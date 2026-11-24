@@ -380,6 +380,8 @@ linux/terminal-delete-scrim--dark.png 003f83508000483997e7455343e31346be48de97
 linux/terminal-delete-scrim--light.png ce2e00db3c93831342dec1b7910dad3ff4aa65eb
 linux/terminal-file-disclosures--dark.png 57fb470fa468eaac9d34af3e44d1265b74801711
 linux/terminal-file-disclosures--light.png c129474c633782a41b6a5310ad8414a67339e695
+linux/terminal-link-disclosures--dark.png 608212cfb8e4dbebc8f82756cc45097dd394d40b
+linux/terminal-link-disclosures--light.png dcfb1e0e826233c102bb57d686456760b62cf633
 linux/terminal-status--dark.png f0e76f0ff5752c6413f1d21e21b14e053962f9f0
 linux/terminal-status--light.png 496c39f7a367052b1904f8928a52597d69f446ea
 linux/terminal-styles--dark.png 1cba223f1d0cba90a1a75f647db4777e2039149d

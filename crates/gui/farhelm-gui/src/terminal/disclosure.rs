@@ -3,12 +3,14 @@
 //! `showLinkTarget` in terminal-links.js at the reference commit).
 //!
 //! A hyperlink a program emits (OSC 8) can underline text that differs from where it goes, so hovering it shows the
-//! exact target first, with its host emphasized. When the underlined text gives a reason to doubt the link (it mentions
-//! a web address that names a different place, spells one with look-alike characters or login details, couldn't be
-//! read whole, or hides part of itself), the panel becomes a loud warning: one line per reason, then the address or
-//! text that prompted it, then the real target. The grid model decides what to show
-//! ([`farhelm_grid_model::LinkDisclosure`]); this draws it, every piece of program text through the host-text element
-//! so invisible and direction-changing characters are visible.
+//! exact target first, in full and wrapped, with its host emphasized. When the underlined text gives a reason to doubt
+//! the link (it mentions a web address that names a different place, spells one with look-alike characters or login
+//! details, couldn't be read whole, or hides part of itself), the panel becomes a loud warning: one line per reason,
+//! then the address or text that prompted it, then the real target. For an address that names another place, the part
+//! of the target that differs from it is marked as an inverted chip ([`mark_style`]), so the eye goes to the place the
+//! text lied about. The grid model decides what to show and what to mark ([`farhelm_grid_model::LinkDisclosure`]);
+//! this draws it, every piece of program text through the host-text element so invisible and direction-changing
+//! characters are visible.
 //!
 //! A printed web address gets the panel too when, on a Mac, it points at a remote session's own loopback: the panel
 //! then ends with the tunnel hint, which says that a plain click opens the address on this Mac and Cmd-click through a
@@ -20,17 +22,18 @@
 //! a zero-width element the terminal draws by the pointer.
 
 use std::cell::Cell;
+use std::ops::Range;
 use std::rc::Rc;
 
 use farhelm_grid_model::{LinkDisclosure, WarningReason};
 use gpui::{
-    App, Bounds, Context, Div, FontWeight, HitboxBehavior, HitboxId, InteractiveElement,
-    IntoElement, ParentElement, Pixels, Render, Stateful, StatefulInteractiveElement, Styled,
-    Window, canvas, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Bounds, Context, Div, FontWeight, HighlightStyle, HitboxBehavior, HitboxId,
+    InteractiveElement, IntoElement, ParentElement, Pixels, Render, Stateful,
+    StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::host_text::{self, HostSentence, HostText};
-use crate::theme::{self, metrics};
+use crate::theme::{self, Palette, metrics};
 
 /// The line a warning shows for one reason. The wording is fixed by SPEC.md's terminal links paragraph; each says what
 /// is wrong with the text in terms a user can check against it, not how the check works.
@@ -47,6 +50,17 @@ const fn reason_line(reason: WarningReason) -> &'static str {
         }
         WarningReason::Incomplete => "The whole link text couldn't be checked",
         WarningReason::Hidden => "Part of the link text is hard to see",
+    }
+}
+
+/// How the differing part of a warning's target is drawn: an inverted chip, the warning's own two colors swapped, so
+/// the mark reads as part of the warning rather than as a new signal (`on_fill` ground, `danger_bg` text). Both
+/// palettes use the same two tokens, at about 6.07:1, which `theme.rs`'s tests hold above 4.5:1.
+pub(super) fn mark_style(palette: &Palette) -> HighlightStyle {
+    HighlightStyle {
+        color: Some(theme::color(palette.danger_bg)),
+        background_color: Some(theme::color(palette.on_fill)),
+        ..HighlightStyle::default()
     }
 }
 
@@ -204,7 +218,11 @@ pub(super) fn message_frame(cx: &App) -> Div {
 /// judged then and need not follow later redraws while the pointer rests).
 pub(crate) struct DisclosureView {
     host: HostText,
+    /// The whole destination, never shortened: the panel wraps it instead.
     target: HostText,
+    /// The bytes of the target to draw marked ([`LinkDisclosure::difference`]): set only on a warning about an address
+    /// that names another place.
+    mark: Option<Range<usize>>,
     /// The loud form, when the grid model found a reason to doubt the link.
     warning: Option<Warning>,
     /// The tunnel offer for a remote host's loopback link, drawn last, after the warning if there is one, which it
@@ -221,6 +239,8 @@ struct Warning {
     /// match ("Text mentions:"), or else the visible label ("Link text:", marked partial when it couldn't be read
     /// whole). `None` for a label too long to read, which has no text to show.
     text: Option<(&'static str, HostText)>,
+    /// How many other addresses in the text name another place too, said under the one shown.
+    more: usize,
 }
 
 impl DisclosureView {
@@ -245,11 +265,13 @@ impl DisclosureView {
                     .map(|&reason| reason_line(reason))
                     .collect(),
                 text: text.map(|(heading, text)| (heading, HostText::from_host(text))),
+                more: warning.more,
             }
         });
         DisclosureView {
             host: HostText::from_host(disclosure.host.as_str()),
             target: HostText::from_host(disclosure.target.as_str()),
+            mark: disclosure.difference(),
             warning,
             hint,
             drawn,
@@ -259,6 +281,13 @@ impl DisclosureView {
 
 impl Render for DisclosureView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.panel(window, cx)
+    }
+}
+
+impl DisclosureView {
+    /// The panel itself, apart from the view so the goldens can draw several without an entity each.
+    fn panel(&self, window: &Window, cx: &App) -> AnyElement {
         let palette = theme::palette(cx);
         let mismatch = self.warning.is_some();
         // The old panel's look (`.terminal-link-target` in app.css, see [`surface`]); the loud form danger-filled at
@@ -302,24 +331,108 @@ impl Render for DisclosureView {
                         .debug_selector(|| "terminal-link-disclosure-claimed".into()),
                 )
             });
+        let more = self.warning.as_ref().map_or(0, |warning| warning.more);
+        // One text element however long the target is, so it wraps inside the panel like any text and its direction
+        // stays its own. The mark's range is the grid model's byte range into the raw target; it reaches the
+        // presentation only where the two are the same string, which a URL serialization (ASCII, with nothing to
+        // escape) always is. Were they ever to differ, a mark at the raw value's offsets could land on the wrong
+        // characters, so it is dropped instead.
+        let target = match &self.mark {
+            Some(mark) => host_text::marked(
+                &self.target,
+                |shown| {
+                    if shown != self.target.raw() {
+                        return Vec::new();
+                    }
+                    shown
+                        .char_indices()
+                        .enumerate()
+                        .filter(|(_, (byte, _))| mark.contains(byte))
+                        .map(|(index, _)| index)
+                        .collect()
+                },
+                mark_style(palette),
+            ),
+            None => host_text::element(&self.target),
+        };
         let panel = panel
             .children(reasons)
             .children(claimed)
+            .when(more > 0, |panel| {
+                panel.child(
+                    div()
+                        .debug_selector(|| "terminal-link-disclosure-more".into())
+                        .child(format!("and {more} more")),
+                )
+            })
             .when(mismatch, |panel| panel.child("Actually goes to:"))
             .child(
                 host_text::element(&self.host)
                     .font_weight(FontWeight::BOLD)
                     .text_color(theme::color(strong)),
             )
-            .child(host_text::element(&self.target))
+            .child(target.debug_selector(|| "terminal-link-disclosure-target".into()))
             .children(self.hint.clone().map(|hint| {
                 div()
                     .debug_selector(|| super::tunnels::HINT_ID.into())
                     .mt(px(4.))
                     .child(hint)
             }));
-        witnessed(panel, self.drawn.clone())
+        witnessed(panel, self.drawn.clone()).into_any_element()
     }
+}
+
+/// A web link's displays, stacked, for the goldens' scene: the ordinary display; a warning about an address that names
+/// another place, whose long destination wraps with the differing part marked and which counts one more such address;
+/// and a warning about a disguised address, shown escaped and unmarked. Drawn on their own rather than over a terminal,
+/// since a display's look does not depend on what it hovers over. Test builds only.
+#[cfg(test)]
+pub(crate) fn golden_displays(window: &Window, cx: &App) -> AnyElement {
+    use farhelm_grid_model::LinkWarning;
+    let query = "?continue=https%3A%2F%2Fmail.example.com%2Fmail%2Fu%2F0%2F&service=mail&flowName=WebSignIn\
+        &flowEntry=ServiceLogin&hl=en&session=7f3e9c2a41d8";
+    let claimed = format!("https://accounts.example.com/signin/v2/identifier{query}");
+    let disclosures = [
+        LinkDisclosure {
+            host: "example.com".into(),
+            target: "https://example.com/docs/getting-started".into(),
+            warning: None,
+        },
+        LinkDisclosure {
+            host: "accounts.example.com.session-check.test".into(),
+            target: format!(
+                "https://accounts.example.com.session-check.test/signin/v2/identifier{query}"
+            ),
+            warning: Some(LinkWarning {
+                reasons: vec![WarningReason::Mismatch],
+                label: format!("Sign in again at {claimed} or https://example.com/help"),
+                address: Some(claimed.clone()),
+                address_parsed: Some(claimed),
+                more: 1,
+            }),
+        },
+        LinkDisclosure {
+            host: "example.com".into(),
+            target: "https://example.com/page".into(),
+            warning: Some(LinkWarning {
+                reasons: vec![WarningReason::Disguised],
+                label: "https://git\u{202e}hub.com/".into(),
+                address: Some("https://git\u{202e}hub.com/".into()),
+                // As the grid model reports it: a host with U+202E fails IDNA, so the address has no parse.
+                address_parsed: None,
+                more: 0,
+            }),
+        },
+    ];
+    div()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(8.))
+        .children(disclosures.iter().map(|disclosure| {
+            DisclosureView::new(disclosure, None, Drawn::default()).panel(window, cx)
+        }))
+        .into_any_element()
 }
 
 #[cfg(test)]

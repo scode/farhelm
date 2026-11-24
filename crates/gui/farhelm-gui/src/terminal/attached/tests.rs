@@ -5029,8 +5029,8 @@ impl Harness<'_> {
 /// either row: "https://example.com" on one row and ".evil.test/x" on the next name other places than the target,
 /// however the rows are read. The warning informs and does not block. Specified: a hyperlink to
 /// `https://example.com/x` labelled across rows 0 and 1 that way shows the warning when resting on either row, with the
-/// mismatch reason's line and, under "Text mentions:", the first address that differs, `https://example.com`; a click
-/// while it is shown opens the target.
+/// mismatch reason's line and, under "Text mentions:", the first address that differs, `https://example.com`, with
+/// one mark painted over the target's part it lacks (`x`); a click while it is shown opens the target.
 #[gpui::test]
 fn a_two_row_lookalike_hyperlink_warns_on_both_rows_and_still_opens(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -5054,6 +5054,15 @@ fn a_two_row_lookalike_hyperlink_warns_on_both_rows_and_still_opens(cx: &mut Tes
     ] {
         assert!(painted.contains(shown), "{shown:?} in {painted}");
     }
+    let (text, target, marks) = h.painted_target();
+    assert_eq!(text, "https://example.com/x");
+    let [mark] = marks.as_slice() else {
+        panic!("one mark over the target: {marks:?}");
+    };
+    assert!(
+        mark.left() > target.left() && mark.right() <= target.right(),
+        "the mark {mark:?} is at the target's end {target:?}"
+    );
     h.rest_on(second);
     assert_eq!(h.disclosure_shown(), (true, true), "and so does the second");
     h.click_at(second);
@@ -5118,8 +5127,8 @@ fn a_long_lookalike_label_wraps_inside_the_window(cx: &mut TestAppContext) {
 /// user reads, and it shows as its escape (SPEC.md: host text is drawn escaped). A target that is not a web address
 /// never reaches the browser and gets no display offering it. Specified: a hyperlink to `https://example.com/page`
 /// labelled `https://github.com/` with a U+202E inside its host shows the warning (the address is disguised) with
-/// `<U+202E>` painted in the address it quotes; a `javascript:` hyperlink shows no display on rest, and a click opens
-/// nothing.
+/// `<U+202E>` painted in the address it quotes and nothing marked in the target, which a disguise's parsed form would
+/// mark in the wrong place; a `javascript:` hyperlink shows no display on rest, and a click opens nothing.
 #[gpui::test]
 fn hostile_hyperlink_text_and_targets_stay_data(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -5151,6 +5160,8 @@ fn hostile_hyperlink_text_and_targets_stay_data(cx: &mut TestAppContext) {
         painted.contains("look-alike or invisible characters"),
         "as a disguised address: {painted}"
     );
+    let (_, _, marks) = h.painted_target();
+    assert_eq!(marks, [], "a disguised address marks nothing");
 
     let script = h.at_cell(4, 2);
     h.rest_on(script);
@@ -5209,7 +5220,10 @@ fn a_printed_address_extended_on_the_next_row_opens_its_new_address(cx: &mut Tes
 }
 
 /// When a hyperlink's text is itself a web address naming somewhere else, the display becomes the loud warning that
-/// shows the text beside the real target: the lookalike defence of SPEC.md's links paragraph.
+/// shows the text beside the real target, with the part of the target that differs marked: the lookalike defence of
+/// SPEC.md's links paragraph. Specified: `https://bank.example/` linking to `https://evil.example/` shows the warning,
+/// and one mark is painted inside the target, on its one line, short of both ends: `evil`, between the shared
+/// `https://` and `.example/`.
 #[gpui::test]
 fn a_lookalike_hyperlink_shows_the_warning(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -5219,6 +5233,200 @@ fn a_lookalike_hyperlink_shows_the_warning(cx: &mut TestAppContext) {
     let on = h.at_cell(4, 0);
     h.rest_on(on);
     assert_eq!(h.disclosure_shown(), (true, true));
+    let (text, target, marks) = h.painted_target();
+    assert_eq!(text, "https://evil.example/");
+    let [mark] = marks.as_slice() else {
+        panic!("one mark over the target: {marks:?}");
+    };
+    assert!(
+        mark.left() > target.left() && mark.right() < target.right(),
+        "the mark {mark:?} is inside the target {target:?}, short of both ends"
+    );
+}
+
+impl Harness<'_> {
+    /// The display's target as painted, from a fresh frame: its text (every wrapped line of it, joined), its bounds,
+    /// and the fills painted in the mark's ground (`on_fill`) wholly inside it, both in the frame's scaled pixels. The
+    /// warning's own ground is `danger_bg` and the ordinary display's is the floating surface, so only a mark paints
+    /// `on_fill` inside the target; the light appearance's window ground is `on_fill`'s white too, but it is larger
+    /// than the target, so containment keeps it out.
+    fn painted_target(
+        &mut self,
+    ) -> (
+        String,
+        gpui::Bounds<gpui::ScaledPixels>,
+        Vec<gpui::Bounds<gpui::ScaledPixels>>,
+    ) {
+        let target = test_support::bounds(self.cx, "terminal-link-disclosure-target");
+        let nodes = test_support::frame(self.cx);
+        let text: String = nodes
+            .iter()
+            .flat_map(|node| &node.texts)
+            .filter(|line| target.contains(&line.bounds.center()))
+            .map(|line| line.text.to_string())
+            .collect();
+        let ground = self.cx.update(|_, cx| {
+            gpui::Background::from(crate::theme::color(crate::theme::palette(cx).on_fill))
+        });
+        let (scale, quads) = self
+            .cx
+            .update(|window, _| (window.scale_factor(), window.painted_quads()));
+        let target = target.scale(scale);
+        let marks = quads
+            .iter()
+            .filter(|quad| {
+                quad.background == ground && quad.bounds.intersect(&target) == quad.bounds
+            })
+            .map(|quad| quad.bounds)
+            .collect();
+        (text, target, marks)
+    }
+}
+
+/// A destination can be up to the wire's 2,083 bytes long, and the part that matters can be anywhere in it, so the
+/// display shows it all, wrapped inside the window, rather than shortened with its middle left out as it once was; a
+/// click then opens exactly what was shown. Specified: in a window 1200 by 900 pixels, a hyperlink labelled
+/// `click here` to a 2,000-character destination, rested on, shows the ordinary display; the target painted in it, its
+/// wrapped lines joined, is the whole destination from its head to its tail, on more than one line, with no mark; and
+/// a click opens that destination.
+#[gpui::test]
+fn a_long_destination_is_shown_in_full_and_a_click_opens_it(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.cx.simulate_resize(gpui::size(px(1200.), px(900.)));
+    let head = "https://example.com/";
+    let path: String = (0..)
+        .map(|index| format!("{index:04}-"))
+        .flat_map(|piece| piece.chars().collect::<Vec<_>>())
+        .take(2000 - head.len())
+        .collect();
+    let target = format!("{head}{path}");
+    assert_eq!(target.len(), 2000, "the premise: the destination's length");
+    h.attach_hyperlink("click here", &target);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(2, 0);
+    h.rest_on(on);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "the premise: the ordinary display"
+    );
+    let (text, bounds, marks) = h.painted_target();
+    assert!(text.starts_with(head), "the head is painted: {text}");
+    assert!(
+        text.ends_with(&target[1980..]),
+        "the tail is painted: {text}"
+    );
+    assert_eq!(text, target, "and everything between");
+    let line =
+        h.cx.update(|window, _| window.line_height().scale(window.scale_factor()));
+    assert!(
+        bounds.size.height > line,
+        "the destination wraps: {bounds:?}"
+    );
+    assert_eq!(marks, [], "the ordinary display marks nothing");
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url().as_deref(), Some(target.as_str()));
+}
+
+/// The display is the click's safeguard, so a destination too long for the window to show whole must not open, and the
+/// panel's real size, from layout, has to count, not only a panel moved out of view by hand. In a window too small for
+/// it, the layer manager pushes the panel back over the resting pointer; once, that took the hover away from the link,
+/// which closed the panel, uncovered the pointer and opened it again, every frame without end. Specified: in a window
+/// 520 by 300 pixels, a hyperlink labelled `click here` to a short destination, rested on, shows its display, and a
+/// click opens it (the control: the window itself does not refuse). The same hyperlink, now to a 2,000-character
+/// destination, rested on at the same cell, is still the hovered link, but its display is held back rather than
+/// flickering; a click opens nothing and says, in the old app's words, that the full link details are not visible.
+#[gpui::test]
+fn a_window_too_small_for_the_whole_destination_refuses_the_click(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.cx.simulate_resize(gpui::size(px(520.), px(300.)));
+    let short = "https://example.com/page";
+    h.attach_hyperlink("click here", short);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(2, 0);
+    h.rest_on(on);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "the control: a short destination's display fits"
+    );
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url().as_deref(), Some(short));
+
+    let long = format!("https://example.com/{}", "a".repeat(1980));
+    h.relabel_hyperlink("click here", &long, 2);
+    let beside = h.at_cell(3, 0);
+    h.rest_on(beside);
+    let on = h.at_cell(2, 0);
+    h.rest_on(on);
+    assert_eq!(
+        h.hovered().as_deref(),
+        Some(long.as_str()),
+        "the premise: the pointer is on the hyperlink"
+    );
+    assert_eq!(
+        h.disclosure_shown(),
+        (false, false),
+        "the display that would cover the pointer is held back"
+    );
+    // Replace the fake platform's recorded URL, so the control's open cannot stand in for one here.
+    h.cx.update(|_, cx| cx.open_url("https://example.com/previous"));
+    h.click_at(on);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://example.com/previous"),
+        "nothing opens"
+    );
+    assert_eq!(
+        test_support::label(h.cx, "terminal-link-refusal").as_deref(),
+        Some("cannot open: full link details are not visible; enlarge the window and hover again")
+    );
+}
+
+/// The warning's mark makes the panel no larger than the window allows, and marking the target does not stop it from
+/// opening: the warning informs and does not block. Specified: a hyperlink labelled `https://github.com/login` linking
+/// to `https://evil.test/login`, rested on, shows the warning with the mismatch line and one mark painted in the
+/// target; the display lies inside the window's content area; and a click opens the target.
+#[gpui::test]
+fn a_mismatch_warning_with_its_mark_fits_and_its_click_opens(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let target = "https://evil.test/login";
+    h.attach_hyperlink("https://github.com/login", target);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(4, 0);
+    h.rest_on(on);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, true),
+        "the premise: the warning"
+    );
+    let painted = crate::session_list::tests::painted(&test_support::frame(h.cx)).join(" ");
+    assert!(
+        painted.contains("The link text mentions an address that differs from where it goes"),
+        "{painted}"
+    );
+    let (text, _, marks) = h.painted_target();
+    assert_eq!(text, target);
+    assert_eq!(marks.len(), 1, "one mark: {marks:?}");
+    let panel = h.cx.update(|_, cx| {
+        let drawn = owner.read(cx).disclosure_drawn().expect("a display");
+        drawn
+            .get()
+            .expect("the display recorded where it was drawn")
+    });
+    assert!(
+        panel.area.contains(&panel.bounds.origin)
+            && panel.bounds.right() <= panel.area.right()
+            && panel.bounds.bottom() <= panel.area.bottom(),
+        "the display {:?} lies inside the content area {:?}",
+        panel.bounds,
+        panel.area
+    );
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url().as_deref(), Some(target));
 }
 
 /// The display is the whole safeguard: a click on a program's hyperlink whose display was not fully visible when last

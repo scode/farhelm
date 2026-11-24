@@ -22,7 +22,7 @@ pub mod attached;
 mod attachments;
 pub(crate) use attachments::install_carried;
 mod blocks;
-mod disclosure;
+pub(crate) mod disclosure;
 mod drag_notice;
 pub(crate) mod files;
 pub(crate) mod set;

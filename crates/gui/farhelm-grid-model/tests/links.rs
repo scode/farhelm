@@ -1468,6 +1468,102 @@ fn each_address_reason_reaches_the_hover() {
     }
 }
 
+/// The destination is what the user decides on, and a long one can hide the part that matters anywhere in it, the
+/// omitted middle included: shortening it, as the old client did past 300 characters, let a spoof put the real place
+/// where nobody could read it. Spec: a hyperlink to a destination of almost 2,000 characters discloses all of it, and
+/// its host whole, both in the ordinary display (labelled `click here`) and in a warning (labelled with another site).
+#[test]
+fn the_hover_discloses_a_long_destination_in_full() {
+    let target = format!("https://example.test/{}", "a".repeat(1900));
+    for (label, warns) in [("click here", false), ("https://other.test/", true)] {
+        let grid = model(
+            40,
+            vec![ascii(label, false, Some(0))],
+            vec![json!(["tag", target])],
+        );
+        let link = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+        let disclosure = grid.link_disclosure(&link).unwrap();
+        assert_eq!(disclosure.target, target, "{label}");
+        assert_eq!(disclosure.host, "example.test", "{label}");
+        assert_eq!(disclosure.warning.is_some(), warns, "{label}");
+    }
+}
+
+/// The hover marks where the destination differs from the address the text mentions, so the user sees at a glance
+/// which part of the real destination the text lied about. The mark only makes sense for a plain other address: a
+/// disguised one reads as the destination's own place once folded, and login details put a host the parsed form
+/// doesn't name as its host, so marking those would point at the wrong part. Spec: against its destination, a label
+/// mentioning another host marks that host in the destination; another path marks the path's differing middle; a
+/// disguised address, login details before a host, an address that doesn't parse, an address longer than the
+/// destination by a path, and the ordinary display mark nothing.
+#[test]
+fn only_a_plain_mismatch_marks_where_the_destination_differs() {
+    let plain = |label: &str| json!([[0, label.len(), label, [0, -1, -1], 0]]);
+    for (runs, target, reason, marked) in [
+        (
+            plain("https://github.com/login"),
+            "https://evil.test/login",
+            Some(Mismatch),
+            Some("evil.test"),
+        ),
+        (
+            plain("https://example.test/docs/guide"),
+            "https://example.test/docs/admin",
+            Some(Mismatch),
+            Some("admin"),
+        ),
+        (
+            json!([
+                [0, 8, "https://", [0, -1, -1], 0],
+                [8, 2, "ｅ", [0, -1, -1], 0],
+                [10, 12, "xample.com/x", [0, -1, -1], 0]
+            ]),
+            "https://evil.test/x",
+            Some(Disguised),
+            None,
+        ),
+        (
+            plain("example.com@evil.test/x"),
+            "https://evil.test/x",
+            Some(Credentials),
+            None,
+        ),
+        (
+            plain("https://example.test:bogus/"),
+            "https://example.test/",
+            Some(Mismatch),
+            None,
+        ),
+        (
+            plain("https://example.test/a/b"),
+            "https://example.test/a",
+            Some(Mismatch),
+            None,
+        ),
+        (plain("click here"), "https://example.test/", None, None),
+    ] {
+        let grid = model(
+            40,
+            vec![json!({"w":false,"r":runs})],
+            vec![json!(["tag", target])],
+        );
+        let link = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+        let disclosure = grid.link_disclosure(&link).unwrap();
+        assert_eq!(
+            reasons(&disclosure.warning),
+            Vec::from_iter(reason),
+            "the premise: {runs} warns as expected"
+        );
+        assert_eq!(
+            disclosure
+                .difference()
+                .map(|range| &disclosure.target[range]),
+            marked,
+            "{runs} against {target}"
+        );
+    }
+}
+
 /// A seam is soft only where the hyperlink's own text meets edge to edge: its piece reaches the row's last text column
 /// (a wide-wrap pad column is not text) and the next row's piece starts at column 0. Anything else is a
 /// program's own break, which separates before an address. Getting this wrong either glues a word onto an address

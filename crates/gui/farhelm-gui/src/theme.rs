@@ -904,6 +904,29 @@ mod tests {
         }
     }
 
+    /// A terminal link's warning marks the part of the destination that differs from what the link text says as an
+    /// inverted chip, `danger_bg` text on an `on_fill` ground (`terminal::disclosure`'s `mark_style`). The mark is the
+    /// part the user most needs to read, so it must stay legible in both appearances. Spec: both tokens are opaque,
+    /// and their WCAG contrast is at least 4.5:1 in the dark and the light palette.
+    #[test]
+    fn a_link_warnings_marked_difference_is_readable_in_both_appearances() {
+        for palette in [&DARK, &LIGHT] {
+            assert!(
+                !palette.danger_bg.alpha && !palette.on_fill.alpha,
+                "the premise: the chip is drawn in opaque colors, dark: {}",
+                palette.dark
+            );
+            let [ink, ground] =
+                [palette.danger_bg, palette.on_fill].map(|token| luminance(srgb(token)));
+            let contrast = (ink.max(ground) + 0.05) / (ink.min(ground) + 0.05);
+            assert!(
+                contrast >= 4.5,
+                "the mark has {contrast:.2}:1 contrast, dark: {}",
+                palette.dark
+            );
+        }
+    }
+
     /// The projection of both palettes is accepted by Kit's schema; a rejected projection would silently fall back to
     /// Kit's own colors in a release build, so this is the test that catches it.
     #[test]
