@@ -2641,6 +2641,11 @@
       "reference": null
     },
     {
+      "golden": "terminal-link-disclosures",
+      "title": "A terminal web link's destination display: ordinary, a warning with the differing part of a long destination marked, and a warning about a disguised address",
+      "reference": null
+    },
+    {
       "golden": "terminal-covered-link",
       "title": "The reason a terminal link cannot open appears above the approval card covering it",
       "reference": null
