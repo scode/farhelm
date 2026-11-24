@@ -36,7 +36,7 @@ VERSION_TIMEOUT = 60
 class Recipe(NamedTuple):
     """How one harness reports its version and upgrades itself.
 
-    `binary` must match the binary the harness's drift profile launches (`real_agent_capture/drift.rs`); the runner's
+    `binary` must match the binary the harness's drift profile launches (`real_agent_capture/drift/mod.rs`); the runner's
     tests check that every drift case has a recipe. `quiet_env` is added to every invocation, version probes included,
     and exists for launchers that would otherwise update in the background during a probe. `upgrade_env` is added only
     to the upgrade command. `installer_env` is the environment the fallback installer needs to run unattended.

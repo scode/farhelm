@@ -8,21 +8,29 @@ interactive CLI without submitting a prompt.
 
 ```sh
 python3 -B scripts/run-harness-drift.py --list
+python3 -B scripts/run-harness-drift.py --list --category base --harness codex
 python3 -B scripts/run-harness-drift.py --harness codex --harness claude
 python3 -B scripts/run-harness-drift.py
 python3 -B scripts/run-harness-drift.py --no-upgrade --harness grok
 python3 -B scripts/run-harness-drift.py --upgrade-only
 ```
 
-With no selection the runner upgrades and checks every discovered harness. `--list` builds the e2e test binary and lists
-cases without starting agents. These cases are ignored in normal nextest, CI, the release gate and the deflake sweep.
+With no selection the runner upgrades and checks every harness in the `base` category. Use `--category <name>` to select
+a category, repeat it to select several, or pass `--category all` to run every discovered category. Combine it with
+`--harness <name>` to narrow the selection. Each selected harness upgrades once, even when it runs in several
+categories.
+
+`--list` builds the e2e binary and prints the discovered `category/harness` pairs without starting agents or upgrading
+them. It lists all categories by default and accepts the same filters. These cases are ignored in normal nextest, CI,
+the release gate and the deflake sweep. The Rust entry points live in the category modules under
+`crates/farhelm/tests/e2e/real_agent_capture/drift/`.
 
 Each case starts the shipped launch command in its own supervisor, terminal host and empty working directory. A tracked
 case asks the agent to remember a random code word and waits for its reply and an accepted conversation report. The case
 then stops the session, records how many hook reports were accepted, and uses Restart with the saved resume arguments.
 The resumed agent must recall the code word in a second reply. Farhelm must also accept a new hook report that leaves
-the original resume arguments intact. The runner allows up to 720 seconds per case for startup, both turns and cleanup.
-The launch-only cases check that the interactive screen or workspace trust prompt opens.
+the original resume arguments intact. The launch-only base cases check that the interactive screen or workspace trust
+prompt opens. Every category has up to 720 seconds per harness, including startup, checks and cleanup.
 
 An agent may save a trust choice for the temporary directory. The Muse launcher and OMP can update themselves during
 startup, so these cases disable their updaters for the test invocations using a launcher variable and a temporary OMP
@@ -40,9 +48,9 @@ case also needs one. The summary names the version each case ran against, and a 
 nonzero even when its case passed, because that pass is for a release users may no longer get.
 
 `--no-upgrade` probes the installed versions without changing them. Use it to reproduce a failure on the version that
-produced it, or when the agents were upgraded moments ago. `--upgrade-only` upgrades the selected agents and runs no
-case, without building the test binary. An agent session that is already running keeps its old version until it is
-restarted.
+produced it, or when the agents were upgraded moments ago. `--upgrade-only` upgrades the selected harnesses without
+building the test binary. It accepts `--harness` and rejects `--list` and `--category`. An agent session that is already
+running keeps its old version until it is restarted.
 
 ## Hook setup in a private copy of the vendor's configuration
 

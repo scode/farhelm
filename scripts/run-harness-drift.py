@@ -18,7 +18,8 @@ from agent_screen_host import OUTER_SESSION_MARKERS
 import harness_upgrades
 
 ROOT = Path(__file__).resolve().parents[1]
-CASE_PATTERN = re.compile(r"real_agent_capture::drift::drift_([a-z][a-z0-9_-]*): test")
+CASE_PATTERN = re.compile(r"real_agent_capture::drift::([a-z][a-z0-9_]*)::drift_([a-z][a-z0-9_-]*): test")
+CaseKey = tuple[str, str]
 VERDICT_ENV = "FARHELM_DRIFT_VERDICT_FILE"
 EVIDENCE_PREFIX = "test-run evidence: "
 LABELS = {"passed": "PASSED", "could_not_run": "COULD NOT RUN", "failed": "FAILED"}
@@ -68,15 +69,15 @@ def build_binary(env: dict[str, str]) -> Path:
     return binaries.pop()
 
 
-def discover(binary: Path, env: dict[str, str]) -> dict[str, str]:
-    """Discover only ignored drift cases. The Rust test entry points are the harness inventory."""
+def discover(binary: Path, env: dict[str, str]) -> dict[CaseKey, str]:
+    """Use the ignored Rust entry points as the inventory of categories and their harnesses."""
     listing = subprocess.run(
         [str(binary), "--ignored", "--list"], cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE, check=True
     )
     cases = {}
     for line in listing.stdout.splitlines():
         if match := CASE_PATTERN.fullmatch(line):
-            cases[match[1]] = line.removesuffix(": test")
+            cases[(match[1], match[2])] = line.removesuffix(": test")
     if not cases:
         raise RuntimeError("No ignored harness drift cases were found. The real-agent e2e suite requires Linux.")
     return dict(sorted(cases.items()))
@@ -191,20 +192,20 @@ def prepare(names: list[str], env: dict[str, str], upgrade: bool) -> dict[str, h
     return upgrades
 
 
-def summarize(results: dict[str, Result], explicit: bool, upgrades: dict[str, harness_upgrades.Upgrade]) -> int:
+def summarize(results: dict[CaseKey, Result], explicit: bool, upgrades: dict[str, harness_upgrades.Upgrade]) -> int:
     """Group verdicts while keeping unknown coverage separate from success.
 
     Each line names the version the case ran against, since a verdict is only meaningful for that version. A failed
     upgrade fails the run even when its case passed: the pass is real, but for a release users no longer get.
     """
-    print(f"{'Verdict':<14}  {'Harness':<13}  {'Version':<34}  Detail")
+    print(f"{'Verdict':<14}  {'Category':<22}  {'Harness':<13}  {'Version':<34}  Detail")
     for verdict, title in LABELS.items():
-        for name, result in results.items():
+        for (category, name), result in results.items():
             if result.verdict == verdict:
                 detail = result.detail.splitlines()[0]
                 evidence = f"  ({result.evidence})" if result.evidence is not None else ""
                 tested = upgrades[name].after if name in upgrades else "unknown"
-                print(f"{title:<14}  {name:<13}  {tested:<34}  {detail}{evidence}")
+                print(f"{title:<14}  {category:<22}  {name:<13}  {tested:<34}  {detail}{evidence}")
     stale = [name for name, result in upgrades.items() if result.status == "failed"]
     if stale:
         print(f"UPGRADE FAILED for {', '.join(stale)}: those cases ran against the version that was already installed")
@@ -218,6 +219,10 @@ def main(argv: list[str] | None = None) -> int:
     """Build and list once, upgrade the selected harnesses, then keep going after each individual verdict."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--harness", action="append", default=[], metavar="NAME")
+    parser.add_argument(
+        "--category", action="append", default=[], metavar="NAME",
+        help="select a drift category, or all. By default runs base and lists all",
+    )
     parser.add_argument("--list", action="store_true", help="build and list the ignored cases without launching agents")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument(
@@ -228,6 +233,10 @@ def main(argv: list[str] | None = None) -> int:
     env = child_environment(dict(os.environ))
     if options.upgrade_only:
         # Upgrading needs no test binary, so skip the build and select from the recipes instead of discovered cases.
+        if options.category:
+            parser.error("--category cannot be used with --upgrade-only")
+        if options.list:
+            parser.error("--list cannot be used with --upgrade-only")
         unknown = sorted(set(options.harness) - harness_upgrades.RECIPES.keys())
         if unknown:
             parser.error(f"unknown harness: {', '.join(unknown)} (choose from {', '.join(harness_upgrades.RECIPES)})")
@@ -239,20 +248,38 @@ def main(argv: list[str] | None = None) -> int:
     except (RuntimeError, OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"harness drift: {error}", file=sys.stderr)
         return 1
-    unknown = sorted(set(options.harness) - cases.keys())
+    categories = sorted({category for category, _ in cases})
+    requested = options.category or (["all"] if options.list else ["base"])
+    unknown = sorted(set(requested) - set(categories) - {"all"})
     if unknown:
-        parser.error(f"unknown harness: {', '.join(unknown)} (choose from {', '.join(cases)})")
+        parser.error(f"unknown category: {', '.join(unknown)} (choose from {', '.join(categories)}, or all)")
+    selected_categories = categories if "all" in requested else list(dict.fromkeys(requested))
+    available = sorted({name for category, name in cases if category in selected_categories})
+    unknown = sorted(set(options.harness) - {name for _, name in cases})
+    if unknown:
+        parser.error(f"unknown harness: {', '.join(unknown)} (choose from {', '.join(available)})")
+    selected = [
+        (category, name)
+        for category in selected_categories
+        for name in dict.fromkeys(options.harness or available)
+        if (category, name) in cases
+    ]
+    if not selected:
+        parser.error(
+            f"no cases match the selected categories and harnesses (available harnesses: {', '.join(available)})"
+        )
     if options.list:
-        print("\n".join(cases))
+        print("\n".join(f"{category}/{name}" for category, name in selected))
         return 0
-    selected = list(dict.fromkeys(options.harness or cases))
-    upgrades = prepare(selected, env, upgrade=not options.no_upgrade)
+    names = list(dict.fromkeys(name for _, name in selected))
+    upgrades = prepare(names, env, upgrade=not options.no_upgrade)
     results = {}
-    for name in selected:
+    for category, name in selected:
+        key = (category, name)
         try:
-            results[name] = recorded_case(binary, cases[name], name, env)
+            results[key] = recorded_case(binary, cases[key], f"{category}/{name}", env)
         except OSError as error:
-            results[name] = Result("failed", str(error))
+            results[key] = Result("failed", str(error))
     return summarize(results, bool(options.harness), upgrades)
 
 

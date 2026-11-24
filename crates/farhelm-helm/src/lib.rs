@@ -192,6 +192,20 @@ pub fn compile_agent_launch(
     launches::compile(selection)
 }
 
+/// The catalog shipped by this helm, for tests that drive the same launch choices without starting the REST API.
+pub fn launcher_catalog() -> Vec<farhelm_proto::launcher::LaunchCatalogModel> {
+    launches::launcher_catalog()
+}
+
+/// Compile the one-time start of a named conversation with the same validation as the launcher.
+/// This prepares the start command without changing the launch's ordinary restart behavior.
+pub fn compile_named_start(
+    launch: &farhelm_proto::SessionLaunch,
+    value: String,
+) -> Result<farhelm_proto::NamedConversationStart, String> {
+    launches::named_start(launch, value)
+}
+
 /// The per-host connection actors, their reconnect state machine, and the
 /// cache refresh that rides them (PLAN_M6.md item 4).
 ///

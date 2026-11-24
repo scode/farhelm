@@ -2,8 +2,8 @@
 //!
 //! Each test owns a new workspace, supervisor state and terminal host. Vendors keep their ordinary login and
 //! settings. An agent whose Farhelm hooks are global files gets Farhelm's real setup run into a private copy of its
-//! configuration instead of the maintainer's (`private_config`). The tracked tests plant a code word, Restart, and
-//! ask the new process to recall it. A fresh accepted hook report must also leave the original resume command intact.
+//! configuration instead of the maintainer's (`private_config`). Each category declares which agents it exercises
+//! and reuses this module's supervisor, terminal and verdict handling.
 
 mod private_config;
 
@@ -11,7 +11,8 @@ use super::{
     SCREEN_BYTES, StreamText, reported_runtime_identity, serving_supervisor, which_binary,
 };
 use crate::harness::*;
-use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer};
+use farhelm_proto::session_launch::CONVERSATION_PLACEHOLDER;
+use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchSelection, RestartOffer};
 use farhelm_supervisor::hosts::{HostTerminal, Liveness};
 use std::path::Path;
 
@@ -26,6 +27,16 @@ const TURN_LIMIT: Duration = Duration::from_secs(180);
 const TRUST_RETRY: Duration = Duration::from_secs(3);
 // Spell the prefix separately so neither the prompt echo nor Turn 1 can supply the recall witness.
 const RECALL_PROMPT: &str = "Join R E C A L L, a hyphen, and my test label on one line. Reply with only that line. No tools.";
+
+/// Different categories need different evidence from the trust screen. A launch smoke check can stop there, while
+/// a test of the explicit trust choice must reject an unexpected prompt.
+#[derive(Clone, Copy)]
+enum TrustPolicy<'a> {
+    AutoAnswer,
+    StopAtPrompt,
+    #[allow(dead_code, reason = "used by the queued workspace-trust category")]
+    FailOnPrompt(&'a [&'a str]),
+}
 
 /// An unavailable prerequisite gives no verdict. Once a turn succeeds, a startup or resume refusal is a failure.
 #[derive(Debug)]
@@ -407,13 +418,23 @@ impl<'a> Terminal<'a> {
     }
 
     /// Await an interactive screen. A trust response is sent once per newly rendered prompt, and again when that
-    /// same rendering is still on screen after TRUST_RETRY; launch-only smoke cases never answer, since reaching the
-    /// prompt already establishes that the CLI entered its TUI.
+    /// same rendering is still on screen after TRUST_RETRY. The caller decides whether the prompt itself suffices,
+    /// the workspace can be trusted, or the prompt means the launch choice was ignored.
     ///
     /// The retry exists because Claude Code 2.1.330 lost the answer twice in a row on 2026-11-22: once it reset the
     /// selection to "No, exit" after the Enter, and once the Down never registered. Answering each rendering only
     /// once then waited out START_LIMIT on an unchanged dialog. Answering the same dialog by hand worked every time.
-    async fn ready(&mut self, profile: &Harness, turned: bool) -> DriftResult {
+    async fn ready(
+        &mut self,
+        profile: &Harness,
+        trust: TrustPolicy<'_>,
+        turned: bool,
+    ) -> DriftResult {
+        // A trust check needs evidence of the composer beyond the dialog. A CLI's startup banner can draw earlier.
+        let composer = match trust {
+            TrustPolicy::FailOnPrompt(cues) => cues,
+            TrustPolicy::AutoAnswer | TrustPolicy::StopAtPrompt => profile.composer,
+        };
         let deadline = tokio::time::Instant::now() + START_LIMIT;
         let mut answered: Option<(String, tokio::time::Instant)> = None;
         loop {
@@ -421,8 +442,16 @@ impl<'a> Terminal<'a> {
             let text = rendered.to_lowercase();
             self.check(&text, turned).await?;
             if trust_prompt(&text) {
-                if profile.hook_witness.is_none() {
-                    return Ok(());
+                match trust {
+                    TrustPolicy::StopAtPrompt => return Ok(()),
+                    TrustPolicy::FailOnPrompt(_) => {
+                        return Err(anyhow::anyhow!(
+                            "unexpected workspace trust prompt\n{}",
+                            self.diagnostics()
+                        )
+                        .into());
+                    }
+                    TrustPolicy::AutoAnswer => {}
                 }
                 let unanswered = answered
                     .as_ref()
@@ -431,7 +460,7 @@ impl<'a> Terminal<'a> {
                     self.client.send_keys(self.channel, keys.to_vec()).await;
                     answered = Some((rendered, tokio::time::Instant::now()));
                 }
-            } else if profile.composer.iter().any(|marker| text.contains(marker)) {
+            } else if composer.iter().any(|marker| text.contains(marker)) {
                 return Ok(());
             }
             if tokio::time::Instant::now() >= deadline {
@@ -470,6 +499,18 @@ impl<'a> Terminal<'a> {
             pace().await;
         }
     }
+}
+
+/// A captured conversation's launch selector, including any vendor-specific spelling present in saved argv.
+/// The resume template is the source of its position because agents put the value after different flags.
+fn conversation_selector<'a>(
+    resume_template: &[String],
+    resume_argv: &'a [String],
+) -> Option<&'a str> {
+    let slot = resume_template
+        .iter()
+        .position(|word| word == CONVERSATION_PLACEHOLDER)?;
+    resume_argv.get(slot).map(String::as_str)
 }
 
 /// Pace rendered-screen and hook polling while leaving readiness to each observer.
@@ -623,9 +664,78 @@ fn omp_update_override(state: &Path) -> anyhow::Result<Vec<String>> {
     Ok(vec!["env".into(), shell_words::quote(&word).into_owned()])
 }
 
-/// Drive the shipped launch, Stop and Restart through a private supervisor.
-async fn execute(kind: LaunchHarness) -> DriftResult {
-    let profile = profile(kind).expect("a drift case must name a supported agent");
+/// The private supervisor and workspace a category borrows for its sessions. A named start can reuse the same
+/// workspace as the session that produced its conversation.
+struct DriftEnv<'a> {
+    harness: LaunchHarness,
+    sup: &'a Supervisor,
+    client: &'a SupervisorClient,
+    work: &'a Path,
+    state: &'a Path,
+    private: Option<&'a private_config::PrivateConfig>,
+}
+
+impl DriftEnv<'_> {
+    /// Start with the category's one-time extras and delete the session after its checks, even on failed attachment
+    /// or startup. Hook setup always targets the private copy for agents with global hook files.
+    async fn with_session<T>(
+        &self,
+        launch: farhelm_proto::SessionLaunch,
+        mut extras: farhelm_helm::CreateExtras,
+        check: impl AsyncFnOnce(&str) -> Result<T, DriftError>,
+    ) -> Result<T, DriftError> {
+        // The case, binary preflight and hook mirror belong to one harness. Several distinct harnesses share
+        // the generic integration, so compare the harness itself.
+        if launch.agent_type() != Some(self.harness) {
+            return Err(anyhow::anyhow!(
+                "launch harness {:?} does not match the drift fixture for {:?}",
+                launch.agent_type(),
+                self.harness
+            )
+            .into());
+        }
+        extras.setup_persistent_hooks =
+            self.harness.agent_kind().offers_persistent_hooks() && self.private.is_some();
+        let session = self
+            .client
+            .create_session_with_extras(
+                &self.work.to_string_lossy(),
+                launch,
+                None,
+                COLS,
+                ROWS,
+                extras,
+            )
+            .await?;
+        let result = async {
+            if let Some(private) = self.private {
+                private.check_installed()?;
+            }
+            check(&session.id).await
+        }
+        .await;
+        after_cleanup(result, self.client.delete_session(&session.id).await)
+    }
+}
+
+/// Keep the installed CLI version under test through both Start and Restart.
+fn update_override_prefix(profile: &Harness, state: &Path) -> anyhow::Result<Option<Vec<String>>> {
+    match profile.update_override {
+        Some(UpdateOverride::Muse) => Ok(Some(vec!["env".into(), "MUSE_NO_AUTO_UPDATE=1".into()])),
+        Some(UpdateOverride::Omp) => omp_update_override(state).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Give the category an owned supervisor and its compiled launch. Agents with global hooks always use the mirror
+/// planned by Farhelm. A category may supply a mirror for another kind, such as Claude's config for a trust check.
+/// Confirm the terminal hosts are gone before reconciling any vendor writes to that mirror.
+async fn with_drift_supervisor(
+    profile: &Harness,
+    mut selection: LaunchSelection,
+    extra_config: Option<fn(&Path) -> anyhow::Result<private_config::PrivateConfig>>,
+    run: impl AsyncFnOnce(DriftEnv<'_>, farhelm_proto::SessionLaunch) -> DriftResult,
+) -> DriftResult {
     if which_binary(profile.binary).is_none() {
         return Err(DriftError::CouldNotRun(format!(
             "{} is not installed on PATH",
@@ -633,152 +743,80 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
         )));
     }
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    // Declared first so it drops last: the private vendor configuration must outlive the agent reading it.
+    // The private vendor configuration must outlive the agent reading it.
     let config = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
-    let private = private_config::PrivateConfig::prepare(kind.agent_kind(), config.path()).await?;
+    let harness = selection.harness;
+    let kind = harness.agent_kind();
+    let private = if kind.offers_persistent_hooks() {
+        private_config::PrivateConfig::prepare(kind, config.path()).await?
+    } else {
+        extra_config
+            .map(|prepare| prepare(config.path()))
+            .transpose()?
+    };
     let mut seams = SupervisorSeams::default();
     if let Some(private) = &private {
         private.apply(&mut seams);
     }
-    // State drops before the work directory and reaps the terminal host on every return path.
+    // State reaps the terminal host if startup fails, and drops before the workspace and configuration.
     let work = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
     let state = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
-    let wrapper_prefix = match profile.update_override {
-        Some(UpdateOverride::Muse) => Some(vec!["env".into(), "MUSE_NO_AUTO_UPDATE=1".into()]),
-        Some(UpdateOverride::Omp) => Some(omp_update_override(state.path())?),
-        None => None,
-    };
-    let launch = farhelm_helm::compile_agent_launch(LaunchSelection {
-        custom_agent: None,
-        harness: kind,
-        model: profile.model.map(str::to_owned),
-        effort: profile.effort.map(Into::into),
-        // Exercise the two launch-only agents' actual permission flags without sending either a prompt.
-        permissions: profile
-            .hook_witness
-            .is_none()
-            .then_some(LaunchPermission::Yolo),
-        permission_flags: None,
-        wrapper_prefix,
-        container: None,
-        // Codex's modal and Muse's startup redraw can lose input. Trust only the test workspace for this launch.
-        workspace_trust: profile.trust_at_launch.then_some(true),
-    })
-    .map_err(anyhow::Error::msg)?;
+    if let Some(mut prefix) = update_override_prefix(profile, state.path())? {
+        prefix.extend(selection.wrapper_prefix.take().unwrap_or_default());
+        selection.wrapper_prefix = Some(prefix);
+    }
+    let launch = farhelm_helm::compile_agent_launch(selection).map_err(anyhow::Error::msg)?;
     let (sup, client, accepting) = serving_supervisor(state.path(), seams).await;
-    let session = client
-        .create_session_with_extras(
-            &work.path().to_string_lossy(),
-            launch,
-            None,
-            COLS,
-            ROWS,
-            // The same consent "Set up and launch" gives; the seams aim its writes at the private copy.
-            farhelm_helm::CreateExtras {
-                setup_persistent_hooks: private.is_some(),
-                ..farhelm_helm::CreateExtras::default()
-            },
-        )
-        .await?;
-    let id = &session.id;
-    let mut first = Terminal::attach(&sup, &client, id, false).await?;
-    let result = async {
-        if let Some(private) = &private {
-            private.check_installed()?;
-        }
-        first.ready(&profile, false).await?;
-        let Some(hook_witness) = profile.hook_witness else {
-            return Ok(());
-        };
-        let random = uuid::Uuid::new_v4().simple().to_string();
-        let code_word = format!("FH{}", random[..8].to_ascii_uppercase());
-        // Both turns can be answered from the conversation. A tool approval would strand the terminal on a dialog
-        // that has nothing to do with whether the agent remembered the word.
-        let prompt = format!(
-            "Remember test label {code_word}. Reply with O and K joined into one word, and nothing else. No tools."
-        );
-        first.type_text(&prompt, false).await?;
-        first.client.send_keys(first.channel, b"\r".to_vec()).await;
-        let hook_log = state.path().join("hook-log").join(format!("{id}.log"));
-        let captured = wait_for_turn(
-            &mut first,
-            &sup,
-            id,
-            &hook_log,
-            &TurnExpectation {
-                reply: "OK",
-                acked_before: 0,
-                original_argv: None,
-                hook_witness,
-            },
-        )
-        .await?;
-
-        // Listing observes the stopped row but does not apply reports. Drain them before taking the baseline
-        // so Restart cannot acknowledge a pending Turn-1 callback and count it as a new-generation witness.
-        client.stop_session(id).await?;
-        client.list_sessions().await?;
-        sup.reconcile_for_test().await;
-        let hook_baseline = std::fs::read_to_string(&hook_log).map_err(anyhow::Error::from)?;
-        let acked_before = acknowledged_reports(&hook_baseline).count();
-        if acked_before == 0 {
-            return Err(
-                anyhow::anyhow!("the accepted Turn-1 hook disappeared before Restart").into(),
-            );
-        }
-        client.restart_session(id, false).await?;
-        let resumed = sup
-            .session_snapshot(id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Restart lost the session"))?;
-        if resumed.generation <= captured.generation {
-            return Err(anyhow::anyhow!("Restart did not start a new generation").into());
-        }
-        let mut second = Terminal::attach(&sup, &client, id, true).await?;
-        second.ready(&profile, true).await?;
-        let expected = TurnExpectation {
-            reply: &format!("RECALL-{code_word}"),
-            acked_before,
-            original_argv: Some(
-                captured
-                    .resume_argv
-                    .as_deref()
-                    .expect("accepted Turn 1 has resume argv"),
-            ),
-            hook_witness,
-        };
-        if expected.saw_reply(&second.host.screen_tail(SCREEN_BYTES)) {
-            return Err(
-                anyhow::anyhow!("the recall witness was already present before Turn 2").into(),
-            );
-        }
-        second.type_text(RECALL_PROMPT, true).await?;
-        second
-            .client
-            .send_keys(second.channel, b"\r".to_vec())
-            .await;
-        wait_for_turn(&mut second, &sup, id, &hook_log, &expected).await?;
-        Ok(())
-    }
+    let result = run(
+        DriftEnv {
+            harness,
+            sup: &sup,
+            client: &client,
+            work: work.path(),
+            state: state.path(),
+            private: private.as_ref(),
+        },
+        launch,
+    )
     .await;
-    drop(first);
-    let cleanup = client.delete_session(id).await;
     accepting.stop().await;
-    // After the agent is gone, so nothing writes the copy any more; before `config` drops, so rewrites survive.
-    let finished = private
-        .as_ref()
-        .map(private_config::PrivateConfig::finish)
-        .transpose();
-    cleanup?;
-    for note in finished?.unwrap_or_default() {
-        eprintln!("drift: {note}");
+    drop(client);
+    drop(sup);
+    // Even a failed create can leave a host. The state directory has the authoritative reap check.
+    let stopped = state.close().map_err(anyhow::Error::from);
+    let finished = private.as_ref().map_or(Ok(()), |config| {
+        for note in config.finish(stopped.is_ok())? {
+            eprintln!("drift: {note}");
+        }
+        Ok(())
+    });
+    after_cleanup(after_cleanup(result, stopped), finished)
+}
+
+/// Keep the original check's evidence if cleanup also failed. Cleanup failure makes the whole case fail even
+/// when the live check passed or a missing login otherwise would have made its coverage unavailable.
+fn after_cleanup<T>(
+    result: Result<T, DriftError>,
+    cleanup: anyhow::Result<()>,
+) -> Result<T, DriftError> {
+    let Err(cleanup) = cleanup else {
+        return result;
+    };
+    Err(match result {
+        Ok(_) => cleanup,
+        Err(DriftError::CouldNotRun(reason)) => {
+            cleanup.context(format!("drift could not run: {reason}"))
+        }
+        Err(DriftError::Failed(error)) => {
+            error.context(format!("drift cleanup also failed: {cleanup:#}"))
+        }
     }
-    result
+    .into())
 }
 
 /// A direct ignored test fails loudly when a prerequisite is absent. The manual runner turns that same outcome
 /// into an explicit unknown verdict and keeps the ordinary test recorder's evidence.
-async fn run_case(kind: LaunchHarness) {
+async fn run_case(kind: LaunchHarness, execute: impl AsyncFnOnce(LaunchHarness) -> DriftResult) {
     let outcome = execute(kind).await;
     let (verdict, detail) = match &outcome {
         Ok(()) => ("passed", "completed the selected live checks".to_owned()),
@@ -799,37 +837,42 @@ async fn run_case(kind: LaunchHarness) {
     }
 }
 
-/// Register the ignored entry points the manual runner discovers. These tests spend real vendor turns.
+/// Register a category's ignored entry points and keep its coverage list available to the category's unit tests.
 macro_rules! drift_cases {
-    ($($name:ident => $kind:ident),+ $(,)?) => {
-        const _: () = assert!(LaunchHarness::is_ordering_of_built_ins(&[
-            $(LaunchHarness::$kind,)+ LaunchHarness::Bash, LaunchHarness::Zsh,
-        ]));
+    ($execute:path; $($name:ident => $kind:ident),+ $(,)?) => {
+        const HARNESSES: &[LaunchHarness] = &[$(LaunchHarness::$kind),+];
         $(
         #[farhelm_testtrace::test]
         #[ignore = "manual live vendor drift check"]
         async fn $name() {
-            run_case(LaunchHarness::$kind).await;
+            run_case(LaunchHarness::$kind, $execute).await;
         }
     )+ };
 }
 
-drift_cases! {
-    drift_claude => Claude,
-    drift_codex => Codex,
-    drift_antigravity => Antigravity,
-    drift_goose => Goose,
-    drift_grok => Grok,
-    drift_muse => Muse,
-    drift_pi => Pi,
-    drift_omp => Omp,
-    drift_cursor => Cursor,
-    drift_opencode => OpenCode,
-}
+mod base;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The selector comes from the corresponding argv position even when another argument would look like a
+    /// conversation ID. A partial saved command cannot supply that evidence.
+    #[farhelm_testtrace::test]
+    fn conversation_selector_uses_the_templates_slot() {
+        let template = [
+            "agent".into(),
+            "--session".into(),
+            CONVERSATION_PLACEHOLDER.into(),
+        ];
+        let argv = ["agent".into(), "--session".into(), "vendor:91abc".into()];
+        assert_eq!(
+            conversation_selector(&template, &argv),
+            Some("vendor:91abc")
+        );
+        assert_eq!(conversation_selector(&template, &argv[..2]), None);
+        assert_eq!(conversation_selector(&argv, &argv), None);
+    }
 
     /// A prior report is already in the log, and the old conversation command is still in memory after Restart.
     fn after_restart(original_argv: &[String]) -> TurnExpectation<'_> {
