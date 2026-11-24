@@ -326,7 +326,10 @@ fn resolve_with(
     };
     let registered = id.and_then(|id| placement.custom_agents.iter().find(|agent| agent.id == id));
     if let (Some(id), None) = (id, registered) {
-        return Err(crate::custom_agents::unknown_agent(id));
+        return Err(crate::custom_agents::unknown_agent(
+            id,
+            placement.custom_agents,
+        ));
     }
     let launch = crate::sessions::resolve_launch_request(request, registered)?;
     // A template switch can leave an earlier prompt dormant. Only the final

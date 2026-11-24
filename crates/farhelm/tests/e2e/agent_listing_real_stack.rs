@@ -710,6 +710,54 @@ while read -r ignored; do :; done
             .any(|arg| arg == "conv-1")
     );
 
+    // The successful launch above proved that the template exists and the registered ID works.
+    // Unknown selections must name that ID from both launch and template-write entry points.
+    for args in [
+        &[
+            "create",
+            "--host",
+            "this machine",
+            "--cwd",
+            cwd,
+            "--agent",
+            "cluade",
+        ][..],
+        &["template", "create", "unknown-agent", "--agent", "cluade"],
+        &["template", "edit", "acme", "--agent", "cluade"],
+    ] {
+        let result = spawn_agent_command_args(args, &asker.id, &token, &socket).await;
+        assert!(!result.status.success(), "{args:?}");
+        let refusal = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            refusal.contains("\"cluade\"")
+                && refusal.contains("built-in types are")
+                && refusal.contains("registered custom agents are acme-code"),
+            "{args:?}: {refusal}"
+        );
+    }
+    // The CLI must reach the helm's effort vocabulary even for a case typo. A custom
+    // wrapper still refuses that same value under its own lowercase grammar.
+    for (harness, expected) in [
+        ("codex", "The choices are low, medium, high"),
+        ("acme-code", "lowercase letters"),
+    ] {
+        let args = [
+            "create",
+            "--host",
+            "this machine",
+            "--cwd",
+            cwd,
+            "--agent",
+            harness,
+            "--effort",
+            "HIGH",
+        ];
+        let result = spawn_agent_command_args(&args, &asker.id, &token, &socket).await;
+        let refusal = String::from_utf8_lossy(&result.stderr);
+        assert!(!result.status.success(), "{args:?}");
+        assert!(refusal.contains(expected), "{args:?}: {refusal}");
+    }
+
     let removed = client
         .delete(format!("{catalog}/acme-code"))
         .send()
@@ -721,8 +769,9 @@ while read -r ignored; do :; done
     let refusal = String::from_utf8_lossy(&missing.stderr);
     assert!(
         refusal.contains("not a built-in agent type or a custom agent registered")
-            && refusal.contains("built-in types are"),
-        "a deleted ID is refused like any unknown one, with the built-in types: {refusal}"
+            && refusal.contains("built-in types are")
+            && refusal.contains("no custom agents are registered"),
+        "a deleted ID is refused like any unknown one: {refusal}"
     );
     agent_command_args(
         &["restart", "--session", &live.id, "--stop-if-running"],

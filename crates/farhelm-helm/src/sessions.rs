@@ -1299,7 +1299,8 @@ impl CreateReq {
     /// for it (SPEC.md, "Agents and environments"), in the shape the
     /// launcher's own environment launch sends: the new home as its folder,
     /// or a managed checkout of `repo` there, and no host, which the launch
-    /// task supplies once the environment exists.
+    /// task supplies once the environment exists. These launches start fresh, as
+    /// the new environment has no existing conversation to reopen by ID.
     ///
     /// `launch` is what the agent's templates and flags resolved to, or a
     /// clone source's stored launch, with workspace trust already decided.
@@ -1316,7 +1317,6 @@ impl CreateReq {
         prompt: Option<String>,
         title: Option<String>,
         repo: Option<String>,
-        conversation: Option<String>,
     ) -> anyhow::Result<CreateReq> {
         let (selection, command) = match launch.as_launch() {
             farhelm_proto::SessionLaunch::Agent { selection, .. } => {
@@ -1343,7 +1343,7 @@ impl CreateReq {
             }),
             prepared_user_launch: None,
             prompt,
-            conversation,
+            conversation: None,
             cwd: "~".into(),
             launch: selection,
             command,
@@ -2963,15 +2963,9 @@ mod workspace_trust_tests {
             Some(true),
             "premise: Settings trust a managed Codex checkout"
         );
-        let req = CreateReq::for_agent_environment(
-            approved,
-            true,
-            None,
-            None,
-            Some("acme/web".into()),
-            None,
-        )
-        .unwrap();
+        let req =
+            CreateReq::for_agent_environment(approved, true, None, None, Some("acme/web".into()))
+                .unwrap();
         assert!(matches!(
             req.origin(),
             CreateOrigin::Agent {
