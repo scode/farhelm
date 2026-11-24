@@ -88,3 +88,38 @@ the helper's stdout is "/tmp/<run>/<fixture>/ready"
 Class: fixture-premise
 
 Cause: established
+
+## 2026-11-24 — `codex_subscription_and_none_enter_setup_without_an_endpoint` in `crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs`
+
+While landing the plan preserve-creds-on-lookup-failure, a full `farhelm-helm` run on the arm64 Linux test worker failed
+this test alone (1885 passed). Run alone on the same worker it failed 2 of 25 times on the plan's tree and 2 of 30 times
+on main's tree, so it predates that plan. The test adds a Tensorlake host whose recipe uses a Codex subscription login,
+then no Codex credentials, and after setup asserts that the host's delivery record holds no Codex settings cleanup
+stamp. Each failed record holds `"codex":"Cleared"`. Setup's own delivery skips Codex, so that stamp comes from the
+delivery that runs once the new host connects, which records the Codex cleanup as done even on a fresh host with nothing
+to clean; the test fails whenever that delivery finishes before the test reads the record. A failing attempt in the
+subscription case took 2.06 s against 4.1 s for a pass of both cases, failing in the first case; the full run's failure
+came in the second case, at 4.13 s. Open.
+
+```text
+panicked at crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:1198:9:
+{"claude":"Cleared","claude_environment":"Cleared","codex":"Cleared","codex_auth":["codex",1,"<uuid>"],"codex_environment":null,"github":"Absent","home":"<fixture home>"}
+```
+
+- Full run `f2abe974-d3aa-4c85-b5e7-855b3e63ac7e`: `cargo nextest run -p farhelm-helm`, four slots, zero retries, on the
+  plan's tree `054d8fc7736cd1887175c325310d154801e653c8` (clean), on the arm64 Linux test worker; the worker ran nothing
+  else of this checkout at the time. Locale, kernel, load average and memory pressure unavailable. No `FARHELM_*`
+  variable was passed. A second full run on that tree, `fefd26ea-338b-4d0e-a308-90c6aba9b9e2`, passed.
+- Alone on the worker with
+  `cargo nextest run -p farhelm-helm --lib -E 'test(=provisioning::service::tensorlake_add::tests::codex_subscription_and_none_enter_setup_without_an_endpoint)'`,
+  one recorder run per attempt: plan tree 1 of 5 (`39c5a440-f8f6-417e-bf9e-a50df9b6a95d`) and 1 of 20
+  (`52a1b811-c73a-45b3-860f-d0d0449eb38c`); main's tree at `e6b53fb6e05462a31fe6c0dd6f64f602a175c069` (clean) 0 of 10
+  (`1c85fb63-f210-471e-8d90-ed63a46ae941`) and 2 of 20 (`975c7642-2c13-4786-81c5-a15bde4a0d07`). Locally on x86_64 Linux
+  it passed 3 of 3 on the plan's tree. The failed runs are retained on the worker, which keeps its newest 20 invocations
+  per checkout.
+- The test and the delivery code it covers last changed in #4693 (2026-11-22), which moved Codex endpoint credentials to
+  launch time; that is the likely start of the race but has not been checked.
+
+Class: readiness
+
+Cause: hypothesis

@@ -10,3 +10,4 @@
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
 
 nextest terminal-host::host_lifecycle the_exit_is_reported_while_a_descendant_holds_the_pty  # descendant-pty-restore-stdout
+nextest farhelm-helm provisioning::service::tensorlake_add::tests::codex_subscription_and_none_enter_setup_without_an_endpoint  # tensorlake-add-connected-delivery-race
