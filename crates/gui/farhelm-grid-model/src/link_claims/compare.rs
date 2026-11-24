@@ -87,7 +87,7 @@ fn parse(text: &str, written: bool, target: &Url) -> Option<Url> {
 
 /// Compare places, retaining credentials, query and fragment. Only one final
 /// path slash, percent-escape hex case and an empty query or fragment are immaterial.
-pub(crate) fn comparable(url: &Url) -> String {
+pub(super) fn comparable(url: &Url) -> String {
     let path = url.path().strip_suffix('/').unwrap_or(url.path());
     let query = url
         .query()

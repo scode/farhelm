@@ -18,7 +18,8 @@
 //! The second half of the module judges that ink: [`unseen`] says whether a run can be read at all, so that link
 //! detection can treat text a program drew in (nearly) its background color the way it treats concealed text. A plain
 //! click on a printed URL opens it without showing it first, which is only safe while the whole address is something
-//! the user can actually see on the screen.
+//! the user can actually see on the screen. A program's hyperlink leaves unseen text out of its label for the same
+//! reason, and its hover warns when part of the text is unseen (`link_disclosure.rs`).
 
 use std::sync::LazyLock;
 
@@ -249,6 +250,16 @@ static DRAWS_NOTHING: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 
+/// Whether `text` has something a reader could see if it were drawn: a character other than whitespace, a format
+/// character or a combining mark (the complement of [`DRAWS_NOTHING`]).
+///
+/// [`unseen`] uses it to keep blank runs in the background color from counting as hidden, and the hover's warning uses
+/// it to decide which unseen runs are evidence that part of a hyperlink's text is out of sight: a concealed space hides
+/// nothing.
+pub fn draws_something(text: &str) -> bool {
+    !DRAWS_NOTHING.is_match(text)
+}
+
 /// Whether a run is **unseen**: concealed, or **hidden** (it has a character other than whitespace, a format
 /// character or a combining mark, and its glyph-to-background contrast is below [`HIDDEN_CONTRAST`]).
 ///
@@ -266,7 +277,7 @@ pub fn unseen(palette: &TerminalPalette, run: &GridRun, state: Option<TerminalSt
     let ink = ink(palette, run.style, state);
     // The arithmetic is cheaper than the regex, and most runs are readable, so the text is only looked at for a run
     // whose color already hides it.
-    contrast(glyph(ink), ink.bg) < HIDDEN_CONTRAST && !DRAWS_NOTHING.is_match(&run.text)
+    contrast(glyph(ink), ink.bg) < HIDDEN_CONTRAST && draws_something(&run.text)
 }
 
 #[cfg(test)]

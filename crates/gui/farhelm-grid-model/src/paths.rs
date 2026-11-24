@@ -239,6 +239,7 @@ impl CellText {
             evidence: (first.saturating_sub(2)..=last.saturating_add(2)).collect(),
             label: String::new(),
             osc_label_ambiguous: false,
+            unseen: false,
         })
     }
 }

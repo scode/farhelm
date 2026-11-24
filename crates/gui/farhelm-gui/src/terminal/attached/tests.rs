@@ -4621,7 +4621,7 @@ impl Harness<'_> {
         redraw(self.cx);
     }
 
-    /// Whether the destination display is drawn, and whether in its loud mismatch form.
+    /// Whether the destination display is drawn, and whether in its loud warning form.
     fn disclosure_shown(&mut self) -> (bool, bool) {
         (
             self.cx.debug_bounds("terminal-link-disclosure").is_some(),
@@ -4948,6 +4948,62 @@ fn a_hyperlink_relabelled_between_press_and_release_does_not_open(cx: &mut TestA
     );
 }
 
+/// A press opens a link only if the release lands on the link the user agreed to, and text with the link's destination
+/// turning hidden on the hovered row changes what they agreed to, even though the hovered text and its range stay the
+/// same: the display would now warn that part of the link's text is hard to see. Specified: a hyperlink reading
+/// `click here` and, after a gap, `x`, is pressed on `click here`; the program recolors `x` to ANSI black on the default
+/// background before the release, which opens nothing; the display then shows the warning, and a click on the link as
+/// it now reads opens it.
+#[gpui::test]
+fn a_hyperlink_whose_text_turns_hidden_between_press_and_release_does_not_open(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    let row = |x_style: serde_json::Value| serde_json::json!({"w":false,"r":[[0,10,"click here",[0,-1,-1],0],[11,1,"x",x_style,0]]});
+    let uri = "https://example.com/page";
+    h.attach_rows(
+        serde_json::json!([[0, row(serde_json::json!([0, -1, -1]))]]),
+        serde_json::json!([["1", uri]]),
+    );
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(4, 0);
+    h.rest_on(on);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "the premise: the ordinary display"
+    );
+    h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    let recolor: GridOutput = serde_json::from_value(serde_json::json!({
+        "t":"rows",
+        "rows":[[0,row(serde_json::json!([0, 0, -1]))]],
+        "links":[["1",uri]]
+    }))
+    .unwrap();
+    h.fake().output(recolor);
+    let (cols, rows) = FITTED;
+    h.fake()
+        .output(serde_json::from_value(frame(2, cols, rows)).unwrap());
+    settle(h.cx);
+    h.cx.simulate_mouse_up(on, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.cx.opened_url(), None, "nothing opens");
+    redraw(h.cx);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, true),
+        "the link is shown as it now is"
+    );
+    h.click_at(on);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some(uri),
+        "and a click on the link as it now reads opens it"
+    );
+}
+
 impl Harness<'_> {
     /// Attach a screen whose rows are `rows` (the wire's `[line, {"w": wrapped, "r": runs}]` entries) with the
     /// hyperlinks `links` (`[id, uri]` pairs the runs index), replayed whole.
@@ -4969,11 +5025,12 @@ impl Harness<'_> {
     }
 }
 
-/// A program's hyperlink can spread its label over two rows, and the lookalike defence must judge the whole label,
-/// not each row's piece: "https://example.com" on one row and ".evil.test/x" on the next together name another site.
-/// The warning informs and does not block. Specified: a hyperlink to `https://example.com/x` labelled across rows 0 and
-/// 1 that way shows the warning, naming the joined label `https://example.com.evil.test/x`, when resting on either row,
-/// and a click while it is shown opens the target.
+/// A program's hyperlink can spread its label over two rows, and the lookalike defence must judge the whole label from
+/// either row: "https://example.com" on one row and ".evil.test/x" on the next name other places than the target,
+/// however the rows are read. The warning informs and does not block. Specified: a hyperlink to
+/// `https://example.com/x` labelled across rows 0 and 1 that way shows the warning when resting on either row, with the
+/// mismatch reason's line and, under "Text mentions:", the first address that differs, `https://example.com`; a click
+/// while it is shown opens the target.
 #[gpui::test]
 fn a_two_row_lookalike_hyperlink_warns_on_both_rows_and_still_opens(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -4990,31 +5047,39 @@ fn a_two_row_lookalike_hyperlink_warns_on_both_rows_and_still_opens(cx: &mut Tes
     h.rest_on(first);
     assert_eq!(h.disclosure_shown(), (true, true), "the first row warns");
     let painted = crate::session_list::tests::painted(&test_support::frame(h.cx)).join(" ");
-    assert!(
-        painted.contains("https://example.com.evil.test/x"),
-        "judged on the whole label, joined across its rows: {painted}"
-    );
+    for shown in [
+        "The link text mentions an address that differs from where it goes",
+        "Text mentions:",
+        "https://example.com",
+    ] {
+        assert!(painted.contains(shown), "{shown:?} in {painted}");
+    }
     h.rest_on(second);
     assert_eq!(h.disclosure_shown(), (true, true), "and so does the second");
     h.click_at(second);
     assert_eq!(h.cx.opened_url().as_deref(), Some("https://example.com/x"));
 }
 
-/// A lookalike label can be thousands of characters long, and the warning shows it under "Text says:". It must wrap
-/// inside the warning: laid out beside its label in a wrapping row, it once kept its whole width, so the warning ran
-/// past the window's right edge and hid the end of the text the user is being warned about.
+/// A label can be thousands of characters long, and a warning about hidden text shows it under "Link text:". It must
+/// wrap inside the warning: laid out beside its heading in a wrapping row, it once kept its whole width, so the warning
+/// ran past the window's right edge and hid the end of the text the user is being warned about.
 ///
 /// Spec: in a window 520 pixels wide, a hyperlink to `https://evil.example/` whose label is twelve rows of repeated
-/// `https://bank.example/`, rested on, shows the warning; the claimed text ends inside the warning, and the warning
-/// inside the window.
+/// `https://evil.example/`, with an `x` drawn in ANSI black on the default background after the first row's text,
+/// rested on, shows the warning; the label ends inside the warning, and the warning inside the window.
 #[gpui::test]
 fn a_long_lookalike_label_wraps_inside_the_window(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.cx.simulate_resize(gpui::size(px(520.), px(600.)));
-    let piece = "https://bank.example/ ".repeat(3);
+    let piece = "https://evil.example/ ".repeat(2);
+    let width = piece.chars().count();
     let rows: Vec<serde_json::Value> = (0..12)
         .map(|row| {
-            serde_json::json!([row, {"w": true, "r": [[0, piece.chars().count(), piece, [0, -1, -1], 0]]}])
+            let mut runs = vec![serde_json::json!([0, width, piece, [0, -1, -1], 0])];
+            if row == 0 {
+                runs.push(serde_json::json!([width, 1, "x", [0, 0, -1], 0]));
+            }
+            serde_json::json!([row, {"w": true, "r": runs}])
         })
         .collect();
     h.attach_rows(
@@ -5052,14 +5117,15 @@ fn a_long_lookalike_label_wraps_inside_the_window(cx: &mut TestAppContext) {
 /// A label is the program's text, so the display shows it as data: a right-to-left override cannot reorder what the
 /// user reads, and it shows as its escape (SPEC.md: host text is drawn escaped). A target that is not a web address
 /// never reaches the browser and gets no display offering it. Specified: a hyperlink to `https://example.com/page`
-/// labelled `https://github.com/` and a U+202E shows the warning (the label names another site) with `<U+202E>`
-/// painted; a `javascript:` hyperlink shows no display on rest, and a click opens nothing.
+/// labelled `https://github.com/` with a U+202E inside its host shows the warning (the address is disguised) with
+/// `<U+202E>` painted in the address it quotes; a `javascript:` hyperlink shows no display on rest, and a click opens
+/// nothing.
 #[gpui::test]
 fn hostile_hyperlink_text_and_targets_stay_data(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.attach_rows(
         serde_json::json!([
-            [0, {"w":false,"r":[[0,20,"https://github.com/\u{202e}",[0,-1,-1],0]]}],
+            [0, {"w":false,"r":[[0,20,"https://git\u{202e}hub.com/",[0,-1,-1],0]]}],
             [2, {"w":false,"r":[[0,10,"run script",[0,-1,-1],1]]}]
         ]),
         serde_json::json!([
@@ -5077,7 +5143,14 @@ fn hostile_hyperlink_text_and_targets_stay_data(cx: &mut TestAppContext) {
         "the lookalike label warns"
     );
     let painted = crate::session_list::tests::painted(&test_support::frame(h.cx)).join(" ");
-    assert!(painted.contains("<U+202E>"), "shown escaped: {painted}");
+    assert!(
+        painted.contains("https://git<U+202E>hub.com/"),
+        "shown escaped: {painted}"
+    );
+    assert!(
+        painted.contains("look-alike or invisible characters"),
+        "as a disguised address: {painted}"
+    );
 
     let script = h.at_cell(4, 2);
     h.rest_on(script);

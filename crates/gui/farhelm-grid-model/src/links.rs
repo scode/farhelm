@@ -3,8 +3,7 @@
 //! client (LICENSE-PORTED). Opening and disclosure admission belong to the UI.
 
 use crate::{
-    GridModel, GridRow, GridRun, Link, Position, Selection, SelectionMode, constant_regex,
-    style_flags,
+    GridModel, GridRow, GridRun, Link, Position, Selection, SelectionMode, colors, constant_regex,
 };
 use regex::Regex;
 use std::{
@@ -61,6 +60,12 @@ pub struct TerminalLink {
     /// stretch itself stays the same. Nothing reads this field directly: it is part of the link's equality, which
     /// is how a resting hover's destination display learns that it must be judged again.
     pub osc_label_ambiguous: bool,
+    /// Whether this row has an unseen run with something to draw ([`colors::unseen`], [`colors::draws_something`])
+    /// that belongs to a program hyperlink with this link's target. That is the hover's evidence that part of the
+    /// link's text is out of sight, so a run turning unseen or seen again (a color change, or the program's OSC 10/11)
+    /// can add or drop the warning while the hovered stretch's own text and range stay the same. Like
+    /// `osc_label_ambiguous`, it exists for the link's equality only. Always `false` for printed links and paths.
+    pub unseen: bool,
 }
 
 impl TerminalLink {
@@ -162,12 +167,15 @@ fn host_prefixed(text: &str) -> bool {
         .starts_with(&format!("{}://{auth}{host}{port}", url.scheme()).to_lowercase())
 }
 
-/// Conceal removes a run from visible OSC 8 identity, including continuation across a row boundary.
-/// Raw tags still hold their cells against printed-link fallback.
-fn visible_link(run: &GridRun) -> Option<&Arc<Link>> {
+/// A run's program hyperlink as the user can see it: none when the run is unseen ([`colors::unseen`]: concealed, or
+/// drawn too close to its background to read). Leaving unseen runs out of visible identity is what keeps them out of
+/// a hyperlink's label, hover and click area, underline and continuation across a row boundary, exactly as conceal
+/// always did; hidden-by-color text is treated the same so a program cannot pad or extend a label with text the user
+/// cannot read. Raw tags still hold their cells against printed-link fallback.
+fn visible_link<'r>(model: &GridModel, run: &'r GridRun) -> Option<&'r Arc<Link>> {
     run.link
         .as_ref()
-        .filter(|_| run.style.flags & style_flags::HIDDEN == 0)
+        .filter(|_| !colors::unseen(model.palette(), run, model.state()))
 }
 
 /// Resolve numeric emulator-generated ids only through contiguous pieces of the
@@ -197,23 +205,16 @@ impl<'a> Identities<'a> {
             .is_some_and(|(a, b)| generated(a) && generated(b) && a.uri == b.uri)
     }
 
-    /// Index of the preceding row's visible link at a soft-wrap seam. Padding and conceal break the seam.
+    /// Index of the preceding row's visible link at a soft-wrap seam. Padding and unseen runs break the seam.
     fn previous_piece(&self, line: u64) -> Option<usize> {
+        let index = self.model.wrap_seam(line)?;
         let (_, row) = self.model.selection_line(line)?;
-        let first = row.runs.first().filter(|run| run.col == 0)?;
-        let previous = line.checked_sub(1)?;
-        let (cols, row) = self
-            .model
-            .selection_line(previous)
-            .filter(|(_, row)| self.model.wraps_after(previous, row))?;
-        let text_end = row.text_columns(cols);
-        let index = row
-            .runs
-            .partition_point(|run| run.col < text_end)
-            .checked_sub(1)?;
-        let last = &row.runs[index];
-        (last.col + last.width >= text_end && Self::joins(visible_link(last), visible_link(first)))
-            .then_some(index)
+        let (_, previous) = self.model.selection_line(line.checked_sub(1)?)?;
+        Self::joins(
+            visible_link(self.model, &previous.runs[index]),
+            visible_link(self.model, &row.runs[0]),
+        )
+        .then_some(index)
     }
 
     /// A lookup follows at most 128 predecessor rows, exactly as the pinned
@@ -246,14 +247,15 @@ impl<'a> Identities<'a> {
             let text_end = row.text_columns(cols);
             let mut keys: Vec<Option<Arc<Link>>> = Vec::with_capacity(row.runs.len());
             for (index, run) in row.runs.iter().enumerate() {
-                let Some(link) = visible_link(run).filter(|_| run.col < text_end) else {
+                let Some(link) = visible_link(self.model, run).filter(|_| run.col < text_end)
+                else {
                     keys.push(None);
                     continue;
                 };
                 let before = index.checked_sub(1).and_then(|i| row.runs.get(i));
                 let key = if before.is_some_and(|before| {
                     before.col + before.width == run.col
-                        && Self::joins(visible_link(before), Some(link))
+                        && Self::joins(visible_link(self.model, before), Some(link))
                 }) {
                     keys[index - 1].clone()
                 } else if let Some(above) = above.filter(|_| index == 0) {
@@ -290,13 +292,55 @@ impl GridRow {
 }
 
 impl GridModel {
+    /// The geometry of a soft-wrap seam before `line`: `Some` with the index of the previous row's last text run when
+    /// the previous row wraps into this one and [`GridModel::edge_seam`] holds. `None` for every other boundary.
+    ///
+    /// This is only where the cells meet, not whether a link continues across them: link identity ([`Identities`])
+    /// adds its own test of the two runs.
+    pub(crate) fn wrap_seam(&self, line: u64) -> Option<usize> {
+        let previous = line.checked_sub(1)?;
+        let (_, row) = self.selection_line(previous)?;
+        if !self.wraps_after(previous, row) {
+            return None;
+        }
+        self.edge_seam(line)
+    }
+
+    /// Where the previous row's text meets `line` edge to edge, whatever the wrap flag says: `Some` with the index of
+    /// the previous row's last text run when that run reaches the previous row's last text column (a wide-wrap pad
+    /// column is not text) and this row's first run starts at column 0. `None` for every other boundary.
+    ///
+    /// [`GridModel::wrap_seam`] adds the wrap flag for link identity. The hover's label reader (`link_disclosure.rs`)
+    /// uses this geometry alone, because a program that fills a row and moves to the next one itself (CR LF at the
+    /// edge, or cursor positioning) draws exactly what a wrap draws, and the user reads the two pieces as one word.
+    pub(crate) fn edge_seam(&self, line: u64) -> Option<usize> {
+        let (_, row) = self.selection_line(line)?;
+        row.runs.first().filter(|run| run.col == 0)?;
+        let previous = line.checked_sub(1)?;
+        let (cols, row) = self.selection_line(previous)?;
+        let text_end = row.text_columns(cols);
+        let index = row
+            .runs
+            .partition_point(|run| run.col < text_end)
+            .checked_sub(1)?;
+        let last = &row.runs[index];
+        (last.col + last.width >= text_end).then_some(index)
+    }
+
+    /// Whether `run` is evidence that part of a program hyperlink's text is out of sight: it is unseen and has
+    /// something to draw. A concealed or background-colored space hides nothing, so it is not evidence.
+    pub(crate) fn hides_ink(&self, run: &GridRun) -> bool {
+        colors::unseen(self.palette(), run, self.state()) && colors::draws_something(&run.text)
+    }
+
     /// Every visible OSC 8 stretch on this row precedes plain URLs. All OSC targets keep ownership of their cells.
     /// Text detection walks only the pinned 2048-character neighboring window and preserves UTF-16 ownership across
     /// soft wraps.
     /// Unseen cells break a printed URL: concealed text, and text drawn too close to its background to read
     /// ([`crate::colors::unseen`]). A plain click opens the address without showing it first, so it may only open what
     /// the user can actually see. The URL simply ends before such a cell, as it would before a real space; its
-    /// visible part still links. Program hyperlinks still read their label from concealment alone here.
+    /// visible part still links. A program hyperlink leaves the same unseen runs out of its label, ranges and
+    /// continuation ([`visible_link`]), and flags its row's unseen runs with its target ([`TerminalLink::unseen`]).
     pub fn row_links(&self, line: u64) -> Vec<TerminalLink> {
         let Some((cols, row)) = self.selection_line(line) else {
             return Vec::new();
@@ -306,6 +350,17 @@ impl GridModel {
         let mut found: Vec<TerminalLink> = Vec::new();
         let mut previous_stretch = HashMap::new();
         let text_end = row.text_columns(cols);
+        // The targets of this row's unseen runs that have something to draw, judged once per row rather than per
+        // stretch: each needs a color resolution, and a row holds few distinct targets.
+        let mut hidden_targets: Vec<&str> = Vec::new();
+        for run in row.runs.iter().filter(|run| run.col < text_end) {
+            if let Some(link) = &run.link
+                && !hidden_targets.contains(&link.uri.as_str())
+                && self.hides_ink(run)
+            {
+                hidden_targets.push(&link.uri);
+            }
+        }
         for (run, key) in row.runs.iter().zip(&keys) {
             let Some(key) = key else { continue };
             let end = (run.col + run.width).min(text_end);
@@ -366,6 +421,7 @@ impl GridModel {
                 evidence: (first.saturating_sub(1)..=last.saturating_add(1)).collect(),
                 label: text.to_owned(),
                 osc_label_ambiguous: earlier.is_some(),
+                unseen: hidden_targets.contains(&key.uri.as_str()),
             });
         }
         let Some((first, last)) = self.url_window(line) else {
@@ -429,6 +485,7 @@ impl GridModel {
                     evidence: (first.saturating_sub(1)..=last.saturating_add(1)).collect(),
                     label: String::new(),
                     osc_label_ambiguous: false,
+                    unseen: false,
                 });
             }
         }

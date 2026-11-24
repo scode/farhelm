@@ -8,10 +8,11 @@
 mod common;
 
 use farhelm_grid_model::{
-    GridModel, GridOutput, LinkKind, Position, SelectionMode, colors, style_flags, tunnel_port,
-    web_target,
+    GridModel, GridOutput, LinkKind, LinkWarning, Position, SelectionMode, WarningReason, colors,
+    style_flags, tunnel_port, web_target,
 };
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 
 /// Explicit cell rows pass the actual wire encoder/checker before lookup. This
 /// fixture has no terminal emulator or UI whose URL detection could mask ours.
@@ -47,56 +48,95 @@ fn ascii(text: &str, wraps: bool, link: Option<usize>) -> Value {
     json!({"w":wraps,"r":[run]})
 }
 
-/// Disclosure reads both pieces of a wrapped program hyperlink. A wrapped label can put an address immediately
-/// after its own text, and still receives an ordinary target disclosure. A wrapped address alone still warns.
+/// The hover's warning for the link at `(line, col)`, which must be a program hyperlink with a web destination.
+fn warning(grid: &GridModel, line: u64, col: u16) -> Option<LinkWarning> {
+    let link = grid.link_at(Position { line, col }).unwrap();
+    assert!(matches!(link.kind, LinkKind::Osc { .. }), "{link:?}");
+    grid.link_disclosure(&link).unwrap().warning
+}
+
+/// The reasons of a warning, or none for the ordinary display: the shape most assertions here compare.
+fn reasons(warning: &Option<LinkWarning>) -> Vec<WarningReason> {
+    warning
+        .as_ref()
+        .map_or_else(Vec::new, |warning| warning.reasons.clone())
+}
+
+use WarningReason::{Credentials, Disguised, Hidden, Incomplete, Mismatch};
+
+/// A web address anywhere in a label is a claim about where the link goes, also when the label wraps: prose before
+/// it, a ticket number glued to it or a scheme-less host don't make it descriptive text (SPEC.md's terminal links
+/// paragraph). This replaces the old rule that a label was an address only when the whole of it looked like one, under
+/// which a spoof could hide behind one word. Spec: each label, soft-wrapped over two rows of one explicit hyperlink,
+/// warns from either row against another site, quoting the address it mentions and the whole label with the wrap
+/// joined; against the address it names, it is quiet.
 #[test]
-fn a_wrapped_program_label_can_contain_an_address_without_claiming_it() {
-    let target = "https://other.test/";
+fn a_wrapped_program_label_warns_on_an_address_anywhere_in_it() {
     let columns = 20;
-    for (label, warns) in [
-        ("ticket-42(https://example.test/x)", false),
-        ("ticket-42(example.test/tickets/42)", false),
-        ("https://example.test/tickets/42", true),
+    for (label, address, own) in [
+        (
+            "ticket-42(https://example.test/x)",
+            "https://example.test/x",
+            "https://example.test/x",
+        ),
+        (
+            "ticket-42(example.test/tickets/42)",
+            "example.test/tickets/42",
+            "https://example.test/tickets/42",
+        ),
+        (
+            "https://example.test/tickets/42",
+            "https://example.test/tickets/42",
+            "https://example.test/tickets/42",
+        ),
     ] {
         let (first, last) = label.split_at(usize::from(columns));
-        let model = model(
-            columns,
-            vec![ascii(first, true, Some(0)), ascii(last, false, Some(0))],
-            vec![json!(["example", target])],
-        );
-        let start = model.link_at(Position { line: 0, col: 0 }).unwrap();
-        let end = model.link_at(Position { line: 1, col: 0 }).unwrap();
-        assert_eq!(start.label, first);
-        assert_eq!(end.label, last);
-        assert_eq!(start.kind, end.kind, "both rows share the explicit tag");
-        for link in [start, end] {
-            let disclosure = model.link_disclosure(&link).unwrap();
-            assert_eq!(disclosure.host, "other.test");
-            assert_eq!(
-                disclosure.claimed_text.as_deref(),
-                warns.then_some(label),
-                "{label}"
+        for (target, warns) in [("https://other.test/", true), (own, false)] {
+            let grid = model(
+                columns,
+                vec![ascii(first, true, Some(0)), ascii(last, false, Some(0))],
+                vec![json!(["example", target])],
             );
+            let start = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+            let end = grid.link_at(Position { line: 1, col: 0 }).unwrap();
+            assert_eq!(start.label, first);
+            assert_eq!(end.label, last);
+            assert_eq!(start.kind, end.kind, "both rows share the explicit tag");
+            for link in [start, end] {
+                let disclosure = grid.link_disclosure(&link).unwrap();
+                let warning = disclosure.warning;
+                if warns {
+                    let warning = warning.unwrap();
+                    assert_eq!(warning.reasons, [Mismatch], "{label}");
+                    assert_eq!(warning.address.as_deref(), Some(address), "{label}");
+                    assert_eq!(warning.label, label, "the soft wrap joins");
+                } else {
+                    assert_eq!(warning, None, "{label} -> {target}");
+                }
+            }
         }
     }
 }
 
-/// A bracketed or quoted address is still a claim about the destination. The warning retains
-/// the wrapping punctuation so the user can compare what they saw with the actual target.
+/// A bracketed or quoted address is still a claim about the destination, and so is one inside Markdown or after
+/// prose. The warning quotes the address without its wrapping, and keeps the whole label, punctuation and words
+/// included, so the user can compare what they saw with the actual target. Spec: each one-row label warns against
+/// another site, naming `https://example.test/` as the address and the trimmed label as the label; against
+/// `https://example.test/` it is quiet.
 #[test]
 fn quoting_an_address_keeps_the_original_label_in_mismatch_warnings() {
-    for (label, claims_address) in [
-        ("<https://example.test/>", true),
-        ("\"https://example.test/\"", true),
-        ("'https://example.test/'", true),
-        ("(https://example.test/)", true),
-        ("[https://example.test/]", true),
-        (" ( \"<https://example.test/>\" ) ", true),
-        ("See (https://example.test/)", false),
-        ("ticket-42(https://example.test/)", false),
-        ("[docs](https://example.test/)", false),
-        ("[https://example.test/] [docs]", false),
-        ("<https://example.test/)", false),
+    for label in [
+        "<https://example.test/>",
+        "\"https://example.test/\"",
+        "'https://example.test/'",
+        "(https://example.test/)",
+        "[https://example.test/]",
+        " ( \"<https://example.test/>\" ) ",
+        "See (https://example.test/)",
+        "ticket-42(https://example.test/)",
+        "[docs](https://example.test/)",
+        "[https://example.test/] [docs]",
+        "<https://example.test/)",
     ] {
         for (target, differs) in [
             ("https://example.test/", false),
@@ -110,42 +150,28 @@ fn quoting_an_address_keeps_the_original_label_in_mismatch_warnings() {
             let link = grid.link_at(Position { line: 0, col: 0 }).unwrap();
             let disclosure = grid.link_disclosure(&link).unwrap();
             assert_eq!(disclosure.target, target);
-            let expected = (claims_address && differs).then_some(label.trim());
-            assert_eq!(disclosure.claimed_text.as_deref(), expected, "{label:?}");
-            assert_eq!(disclosure.claimed.as_deref(), expected, "{label:?}");
+            if differs {
+                let warning = disclosure.warning.unwrap();
+                assert_eq!(warning.reasons, [Mismatch], "{label:?}");
+                assert_eq!(
+                    warning.address.as_deref(),
+                    Some("https://example.test/"),
+                    "{label:?}"
+                );
+                assert_eq!(warning.label, label.trim(), "{label:?}");
+            } else {
+                assert_eq!(disclosure.warning, None, "{label:?}");
+            }
         }
     }
 }
 
-/// Distinct outer delimiters can make a concatenation look like prose even when both rows
-/// present complete addresses. Hovering each row must still compare that row to the target.
-#[test]
-fn differently_wrapped_rows_keep_their_individual_address_claims() {
-    let honest = "<https://example.test/>";
-    let other = "\"https://other.test/\"";
-    let target = "https://example.test/";
-    let grid = model(
-        40,
-        vec![ascii(honest, false, Some(0)), ascii(other, false, Some(0))],
-        vec![json!(["tag", target])],
-    );
-    let first = grid.link_at(Position { line: 0, col: 0 }).unwrap();
-    let second = grid.link_at(Position { line: 1, col: 0 }).unwrap();
-    assert_eq!(first.kind, second.kind);
-    assert_eq!(first.label, honest);
-    assert_eq!(second.label, other);
-    assert_eq!(grid.link_disclosure(&first).unwrap().claimed_text, None);
-    assert_eq!(
-        grid.link_disclosure(&second)
-            .unwrap()
-            .claimed_text
-            .as_deref(),
-        Some(other)
-    );
-}
-
-/// A bracketed row joined to a bare one does not look like one address, so judging the join alone would show
-/// no warning while the bare row names another place. Hovering that row must compare it with the target.
+/// Ported from the fix for a bare address below a bracketed one (#4748), whose two-row case the label reader now
+/// covers on every row: a bracketed row joined to a bare one doesn't look like one address, so judging the join alone
+/// would show no warning while the bare row names another place. Spec: `<https://example.test/>` above
+/// `https://other.test/`, one explicit hyperlink to `https://example.test/` on two hard rows, warns from both rows,
+/// naming `https://other.test/`. The old answer for the first row, quiet, came from judging that row alone; the label is
+/// now judged whole from every row (SPEC.md), so both rows show the same warning.
 #[test]
 fn a_bare_address_row_beside_a_bracketed_one_keeps_its_claim() {
     let bracketed = "<https://example.test/>";
@@ -162,18 +188,18 @@ fn a_bare_address_row_beside_a_bracketed_one_keeps_its_claim() {
     let first = grid.link_at(Position { line: 0, col: 0 }).unwrap();
     let second = grid.link_at(Position { line: 1, col: 0 }).unwrap();
     assert_eq!(first.kind, second.kind);
-    assert_eq!(grid.link_disclosure(&first).unwrap().claimed_text, None);
-    assert_eq!(
-        grid.link_disclosure(&second)
-            .unwrap()
-            .claimed_text
-            .as_deref(),
-        Some(bare)
-    );
+    let shown = warning(&grid, 0, 0);
+    assert_eq!(shown, warning(&grid, 1, 0), "both rows show the same hover");
+    let shown = shown.unwrap();
+    assert_eq!(shown.reasons, [Mismatch]);
+    assert_eq!(shown.address.as_deref(), Some(bare));
+    assert_eq!(shown.label, format!("{bracketed} {bare}"));
 }
 
-/// Honest output can print one address several times under one hyperlink, quoted differently on each row. If
-/// the repeat were not recognized, the hover would warn about an address that names the real target.
+/// Honest output can print one address several times under one hyperlink, quoted differently on each row. If the
+/// repeat were not recognized, the hover would warn about an address that names the real target. Spec: the two rows
+/// each start with an address after punctuation only, so the seam separates and each address is judged alone; both
+/// name the destination, and both rows are quiet.
 #[test]
 fn repeated_quoted_addresses_each_match_the_destination() {
     let first = "<https://example.test/>";
@@ -188,12 +214,16 @@ fn repeated_quoted_addresses_each_match_the_destination() {
         assert_eq!(link.label, label);
         let disclosure = grid.link_disclosure(&link).unwrap();
         assert_eq!(disclosure.target, "https://example.test/");
-        assert_eq!(disclosure.claimed_text, None);
+        assert_eq!(disclosure.warning, None);
     }
 }
 
-/// An ambiguous continuation still warns on a quoted address-shaped fragment. Even when the
-/// fragment names the destination, the other stretches keep it from proving a complete match.
+/// A row that shows a multi-row hyperlink in two separate stretches can't be put back into one text, so the label
+/// can't be checked whole: a gap is how a program would keep part of an address out of the comparison. Spec: with
+/// `<https://example.test/>`, a gap and `more` on row 0 and `continuation` on row 1, all one hyperlink to the address
+/// row 0 names, the first stretch's hover is incomplete (it mentions an address), shows every piece as the partial
+/// label (the break before `continuation` joins, as in a complete label), and quotes no address. Updated from a warning that quoted the stretch as a mismatching claim: incomplete is
+/// now its own reason, and an address that matches is no mismatch.
 #[test]
 fn a_quoted_address_fragment_warns_when_the_full_label_is_ambiguous() {
     let address = "<https://example.test/>";
@@ -216,7 +246,10 @@ fn a_quoted_address_fragment_warns_when_the_full_label_is_ambiguous() {
     assert_eq!(fragments[0].label, address);
     let disclosure = grid.link_disclosure(&fragments[0]).unwrap();
     assert_eq!(disclosure.target, target);
-    assert_eq!(disclosure.claimed_text.as_deref(), Some(address));
+    let warning = disclosure.warning.unwrap();
+    assert_eq!(warning.reasons, [Incomplete]);
+    assert_eq!(warning.label, format!("{address} morecontinuation"));
+    assert_eq!(warning.address, None);
 }
 
 /// A URL can continue over soft wraps; underlining follows cell ranges, while
@@ -373,33 +406,38 @@ fn osc_continuation_looks_past_the_styled_padding_run() {
 }
 
 /// The wire allows a link run to cover the last column. Its padded cell must not reappear as a false mismatch
-/// warning when disclosure reconstructs the visible label across the wrap.
+/// warning when disclosure reconstructs the visible label across the wrap, and the wide-wrap pad must not stop the seam
+/// from being soft. Spec: `https://a.test/` plus a padded cell, soft-wrapped into `界`, under a generated hyperlink to
+/// `https://a.test/界` is quiet from both rows; to another site it warns, quoting the joined `https://a.test/界`.
 #[test]
 fn osc_disclosure_excludes_padding_inside_a_link_run() {
-    let model = model(
-        16,
-        vec![
-            json!({"w":true,"p":true,"r":[[0,16,"https://a.test/ ",[0,-1,-1],0]]}),
-            json!({"w":false,"r":[[0,2,"界",[0,-1,-1],1]]}),
-        ],
-        vec![
-            json!(["1_alacritty", "https://a.test/界"]),
-            json!(["2_alacritty", "https://a.test/界"]),
-        ],
-    );
-    let first = model.link_at(Position { line: 0, col: 1 }).unwrap();
-    let last = model.link_at(Position { line: 1, col: 0 }).unwrap();
-    assert_eq!(first.kind, last.kind);
-    assert_eq!(first.label, "https://a.test/");
-    assert!(model.link_at(Position { line: 0, col: 15 }).is_none());
-    assert!(
-        model
-            .link_disclosure(&first)
-            .unwrap()
-            .claimed_text
-            .is_none()
-    );
-    assert!(model.link_disclosure(&last).unwrap().claimed_text.is_none());
+    for (target, warns) in [("https://a.test/界", false), ("https://b.test/", true)] {
+        let model = model(
+            16,
+            vec![
+                json!({"w":true,"p":true,"r":[[0,16,"https://a.test/ ",[0,-1,-1],0]]}),
+                json!({"w":false,"r":[[0,2,"界",[0,-1,-1],1]]}),
+            ],
+            vec![
+                json!(["1_alacritty", target]),
+                json!(["2_alacritty", target]),
+            ],
+        );
+        let first = model.link_at(Position { line: 0, col: 1 }).unwrap();
+        let last = model.link_at(Position { line: 1, col: 0 }).unwrap();
+        assert_eq!(first.kind, last.kind);
+        assert_eq!(first.label, "https://a.test/");
+        assert!(model.link_at(Position { line: 0, col: 15 }).is_none());
+        let shown = warning(&model, 0, 1);
+        assert_eq!(shown, warning(&model, 1, 0));
+        if warns {
+            let shown = shown.unwrap();
+            assert_eq!(shown.label, "https://a.test/界", "the soft seam joins");
+            assert_eq!(shown.address.as_deref(), Some("https://a.test/界"));
+        } else {
+            assert_eq!(shown, None);
+        }
+    }
 }
 
 /// A hidden suffix cannot extend the address opened by a click on the visible prefix.
@@ -574,245 +612,288 @@ fn a_default_foreground_set_to_the_background_hides_default_colored_text() {
     );
 }
 
-/// A style-only update changes which label a user sees. It can expose a real destination mismatch or remove
-/// a false warning. The link under the pointer changes identity and its hover range ends at the visible label.
+/// The two ways a program puts text out of sight, as wire styles: the conceal attribute, and ANSI black on the default
+/// background, which the fixture palette draws below the hidden threshold. A program hyperlink treats them the same, so
+/// each conceal test below runs with both; `assert_out_of_sight` checks the second one's premise.
+fn out_of_sight() -> [(&'static str, Value); 2] {
+    [
+        ("concealed", json!([style_flags::HIDDEN, -1, -1])),
+        ("background-colored", json!([0, 0, -1])),
+    ]
+}
+
+/// Premise for a test using [`out_of_sight`]: the run at `(line, index)` is unseen under the fixture palette.
+fn assert_out_of_sight(grid: &GridModel, line: usize, index: usize, way: &str) {
+    let run = &grid.screen()[line].runs[index];
+    assert!(
+        colors::unseen(grid.palette(), run, grid.state()),
+        "{way}: {run:?}"
+    );
+}
+
+/// A style-only update changes which label a user sees. It can expose a real destination mismatch or remove a false
+/// one, and the text it hides is itself a reason to doubt the link. The link under the pointer changes identity and its
+/// hover range ends at the visible label. Spec: for each way of putting text out of sight, `https://example.test` with
+/// `.other.test` linked to the joined address is quiet; with the suffix out of sight it mismatches on what's left and
+/// warns hidden. `menu` with `://example.test/x` linked to another site warns; with the suffix out of sight the label
+/// `menu` mentions no address, and only hidden remains. Updated from conceal clearing the second warning: hidden text is
+/// now a reason of its own.
 #[test]
 fn concealing_a_program_link_suffix_rechecks_the_visible_label() {
-    for (prefix, suffix, target, warns_before) in [
-        (
-            "https://example.test",
-            ".other.test",
-            "https://example.test.other.test",
-            false,
-        ),
-        ("menu", "://example.test/x", "https://other.test/x", true),
-    ] {
-        let split = prefix.len() as u16;
-        let row = |flags| {
-            json!({"w":false,"r":[
-                [0,split,prefix,[0,-1,-1],0],
-                [split,suffix.len(),suffix,[flags,-1,-1],0]
-            ]})
-        };
-        let links = vec![json!(["tag", target])];
-        let mut grid = model(48, vec![row(0)], links.clone());
-        let start = Position { line: 0, col: 0 };
-        let boundary = Position {
-            line: 0,
-            col: split,
-        };
-        let before = grid.link_at(start).unwrap();
-        let full_label = format!("{prefix}{suffix}");
-        assert_eq!(before.label, full_label);
-        assert_eq!(grid.link_at(boundary), Some(before.clone()));
-        assert_eq!(
-            grid.link_disclosure(&before)
-                .unwrap()
-                .claimed_text
-                .as_deref(),
-            warns_before.then_some(full_label.as_str())
-        );
+    for (way, style) in out_of_sight() {
+        for (prefix, suffix, target, before_reasons, after_reasons) in [
+            (
+                "https://example.test",
+                ".other.test",
+                "https://example.test.other.test",
+                vec![],
+                vec![Mismatch, Hidden],
+            ),
+            (
+                "menu",
+                "://example.test/x",
+                "https://other.test/x",
+                vec![Mismatch],
+                vec![Hidden],
+            ),
+        ] {
+            let split = prefix.len() as u16;
+            let row = |style: &Value| {
+                json!({"w":false,"r":[
+                    [0,split,prefix,[0,-1,-1],0],
+                    [split,suffix.len(),suffix,style,0]
+                ]})
+            };
+            let links = vec![json!(["tag", target])];
+            let mut grid = model(48, vec![row(&json!([0, -1, -1]))], links.clone());
+            let start = Position { line: 0, col: 0 };
+            let boundary = Position {
+                line: 0,
+                col: split,
+            };
+            let before = grid.link_at(start).unwrap();
+            let full_label = format!("{prefix}{suffix}");
+            assert_eq!(before.label, full_label);
+            assert_eq!(grid.link_at(boundary), Some(before.clone()));
+            assert_eq!(reasons(&warning(&grid, 0, 0)), before_reasons, "{way}");
 
-        apply_message(
-            &mut grid,
-            json!({"t":"rows","rows":[[0,row(style_flags::HIDDEN)]],"links":links}),
-        );
-        apply_message(
-            &mut grid,
-            json!({"t":"frame","rev":2,"cols":48,"rows":1,"cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
-        );
-        let after = grid.link_at(start).unwrap();
-        assert_eq!(after.kind, before.kind);
-        assert_eq!(after.uri, before.uri);
-        assert_eq!(after.label, prefix);
-        assert_eq!(after.ranges[0].end, boundary);
-        assert_ne!(after, before);
-        assert_eq!(grid.link_at(boundary), None);
-        assert_eq!(
-            grid.link_disclosure(&after)
-                .unwrap()
-                .claimed_text
-                .as_deref(),
-            (!warns_before).then_some(prefix)
-        );
+            apply_message(
+                &mut grid,
+                json!({"t":"rows","rows":[[0,row(&style)]],"links":links}),
+            );
+            apply_message(
+                &mut grid,
+                json!({"t":"frame","rev":2,"cols":48,"rows":1,"cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
+            );
+            assert_out_of_sight(&grid, 0, 1, way);
+            let after = grid.link_at(start).unwrap();
+            assert_eq!(after.kind, before.kind);
+            assert_eq!(after.uri, before.uri);
+            assert_eq!(after.label, prefix);
+            assert_eq!(after.ranges[0].end, boundary);
+            assert_ne!(after, before);
+            assert_eq!(grid.link_at(boundary), None, "{way}");
+            let shown = warning(&grid, 0, 0).unwrap();
+            assert_eq!(shown.reasons, after_reasons, "{way}");
+            assert_eq!(shown.label, prefix, "{way}");
+        }
     }
 }
 
-/// A concealed-only row ends the visible label walk. It stays in the evidence boundary so revealing it can
-/// extend the link, and another visible row carrying the same tag beyond it stays outside the comparison.
+/// A row that shows nothing of the hyperlink ends the visible label walk, and it is no evidence of hidden text: that is
+/// how conceal always worked, and text too faint to read works the same (an accepted gap, SPEC.md). It stays in the
+/// evidence boundary so revealing it can extend the link, and another visible row carrying the same tag beyond it stays
+/// outside the comparison. Spec: for each way of putting text out of sight, `https://example.test/x` above an
+/// out-of-sight row and `unrelated`, one explicit hyperlink to that address, is quiet from row 0.
 #[test]
 fn a_concealed_only_row_breaks_a_program_link_label() {
-    let grid = model(
-        42,
-        vec![
-            ascii("https://example.test/x", false, Some(0)),
-            json!({"w":false,"r":[[0,6,"hidden",[style_flags::HIDDEN,-1,-1],0]]}),
-            ascii("unrelated", false, Some(0)),
-        ],
-        vec![json!(["tag", "https://example.test/x"])],
-    );
-    let first = grid.link_at(Position { line: 0, col: 0 }).unwrap();
-    let other = grid.link_at(Position { line: 2, col: 0 }).unwrap();
-    assert_eq!(first.kind, other.kind);
-    assert!(grid.row_links(1).is_empty());
-    assert!(first.evidence.contains(&1));
-    assert!(!first.evidence.contains(&2));
-    assert!(grid.link_disclosure(&first).unwrap().claimed_text.is_none());
+    for (way, style) in out_of_sight() {
+        let grid = model(
+            42,
+            vec![
+                ascii("https://example.test/x", false, Some(0)),
+                json!({"w":false,"r":[[0,6,"hidden",style,0]]}),
+                ascii("unrelated", false, Some(0)),
+            ],
+            vec![json!(["tag", "https://example.test/x"])],
+        );
+        assert_out_of_sight(&grid, 1, 0, way);
+        let first = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+        let other = grid.link_at(Position { line: 2, col: 0 }).unwrap();
+        assert_eq!(first.kind, other.kind);
+        assert!(grid.row_links(1).is_empty(), "{way}");
+        assert!(first.evidence.contains(&1));
+        assert!(!first.evidence.contains(&2));
+        assert_eq!(warning(&grid, 0, 0), None, "{way}");
+    }
 }
 
-/// A concealed gap splits the hit ranges even when the runs have one explicit tag. An adjacent continuation
-/// makes the address ambiguous, so the visible address-shaped fragment still warns.
+/// An out-of-sight gap splits the hit ranges even when the runs have one explicit tag. With a continuation on the next
+/// row, the row's two stretches can't be put back into one text, so a visible stretch that mentions an address makes
+/// the label incomplete. Spec: `https://example.test/x`, a two-cell gap and `more` on row 0, `continuation` on row 1,
+/// one hyperlink to `https://example.test/x`: the two stretches split at the gap, and the first one's hover is
+/// incomplete. A concealed gap of spaces hides nothing, so that is all; a gap with text in it, concealed or in the
+/// background color, adds hidden. Updated from a warning that quoted the stretch as a mismatching claim.
 #[test]
 fn a_concealed_gap_splits_the_hit_ranges_of_an_explicit_program_link() {
     let address = "https://example.test/x";
     let split = address.len();
-    let grid = model(
-        48,
-        vec![
-            json!({"w":false,"r":[
-                [0,split,address,[0,-1,-1],0],
-                [split,2,"  ",[style_flags::HIDDEN,-1,-1],0],
-                [split+2,4,"more",[0,-1,-1],0]
-            ]}),
-            ascii("continuation", false, Some(0)),
-        ],
-        vec![json!(["tag", address])],
-    );
-    let links = grid.row_links(0);
-    assert_eq!(links.len(), 2);
-    assert_eq!(links[0].kind, links[1].kind);
-    assert_eq!(links[0].label, address);
-    assert_eq!(links[0].ranges[0].end.col, split as u16);
-    assert_eq!(links[1].label, "more");
-    assert_eq!(links[1].ranges[0].start.col, (split + 2) as u16);
-    assert_eq!(
-        grid.link_at(Position {
-            line: 0,
-            col: split as u16
-        }),
-        None
-    );
-    assert_eq!(
-        grid.link_disclosure(&links[0])
-            .unwrap()
-            .claimed_text
-            .as_deref(),
-        Some(address)
-    );
-}
-
-/// Revealing a separate stretch of the same tag can change the hovered row's warning while leaving the
-/// hovered stretch itself untouched. When that happens, a display for the old link must be refreshed.
-#[test]
-fn revealing_a_second_stretch_invalidates_a_wrapped_link_disclosure() {
-    let prefix = "https://example.test/";
-    let links = vec![json!(["tag", "https://example.test/x"])];
-    let separated = prefix.len() + 1;
-    let row = |flags| {
-        json!({"w":false,"r":[
-            [0,prefix.len(),prefix,[0,-1,-1],0],
-            [separated,4,"more",[flags,-1,-1],0]
-        ]})
-    };
-    let mut grid = model(
-        48,
-        vec![row(style_flags::HIDDEN), ascii("x", false, Some(0))],
-        links.clone(),
-    );
-    let hovered = Position { line: 0, col: 0 };
-    let before = grid.link_at(hovered).unwrap();
-    assert_eq!(before.label, prefix);
-    assert!(
-        grid.link_disclosure(&before)
-            .unwrap()
-            .claimed_text
-            .is_none()
-    );
-
-    apply_message(
-        &mut grid,
-        json!({"t":"rows","rows":[[0,row(0)]],"links":links}),
-    );
-    apply_message(
-        &mut grid,
-        json!({"t":"frame","rev":2,"cols":48,"rows":2,"cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
-    );
-    let after = grid.link_at(hovered).unwrap();
-    assert_eq!(grid.row_links(0).len(), 2, "the second stretch is visible");
-    assert_eq!(after.label, before.label);
-    assert_eq!(after.ranges, before.ranges);
-    assert_eq!(after.evidence, before.evidence);
-    assert_eq!(after.uri, before.uri);
-    assert_eq!(after.kind, before.kind);
-    assert_ne!(after, before, "the display must refresh");
-    assert_eq!(
-        grid.link_disclosure(&after)
-            .unwrap()
-            .claimed_text
-            .as_deref(),
-        Some(prefix)
-    );
-}
-
-/// Anonymous tags sharing a destination only inherit each other's identity across visible cells. Concealing
-/// either side of a soft-wrap seam keeps the second row's visible text from joining the first.
-#[test]
-fn concealed_cells_break_generated_link_continuation_on_either_side_of_a_wrap() {
-    for hide_above in [false, true] {
-        let style = |hide| {
-            [
-                if hide {
-                    i64::from(style_flags::HIDDEN)
-                } else {
-                    0
-                },
-                -1,
-                -1,
-            ]
-        };
+    let [(_, concealed), (_, faded)] = out_of_sight();
+    for (gap, style, expected) in [
+        ("  ", concealed.clone(), vec![Incomplete]),
+        ("xx", concealed, vec![Incomplete, Hidden]),
+        ("xx", faded, vec![Incomplete, Hidden]),
+    ] {
         let grid = model(
-            8,
+            48,
             vec![
-                json!({"w":true,"r":[[0,4,"head",style(false),0],[4,4,"seam",style(hide_above),1]]}),
-                json!({"w":false,"r":[[0,4,"seam",style(!hide_above),2],[4,4,"tail",style(false),3]]}),
+                json!({"w":false,"r":[
+                    [0,split,address,[0,-1,-1],0],
+                    [split,2,gap,style,0],
+                    [split+2,4,"more",[0,-1,-1],0]
+                ]}),
+                ascii("continuation", false, Some(0)),
             ],
-            (1..=4)
-                .map(|id| json!([format!("{id}_alacritty"), "https://example.test/x"]))
-                .collect(),
+            vec![json!(["tag", address])],
         );
-        let head = grid.link_at(Position { line: 0, col: 0 }).unwrap();
-        let tail = grid.link_at(Position { line: 1, col: 4 }).unwrap();
-        assert!(matches!(head.kind, LinkKind::Osc { ref id } if id == "1_alacritty"));
-        let expected = if hide_above {
-            "3_alacritty"
-        } else {
-            "4_alacritty"
-        };
-        assert!(matches!(tail.kind, LinkKind::Osc { ref id } if id == expected));
-        let hidden = if hide_above {
-            Position { line: 0, col: 4 }
-        } else {
-            Position { line: 1, col: 0 }
-        };
-        assert_eq!(grid.link_at(hidden), None);
+        assert_out_of_sight(&grid, 0, 1, gap);
+        let links = grid.row_links(0);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].kind, links[1].kind);
+        assert_eq!(links[0].label, address);
+        assert_eq!(links[0].ranges[0].end.col, split as u16);
+        assert_eq!(links[1].label, "more");
+        assert_eq!(links[1].ranges[0].start.col, (split + 2) as u16);
+        assert_eq!(
+            grid.link_at(Position {
+                line: 0,
+                col: split as u16
+            }),
+            None
+        );
+        let shown = grid.link_disclosure(&links[0]).unwrap().warning.unwrap();
+        assert_eq!(shown.reasons, expected, "{gap:?}");
+        assert_eq!(shown.label, format!("{address} morecontinuation"));
     }
 }
 
-/// A printed address under a program's tag must never become a fallback target, including when the whole
-/// tagged label is concealed. The same visible address without a tag is a printed link.
+/// Revealing a separate stretch of the same tag can change the hovered row's warning while leaving the hovered stretch
+/// itself untouched. When that happens, a display for the old link must be refreshed. Spec: for each way of putting text
+/// out of sight, `https://example.test/`, a gap and an out-of-sight `more` on row 0, and `x` on row 1, one hyperlink to
+/// `https://example.test/x`: the hidden `more` makes the hover warn hidden, and the gap it leaves keeps the rows from
+/// joining into the destination, so it mismatches too. Once `more` is drawn normally, the hovered link compares
+/// unequal to the one before, and its hover is incomplete instead: row 0 now shows the hyperlink in two stretches.
+#[test]
+fn revealing_a_second_stretch_invalidates_a_wrapped_link_disclosure() {
+    for (way, style) in out_of_sight() {
+        let prefix = "https://example.test/";
+        let links = vec![json!(["tag", "https://example.test/x"])];
+        let separated = prefix.len() + 1;
+        let row = |style: &Value| {
+            json!({"w":false,"r":[
+                [0,prefix.len(),prefix,[0,-1,-1],0],
+                [separated,4,"more",style,0]
+            ]})
+        };
+        let mut grid = model(
+            48,
+            vec![row(&style), ascii("x", false, Some(0))],
+            links.clone(),
+        );
+        assert_out_of_sight(&grid, 0, 1, way);
+        let hovered = Position { line: 0, col: 0 };
+        let before = grid.link_at(hovered).unwrap();
+        assert_eq!(before.label, prefix);
+        let shown = warning(&grid, 0, 0).unwrap();
+        assert_eq!(shown.reasons, [Mismatch, Hidden], "{way}");
+        assert_eq!(shown.label, format!("{prefix} x"), "{way}");
+
+        apply_message(
+            &mut grid,
+            json!({"t":"rows","rows":[[0,row(&json!([0,-1,-1]))]],"links":links}),
+        );
+        apply_message(
+            &mut grid,
+            json!({"t":"frame","rev":2,"cols":48,"rows":2,"cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
+        );
+        let after = grid.link_at(hovered).unwrap();
+        assert_eq!(grid.row_links(0).len(), 2, "the second stretch is visible");
+        assert_eq!(after.label, before.label);
+        assert_eq!(after.ranges, before.ranges);
+        assert_eq!(after.evidence, before.evidence);
+        assert_eq!(after.uri, before.uri);
+        assert_eq!(after.kind, before.kind);
+        assert_ne!(after, before, "the display must refresh");
+        let shown = warning(&grid, 0, 0).unwrap();
+        assert_eq!(shown.reasons, [Incomplete], "{way}");
+        assert_eq!(shown.label, format!("{prefix} morex"), "{way}");
+    }
+}
+
+/// Anonymous tags sharing a destination only inherit each other's identity across visible cells. Putting either side
+/// of a soft-wrap seam out of sight, by conceal or by color, keeps the second row's visible text from joining the
+/// first.
+#[test]
+fn concealed_cells_break_generated_link_continuation_on_either_side_of_a_wrap() {
+    for (way, hidden_style) in out_of_sight() {
+        for hide_above in [false, true] {
+            let style = |hide| {
+                if hide {
+                    hidden_style.clone()
+                } else {
+                    json!([0, -1, -1])
+                }
+            };
+            let grid = model(
+                8,
+                vec![
+                    json!({"w":true,"r":[[0,4,"head",style(false),0],[4,4,"seam",style(hide_above),1]]}),
+                    json!({"w":false,"r":[[0,4,"seam",style(!hide_above),2],[4,4,"tail",style(false),3]]}),
+                ],
+                (1..=4)
+                    .map(|id| json!([format!("{id}_alacritty"), "https://example.test/x"]))
+                    .collect(),
+            );
+            let head = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+            let tail = grid.link_at(Position { line: 1, col: 4 }).unwrap();
+            assert!(matches!(head.kind, LinkKind::Osc { ref id } if id == "1_alacritty"));
+            let expected = if hide_above {
+                "3_alacritty"
+            } else {
+                "4_alacritty"
+            };
+            assert!(
+                matches!(tail.kind, LinkKind::Osc { ref id } if id == expected),
+                "{way}"
+            );
+            let hidden = if hide_above {
+                Position { line: 0, col: 4 }
+            } else {
+                Position { line: 1, col: 0 }
+            };
+            assert_eq!(grid.link_at(hidden), None, "{way}");
+        }
+    }
+}
+
+/// A printed address under a program's tag must never become a fallback target, including when the whole tagged label
+/// is out of sight, by conceal or by color. The same visible address without a tag is a printed link.
 #[test]
 fn a_concealed_program_link_over_a_printed_address_has_no_fallback_link() {
     let label = "https://example.test/x";
     let position = Position { line: 0, col: 0 };
     let printed = model(26, vec![ascii(label, false, None)], vec![]);
     assert_eq!(printed.link_at(position).unwrap().kind, LinkKind::Text);
-    let tagged = model(
-        26,
-        vec![json!({"w":false,"r":[[0,label.len(),label,[style_flags::HIDDEN,-1,-1],0]]})],
-        vec![json!(["tag", "https://other.test/x"])],
-    );
-    assert!(tagged.row_links(0).is_empty());
-    assert_eq!(tagged.link_at(position), None);
+    for (way, style) in out_of_sight() {
+        let tagged = model(
+            26,
+            vec![json!({"w":false,"r":[[0,label.len(),label,style,0]]})],
+            vec![json!(["tag", "https://other.test/x"])],
+        );
+        assert_out_of_sight(&tagged, 0, 0, way);
+        assert!(tagged.row_links(0).is_empty(), "{way}");
+        assert_eq!(tagged.link_at(position), None, "{way}");
+    }
 }
 
 /// Explicit OSC ownership defeats prose recognition even for an inert scheme;
@@ -902,12 +983,53 @@ fn prose_detection_and_native_browser_scheme_boundary() {
     );
 }
 
-/// Recognition and label joining are evaluated together against the actual
-/// pinned providers. Hard row breaks, repeated tags, ambiguous runs and budget
-/// exhaustion must not turn a forged address into a quiet disclosure.
+/// The `grid` exceptions to the oracle's safety check (`tests/fixtures/links-oracle-exceptions.json`), keyed by grid
+/// index, line and result index, after checking the whole file: every entry has a known kind, a key and a rule, and no
+/// key appears twice. The `policy` entries are the link disclosure unit test's.
+fn grid_exceptions() -> BTreeSet<(usize, u64, usize)> {
+    let file: Value =
+        serde_json::from_str(include_str!("fixtures/links-oracle-exceptions.json")).unwrap();
+    let mut seen = BTreeSet::new();
+    let mut grids = BTreeSet::new();
+    for entry in file["exceptions"].as_array().unwrap() {
+        let kind = entry["kind"].as_str().unwrap();
+        assert!(
+            matches!(kind, "policy" | "grid"),
+            "unknown exception kind: {entry}"
+        );
+        assert!(
+            entry["rule"].as_str().is_some_and(|rule| !rule.is_empty()),
+            "an exception names the behavior that explains it: {entry}"
+        );
+        assert!(
+            seen.insert((kind.to_owned(), entry["key"].to_string())),
+            "duplicate exception: {entry}"
+        );
+        if kind == "grid" {
+            let key = &entry["key"];
+            grids.insert((
+                key["grid"].as_u64().unwrap() as usize,
+                key["line"].as_u64().unwrap(),
+                key["result"].as_u64().unwrap() as usize,
+            ));
+        }
+    }
+    grids
+}
+
+/// Recognition and label joining are evaluated together against the old web client's recorded answers. Which cells
+/// form which link (kind, target, ranges, evidence, identity) and the destination a hover names still bind exactly.
+/// The warning binds in the safety direction only: where the old client warned, the hover must still warn, and where it
+/// warned on a complete label for a mismatch, the label the hover shows, escaped, must be the text the old client
+/// quoted. That last check keeps row joining honest: a reader that joined rows differently would show a different
+/// label. Hard row breaks, repeated tags, ambiguous runs and budget exhaustion must not turn a forged address into a
+/// quiet disclosure. A case where the answer legitimately differs is a named exception in the fixture.
 #[test]
 fn pinned_cell_links_and_label_join_oracle() {
     let oracle: Value = serde_json::from_str(include_str!("fixtures/links-oracle.json")).unwrap();
+    let exceptions = grid_exceptions();
+    let mut used = BTreeSet::new();
+    let mut failures = Vec::new();
     for (index, case) in oracle["grids"].as_array().unwrap().iter().enumerate() {
         let model = model(
             case["cols"].as_u64().unwrap() as u16,
@@ -916,8 +1038,12 @@ fn pinned_cell_links_and_label_join_oracle() {
         );
         for question in case["questions"].as_array().unwrap() {
             let line = question["line"].as_u64().unwrap();
-            let actual: Vec<_> = model.row_links(line).iter().map(|link| {
-                let mut value = json!({
+            let links = model.row_links(line);
+            let expected = question["expected"].as_array().unwrap();
+            assert_eq!(links.len(), expected.len(), "grid {index}, row {line}");
+            for (result, (link, expected)) in links.iter().zip(expected).enumerate() {
+                let disclosure = model.link_disclosure(link);
+                let mut actual = json!({
                     "kind": match &link.kind { LinkKind::Osc { .. } => "osc", LinkKind::Text => "text", LinkKind::Path => "path" },
                     "uri": link.uri,
                     "ranges": link.ranges.iter().map(|range| json!({
@@ -925,20 +1051,43 @@ fn pinned_cell_links_and_label_join_oracle() {
                         "end": {"abs": range.end.line, "col": range.end.col},
                     })).collect::<Vec<_>>(),
                     "evidence": link.evidence,
-                    "disclosure": model.link_disclosure(link).map(|display| json!({
-                        "host": display.host, "target": display.target, "claimed": display.claimed,
+                    "disclosure": disclosure.as_ref().map(|display| json!({
+                        "host": display.host, "target": display.target,
                     })),
                 });
-                if let LinkKind::Osc { id } = &link.kind { value["id"] = json!(id); }
-                value
-            }).collect();
-            assert_eq!(
-                json!(actual),
-                question["expected"],
-                "grid {index}, row {line}"
-            );
+                if let LinkKind::Osc { id } = &link.kind {
+                    actual["id"] = json!(id);
+                }
+                let mut exact = expected.clone();
+                let claimed = exact["disclosure"]
+                    .as_object_mut()
+                    .and_then(|display| display.remove("claimed"));
+                assert_eq!(actual, exact, "grid {index}, row {line}, result {result}");
+                let Some(claimed) = claimed.as_ref().and_then(Value::as_str) else {
+                    continue;
+                };
+                let warning = disclosure.and_then(|display| display.warning);
+                let holds = warning.as_ref().is_some_and(|warning| {
+                    !warning.reasons.contains(&Mismatch)
+                        || warning.reasons.contains(&Incomplete)
+                        || farhelm_proto::text::escaped(&warning.label) == claimed
+                });
+                let key = (index, line, result);
+                if exceptions.contains(&key) {
+                    assert!(
+                        !holds,
+                        "an exception for a case that holds: grid {index}, row {line}, result {result}"
+                    );
+                    used.insert(key);
+                } else if !holds {
+                    failures.push((key, claimed.to_owned(), warning));
+                }
+            }
         }
     }
+    assert!(failures.is_empty(), "{failures:#?}");
+    let unused: Vec<_> = exceptions.difference(&used).collect();
+    assert!(unused.is_empty(), "unused grid exceptions: {unused:?}");
 }
 
 /// A tunnel is offered only for a remote host's own loopback, so the offer must neither miss what a local dev server
@@ -999,4 +1148,611 @@ fn tunnel_ports_are_offered_only_for_normalized_loopback_and_wildcard_hosts() {
     ] {
         assert_eq!(tunnel_port(uri), None, "{uri:?}");
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Labels over several rows
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// Rows for one explicit hyperlink (link 0) whose text is `lines`: each line starts a new row with a hard break before
+/// it, and a line longer than `cols` soft-wraps over as many full rows as it needs.
+fn logical_lines(cols: u16, lines: &[&str]) -> Vec<Value> {
+    let width = usize::from(cols);
+    let mut rows = Vec::new();
+    for line in lines {
+        let pieces: Vec<&str> = line
+            .as_bytes()
+            .chunks(width)
+            .map(|chunk| std::str::from_utf8(chunk).unwrap())
+            .collect();
+        for (index, piece) in pieces.iter().enumerate() {
+            rows.push(ascii(piece, index + 1 < pieces.len(), Some(0)));
+        }
+    }
+    rows
+}
+
+/// Every row's hover for a hyperlink whose text starts at column 0 of each of the model's rows, after asserting they
+/// are all the same: the label is read whole from whichever row the pointer rests on, so a user can't get a quieter
+/// answer by moving to another row.
+fn same_hover_on_every_row(grid: &GridModel, rows: usize) -> Option<LinkWarning> {
+    let first = warning(grid, 0, 0);
+    for line in 1..rows as u64 {
+        assert_eq!(warning(grid, line, 0), first, "row {line}");
+    }
+    first
+}
+
+/// How a hyperlink continued over rows is read, row by row of SPEC.md's examples: a soft wrap always joins; a row that
+/// starts with an address (after punctuation only) is a new item, so the break before it separates like a space; any
+/// other break joins, so a host or path a program broke over rows is judged whole. A label that mismatches read that
+/// way warns only if it also mismatches with every break joined. These are the cases that decided the rule: each one
+/// is either a spoof that must warn or an honest layout that must not, and the past regressions in this area came from
+/// getting exactly these joins wrong. Spec: each case, hovered on every row, shows the same hover; the quiet ones show
+/// none, and the loud ones warn of a mismatch naming the given address and showing the given label.
+#[test]
+fn labels_over_several_rows_join_and_separate_at_their_seams() {
+    let evil = "https://evil.test/";
+    for (cols, lines, target, expected) in [
+        (
+            40,
+            &["https://github.com/a", "/b"][..],
+            "https://github.com/a/b",
+            None,
+        ),
+        (
+            40,
+            &["github.", "com/login"],
+            evil,
+            Some(("github.com/login", "github.com/login")),
+        ),
+        (
+            40,
+            &["Visit", "https://github.com/"],
+            evil,
+            Some(("https://github.com/", "Visit https://github.com/")),
+        ),
+        // `https://` fills its row, so the address soft-wraps onto the next ones.
+        (
+            8,
+            &["Visit", "https://github.com/"],
+            "https://github.com/",
+            None,
+        ),
+        (
+            40,
+            &["Preview", "https://github.com/"],
+            "https://github.com/",
+            None,
+        ),
+        (
+            40,
+            &["Preview", "1.https://github.com/"],
+            "https://github.com/",
+            None,
+        ),
+        (
+            40,
+            &["[https://evil.test/]", "https://github.com/"],
+            evil,
+            Some((
+                "https://github.com/",
+                "[https://evil.test/] https://github.com/",
+            )),
+        ),
+        (
+            40,
+            &["<https://example.test/>", "\"https://other.test/\""],
+            "https://example.test/",
+            Some((
+                "https://other.test/",
+                "<https://example.test/> \"https://other.test/\"",
+            )),
+        ),
+        (
+            40,
+            &["https://github.com/", "https://github.com/"],
+            "https://github.com/",
+            None,
+        ),
+        (
+            40,
+            &[
+                "Read the guide at",
+                "https://docs.example.com/a/long/pa",
+                "th/here",
+            ],
+            "https://docs.example.com/a/long/path/here",
+            None,
+        ),
+        // A host that soft-wraps after a separating break is still one address.
+        (
+            10,
+            &["See", "example.test/x"],
+            "https://example.test/x",
+            None,
+        ),
+        (
+            10,
+            &["See", "example.test/x"],
+            evil,
+            Some(("example.test/x", "See example.test/x")),
+        ),
+    ] {
+        let rows = logical_lines(cols, lines);
+        let count = rows.len();
+        let grid = model(cols, rows, vec![json!(["tag", target])]);
+        let shown = same_hover_on_every_row(&grid, count);
+        match expected {
+            None => assert_eq!(shown, None, "{lines:?} -> {target}"),
+            Some((address, label)) => {
+                let shown = shown.unwrap_or_else(|| panic!("{lines:?} -> {target} warns"));
+                assert_eq!(shown.reasons, [Mismatch], "{lines:?}");
+                assert_eq!(shown.address.as_deref(), Some(address), "{lines:?}");
+                assert_eq!(shown.label, label, "{lines:?}");
+            }
+        }
+    }
+}
+
+/// The ordinary hover for a label too long to read whole: incomplete, with no text, so no part of an unread label is
+/// ever presented as if it were the whole.
+fn over_budget() -> Option<LinkWarning> {
+    Some(LinkWarning {
+        reasons: vec![Incomplete],
+        label: String::new(),
+        address: None,
+        address_parsed: None,
+        more: 0,
+    })
+}
+
+/// A label longer than the budget can't be checked, and must say so from every row: if it were read whole from one end
+/// and in part from the other, the quieter row would be the one to click. Spec: one explicit hyperlink over 129 rows
+/// of honest text is incomplete with no label when hovered at its first, middle and last row; over 128 rows, the
+/// budget's edge, it is read whole and quiet.
+#[test]
+fn an_explicit_label_over_the_row_budget_is_incomplete_from_every_row() {
+    for (count, expected) in [(129, over_budget()), (128, None)] {
+        let rows = (0..count).map(|_| ascii("abcd", false, Some(0))).collect();
+        let grid = model(8, rows, vec![json!(["tag", "https://example.test/"])]);
+        for line in [0, count / 2, count - 1] {
+            assert_eq!(
+                warning(&grid, line, 0),
+                expected,
+                "{count} rows, row {line}"
+            );
+        }
+    }
+}
+
+/// A program that opens a fresh anonymous hyperlink on every row, each continuing the last across a soft wrap, makes
+/// one long link out of many generated ids. Identity is resolved at most 129 rows back, so from the last row the root
+/// of a chain longer than that is a different id than from the first: the label reader resolves the hovered row first
+/// and keeps one lookup for the whole walk, which reaches past the budget from wherever the pointer is. Spec: a chain of
+/// 140 such rows is incomplete with no label hovered at its first, middle and last row (whose identities differ), and a
+/// chain of 128 rows is one link and quiet from its first and last row.
+#[test]
+fn a_generated_chain_over_the_row_budget_is_incomplete_from_every_row() {
+    let chain = |count: u64| {
+        let rows = (0..count)
+            .map(|index| json!({"w": index + 1 < count, "r": [[0, 4, "abcd", [0, -1, -1], index]]}))
+            .collect();
+        let links = (0..count)
+            .map(|index| json!([format!("{}_alacritty", index + 1), "https://example.test/"]))
+            .collect();
+        model(4, rows, links)
+    };
+    let grid = chain(140);
+    let first = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+    let last = grid.link_at(Position { line: 139, col: 0 }).unwrap();
+    assert_ne!(
+        first.kind, last.kind,
+        "the premise: the chain is longer than one lookup"
+    );
+    for line in [0, 70, 139] {
+        assert_eq!(warning(&grid, line, 0), over_budget(), "row {line}");
+    }
+    let grid = chain(128);
+    let first = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+    let last = grid.link_at(Position { line: 127, col: 0 }).unwrap();
+    assert_eq!(first.kind, last.kind, "the premise: one link");
+    for line in [0, 127] {
+        assert_eq!(warning(&grid, line, 0), None, "row {line}");
+    }
+}
+
+/// A row that shows a multi-row hyperlink in more than one stretch can't be put back into one text, so the stretches
+/// are scanned one by one and any address among them makes the whole label incomplete, even one that names the
+/// destination: the gap is where the rest of an address could hide. Spec: `heading`, then `one` and `two` with a gap
+/// between them, then `https://example.test/`, one hyperlink to that address, hovered on each of its four stretches,
+/// shows the same incomplete hover with every piece in the label (the break before `one` joins and the one before the
+/// address separates, as in a complete label); the same rows without the address are quiet.
+#[test]
+fn a_row_with_several_stretches_makes_a_multi_row_label_incomplete() {
+    let rows = |last: &str| {
+        vec![
+            ascii("heading", false, Some(0)),
+            json!({"w":false,"r":[[0,3,"one",[0,-1,-1],0],[4,3,"two",[0,-1,-1],0]]}),
+            ascii(last, false, Some(0)),
+        ]
+    };
+    let target = vec![json!(["tag", "https://example.test/"])];
+    let grid = model(30, rows("https://example.test/"), target.clone());
+    let shown = warning(&grid, 0, 0);
+    for (line, col) in [(1, 0), (1, 4), (2, 0)] {
+        assert_eq!(warning(&grid, line, col), shown, "row {line}, column {col}");
+    }
+    let shown = shown.unwrap();
+    assert_eq!(shown.reasons, [Incomplete]);
+    assert_eq!(shown.label, "headingone two https://example.test/");
+    let grid = model(30, rows("the end"), target);
+    assert_eq!(warning(&grid, 1, 4), None);
+}
+
+/// A hyperlink on one row only, shown in several stretches, is several labels, as the old client had it: a program
+/// listing two links to one place under one tag isn't hiding anything between them. Spec: `https://a.test/`, a gap and
+/// `https://b.test/` on one row, one hyperlink to `https://a.test/`: the first stretch is quiet and the second warns of a
+/// mismatch, naming `https://b.test/` and showing only its own text.
+#[test]
+fn stretches_of_a_one_row_label_are_judged_on_their_own() {
+    let grid = model(
+        40,
+        vec![json!({"w":false,"r":[
+            [0,15,"https://a.test/",[0,-1,-1],0],
+            [16,15,"https://b.test/",[0,-1,-1],0]
+        ]})],
+        vec![json!(["tag", "https://a.test/"])],
+    );
+    assert_eq!(warning(&grid, 0, 0), None);
+    let shown = warning(&grid, 0, 16).unwrap();
+    assert_eq!(shown.reasons, [Mismatch]);
+    assert_eq!(shown.address.as_deref(), Some("https://b.test/"));
+    assert_eq!(shown.label, "https://b.test/");
+}
+
+/// The hover names why an address doesn't match, because look-alike characters and login details before a host need
+/// a different explanation than a plain other site. Spec: to `https://example.com/x`, `https://other.test/x` is a
+/// mismatch, `https://ｅxample.com/x` (a fullwidth letter) is disguised and `example.com@evil.test/x` is credentials,
+/// each quoting its address as written and its parsed form; `https://exa<U+FEFF>mple.com/x` is disguised, and the
+/// invisible character stays in the quoted address for the display to escape, though the URL parser drops it.
+#[test]
+fn each_address_reason_reaches_the_hover() {
+    // Wire runs: printable ASCII flows one byte per cell; any other character is a cell of its own, with a zero-width
+    // character riding on the cell before it.
+    let plain = |label: &str| json!([[0, label.len(), label, [0, -1, -1], 0]]);
+    for (label, runs, reason, parsed) in [
+        (
+            "https://other.test/x",
+            plain("https://other.test/x"),
+            Mismatch,
+            Some("https://other.test/x"),
+        ),
+        (
+            "https://ｅxample.com/x",
+            json!([
+                [0, 8, "https://", [0, -1, -1], 0],
+                [8, 2, "ｅ", [0, -1, -1], 0],
+                [10, 12, "xample.com/x", [0, -1, -1], 0]
+            ]),
+            Disguised,
+            Some("https://example.com/x"),
+        ),
+        (
+            "example.com@evil.test/x",
+            plain("example.com@evil.test/x"),
+            Credentials,
+            Some("https://example.com@evil.test/x"),
+        ),
+        (
+            "https://exa\u{feff}mple.com/x",
+            json!([
+                [0, 10, "https://ex", [0, -1, -1], 0],
+                [10, 1, "a\u{feff}", [0, -1, -1], 0],
+                [11, 10, "mple.com/x", [0, -1, -1], 0]
+            ]),
+            Disguised,
+            Some("https://example.com/x"),
+        ),
+    ] {
+        let grid = model(
+            40,
+            vec![json!({"w":false,"r":runs})],
+            vec![json!(["tag", "https://example.com/x"])],
+        );
+        let shown = warning(&grid, 0, 0).unwrap();
+        assert_eq!(shown.reasons, [reason], "{label}");
+        assert_eq!(shown.address.as_deref(), Some(label), "{label}");
+        assert_eq!(shown.address_parsed.as_deref(), parsed, "{label}");
+        assert_eq!(shown.more, 0);
+    }
+}
+
+/// A seam is soft only where the hyperlink's own text meets edge to edge: its piece reaches the row's last text column
+/// (a wide-wrap pad column is not text) and the next row's piece starts at column 0. Anything else is a
+/// program's own break, which separates before an address. Getting this wrong either glues a word onto an address
+/// (`Visithttps://`, a false alarm) or splits a wrapped address in two. Spec: with `Visit` above `https://github.com/`
+/// under one explicit hyperlink to another site, the label reads `Visithttps://github.com/` when `Visit` ends the
+/// wrapped row (after unlinked text, or before a wide-wrap pad cell), and `Visit https://github.com/` when unlinked
+/// cells fill the rest of the wrapped row, or a real styled cell (not a pad) takes its last column.
+#[test]
+fn a_seam_is_soft_only_where_the_hyperlink_itself_wraps() {
+    let link = |col: usize| json!([col, 5, "Visit", [0, -1, -1], 0]);
+    let filler = |col: usize, width: usize| json!([col, width, " ".repeat(width), [0, -1, -1]]);
+    for (name, first, joined) in [
+        (
+            "unlinked cells fill the wrapped row",
+            json!({"w":true,"r":[link(0), filler(5, 15)]}),
+            false,
+        ),
+        (
+            "the hyperlink ends the wrapped row",
+            json!({"w":true,"r":[[0,15,"x".repeat(15),[0,-1,-1]], link(15)]}),
+            true,
+        ),
+        (
+            "a wide-wrap pad cell follows the hyperlink",
+            json!({"w":true,"p":true,"r":[[0,14,"x".repeat(14),[0,-1,-1]], link(14), [19,1," ",[0,-1,2]]]}),
+            true,
+        ),
+        (
+            "a real styled cell follows the hyperlink",
+            json!({"w":true,"p":false,"r":[[0,14,"x".repeat(14),[0,-1,-1]], link(14), [19,1," ",[0,-1,2]]]}),
+            false,
+        ),
+    ] {
+        let grid = model(
+            20,
+            vec![first, ascii("https://github.com/", false, Some(0))],
+            vec![json!(["tag", "https://evil.test/"])],
+        );
+        let col = grid.row_links(0)[0].ranges[0].start.col;
+        let shown = warning(&grid, 0, col).unwrap();
+        assert_eq!(shown, warning(&grid, 1, 0).unwrap(), "{name}");
+        let label = if joined {
+            "Visithttps://github.com/"
+        } else {
+            "Visit https://github.com/"
+        };
+        assert_eq!(shown.label, label, "{name}");
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Unseen text inside a hyperlink
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// Text drawn in its background color is out of sight like concealed text: it leaves the label, and its presence warns
+/// that part of the label is hidden, since a program has no honest reason to hide part of a link's text. Spec:
+/// `https://example.test/a` followed by a background-colored `b` in the same hyperlink: the link's label and range end
+/// at `a`; to `https://example.test/a` the hover warns hidden, showing `https://example.test/a`; to
+/// `https://example.test/ab` it also mismatches on what's visible.
+#[test]
+fn a_hidden_suffix_leaves_the_label_and_warns_hidden() {
+    for (target, expected) in [
+        ("https://example.test/a", vec![Hidden]),
+        ("https://example.test/ab", vec![Mismatch, Hidden]),
+    ] {
+        let grid = model(
+            30,
+            vec![json!({"w":false,"r":[
+                [0,22,"https://example.test/a",[0,-1,-1],0],
+                [22,1,"b",[0,0,-1],0]
+            ]})],
+            vec![json!(["tag", target])],
+        );
+        assert_out_of_sight(&grid, 0, 1, "background-colored");
+        let link = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+        assert_eq!(link.label, "https://example.test/a");
+        assert_eq!(link.ranges[0].end.col, 22);
+        assert!(link.unseen);
+        let shown = warning(&grid, 0, 0).unwrap();
+        assert_eq!(shown.reasons, expected, "{target}");
+        assert_eq!(shown.label, "https://example.test/a");
+    }
+}
+
+/// Unseen text between two pieces of one anonymous hyperlink splits it into two links, and each of them must still warn
+/// that something with its destination is hidden between them. Spec: `abc`, an out-of-sight `XYZ` and `def` on one row,
+/// three generated ids to one destination: the visible pieces are separate links, and each one's hover warns hidden.
+#[test]
+fn a_hidden_middle_piece_warns_from_either_visible_piece() {
+    for (way, style) in out_of_sight() {
+        let grid = model(
+            12,
+            vec![json!({"w":false,"r":[
+                [0,3,"abc",[0,-1,-1],0],
+                [3,3,"XYZ",style,1],
+                [6,3,"def",[0,-1,-1],2]
+            ]})],
+            (1..=3)
+                .map(|id| json!([format!("{id}_alacritty"), "https://example.test/"]))
+                .collect(),
+        );
+        assert_out_of_sight(&grid, 0, 1, way);
+        let links = grid.row_links(0);
+        assert_eq!(links.len(), 2, "{way}");
+        assert_ne!(links[0].kind, links[1].kind, "{way}");
+        for col in [0, 6] {
+            assert_eq!(
+                reasons(&warning(&grid, 0, col)),
+                [Hidden],
+                "{way}, column {col}"
+            );
+        }
+    }
+}
+
+/// A program can fill a row with the start of a host and move to the next row itself (CR LF at the edge, or cursor
+/// positioning) instead of letting the terminal wrap. On screen that is indistinguishable from a wrap, and the user reads
+/// the two pieces as one host, so the hover must too: separating there would judge only the second piece, which names
+/// the destination, and a spoof the old client caught would go quiet. Spec: under one explicit hyperlink without the
+/// wrap flag, `git` ending row 0 at its last column above `hub.com/login`, `pay` above `pal.com/login` and
+/// `accounts.goo` above `gle.com/x`, each to the second row's site, warn of a mismatch from both rows, naming and
+/// showing the joined address.
+#[test]
+fn a_hyperlink_that_fills_its_row_joins_the_next_row_without_a_wrap() {
+    for (head, tail, target, joined) in [
+        (
+            "git",
+            "hub.com/login",
+            "https://hub.com/login",
+            "github.com/login",
+        ),
+        (
+            "pay",
+            "pal.com/login",
+            "https://pal.com/login",
+            "paypal.com/login",
+        ),
+        (
+            "accounts.goo",
+            "gle.com/x",
+            "https://gle.com/x",
+            "accounts.google.com/x",
+        ),
+    ] {
+        // Unlinked filler before the head lets the head end exactly at the last column of a row wide enough for the
+        // tail.
+        let cols = head.len().max(tail.len());
+        let filler = cols - head.len();
+        let mut first = Vec::new();
+        if filler > 0 {
+            first.push(json!([0, filler, "x".repeat(filler), [0, -1, -1]]));
+        }
+        first.push(json!([filler, head.len(), head, [0, -1, -1], 0]));
+        let grid = model(
+            cols as u16,
+            vec![json!({"w":false,"r":first}), ascii(tail, false, Some(0))],
+            vec![json!(["tag", target])],
+        );
+        let shown = warning(&grid, 0, filler as u16);
+        assert_eq!(shown, warning(&grid, 1, 0), "{joined}: both rows");
+        let shown = shown.unwrap_or_else(|| panic!("{joined} warns"));
+        assert_eq!(shown.reasons, [Mismatch], "{joined}");
+        assert_eq!(shown.address.as_deref(), Some(joined));
+        assert_eq!(shown.label, joined);
+    }
+}
+
+/// Programs print secondary text in gray (SGR 90) and dim text all the time, and an honest link in them must not warn:
+/// the hidden threshold sits below the dimmest ordinary styles. Spec: `https://example.test/a` followed by `b` in each
+/// of SGR 90, dim default and dim SGR 90, all one hyperlink to `https://example.test/ab`, is quiet, its label whole.
+#[test]
+fn gray_and_dim_text_in_a_hyperlink_is_not_hidden() {
+    for style in [
+        json!([0, 8, -1]),
+        json!([style_flags::DIM, -1, -1]),
+        json!([style_flags::DIM, 8, -1]),
+    ] {
+        let grid = model(
+            30,
+            vec![json!({"w":false,"r":[
+                [0,22,"https://example.test/a",[0,-1,-1],0],
+                [22,1,"b",style,0]
+            ]})],
+            vec![json!(["tag", "https://example.test/ab"])],
+        );
+        let link = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+        assert_eq!(link.label, "https://example.test/ab", "{style}");
+        assert!(!link.unseen);
+        assert_eq!(warning(&grid, 0, 0), None, "{style}");
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// When a resting hover must be judged again
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// Replace row `y` with `row` and commit it as a frame at revision `rev`, the way live output arrives.
+fn redraw_row(grid: &mut GridModel, y: usize, row: Value, links: &[Value], rev: u64) {
+    let (cols, rows) = grid.size();
+    apply_message(grid, json!({"t":"rows","rows":[[y,row]],"links":links}));
+    apply_message(
+        grid,
+        json!({"t":"frame","rev":rev,"cols":cols,"rows":rows,"cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
+    );
+}
+
+/// A resting hover keeps its answer for as long as the link under the pointer compares equal, so a change that adds or
+/// drops the hidden reason must change the hovered link, even when its own text and range stay the same. Spec: row 0
+/// holds `click here` and, after a gap, `x`, one hyperlink. Recoloring `x` to the background makes the link at
+/// `click here` compare unequal and its hover warn hidden; recoloring it back restores the original link. Recoloring
+/// `x` to green, which stays readable, leaves the link equal. A same-target hyperlink on another row turning hidden
+/// leaves it equal too: only the hovered row is watched (SPEC.md).
+#[test]
+fn a_run_turning_hidden_on_the_hovered_row_changes_the_link() {
+    let links = [
+        json!(["tag", "https://example.test/"]),
+        json!(["other", "https://example.test/"]),
+    ];
+    let row = |x_style: Value| json!({"w":false,"r":[[0,10,"click here",[0,-1,-1],0],[11,1,"x",x_style,0]]});
+    let other = |style: Value| json!({"w":false,"r":[[0,1,"y",style,1]]});
+    let mut grid = model(
+        20,
+        vec![row(json!([0, -1, -1])), other(json!([0, -1, -1]))],
+        links.to_vec(),
+    );
+    let at = Position { line: 0, col: 2 };
+    let original = grid.link_at(at).unwrap();
+    assert!(!original.unseen);
+    assert_eq!(warning(&grid, 0, 2), None);
+
+    redraw_row(&mut grid, 0, row(json!([0, 0, -1])), &links, 2);
+    assert_out_of_sight(&grid, 0, 1, "background-colored");
+    let hidden = grid.link_at(at).unwrap();
+    assert_eq!(
+        (&hidden.label, &hidden.ranges),
+        (&original.label, &original.ranges)
+    );
+    assert_ne!(hidden, original, "turning hidden changes the link");
+    assert_eq!(reasons(&warning(&grid, 0, 2)), [Hidden]);
+
+    redraw_row(&mut grid, 0, row(json!([0, -1, -1])), &links, 3);
+    assert_eq!(
+        grid.link_at(at).unwrap(),
+        original,
+        "and turning visible again restores it"
+    );
+
+    redraw_row(&mut grid, 0, row(json!([0, 2, -1])), &links, 4);
+    assert_eq!(
+        grid.link_at(at).unwrap(),
+        original,
+        "a readable color changes nothing"
+    );
+
+    redraw_row(&mut grid, 1, other(json!([0, 0, -1])), &links, 5);
+    assert_out_of_sight(&grid, 1, 0, "background-colored");
+    assert_eq!(
+        grid.link_at(at).unwrap(),
+        original,
+        "another row is not watched"
+    );
+}
+
+/// The program's own default colors decide what is hidden too, so an OSC 10 that sets the default foreground to the
+/// background hides every default-colored run, and must change the hovered link the same way a recolor does. Spec:
+/// `click here` in explicit white and `x` in the default foreground, one hyperlink; setting the default foreground to
+/// the background makes the link compare unequal and warn hidden, and setting it back restores it.
+#[test]
+fn a_default_color_change_that_hides_a_run_changes_the_link() {
+    let mut grid = model(
+        20,
+        vec![json!({"w":false,"r":[[0,10,"click here",[0,7,-1],0],[11,1,"x",[0,-1,-1],0]]})],
+        vec![json!(["tag", "https://example.test/"])],
+    );
+    let state = |default_fg: Option<i64>| json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,"default_fg":default_fg,"default_bg":null,"history_trimmed":false,"exit":null});
+    let at = Position { line: 0, col: 2 };
+    let original = grid.link_at(at).unwrap();
+    assert_eq!(warning(&grid, 0, 2), None);
+
+    let background = direct(grid.palette().background.hex());
+    apply_message(&mut grid, state(Some(background)));
+    assert_out_of_sight(&grid, 0, 1, "default foreground on the background");
+    assert_ne!(grid.link_at(at).unwrap(), original);
+    assert_eq!(reasons(&warning(&grid, 0, 2)), [Hidden]);
+
+    apply_message(&mut grid, state(None));
+    assert_eq!(grid.link_at(at).unwrap(), original);
 }

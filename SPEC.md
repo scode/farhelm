@@ -3580,40 +3580,64 @@ whatever the agent renders is what you see. There is no composer, no message abs
   either let Farhelm open the link and also send the click to the program (which may open it again), or leave the click
   entirely to the program; without mouse reporting, the latter opens nothing. Program-initiated URL forwarding and its
   host permissions are independent and unchanged. A hyperlink a program emits (OSC 8) can underline text that differs
-  from where it goes, so hovering it shows the exact target first, with its host emphasized. When the underlined text is
-  itself a web address (it starts with a scheme or `www.`, or is a dotted host, optionally after credentials, ending in
-  a name of two or more letters followed by `/`), Farhelm compares it with the target. Text shown inside matching outer
-  pairs of angle brackets, parentheses, square brackets, or single or double quotes, nested or not, is checked as the
-  address inside them. A label in which a closing bracket or quote is followed by further words
-  (`[https://a.test/] [docs]`) counts as descriptive text, even when it begins with an address. Characters that draw
-  nothing are ignored when recognizing the address shape and when finding the pairs. If the address names a different
-  place, ignoring only a trailing slash, a prominent warning shows the original label beside the real target.
-  Descriptive link text such as a file name or "click here" keeps the ordinary display. Consecutive rows of the same
-  hyperlink are compared together, including links an agent continues after indentation with cursor movement. Restarting
-  a hyperlink without an explicit id right where its previous piece ended, with the same target, continues that
-  hyperlink, across soft wraps too. A cursor-positioned continuation can keep its own link identity when the preceding
-  piece was already joined to an earlier anonymous piece on the previous row. The hover comparison stops at the boundary
-  between different link identities. An honest wrapped web address keeps the ordinary display when the pieces join, and
-  a lookalike is judged on the whole joined text. Repeated complete addresses that each independently match the target
-  keep the ordinary display. When neighboring rows each display a web address of their own and the joined text has no
-  address shape (because of brackets or quotes around some of them), the hovered row is compared on its own. If an
-  adjacent continuation cannot be joined unambiguously within the bounds, a piece that looks like a web address warns
-  rather than counting as a match. The warning is judged when the hover starts and need not follow later redraws of
-  other rows while the pointer rests; the destination display stays authoritative. The warning is an aid, not a
-  guarantee: unlinked text around the hyperlink is outside the comparison, a program that chooses its own line breaks
-  can still split a lookalike into pieces that are not joined (separate hyperlinks, say) and that do not look like web
-  addresses on their own, and the ordinary display, which always names the real host, is what remains. The hover display
-  is the whole safeguard: it counts as disclosing the target only while fully visible, inside the window and not covered
-  by another Farhelm surface such as an approval card or tunnel-error notice. A click whose hover is not fully visible
-  is refused with an explanation; this also applies to Cmd-click tunnel opens. Plain URLs printed as text need no such
-  display, because what is shown is what opens, apart from the remote-localhost tunnel hint below. Concealed terminal
-  cells break a printed URL. They are also excluded from a program hyperlink's visible label, its hover and click area,
-  and its underline. The program hyperlink still owns those cells, preventing a printed URL or file path from taking its
-  place there. Hidden text, too close to its background color to read, also breaks a printed URL, exactly as concealed
-  text does: a URL ends where the readable text does. Text is hidden when it has a character other than whitespace, a
-  format character or a combining mark, and its color contrasts with its background at less than 1.35:1, judged as
-  Farhelm draws it (after reverse video, bold, dim and the program's own color changes). A program hyperlink's label,
-  hover, click area and underline still include hidden text.
+  from where it goes, so hovering it shows the exact target first, with its host emphasized. Farhelm warns when the
+  underlined text gives a reason to doubt where the link goes. The warning has one line per reason: "The link text
+  mentions an address that differs from where it goes"; "The address in the link text uses look-alike or invisible
+  characters"; "The address in the link text puts login details before the real site"; "The whole link text couldn't be
+  checked"; "Part of the link text is hard to see". Under the reasons it shows the first address that differs after
+  "Text mentions:", or else the visible text after "Link text:", marked partial when it couldn't be checked whole, and
+  then the real target. An address counts anywhere in the text: in prose, Markdown, brackets or quotes, after a list
+  marker or a ticket number, or glued to punctuation. An address is a URL with a scheme (including the spellings
+  browsers accept, such as `https:github.com` and `//intranet/`), a `www.` name, a dotted host whose ending is a common
+  site ending (`.com`, `.org`, `.io`, most two-letter country endings and a few others) or looks like one with a
+  non-ASCII letter, a dotted host with any real ending followed by a path, an IPv4 address or `localhost` followed by a
+  path or port, a bracketed IPv6 address, or a host after login details and an `@`. Email addresses, handles (`@name`)
+  and SCP-style git remotes (`git@github.com:org/repo.git`) claim nothing, and neither do file names, version numbers or
+  dotted code names. Look-alike punctuation, compatibility forms such as fullwidth letters, and invisible characters are
+  folded away to recognize an address; an address that needed that in its scheme or site, and one with login details
+  before its host, always warns. Trailing sentence punctuation, closing quotes, emoji and Markdown emphasis after an
+  address are decoration. Otherwise the comparison is strict: http against https, an added `www.`, an extra query or
+  fragment, a differently escaped character and a shortened address all differ, and only the URL parser's own
+  normalization, one trailing slash, the case of percent-escapes and an empty `?` or `#` are ignored. A bare site name
+  with no path (`github.com`) matches any target on that host. An address that does not parse warns. The text is read
+  over every row the hyperlink continues on, including links an agent continues after indentation with cursor movement.
+  Restarting a hyperlink without an explicit id right where its previous piece ended, with the same target, continues
+  that hyperlink, across soft wraps too. A cursor-positioned continuation can keep its own link identity when the
+  preceding piece was already joined to an earlier anonymous piece on the previous row. The text stops at the boundary
+  between different link identities. Rows join where the hyperlink's text fills one row to its last column and continues
+  at the start of the next, as a wrap draws it, whether the terminal wrapped it or the program moved to the next row
+  itself. Where a program continued the hyperlink on a new row itself, the break separates like a space when the text
+  that follows it, up to the next such break, has an address with no letter before it, and joins otherwise, so a host or
+  path a program broke over rows is judged whole; the hover shows a separating break as a space. Text that mismatches
+  read that way is read again with every such break joined, and warns only when both readings mismatch. Every row of the
+  hyperlink shows the same hover. When a row shows the hyperlink in more than one separate piece, the pieces can't be
+  put back together, and the text is incomplete when any piece mentions an address; a hyperlink on a single row whose
+  pieces are separate is several links, each judged alone. Text over more than 128 rows or 8,192 UTF-16 units is
+  incomplete from every row, and no text is shown. The hover display is the whole safeguard: it counts as disclosing the
+  target only while fully visible, inside the window and not covered by another Farhelm surface such as an approval card
+  or tunnel-error notice. A click whose hover is not fully visible is refused with an explanation; this also applies to
+  Cmd-click tunnel opens. Plain URLs printed as text need no such display, because what is shown is what opens, apart
+  from the remote-localhost tunnel hint below. Concealed terminal cells break a printed URL. Hidden text, too close to
+  its background color to read, also breaks a printed URL, exactly as concealed text does: a URL ends where the readable
+  text does. Text is hidden when it has a character other than whitespace, a format character or a combining mark, and
+  its color contrasts with its background at less than 1.35:1, judged as Farhelm draws it (after reverse video, bold,
+  dim and the program's own color changes). Concealed and hidden text are also left out of a program hyperlink's visible
+  text, its hover and click area, and its underline, and break the text there in every reading. The program hyperlink
+  still owns those cells, preventing a printed URL or file path from taking its place there. Concealed or hidden text
+  with something to draw and the hyperlink's target, on a row of its text, makes the hover warn that part of the text is
+  hard to see, and makes text split into separate pieces on one of its rows incomplete; a row that shows none of the
+  hyperlink ends its text and does not count. The warning is judged when the hover starts and need not follow later
+  redraws of other rows while the pointer rests, though text on the hovered row turning hidden or visible is judged
+  again; the destination display stays authoritative. The warning is an aid, not a guarantee: unlinked text around the
+  hyperlink is outside the comparison; a program that chooses its own line breaks or uses separate hyperlinks can still
+  split an address into pieces none of which looks like one; a host continued after a break (`https://github.com` above
+  `.evil.test/`) that joins into the target is quiet; a row that is entirely hidden ends the text without counting as
+  hidden; two hyperlinks to one target on a row share hidden text; an invisible character before an address whose
+  visible text is the target itself is not a disguise; site names on endings left off the common list (`docs.rs`) count
+  only with a path; a `_` glued before a host (`secure_paypal.com/login`) hides it; a git remote such as `git@host:path`
+  claims the rest of its word, so an address glued after it is not seen; `www.` followed by a single name with an ending
+  off the list (`www.intranet/x`) is not an address; a change to the link that is undone between a press and its release
+  is not noticed; and the ordinary display, which always names the real host, is what remains.
 
 - In the Mac app, a loopback link in a remote session's terminal offers Cmd-click to tunnel and open it in the browser.
   Its hover names the host and port, explains that a plain click still opens on the Mac, and preserves any OSC hyperlink

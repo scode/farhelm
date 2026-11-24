@@ -3,10 +3,12 @@
 //! `showLinkTarget` in terminal-links.js at the reference commit).
 //!
 //! A hyperlink a program emits (OSC 8) can underline text that differs from where it goes, so hovering it shows the
-//! exact target first, with its host emphasized; when the underlined text is itself a web address that names a
-//! different place, the panel becomes a loud warning that shows that text beside the real target. The grid model
-//! decides what to show ([`farhelm_grid_model::LinkDisclosure`]); this draws it, every piece of program text through
-//! the host-text element so invisible and direction-changing characters are visible.
+//! exact target first, with its host emphasized. When the underlined text gives a reason to doubt the link (it mentions
+//! a web address that names a different place, spells one with look-alike characters or login details, couldn't be
+//! read whole, or hides part of itself), the panel becomes a loud warning: one line per reason, then the address or
+//! text that prompted it, then the real target. The grid model decides what to show
+//! ([`farhelm_grid_model::LinkDisclosure`]); this draws it, every piece of program text through the host-text element
+//! so invisible and direction-changing characters are visible.
 //!
 //! A printed web address gets the panel too when, on a Mac, it points at a remote session's own loopback: the panel
 //! then ends with the tunnel hint, which says that a plain click opens the address on this Mac and Cmd-click through a
@@ -20,7 +22,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use farhelm_grid_model::LinkDisclosure;
+use farhelm_grid_model::{LinkDisclosure, WarningReason};
 use gpui::{
     App, Bounds, Context, Div, FontWeight, HitboxBehavior, HitboxId, InteractiveElement,
     IntoElement, ParentElement, Pixels, Render, Stateful, StatefulInteractiveElement, Styled,
@@ -30,8 +32,23 @@ use gpui::{
 use crate::host_text::{self, HostSentence, HostText};
 use crate::theme::{self, metrics};
 
-/// The warning's first line (the old app's words).
-const MISMATCH_WARNING: &str = "Link text does not match where it goes";
+/// The line a warning shows for one reason. The wording is fixed by SPEC.md's terminal links paragraph; each says what
+/// is wrong with the text in terms a user can check against it, not how the check works.
+const fn reason_line(reason: WarningReason) -> &'static str {
+    match reason {
+        WarningReason::Mismatch => {
+            "The link text mentions an address that differs from where it goes"
+        }
+        WarningReason::Disguised => {
+            "The address in the link text uses look-alike or invisible characters"
+        }
+        WarningReason::Credentials => {
+            "The address in the link text puts login details before the real site"
+        }
+        WarningReason::Incomplete => "The whole link text couldn't be checked",
+        WarningReason::Hidden => "Part of the link text is hard to see",
+    }
+}
 
 /// What the panel recorded at paint. An unanswered file check can invalidate this record before the answer draws.
 pub(crate) type Drawn = Rc<Cell<Option<DrawnPanel>>>;
@@ -188,12 +205,22 @@ pub(super) fn message_frame(cx: &App) -> Div {
 pub(crate) struct DisclosureView {
     host: HostText,
     target: HostText,
-    /// The link's own text, when it names somewhere else.
-    claimed: Option<HostText>,
+    /// The loud form, when the grid model found a reason to doubt the link.
+    warning: Option<Warning>,
     /// The tunnel offer for a remote host's loopback link, drawn last, after the warning if there is one, which it
     /// never replaces (SPEC.md: the hover "preserves any OSC hyperlink mismatch warning").
     hint: Option<HostSentence>,
     drawn: Drawn,
+}
+
+/// What a warning panel shows above the destination.
+struct Warning {
+    /// One line per reason, in the grid model's order.
+    reasons: Vec<&'static str>,
+    /// The program text the user can check the reasons against, under its heading: the first address that doesn't
+    /// match ("Text mentions:"), or else the visible label ("Link text:", marked partial when it couldn't be read
+    /// whole). `None` for a label too long to read, which has no text to show.
+    text: Option<(&'static str, HostText)>,
 }
 
 impl DisclosureView {
@@ -202,10 +229,28 @@ impl DisclosureView {
         hint: Option<HostSentence>,
         drawn: Drawn,
     ) -> Self {
+        let warning = disclosure.warning.as_ref().map(|warning| {
+            let text = match &warning.address {
+                Some(address) => Some(("Text mentions:", address.as_str())),
+                None if warning.label.is_empty() => None,
+                None if warning.reasons.contains(&WarningReason::Incomplete) => {
+                    Some(("Link text (partial):", warning.label.as_str()))
+                }
+                None => Some(("Link text:", warning.label.as_str())),
+            };
+            Warning {
+                reasons: warning
+                    .reasons
+                    .iter()
+                    .map(|&reason| reason_line(reason))
+                    .collect(),
+                text: text.map(|(heading, text)| (heading, HostText::from_host(text))),
+            }
+        });
         DisclosureView {
             host: HostText::from_host(disclosure.host.as_str()),
             target: HostText::from_host(disclosure.target.as_str()),
-            claimed: disclosure.claimed_text.as_deref().map(HostText::from_host),
+            warning,
             hint,
             drawn,
         }
@@ -215,7 +260,7 @@ impl DisclosureView {
 impl Render for DisclosureView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
-        let mismatch = self.claimed.is_some();
+        let mismatch = self.warning.is_some();
         // The old panel's look (`.terminal-link-target` in app.css, see [`surface`]); the loud form danger-filled at
         // 14 pixels with a 2-pixel edge.
         let panel = surface("terminal-link-disclosure", window, cx).when(mismatch, |panel| {
@@ -233,24 +278,32 @@ impl Render for DisclosureView {
         } else {
             palette.fg_bright
         };
-        // The claimed text on its own line under its label, as a block: in a wrapping flex row it kept its whole
-        // width, so a long one ran past the panel and the window's edge instead of wrapping inside the panel.
-        let claimed = self.claimed.as_ref().map(|claimed| {
-            div().child("Text says:").child(
-                host_text::element(claimed)
-                    .debug_selector(|| "terminal-link-disclosure-claimed".into()),
-            )
-        });
-        let panel = panel
-            .when(mismatch, |panel| {
-                panel.child(
+        // The reasons, each on its own line, bold.
+        let reasons = self.warning.as_ref().map(|warning| {
+            div()
+                .debug_selector(|| "terminal-link-disclosure-warning".into())
+                .mb(px(4.))
+                .font_weight(FontWeight::BOLD)
+                .children(warning.reasons.iter().map(|&reason| {
                     div()
-                        .debug_selector(|| "terminal-link-disclosure-warning".into())
-                        .mb(px(4.))
-                        .font_weight(FontWeight::BOLD)
-                        .child(MISMATCH_WARNING),
+                        .debug_selector(|| "terminal-link-disclosure-reason".into())
+                        .child(reason)
+                }))
+        });
+        // The program's text on its own line under its heading, as a block: in a wrapping flex row it kept its whole
+        // width, so a long one ran past the panel and the window's edge instead of wrapping inside the panel.
+        let claimed = self
+            .warning
+            .as_ref()
+            .and_then(|warning| warning.text.as_ref())
+            .map(|(heading, text)| {
+                div().child(*heading).child(
+                    host_text::element(text)
+                        .debug_selector(|| "terminal-link-disclosure-claimed".into()),
                 )
-            })
+            });
+        let panel = panel
+            .children(reasons)
             .children(claimed)
             .when(mismatch, |panel| panel.child("Actually goes to:"))
             .child(

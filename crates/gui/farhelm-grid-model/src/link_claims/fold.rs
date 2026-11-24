@@ -48,9 +48,9 @@ fn is(class: &Regex, ch: char) -> bool {
 }
 
 /// The look-alike table: punctuation a reader takes for one of the four characters that structure an address, and
-/// which NFKC does not already turn into it. Shared with the hover's current mismatch check, so the two agree on
-/// what counts as a look-alike.
-pub(crate) fn lookalike(ch: char) -> char {
+/// which NFKC does not already turn into it. It came from the hover's old address check, which used it for the same
+/// purpose.
+pub(super) fn lookalike(ch: char) -> char {
     match ch {
         '\u{02d0}' | '\u{02f8}' | '\u{2236}' | '\u{a789}' | '\u{ff1a}' | '\u{fe13}'
         | '\u{fe55}' => ':',

@@ -681,6 +681,7 @@ fn ready_for_requires_the_same_cells_and_file() {
         evidence: [2, 3, 4, 5, 6].into_iter().collect(),
         label: String::new(),
         osc_label_ambiguous: false,
+        unseen: false,
     };
     let mut files = FileLinks::new("s1".into(), None);
     let hover = |check| Hover {

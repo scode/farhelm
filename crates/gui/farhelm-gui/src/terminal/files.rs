@@ -546,6 +546,7 @@ pub(crate) fn golden_displays(window: &Window, cx: &App) -> AnyElement {
                 evidence: Default::default(),
                 label: String::new(),
                 osc_label_ambiguous: false,
+                unseen: false,
             },
             asked: HostText::from_host(asked),
             platform: Platform::Mac,
