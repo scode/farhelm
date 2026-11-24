@@ -1,0 +1,19 @@
+{
+  "screenshots": [
+    {
+      "entry": 4731,
+      "name": "release-notes/v0-45-0-custom-agent",
+      "alt": "The Add custom agent page in Settings with a display name, ID, and command in an unsaved registration."
+    },
+    {
+      "entry": 4753,
+      "name": "release-notes/v0-45-0-announcement-setting",
+      "alt": "The Notifications page in Settings with Check for announcements turned on."
+    },
+    {
+      "entry": 4672,
+      "name": "release-notes/v0-45-0-guarded-replace",
+      "alt": "A YOLO session's Replace question with a button to replace it as Guarded instead."
+    }
+  ]
+}

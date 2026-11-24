@@ -315,3 +315,93 @@ SHOTS += [
         max_height=620,
     ),
 ]
+
+# --- v0.45.0 --------------------------------------------------------------------------------------------------------
+
+YOLO_SESSION = "bench tokenizer"
+
+
+def custom_agent_draft(bridge):
+    """Show the registration fields on an unsaved draft so the shared agent list stays empty."""
+    bridge.click("id:app-settings-toggle")
+    bridge.scroll_into_view("id:settings-section-add-custom-agent")
+    bridge.click("id:settings-section-add-custom-agent")
+    bridge.wait("id:custom-agent-name")
+    bridge.fill("id:custom-agent-name", "Review Agent")
+    bridge.fill("id:custom-agent-command", "review-agent")
+
+    def discard_draft():
+        """Close Settings via Discard so the next shot starts on the staged fleet."""
+        bridge.press("escape")
+        bridge.wait_text("Save changes before closing?")
+        bridge.click("id:prompt-alternative-0")
+        bridge.wait_gone_text("Save changes before closing?")
+
+    return discard_draft
+
+
+def announcement_settings(bridge):
+    """Show the switch in its default on state without changing it or fetching an announcement."""
+    bridge.click("id:app-settings-toggle")
+    bridge.click("id:settings-section-notifications")
+    bridge.wait("id:settings-check-announcements")
+
+
+def guarded_replace_offer(bridge):
+    """Show the question a plain Replace reaches on a host that still asks before YOLO launches.
+
+    Check both premises before confirming Replace so a later scenario change cannot make this shot launch a session.
+    The shot stops at the Guarded alternative without choosing an answer.
+    """
+    session = next(session for session in bridge.plan["sessions"] if session["title"] == YOLO_SESSION)
+    host_id = bridge.host_id(session["host"])
+    hosts = bridge.gui.helm_request(bridge.run, "GET", "/api/hosts")["hosts"]
+    host = next((host for host in hosts if str(host["id"]) == host_id), {})
+    if not session["yolo"] or host.get("yolo_without_asking") is not False:
+        raise RuntimeError("guarded Replace needs a YOLO session on a host that asks before YOLO launches")
+    bridge.click(f"text:Session actions for {YOLO_SESSION}")
+    bridge.click("id:session-menu-replace")
+    bridge.wait_text("Confirm replace")
+    bridge.click("text:Confirm replace")
+    bridge.wait("id:prompt-alternative-0")
+    bridge.wait_text("Replace as guarded instead")
+
+    def cancel_offer():
+        """Dismiss the unanswered prompt so it cannot carry into another shot."""
+        bridge.click("id:prompt-cancel")
+        bridge.wait_gone_text("Replace as guarded instead")
+
+    return cancel_offer
+
+
+SHOTS += [
+    Shot(
+        "v0-45-0-custom-agent",
+        custom_agent_draft,
+        ["id:settings-heading", "id:custom-agent-command"],
+        park=SETTINGS_PARK,
+        annotations=[
+            Callout("id:custom-agent-command", "This command must be available on any host where you launch this agent.",
+                    side="right"),
+        ],
+    ),
+    Shot(
+        "v0-45-0-announcement-setting",
+        announcement_settings,
+        ["id:settings-section-notifications", "id:settings-heading", "id:settings-check-announcements"],
+        park=SETTINGS_PARK,
+        annotations=[
+            Callout("id:settings-check-announcements", "Turn off automatic checks for urgent announcements.",
+                    side="right"),
+        ],
+    ),
+    Shot(
+        "v0-45-0-guarded-replace",
+        guarded_replace_offer,
+        [f"id:session-item-{{session:{YOLO_SESSION}}}", "id:prompt"],
+        annotations=[
+            Callout("id:prompt-alternative-0", "Replace this session with the agent's approval prompts enabled.",
+                    side="right"),
+        ],
+    ),
+]
