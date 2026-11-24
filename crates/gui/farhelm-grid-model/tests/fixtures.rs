@@ -8,6 +8,8 @@
     clippy::expect_used,
     reason = "test-only crate; crates/gui/clippy.toml's test allowance covers #[test] functions but not these helpers"
 )]
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,7 +52,7 @@ fn send(model: &mut GridModel, message: &GridOutput) {
 
 /// Give independent output cases a valid attachment prefix at the largest size.
 fn prefix(message: &GridOutput) -> GridModel {
-    let mut model = GridModel::new();
+    let mut model = GridModel::new(common::palette());
     if !matches!(message, GridOutput::Hello { .. }) {
         send(
             &mut model,
@@ -209,7 +211,7 @@ fn every_accepted_output_fixture_survives_the_model() {
 #[test]
 fn recorded_attach_and_scroll_streams() {
     for name in ["attach", "scroll"] {
-        let mut model = GridModel::new();
+        let mut model = GridModel::new(common::palette());
         for line in fs::read_to_string(recorded_root().join(format!("{name}.jsonl")))
             .unwrap()
             .lines()

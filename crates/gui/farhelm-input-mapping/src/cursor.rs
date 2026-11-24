@@ -230,8 +230,19 @@ pub fn move_to_cell(model: &GridModel, x: u16, y: u16, platform: Platform) -> Ar
 #[cfg(test)]
 mod tests {
     use super::*;
+    use farhelm_grid_model::{Rgb, TerminalPalette};
     use farhelm_proto::grid::GridOutput;
     use serde_json::json;
+
+    /// A model's palette. Cursor movement never looks at colors, so any palette serves; this one is a plain fixture
+    /// rather than the desktop app's theme, which this crate does not depend on.
+    fn palette() -> TerminalPalette {
+        TerminalPalette {
+            foreground: Rgb::from_hex(0xffffff),
+            background: Rgb::from_hex(0x000000),
+            ansi: [Rgb::from_hex(0x808080); 16],
+        }
+    }
 
     /// JavaScript's seeded generator multiplies as f64 before its bitwise mask;
     /// integer multiplication produces a different table once precision is lost.
@@ -245,7 +256,7 @@ mod tests {
     /// contributes one blank if the requested slice starts on that spacer.
     #[test]
     fn cursor_text_slices_preserve_utf16_and_wide_spacer_rules() {
-        let mut model = GridModel::new();
+        let mut model = GridModel::new(palette());
         for value in [
             json!({"t":"hello","cols":4,"rows":1,"history_cap":0}),
             json!({"t":"state","mouse":"off","focus":false,"alt_screen":true,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
@@ -289,7 +300,7 @@ mod tests {
                 for _application in [false, true] {
                     let start = (random(&mut seed, cols), random(&mut seed, rows));
                     let target = (random(&mut seed, cols), random(&mut seed, rows));
-                    let mut model = GridModel::new();
+                    let mut model = GridModel::new(palette());
                     let screen: Vec<_> = lines.iter().enumerate().map(|(row, text)| json!([row, {"w": wrapped.get(row + 1).copied().unwrap_or(false), "r": [[0, cols, text, [0, -1, -1]]]}])).collect();
                     for value in [
                         json!({"t":"hello", "cols":cols, "rows":rows, "history_cap":0}),

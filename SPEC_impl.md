@@ -2498,20 +2498,21 @@ since nobody reports the viewer's; XTVERSION names Farhelm and its version, beca
 synchronized output included, without an answer; and color queries are answered from Farhelm's terminal theme (Ghostty's
 default palette, `crates/farhelm-terminal-emulator/src/theme.rs`, which the desktop app's terminal theme in
 `crates/gui/farhelm-gui/src/theme.rs` repeats; no test holds the two copies equal since the old app's check went with
-it) or the colors the program set. Known limitations, accepted: a few queries `vte` does not parse go unanswered, and a
-query inside an open synchronized update is answered when the update ends rather than at once. Keyboard input keeps
-today's legacy xterm encoding: the kitty keyboard protocol stays off (turning it on would change the Shift+Enter and
-Escape handling SPEC.md promises) and its query unanswered, and OSC 52 writes are honored while reads are never
-answered. The encoding itself is the supervisor's (`grid_input.rs`). `vte` holds a synchronized update's bytes until the
-update ends, and its 150 ms safety deadline is not self-driving: the runtime wakes at the deadline on its own clock and
-draws the update, and also draws one left open when the child exits, when a replay ends and before a resize; `vte`
-itself ends one whose bytes reach its 2 MiB buffer. Each of those can draw a frame the program had not finished. The
-safety deadline, the buffer limit, a resize, the child's exit and the end of a replay are examples of the deliberate
-exceptions to frames never being drawn half done; a recovering replay also draws an open update where it crosses from
-output an earlier supervisor was sent to output none was, and where it crosses a gap, though it carries on to the same
-final state. The crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's, and the
-supervisor's screen fixture tests paint every captured agent screen into the emulator and run its status reader on the
-emulator's text.
+it) or the colors the program set. The desktop app's copy holds only the values: the arithmetic that resolves a cell's
+style against them lives in the grid model (`crates/gui/farhelm-grid-model/src/colors.rs`), which the terminal view
+creates with that palette. Known limitations, accepted: a few queries `vte` does not parse go unanswered, and a query
+inside an open synchronized update is answered when the update ends rather than at once. Keyboard input keeps today's
+legacy xterm encoding: the kitty keyboard protocol stays off (turning it on would change the Shift+Enter and Escape
+handling SPEC.md promises) and its query unanswered, and OSC 52 writes are honored while reads are never answered. The
+encoding itself is the supervisor's (`grid_input.rs`). `vte` holds a synchronized update's bytes until the update ends,
+and its 150 ms safety deadline is not self-driving: the runtime wakes at the deadline on its own clock and draws the
+update, and also draws one left open when the child exits, when a replay ends and before a resize; `vte` itself ends one
+whose bytes reach its 2 MiB buffer. Each of those can draw a frame the program had not finished. The safety deadline,
+the buffer limit, a resize, the child's exit and the end of a replay are examples of the deliberate exceptions to frames
+never being drawn half done; a recovering replay also draws an open update where it crosses from output an earlier
+supervisor was sent to output none was, and where it crosses a gap, though it carries on to the same final state. The
+crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's, and the supervisor's screen
+fixture tests paint every captured agent screen into the emulator and run its status reader on the emulator's text.
 
 Emoji and text variation selectors follow Ghostty's default Unicode width rules: only eligible bases change width,
 selectors after a combining mark are ignored, and text presentation can narrow a wide character. Two exceptions keep the

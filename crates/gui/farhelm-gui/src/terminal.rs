@@ -56,7 +56,7 @@ use gpui::{
 use crate::assets::TERMINAL_FONT;
 use crate::components::ScrollbarLines;
 use crate::render_count;
-use crate::theme::{TERMINAL, TerminalColor};
+use crate::theme::{self, TERMINAL, TerminalColor};
 use style::{ResolvedStyle, Underline};
 
 /// The key that gives a drag to Farhelm when the terminal program has mouse reporting enabled.
@@ -378,7 +378,7 @@ impl TerminalView {
     /// new attachment must start a new model.
     pub fn new(metrics: CellMetrics) -> Self {
         Self {
-            model: GridModel::new(),
+            model: GridModel::new(theme::TERMINAL_GRID),
             rows: Vec::new(),
             viewport: Viewport::default(),
             shown: Vec::new(),

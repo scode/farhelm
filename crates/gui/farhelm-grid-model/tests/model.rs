@@ -8,6 +8,8 @@
     clippy::expect_used,
     reason = "test-only crate; crates/gui/clippy.toml's test allowance covers #[test] functions but not these helpers"
 )]
+mod common;
+
 use std::sync::Arc;
 
 use farhelm_grid_model::{
@@ -68,7 +70,7 @@ fn top_line(view: &Viewport, model: &GridModel) -> u64 {
 
 /// Establish the mandatory hello/state prefix without completing replay.
 fn opened(cols: u16, rows: u16, history_cap: u32) -> GridModel {
-    let mut model = GridModel::new();
+    let mut model = GridModel::new(common::palette());
     send(
         &mut model,
         GridOutput::Hello {
@@ -362,7 +364,7 @@ fn history(first: u64, cols: u16, rows: Vec<Row>) -> GridOutput {
 /// completion notice between it and its frame cannot release the placeholder.
 #[test]
 fn replay_visibility_and_atomic_screen_commits() {
-    let mut model = GridModel::new();
+    let mut model = GridModel::new(common::palette());
     assert!(model.mark_replay_complete().is_err());
     model = opened(4, 2, 10);
     send(&mut model, rows(vec![(0, row(false, &[(0, 3, "old")]))]));
@@ -389,7 +391,7 @@ fn stream_ordering_is_enforced_before_model_mutation() {
         rows: 2,
         history_cap: 10,
     };
-    let mut model = GridModel::new();
+    let mut model = GridModel::new(common::palette());
     assert!(model.apply(&frame(1, 4, 2, 0).encode().unwrap()).is_err());
     send(&mut model, hello());
     assert!(model.apply(&frame(1, 4, 2, 0).encode().unwrap()).is_err());
@@ -420,7 +422,7 @@ fn already_decoded_output_gets_the_same_ordering_checks() {
         rows: 2,
         history_cap: 10,
     };
-    let mut model = GridModel::new();
+    let mut model = GridModel::new(common::palette());
     assert!(model.apply_output(frame(1, 4, 2, 0)).is_err());
     let _ = model.apply_output(hello()).unwrap();
     assert!(model.apply_output(hello()).is_err());
@@ -626,7 +628,11 @@ fn osc8_targets_are_shared_across_runs_and_rows() {
 fn selection_clamps_to_retained_lines_at_numeric_boundaries() {
     let pos = |line, col| Position { line, col };
     assert_eq!(
-        GridModel::new().selection_text(pos(0, 0), pos(u64::MAX, 1), SelectionMode::Linear),
+        GridModel::new(common::palette()).selection_text(
+            pos(0, 0),
+            pos(u64::MAX, 1),
+            SelectionMode::Linear
+        ),
         ""
     );
     let mut model = opened(1, 2, 1);

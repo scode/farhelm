@@ -13,6 +13,7 @@
 //! migration's reference commit 24bc0580 (`grid-model.js`, `grid-buffer.js`,
 //! `terminal-links.js`, and `terminal-files.js` for printed paths), whose behavior this model reproduces.
 
+pub mod colors;
 mod link_disclosure;
 mod links;
 mod paths;
@@ -23,6 +24,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
+pub use colors::{Rgb, TerminalPalette};
 pub use farhelm_proto::grid::{
     ClipboardTarget, Color, Cursor, CursorShape, ExitState, GridError, GridOutput, Link, MouseMode,
     Style, TerminalState, style_flags,
@@ -59,7 +61,7 @@ pub struct GridRun {
     pub width: u16,
     /// Received text, including controls removed only at drawing time.
     pub text: String,
-    /// Unmodified wire style; theme color resolution belongs to the renderer.
+    /// Unmodified wire style. [`colors::ink`] resolves it against a palette; the values come from the owner.
     pub style: Style,
     /// Resolved OSC 8 identity and URI shared by all runs using that message's
     /// table entry. The target remains untrusted data, not an instruction to
@@ -235,8 +237,12 @@ pub struct ApplyEffects {
 /// `apply` refuses malformed or misordered input before mutation. The owner
 /// must end the attachment on any error, as required by the wire protocol.
 /// Pending screen rows never reach `screen()` before a frame commits them.
-#[derive(Debug, Default)]
+///
+/// There is deliberately no `Default`: a model always knows the palette its owner draws with, so nothing that judges
+/// colors (whether text can be seen against its background, say) can run against a palette the screen does not use.
+#[derive(Debug)]
 pub struct GridModel {
+    palette: TerminalPalette,
     check: GridStreamCheck,
     cols: u16,
     rows: u16,
@@ -257,8 +263,35 @@ pub struct GridModel {
 
 impl GridModel {
     /// Start an attachment behind its catch-up placeholder.
-    pub fn new() -> Self {
-        Self::default()
+    ///
+    /// `palette` is the one the owner's renderer resolves cell colors against (the GUI passes
+    /// `theme::TERMINAL_GRID`). It is fixed for the model's lifetime; the program's own OSC 10/11 and OSC 4
+    /// changes arrive through the stream, not through a new palette.
+    pub fn new(palette: TerminalPalette) -> Self {
+        Self {
+            palette,
+            check: GridStreamCheck::default(),
+            cols: 0,
+            rows: 0,
+            history_cap: 0,
+            screen: Vec::new(),
+            pending: BTreeMap::new(),
+            update_open: false,
+            history: VecDeque::new(),
+            history_next: None,
+            cursor: None,
+            state: None,
+            revision: None,
+            clipboard_open: false,
+            partial_clipboard: String::new(),
+            replay_complete: false,
+            damage: Damage::default(),
+        }
+    }
+
+    /// The palette this model was created with.
+    pub fn palette(&self) -> &TerminalPalette {
+        &self.palette
     }
 
     /// Decode, check, and apply one unchanged WebSocket binary payload.

@@ -5,6 +5,8 @@
     clippy::expect_used,
     reason = "test-only crate; crates/gui/clippy.toml's test allowance covers #[test] functions but not these helpers"
 )]
+mod common;
+
 use farhelm_grid_model::{
     GridModel, GridOutput, LinkKind, Position, SelectionMode, style_flags, tunnel_port, web_target,
 };
@@ -14,7 +16,7 @@ use serde_json::{Value, json};
 /// fixture has no terminal emulator or UI whose URL detection could mask ours.
 fn model(cols: u16, rows: Vec<Value>, links: Vec<Value>) -> GridModel {
     let count = rows.len();
-    let mut model = GridModel::new();
+    let mut model = GridModel::new(common::palette());
     for value in [
         json!({"t":"hello","cols":cols,"rows":count,"history_cap":10000}),
         json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
