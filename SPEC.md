@@ -568,6 +568,10 @@ host whose only previous bearer was Farhelm's, a tokenless endpoint sends no Aut
 
 Running processes keep their environment. None removes that agent's managed entries from the private state file.
 
+If Farhelm cannot read either Claude's or Codex's recipe credential, the host keeps both agents' last delivered launch
+credentials. The host warning names each affected agent, and a replacement for those launch credentials reports that
+delivery failed. Separate Codex login and GitHub token updates can still reach the host.
+
 For each agent, credentials belong either to Farhelm (API endpoint or Subscription) or to the base image and host
 (None). When Farhelm supplies credentials, credentials for that agent already in the image or host configuration give
 undefined results.

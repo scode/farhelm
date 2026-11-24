@@ -275,14 +275,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   coded announcements in releases, but i want one where i can push announcements by publishing them centrally and
   deliver to users. details tbd during planning. Plan: `plans/queue/dynamic-announcements.md`.
 
-- **Keep remote agent credentials intact when a recipe credential lookup fails.** After #4679 combined Claude and Codex
-  into one remote launch-credentials file, a failed lookup in the helm's SQLite credential catalog for either agent
-  falls into the legacy-cleanup withholding path and rewrites or deletes the remote file without that agent's entry
-  (even during an unrelated push such as a GitHub token update). Fail out and leave the existing on-disk credentials
-  file untouched whenever either agent's SQLite lookup fails (keep per-agent withholding only for legacy settings
-  cleanup, without trying to simultaneously update the other agent's entry in the same file), and name which agent
-  failed in the host warning. Plan: `plans/queue/preserve-creds-on-lookup-failure.md`.
-
 - **Make registered custom agents visible and consistent in the `farhelm agent` CLI.** Agents currently have no way to
   discover registered custom agent IDs through the CLI. Make custom agents behave like built-in agents in the CLI so
   they are visible to agents as usual: add a way to list registered custom agents (and include them alongside built-in
