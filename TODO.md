@@ -51,7 +51,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ## Immediate
 
 - **No hover for a detected file missing on remote.** When hovering over what Farhelm detects as a file, if it does not
-  exist on remote, just silently ignore and do not show any hover at all.
+  exist on remote, just silently ignore and do not show any hover at all. Plan:
+  `plans/queue/hide-non-actionable-file-hovers.md`.
 
 ## Plan follow-ups
 
@@ -143,18 +144,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
   Then sweep the repository once more for tmux, xterm.js, pane and old-terminal mentions and remove or reword whatever
   is left that does not belong to "phase 3". Recorded by the maintainer on 2026-11-18 from the plan's review.
-
-- **Cmd-P quick launch sometimes leaves the previous session active.** there is a bug whereby when i use Cmd-P to quick
-  launch, sometimes, i'm not sure when, it just creates the session without making it the active session. observed on
-  0.39.0. i cannot reproduce consistently, but twice it happened when i had an active codex agent. visigle, at least
-  once after having typed in it, and then hitting cmd-p. Findings, 2026-11-18: code reading (no change to the path since
-  0.40.0) found no ordinary cause. The maintainer did not recall a "Started" pill, which the designed "moved on" path
-  shows. One rare helm-side corner case matches every symptom: the helm's best-effort cache write of a newly created
-  session (`record_session`, called from `accept_created_session`) can fail when the host reconnected during the create,
-  so the list pushed with the reply is complete but lacks the new session; the desktop app opens it, sees it proven gone
-  (`listing_proves_gone`), and reselects the previous session silently. The helm log would then say "could not record
-  the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
-  keep watching for it.
 
 ### Tensorlake
 
