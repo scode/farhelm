@@ -82,7 +82,7 @@ pub(crate) struct FileLinks {
 struct Hover {
     /// The link as the grid model found it when the hover started: what a click must still find.
     link: TerminalLink,
-    /// Whose modifier the opening hint names.
+    /// Whose modifier opens the save on a click. The disclosure's hint takes the owner's platform when it opens.
     platform: Platform,
     check: Check,
     /// Whether `check` came from a staged run's pins file rather than the host (agent builds only): the file it names
@@ -389,8 +389,8 @@ impl Render for FileDisclosureView {
 }
 
 /// The file disclosure uses the web-link display's floating surface with a 3-pixel stripe in the size tier's color.
-/// Its three lines show the file's icon and name, `host:directory`, and the size with the action hints. Every host value goes through the
-/// host-text element, so hidden characters show and repeated spaces stay. Long paths wrap rather than elide: the full
+/// Its three lines show the file's icon and name, `host:directory`, and the size with the action hints. Every host
+/// value goes through the host-text element, so hidden characters show and repeated spaces stay. Long paths wrap rather than elide: the full
 /// path is the evidence a click needs, and a display too tall for the window is not fully visible, which refuses the
 /// click.
 fn panel(

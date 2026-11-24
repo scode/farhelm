@@ -5,8 +5,8 @@
 //! and attachment code runs unchanged with no socket, runtime or timer. Each transfer the GUI starts shows up in
 //! [`FakeTransfers::take`] in the order it was started, carrying what the real client would have sent, and its
 //! [`Transfer`](crate::transfers::Transfer) stays pending until the test answers it. Holding an answer is how a test
-//! observes the in-flight state (a checking spinner, an upload strip); answering with a [`TransferError`] is how it
-//! stages a refusal or a dead connection.
+//! observes the in-flight state (a file hover that stays silent, an upload strip); answering with a
+//! [`TransferError`] is how it stages a refusal or a dead connection.
 //!
 //! NOTE: Like the other fakes, this models outcomes, not mechanics. It reads no file and makes no HTTP request: an
 //! upload records the file path or bytes the GUI handed over, and the test reads that file itself if it cares.

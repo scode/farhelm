@@ -827,8 +827,9 @@ fn a_replacement_file_check_cannot_inherit_a_press(cx: &mut TestAppContext) {
     assert_eq!(h.admitted(), ["/work/second/notes.txt"]);
 }
 
-/// SPEC.md: "Only a successful check ... admits a click", and the old app gave a printed path the pointing hand only
-/// once its check was ready, so the hand never promises a click that would do nothing. The old app also gave a
+/// SPEC.md: "Only a downloadable file gets an underline, a pointing hand, and a disclosure", and the old app gave a
+/// printed path the pointing hand only once its check was ready, so the hand never promises a click that would do
+/// nothing. The old app also gave a
 /// program's `file://` hyperlink the hand at once; that hyperlink is now inert. Specified: on a printed path, no hand
 /// while checking or after a refusal, and the hand once the file is ready; resting on the cells of a program's
 /// `file://` hyperlink labelled with a path-shaped `report.txt` (the grid model finds the hyperlink there), no link, no
