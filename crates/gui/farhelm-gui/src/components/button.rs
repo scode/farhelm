@@ -111,7 +111,8 @@ pub enum Tier {
     /// Keyboard focus draws a ring around their unfilled text box.
     Readout,
     /// The version readout while an installed update awaits restart. Its red tint stays visible with the menu open.
-    /// The reminder can deepen that tint without moving the button or its menu anchor.
+    /// While `pulsing`, the reminder deepens that tint (to a solid fill in light mode, which takes white ink) without
+    /// moving the button or its menu anchor.
     UpdateReady { pulsing: bool },
     /// `.app-settings-navigation button`: an entry of a navigation list (Settings' sections), as wide as its list, its
     /// icon and label at the left 8 pixels apart, 13-pixel text on a 16-pixel line, a 28-pixel row around Settings'

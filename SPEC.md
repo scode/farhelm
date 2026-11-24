@@ -848,18 +848,18 @@ withdrawal are outside this behavior.
 Whenever the installed version is newer than the running one and is not known to be withdrawn, however it got there (the
 app's own background install, or the installer run by hand in a terminal, which the app notices within about a minute),
 the version readout in the sidebar's top bar shows a tinted red pill with an up-arrow and the running version. Its hover
-says which version is installed and that a restart finishes the update. In light mode the tint deepens on hover, and the
-reminder fills the pill with solid red and white text, including any warning mark. While the window is active, a brief
-bold bouncing arrow points to the pill and the pill brightens when an update becomes ready, then every 15 minutes when
-there has been a click or keystroke in the last five minutes. A reminder due while the window is inactive plays when it
-next activates. In an active but idle window it waits for input. When the top bar is narrow or shows an update status
-beside the pill, only the pill brightens. With Reduce Motion on, the pill stays visible without the animation. Clicking
-it opens a small menu with **Restart to update**, which quits Farhelm and opens it again on the new version (sessions
-keep running, as they do across any quit), and **What's new**, which opens the release notes on the docs website
-(`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, selecting the version
-checks for updates. A dim refresh glyph after it hints at that action; hover and keyboard focus brighten both and turn
-the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (a build from
-main, say), the readout stays plain text without the refresh glyph.
+says which version is installed and that a restart finishes the update. The tint deepens on hover. In light mode, the
+reminder flashes the pill between its tint and solid red with white text, including any warning mark. While the window
+is active, a brief bold bouncing arrow points to the pill and the pill brightens when an update becomes ready, then
+every 15 minutes when there has been a click or keystroke in the last five minutes. A reminder due while the window is
+inactive plays when it next activates. In an active but idle window it waits for input. When the top bar is narrow or
+shows an update status beside the pill, only the pill brightens. With Reduce Motion on, the pill stays visible without
+the animation. Clicking it opens a small menu with **Restart to update**, which quits Farhelm and opens it again on the
+new version (sessions keep running, as they do across any quit), and **What's new**, which opens the release notes on
+the docs website (`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, selecting
+the version checks for updates. A dim refresh glyph after it hints at that action; hover and keyboard focus brighten
+both and turn the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs
+(a build from main, say), the readout stays plain text without the refresh glyph.
 
 The update can be checked for on demand by selecting the version, by choosing the local machine's host row's Update (see
 [Session list](#session-list)), or by choosing **Check for updates** in Settings → App or in the `?` menu (see

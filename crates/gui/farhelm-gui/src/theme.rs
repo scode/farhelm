@@ -187,6 +187,12 @@ pub struct Palette {
     pub update_ready_hover_ink: Token,
     /// The pending-update pill's text on the reminder fill.
     pub update_ready_pulse_ink: Token,
+    /// The pending-update pill's warning mark on its hover wash: darker amber in light mode, where the resting amber
+    /// would fall below 4.5:1 on the deeper wash.
+    pub update_ready_hover_warn: Token,
+    /// The pending-update pill's warning mark on the reminder fill: white in light mode, where amber cannot be read
+    /// on solid red.
+    pub update_ready_pulse_warn: Token,
     /// `color-mix(in srgb, var(--danger) 20%, var(--bg-2))`, worked out: the launcher's permission-escalation banner,
     /// the old `.permission-escalation-banner` background.
     pub danger_tint: Token,
@@ -296,6 +302,8 @@ pub const DARK: Palette = Palette {
     danger_wash_pulse: rgba_token(0xee8a8a39),
     update_ready_hover_ink: rgb_token(0xf09595),
     update_ready_pulse_ink: rgb_token(0xf09595),
+    update_ready_hover_warn: rgb_token(0xe5bb6e),
+    update_ready_pulse_warn: rgb_token(0xe5bb6e),
     danger_tint: rgb_token(0x50404a),
     info: rgb_token(0x8ea2f5),
     on_accent_dim: rgb_token(0xf4f6ff),
@@ -389,6 +397,8 @@ pub const LIGHT: Palette = Palette {
     danger_wash_pulse: rgb_token(0xa83e4d),
     update_ready_hover_ink: rgb_token(0x8b2837),
     update_ready_pulse_ink: rgb_token(0xffffff),
+    update_ready_hover_warn: rgb_token(0x694719),
+    update_ready_pulse_warn: rgb_token(0xffffff),
     danger_tint: rgb_token(0xedd8db),
     info: rgb_token(0x445acf),
     on_accent_dim: rgb_token(0xf4f6ff),
@@ -832,17 +842,21 @@ mod tests {
         assert_eq!(LIGHT.update_ready_hover_ink, rgb_token(0x8b2837));
         assert_eq!(LIGHT.danger_wash_pulse, LIGHT.danger_bg);
         assert_eq!(LIGHT.update_ready_pulse_ink, LIGHT.on_fill);
+        assert_eq!(LIGHT.update_ready_hover_warn, LIGHT.warn_bright);
+        assert_eq!(LIGHT.update_ready_pulse_warn, LIGHT.on_fill);
+        assert_eq!(DARK.update_ready_hover_warn, DARK.warn);
+        assert_eq!(DARK.update_ready_pulse_warn, DARK.warn);
 
         let backdrop = srgb(LIGHT.bg_1);
         for (fill, inks) in [
             (LIGHT.danger_wash, [LIGHT.danger_strong, LIGHT.warn]),
             (
                 LIGHT.danger_wash_hover,
-                [LIGHT.update_ready_hover_ink, LIGHT.warn_bright],
+                [LIGHT.update_ready_hover_ink, LIGHT.update_ready_hover_warn],
             ),
             (
                 LIGHT.danger_wash_pulse,
-                [LIGHT.update_ready_pulse_ink, LIGHT.on_fill],
+                [LIGHT.update_ready_pulse_ink, LIGHT.update_ready_pulse_warn],
             ),
         ] {
             let alpha = if fill.alpha {
