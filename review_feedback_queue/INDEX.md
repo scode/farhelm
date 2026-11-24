@@ -144,6 +144,19 @@ consequences.
   invisible-character strip and suppresses the mismatched-destination warning on hover (borderline highest/high;
   ordinary hover preview still names the real host).
 
+- [`trailing-printed-url-cut-at-contrasting-hue-opens-shorter-address.md`](trailing-printed-url-cut-at-contrasting-hue-opens-shorter-address.md)
+  — A printed URL ends early at readable text whose colour differs in hue but not brightness, so a plain click opens a
+  shorter address than the user reads, with nothing shown first; the readability premise is unverified.
+
+- [`trailing-deleted-credential-stays-on-connected-host-after-lookup-failure.md`](trailing-deleted-credential-stays-on-connected-host-after-lookup-failure.md)
+  — A Claude or Codex token the user deleted from the recipe and Settings stays in a connected host's launch
+  credentials, usable by new sessions, until that host reconnects (bucket uncertain; recorded higher).
+
+- [`trailing-signed-announcement-feed-replayable-across-files-and-versions.md`](trailing-signed-announcement-feed-replayable-across-files-and-versions.md)
+  — The announcement signature does not bind the file name or freshness, so the standing production-signed brick-test
+  feed, or any older feed, served as the real feed would be accepted permanently by every released Mac app (bucket
+  uncertain; recorded higher).
+
 ## High priority: material UX degradation
 
 - [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
@@ -361,6 +374,65 @@ consequences.
   — In the Templates editor, adding Approvals to a Command template that declares a custom agent (or opening a stored
   one whose Approvals was set to 'Keeps safety checks') displays only the static message 'Custom agents always run in
   YOLO mode.' with no toggle and lets the user save, yet actually saves YOLO as off ('Not YOLO').
+
+- [`trailing-link-scanner-misses-lookalike-punctuation.md`](trailing-link-scanner-misses-lookalike-punctuation.md) —
+  Terminal hyperlink text using look-alike punctuation the scanner does not fold (`paypalꓸcom`, `httpsꓽ//paypal.com`,
+  Devanagari visarga for `:`) shows no mismatch warning.
+
+- [`trailing-link-scanner-ignores-all-lookalike-hosts.md`](trailing-link-scanner-ignores-all-lookalike-hosts.md) —
+  Hyperlink text spelling a familiar site entirely in look-alike letters (Cyrillic `раураӏ.сом`) shows no mismatch
+  warning, contrary to SPEC.md, and the tests pin the narrower rule.
+
+- [`trailing-link-scanner-ignores-at-prefixed-host-with-path.md`](trailing-link-scanner-ignores-at-prefixed-host-with-path.md)
+  — Hyperlink text such as `@paypal.com/login` is treated as a handle and shows no mismatch warning, though SPEC.md
+  exempts only handles; a test pins it.
+
+- [`trailing-link-scanner-treats-site-before-at-as-email.md`](trailing-link-scanner-treats-site-before-at-as-email.md) —
+  Hyperlink text such as `paypal.com@evil.test` (a familiar site as login details, with nothing after) is read as an
+  email and shows no mismatch warning; SPEC.md does not say where email ends and login details begin.
+
+- [`trailing-link-scanner-treats-dotted-handle-as-claimless.md`](trailing-link-scanner-treats-dotted-handle-as-claimless.md)
+  — Hyperlink text `@paypal.com` (a handle whose name is a familiar site) shows no mismatch warning; whether SPEC.md's
+  handle rule covers dotted names is unclear.
+
+- [`trailing-link-scanner-reads-slash-prefixed-host-as-path.md`](trailing-link-scanner-reads-slash-prefixed-host-as-path.md)
+  — Hyperlink text such as `/paypal.com/login` is read as a file path and shows no mismatch warning.
+
+- [`trailing-link-scanner-short-ipv4-is-not-an-address.md`](trailing-link-scanner-short-ipv4-is-not-an-address.md) —
+  Hyperlink text naming a shortened IPv4 address with a port or path (`127.1:8080/admin`) shows no mismatch warning,
+  though SPEC.md counts an IPv4 address followed by a path or port.
+
+- [`trailing-link-scanner-host-glued-to-cjk-prose.md`](trailing-link-scanner-host-glued-to-cjk-prose.md) — A site name
+  glued to CJK prose is misread: an honest `详见github.com/x` warns falsely and `请看github.com。谢谢` on a link
+  elsewhere is missed; untested.
+
+- [`trailing-link-scanner-backslash-path-counts-as-bare-site.md`](trailing-link-scanner-backslash-path-counts-as-bare-site.md)
+  — Hyperlink text such as `github.com\org\repo` is compared as a bare site name, so it stays quiet for any link to that
+  site, including a different repository.
+
+- [`trailing-link-scanner-exempts-lookalike-idn-endings.md`](trailing-link-scanner-exempts-lookalike-idn-endings.md) —
+  Hyperlink text `paypal.ευ` (Greek letters that read as `.eu`) shows no mismatch warning because a real
+  internationalized ending is exempt from the look-alike check.
+
+- [`trailing-link-scanner-spacing-mark-after-slash-hides-host.md`](trailing-link-scanner-spacing-mark-after-slash-hides-host.md)
+  — Hyperlink text `/ःpaypal.com/login` (a spacing mark after `/`) reads to the scanner as a path, so it shows no
+  mismatch warning whether the mark is visible or not.
+
+- [`trailing-link-disclosure-joined-reading-treats-no-address-as-match.md`](trailing-link-disclosure-joined-reading-treats-no-address-as-match.md)
+  — A multi-row hyperlink whose first reading mismatches loses its warning when joining the rows makes the address
+  unrecognizable (`x_` or `/` before `paypal.com/login` on the next row).
+
+- [`trailing-link-disclosure-gap-splits-address-across-rows.md`](trailing-link-disclosure-gap-splits-address-across-rows.md)
+  — A program can split a familiar address across a line wrap (`Sign in at github` / `.com/login`) and avoid the
+  mismatch warning by leaving one unlinked cell anywhere in the link's text.
+
+- [`trailing-link-disclosure-letter-test-counts-spacing-marks.md`](trailing-link-disclosure-letter-test-counts-spacing-marks.md)
+  — A multi-row hyperlink whose next row starts with a spacing mark before a familiar address joins that address onto a
+  `/` above it in every reading, so the mismatch warning never shows.
+
+- [`trailing-link-text-invisible-spacing-mark-silences-warning.md`](trailing-link-text-invisible-spacing-mark-silences-warning.md)
+  — A spacing mark drawn in the background colour between `/` and a familiar address is invisible yet counts as seen, so
+  the hyperlink shows neither a mismatch warning nor the "hard to see" note.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -1442,8 +1514,8 @@ consequences.
   going inert, the stack resets to the top and hides the newest banner off the bottom.
 
 - [`trailing-later-codex-github-failure-hides-claude-cleanup-warning.md`](trailing-later-codex-github-failure-hides-claude-cleanup-warning.md)
-  — If legacy Claude settings cleanup fails on a host and a later Codex or GitHub credential step also fails, Farhelm
-  hides the Claude cleanup warning and reports the unrelated error for Claude replacements.
+  — If legacy Claude (or, since #4751, Codex) settings cleanup fails on a host and a later Codex or GitHub credential
+  step also fails, Farhelm hides the cleanup warning and reports the unrelated error for that agent's replacements.
 
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
@@ -2111,3 +2183,72 @@ consequences.
   confirmation dialog explains the YOLO classification as "Farhelm treats every Custom permission choice as YOLO."
   Because "Custom" is also the name of the Custom permission flags mode, this reads as if the launch used custom
   permission flags rather than a registered custom agent.
+
+- [`trailing-announcement-override-survives-app-relaunch.md`](trailing-announcement-override-survives-app-relaunch.md) —
+  An app started with the brick-test announcement feed override keeps it after Restart to update or a bundle reopen, so
+  it keeps polling the test feed.
+
+- [`trailing-bell-open-announcements-silent-on-read-failure.md`](trailing-bell-open-announcements-silent-on-read-failure.md)
+  — Pressing Open Announcements in the notification bell does nothing visible when the helm read fails: no dialog and no
+  error, only a log line.
+
+- [`trailing-bell-stale-reply-guards-untested.md`](trailing-bell-stale-reply-guards-untested.md) — No test covers the
+  bell's guards that stop a late announcements reply from opening the dialog after the user moved on or closed the
+  popover.
+
+- [`trailing-brick-test-announcement-override-check-untested.md`](trailing-brick-test-announcement-override-check-untested.md)
+  — The brick test's check that only the staged launch used the test announcement feed could stop working without any
+  unit test failing.
+
+- [`trailing-brick-test-missing-announcement-feed-reported-as-candidate-failure.md`](trailing-brick-test-missing-announcement-feed-reported-as-candidate-failure.md)
+  — When the standing test announcement files are missing, the brick test reports the candidate's announcements check as
+  failed, though the app never ran.
+
+- [`trailing-brick-test-announcement-check-has-no-delivery-wait.md`](trailing-brick-test-announcement-check-has-no-delivery-wait.md)
+  — The brick test inspects the bell without waiting for the feed download, and one transient fetch error means no retry
+  for 12 hours, so a network blip can show up as a candidate failure.
+
+- [`trailing-credential-test-name-says-setup-refuses.md`](trailing-credential-test-name-says-setup-refuses.md) — A test
+  name says a failed Claude credential lookup makes host setup fail, while setup actually completes with a notice.
+
+- [`trailing-codex-login-save-reports-later-github-failure.md`](trailing-codex-login-save-reports-later-github-failure.md)
+  — Saving a new Codex login can install it on the host and still report "not delivered", naming a later GitHub token
+  failure as the reason.
+
+- [`trailing-link-disclosure-warning-wording-untested.md`](trailing-link-disclosure-warning-wording-untested.md) — No
+  test checks the link warning's "Link text (partial):" heading, its omitted-text case or its "and N more" line, though
+  the spec fixes the wording.
+
+- [`trailing-link-oracle-exception-asserts-only-absence.md`](trailing-link-oracle-exception-asserts-only-absence.md) —
+  The link oracle test only checks that an excepted grid no longer gives the old answer, so the `example.com` above
+  `.evil.test/x` spoof could go quiet without a failing test.
+
+- [`trailing-link-hidden-row-test-step-cannot-fail.md`](trailing-link-hidden-row-test-step-cannot-fail.md) — The
+  "another row is not watched" step of a link-disclosure test cannot fail, because the other row belongs to a different
+  hyperlink.
+
+- [`trailing-link-label-budget-untested.md`](trailing-link-label-budget-untested.md) — Nothing tests the 8,192-unit
+  budget beyond which link text cannot be checked whole.
+
+- [`trailing-link-joined-second-reading-untested.md`](trailing-link-joined-second-reading-untested.md) — No test
+  exercises the joined second reading that quiets a multi-row link, in either direction; see the related `high`
+  joined-reading finding.
+
+- [`trailing-link-scanner-zwsp-scheme-test-vacuous.md`](trailing-link-scanner-zwsp-scheme-test-vacuous.md) — A ported
+  scanner test's zero-width-space scheme case passes only because its constructed destination is malformed.
+
+- [`trailing-link-scanner-disguised-scheme-reason-unpinned.md`](trailing-link-scanner-disguised-scheme-reason-unpinned.md)
+  — The scanner's disguised-scheme cases assert only that some warning appears, so they would pass with no character
+  folding at all.
+
+- [`trailing-link-scanner-comparison-leeways-untested.md`](trailing-link-scanner-comparison-leeways-untested.md) — No
+  test covers the comparison leeways (trailing slash, escape case, empty `?`) since the oracle's quiet side was dropped,
+  so a change could make honest links warn unnoticed.
+
+- [`trailing-link-scanner-host-start-test-docstring-wrong.md`](trailing-link-scanner-host-start-test-docstring-wrong.md)
+  — A scanner test docstring says a host start is judged only on the original characters, but the code accepts either
+  reading.
+
+- [`trailing-link-disclosure-module-doc-soft-seam.md`](trailing-link-disclosure-module-doc-soft-seam.md) — The
+  link-disclosure module docs say a soft seam is a terminal wrap, but the code and spec also treat a program's
+  edge-filling line break as one.

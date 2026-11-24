@@ -1,6 +1,6 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `1b3fe49af86979aebc2719965682a17f8c6366ac`
+Last reviewed commit: `e159ffc79ab147be44e92a92b59571650a4f322d`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in `review_feedback_queue/.agents/trailing-review.md`, together with any resulting queue updates. A proposed
@@ -9,38 +9,32 @@ checkpoint reaches `main` only when its review-result PR is merged.
 This file holds only the checkpoint and the latest run's completion record. Earlier runs' records are in
 `review_feedback_queue/TRAILING_REVIEW_HISTORY.md`.
 
-## Review through 1b3fe49a
+## Review through e159ffc7
 
-The range starts after `66ad3aaa95ef03a2130e2d0194d58353912ae9da` and includes
-`1b3fe49af86979aebc2719965682a17f8c6366ac`. Of the 185 commits inventoried, 68 have in-scope patches with 25,307
-additions and 7,099 deletions across individual commits, touching 321 unique paths. The other 117 contain only excluded
-material, including plans, review bookkeeping, TODO and flake records, agent instructions, historical records, ordinary
-documentation, and release prose.
+The range starts after `1b3fe49af86979aebc2719965682a17f8c6366ac` and includes
+`e159ffc79ab147be44e92a92b59571650a4f322d`. Of the 67 commits inventoried, 18 have in-scope patches with 12,058
+additions and 2,082 deletions across individual commits, touching 95 unique paths. The other 49 contain only excluded
+material: plans, review bookkeeping, TODO records, changelog fragments, agent instructions, brick-test procedure prose,
+and ordinary documentation. The generated IANA list `crates/gui/farhelm-grid-model/src/link_claims/tlds.txt` was
+reviewed only through its header (lines 1-40).
 
-Antigravity `agy` (`gemini-4-neon` at high reasoning effort) reviewed 64 functional groups over 200 turns. The groups
-covered macOS service stop grace and brick-test coordinator, guest workflow, remote-Mac uninstall, and test suites;
-maintainer drift-upgrade, private-config, and test-worker tooling; Claude trust home-directory policy and release notes;
-Tensorlake sandbox identity, leftover discovery, and Stop-and-suspend feedback; removing the retired
-`Agent's own setting` permission mode and guarded plain-Replace; Codex recipe credentials across helm, supervisor, and
-specs; stale launcher choices and approval-card wording; Wayland clipboard file paste; toolkit reduced motion and Trash
-animation; remembered-tab fallback and Muse conversation reporting; repository-cache lock redesign; removing the host
-sign-in route lock; GUI button restyling and release golden gates; pending-upgrade sidebar reminders; host automatic
-updates after 2FA sign-in; registered custom agents end to end across protocol, supervisor, CLI, helm, e2e tests,
-Settings, launcher, and templates; positional hook attribution for Grok, Codex, and shared corridors; and OSC 8 terminal
-link disclosure. Delivery audits matched all 57,876 assigned patch lines. Every group completed later-turn synthesis and
-a final discovery pass with no new findings, and the run ended quiescent with no open leads or pending cross-group
-input.
+Claude Code `claude -p` (`claude-opus-5-5` at high reasoning effort) reviewed 12 functional groups over 46 turns. The
+groups covered the hyperlink-text address scanner and its tests, the link mismatch warning across rows and its tests,
+the GUI's warning and full-destination display, inert non-web hyperlinks, terminal colour resolution and printed URLs
+ending at faint text, the signed announcement feed in the helm and the bell, the brick test's announcement check, host
+credential delivery on lookup failure, and the agent listing CLI with the update pill. Delivery audits matched every
+assigned patch line (about 13,900 mandatory lines). Every group completed later-turn synthesis and a final discovery
+pass with no new findings; three groups were reopened for cross-group input and closed again on an empty pass. The run
+ended quiescent with no open leads or pending cross-group input.
 
-The reviewers logged 172 active findings, 0 withdrawn findings (1 withdrawn candidate superseded by a verified finding),
-and 334 open candidates before deduplication and independent checks. Consolidating all 506 open records produced 133
-verified defect groups, 2 unverified-after-investigation groups, 6 rejected groups (5 reviewer-proposed spec-accepted
-drops and 1 filter drop), and 333 excluded candidate groups. Two fresh-context `agy` (`gemini-4-neon`, high)
-consultations checked all 6 entries in the independent drop register, agreeing with all 6 and noting no unrelated leads.
-The resulting queue adds 130 items (5 `highest`, 15 `high`, and 110 `other`; 2 additional `other` findings were
-deduplicated against fixes already landed post-tip in `#4752`, and `trailing-cli-effort-hyphen-and-spec-drift.md` was
-narrowed to what remains open after `#4752`) and extends 3 existing items
-(`trailing-template-summary-misstates-unsupported-permissions.md`,
-`trailing-ssh-route-lock-leaks-cache-locks-on-delete-race.md`, and
-`trailing-hosts-menu-rerun-reads-live-host-state.md`). Source inspection supports 128 new items and all 3 extensions; 2
-new items preserve unverified premises after investigation. The review inventory, delivery audits, findings logs,
-disposition log, and independent verdicts are retained under run `746bd2ca-c078-44c7-90d6-305e2a679dca`.
+The reviewers logged 48 active findings, 0 withdrawn, and 70 open candidates. Consolidation produced 41 verified defect
+groups and 67 excluded candidate groups. Three fresh-context Claude consultations judged the 10-entry independent drop
+register: they agreed with 3 drops (spec-accepted quiet joins across a row break, the faint-text threshold band, bare
+names on uncommon endings), agreed in part with 2 (the stale `SPEC_impl.md` CLI sentence is covered only for `--effort`;
+the bell's silent failure is filtered only for its empty-list case), and disagreed or were ambiguous on 5, which were
+recorded. The queue adds 36 items (3 `highest`, 15 `high`, 18 `other`) and extends 2
+(`trailing-later-codex-github-failure-hides-claude-cleanup-warning.md`, `trailing-cli-effort-hyphen-and-spec-drift.md`).
+Buckets for hyperlink warning bypasses (`high`) and the printed-URL hue cut (`highest`) follow the maintainer's
+2026-11-24 decision; the deleted-credential and signed-feed-replay items were uncertain and recorded at the higher
+bucket. One new item preserves an unverified perceptual premise. The review inventory, delivery audits, findings logs,
+disposition log, and drop-check verdicts are retained under run `71907637-41f3-4337-888c-8515d58c5dbb`.
