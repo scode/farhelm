@@ -54,7 +54,7 @@ const SESSION_LIMIT_SCHEMA: &str = "
 
 /// The notices table as it stood before the late Delete notice kind. The upgrade step that added the desktop
 /// login-path notice rebuilds to exactly this, so a database passing through that step matches what that release
-/// created; the later late Delete step then rebuilds to [`SCHEMA`].
+/// created. The late Delete step then rebuilds to [`LATE_DELETE_SCHEMA`].
 const DESKTOP_PATH_SCHEMA: &str = "
     CREATE TABLE notices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,19 +73,35 @@ const DESKTOP_PATH_SCHEMA: &str = "
     CREATE UNIQUE INDEX notices_app_condition ON notices (kind, condition_key) WHERE host_id IS NULL;
 ";
 
-/// A host's notices cascade with its registration. The partial unique index
-/// gives the app-wide condition one identity, since NULLs compare as distinct
-/// in SQLite's table-level UNIQUE constraint. Fresh databases and upgrades use
-/// exactly the same condition identity and cascade. AUTOINCREMENT prevents a
-/// stale panel's IDs naming later notices, so notice history and read marks
-/// share the same ID allocator across upgrades.
-pub(crate) const SCHEMA: &str = "
+/// The table added by the late Delete migration. Keep this constraint at its historical shape.
+const LATE_DELETE_SCHEMA: &str = "
     CREATE TABLE notices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         host_id INTEGER REFERENCES hosts (id) ON DELETE CASCADE,
         kind TEXT NOT NULL CHECK (
             (kind IN ('stuck_trash', 'host_session_limit', 'late_delete') AND host_id IS NOT NULL)
             OR (kind IN ('fleet_session_limit', 'desktop_login_path_unavailable') AND host_id IS NULL)
+        ),
+        condition_key TEXT NOT NULL,
+        raised_at INTEGER NOT NULL,
+        read INTEGER NOT NULL CHECK (read IN (0, 1)),
+        resolved INTEGER NOT NULL CHECK (resolved IN (0, 1)),
+        content TEXT NOT NULL,
+        UNIQUE (host_id, kind, condition_key)
+    ) STRICT;
+    CREATE UNIQUE INDEX notices_app_condition ON notices (kind, condition_key) WHERE host_id IS NULL;
+";
+
+/// App-wide conditions have one identity per kind and key via the partial
+/// index, since SQLite treats NULLs as distinct in the table constraint.
+/// AUTOINCREMENT keeps a stale panel's IDs from naming later notices.
+pub(crate) const SCHEMA: &str = "
+    CREATE TABLE notices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id INTEGER REFERENCES hosts (id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (
+            (kind IN ('stuck_trash', 'host_session_limit', 'late_delete') AND host_id IS NOT NULL)
+            OR (kind IN ('fleet_session_limit', 'desktop_login_path_unavailable', 'new_announcement') AND host_id IS NULL)
         ),
         condition_key TEXT NOT NULL,
         raised_at INTEGER NOT NULL,
@@ -127,7 +143,40 @@ pub(crate) fn upgrade_desktop_login_path_notice(
 
 /// Add one-time cleanup notices for Deletes that finish after their reply.
 pub(crate) fn upgrade_late_delete_notice(tx: &rusqlite::Transaction<'_>) -> anyhow::Result<()> {
+    rebuild_notices(tx, LATE_DELETE_SCHEMA)
+}
+
+/// Widen the app-wide condition set while retaining existing notices and their IDs.
+pub(crate) fn upgrade_new_announcement_notice(
+    tx: &rusqlite::Transaction<'_>,
+) -> anyhow::Result<()> {
     rebuild_notices(tx, SCHEMA)
+}
+
+/// Publish one unread reminder for the current batch in the enqueue transaction.
+/// A new ID keeps an acknowledgement of an older bell frame from reading the new notice.
+pub(crate) fn raise_new_announcement_notice(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO notices (host_id, kind, condition_key, raised_at, read, resolved, content)
+         VALUES (NULL, 'new_announcement', '', ?1, 0, 0, ?2)",
+        rusqlite::params![
+            raised_now(),
+            serde_json::to_string(&NoticeContent::NewAnnouncement)?
+        ],
+    )?;
+    Ok(())
+}
+
+/// Retire the reminder only after the last pending entry is recorded as shown.
+/// The predicate shares the dismissal's transaction, so concurrent work cannot hide a new entry.
+pub(crate) fn resolve_new_announcement_notice(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE notices SET read = 1, resolved = 1
+         WHERE host_id IS NULL AND kind = 'new_announcement' AND condition_key = ''
+             AND resolved = 0 AND NOT EXISTS (SELECT 1 FROM announcements WHERE shown_at IS NULL)",
+        [],
+    )?;
+    Ok(())
 }
 
 /// Rebuild a notice constraint with the same columns. Drop the old index
@@ -396,6 +445,7 @@ fn record_trash(
             NoticeContent::HostSessionLimit
             | NoticeContent::FleetSessionLimit
             | NoticeContent::DesktopLoginPathUnavailable
+            | NoticeContent::NewAnnouncement
             | NoticeContent::LateDelete { .. } => None,
         });
         let content = match &entry.stuck {
@@ -685,7 +735,7 @@ pub(crate) mod tests {
 
     /// Exact marks must stay safe when a displayed notice was removed meanwhile
     /// or a new failure arrives before an old panel closes.
-    async fn mark(harness: &rest_harness::Harness, action: &str, ids: &[i64]) {
+    pub(crate) async fn mark(harness: &rest_harness::Harness, action: &str, ids: &[i64]) {
         let response = harness
             .router()
             .oneshot(request(
@@ -964,6 +1014,62 @@ pub(crate) mod tests {
             .unwrap();
         assert!(late.id > added.id);
         assert!(after.iter().all(|notice| notices.contains(notice)));
+    }
+
+    /// The announcement upgrade must retain a pre-existing notice and the
+    /// allocator high-water mark of notices a client has already cleared.
+    #[farhelm_testtrace::test]
+    async fn announcement_migration_keeps_the_previous_table_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        {
+            let db = store.connection_for_test();
+            let mut conn = db.lock();
+            conn.execute_batch(&format!(
+                "DROP TABLE notices; {LATE_DELETE_SCHEMA}
+                 ALTER TABLE preferences DROP COLUMN check_announcements;
+                 PRAGMA user_version = 100;"
+            ))
+            .unwrap();
+            let tx = conn.transaction().unwrap();
+            assert!(reconcile_session_limit(&tx, None, true).unwrap());
+            assert!(reconcile_session_limit(&tx, None, false).unwrap());
+            assert!(raise_new_announcement_notice(&tx).is_err());
+            tx.execute(
+                "UPDATE sqlite_sequence SET seq = 100 WHERE name = 'notices'",
+                [],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let old = store.notices().await.unwrap().notices;
+        assert_eq!(old.len(), 1);
+        assert!(old[0].read && old[0].resolved);
+        drop(store);
+
+        let migrated = HelmStore::open(&path).await.unwrap();
+        assert_eq!(migrated.notices().await.unwrap().notices, old);
+        assert_eq!(
+            migrated.preferences().await.unwrap().check_announcements,
+            None
+        );
+        migrated
+            .connection_for_test()
+            .lock()
+            .execute_batch(
+                "INSERT INTO announcements (id, title, body) VALUES ('one', 'Title', 'Body');",
+            )
+            .unwrap();
+        raise_new_announcement_notice(&migrated.connection_for_test().lock()).unwrap();
+        let notices = migrated.notices().await.unwrap().notices;
+        assert!(notices.contains(&old[0]));
+        let announcement = notices
+            .iter()
+            .find(|n| n.content == NoticeContent::NewAnnouncement)
+            .unwrap();
+        assert!(announcement.id > 100);
+        assert!(announcement.host.is_none() && !announcement.read && !announcement.resolved);
     }
 
     /// A completed Delete has no later condition read to resolve its notice.

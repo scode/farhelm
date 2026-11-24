@@ -223,6 +223,7 @@ mod preferences;
 
 /// The helm's durable announcement queue and shared shown history.
 mod announcements;
+mod network_announcements;
 /// The compiled release table is the queue's first producer; release policy
 /// belongs here rather than in its storage, routes or clients.
 mod release_announcements;
@@ -339,6 +340,10 @@ pub struct HelmArgs {
     /// here — this directory was explicitly supplied by the operator, so its
     /// contents are trusted as given.
     pub payload_dir: Option<PathBuf>,
+
+    /// Optional test-feed filename supplied at app launch. Verification still uses
+    /// the release origin and public keys, and invalid names use the standard feed.
+    pub announcements_path: Option<std::ffi::OsString>,
 
     /// TEST ONLY: the seconds between a connected host's backstop session
     /// polls, in place of `manager::REFRESH_INTERVAL`. Lets an end-to-end
@@ -1449,8 +1454,8 @@ async fn serve_with_ready(
     {
         tracing::warn!(%error, "could not record the desktop login PATH notice");
     }
-    // The only producer runs before readiness and serving, so every initial
-    // client read sees the complete queue without needing an event-feed path.
+    // Compiled-in entries are ready for the initial client read. Network
+    // announcements can arrive later and publish through the UI feed.
     release_announcements::enqueue_builtin(&store).await?;
     if let Some(path) = args.ensure_hosts.as_deref() {
         ensure::ingest(&store, path).await?;
@@ -1558,6 +1563,9 @@ async fn serve_with_ready(
         () = checkout_config::watch_revision(
             state.store.clone(), Arc::clone(state.manager.events()), checkout_revision,
         ) => unreachable!("checkout configuration watcher runs until serving ends"),
+        () = network_announcements::watch(
+            &state.store, state.manager.events(), args.announcements_path.as_deref(),
+        ) => unreachable!("announcement watcher runs until serving ends"),
         () = requested_shutdown => Ok(())
     };
     drop(mute_expiry);
@@ -1915,6 +1923,7 @@ mod tests {
             ssh_askpass_program: None,
             ensure_hosts: None,
             payload_dir: None,
+            announcements_path: None,
             backstop_refresh_secs: None,
         }
     }

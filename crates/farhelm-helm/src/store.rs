@@ -338,7 +338,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 100;
+pub(crate) const SCHEMA_VERSION: i64 = 101;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -1683,6 +1683,13 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub show_whats_new: Option<Option<bool>>,
+    /// Null restores the enabled default. Omission leaves the current network-check choice intact.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub check_announcements: Option<Option<bool>>,
     #[serde(
         default,
         deserialize_with = "double_option",
@@ -3125,7 +3132,8 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  last_whats_new_release TEXT,
                  show_whats_new INTEGER CHECK (show_whats_new IN (0, 1)),
                  grok_hook_hint_dismissed INTEGER CHECK (grok_hook_hint_dismissed IN (0, 1)),
-                 antigravity_hook_hint_dismissed INTEGER CHECK (antigravity_hook_hint_dismissed IN (0, 1))
+                 antigravity_hook_hint_dismissed INTEGER CHECK (antigravity_hook_hint_dismissed IN (0, 1)),
+                 check_announcements INTEGER CHECK (check_announcements IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -3226,7 +3234,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 100;",
+              PRAGMA user_version = 101;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
             custom_agents_schema = crate::custom_agents::SCHEMA,
@@ -5252,6 +5260,25 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 100")?;
         version = 100;
     }
+    if version == 100 {
+        // Existing helms inherit the enabled default and keep their notice history and read marks.
+        crate::notices::upgrade_new_announcement_notice(&tx)
+            .context("adding announcement notices")?;
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('preferences') WHERE name = 'check_announcements'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch(
+                "ALTER TABLE preferences ADD COLUMN check_announcements
+                     INTEGER CHECK (check_announcements IN (0, 1));",
+            )?;
+        }
+        tx.execute_batch("PRAGMA user_version = 101;")
+            .context("migrating helm.db to schema version 101")?;
+        version = 101;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -6130,7 +6157,7 @@ impl HelmStore {
             conn
                 .query_row(
                     "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history, auto_update_remote_hosts, last_container_host, \
-                            appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in, antigravity_trust_hint_dismissed, last_whats_new_release, show_whats_new, grok_hook_hint_dismissed, antigravity_hook_hint_dismissed \
+                            appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in, antigravity_trust_hint_dismissed, last_whats_new_release, show_whats_new, grok_hook_hint_dismissed, antigravity_hook_hint_dismissed, check_announcements \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -6172,6 +6199,7 @@ impl HelmStore {
                             show_whats_new: row.get(34)?,
                             grok_hook_hint_dismissed: row.get(35)?,
                             antigravity_hook_hint_dismissed: row.get(36)?,
+                            check_announcements: row.get(37)?,
                             list_sort: row.get(0)?,
                             last_selected: row.get(1)?,
                             visit_history: serde_json::from_str(&row.get::<_, String>(21)?)
@@ -6339,8 +6367,8 @@ impl HelmStore {
                 .execute(
                     "INSERT INTO preferences \
                          (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions, visit_history, auto_update_remote_hosts, \
-                          appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in, antigravity_trust_hint_dismissed, last_whats_new_release, show_whats_new, grok_hook_hint_dismissed, antigravity_hook_hint_dismissed) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42, ?44, ?46, ?48, ?50, ?52, ?54, ?56, ?58, ?60, ?62, ?64, ?66, ?68) \
+                          appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in, antigravity_trust_hint_dismissed, last_whats_new_release, show_whats_new, grok_hook_hint_dismissed, antigravity_hook_hint_dismissed, check_announcements) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42, ?44, ?46, ?48, ?50, ?52, ?54, ?56, ?58, ?60, ?62, ?64, ?66, ?68, ?70) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -6381,7 +6409,8 @@ impl HelmStore {
                          last_whats_new_release = CASE WHEN ?63 THEN excluded.last_whats_new_release ELSE last_whats_new_release END, \
                          show_whats_new = CASE WHEN ?65 THEN excluded.show_whats_new ELSE show_whats_new END, \
                          grok_hook_hint_dismissed = CASE WHEN ?67 THEN excluded.grok_hook_hint_dismissed ELSE grok_hook_hint_dismissed END, \
-                         antigravity_hook_hint_dismissed = CASE WHEN ?69 THEN excluded.antigravity_hook_hint_dismissed ELSE antigravity_hook_hint_dismissed END",
+                         antigravity_hook_hint_dismissed = CASE WHEN ?69 THEN excluded.antigravity_hook_hint_dismissed ELSE antigravity_hook_hint_dismissed END, \
+                         check_announcements = CASE WHEN ?71 THEN excluded.check_announcements ELSE check_announcements END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -6452,6 +6481,8 @@ impl HelmStore {
                         patch.grok_hook_hint_dismissed.is_some(),
                         patch.antigravity_hook_hint_dismissed.flatten(),
                         patch.antigravity_hook_hint_dismissed.is_some(),
+                        patch.check_announcements.flatten(),
+                        patch.check_announcements.is_some(),
                     ],
                 )
                 .context("writing the client preference")?;
@@ -14516,6 +14547,7 @@ mod tests {
                 welcome_seen: None,
                 last_whats_new_release: None,
                 show_whats_new: None,
+                check_announcements: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -14566,6 +14598,7 @@ mod tests {
                 welcome_seen: None,
                 last_whats_new_release: None,
                 show_whats_new: None,
+                check_announcements: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -14615,6 +14648,7 @@ mod tests {
                 welcome_seen: None,
                 last_whats_new_release: None,
                 show_whats_new: None,
+                check_announcements: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -14713,6 +14747,7 @@ mod tests {
                 welcome_seen: None,
                 last_whats_new_release: None,
                 show_whats_new: None,
+                check_announcements: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -17466,10 +17501,11 @@ mod tests {
              ALTER TABLE preferences DROP COLUMN show_whats_new;
              ALTER TABLE preferences DROP COLUMN grok_hook_hint_dismissed;
              ALTER TABLE preferences DROP COLUMN antigravity_hook_hint_dismissed;
+             ALTER TABLE preferences DROP COLUMN check_announcements;
              ALTER TABLE checkout_config DROP COLUMN grok_hook_setup;
              ALTER TABLE checkout_config DROP COLUMN antigravity_hook_setup;",
         )
-        .expect("a fresh schema declares the upgrade highlights and hook setup settings");
+        .expect("a fresh schema declares the later preference and hook setup columns");
     }
 
     /// The migration's DATA half: a version-1 database may already hold two
@@ -19036,6 +19072,7 @@ mod tests {
                 welcome_seen: None,
                 last_whats_new_release: None,
                 show_whats_new: None,
+                check_announcements: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -19136,6 +19173,7 @@ mod tests {
                 welcome_seen: None,
                 last_whats_new_release: None,
                 show_whats_new: None,
+                check_announcements: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,

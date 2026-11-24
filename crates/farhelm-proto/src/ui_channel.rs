@@ -766,6 +766,9 @@ pub struct Preferences {
     /// Shared choice for the upgrade highlights dialog. Unset uses the enabled default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_whats_new: Option<bool>,
+    /// An explicit false opts this helm out of checking the signed announcement feed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check_announcements: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub list_sort: Option<String>,
     /// Full entry-bound reference. A deleted entry or session may leave this
