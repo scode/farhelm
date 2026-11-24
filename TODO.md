@@ -50,6 +50,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
+- **No hover for a detected file missing on remote.** When hovering over what Farhelm detects as a file, if it does not
+  exist on remote, just silently ignore and do not show any hover at all.
+
 ## Plan follow-ups
 
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
