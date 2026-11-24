@@ -73,12 +73,13 @@ has nothing to do with the `Planned` bucket, which means something else (see TOD
 
 ## Follow-up TODO entries
 
-Every TODO.md entry that comes out of a plan goes in the `### Plan follow-up` subsection of TODO.md's `## Near term`
-bucket, and nowhere else. That covers a TODO entry the maintainer asks for while reviewing a report, a leftover from a
-report or landing notes turned into an entry, and work a plan's goal file says to defer into TODO.md, whatever bucket
-the work would otherwise seem to belong in. The maintainer wants plan follow-ups kept apart from the rest of the
-near-term work (2026-11-21), and moves an entry out of the subsection when they decide it belongs elsewhere. The one
-exception is the landing monitor's record of the judgment calls it makes when it answers a block: those go in the
+Every TODO.md entry that comes out of a plan goes in TODO.md's `## Plan follow-ups` bucket, and nowhere else. That
+covers a TODO entry the maintainer asks for while reviewing a report, a leftover from a report or landing notes turned
+into an entry, and work a plan's goal file says to defer into TODO.md, whatever bucket the work would otherwise seem to
+belong in. The maintainer wants plan follow-ups kept apart from the rest of the work (2026-11-21; a subsection of
+`## Near term` until 2026-11-23, when it became its own bucket), and moves an entry out of the bucket when they decide
+it belongs elsewhere. A goal file or report written before then that says `### Plan follow-up` means this bucket. The
+one exception is the landing monitor's record of the judgment calls it makes when it answers a block: those go in the
 `## Plan decisions to revisit` bucket (`plans/.agents/landing.md`, "Answering blocks"), since they are decisions to
 revisit rather than work to do.
 
