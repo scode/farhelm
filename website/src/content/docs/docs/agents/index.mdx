@@ -124,7 +124,7 @@ what they do, so the session gets the amber YOLO shield and hosts that ask befor
 The field accepts quotes and backslash escapes to group words, without expanding variables or running commands. Its
 preview shows the words passed to the agent. Templates save them; Clone, Replace with and Restart with let you edit
 them, while a plain Restart reuses them. Custom is never remembered as the next launch's default permission. Goose,
-Pi and OpenCode do not offer this choice. See [Start a session](/docs/using/start-a-session/).
+Pi, OpenCode and custom agents do not offer this choice. See [Start a session](/docs/using/start-a-session/).
 
 **Guarded** lets an agent approve work on its own through a safety check that can still refuse an action or ask you.
 Choosing **YOLO** skips those checks. The shield beside a session shows how Farhelm treats its launch. Hold the
@@ -142,7 +142,8 @@ and keeps their saved commands.
 
 Guarded is the default for every agent that offers it, unless you chose another mode or the launcher remembered one. Goose keeps its
 approve, smart approve and chat choices and starts in YOLO unless you choose another mode.
-Cursor defaults to YOLO, and Pi and OpenCode offer YOLO only. [Custom commands](/docs/agents/custom-commands/) use your own assertion about whether
+Cursor defaults to YOLO, Pi and OpenCode offer YOLO only, and
+[custom agents](/docs/agents/custom-agents/) always count as YOLO. [Custom commands](/docs/agents/custom-commands/) use your own assertion about whether
 the command is YOLO.
 
 Farhelm passes these flags, but cannot guarantee the agent's behavior. Claude and Grok can allow actions through your
@@ -161,9 +162,11 @@ shows the launch choice until Farhelm sees the status line again. The shield nev
 launch choice. This changes only the display; Farhelm's confirmations and permission choices for new sessions still
 follow the launch.
 
-Older agent sessions with no recorded permission show the amber YOLO shield. If you confirm plain **Replace**, Farhelm
-uses the saved command. On a host that asks before YOLO launches, the confirmation offers **Replace as guarded
-instead** when the saved agent supports Guarded. See [Start a session](/docs/using/start-a-session/).
+Older agent sessions with no recorded permission show the amber YOLO shield, and **Clone**, **Replace with** and
+**Restart with** of one start on **YOLO**; choose **Guarded** there for a guarded launch. If you confirm plain
+**Replace**, Farhelm uses the saved command. On a host that asks before YOLO launches, the confirmation offers
+**Replace as guarded instead** when the saved agent supports Guarded. See
+[Confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-launch).
 
 Guarded launches need Farhelm 0.29.0 or later on the host. If a remote host runs an older release,
 [update it](/docs/using/manage-hosts/) before starting sessions there.

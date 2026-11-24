@@ -17,8 +17,10 @@ a copy of Farhelm you built yourself never updates itself. Neither does the Farh
 
 ## When an update is ready
 
-When a newer version is installed than the one you are running, the version number at the top of the sidebar turns red,
-with an up-arrow in front of it. Hover over it to see which version is waiting.
+When a newer version is installed than the one you are running, the version number at the top of the sidebar becomes a
+red pill with an up-arrow in front of it. When the update arrives, and every 15 minutes while you are using Farhelm, a
+small arrow bounces beside the pill for a moment; with your system's Reduce Motion setting on, the pill stays still.
+Hover over it to see which version is waiting.
 
 Select the version number and choose **Restart to update**: Farhelm quits and opens again on the new version. Your
 sessions keep running while it does, as they do whenever you quit Farhelm
@@ -37,9 +39,9 @@ Each one installs a new release if there is one. Beside the version number the a
 **Installing…**, **Up to date**, or **Check failed**. **Up to date** stays for about five seconds; **Check failed**
 stays until you dismiss it or check again, and hovering over it gives the reason.
 
-A check Farhelm makes by itself shows nothing while it goes well; when it installs an update, the version number turns
-red. If downloading or installing an update fails, **Check failed** appears right away. If Farhelm cannot reach the
-update server, for example because your Mac is offline, it tries again the next day, and shows **Check failed** only
+A check Farhelm makes by itself shows nothing while it goes well; when it installs an update, the version number becomes
+the red pill. If downloading or installing an update fails, **Check failed** appears right away. If Farhelm cannot reach
+the update server, for example because your Mac is offline, it tries again the next day, and shows **Check failed** only
 once that has kept failing for three days. A failure shown this way stays until a check succeeds, a newer version is
 installed, or you dismiss it.
 
@@ -55,8 +57,8 @@ interrupted works the same way: run it again to finish removing Farhelm, or run 
 Select the gear at the foot of the navigation rail, choose **App**, and turn off **Install updates automatically**.
 Farhelm then stops checking by itself. You can
 [check for an update now](/docs/using/update-and-uninstall/#check-for-an-update-now) or run the installer again, as in
-[Install Farhelm](/docs/get-started/install/). The red version number still appears when a newer version is installed,
-however it got there.
+[Install Farhelm](/docs/get-started/install/). The red pill still appears when a newer version is installed, however it
+got there.
 
 If Farhelm cannot read your saved choice, it does not update automatically until it can, and the switch shows off. You
 can still check for an update now.

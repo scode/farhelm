@@ -6,8 +6,9 @@ sidebar:
 ---
 
 The gear at the foot of the [navigation rail](/docs/using/manage-hosts/), the column of icons down the left edge of the
-sidebar, opens Settings at **Sessions**. The section list groups its sections under **General**, **Where sessions run**
-and **Agents**, and stays beside the page as you scroll. The page heading tells you where its settings apply.
+sidebar, opens Settings at **Sessions**. The section list groups its sections under **General**, **Where sessions run**,
+**Agents** and **Custom agents**, and stays beside the page as you scroll. The page heading tells you where its settings
+apply.
 
 Switches outside forms save as soon as you change them. A dot beside a field or section marks an unsaved change. Use
 **Save** or **Discard** at the bottom of the dialog. Your drafts stay while you move between sections. If you close with
@@ -101,6 +102,12 @@ available. [Workspace trust](/docs/using/start-a-session/#workspace-trust)
 [Grok](/docs/agents/grok/#setup) and [Antigravity](/docs/agents/antigravity/#set-up-restart) have their own **Set up
 conversation hooks on all hosts** switches. **Show the hook setup prompt and hint** restores the offer in the launcher
 and the hint above sessions started without setup.
+
+## Custom agents
+
+**+ Add custom agent** registers your own coding agent, so it appears in the session launcher beside the agents Farhelm
+knows. Each agent you register gets its own page here, where you can edit or delete it.
+[Custom agents](/docs/agents/custom-agents/) explains the fields and the program Farhelm starts.
 
 ## Next
 

@@ -42,8 +42,9 @@ button or Cmd+Q.
 Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on the same host as the agent, in the
 session's directory. In a [container session](/docs/agents/containerized-sessions/), it opens inside the session's
 container. It belongs to the session: it keeps running when you switch to another session or restart the agent.
-When you come back to a session, Farhelm shows the tab you last chose there until you quit the app; if that tab has
-closed, it shows the agent.
+When you come back to a session, Farhelm shows the tab you last chose there until you quit the app. If that tab has
+closed, or its host reports that it cannot be opened, Farhelm shows the agent instead. A tab that cannot be opened stays
+in the tab strip; choose it to see why, with a **Reconnect** button to try again.
 Stopping or deleting the session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
 to confirm, or **Cancel** to keep it open. You can skip that question with
 [Skip session confirmations](/docs/using/stop-restart-resume/#stop-or-delete) under **Sessions** in settings.
@@ -67,8 +68,7 @@ control characters, such as Ctrl-C, still reach the program.
 To give the agent a screenshot or a file, paste it into the terminal. Farhelm uploads it to the session's host and types
 its path at the prompt, so it works the same on a remote host as on your Mac. Dropping a file onto the terminal does the
 same. If you leave the session before an upload finishes, a notice names the files and says whether any of them reached
-the host. On Linux, a file you copy in a file manager pastes as text, usually its path on your machine, instead of being
-uploaded; pasted screenshots and other images still upload.
+the host.
 
 Clicking a web link in the terminal opens it once in your browser. Farhelm keeps that click from reaching the program,
 so an agent that opens links itself does not open a second tab. If a program needs those clicks, change
@@ -144,8 +144,8 @@ host reports that the session's terminal is gone, a card offers **Restart** or *
 [After a reboot](/docs/using/stop-restart-resume/#after-a-reboot). What keeps running during an outage is covered in
 [What survives what](/docs/how-it-works/what-survives-what/).
 
-A terminal that stops and will not come back by itself, because your window fell too far behind its output or the
-connection was refused, keeps its last screen under a red line that says why, with a **Reconnect** button that attaches
+A terminal that stops and will not come back by itself, because your window fell too far behind its output, the
+connection was refused, or the host could not open a shell tab, keeps its last screen under a red line that says why, with a **Reconnect** button that attaches
 it again.
 
 ## Next

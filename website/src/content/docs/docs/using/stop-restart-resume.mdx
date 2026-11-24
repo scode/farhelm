@@ -27,6 +27,8 @@ hovering over it says why. Right after a launch that is usually just a wait: Far
 you submit your first prompt, a Pi or OMP conversation after the agent's first reply, a Claude conversation a few
 seconds after it starts, and a Goose conversation as soon as it starts. [Grok](/docs/agents/grok/#setup) and
 [Antigravity](/docs/agents/antigravity/#set-up-restart) report after your first prompt once Farhelm sets up their hooks.
+A [custom agent](/docs/agents/custom-agents/) can be restarted once it reports its conversation, if it is registered
+with both **Supports session resumption** and **Supports session reporting**.
 When the tooltip directs you to **Settings → Agents**, turn on hook setup there and start a new session.
 **Restart** can take a couple of seconds more to become
 available. If it never comes, replace is how you start the session over. [Supported agents](/docs/agents/) says which
@@ -45,7 +47,8 @@ if you want to open it directly.
 effort, permission mode or wrapper prefix; the agent, host, directory, session name and first message stay as they are; [templates](/docs/using/launch-templates/)
 work here as long as they leave those as they are. For an agent Farhelm can resume, you can also name the conversation it should enter, under **More options**. If
 Farhelm never learned its id, **Restart with** remains available and requires the id or, for Pi and OMP, the session
-file. Cursor and OpenCode cannot use Restart with, and neither can a Muse session started before Farhelm could resume Muse;
+file. Cursor and OpenCode cannot use Restart with, and neither can a custom agent registered without **Supports session
+resumption** or a Muse session started before Farhelm could resume Muse;
 [Muse](/docs/agents/muse/#restarting-a-conversation) says how to recreate it. Enter on one of its choices picks it and restarts
 with the result (in the model field, Enter only picks the model); when the button says **Stop and restart**, because the agent is working, Enter also confirms stopping
 it first.
@@ -81,8 +84,9 @@ case. None of these sends an
 While the agent is working (its status is running), **Restart** asks you to confirm first, since restarting stops it.
 An agent that is idle or waiting for you is stopped and restarted without asking, and a session whose agent has already
 ended restarts straight away. **Restart** never asks the YOLO question, even for a YOLO session, since it relaunches a
-choice you already made; **Restart with** asks it when the new settings are YOLO and the host asks before YOLO
-launches; [Confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-launch) covers its answers.
+choice you already made. **Restart with** asks it when the new settings are YOLO and the host asks before YOLO
+launches, and so does a plain **Replace** of a YOLO session on such a host, where it can offer **Replace as guarded
+instead**. [Confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-launch) covers its answers.
 
 ## Stop or delete
 

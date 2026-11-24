@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-11-22T18:54:14Z",
-  "captured_from": "4b60fe6467c54c6770caddc2570bf6b0800a36e1",
-  "commit": "e1cbe1695b16943c9983c146836afa4a216f4e21",
+  "captured_at": "2026-11-24T00:39:46Z",
+  "captured_from": "9d8fe55a0b7528d1e3e04e2b2238a2da4fc78ffe",
+  "commit": "b72c4b7bef689b37f1edbd78b04d919c2db01485",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 699,
@@ -430,7 +430,7 @@
       "width": 1866
     },
     "session-list/statuses": {
-      "height": 699,
+      "height": 695,
       "width": 1368
     },
     "session-list/trash-button": {
@@ -451,11 +451,11 @@
     },
     "start-a-session/effort-and-permissions": {
       "height": 899,
-      "width": 1630
+      "width": 1634
     },
     "start-a-session/harness-and-model": {
       "height": 1047,
-      "width": 2124
+      "width": 2126
     },
     "start-a-session/host-menu": {
       "height": 771,
@@ -467,7 +467,7 @@
     },
     "start-a-session/launch-button": {
       "height": 496,
-      "width": 1047
+      "width": 1052
     },
     "start-a-session/new-button": {
       "height": 256,
@@ -487,11 +487,11 @@
     },
     "start-a-session/yolo-confirmation": {
       "height": 780,
-      "width": 1873
+      "width": 1871
     },
     "stop-restart-resume/header-actions": {
-      "height": 1031,
-      "width": 1544
+      "height": 1034,
+      "width": 1686
     },
     "stop-restart-resume/row-menu": {
       "height": 1391,
@@ -507,7 +507,7 @@
     },
     "work-in-a-session/tabs": {
       "height": 390,
-      "width": 622
+      "width": 624
     }
   }
 }
