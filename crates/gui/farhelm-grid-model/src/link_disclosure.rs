@@ -62,6 +62,38 @@ enum AddressShape {
     Host,
 }
 
+/// A label can quote or bracket the whole address. Remove only matching outer pairs so prose
+/// around an address stays part of the label. The hover still displays the original text.
+fn strip_matching_wrappers(text: &str) -> &str {
+    let label = text.trim_matches(is_js_space);
+    let mut text = label;
+    loop {
+        let closing = match text.as_bytes().first() {
+            Some(b'<') => '>',
+            Some(b'(') => ')',
+            Some(b'[') => ']',
+            Some(b'"') => '"',
+            Some(b'\'') => '\'',
+            _ => break,
+        };
+        // Every recognized opener is one byte. Search after it so a lone quote is not a pair.
+        let Some(inner) = text[1..].strip_suffix(closing) else {
+            break;
+        };
+        text = inner.trim_matches(is_js_space);
+    }
+    // A bracket or quote before a word break can end an address followed by prose.
+    // Check after peeling so spaces between genuinely nested delimiters stay legal.
+    if text.len() != label.len()
+        && text
+            .split_once(is_js_space)
+            .is_some_and(|(first, _)| first.ends_with(['>', ')', ']', '"', '\'']))
+    {
+        return label;
+    }
+    text
+}
+
 /// Judge lookalike punctuation, leading blanks and invisible characters only when recognizing the address.
 /// Parse the original text in the form recognized here, so a lookalike scheme cannot be reinterpreted as a host.
 fn address_shape(text: &str) -> Option<AddressShape> {
@@ -125,7 +157,7 @@ fn comparable(url: &Url) -> String {
 /// A URL-shaped label that cannot be parsed is a warning, not quiet prose.
 /// Scheme-less labels borrow only the target's scheme, never its authority.
 fn mismatch(text: &str, uri: &str) -> bool {
-    let claimed = text.trim_matches(is_js_space);
+    let claimed = strip_matching_wrappers(text);
     let Some(shape) = address_shape(claimed) else {
         return false;
     };
@@ -176,7 +208,7 @@ impl GridModel {
         let (text, fragment) = self.link_label(link);
         let warning = text.as_ref().filter(|text| {
             if fragment {
-                address_shape(text.trim_matches(is_js_space)).is_some()
+                address_shape(strip_matching_wrappers(text)).is_some()
             } else {
                 mismatch(text, &link.uri)
             }
@@ -286,20 +318,23 @@ impl GridModel {
             }
         }
         if rows.iter().all(|text| {
-            address_shape(text.trim_matches(is_js_space)).is_some() && !mismatch(text, &link.uri)
+            address_shape(strip_matching_wrappers(text)).is_some() && !mismatch(text, &link.uri)
         }) {
-            (Some(fragment), false)
-        } else {
-            (
-                Some(
-                    rows.into_iter()
-                        .collect::<String>()
-                        .trim_matches(is_js_space)
-                        .to_owned(),
-                ),
-                false,
-            )
+            return (Some(fragment), false);
         }
+        let joined = rows.iter().map(String::as_str).collect::<String>();
+        let joined = joined.trim_matches(is_js_space);
+        // Different delimiters can make the join lose its address shape even though each
+        // row spells out its own wrapped address. Keep the hovered row's claim in that case.
+        if rows.iter().all(|text| {
+            let label = text.trim_matches(is_js_space);
+            let address = strip_matching_wrappers(label);
+            address.len() != label.len() && address_shape(address).is_some()
+        }) && address_shape(strip_matching_wrappers(joined)).is_none()
+        {
+            return (Some(fragment), false);
+        }
+        (Some(joined.to_owned()), false)
     }
 }
 
@@ -318,9 +353,8 @@ mod tests {
         for case in oracle["policy"].as_array().unwrap() {
             let text = case["text"].as_str().unwrap();
             let uri = case["uri"].as_str().unwrap();
-            // The oracle records the old client's acceptance of literal escape notation as part of a scheme. Like
-            // any label that opens with an ASCII bracket or quote, it is no longer an address, so it gets the
-            // ordinary display of the real destination. The actual directionality character still warns.
+            // The old client accepted literal escape notation as part of a scheme. The bracket pair encloses
+            // only the notation, so this label gets the ordinary display. An actual directionality mark warns.
             let expected = if text.trim_matches(is_js_space) == "<U+202E>https://example.com/x" {
                 false
             } else {
@@ -354,11 +388,33 @@ mod tests {
         }
     }
 
+    /// A label can present an address inside several layers of punctuation. Judge the address inside
+    /// the matching pairs, including when the pieces have spaces around them.
+    #[test]
+    fn bracketed_and_quoted_addresses_are_compared_with_the_target() {
+        for label in [
+            "<https://example.test/>",
+            "\"https://example.test/\"",
+            "'https://example.test/'",
+            "(https://example.test/)",
+            "[https://example.test/]",
+            " ( \" < '\u{a0}https://example.test/\u{a0}' > \" ) ",
+            "[example.test/]",
+        ] {
+            assert!(!mismatch(label, "https://example.test/"), "{label:?}");
+            assert!(mismatch(label, "https://other.test/"), "{label:?}");
+        }
+    }
+
     /// A program's label can contain a URL without claiming that the whole label is an address. Punctuation
     /// that separates the prose from the URL must keep the ordinary target disclosure.
     #[test]
     fn prose_glued_to_an_address_keeps_the_ordinary_disclosure() {
         for label in [
+            "See (https://example.test/x)",
+            "<https://example.test/x)",
+            "[https://example.test/x] [docs]",
+            "( [https://example.test/x] [docs] )",
             "ticket-42(https://example.test/tickets/42)",
             "ticket-42(example.test/tickets/42)",
             "[label](https://example.test/x)",
@@ -367,6 +423,14 @@ mod tests {
         ] {
             assert!(!mismatch(label, "https://other.test/"), "{label:?}");
         }
+    }
+
+    /// Brackets that belong to a URL path survive peeling the pair around the whole address.
+    #[test]
+    fn punctuation_inside_a_wrapped_address_is_part_of_the_path() {
+        let label = "(https://example.test/page_(name))";
+        assert!(!mismatch(label, "https://example.test/page_(name)"));
+        assert!(mismatch(label, "https://example.test/page_name"));
     }
 
     /// The narrower syntax must still recognize labels that imitate addresses with different characters

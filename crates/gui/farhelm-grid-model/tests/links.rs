@@ -78,6 +78,116 @@ fn a_wrapped_program_label_can_contain_an_address_without_claiming_it() {
     }
 }
 
+/// A bracketed or quoted address is still a claim about the destination. The warning retains
+/// the wrapping punctuation so the user can compare what they saw with the actual target.
+#[test]
+fn quoting_an_address_keeps_the_original_label_in_mismatch_warnings() {
+    for (label, claims_address) in [
+        ("<https://example.test/>", true),
+        ("\"https://example.test/\"", true),
+        ("'https://example.test/'", true),
+        ("(https://example.test/)", true),
+        ("[https://example.test/]", true),
+        (" ( \"<https://example.test/>\" ) ", true),
+        ("See (https://example.test/)", false),
+        ("ticket-42(https://example.test/)", false),
+        ("[docs](https://example.test/)", false),
+        ("[https://example.test/] [docs]", false),
+        ("<https://example.test/)", false),
+    ] {
+        for (target, differs) in [
+            ("https://example.test/", false),
+            ("https://other.test/", true),
+        ] {
+            let grid = model(
+                48,
+                vec![ascii(label, false, Some(0))],
+                vec![json!(["tag", target])],
+            );
+            let link = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+            let disclosure = grid.link_disclosure(&link).unwrap();
+            assert_eq!(disclosure.target, target);
+            let expected = (claims_address && differs).then_some(label.trim());
+            assert_eq!(disclosure.claimed_text.as_deref(), expected, "{label:?}");
+            assert_eq!(disclosure.claimed.as_deref(), expected, "{label:?}");
+        }
+    }
+}
+
+/// Distinct outer delimiters can make a concatenation look like prose even when both rows
+/// present complete addresses. Hovering each row must still compare that row to the target.
+#[test]
+fn differently_wrapped_rows_keep_their_individual_address_claims() {
+    let honest = "<https://example.test/>";
+    let other = "\"https://other.test/\"";
+    let target = "https://example.test/";
+    let grid = model(
+        40,
+        vec![ascii(honest, false, Some(0)), ascii(other, false, Some(0))],
+        vec![json!(["tag", target])],
+    );
+    let first = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+    let second = grid.link_at(Position { line: 1, col: 0 }).unwrap();
+    assert_eq!(first.kind, second.kind);
+    assert_eq!(first.label, honest);
+    assert_eq!(second.label, other);
+    assert_eq!(grid.link_disclosure(&first).unwrap().claimed_text, None);
+    assert_eq!(
+        grid.link_disclosure(&second)
+            .unwrap()
+            .claimed_text
+            .as_deref(),
+        Some(other)
+    );
+}
+
+/// Two rows with the same tag can each spell out the same target. The second address
+/// must be recognized as a repeat even when the rows quote it differently.
+#[test]
+fn repeated_quoted_addresses_each_match_the_destination() {
+    let first = "<https://example.test/>";
+    let second = "<('https://example.test/')>";
+    let grid = model(
+        40,
+        vec![ascii(first, false, Some(0)), ascii(second, false, Some(0))],
+        vec![json!(["tag", "https://example.test/"])],
+    );
+    for (line, label) in [(0, first), (1, second)] {
+        let link = grid.link_at(Position { line, col: 0 }).unwrap();
+        assert_eq!(link.label, label);
+        let disclosure = grid.link_disclosure(&link).unwrap();
+        assert_eq!(disclosure.target, "https://example.test/");
+        assert_eq!(disclosure.claimed_text, None);
+    }
+}
+
+/// An ambiguous continuation still warns on a quoted address-shaped fragment. Even when the
+/// fragment names the destination, the other stretches keep it from proving a complete match.
+#[test]
+fn a_quoted_address_fragment_warns_when_the_full_label_is_ambiguous() {
+    let address = "<https://example.test/>";
+    let gap = address.len();
+    let target = "https://example.test/";
+    let grid = model(
+        48,
+        vec![
+            json!({"w":false,"r":[
+                [0,gap,address,[0,-1,-1],0],
+                [gap+1,4,"more",[0,-1,-1],0]
+            ]}),
+            ascii("continuation", false, Some(0)),
+        ],
+        vec![json!(["tag", target])],
+    );
+    let fragments = grid.row_links(0);
+    assert_eq!(fragments.len(), 2);
+    assert_eq!(fragments[0].kind, fragments[1].kind);
+    assert_eq!(fragments[0].label, address);
+    let disclosure = grid.link_disclosure(&fragments[0]).unwrap();
+    assert_eq!(disclosure.target, target);
+    assert_eq!(disclosure.claimed_text.as_deref(), Some(address));
+}
+
 /// A URL can continue over soft wraps; underlining follows cell ranges, while
 /// evidence includes the neighboring boundary whose edit could extend it.
 #[test]
