@@ -1,6 +1,6 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `66ad3aaa95ef03a2130e2d0194d58353912ae9da`
+Last reviewed commit: `1b3fe49af86979aebc2719965682a17f8c6366ac`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in `review_feedback_queue/.agents/trailing-review.md`, together with any resulting queue updates. A proposed
@@ -9,33 +9,38 @@ checkpoint reaches `main` only when its review-result PR is merged.
 This file holds only the checkpoint and the latest run's completion record. Earlier runs' records are in
 `review_feedback_queue/TRAILING_REVIEW_HISTORY.md`.
 
-## Review through 66ad3aaa
+## Review through 1b3fe49a
 
-The range starts after `df6199142d6495a95b2d008400ba2686efb775c6` and includes
-`66ad3aaa95ef03a2130e2d0194d58353912ae9da`. Of the 226 commits inventoried, 88 have in-scope patches with 20,414
-additions and 6,611 deletions across individual commits, touching 338 unique paths. The other 138 contain only excluded
+The range starts after `66ad3aaa95ef03a2130e2d0194d58353912ae9da` and includes
+`1b3fe49af86979aebc2719965682a17f8c6366ac`. Of the 185 commits inventoried, 68 have in-scope patches with 25,307
+additions and 7,099 deletions across individual commits, touching 321 unique paths. The other 117 contain only excluded
 material, including plans, review bookkeeping, TODO and flake records, agent instructions, historical records, ordinary
 documentation, and release prose.
 
-Antigravity `agy` (`gemini-4-neon` at high reasoning effort) reviewed 46 functional groups over 141 turns. The groups
-covered maintainer and test-worker tooling, GUI shortcuts, templates, bulk marking, Tensorlake runtime and specs,
-wake-on-launch flows and tests, Claude/Codex/Muse/Pi/Antigravity workspace trust, SQLite and restart scope cleanup,
-interrupted upload notices, recipe credential delivery, compact launcher checkout UI, terminal wide-character rendering
-and erase semantics, GUI refactors, remote exit-status wrapping, Podman recipe rebuilds and place-identity verification,
-UI-channel slow-host bypasses, and Tailscale SSH transport, store, provisioning, and GUI support. Delivery audits
-matched all 49,481 assigned patch lines. Every group completed later-turn synthesis and a final discovery pass with no
-new findings, and the run ended quiescent with no open leads or pending cross-group input.
+Antigravity `agy` (`gemini-4-neon` at high reasoning effort) reviewed 64 functional groups over 200 turns. The groups
+covered macOS service stop grace and brick-test coordinator, guest workflow, remote-Mac uninstall, and test suites;
+maintainer drift-upgrade, private-config, and test-worker tooling; Claude trust home-directory policy and release notes;
+Tensorlake sandbox identity, leftover discovery, and Stop-and-suspend feedback; removing the retired
+`Agent's own setting` permission mode and guarded plain-Replace; Codex recipe credentials across helm, supervisor, and
+specs; stale launcher choices and approval-card wording; Wayland clipboard file paste; toolkit reduced motion and Trash
+animation; remembered-tab fallback and Muse conversation reporting; repository-cache lock redesign; removing the host
+sign-in route lock; GUI button restyling and release golden gates; pending-upgrade sidebar reminders; host automatic
+updates after 2FA sign-in; registered custom agents end to end across protocol, supervisor, CLI, helm, e2e tests,
+Settings, launcher, and templates; positional hook attribution for Grok, Codex, and shared corridors; and OSC 8 terminal
+link disclosure. Delivery audits matched all 57,876 assigned patch lines. Every group completed later-turn synthesis and
+a final discovery pass with no new findings, and the run ended quiescent with no open leads or pending cross-group
+input.
 
-The reviewers logged 140 active findings, 1 withdrawn finding, and 250 candidates before deduplication and independent
-checks. Consolidating all 390 open records produced 96 verified defect groups, 1 unverified-after-investigation group, 4
-rejected spec-accepted groups, and 248 excluded candidate groups. Three independent `agy` (`gemini-4-neon`, high)
-consultations checked 9 register entries (1 withdrawal, 5 reviewer-proposed drops across 7 records, and 3
-highest-adjacent candidates), agreeing with 7 and disagreeing with 2 (retaining both in `highest`) while noting 1
-separate hardening lead recorded in `other`. The resulting queue adds 94 items (11 `highest`, 16 `high`, and 67 `other`;
-2 additional `other` findings were deduplicated against `claude-trust-settings-omit-folder-exemptions.md` and
-`launcher-new-environment-folder-omits-repository-prompt.md` landed in `#4650`) and extends 3 existing items
-(`hook-save-uses-newer-replace-warning.md`, `stale-host-retry-can-continue-sandbox-delete.md`, and
-`trailing-trust-hint-save-errors-use-live-selection-instead-of.md`). Source inspection supports 93 new items and all 3
-extensions; 1 new item preserves an unverified platform premise after investigation. The review inventory, delivery
-audits, findings logs, disposition log, and independent verdicts are retained under run
-`34570dac-b635-4682-a942-3a3fc1728e12`.
+The reviewers logged 172 active findings, 0 withdrawn findings (1 withdrawn candidate superseded by a verified finding),
+and 334 open candidates before deduplication and independent checks. Consolidating all 506 open records produced 133
+verified defect groups, 2 unverified-after-investigation groups, 6 rejected groups (5 reviewer-proposed spec-accepted
+drops and 1 filter drop), and 333 excluded candidate groups. Two fresh-context `agy` (`gemini-4-neon`, high)
+consultations checked all 6 entries in the independent drop register, agreeing with all 6 and noting no unrelated leads.
+The resulting queue adds 130 items (5 `highest`, 15 `high`, and 110 `other`; 2 additional `other` findings were
+deduplicated against fixes already landed post-tip in `#4752`, and `trailing-cli-effort-hyphen-and-spec-drift.md` was
+narrowed to what remains open after `#4752`) and extends 3 existing items
+(`trailing-template-summary-misstates-unsupported-permissions.md`,
+`trailing-ssh-route-lock-leaks-cache-locks-on-delete-race.md`, and
+`trailing-hosts-menu-rerun-reads-live-host-state.md`). Source inspection supports 128 new items and all 3 extensions; 2
+new items preserve unverified premises after investigation. The review inventory, delivery audits, findings logs,
+disposition log, and independent verdicts are retained under run `746bd2ca-c078-44c7-90d6-305e2a679dca`.

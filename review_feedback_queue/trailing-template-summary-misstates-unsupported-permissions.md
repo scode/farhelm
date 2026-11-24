@@ -40,3 +40,45 @@ falls back to YOLO rather than a safer label, and approvals/model.rs:812 uncondi
 whenever present); confidence: confirmed; possible cover: none.
 
 Review evidence is retained under run `34570dac-b635-4682-a942-3a3fc1728e12` as `g05-triage-gui-templates-hosts/l2`.
+
+Additional source record at `1b3fe49af86979aebc2719965682a17f8c6366ac`,
+`crates/gui/farhelm-gui/src/templates/summary.rs:192` (g20_yolo_unset_gui_launcher/l4):
+
+Follow-up observation at `1b3fe49af86979aebc2719965682a17f8c6366ac` after removing `Agent's own setting`
+(`#4673`–`#4676`): Cursor's `omitted_permission()` is now `Some(LaunchPermission::Yolo)`, so unsupported modes on Cursor
+now misdisplay as `YOLO` instead of `Agent's own setting`.
+
+In crates/gui/farhelm-gui/src/templates/summary.rs:177-199, `permission_label(agent, permission)` handles shells
+verbatim (lines 187-191) so an incompatible stored permission like `Custom` on `Bash` still reads `"Custom"`, but for
+every non-shell harness line 192 calls `harness.request_permission(permission)`. In
+crates/farhelm-proto/src/launch.rs:421-429, `request_permission(Some(value))` checks `if self.offers_permission(value)`
+and otherwise falls back to `self.omitted_permission()`. Because `check_template_shape`
+(crates/farhelm-proto/src/launcher.rs:546-643) does not reject incompatible `(agent, permissions)` pairs, an agent
+template write (`TemplateCreate`/`TemplateEdit`) or `TemplateDelete` approval card
+(crates/gui/farhelm-gui/src/approvals/model.rs:832-839) and the Templates list summary
+(crates/gui/farhelm-gui/src/templates/summary.rs:100) both invoke `permission_label(fields.agent, *permissions)` and
+misreport the stored field: e.g. `Claude + Approve` displays `"Guarded · Claude auto mode"`, `Cursor + Guarded` displays
+`"YOLO"` (previously `"Agent's own setting"` before 7b226839/6d32efc9 changed Cursor's omitted_permission to YOLO), and
+`Pi + Custom` displays `"YOLO"`. SPEC.md (Agent-spawned sessions, lines 4592-4593) specifies "Template cards show the
+permission field when present, resolving a reset to the agent's default when the template names one" — resolving only a
+reset (`None`), not rewriting an explicit stored permission. Compare approvals/model_tests.rs:848-863, which explicitly
+requires shell template cards to show incompatible stored permissions accurately.
+
+How to verify: Call `templates::summary::permission_label(Some(LaunchHarness::Claude), Some(LaunchPermission::Approve))`
+(returns `"Guarded · Claude auto mode"` instead of `"Approve"`) or
+`permission_label(Some(LaunchHarness::Cursor), Some(LaunchPermission::Guarded))` (returns `"YOLO"` instead of
+`"Guarded"`).
+
+Fix: In crates/gui/farhelm-gui/src/templates/summary.rs:192-198, resolve only `None` (an explicit reset) via
+`harness.omitted_permission()`, and display any explicit `Some(chosen)` as itself (using `guarded_mode_name(harness)`
+only when `chosen == LaunchPermission::Guarded` and supported, falling back to `permission_display(Some(chosen))`).
+
+Reviewer metadata (g20_yolo_unset_gui_launcher/l4): suggested bucket: other — misstates incompatible stored permissions
+on template summaries and approval cards, but cannot disguise a YOLO or Custom permission as Guarded: every non-shell
+harness offers `Yolo` (so `Yolo` never falls back), every non-shell harness that lacks `Custom` (`Goose`, `Pi`,
+`OpenCode`, `Custom`) has `omitted_permission() == Some(Yolo)` (so `Custom` falls back to `YOLO` while
+`permission_flags` still prints on its own fact line), and `apply_template`/`launches::compile` refuse unsupported
+`(agent, permission)` combinations when launching. Thus no security bypass or data-loss route is established.;
+confidence: confirmed; possible cover: none.
+
+Review evidence is retained under run `746bd2ca-c078-44c7-90d6-305e2a679dca` as `g20_yolo_unset_gui_launcher/l4`.

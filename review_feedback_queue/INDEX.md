@@ -120,6 +120,30 @@ consequences.
   — Re-running failed setup on a Tailscale host omits the Tailscale flag from the probe request, so removing or toggling
   the host concurrently lets Farhelm fall back to unpinned ordinary SSH and auto-provision or re-register it.
 
+- [`trailing-agent-stop-does-not-pin-target-connection-across-approval.md`](trailing-agent-stop-does-not-pin-target-connection-across-approval.md)
+  — Approving a cross-host agent Stop does not pin the target host's connection incarnation across the approval wait, so
+  a retarget or reconnect during approval can stop a matching session ID on the replacement connection (requires a rare
+  cross-host retarget with a colliding session ID).
+
+- [`trailing-claude-trust-relative-config-dir-persists-relative-lock.md`](trailing-claude-trust-relative-config-dir-persists-relative-lock.md)
+  — If the login shell exports a relative CLAUDE_CONFIG_DIR, Farhelm accepts it, letting a symlink in a cloned
+  repository redirect pre-prompt ~/.claude.json edits and persisting a relative lock path into supervisor cleanup
+  (depends on user-exported relative CLAUDE_CONFIG_DIR).
+
+- [`trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md`](trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md)
+  — Expanding a custom agent's ~/ command only during launch preparation kills a live agent on Restart (and allocates
+  checkouts on Create) before failing if HOME is missing or the expanded path cannot be resolved (borderline
+  highest/high; durable conversation ID stays preserved).
+
+- [`trailing-launcher-enter-deleted-custom-agent-chip-submits-previous-agent.md`](trailing-launcher-enter-deleted-custom-agent-chip-submits-previous-agent.md)
+  — Pressing Enter on a deleted custom-agent chip in the launcher submits the previously selected agent instead of
+  refusing, which in Replace with mode can retire the running session under the wrong agent (borderline highest/high).
+
+- [`trailing-osc8-mismatch-warning-bypassed-by-u1160-hangul-filler.md`](trailing-osc8-mismatch-warning-bypassed-by-u1160-hangul-filler.md)
+  — Embedding a zero-width Hangul Jungseong Filler (U+1160) in a terminal hyperlink label bypasses the
+  invisible-character strip and suppresses the mismatched-destination warning on hover (borderline highest/high;
+  ordinary hover preview still names the real host).
+
 ## High priority: material UX degradation
 
 - [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
@@ -265,6 +289,78 @@ consequences.
 - [`trailing-tailscale-predictable-tmp-socket-dir-local-dos.md`](trailing-tailscale-predictable-tmp-socket-dir-local-dos.md)
   — On a multi-user machine, another local account can pre-create the predictable /tmp/fhs-<digest> directory and
   permanently block Farhelm from connecting to or setting up that Tailscale host.
+
+- [`trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md`](trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md)
+  — If a user edits a custom agent, clicks Delete to show the confirmation buttons, and then closes Settings and chooses
+  Save in the 'Save changes before closing?' dialog, saving silently fails without displaying any error and leaves
+  Settings stuck open on the delete confirmation (and leaves any remaining dirty Settings forms unsaved).
+
+- [`trailing-custom-agent-settings-delete-confirmation-bypasses-ask-inline.md`](trailing-custom-agent-settings-delete-confirmation-bypasses-ask-inline.md)
+  — The custom-agent Delete confirmation in Settings bypasses the shared inline prompt, so Escape closes Settings
+  instead of cancelling, Cancel loses default focus, and external edits can change the agent while the unnamed
+  confirmation stays open (borderline high/highest; registration ID stays fixed).
+
+- [`trailing-custom-agent-settings-delete-dirty-leaves-ghost-draft.md`](trailing-custom-agent-settings-delete-dirty-leaves-ghost-draft.md)
+  — If a user makes any unsaved edit to a registered custom agent and then deletes it, the deleted agent remains in the
+  Settings sidebar as an unsaved draft instead of being removed; choosing Save when closing Settings then silently
+  re-registers the agent they just deleted.
+
+- [`trailing-custom-agent-settings-external-delete-kicks-user-mid-edit.md`](trailing-custom-agent-settings-external-delete-kicks-user-mid-edit.md)
+  — If a custom agent is deleted from the CLI or another client while the user is editing or saving it in Settings,
+  Farhelm abruptly switches them to the Add custom agent page even though it keeps their draft in the sidebar,
+  interrupting their typing and hiding both the 'deleted — register again' banner and any 404 save failure.
+
+- [`trailing-custom-agents-share-one-remembered-wrapper-prefix.md`](trailing-custom-agents-share-one-remembered-wrapper-prefix.md)
+  — Remembered wrapper prefixes are stored per agent type, but every registered custom agent shares a single bucket.
+
+- [`trailing-custom-to-custom-switch-retains-previous-wrapper-prefix.md`](trailing-custom-to-custom-switch-retains-previous-wrapper-prefix.md)
+  — Switching between two custom agents in the launcher or via templates retains the first agent's wrapper prefix and
+  explicit flag under collapsed More options instead of resetting it (borderline high/highest if a wrapper injects
+  agent-specific context).
+
+- [`trailing-delete-custom-agent-leaks-remembered-wrapper-prefix.md`](trailing-delete-custom-agent-leaks-remembered-wrapper-prefix.md)
+  — When a user launches a custom agent with a wrapper prefix and later deletes that custom agent, Farhelm keeps the
+  wrapper prefix remembered and silently pre-fills it when selecting another or newly registered custom agent.
+
+- [`trailing-launcher-recents-display-literal-custom-instead-of-agent-name.md`](trailing-launcher-recents-display-literal-custom-instead-of-agent-name.md)
+  — In both the launcher's Recent list and typed search results (wide pane and narrow popover alike), every recent setup
+  for a registered custom agent shows the generic label "Custom" instead of that agent's display name or ID, so users
+  cannot visually tell different custom agents apart in recent setups without hovering.
+
+- [`trailing-osc8-mismatch-warning-dropped-for-unicode-lookalike-hyphens.md`](trailing-osc8-mismatch-warning-dropped-for-unicode-lookalike-hyphens.md)
+  — Tightening terminal link label matching dropped the mismatched-destination warning for scheme-less hosts and
+  credential lookalikes using Unicode lookalike hyphens or valid RFC 3986 userinfo (borderline high/highest; ordinary
+  hover preview still names the real host).
+
+- [`trailing-refused-setup-confirmation-persists-planned-paths-on-retargeted-host.md`](trailing-refused-setup-confirmation-persists-planned-paths-on-retargeted-host.md)
+  — Confirming Setup for an already-registered SSH host writes the plan's remote Farhelm binary and state-directory
+  paths into the host's database row before taking the host's provisioning lock.
+
+- [`trailing-restart-with-custom-reporting-and-offer-use-stale-row-launch.md`](trailing-restart-with-custom-reporting-and-offer-use-stale-row-launch.md)
+  — When a user edits a registered custom agent's reporting or resumption setting and uses Restart with to apply it, a
+  conversation ID reported right after the restarted agent starts is judged against the previous launch's reporting
+  setting, and the Restart reply (and listings before launch update completes) report a stale restart offer.
+
+- [`trailing-shared-signin-triggers-auto-update-concurrently-with-manual-action.md`](trailing-shared-signin-triggers-auto-update-concurrently-with-manual-action.md)
+  — When automatic host updates are on (the default) and a remote SSH host needs SSH sign-in, choosing Uninstall or
+  Update on that host shares the waiting Setup sign-in question.
+
+- [`trailing-templates-editor-agent-dropdown-duplicate-keys-without-agent.md`](trailing-templates-editor-agent-dropdown-duplicate-keys-without-agent.md)
+  — Opening a stored template that sets a custom agent ID without an agent type (valid under the helm's save rules)
+  breaks the Agent type dropdown in the Templates editor: it adds a duplicate 'unavailable' entry with the same internal
+  key as the real registered agent, prevents clicking the real registered agent to fix the template, and can panic in
+  debug builds with assistive technology active.
+
+- [`trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md`](trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md)
+  — When a launch template has a custom effort value without an agent type (a valid modifier template) or after
+  switching its agent type from a custom agent to a built-in agent, the Templates editor displays Effort as 'Default'
+  instead of showing the stored custom value, refuses to save, and (when Effort renders as a dropdown) ignores clicking
+  'Default' so the user cannot reset it directly.
+
+- [`trailing-templates-editor-hides-custom-yolo-control-and-saves-false.md`](trailing-templates-editor-hides-custom-yolo-control-and-saves-false.md)
+  — In the Templates editor, adding Approvals to a Command template that declares a custom agent (or opening a stored
+  one whose Approvals was set to 'Keeps safety checks') displays only the static message 'Custom agents always run in
+  YOLO mode.' with no toggle and lets the user save, yet actually saves YOLO as off ('Not YOLO').
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -1469,3 +1565,555 @@ consequences.
 - [`trailing-reply-and-outcome-debug-can-expose-ntfy-topic.md`](trailing-reply-and-outcome-debug-can-expose-ntfy-topic.md)
   — Although ntfy::Settings omits Debug so diagnostics never include the ntfy topic, Reply and operations::Outcome
   derive Debug over raw JSON response bodies that carry it (no production log call currently formats them).
+
+- [`trailing-apply-template-custom-command-yolo-diverges-from-gui.md`](trailing-apply-template-custom-command-yolo-diverges-from-gui.md)
+  — Applying launch templates that declare a custom agent on the Command tab behaves differently in the desktop app and
+  the CLI.
+
+- [`trailing-approval-card-yolo-description-wrong-on-restart-and-prompt.md`](trailing-approval-card-yolo-description-wrong-on-restart-and-prompt.md)
+  — On an agent approval card for a plain Restart of a YOLO session (or a Prompt card whose target session was seen
+  bypassing checks on its status line), the Permissions row says "Farhelm applies the host's YOLO rules to this launch."
+  That is inaccurate in both cases: plain Restart is exempt from the host's YOLO launch rule even on hosts that ask
+  before YOLO launches, and status-line YOLO observation is display-only and never triggers host YOLO rules.
+
+- [`trailing-automatic-signin-tests-omit-shared-prompt-with-auto-updates-on.md`](trailing-automatic-signin-tests-omit-shared-prompt-with-auto-updates-on.md)
+  — The automatic host-update sign-in test suite never tests what happens when a user clicks Update or Uninstall on a
+  host that already has an automatic-update sign-in waiting and answers that shared prompt with automatic updates still
+  turned on (the default setting), allowing a race between the automatic update resuming and the user's manual Update or
+  Uninstall to go undetected.
+
+- [`trailing-brick-test-cleanup-skips-p1-retry-and-preflight-evidence.md`](trailing-brick-test-cleanup-skips-p1-retry-and-preflight-evidence.md)
+  — During a release brick test, if a retained provider-retry archive for a P1 check (such as old-session survival or
+  remote-host uninstall) goes missing or is modified on disk, the P1 verdict degrades to could not run, yet ordinary
+  pair cleanup still deletes the live test VMs instead of keeping them so the operator can recover or inspect the
+  evidence.
+
+- [`trailing-brick-test-dead-end-misses-deleted-p0-automation-failure.md`](trailing-brick-test-dead-end-misses-deleted-p0-automation-failure.md)
+  — If an earlier P0 test pair finishes recording its last check and then hits an interruption or reconciliation failure
+  before exiting, releasing that pair and continuing to the installer pair causes the installer pair to fail with a
+  harness error at P2 instead of skipping P2 cleanly.
+
+- [`trailing-brick-test-exiting-stdio-proxy-mid-scan-fails-remove.md`](trailing-brick-test-exiting-stdio-proxy-mid-scan-fails-remove.md)
+  — During the brick test's Linux remote Remove check, if the closing SSH stdio proxy exits between two `/proc` reads
+  while taking the post-Remove snapshot, the probe keeps its PID in `farhelm_pids` without recognizing it as a stdio
+  proxy.
+
+- [`trailing-brick-test-fixture-probe-forwards-sys-executable.md`](trailing-brick-test-fixture-probe-forwards-sys-executable.md)
+  — When the release brick test uses a separate macOS base image for the headless remote Mac peer, the clean-fixture
+  probe can fail to start over SSH even when the peer has Python installed at the documented path, because the GUI Mac
+  sends its own resolved Python binary path instead of the configured path.
+
+- [`trailing-brick-test-fixture-probe-launchctl-list-vs-user-domain.md`](trailing-brick-test-fixture-probe-launchctl-list-vs-user-domain.md)
+  — The Mac release-verifier fixture probe checks remote-mac launchd jobs with legacy launchctl list instead of
+  launchctl print user/<uid> (unverified after investigation: whether an orphaned user-domain job without a plist
+  escapes launchctl list on current macOS remains unverified).
+
+- [`trailing-brick-test-guest-ui-p1-remote-mac-bonus-preflight.md`](trailing-brick-test-guest-ui-p1-remote-mac-bonus-preflight.md)
+  — In the release brick-test UI bridge, `p1-remote-mac` is still misclassified as a bonus pass during
+  `native-preflight` because `guest_ui.py` checks `not pass_id.startswith('p0-')` instead of `is_bonus_pass(pass_id)`.
+
+- [`trailing-brick-test-linux-remote-start-accepts-empty-sessions.md`](trailing-brick-test-linux-remote-start-accepts-empty-sessions.md)
+  — The release brick test's Linux remote host Remove and Uninstall checks accept a starting remote database that
+  contains zero sessions, so an empty or freshly recreated sessions table after Uninstall can pass the retained-data
+  check instead of failing the starting premise.
+
+- [`trailing-brick-test-machine-profile-conflicting-mac-address.md`](trailing-brick-test-machine-profile-conflicting-mac-address.md)
+  — A brick-test machine profile can name the same macOS base VM for both the GUI Mac and the headless remote Mac while
+  giving two conflicting hardware MAC addresses; profile loading accepts this contradiction, so the run only fails hours
+  later after all P0 pairs finish and the remote Mac pass starts.
+
+- [`trailing-brick-test-old-sessions-nonexistent-unavailable-status.md`](trailing-brick-test-old-sessions-nonexistent-unavailable-status.md)
+  — The brick-test prompt for the `old-sessions` checkpoint tells the guest tester that if `terminal_hosts` or
+  `remote_terminal_hosts` returns `status unavailable`, it should report `could-not-run` with its detail.
+
+- [`trailing-brick-test-old-sessions-stdout-prints-fail.md`](trailing-brick-test-old-sessions-stdout-prints-fail.md) —
+  During a release brick test, if the guest tester reports `fail` on the previous-release `old-sessions` check, the
+  coordinator saves it as `could-not-run` in workflow state but prints `"status": "fail"` in its live progress line,
+  which can mislead an operator or supervising agent reporting live progress while the pair is still running.
+
+- [`trailing-brick-test-p1-automation-failure-drops-unverified-fail.md`](trailing-brick-test-p1-automation-failure-drops-unverified-fail.md)
+  — During a release brick test, if a P1 check hits a guest automation failure after reporting a product failure and the
+  host import then fails (for example because the guest event log exceeded the 96 MiB export limit and was omitted from
+  the archive), the coordinator discards the unverified product-failure claim instead of flagging the run as
+  promotion_blocked_pending_review.
+
+- [`trailing-brick-test-p1-permission-block-swallowed.md`](trailing-brick-test-p1-permission-block-swallowed.md) — In
+  the release brick test, if the guest tester hits an OS/CUA/authentication permission prompt during UI inspection
+  before running any fixed command operation, the executor turns `permission-block` into an `automation-failure`.
+
+- [`trailing-brick-test-plain-update-relaunch-requires-local-supervisor.md`](trailing-brick-test-plain-update-relaunch-requires-local-supervisor.md)
+  — The release brick test's non-managed instruction envelope for P0 relaunches still tells the guest tester to wait for
+  the upgraded local supervisor during `update-relaunch` instead of deferring that check to `local-supervisor-upgrade`,
+  and the new unit test only checks the managed envelope.
+
+- [`trailing-brick-test-record-settle-breaks-retry-unavailable.md`](trailing-brick-test-record-settle-breaks-retry-unavailable.md)
+  — During a release brick test run in full, stop-after-P1, or stop-after-P2 scope, the documented
+  `brick_test.py retry-unavailable` recovery command always refuses to retry any P0 checkpoint on the installer-upgrade
+  pair (`p0-installer-upgrade`), forcing the operator to discard the pair and start over after repairing a fixture
+  prerequisite.
+
+- [`trailing-brick-test-require-no-failure-allows-rerun-on-failed-p0.md`](trailing-brick-test-require-no-failure-allows-rerun-on-failed-p0.md)
+  — After a P0 check fails or records `could-not-run` on a live P0 test pair, running `brick_test.py test` again on that
+  pair is no longer refused; if the failure was on the last in-scope check it exits cleanly as `complete` and wipes the
+  failed attempt metadata needed for `retry-unavailable`, and if earlier it stamps a spurious harness
+  `automation_failure` on the next check.
+
+- [`trailing-brick-test-unavailable-retry-p2-stale-dict.md`](trailing-brick-test-unavailable-retry-p2-stale-dict.md) —
+  The brick-test coordinator unit test meant to guard against retrying a P2 live feedback send never actually tests P2;
+  it tests P1 twice because it edits a detached in-memory copy of the workflow state after the first iteration reloads
+  from disk.
+
+- [`trailing-check-template-shape-allows-custom-agent-yolo-false.md`](trailing-check-template-shape-allows-custom-agent-yolo-false.md)
+  — Both the CLI and the desktop Templates editor allow saving a Command launch template that declares a custom agent
+  with YOLO turned off, creating a saved template that Farhelm always refuses when you try to apply it (and in the
+  desktop editor the Approvals toggle is hidden behind a static YOLO message, so the user cannot even see or fix the
+  saved non-YOLO flag without removing the field).
+
+- [`trailing-check-template-shape-skips-validate-model-on-custom-agent.md`](trailing-check-template-shape-skips-validate-model-on-custom-agent.md)
+  — Saving a custom-agent launch template from the CLI or API accepts invalid model values (such as uppercase letters,
+  spaces, control characters, or empty strings) even though Farhelm refuses those same values in the desktop Templates
+  editor and whenever the template is applied.
+
+- [`trailing-cli-effort-hyphen-and-spec-drift.md`](trailing-cli-effort-hyphen-and-spec-drift.md) — CLI --effort rejects
+  leading-hyphen custom values as unrecognized flags while --effort=-val succeeds, and SPEC_impl.md still describes
+  closed-set parsing (typo guidance on --effort was separately fixed post-tip in #4752).
+
+- [`trailing-clone-replace-with-prefills-guarded-for-unset-permissions.md`](trailing-clone-replace-with-prefills-guarded-for-unset-permissions.md)
+  — When you open Clone or Replace with on an older session whose permission mode was never recorded (for example, a
+  cached session or one on a remote host whose supervisor has not been upgraded yet, or a session with an unsupported
+  stored permission) for an agent that defaults to Guarded, the launcher prefills Guarded instead of YOLO — even though
+  the session list, session summary, plain Replace, and Restart with all classify that same session as YOLO.
+
+- [`trailing-codex-dual-agent-delivery-tests-raw-substring.md`](trailing-codex-dual-agent-delivery-tests-raw-substring.md)
+  — Several credential-delivery tests that share one endpoint token between Claude and Codex either check only whether a
+  token appears anywhere in the raw combined credentials file after recovery, or check only that `codex_endpoint` is
+  absent without verifying `FARHELM_CODEX_ENDPOINT_TOKEN` was also stripped.
+
+- [`trailing-codex-fixture-and-notifications-stale-corridor-comments.md`](trailing-codex-fixture-and-notifications-stale-corridor-comments.md)
+  — Comments in the Codex test fixture and supervisor notification enum still describe the removed two-Codex-image
+  corridor refusal rule and Codex-only ancestor restriction, which can mislead future readers about how Codex process
+  attribution actually works.
+
+- [`trailing-codex-renamed-executable-missing-admission-and-e2e-test.md`](trailing-codex-renamed-executable-missing-admission-and-e2e-test.md)
+  — The change that enables Restart to resume Codex sessions launched from renamed or versioned executables adds no
+  admission or end-to-end test using a renamed Codex executable.
+
+- [`trailing-codex-subscription-replacement-suppresses-legacy-cleanup-warning.md`](trailing-codex-subscription-replacement-suppresses-legacy-cleanup-warning.md)
+  — When a host upgraded from an older Farhelm still has a failing legacy Codex settings cleanup (leaving the old
+  `farhelm` provider selected in `~/.codex/config.toml` or leaving `config.toml` unparseable), replacing a Codex
+  Subscription login in Settings -> Credentials reports a clean save with no failure for that host, even though Codex on
+  that host still cannot use the replaced subscription login until the cleanup succeeds.
+
+- [`trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md`](trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md)
+  — The end-to-end test that claims to verify a custom agent parent can correct a child-first conversation report would
+  still pass even if custom-agent ancestor correction and its user-facing correction notification were completely
+  broken.
+
+- [`trailing-custom-agent-draft-retains-stale-builtin-effort.md`](trailing-custom-agent-draft-retains-stale-builtin-effort.md)
+  — When cloning, replacing, or loading a recent setup for a custom agent whose effort matches a built-in effort word
+  (such as "high" or "low"), or switching from a built-in agent to a custom agent before the model catalog loads,
+  editing or clearing Effort in the launcher leaves a hidden stale effort behind.
+
+- [`trailing-custom-agent-id-matching-model-family-hidden-without-catalog.md`](trailing-custom-agent-id-matching-model-family-hidden-without-catalog.md)
+  — If you register a custom agent with an ID that happens to be a model family word (such as `auto`, `sol`, `flash`,
+  `spark`, or `luna`), typing that ID in the launcher's unlabelled search shows "Loading models…" while the model
+  catalog is loading and "No model matches" if the model catalog failed to load, hiding the registered custom agent.
+
+- [`trailing-custom-agent-model-effort-error-duplicate-element-id.md`](trailing-custom-agent-model-effort-error-duplicate-element-id.md)
+  — When a user enters invalid values in both the Model and Effort fields of a custom agent in the session launcher at
+  the same time, both validation status lines mount under the same UI element ID, which collides in the accessibility
+  tree and triggers a debug panic when assistive technology is active.
+
+- [`trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md`](trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md)
+  — For a registered custom agent session created without session resumption enabled, the disabled Restart with menu
+  item tells the user "Custom sessions can't be resumed" instead of explaining that this launch has no stored resume
+  command and pointing them to Clone or Replace with.
+
+- [`trailing-custom-agent-settings-busy-save-button-and-saw-saved-restore.md`](trailing-custom-agent-settings-busy-save-button-and-saw-saved-restore.md)
+  — While a custom-agent save is in flight, a pushed catalog update can disable the busy Save button (causing it to drop
+  keyboard focus) or overwrite the fields being saved with a subsequent external update.
+
+- [`trailing-custom-agent-settings-dirty-close-prompt-collapses-multiple-agents.md`](trailing-custom-agent-settings-dirty-close-prompt-collapses-multiple-agents.md)
+  — When two or more custom-agent pages have unsaved changes, the 'Save changes before closing?' prompt lists only a
+  single 'Custom agent' and jumps Settings to whichever custom-agent draft sorts first rather than staying on the page
+  the user was viewing.
+
+- [`trailing-custom-agent-settings-launch-preview-breaks-bidi-isolation.md`](trailing-custom-agent-settings-launch-preview-breaks-bidi-isolation.md)
+  — If a custom agent's command contains right-to-left characters, the Start and Resume command previews in Settings can
+  visually reorder Farhelm's --model, --effort, and --resume flags with the command text instead of keeping them
+  isolated.
+
+- [`trailing-custom-agent-settings-omits-per-field-unsaved-dots.md`](trailing-custom-agent-settings-omits-per-field-unsaved-dots.md)
+  — Editing Display name, ID, Command, or capability checkboxes on a custom-agent page marks the sidebar row and footer
+  as unsaved, but never shows the unsaved dot next to any edited field.
+
+- [`trailing-custom-agent-settings-save-delete-collapses-retired-and-missing-store.md`](trailing-custom-agent-settings-save-delete-collapses-retired-and-missing-store.md)
+  — When saving or deleting a custom agent cannot start because the helm session is resetting or unavailable, Settings
+  misleadingly reports 'Another change to this custom agent is in progress' (or fails silently with no error when no
+  operation store exists), and when the key is busy it ignores Farhelm's shared busy-reason wording.
+
+- [`trailing-custom-agent-settings-test-locks-in-kick-and-misses-dirty-delete.md`](trailing-custom-agent-settings-test-locks-in-kick-and-misses-dirty-delete.md)
+  — The Settings test for custom-agent lifecycle locks in an unhelpful navigation jump that kicks the user off their
+  draft page when an external delete arrives mid-save, and only exercises Delete on a clean draft, missing the bug where
+  confirming Delete on a modified custom agent leaves a ghost entry in the Settings sidebar.
+
+- [`trailing-custom-agent-validate-model-effort-allows-leading-hyphen.md`](trailing-custom-agent-validate-model-effort-allows-leading-hyphen.md)
+  — Custom agent model and effort values can begin with a hyphen (for example `--resume` or `-v`), which Farhelm passes
+  as separate `--model <value>` and `--effort <value>` arguments.
+
+- [`trailing-custom-agent-validate-omits-display-name-and-command-length-caps.md`](trailing-custom-agent-validate-omits-display-name-and-command-length-caps.md)
+  — Registering a custom agent accepts arbitrarily long display names and executable paths without a size limit.
+
+- [`trailing-custom-pin-corrected-text-omits-prior-restart-consequence.md`](trailing-custom-pin-corrected-text-omits-prior-restart-consequence.md)
+  — When a custom agent's parent process corrects a conversation first reported by a child process, the session
+  notification omits explaining what an earlier Restart would have resumed (unlike the other five pinned agents) and
+  says "its parent" even when a higher recorded ancestor makes the correction.
+
+- [`trailing-custom-report-forwarder-lock-test-lacks-witness.md`](trailing-custom-report-forwarder-lock-test-lacks-witness.md)
+  — The integration test for running a custom agent's conversation reporter through the app forwarder during an update
+  or uninstall does not actually prove that the forwarder prevented the CLI from starting, so a regression that bypassed
+  the lock or failed before locking would still pass.
+
+- [`trailing-docs-github-checkouts-stale-single-dir-cache-path.md`](trailing-docs-github-checkouts-stale-single-dir-cache-path.md)
+  — The repository's managed-checkouts guide still says each host stores a repository's cache at
+  `<supervisor-state-dir>/repo-cache/<owner>/<name>.git`, even though Farhelm now stores caches in separate
+  `<name>.git:gen-<uuid>` directories selected by `<name>.git:current`.
+
+- [`trailing-drift-grok-home-overwritten-by-login-shell-rc.md`](trailing-drift-grok-home-overwritten-by-login-shell-rc.md)
+  — If a maintainer configures a custom `GROK_HOME` in their login shell startup files (`~/.profile`, `~/.bashrc`, or
+  `~/.zshrc`), the Grok drift test launches Grok against the maintainer's real `GROK_HOME` instead of the private mirror
+  — silently exercising whatever hook file is in the real configuration (or failing to capture) rather than the hook
+  file installed by the build under test.
+
+- [`trailing-drift-grok-trust-retry-resends-printable-y.md`](trailing-drift-grok-trust-retry-resends-printable-y.md) —
+  In the opt-in Grok drift test, redraw detection and the 3-second retry can resend printable 'y' into Grok's composer
+  ahead of the test prompt without the echo check noticing (unverified after investigation: live Grok trust-dismissal
+  timing and input buffering are unverified).
+
+- [`trailing-drift-harness-skips-private-config-finish-on-error.md`](trailing-drift-harness-skips-private-config-finish-on-error.md)
+  — During a real-agent drift test for Grok or Antigravity, if session creation or initial terminal attachment fails,
+  the harness skips both the check that the maintainer's real hook files were untouched and the copy-back of any vendor
+  config/login files rewritten before the failure.
+
+- [`trailing-drift-private-config-copy-back-aborts-first-error.md`](trailing-drift-private-config-copy-back-aborts-first-error.md)
+  — If copying back one rewritten file during drift-test cleanup fails (for instance, because a symlinked dotfile
+  resolves to a read-only location or setting permissions/renaming fails), cleanup aborts immediately: any staged
+  temporary file is left behind in the maintainer's real directory, other rewritten files (such as a refreshed login
+  token) are dropped instead of copied back, and the final check that real hook files were untouched is skipped.
+
+- [`trailing-drift-runner-list-upgrade-only-conflict.md`](trailing-drift-runner-list-upgrade-only-conflict.md) — Passing
+  `--list` together with `--upgrade-only` to the drift test runner silently ignores `--list` and upgrades all installed
+  agent CLIs instead of rejecting the conflicting options or listing the cases.
+
+- [`trailing-grok-drift-test-uses-hook-witness-fresh-after-noop-acks.md`](trailing-grok-drift-test-uses-hook-witness-fresh-after-noop-acks.md)
+  — The opt-in real-agent drift test for Grok can now accept a quietly ignored turn callback on the resumed turn as
+  proof that the restarted Grok session reported its conversation, instead of verifying that the acknowledged report
+  actually matched the resumed conversation.
+
+- [`trailing-guarded-plain-replace-live-read-and-spec-contradiction.md`](trailing-guarded-plain-replace-live-read-and-spec-contradiction.md)
+  — Answering "Replace as guarded instead" on a plain Replace YOLO confirmation reads the session's live store entry at
+  click time rather than what was drawn on screen, so an undrawn update can change the replacement's title or directory,
+  and if the row left the filtered session list right before the press the question closes and does nothing with no
+  notice.
+
+- [`trailing-harness-upgrades-https-redirect-downgrade.md`](trailing-harness-upgrades-https-redirect-downgrade.md) — The
+  drift runner's fallback installer downloader follows HTTPS-to-HTTP/FTP redirects before piping to bash (other by
+  established-route rule because neither hardcoded HTTPS URL is known to redirect; would cross into highest if a
+  redirect downgrade is reached).
+
+- [`trailing-harness-upgrades-orphans-updater-grandchildren.md`](trailing-harness-upgrades-orphans-updater-grandchildren.md)
+  — If a vendor agent updater or fallback shell installer hangs until its timeout, or the drift runner is stopped with
+  SIGTERM during the upgrade phase, only the top-level shell/wrapper process is killed while its download or extraction
+  subprocesses keep running and can mutate the agent binary while the drift test runs.
+
+- [`trailing-harness-upgrades-unhandled-http-exception.md`](trailing-harness-upgrades-unhandled-http-exception.md) —
+  When upgrading an agent CLI falls back to downloading its vendor installer (used for Goose and Cursor) and the
+  download hits a truncated response or malformed HTTP reply, the drift test runner crashes with an unhandled traceback
+  instead of recording that agent's upgrade as failed and continuing with the remaining agents.
+
+- [`trailing-hidden-trash-button-retains-animation-handles.md`](trailing-hidden-trash-button-retains-animation-handles.md)
+  — If the Trash button stops being shown (because the user opens the Hosts panel or marks sessions) while its archive
+  wiggle or emptying bob is running, Farhelm does not release that animation handle while the button is hidden.
+
+- [`trailing-host-removal-replies-200-before-signin-cancel-settles.md`](trailing-host-removal-replies-200-before-signin-cancel-settles.md)
+  — When you remove an SSH host while a Setup, Update, or Uninstall sign-in question is open, the helm can reply that
+  the removal succeeded slightly before the background sign-in task has actually closed the question, stopped the SSH
+  child, and recorded cancellation.
+
+- [`trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md`](trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md)
+  — When the Agent tab holds a deleted custom agent (for example from Clone, Replace with, a recent setup, a template,
+  or a deletion while the launcher is open), no harness chip appears selected and the deleted agent's ID is not shown
+  anywhere in the form, even though the form still shows custom-agent fields and refuses launch with "The selected
+  custom agent is no longer registered".
+
+- [`trailing-launcher-choose-effort-omits-sync-fields.md`](trailing-launcher-choose-effort-omits-sync-fields.md) — When
+  resetting a custom agent's effort to default via launcher search (`effort:default`), the launcher's custom effort text
+  field is never resynchronized with the draft, so the visible text input can retain stale custom effort text.
+
+- [`trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md`](trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md)
+  — When switching from a safer agent (such as Guarded Claude or Codex) to a registered custom agent (which always
+  counts as YOLO), the red permission-escalation banner appears at the top of the launcher, but the custom agent's YOLO
+  permission control does not show the required thick red escalation outline.
+
+- [`trailing-launcher-footer-test-checks-stale-bg2-token.md`](trailing-launcher-footer-test-checks-stale-bg2-token.md) —
+  The test that guards against the session launcher's Reset button taking a neutral button fill no longer catches that
+  regression, because it still checks for the pre-restyle background color rather than the current neutral button fill.
+
+- [`trailing-launcher-search-custom-agent-rename-refused-as-stale.md`](trailing-launcher-search-custom-agent-rename-refused-as-stale.md)
+  — If a registered custom agent is renamed while it is highlighted in the launcher's search results, or between drawing
+  a search result and clicking it, the launcher drops the selection and warns that the choice is no longer available
+  even though that agent is still present and matches the search.
+
+- [`trailing-launcher-search-effort-default-misses-custom-effort.md`](trailing-launcher-search-effort-default-misses-custom-effort.md)
+  — When a registered custom agent is selected in the session launcher and has a typed effort, choosing "Effort:
+  Default" via composer search (e.g. `effort:default`) appears to accept the choice and clears the search box, but
+  leaves the custom agent's effort unchanged and still sends it at launch.
+
+- [`trailing-launcher-search-recents-omits-custom-agent-id-and-name.md`](trailing-launcher-search-recents-omits-custom-agent-id-and-name.md)
+  — Typing a registered custom agent's ID or display name in launcher search (including `recent:<name>`) does not find
+  recent setups for that custom agent; recent setups only match the literal word `custom`, their folder/repository, or
+  their model.
+
+- [`trailing-launcher-target-names-command-custom-agent-outside-restart-with.md`](trailing-launcher-target-names-command-custom-agent-outside-restart-with.md)
+  — When creating, cloning, or replacing a session on the Command tab with a registered custom agent declared, the main
+  action's accessible name includes the custom agent's name ("Launch Command · <name> · <host> · <folder>"), whereas
+  declaring any built-in agent or generic Custom omits the agent name ("Launch Command · <host> · <folder>").
+
+- [`trailing-light-theme-primary-and-danger-buttons-identical-hover-held.md`](trailing-light-theme-primary-and-danger-buttons-identical-hover-held.md)
+  — In Light appearance, pressing and holding a primary or destructive button produces no visual change from hovering
+  it, because both states use the exact same color.
+
+- [`trailing-mac-reach-omits-date-for-bootout.md`](trailing-mac-reach-omits-date-for-bootout.md) — Remote Mac setup,
+  Update, and uninstall are specified to refuse during inspection if any command their shell path requires is missing
+  from the host's PATH.
+
+- [`trailing-mac-uninstall-stop-discards-absent.md`](trailing-mac-uninstall-stop-discards-absent.md) — When retrying a
+  remote Mac uninstall after the supervisor job and its terminal hosts are already gone (for example after a later
+  directory-removal step failed), the stop step is reported as completed instead of unchanged/skipped, unlike Linux
+  uninstall.
+
+- [`trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md`](trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md)
+  — In Restart with for a custom-agent session that has no captured conversation, if the custom agent's registration has
+  resumption disabled (or is deleted), the More options disclosure is locked open with "A setting here is required or
+  needs attention", yet shows neither the conversation field nor any error inside it.
+
+- [`trailing-printed-file-paths-consume-adjacent-osc8-cells.md`](trailing-printed-file-paths-consume-adjacent-osc8-cells.md)
+  — When a program hyperlink (including one whose cells are concealed) sits immediately beside plain terminal text with
+  no space between them — on the same row, across a soft wrap, or on the second row of a hard-cut path — hovering the
+  plain text can turn the combined text into a clickable file path that incorporates the hyperlink's hidden text and
+  underlines across the hyperlink's cells, even though the program hyperlink is supposed to own those cells.
+
+- [`trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md`](trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md)
+  — A registered custom agent with a long display name produces a chip in the session launcher's Custom group that
+  cannot shrink or ellipsize to the dialog width, overflowing and getting clipped at the right edge of the launcher.
+
+- [`trailing-refresh-custom-capabilities-treats-unloaded-collection-as-deleted.md`](trailing-refresh-custom-capabilities-treats-unloaded-collection-as-deleted.md)
+  — If the helm's custom-agents catalog is unavailable or has not loaded yet, the launcher treats any selected custom
+  agent (on the Agent or Command tab) as deleted—blocking launch with "no longer registered" / "was deleted" messages,
+  hiding or erroring its conversation-ID field, and prompting the user to replace a registration that was not actually
+  deleted.
+
+- [`trailing-refused-no-confirm-remove-during-signin-loses-error-on-ready.md`](trailing-refused-no-confirm-remove-during-signin-loses-error-on-ready.md)
+  — With "Remove hosts without asking" enabled, if you click Remove on an SSH host while a Setup, Update, or Uninstall
+  sign-in finishes and the helm refuses or times out the Remove, the refusal message disappears immediately before you
+  can see it because the desktop replays the pending setup/update/uninstall right away and clears the host's error slot.
+
+- [`trailing-reminder-frame-cfg-test-branch-in-render-path.md`](trailing-reminder-frame-cfg-test-branch-in-render-path.md)
+  — The pending-update reminder screenshot test relies on a test-only compile branch inside the rendering path,
+  violating the project's rule that tests and screenshot captures render through the same production code path that
+  ships.
+
+- [`trailing-repo-cache-sweep-single-error-aborts-all-remaining-repos.md`](trailing-repo-cache-sweep-single-error-aborts-all-remaining-repos.md)
+  — When a host's supervisor starts up, if cleaning up an old repository cache directory for one repository fails (for
+  example, because a leftover Git process is still writing inside it), startup cleanup stops immediately and skips
+  cleaning up caches and prepared checkouts for every other repository on that host until the supervisor restarts again.
+
+- [`trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md`](trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md)
+  — When you open Restart with on an existing custom-agent session after turning off "Supports resumption" for that
+  custom agent in Settings, the launcher gives contradictory or broken behavior: if the session has no captured
+  conversation, it tells you "Enter a conversation to restart" even though it hides the Conversation ID input and cannot
+  resume; if the session has a captured conversation, Restart stays enabled and submits a request that the
+  helm/supervisor then rejects.
+
+- [`trailing-session-launch-validate-new-skips-effort-and-custom-model.md`](trailing-session-launch-validate-new-skips-effort-and-custom-model.md)
+  — Widening effort on stored and transmitted launches to accept custom free-text strings allows invalid or arbitrary
+  effort text (including control characters or unknown words on built-in agents) to pass launch-shape validation when
+  loading stored sessions or validating a session launch directly.
+
+- [`trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md`](trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md)
+  — Sessions launched with a registered custom agent show the generic label "Custom agent" in both the session row's
+  actions menu header and the quick switcher's agent column, instead of the custom agent's current display name (or its
+  saved ID after the registration is deleted).
+
+- [`trailing-session-toolbar-golden-height-clips-on-macos.md`](trailing-session-toolbar-golden-height-clips-on-macos.md)
+  — The screenshot golden for the session toolbar is sized only for Linux's 30-pixel top row, so capturing it on macOS
+  clips the top and bottom of the taller 48-pixel title-band rows without failing its readiness check.
+
+- [`trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md`](trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md)
+  — When a custom agent is deleted externally while the user has unsaved edits, the 'This registration was deleted.
+  Register it again to keep these edits.' banner is omitted from the accessibility tree so assistive technology never
+  exposes or announces it.
+
+- [`trailing-settings-custom-agent-duplicate-host-sentence-id.md`](trailing-settings-custom-agent-duplicate-host-sentence-id.md)
+  — Whenever a registered custom agent's Settings page is open, both its sidebar navigation row and its page heading
+  emit a label with the same flat element ID in GPUI's driver node list, violating Farhelm's unique-ID rule for host
+  sentences and making element-ID lookups in tests and the gpui-agent automation bridge ambiguous.
+
+- [`trailing-settings-custom-agent-nav-tooltip-omits-bidi-isolation.md`](trailing-settings-custom-agent-nav-tooltip-omits-bidi-isolation.md)
+  — Hovering a custom agent's row in the Settings sidebar shows a tooltip that embeds the agent's display name directly
+  in a plain string instead of isolating its text direction.
+
+- [`trailing-settings-custom-agents-unavailable-collection-silently-appears-empty.md`](trailing-settings-custom-agents-unavailable-collection-silently-appears-empty.md)
+  — If the helm fails to read the custom-agents catalog (for example due to a database error or a corrupted catalog
+  row), Settings hides the failure and shows an empty Custom agents section with only '+ Add custom agent', leaving the
+  user with no explanation for why their agents disappeared or why re-adding an existing ID fails as already taken.
+
+- [`trailing-settings-heading-lacks-min-w-0-and-truncate-for-long-custom-agent-name.md`](trailing-settings-heading-lacks-min-w-0-and-truncate-for-long-custom-agent-name.md)
+  — Opening a custom agent with a long display name in Settings can push the page's scope label ("Every host on this
+  helm") past the right edge of the dialog or expand the pinned heading vertically over multiple lines, reducing space
+  for the scrollable form.
+
+- [`trailing-settings-search-omits-registered-custom-agent-sections.md`](trailing-settings-search-omits-registered-custom-agent-sections.md)
+  — Searching in Settings for a registered custom agent's display name or ID always returns no matches and hides every
+  registered custom agent from the Settings sidebar, even though each registered custom agent is its own Settings
+  section.
+
+- [`trailing-spec-impl-contradiction-orphan-discovery-local-read-bounds.md`](trailing-spec-impl-contradiction-orphan-discovery-local-read-bounds.md)
+  — The implementation specification contradicts itself about whether listing Tensorlake sandboxes not on this helm
+  bounds its local database reads, which can mislead future changes to discovery timeouts.
+
+- [`trailing-spec-md-contradicts-send-handoff-auto-opening-auto-update-popover.md`](trailing-spec-md-contradicts-send-handoff-auto-opening-auto-update-popover.md)
+  — The product specification contradicts itself on when an automatic host update's SSH sign-in popover can open on its
+  own: one section says it opens only when you press **Answer** (or run a manual action on that host), while the
+  keyboard-focus section and the desktop app allow sending an answer to any other host's SSH question to immediately
+  open and focus an already-waiting automatic Update Setup question.
+
+- [`trailing-spec-md-security-still-describes-ongoing-codex-merges.md`](trailing-spec-md-security-still-describes-ongoing-codex-merges.md)
+  — The Security section of SPEC.md contradicts the Topology section by still stating that Farhelm performs ongoing
+  Codex settings merges that can grow ~/.codex/config.toml past 1 MiB and cause later merges to refuse the file.
+
+- [`trailing-spec-md-status-contradicts-codex-pin-corrected-text.md`](trailing-spec-md-status-contradicts-codex-pin-corrected-text.md)
+  — The Status section of SPEC.md still states the pre-positional wording for Codex pin-correction notifications (a
+  nested process of that agent, "would have resumed", and "the agent process that started it"), contradicting the
+  updated Codex notification text shipped in #4728.
+
+- [`trailing-specs-and-core-omit-grok-and-custom-from-pin-correction-lists.md`](trailing-specs-and-core-omit-grok-and-custom-from-pin-correction-lists.md)
+  — The product and implementation specs still list only Claude, Codex, Muse, and Antigravity for pin-correction
+  notifications and omit custom agents from several positional-attribution and version-0 lists, even though Grok and
+  custom agents now use the same positional process pin and post their own correction notifications.
+
+- [`trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md`](trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md)
+  — A launch template on the Agent tab that selects the generic Custom agent type without naming a registered custom
+  agent ID can be marked as the quick-launch template (⚡) or treated as ready to quick-launch, even though Farhelm
+  cannot launch an Agent-tab custom session without a registered agent ID.
+
+- [`trailing-supervisor-positional-pin-tests-omit-custom-agent.md`](trailing-supervisor-positional-pin-tests-omit-custom-agent.md)
+  — Custom agents share the supervisor's positional process-pin admission, ancestor-correction notification, and
+  named-restart capture-clearing code, but none of those supervisor behaviors are tested for custom agents.
+
+- [`trailing-template-apply-custom-to-custom-misses-switched-agent.md`](trailing-template-apply-custom-to-custom-misses-switched-agent.md)
+  — If you switch in the launcher from a guarded agent (like Codex) to a custom agent — raising the red
+  permission-escalation banner with Undo — and then apply a launch template that selects a different custom agent, the
+  old escalation banner stays open instead of closing.
+
+- [`trailing-template-fields-implied-kind-ignores-custom-agent.md`](trailing-template-fields-implied-kind-ignores-custom-agent.md)
+  — A launch template saved through the API with only a custom agent ID (without also setting launch kind or agent type)
+  does not infer a launch kind when opened in the desktop Templates editor, causing it to display under "Don't switch"
+  with a bogus "registration unavailable" agent row that refuses saving.
+
+- [`trailing-template-replay-drops-custom-agent-effort-switching-to-builtin.md`](trailing-template-replay-drops-custom-agent-effort-switching-to-builtin.md)
+  — Applying a launch template (or quick-launch sequence) that switches from a custom agent with a standard effort word
+  such as `high` to a built-in agent like Claude drops the effort to Default in the desktop launcher, whereas the CLI
+  keeps `high`.
+
+- [`trailing-templates-editor-allows-generic-custom-on-agent-template.md`](trailing-templates-editor-allows-generic-custom-on-agent-template.md)
+  — Switching a Command template with generic 'Custom' to an Agent template shows 'Custom (not offered)' in the Agent
+  type dropdown, yet the editor still allows saving it without an error.
+
+- [`trailing-tensorlake-504-cleanup-finishes-before-outage-leaves-stale-row.md`](trailing-tensorlake-504-cleanup-finishes-before-outage-leaves-stale-row.md)
+  — If you delete a remembered leftover sandbox while Tensorlake's sandbox listing is failing or timing out, and the
+  deletion takes just over 20 seconds (so Settings reports that cleanup carries on) and then succeeds before the
+  follow-up list check finishes failing, the already-deleted sandbox stays in the Settings list with an active Delete
+  button until listing recovers.
+
+- [`trailing-tensorlake-add-tests-misleading-codex-null-docstring.md`](trailing-tensorlake-add-tests-misleading-codex-null-docstring.md)
+  — A test docstring in Tensorlake setup tests inaccurately claims a fresh host leaves its Codex cleanup stamp unset
+  because it has no earlier Codex settings write, when in fact a fresh host records `Cleared` as soon as Codex
+  reconciliation runs (on connect) and only stays `null` here because setup skips Codex reconciliation before the
+  protocol-87 hello.
+
+- [`trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md`](trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md)
+  — When you replace your saved Tensorlake API key with a different key in Settings without clicking Clear first, the
+  list of sandboxes not on this helm keeps showing leftover sandboxes from the old key while the new check runs — and
+  keeps showing them indefinitely with active Delete buttons if the new key fails to list sandboxes (for example, if the
+  new key is invalid or Tensorlake is unreachable).
+
+- [`trailing-tensorlake-orphan-cleanup-retry-falsely-succeeds-after-key-change.md`](trailing-tensorlake-orphan-cleanup-retry-falsely-succeeds-after-key-change.md)
+  — If a leftover sandbox cleanup failed (for example, snapshot deletion failed) and you then switch Settings to a
+  different Tensorlake account's API key, the old account's unfinished cleanup stays in Settings; clicking Retry cleanup
+  appears to succeed and removes the row, even though the old account's snapshots were never deleted and may keep
+  billing.
+
+- [`trailing-tensorlake-sandboxes-inline-delete-prompt-survives-key-change.md`](trailing-tensorlake-sandboxes-inline-delete-prompt-survives-key-change.md)
+  — If you open the inline Delete confirmation for a leftover sandbox in Settings → Tensorlake and then clear or replace
+  your Tensorlake API key (either on that page or in Settings → Credentials), the confirmation prompt for the old key's
+  sandbox stays open — keeping the Sandboxes section visible even after Clear, or letting you confirm deleting an
+  old-key sandbox under the new key.
+
+- [`trailing-test-worker-disk-guard-df-du-edge-cases.md`](trailing-test-worker-disk-guard-df-du-edge-cases.md) — On a
+  full ext4 test worker, or if `df`/`du` fails after cleanup (for example when a run is stopped mid-cleanup), the
+  worker's disk guard can misread negative available space as positive free GB, wipe a healthy tree on a transient
+  second `df` failure, or falsely emit `FULL BY OTHER WORKLOADS` and page the maintainer.
+
+- [`trailing-ticker-leaks-dead-subscribers-under-reduced-motion.md`](trailing-ticker-leaks-dead-subscribers-under-reduced-motion.md)
+  — When the user keeps the operating system's Reduce Motion setting turned on, Farhelm's GUI animation list accumulates
+  stale entries every time a cursor blink, pulsing indicator, or spinner starts and stops, leaking memory slowly over a
+  long desktop session because nothing prunes dead entries until Reduce Motion is turned back off.
+
+- [`trailing-ticker-live-motion-resume-test-misses-blink-resume.md`](trailing-ticker-live-motion-resume-test-misses-blink-resume.md)
+  — The test checking that live Reduce Motion changes pause and then resume both the terminal cursor blink and the
+  running-session pulse does not actually verify that the cursor blink resumes blinking after motion is turned back on.
+
+- [`trailing-ticker-reduced-motion-doc-misstates-outline-fade.md`](trailing-ticker-reduced-motion-doc-misstates-outline-fade.md)
+  — The doc comment explaining why `ticker::reduced_motion` still exists contradicts the actual behavior of the
+  permission-escalation outline, which could mislead a future change into removing the reduced-motion check and breaking
+  the static red outline.
+
+- [`trailing-toolbar-650px-height-test-unguarded-else-branch.md`](trailing-toolbar-650px-height-test-unguarded-else-branch.md)
+  — The layout test meant to guard the condensed environment button's 23-pixel height in a 650-pixel session pane does
+  not actually assert that the row condensed or that the neighboring action buttons have a valid height, so a regression
+  that keeps ordinary heights or breaks Stop's height can slip past it.
+
+- [`trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md`](trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md)
+  — Changes to registered custom agents are wired to push over the UI channel, but the helm test suite never exercises a
+  live create, edit, or delete of a custom agent end-to-end over the UI channel to verify that the served payload
+  projects and decodes cleanly.
+
+- [`trailing-unanswered-auto-update-signin-blocks-set-tailscale-hostbusy.md`](trailing-unanswered-auto-update-signin-blocks-set-tailscale-hostbusy.md)
+  — While an unanswered automatic-update SSH sign-in question is waiting in the attention row (up to two minutes per
+  prompt), trying to turn **Tailscale host** on or off in Host settings fails with "This host is busy; try again after
+  its current operation finishes" even though no setup or update is running and you never started an operation on that
+  host.
+
+- [`trailing-unknown-agent-typo-fails-with-misleading-custom-flag-error.md`](trailing-unknown-agent-typo-fails-with-misleading-custom-flag-error.md)
+  — When an agent mistypes a built-in agent name (such as `--agent cluade` or `--agent opencode`) together with
+  `--prompt`, `--permissions guarded`, or a built-in model name containing `.` or `/` (such as `gpt-6.2-sol`), Farhelm
+  refuses the command with a misleading Custom-agent flag error (e.g., "--prompt/--prompt-file is not offered by this
+  agent") instead of telling the agent that the agent name is unknown and listing the built-in types.
+
+- [`trailing-unseen-quick-launch-deleted-custom-agent-wakes-suspended-host.md`](trailing-unseen-quick-launch-deleted-custom-agent-wakes-suspended-host.md)
+  — Triggering a quick launch (⚡ shortcut, number shortcut, sequence, or Cmd+J) whose template names a deleted custom
+  agent on a suspended host (such as a suspended Tensorlake sandbox or Podman container) wakes the suspended host
+  anyway, only failing with "no longer registered" / "was deleted" after the host finishes waking.
+
+- [`trailing-versionskew-incarnation-stays-unchanged-on-different-peer-build.md`](trailing-versionskew-incarnation-stays-unchanged-on-different-peer-build.md)
+  — If an automatic update fails or is refused on a remote host with an older protocol (for example, because the host's
+  supervisor is below the upgrade floor) and the host is later upgraded out-of-band to a newer but still incompatible
+  supervisor build without Farhelm observing it offline in between, Farhelm keeps treating it as the same failed attempt
+  and does not automatically update it until the user manually clicks Update or Retry or restarts the helm.
+
+- [`trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md`](trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md)
+  — When you launch or plain-replace a registered custom agent on a host that asks before YOLO launches, the
+  confirmation dialog explains the YOLO classification as "Farhelm treats every Custom permission choice as YOLO."
+  Because "Custom" is also the name of the Custom permission flags mode, this reads as if the launch used custom
+  permission flags rather than a registered custom agent.
