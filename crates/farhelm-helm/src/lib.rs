@@ -344,6 +344,13 @@ pub struct HelmArgs {
     /// Optional test-feed filename supplied at app launch. Verification still uses
     /// the release origin and public keys, and invalid names use the standard feed.
     pub announcements_path: Option<std::ffi::OsString>,
+    /// Whether this helm polls the signed network announcement feed. Only the
+    /// desktop app's own launch turns it on. Every helm a test starts leaves
+    /// it off, so a test suite run on a release-versioned build (the release
+    /// gate runs one on the tagged commit) never reaches the release origin
+    /// and never sees a published announcement. Development builds skip the
+    /// check whatever this says.
+    pub check_announcements: bool,
 
     /// TEST ONLY: the seconds between a connected host's backstop session
     /// polls, in place of `manager::REFRESH_INTERVAL`. Lets an end-to-end
@@ -1564,7 +1571,8 @@ async fn serve_with_ready(
             state.store.clone(), Arc::clone(state.manager.events()), checkout_revision,
         ) => unreachable!("checkout configuration watcher runs until serving ends"),
         () = network_announcements::watch(
-            &state.store, state.manager.events(), args.announcements_path.as_deref(),
+            &state.store, state.manager.events(), args.check_announcements,
+            args.announcements_path.as_deref(),
         ) => unreachable!("announcement watcher runs until serving ends"),
         () = requested_shutdown => Ok(())
     };
@@ -1924,6 +1932,7 @@ mod tests {
             ensure_hosts: None,
             payload_dir: None,
             announcements_path: None,
+            check_announcements: false,
             backstop_refresh_secs: None,
         }
     }

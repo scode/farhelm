@@ -33,10 +33,19 @@ struct Feed {
 }
 
 /// Targeting is validated for the entire signed feed before any row is admitted.
+///
+/// The fields are named here rather than flattening [`Announcement`], because serde cannot refuse unknown keys
+/// through a flatten: a misspelled or future targeting field (`min_verison`, `oss`) would otherwise be dropped
+/// silently and its entry shown to every helm. An unknown key is a schema error like any other, so the feed is left
+/// alone instead.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Entry {
-    #[serde(flatten)]
-    announcement: Announcement,
+    id: String,
+    title: String,
+    body: String,
+    detail: Option<String>,
+    link: Option<farhelm_proto::announcements::AnnouncementLink>,
     min_version: Option<String>,
     max_version: Option<String>,
     os: Option<TargetOs>,
@@ -179,7 +188,13 @@ fn decode(
             .map(DateTime::parse_from_rfc3339)
             .transpose()
             .context("invalid announcement expiry")?;
-        let mut announcement = entry.announcement;
+        let mut announcement = Announcement {
+            id: entry.id,
+            title: entry.title,
+            body: entry.body,
+            detail: entry.detail,
+            link: entry.link,
+        };
         ensure!(
             !announcement.id.trim().is_empty()
                 && !announcement.title.trim().is_empty()
@@ -273,9 +288,16 @@ async fn check(
 
 /// Runs alongside serving. No request delays the first client connection,
 /// and shutting down the helm cancels this loop along with its HTTP request.
-pub(crate) async fn watch(store: &HelmStore, events: &FleetEvents, override_path: Option<&OsStr>) {
+/// `enabled` is the launch's choice (`HelmArgs::check_announcements`); only the desktop app's launch sets it.
+pub(crate) async fn watch(
+    store: &HelmStore,
+    events: &FleetEvents,
+    enabled: bool,
+    override_path: Option<&OsStr>,
+) {
     let build = farhelm_proto::BUILD_VERSION;
-    if !cfg!(test)
+    if enabled
+        && !cfg!(test)
         && !farhelm_proto::is_development_build(build)
         && let Err(error) = poll(store, events, filename(override_path), build).await
     {
@@ -472,6 +494,9 @@ mod tests {
             json!({"os": ["linux", "bogus"]}),
             json!({"min_version": "today"}),
             json!({"expires_at": "tomorrow"}),
+            // A misspelled targeting field must not widen the audience to everyone.
+            json!({"min_verison": "0.1.0"}),
+            json!({"oss": "linux"}),
         ] {
             let mut entry = json!({"id": "one", "title": "Title", "body": "Body"});
             entry

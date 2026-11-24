@@ -543,6 +543,9 @@ fn embedded_helm_args(
         ensure_hosts,
         payload_dir: helm_payload_dir(),
         announcements_path,
+        // The installed app is the one launch that checks for announcements; tests that start a helm from these
+        // arguments switch it off again.
+        check_announcements: true,
         backstop_refresh_secs: None,
     }
 }
@@ -1944,7 +1947,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let args = embedded_helm_args(
+        let mut args = embedded_helm_args(
             dir.path().join("state"),
             Some(file),
             None,
@@ -1952,6 +1955,8 @@ mod tests {
             true,
             None,
         );
+        // A test helm never reaches the release origin, even when this suite runs on a release-versioned build.
+        args.check_announcements = false;
         let (ready_tx, ready) = mpsc::channel();
         let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm = std::thread::spawn(move || {

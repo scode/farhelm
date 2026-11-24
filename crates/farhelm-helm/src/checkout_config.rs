@@ -3575,6 +3575,8 @@ mod tests {
                  DROP TABLE session_mutes;
                  DROP TABLE session_group_members;
                  DROP TABLE session_groups;
+                 -- Schema 101 added the opt-out from network announcement checks.
+                 ALTER TABLE preferences DROP COLUMN check_announcements;
                  -- Schema 95 added the remembered dismissals of the hook setup prompt and hint.
                  ALTER TABLE preferences DROP COLUMN grok_hook_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN antigravity_hook_hint_dismissed;

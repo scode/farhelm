@@ -34,7 +34,10 @@ up or updating a host, including the automatic remote host updates that are on b
 files from get.farhelm.io, which hands them over from GitHub, feedback you choose to send goes over HTTPS to a feedback
 service the project runs ([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks
 get.farhelm.io for new releases and downloads them, checking each one's signature, by itself unless you turn that off
-([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). If you set up
+([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). The app also checks get.farhelm.io for announcements
+from the Farhelm project when it starts and every 12 hours, shows only ones signed by the project, and sends no account,
+version or machine details with the request; **Check for announcements** in
+[Settings → Notifications](/docs/using/settings/#notifications) turns that off. If you set up
 [ntfy alerts](/docs/using/session-list/#ntfy-alerts), your helm sends a waiting session's name and its host's name to
 the ntfy server you chose, where anyone who knows the topic can read them. And downloading a file from a session's
 terminal: the helm can read any file the session's account can read on that host. Cmd-click (Ctrl-click on Linux) also

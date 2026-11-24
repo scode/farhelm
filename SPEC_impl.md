@@ -5137,12 +5137,14 @@ stable entries link to their version's notes, and prereleases omit the link beca
 storage, routes and consumers carry display-ready content and know nothing about releases.
 
 `network_announcements` runs alongside helm serving. The first tick runs at startup and later ticks are 12 hours apart.
-Development builds skip it. A nullable shared `check_announcements` preference defaults to enabled. The helm samples it
-before each request and again before admitting the result. The desktop entry passes the raw `FARHELM_ANNOUNCEMENTS_PATH`
-value into `HelmArgs`. A filename may contain ASCII letters, digits, dots, dashes and underscores, starts with a letter
-or digit, is at most 128 bytes and has no `..`. Invalid values use the normal `announcements.json` on the same origin.
-The exact standing brick-test filename `announcements-test.json` reserves the pending batch for the bell in that
-process. The native check needs to open the batch from the bell even if the signed feed arrives before the first window.
+Development builds skip it, and only the desktop app's own launch asks for it (`HelmArgs::check_announcements`): a helm
+a test starts never checks, so a suite run on a release-versioned build does not reach the release origin. A nullable
+shared `check_announcements` preference defaults to enabled. The helm samples it before each request and again before
+admitting the result. The desktop entry passes the raw `FARHELM_ANNOUNCEMENTS_PATH` value into `HelmArgs`. A filename
+may contain ASCII letters, digits, dots, dashes and underscores, starts with a letter or digit, is at most 128 bytes and
+has no `..`. Invalid values use the normal `announcements.json` on the same origin. The exact standing brick-test
+filename `announcements-test.json` reserves the pending batch for the bell in that process. The native check needs to
+open the batch from the bell even if the signed feed arrives before the first window.
 
 The announcement fetcher uses a 15-second request timeout, capped streaming reads (256 KiB for JSON, 4 KiB for the
 signature), HTTPS on `get.farhelm.io`, and no redirects. A 404 on either file is quiet. Other transport, HTTP, size,
@@ -5150,8 +5152,9 @@ authentication or schema errors log a warning and leave the queue alone. `verify
 `RELEASE_KEY_RING` and requires the trusted comment `farhelm announcements` before any JSON is parsed. The v1 object has
 `version: 1` and an `announcements` array. Each entry has `id`, `title`, `body`, optional `detail` and
 `link { label, url }`. Optional `min_version` and `max_version` use inclusive SemVer precedence, `os` is `macos` or
-`linux` (or a list of those), and `expires_at` is RFC 3339. At or after expiry, the entry is excluded. Links outside the
-allowed destination are discarded and the text is kept.
+`linux` (or a list of those), and `expires_at` is RFC 3339. At or after expiry, the entry is excluded. An entry field
+the v1 schema does not name is a schema error, so a misspelled targeting field cannot widen an entry's audience. Links
+outside the allowed destination are discarded and the text is kept.
 
 Schema 101 admits one app-wide announcement notice and adds the nullable preference. A network enqueue that inserts
 entries replaces the reminder in the same transaction with a new unread row. Its fresh ID prevents a stale panel

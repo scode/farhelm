@@ -54,6 +54,7 @@ impl Helm {
             ensure_hosts: None,
             payload_dir: None,
             announcements_path: None,
+            check_announcements: false,
             backstop_refresh_secs: None,
         };
         let (ready_tx, ready) = std::sync::mpsc::channel();

@@ -879,6 +879,7 @@ pub(crate) fn helm_args(state_dir: &std::path::Path) -> farhelm_helm::HelmArgs {
         ensure_hosts: None,
         payload_dir: None,
         announcements_path: None,
+        check_announcements: false,
         backstop_refresh_secs: None,
     }
 }
