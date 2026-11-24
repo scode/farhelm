@@ -229,6 +229,12 @@ enum AgentCmd {
         #[arg(long)]
         json: bool,
     },
+    /// List built-in and registered custom agents that can be used with --agent.
+    Agents {
+        /// Print the versioned machine-readable discovery envelope.
+        #[arg(long)]
+        json: bool,
+    },
     /// List the launch templates the helm holds and the fields each sets.
     Templates {
         /// Print the versioned machine-readable discovery envelope.
@@ -673,6 +679,7 @@ impl AgentCmd {
         match self {
             AgentCmd::Hosts { .. } => Some(farhelm_proto::AgentVerb::Hosts {}),
             AgentCmd::Sessions { .. } => Some(farhelm_proto::AgentVerb::Sessions {}),
+            AgentCmd::Agents { .. } => Some(farhelm_proto::AgentVerb::Agents {}),
             AgentCmd::Templates { .. } => Some(farhelm_proto::AgentVerb::Templates {}),
             AgentCmd::OpenUrl { url } => {
                 Some(farhelm_proto::AgentVerb::OpenUrl { url: url.clone() })
@@ -2497,12 +2504,11 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
         print!("{}", agent_instructions::text());
         return Ok(());
     };
-    // The two listings hand off entirely to `print_agent_listing`,
-    // which makes its own `agent_request` call and returns — there
-    // is nothing left for this arm to do with their reply, unlike
-    // the four lifecycle verbs below.
-    if let AgentCmd::Hosts { json } | AgentCmd::Sessions { json } | AgentCmd::Templates { json } =
-        &command
+    // A discovery command prints its own reply and never enters mutation dispatch.
+    if let AgentCmd::Hosts { json }
+    | AgentCmd::Sessions { json }
+    | AgentCmd::Agents { json }
+    | AgentCmd::Templates { json } = &command
     {
         return print_agent_listing(verb, *json);
     }
@@ -2649,6 +2655,7 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
         // variant.
         AgentCmd::Hosts { .. }
         | AgentCmd::Sessions { .. }
+        | AgentCmd::Agents { .. }
         | AgentCmd::Templates { .. }
         | AgentCmd::Profiles { .. }
         | AgentCmd::Template(_)
@@ -2700,6 +2707,7 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
         let caller_host_id = match &reply {
             AgentReply::Hosts { caller_host_id, .. }
             | AgentReply::Sessions { caller_host_id, .. }
+            | AgentReply::Agents { caller_host_id, .. }
             | AgentReply::Templates { caller_host_id, .. } => caller_host_id.clone(),
             _ => anyhow::bail!("only discovery replies can be printed as JSON"),
         };
@@ -2718,6 +2726,7 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
         // changed meaning).
         // 7: session IDs bind to their host entry, including caller.session_id;
         // host IDs are the entry UUID rather than the helm's integer row ID.
+        // 8: agent discovery exposes built-in and custom launch choices.
         // Spell out the default in this discovery view, where an agent needs
         // to know what a named template does. Persistence and write replies
         // still omit Base; changing their normalized shape would dirty editors.
@@ -2732,7 +2741,7 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
             }
         }
         let envelope = serde_json::json!({
-            "schema_version": 7,
+            "schema_version": 8,
             "caller": {
                 "session_id": caller_session_id.to_string(),
                 "host_id": caller_host_id,

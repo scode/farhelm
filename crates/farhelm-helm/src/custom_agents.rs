@@ -10,7 +10,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use farhelm_proto::{ErrorKind, custom_agents::CustomAgent};
+use farhelm_proto::{
+    AgentListingEntry, AgentListingKind, ErrorKind, LaunchHarness, custom_agents::CustomAgent,
+};
 use rusqlite::OptionalExtension as _;
 
 use crate::{AppState, SupervisorError, http_error, store::HelmStore};
@@ -120,13 +122,7 @@ pub(crate) fn missing_agent() -> anyhow::Error {
 /// Use the same catalog snapshot that ruled out the ID so the caller gets the choices it could have used on
 /// this request. A valid-looking custom ID might be a typo of a built-in type.
 pub(crate) fn unknown_agent(id: &str, registered: &[CustomAgent]) -> anyhow::Error {
-    let built_ins: Vec<String> = farhelm_proto::LaunchHarness::BUILT_INS
-        .iter()
-        .filter_map(|harness| match serde_json::to_value(harness) {
-            Ok(serde_json::Value::String(word)) => Some(word),
-            _ => None,
-        })
-        .collect();
+    let built_ins: Vec<String> = built_in_agents().map(|(_, id)| id).collect();
     let custom = if registered.is_empty() {
         "no custom agents are registered".to_owned()
     } else {
@@ -142,6 +138,44 @@ pub(crate) fn unknown_agent(id: &str, registered: &[CustomAgent]) -> anyhow::Err
         ),
     )
     .into()
+}
+
+/// Use the serialized spelling the CLI parses, in the fixed harness declaration order.
+fn built_in_agents() -> impl Iterator<Item = (LaunchHarness, String)> {
+    LaunchHarness::BUILT_INS
+        .iter()
+        .copied()
+        .filter_map(|harness| match serde_json::to_value(harness) {
+            Ok(serde_json::Value::String(id)) => Some((harness, id)),
+            _ => None,
+        })
+}
+
+/// Agent discovery exposes launch choices from the helm catalog alone. It needs no host probe,
+/// and its dedicated reply shape keeps commands out of both the human and JSON listings.
+pub(crate) async fn agent_listing(store: &HelmStore) -> anyhow::Result<Vec<AgentListingEntry>> {
+    let registered = store.custom_agents().await?;
+    let custom = LaunchHarness::Custom;
+    Ok(built_in_agents()
+        .map(|(harness, id)| AgentListingEntry {
+            id,
+            kind: AgentListingKind::BuiltIn,
+            display_name: harness.display_name().into(),
+            supports_named_conversation: harness.offers_named_conversation(),
+            supports_initial_prompt: harness.supports_initial_prompt(false),
+            supports_model: harness.offers_model(),
+            supports_effort: harness.offers_effort(),
+        })
+        .chain(registered.into_iter().map(|agent| AgentListingEntry {
+            id: agent.id,
+            kind: AgentListingKind::Custom,
+            display_name: agent.display_name,
+            supports_named_conversation: agent.supports_resumption,
+            supports_initial_prompt: custom.supports_initial_prompt(false),
+            supports_model: custom.offers_model(),
+            supports_effort: custom.offers_effort(),
+        }))
+        .collect())
 }
 
 /// Used for the Settings view and the channel's keyed catalog projection.

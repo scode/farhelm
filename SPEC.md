@@ -4382,7 +4382,7 @@ Session references handed to clients and agents are full IDs: the host entry's h
 36-character lowercase form, a colon, and the supervisor's opaque session ID. The separator is at that fixed position;
 the suffix may itself contain colons. Create, clone and spawn print full IDs, and list, detail and mutation replies use
 them for the session, its optional parent and its checkout's origin session. Agent discovery uses the entry UUID as its
-host ID, and its JSON envelope is schema version 7 with a full `caller.session_id`. The own-session `*` marker compares
+host ID, and its JSON envelope is schema version 8 with a full `caller.session_id`. The own-session `*` marker compares
 the entry and session together; the own-host marker compares the entry. Acting host selectors still use display names as
 described below.
 
@@ -4485,21 +4485,21 @@ refused with its state named. The new session appears in the window the way any 
 Every acting verb of `farhelm spawn` and `farhelm agent` asks the user first. `farhelm spawn` in every form,
 `farhelm agent create`, `clone`, `rename`, `stop`, `restart`, `delete`, `prompt` and `open-url`, and the template writes
 below are carried out only once the user approves them in the GUI, including when an agent acts on its own session. The
-read-only verbs (the hosts, sessions and templates listings, and `farhelm agent instructions`) never ask, and neither
-does Farhelm's own plumbing that runs in a session, such as the hooks that report a conversation's identity, which is
-not an agent verb. Farhelm cannot tell an agent from a person typing in a session's shell and does not try: whoever runs
-the command in a session asks as that session. The helm decides, because the requesting host and its supervisor are not
-trusted to (see Local authority and trust between hosts), and it decides by the host connection the request arrived on,
-never by anything the request or its supervisor claims. A request from a host whose "run farhelm commands from this host
-without asking" setting is on (see Topology) is not asked about for commands. Opening links uses its own two permissions
-below; neither link permission grants command authority, and command authority grants neither link permission. Spawn is
-the exception that proves the rule: it is the one action the requesting host's own supervisor carries out, and the
-launch `--inherit-agent` reuses comes from that supervisor, so a compromised supervisor could carry out a spawn without
-asking, show a different launch on the card than the one it starts, or ignore the YOLO rule below. That is accepted,
-because spawn acts only on its own host, which the threat model already trusts. Waiting for the user holds nothing other
-operations wait on, apart from the asking session's own next change, which is refused while an earlier one is still
-waiting. A link request takes no session-change lock: it neither blocks another session command nor waits for one. While
-it is turned off, `prompt` is refused without asking.
+read-only verbs (the hosts, sessions, agents and templates listings, and `farhelm agent instructions`) never ask, and
+neither does Farhelm's own plumbing that runs in a session, such as the hooks that report a conversation's identity,
+which is not an agent verb. Farhelm cannot tell an agent from a person typing in a session's shell and does not try:
+whoever runs the command in a session asks as that session. The helm decides, because the requesting host and its
+supervisor are not trusted to (see Local authority and trust between hosts), and it decides by the host connection the
+request arrived on, never by anything the request or its supervisor claims. A request from a host whose "run farhelm
+commands from this host without asking" setting is on (see Topology) is not asked about for commands. Opening links uses
+its own two permissions below; neither link permission grants command authority, and command authority grants neither
+link permission. Spawn is the exception that proves the rule: it is the one action the requesting host's own supervisor
+carries out, and the launch `--inherit-agent` reuses comes from that supervisor, so a compromised supervisor could carry
+out a spawn without asking, show a different launch on the card than the one it starts, or ignore the YOLO rule below.
+That is accepted, because spawn acts only on its own host, which the threat model already trusts. Waiting for the user
+holds nothing other operations wait on, apart from the asking session's own next change, which is refused while an
+earlier one is still waiting. A link request takes no session-change lock: it neither blocks another session command nor
+waits for one. While it is turned off, `prompt` is refused without asking.
 
 **Manage sessions on this host without asking** is a narrower, independent permission on the requesting host. It waives
 the card for create (with or without an initial prompt), spawn, clone, rename, stop, restart and delete only when the
@@ -4759,6 +4759,12 @@ templates (Concepts), and it exists because an approval covers exactly what the 
 a key also refuses if the mark or any number-key binding changed while its card waited; the template and bindings are
 written together or neither is written. Template deletion keeps clearing its bindings through the shared delete path.
 
+`farhelm agent agents` lists the built-in types followed by the helm's registered custom agents in ID order. Each entry
+gives the ID to pass as `--agent`, its kind and display name, and whether the launch accepts an existing conversation
+ID, an initial prompt, a model, and an effort value. The conversation capability is about starting with
+`--conversation`. A running session reports its own readiness for Restart. The listing omits configured custom commands.
+An unknown ID in a launch or template write lists both sets of choices.
+
 Templates are ordinary fleet metadata exposed by `farhelm agent templates`: each template's name, whether it holds ⚡,
 its number key if any, and the fields it sets, with their values except a command line or resume command, which are
 listed as set without their text. A session name is listed with its effective base or fixed kind in both the table and
@@ -4845,6 +4851,8 @@ asking, and every acting command from its agents asks until the user changes tha
   never the environment: the asking session is still in it, so it cannot be the environment's last session.
 - `farhelm agent hosts` lists only the environment's own host entry, under its own name, and `farhelm agent sessions`
   only the sessions in that environment.
+- `farhelm agent agents` lists the same launch choices as for an ordinary session, so the caller can select an agent for
+  spawn or create within its environment.
 - Clone is refused, whatever its target: copying a session out of an environment creates a new environment, and a
   session in the same environment is what spawn and create are for.
 - The template verbs (`templates` and the template writes) and the host verbs are refused.

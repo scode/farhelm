@@ -59,7 +59,7 @@
 //!   all word that one fact; a new kind that reports conversations needs an entry there, or every surface
 //!   falls back to wording that names no agent.
 //! - **What a launch can choose.** Exhaustive `LaunchHarness` methods in
-//!   `farhelm-proto/src/launch.rs` (`agent_kind`, `offers_model`,
+//!   `farhelm-proto/src/launch.rs` (`agent_kind`, `display_name`, `offers_model`,
 //!   `offers_effort`, `offers_permission`, `offers_workspace_trust`,
 //!   `offers_only_yolo`, `supports_initial_prompt`). Literal prompt arguments
 //!   come from `LaunchHarness::initial_prompt_arguments` in proto and are

@@ -275,13 +275,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   coded announcements in releases, but i want one where i can push announcements by publishing them centrally and
   deliver to users. details tbd during planning. Plan: `plans/queue/dynamic-announcements.md`.
 
-- **Make registered custom agents visible and consistent in the `farhelm agent` CLI.** Agents currently have no way to
-  discover registered custom agent IDs through the CLI. Make custom agents behave like built-in agents in the CLI so
-  they are visible to agents as usual: add a way to list registered custom agents (and include them alongside built-in
-  types in unknown-agent refusals), reconcile the `--conversation` + `--recipe` disagreement between CLI and templates,
-  and restore listing valid built-in choices when `--effort` is mistyped for a built-in agent. Plan:
-  `plans/queue/custom-agents-cli-visibility.md`.
-
 ## Linux support
 
 - **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel

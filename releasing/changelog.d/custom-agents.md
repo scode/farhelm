@@ -9,7 +9,9 @@ and report its ID.
 A conversation ID you already know can be supplied under **More options** in the launcher or with `--conversation`
 on a compatible CLI launch.
 
-`farhelm custom-agent spec` prints the wrapper contract for your installed version, including its change history.
+`farhelm agent agents` lists built-in agents and registered custom IDs with their available launch options. Use
+`--json` for structured output. `farhelm custom-agent spec` prints the wrapper contract for your installed version,
+including its change history.
 
 An unknown agent ID in a CLI launch or template write lists the built-in types and registered custom IDs. A refused
 built-in effort also reports the choices that apply. A launch through a recipe or recipe template refuses

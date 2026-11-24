@@ -74,6 +74,10 @@ built-in agents and **Shells**), in launch templates, in **Clone**, **Replace wi
 `farhelm agent create --agent <id>` and `farhelm spawn --agent <id>`, and as a declared agent on the launcher's
 **Command** tab.
 
+From inside a Farhelm session, run `farhelm agent agents` to find the ID to pass to `--agent`. The list shows the
+built-in and custom agents, their names and which launch options they accept. Use `--json` for structured output. Your
+configured commands are omitted from both outputs.
+
 - **Model and effort**: both fields accept free-text strings using lowercase letters, digits, hyphens, and underscores
   (`[a-z0-9_-]`). Leave either blank to omit its flag and let your agent use its own default. Farhelm does not check
   model or effort names against a catalog.

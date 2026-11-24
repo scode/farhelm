@@ -3652,7 +3652,10 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         // The helm owns URL validation and link permission decisions. This relay only
         // authenticates the session and forwards; an untrusted host cannot grant a link.
         AgentVerb::OpenUrl { .. } => Ok(()),
-        AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => Ok(()),
+        AgentVerb::Hosts {}
+        | AgentVerb::Sessions {}
+        | AgentVerb::Agents {}
+        | AgentVerb::Templates {} => Ok(()),
         AgentVerb::Prompt { session_id, prompt } => {
             validate_target(session_id, "--session", "name another session's exact id")?;
             farhelm_proto::launcher::check_agent_prompt(prompt)
