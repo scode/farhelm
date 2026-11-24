@@ -399,6 +399,97 @@ fn desktop_login_path_notice_explains_the_fallback_and_opens_feedback(cx: &mut T
     assert_eq!(focused_id(cx).as_deref(), Some(BELL_ID));
 }
 
+/// The notice can arrive before its queue push. The action waits for a fresh pending snapshot before acknowledging the
+/// panel frame. Dismissing the dialog records only its visible entries even after a later push.
+#[gpui::test]
+fn network_announcements_open_from_the_bell_and_record_only_the_displayed_batch(
+    cx: &mut TestAppContext,
+) {
+    use crate::announcements::tests::{announcement, queue};
+
+    let (mut fake, cx) = open(cx, &[]);
+    assert!(!any_open(cx), "premise: no startup dialog is open");
+    let first = announcement("first", "First message", "An urgent note.");
+    let second = announcement("second", "Second message", "Another note.");
+    let notice = |id, resolved| {
+        json!({
+            "id": id, "host": null, "raised_at": id, "read": resolved, "resolved": resolved,
+            "content": { "kind": "new_announcement" }
+        })
+    };
+    let push = |fake: &mut FakeHelm, state: CollectionState, remove| {
+        fake.push(CollectionChanges {
+            collection: state.collection,
+            meta: state.meta,
+            upsert: state.entries,
+            remove,
+        });
+    };
+    push(&mut fake, notices(&[notice(1, false)]), vec![]);
+    test_support::settle(cx);
+    assert!(!any_open(cx), "live delivery opens no dialog by itself");
+    assert_eq!(
+        test_support::label(cx, BELL_ID).as_deref(),
+        Some("Notifications: 1 unread")
+    );
+    open_panel(cx);
+    test_support::click(cx, "rail-notice-open-announcements-1");
+    let (read, _) = test_support::one_command(
+        &mut fake,
+        farhelm_helm_client::Method::Get,
+        "/api/announcements",
+    );
+    assert!(
+        node(&frame(cx), PANEL_ID).is_some(),
+        "no mark before the pending read"
+    );
+    fake.reply(
+        read,
+        200,
+        Some(queue(vec![first.clone()], vec![]).entries.remove(0).value),
+    );
+    test_support::settle(cx);
+    assert!(node(&frame(cx), PANEL_ID).is_none());
+    assert_eq!(focused_id(cx).as_deref(), Some("announcements-got-it"));
+    assert!(painted(&frame(cx)).contains(&first.title));
+    assert_eq!(
+        marks(&mut fake, cx, 200),
+        [json!({"action": "read", "ids": [1]})]
+    );
+
+    push(
+        &mut fake,
+        queue(vec![first.clone(), second.clone()], vec![]),
+        vec![],
+    );
+    push(&mut fake, notices(&[notice(2, false)]), vec!["1".into()]);
+    test_support::settle(cx);
+    assert!(!painted(&frame(cx)).contains(&second.title));
+    test_support::keys(cx, "escape");
+    let (id, shown) = test_support::one_command(
+        &mut fake,
+        farhelm_helm_client::Method::Post,
+        "/api/announcements/shown",
+    );
+    assert_eq!(shown, json!({"ids": ["first"]}));
+    fake.reply(id, 204, None);
+    test_support::settle(cx);
+    assert!(!any_open(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some(BELL_ID));
+    assert_eq!(
+        test_support::label(cx, BELL_ID).as_deref(),
+        Some("Notifications: 1 unread")
+    );
+
+    // Simulate another window handling the remaining batch, leaving the latest bell history entry resolved.
+    push(&mut fake, queue(vec![], vec![second, first]), vec![]);
+    push(&mut fake, notices(&[notice(2, true)]), vec![]);
+    test_support::settle(cx);
+    open_panel(cx);
+    assert!(painted(&frame(cx)).contains(&"Resolved".to_string()));
+    assert!(node(&frame(cx), "rail-notice-open-announcements-2").is_none());
+}
+
 // ---- Closing marks what the panel showed read ------------------------------------------------------------------------
 
 /// SPEC.md: "Escape, clicking outside, clicking the bell again or leaving the panel with keyboard focus closes it and

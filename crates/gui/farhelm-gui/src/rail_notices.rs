@@ -35,6 +35,8 @@
 //!   ([`listing::Snapshot::retry_target`]); a refusal the Trash keeps for that checkout shows on the notice too. Open Trash
 //!   closes the panel and opens the Trash dialog through its entry point ([`TrashButton::open`]) naming the bell as
 //!   where closing it returns focus.
+//! - **An announcement notice opens the pending batch.** The action closes the panel through its normal read-mark
+//!   path. The Announcements dialog returns focus to the bell.
 //!
 //! Host names, checkout names, repositories and reasons are host text, drawn through the host-text element.
 //!
@@ -230,6 +232,35 @@ impl NoticesButton {
         }
         self.panel = None;
         cx.notify();
+    }
+
+    /// Read the pending batch before dismissing the popover. Notice and queue
+    /// pushes are independent, so the visible notice can be newer than the
+    /// window's cached queue. A delayed reply belongs to the panel that asked.
+    fn open_announcements(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(panel) = self.open_panel(window, cx) else {
+            return;
+        };
+        let mark = Mark::take(cx);
+        let button = cx.weak_entity();
+        let window = window.window_handle();
+        crate::announcements::read_pending(cx, move |pending, cx| {
+            if pending.is_empty() || crate::focus::has_moved_on(&mark, cx) {
+                return;
+            }
+            let _ = window.update(cx, |_, window, cx| {
+                let bell = button.update(cx, |button, cx| {
+                    if button.open_panel(window, cx) != Some(panel) {
+                        return None;
+                    }
+                    button.close(window, cx);
+                    Some(button.focus.clone())
+                });
+                if let Ok(Some(bell)) = bell {
+                    crate::announcements::open_from_bell(pending, &bell, &mark, window, cx);
+                }
+            });
+        });
     }
 }
 
@@ -621,17 +652,7 @@ fn entry(
                 palette,
             );
         }
-        NoticeContent::NewAnnouncement => {
-            let id = notice.id;
-            return entry_frame(
-                SharedString::from(format!("{ENTRY_ID_PREFIX}{id}")),
-                is_unread(notice),
-                palette,
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("New announcement"),
-            );
-        }
+        NoticeContent::NewAnnouncement => return announcement_entry(notice, button, palette),
         NoticeContent::LateDelete { detail } => {
             let id = notice.id;
             let title = HostSentence::new(format!("{ENTRY_ID_PREFIX}{id}-title"))
@@ -724,6 +745,49 @@ fn entry(
                 .text_color(theme::color(palette.danger_strong))
                 .child(HostSentence::new(format!("{ENTRY_ID_PREFIX}{id}-refused")).host(&refused))
         }));
+    entry_frame(
+        SharedString::from(format!("{ENTRY_ID_PREFIX}{id}")),
+        is_unread(notice),
+        palette,
+        content,
+    )
+}
+
+/// A fresh feed batch offers the ordinary pending dialog until the helm records it as shown.
+fn announcement_entry(
+    notice: &Notice,
+    button: &WeakEntity<NoticesButton>,
+    palette: &Palette,
+) -> gpui::Stateful<gpui::Div> {
+    let id = notice.id;
+    let content = div()
+        .flex()
+        .flex_col()
+        .gap(px(6.))
+        .child(
+            div()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child("New announcement"),
+        )
+        .when(notice.resolved, |content| {
+            content
+                .text_color(theme::color(palette.fg_1))
+                .child("Resolved")
+        })
+        .when(!notice.resolved, |content| {
+            let button = button.clone();
+            let open = Button::new(
+                format!("rail-notice-open-announcements-{id}"),
+                "Open Announcements",
+                HoverHelp::tooltip("Read the pending Farhelm announcements").beside_menu(),
+                Role::Button,
+            )
+            .tier(Tier::Neutral)
+            .on_click(move |_, window, cx| {
+                let _ = button.update(cx, |button, cx| button.open_announcements(window, cx));
+            });
+            content.child(div().flex().child(open))
+        });
     entry_frame(
         SharedString::from(format!("{ENTRY_ID_PREFIX}{id}")),
         is_unread(notice),

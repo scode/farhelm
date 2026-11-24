@@ -5,7 +5,7 @@
 //! `announcements.rs` (`AnnouncementsDialog`) and the stylesheet's `.announcements-*` and `.announcement` rules at
 //! reference commit `24bc0580`. Here's the TLDR of how it behaves:
 //!
-//! - **One dialog, two uses.** It shows a list of announcements newest first, each with its title, its optional detail
+//! - **One dialog for pending announcements and history.** It shows announcements newest first, with each title, detail
 //!   line, its plain-text body (blank lines separate paragraphs; nothing is ever read as markup) and its optional
 //!   labelled link, which opens in the browser through the app's one opener (`cx.open_url`). Got it, the header's ×
 //!   and Escape close it.
@@ -13,9 +13,10 @@
 //!   Announcements, which opens the history ([`open_history`]): every shown announcement, newest shown first, as the
 //!   helm orders it. Reopening the history writes nothing, and closing it returns focus to the `?` button.
 //! - **Read from the store when opened.** The dialog draws the list it was opened with, and later pushes do not change
-//!   it (why: [`AnnouncementsDialog`]). Nothing new is queued while it is open anyway (SPEC.md: "there is no live
-//!   announcement event reader today"; the only producer runs at helm start), and an entry pushed after the window
-//!   start's check opens nothing by itself: the check runs once per UI session.
+//!   it (why: [`AnnouncementsDialog`]). A later feed can raise a notice while the dialog is open. Its entries stay
+//!   pending for the next opening.
+//! - **On demand from the bell.** The notice and the pending queue arrive in separate pushes. [`read_pending`] takes a
+//!   fresh snapshot for Open Announcements. Closing records the displayed batch and returns focus to the bell.
 //! - **The automatic batch, at window start and reset.** [`open_pending`] opens the pending entries, newest first, when
 //!   the window-start owner ([`crate::welcome::StartDialogs`]) says the check is due: at once, or after the Welcome
 //!   card and its feedback handoff close. An empty queue opens nothing, and a queue the store does not hold (a failed
@@ -26,7 +27,7 @@
 //!   has no opener (SPEC.md: "closing an automatic batch restores ordinary initial focus").
 //! - **A keyboard stop when nothing in the body is focusable.** A long announcement without a link holds nothing Tab
 //!   reaches, so the body takes a stop of its own, named "Announcement content" as the old region was
-//!   (`DialogFrame::scroll_stop`), in both uses.
+//!   (`DialogFrame::scroll_stop`).
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -99,12 +100,10 @@ pub fn open_history(
     cx: &mut App,
 ) -> Option<LayerId> {
     let shown = history(cx);
-    if shown.is_empty() {
-        return None;
-    }
     open(
         shown,
         ReturnTo::Control(opener.clone()),
+        false,
         None,
         mark,
         window,
@@ -126,17 +125,59 @@ pub(crate) fn open_pending(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
-    let Some(mut pending) = with_queue(cx, |queue| queue.pending.clone()) else {
+    let Some(pending) = pending(cx) else {
         tracing::warn!(
             "no announcement queue was read; announcements are checked again at the next window start"
         );
         return None;
     };
-    if pending.is_empty() {
-        return None;
-    }
+    open(pending, ReturnTo::Home, true, Some(after), mark, window, cx)
+}
+
+/// Read an action snapshot from the helm. A bell notice can be visible before
+/// its queue push arrives. The read belongs to this click and never updates
+/// the window's cached queue.
+pub(crate) fn read_pending(cx: &mut App, then: impl FnOnce(Vec<Announcement>, &mut App) + 'static) {
+    let Ok(path) = ApiPath::api(&["announcements"]) else {
+        return;
+    };
+    crate::operations::read(
+        path,
+        "GET /api/announcements",
+        cx,
+        move |answer, cx| match answer {
+            Ok(AnnouncementQueue { pending, .. }) => then(pending, cx),
+            Err(words) => {
+                tracing::warn!(reason = %words.raw(), "could not load pending announcements")
+            }
+        },
+    );
+}
+
+/// Open the freshly read batch after the notification popover closes.
+/// The bell owns the focus return. The startup sequence has its own continuation.
+pub(crate) fn open_from_bell(
+    mut pending: Vec<Announcement>,
+    bell: &FocusHandle,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
     pending.reverse();
-    open(pending, ReturnTo::Home, Some(after), mark, window, cx)
+    open(
+        pending,
+        ReturnTo::Control(bell.clone()),
+        true,
+        None,
+        mark,
+        window,
+        cx,
+    )
+}
+
+/// Capture the current pending entries in dialog order, newest first.
+fn pending(cx: &App) -> Option<Vec<Announcement>> {
+    with_queue(cx, |queue| queue.pending.iter().rev().cloned().collect())
 }
 
 /// Record `ids` as shown: one keyless, best-effort `POST /api/announcements/shown` naming exactly those entries, so
@@ -164,26 +205,29 @@ fn record_shown(ids: Vec<String>, cx: &mut App) {
     );
 }
 
-/// Open the dialog over `entries`, in the order given, with closing returning focus as `returns_to` says. With
-/// `after`, the first dismissal records the automatic batch and continues the window start after the layer closes.
-/// The history records nothing.
+/// Keep the opening snapshot through dismissal. The automatic batch and the bell record the same shown IDs.
+/// The automatic batch alone has a startup continuation.
 fn open(
     entries: Vec<Announcement>,
     returns_to: ReturnTo,
+    record_on_dismiss: bool,
     after: Option<MainAction>,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
+    if entries.is_empty() {
+        return None;
+    }
     let dialog = cx.new(|cx| AnnouncementsDialog {
         entries,
         got_it: cx.focus_handle().tab_stop(true),
         layer: None,
-        unrecorded: after.is_some(),
+        unrecorded: record_on_dismiss,
     });
     // Every user close (Got it, the ×, Escape, Enter on the dialog itself) is a dismissal and asks this hook; a reset
     // closes the dialog without asking, so it records nothing and the entries stay pending for the next UI session.
-    let on_dismiss: Option<DismissHook> = after.map(|after| {
+    let on_dismiss: Option<DismissHook> = record_on_dismiss.then(|| {
         let weak = dialog.downgrade();
         let hook: DismissHook = Rc::new(move |window, cx| {
             let ids = weak.update(cx, |dialog, _| {
@@ -198,8 +242,9 @@ fn open(
             });
             if let Ok(Some(ids)) = ids {
                 record_shown(ids, cx);
-                let after = Rc::clone(&after);
-                window.defer(cx, move |window, cx| after(window, cx));
+                if let Some(after) = after.clone() {
+                    window.defer(cx, move |window, cx| after(window, cx));
+                }
             }
             Dismissal::Close
         });
@@ -233,7 +278,7 @@ fn open(
 /// The open dialog: the announcements it was opened with, Got it's focus handle (where it starts) and its layer.
 ///
 /// `entries` is a copy of the store's queue taken at opening, an exception to the rule that a view reads shared state
-/// from the store when it draws. The automatic batch must record exactly the entries its dialog showed when it is
+/// from the store when it draws. A pending batch must record exactly the entries its dialog showed when it is
 /// dismissed (SPEC.md: "dismissal records only the entries that dialog showed"), so what is drawn cannot follow later
 /// pushes. The history uses the same dialog: an announcement the helm pushes while this history is open appears at
 /// its next opening.
@@ -242,8 +287,7 @@ struct AnnouncementsDialog {
     got_it: FocusHandle,
     /// Set right after the layer opens; every way of closing goes through the layer manager's dismissal.
     layer: Option<LayerId>,
-    /// Whether this is the automatic batch and its dismissal has not yet recorded `entries` as shown; never set for the
-    /// history, which records nothing.
+    /// A pending batch can record its entries once, even when two dismissal paths race.
     unrecorded: bool,
 }
 

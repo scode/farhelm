@@ -12,7 +12,8 @@ use super::{Entry, Target, catalog, fold, highlights};
 use crate::actions::THIS_PLATFORM;
 use crate::layers;
 use crate::settings::tests::{
-    click_section, drawn, open_rail, open_settings, section_button, sent, show_checkouts, wheel,
+    click_section, drawn, one_save, open_rail, open_settings, push, section_button, sent,
+    show_checkouts, switch_on, wheel,
 };
 use crate::settings::{Choice, Section, SettingsDialog, decide_tunnels_for_opened};
 use crate::test_support::{
@@ -62,6 +63,52 @@ fn result_ids(cx: &mut VisualTestContext) -> Vec<String> {
         .filter(|id| id.starts_with("settings-result-"))
         .map(|id| id.to_string())
         .collect()
+}
+
+/// Announcements need a reachable opt-out on builds without the App updater.
+/// A search hit lands on the Notifications switch, and saving changes only the shared check preference.
+#[gpui::test]
+fn announcement_search_reaches_the_shared_opt_out(cx: &mut TestAppContext) {
+    let (mut helm, cx, _) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    focus_search(cx);
+    type_query(cx, "check for announcements");
+    let result = "settings-result-notifications-settings-check-announcements";
+    assert_eq!(result_ids(cx), [result]);
+    click(cx, result);
+    assert_eq!(heading(cx).as_deref(), Some("Notifications"));
+    let reads = sent(&mut helm);
+    assert_eq!(reads.len(), 1);
+    assert_eq!(
+        (reads[0].method, reads[0].path.as_str()),
+        (Method::Get, "/api/ntfy-alerts")
+    );
+    helm.reply(
+        reads[0].id,
+        200,
+        Some(json!({
+            "enabled": false, "server": "https://ntfy.sh", "topic": "",
+            "priority": "default", "token_set": false
+        })),
+    );
+    settle(cx);
+    let switch = Choice::CheckAnnouncements.id();
+    assert_eq!(focused_id(cx).as_deref(), Some(switch));
+    assert_eq!(switch_on(cx, switch), Some(true));
+    click(cx, switch);
+    let (id, patch) = one_save(&mut helm);
+    assert_eq!(patch, json!({"check_announcements": false}));
+    push(
+        &mut helm,
+        &Preferences {
+            check_announcements: Some(false),
+            ..Default::default()
+        },
+        cx,
+    );
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert_eq!(switch_on(cx, switch), Some(false));
 }
 
 fn selected(cx: &mut VisualTestContext) -> Option<String> {

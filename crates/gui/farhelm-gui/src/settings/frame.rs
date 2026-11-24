@@ -117,7 +117,7 @@ impl Section {
             Self::Sessions => "How session commands and quick launches behave",
             Self::Appearance => "The interface colors",
             Self::Terminal => "Links and files clicked in a terminal",
-            Self::Notifications => "Sounds and push alerts when a session needs you",
+            Self::Notifications => "Sounds, push alerts and Farhelm announcements",
             Self::App => "This Farhelm app's version and updates",
             Self::Hosts => "Updating, adding and removing hosts",
             Self::Checkouts => "Where managed checkouts go and how they start",

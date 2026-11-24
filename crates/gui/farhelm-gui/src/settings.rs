@@ -1659,9 +1659,17 @@ impl SettingsDialog {
                 .map(|editor| editor.clone().into_any_element())
                 .into_iter()
                 .collect(),
-            Section::Notifications => std::iter::once(self.sounds(preferences, cx))
-                .chain(self.ntfy.iter().cloned().map(IntoElement::into_any_element))
-                .collect(),
+            Section::Notifications => [
+                self.sounds(preferences, cx),
+                card::rows(
+                    [self.switch(Choice::CheckAnnouncements, preferences, cx)],
+                    cx,
+                )
+                .into_any_element(),
+            ]
+            .into_iter()
+            .chain(self.ntfy.iter().cloned().map(IntoElement::into_any_element))
+            .collect(),
             Section::App => {
                 let weak = cx.weak_entity();
                 let rows = app::section(
