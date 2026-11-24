@@ -6100,10 +6100,11 @@ combined file for the connected delivery path. An empty snapshot unlinks the own
 
 When either agent's selected launch credential lookup fails, delivery leaves the combined file, both launch stamps and
 both legacy settings files alone. It reports each failed lookup by agent and continues with the separate Codex auth and
-GitHub slots. If the Codex auth lookup also fails on that pass, the GitHub slot can still finish. Host details report
-both the failed launch lookup and any later failure that ends the pass. A save for either entry in the combined file
-also reports the failed launch lookup because the replacement could not reach the host. During setup, a failed Claude
-lookup is a setup error.
+GitHub slots. If the Codex auth lookup also fails on that pass, it is reported too and the GitHub slot can still finish;
+without a failed launch lookup, a failed Codex auth lookup still ends the pass before GitHub. Host details report both
+the failed launch lookup and any later failure that ends the pass. A save for either entry in the combined file also
+reports the failed launch lookup because the replacement could not reach the host. During setup, a failed Claude lookup
+is returned to host setup, which shows it as a notice on its completed credentials step.
 
 The supervisor reads one snapshot per host-terminal agent or tab spawn, with Restart using the agent path. Only the
 Codex endpoint descriptor reaches launch composition. Codex Start and Resume select the `farhelm` provider in `-c`
