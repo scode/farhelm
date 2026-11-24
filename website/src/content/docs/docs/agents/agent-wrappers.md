@@ -139,7 +139,7 @@ unavailable. The same process rule applies when you write a custom command.
 
 A compound command or prefix can keep Bash running above the wrapper. That extra process can prevent Farhelm from
 following OMP's conversation when the wrapper also stays running, leaving **Restart** unavailable. Claude, Muse, Codex,
-Grok and Antigravity tolerate that extra process.
+Grok, Antigravity and [custom agents](/docs/agents/custom-agents/) tolerate that extra process.
 
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that

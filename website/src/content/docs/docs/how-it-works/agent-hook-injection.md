@@ -163,15 +163,16 @@ The hook does not talk to the supervisor. It saves the report as a small file un
 supervisor's state directory, together with a record of which processes it was started by, and exits 0 — always,
 including on a panic. The supervisor applies saved reports on its regular pass every two seconds, and when it starts. It
 uses the record of processes to check that the report came from your session's terminal, under the launch Farhelm made
-there last, so a report left over from before a restart is refused. For Claude, Codex, Muse, Grok, OMP and Antigravity
-it also checks which agent process can report for the session; see [What you will see](#what-you-will-see). Each session
-keeps only its newest report, except Codex and Grok. For Claude, Muse and Antigravity, that is enough because their
-end-of-turn reports name the current conversation too. Codex and Grok keep the report that starts a conversation apart
-from the latest report that confirms its saved files. Codex confirms at the end of a turn; Grok can also confirm when
-you submit a prompt. This keeps confirmation from overwriting the conversation it belongs to while Farhelm is closed, so
-the directory stays tiny however long the supervisor is away. A hook with neither a complete launch destination nor
-Farhelm's session environment exits without saving a report. The Antigravity callback still returns its empty JSON
-object. Other callbacks can still output the line described below if passed `--announce`.
+there last, so a report left over from before a restart is refused. For Claude, Codex, Muse, Grok, OMP, Antigravity and
+[custom agents](/docs/agents/custom-agents/contract/#process-tree-and-nested-agent-rules) it also checks which agent
+process can report for the session; see [What you will see](#what-you-will-see). Each session keeps only its newest
+report, except Codex and Grok. For Claude, Muse and Antigravity, that is enough because their end-of-turn reports name
+the current conversation too. Codex and Grok keep the report that starts a conversation apart from the latest report
+that confirms its saved files. Codex confirms at the end of a turn; Grok can also confirm when you submit a prompt. This
+keeps confirmation from overwriting the conversation it belongs to while Farhelm is closed, so the directory stays tiny
+however long the supervisor is away. A hook with neither a complete launch destination nor Farhelm's session environment
+exits without saving a report. The Antigravity callback still returns its empty JSON object. Other callbacks can still
+output the line described below if passed `--announce`.
 
 The hook writes diagnostics to Farhelm's log. For Claude, Codex and Muse, `--announce` adds a line to stdout telling the
 agent that `$farhelm ...` in your message means the `farhelm agent` CLI and that `farhelm agent instructions` explains
@@ -323,11 +324,12 @@ of a restart.
 
 No file at all usually means the vendor never ran the hook. Check that the injected flags or installed hooks loaded
 (step 3). For Codex, Muse or Antigravity, check whether you have typed a prompt yet. Two other things also leave no
-file. The path is derived from the session id and the supervisor's socket path, so a run missing either of those from
-its environment has nowhere to write and cannot even leave its `no-credential` line. (A run missing only the token still
-writes one, which is deliberate: that is exactly the half-configured case someone comes to this file for.) And logging
-is best-effort by contract — an uncreatable directory, an unwritable path, or a full disk is ignored rather than turned
-into a failure. Pi and OMP can also lose the hook's line when the agent's own two-second timer stops the reporter first.
+file. The path is derived from the session id and the supervisor's socket path. A Muse hook gets them on its command
+line and every other reporter from its environment, so a run missing either has nowhere to write and cannot even leave
+its `no-credential` line. (A run missing only the token still writes one, which is deliberate: that is exactly the
+half-configured case someone comes to this file for.) And logging is best-effort by contract — an uncreatable directory,
+an unwritable path, or a full disk is ignored rather than turned into a failure. Pi and OMP can also lose the hook's
+line when the agent's own two-second timer stops the reporter first.
 
 **2. The supervisor log.** Every line here carries the session id.
 
@@ -362,8 +364,10 @@ into a failure. Pi and OMP can also lose the hook's line when the agent's own tw
 **3. Confirm the reporter is active.** Use `ps -o args= -p <agent pid>` for injected reporters. Claude's flags are
 `--settings` followed by a JSON blob with `SessionStart` and `Stop` entries naming the farhelm binary; Codex's are
 `--no-daemon --dangerously-bypass-hook-trust` plus three `-c` overrides for `features.hooks=true`, `hooks.SessionStart`,
-and `hooks.Stop`. Muse's are `-c hooks=<JSON>` with `SessionStart` and `Stop` command entries naming the Farhelm binary
-and carrying `--session-id` and `--supervisor-socket`. For Grok, use `/hooks` inside Grok and confirm that the
+and `hooks.Stop`. On a host whose
+[recipe sets a Codex API endpoint](/docs/using/tensorlake-sandboxes/#agent-api-endpoints), two more `-c` overrides
+select that endpoint. Muse's are `-c hooks=<JSON>` with `SessionStart` and `Stop` command entries naming the Farhelm
+binary and carrying `--session-id` and `--supervisor-socket`. For Grok, use `/hooks` inside Grok and confirm that the
 `SessionStart`, `UserPromptSubmit`, and `Stop` entries name the absolute Farhelm command. For Antigravity, use `/hooks`
 to check for Farhelm's `SessionStart` and `Stop` hooks.
 

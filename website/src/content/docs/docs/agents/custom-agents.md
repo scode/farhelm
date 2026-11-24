@@ -24,8 +24,8 @@ Once your agent writes the script, register its name or path under **Settings �
 
 Custom agent support is intentionally minimal right now and does not yet carry a stability guarantee across Farhelm
 releases. We will avoid needless churn, and every contract change will be listed in the
-[contract changelog](/docs/agents/custom-agents/contract/#contract-changelog), but you should be prepared to point your
-agent back at the contract page to update your wrapper script after upgrading Farhelm.
+[contract changelog](/docs/agents/custom-agents/contract/#contract-changelog), but after upgrading Farhelm, be prepared
+to point your agent back at the contract, or have it run `farhelm custom-agent spec`, and update your wrapper script.
 
 :::
 
@@ -35,8 +35,9 @@ You do not need to write a wrapper script by hand. The intended workflow is:
 
 1. Point any coding agent — inside Farhelm (with `$farhelm`) or outside it — at the
    [Custom agent contract](/docs/agents/custom-agents/contract/)
-   (`https://farhelm.io/docs/agents/custom-agents/contract/`) and describe how your CLI tool is started, how it accepts
-   model or effort flags, and how it tracks and resumes conversations.
+   (`https://farhelm.io/docs/agents/custom-agents/contract/`), or have it run `farhelm custom-agent spec` on a host,
+   which prints the contract for the Farhelm version installed there and works outside a session. Describe how your CLI
+   tool is started, how it accepts model or effort flags, and how it tracks and resumes conversations.
 2. Have the agent write a small wrapper script (or update your binary directly) to implement the contract, and place it
    at the same command name or path on the hosts where you run sessions.
 3. Register that command under **Settings → Custom agents**.
@@ -51,8 +52,10 @@ Open **Settings** from the navigation rail (the column of icons down the left ed
 in that group, where you can edit or delete it later.
 
 - **Display name**: how the agent is named in the session launcher and session list (for example, `Acme Code`).
-- **ID**: the short identifier used in launch templates and CLI flags such as `farhelm agent create --agent acme-code`.
-  This is also what you can type in the session launcher's search box to select the agent.
+- **ID**: the short name used in launch templates and CLI flags such as `farhelm agent create --agent acme-code`. It
+  takes up to 32 lowercase letters, digits and hyphens, cannot be a name Farhelm reserves, such as a built-in agent's,
+  and cannot be changed after saving. Type it, or the display name, in the session launcher's search box to select the
+  agent.
 - **Command**: a bare program name on `PATH` (`acme-code`), an absolute path (`/opt/acme/bin/agent`), or a path under
   your home directory (`~/bin/acme-code`). The same command is used on every host and environment managed by this helm.
 - **Supports session resumption**: tick this if your command accepts `--resume <id>`. When ticked, you (through **More
@@ -78,14 +81,19 @@ built-in agents and **Shells**), in launch templates, in **Clone**, **Replace wi
   (`[a-z0-9_-]`). Leave either blank to omit its flag and let your agent use its own default. Farhelm does not check
   model or effort names against a catalog.
 - **Permissions**: custom agents have no permission mode switch in this version and always count as **YOLO**. Hosts that
-  ask before starting YOLO sessions will still ask for confirmation, and an agent cannot launch a custom agent on a host
-  that disallows agent-started YOLO sessions.
+  ask before starting YOLO sessions will still ask for confirmation, and on those hosts an agent cannot start a custom
+  agent at all ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 - **Status**: the session list shows **Running** while terminal output is changing and **Idle** once it settles. Farhelm
   cannot detect when a custom agent is waiting for approval or input.
 - **Initial prompts**: not supported for custom agents yet.
 - **Wrapper prefixes and remote links**: **More options → Wrapper prefix** works the same way as for built-in agents
   (see [Agent wrappers](/docs/agents/agent-wrappers/)). Remote sessions can open links in your browser through `BROWSER`
   or `farhelm agent open-url`.
+
+Changing or deleting a custom agent does not touch sessions already started from it: they keep the command they started
+with, and plain **Restart** still resumes their conversation. New launches use the agent as it is registered now, so
+**Clone**, **Replace with**, **Restart with**, templates and `farhelm agent create --agent <id>` stop working for a
+deleted agent until you register its ID again. The session list shows the ID in place of a deleted agent's name.
 
 ## When Restart stays unavailable
 

@@ -120,7 +120,7 @@ color. It starts off. The terminal background and text colors stay the same. The
 
 A host can ask you to sign in when Farhelm connects to it: for a verification code, a password, a key passphrase, or to
 confirm a host key it has not seen before. This happens when Farhelm opens, when it reconnects after a dropped
-connection, when you add the host, and before **Update**, **Uninstall** or **Re-run** start. Farhelm keeps two
+connection, when you add the host, before **Update**, **Uninstall** or **Re-run** start, and before an automatic update. Farhelm keeps two
 connections to each host, one for sessions and one for setup and updates, so a new host can ask twice; the question says
 which one it is for, **For sessions** or **For setup and updates**.
 
@@ -176,8 +176,10 @@ warning until you open the host list, where its row shows what happened.
 Farhelm updates remote hosts automatically while the app is open. This starts on for new installations, and when you
 upgrade from a release that left it off it turns on again, even if you had turned it off. To keep updates manual, turn off **Update remote hosts
 automatically** in Settings, under **Hosts**. The setting applies to every remote host. Your Mac has its own update
-setting. If an automatic update of a host fails, Farhelm does not try that host again
-until it reconnects or Farhelm restarts. The host keeps its up-arrow, so you can update it yourself.
+setting. If a host needs you to [sign in](#sign-in-to-a-host) before Farhelm can update it, the question waits in the row
+above your sessions with **Answer**, without taking your keyboard, and other hosts keep updating. Once you sign in, the
+update goes ahead by itself. If an automatic update of a host fails, or you cancel its sign-in or let it expire, Farhelm
+does not try that host again until it reconnects or Farhelm restarts. The host keeps its up-arrow, so you can update it yourself.
 
 ## Uninstall Farhelm from a remote host
 

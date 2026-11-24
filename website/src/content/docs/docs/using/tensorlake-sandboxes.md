@@ -142,10 +142,11 @@ open it on a new host.
 
 For Codex **API endpoint**, Farhelm supplies the endpoint whenever it starts or resumes a Codex session. Use **Restart**
 to pick up a replacement in a running session. Typing `codex` in a terminal tab uses that shell's usual Codex settings.
-On upgrade, Farhelm removes the old provider selection and bearer it had written to Codex's settings on hosts where it
-recorded that delivery. If your base image already sets a token on the `farhelm` provider, Codex can send it to the
-recipe's URL even when the recipe's token picker says **None**. To use the image's own configuration, choose **None** as
-the Codex mode.
+A [custom command](/docs/agents/custom-commands/) that runs Codex gets the endpoint only when it declares Codex as its
+agent type. On upgrade, Farhelm removes the old provider selection and bearer it had written to Codex's settings on
+hosts where it recorded that delivery. If your base image already sets a token on the `farhelm` provider, Codex can send
+it to the recipe's URL even when the recipe's token picker says **None**. To use the image's own configuration, choose
+**None** as the Codex mode.
 
 For a ChatGPT login, choose Codex **Subscription** and select the login you saved in Credentials. Farhelm writes it to
 the host's usual `~/.codex/auth.json` and leaves Codex's refreshed file alone until you replace that saved login. Recipe

@@ -58,9 +58,10 @@ YOLO. The command's declaration enables its reporter directly, even if the regis
 A declared agent needs `{farhelm_args}` in the command, once, as a whole argument, where that agent's own arguments go.
 Farhelm fills it in with the arguments that agent needs, including any arguments for conversation tracking. Your command
 has to pass them on. For [Codex](/docs/agents/codex/#gotchas-and-quirks), they include `--no-daemon` even with
-conversation tracking off. That flag keeps Codex's commands in the session's own environment.
-[Agent wrappers](/docs/agents/agent-wrappers/) shows how to write a wrapper that keeps them. For a custom declaration,
-keep the placeholder in the command. It expands to zero arguments.
+conversation tracking off and, on a host whose recipe sets a Codex
+[API endpoint](/docs/using/tensorlake-sandboxes/#agent-api-endpoints), that endpoint. The `--no-daemon` flag keeps
+Codex's commands in the session's own environment. [Agent wrappers](/docs/agents/agent-wrappers/) shows how to write a
+wrapper that keeps them. For a custom declaration, keep the placeholder in the command. It expands to zero arguments.
 
 Leave the placeholders unquoted and separate from other text: `{cwd}`, rather than `"{cwd}"` or `--dir={cwd}`. Farhelm
 quotes the value for you, so a directory or conversation containing spaces stays one argument and cannot turn into
@@ -74,14 +75,15 @@ where `{conversation}` stands. Without all of that, **Restart** stays greyed out
 
 The resume command is usually the start command plus the agent's own way of picking a conversation:
 
-| Agent       | Resume command, after your start command's options                        |
-| ----------- | ------------------------------------------------------------------------- |
-| Claude      | `--resume {conversation} {farhelm_args}`                                  |
-| Antigravity | `--conversation {conversation} {farhelm_args}`                            |
-| Codex, Muse | `resume {conversation} {farhelm_args}`                                    |
-| Goose       | `--resume --session-id {conversation} {farhelm_args}`, on `goose session` |
-| OMP, Grok   | `--resume {conversation} {farhelm_args}`                                  |
-| Pi          | `--session {conversation} {farhelm_args}`                                 |
+| Agent       | Resume command, after your start command's options                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude      | `--resume {conversation} {farhelm_args}`                                                                                               |
+| Antigravity | `--conversation {conversation} {farhelm_args}`                                                                                         |
+| Codex, Muse | `resume {conversation} {farhelm_args}`                                                                                                 |
+| Goose       | `--resume --session-id {conversation} {farhelm_args}`, on `goose session`                                                              |
+| OMP, Grok   | `--resume {conversation} {farhelm_args}`                                                                                               |
+| Pi          | `--session {conversation} {farhelm_args}`                                                                                              |
+| Custom      | `--resume {conversation} {farhelm_args}`, for a program that follows the [custom agent contract](/docs/agents/custom-agents/contract/) |
 
 So `claude --model sonnet {farhelm_args}` resumes as `claude --model sonnet --resume {conversation} {farhelm_args}`.
 **Runs in YOLO mode** applies to the resume command too, including fixed **Yes (YOLO)** for custom declarations.
