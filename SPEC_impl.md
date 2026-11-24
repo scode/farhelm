@@ -2503,20 +2503,21 @@ style against them lives in the grid model (`crates/gui/farhelm-grid-model/src/c
 creates with that palette. The model also judges that ink: `colors::unseen` calls a run hidden when it has something to
 draw and its WCAG contrast with its background is below 1.35:1, with dim text modeled as a half-alpha blend of the
 encoded sRGB values, because GPUI's surface is a non-sRGB format and its blend unit mixes encoded values. Printed URL
-detection blanks unseen runs exactly as it blanks concealed ones; program hyperlinks still go by conceal alone. Known
-limitations, accepted: a few queries `vte` does not parse go unanswered, and a query inside an open synchronized update
-is answered when the update ends rather than at once. Keyboard input keeps today's legacy xterm encoding: the kitty
-keyboard protocol stays off (turning it on would change the Shift+Enter and Escape handling SPEC.md promises) and its
-query unanswered, and OSC 52 writes are honored while reads are never answered. The encoding itself is the supervisor's
-(`grid_input.rs`). `vte` holds a synchronized update's bytes until the update ends, and its 150 ms safety deadline is
-not self-driving: the runtime wakes at the deadline on its own clock and draws the update, and also draws one left open
-when the child exits, when a replay ends and before a resize; `vte` itself ends one whose bytes reach its 2 MiB buffer.
-Each of those can draw a frame the program had not finished. The safety deadline, the buffer limit, a resize, the
-child's exit and the end of a replay are examples of the deliberate exceptions to frames never being drawn half done; a
-recovering replay also draws an open update where it crosses from output an earlier supervisor was sent to output none
-was, and where it crosses a gap, though it carries on to the same final state. The crate's own tests pin the answer
-table, the screen-text format and the modes as Farhelm's, and the supervisor's screen fixture tests paint every captured
-agent screen into the emulator and run its status reader on the emulator's text.
+detection blanks unseen runs exactly as it blanks concealed ones, and program hyperlinks leave them out of their visible
+identity (`links.rs`, `visible_link`). Known limitations, accepted: a few queries `vte` does not parse go unanswered,
+and a query inside an open synchronized update is answered when the update ends rather than at once. Keyboard input
+keeps today's legacy xterm encoding: the kitty keyboard protocol stays off (turning it on would change the Shift+Enter
+and Escape handling SPEC.md promises) and its query unanswered, and OSC 52 writes are honored while reads are never
+answered. The encoding itself is the supervisor's (`grid_input.rs`). `vte` holds a synchronized update's bytes until the
+update ends, and its 150 ms safety deadline is not self-driving: the runtime wakes at the deadline on its own clock and
+draws the update, and also draws one left open when the child exits, when a replay ends and before a resize; `vte`
+itself ends one whose bytes reach its 2 MiB buffer. Each of those can draw a frame the program had not finished. The
+safety deadline, the buffer limit, a resize, the child's exit and the end of a replay are examples of the deliberate
+exceptions to frames never being drawn half done; a recovering replay also draws an open update where it crosses from
+output an earlier supervisor was sent to output none was, and where it crosses a gap, though it carries on to the same
+final state. The crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's, and the
+supervisor's screen fixture tests paint every captured agent screen into the emulator and run its status reader on the
+emulator's text.
 
 Emoji and text variation selectors follow Ghostty's default Unicode width rules: only eligible bases change width,
 selectors after a combining mark are ignored, and text presentation can narrow a wide character. Two exceptions keep the
@@ -3492,18 +3493,40 @@ gone. A release can still finish an admitted press after it closes its own panel
 explanation before any cover is considered.
 
 The scanner that finds the web addresses a hyperlink's visible text mentions, and judges each against the destination,
-is `crates/gui/farhelm-grid-model/src/link_claims.rs`. Nothing outside its tests calls it yet: the hover's warning still
-comes from `link_disclosure.rs`, which shares only the URL comparison and the look-alike table with it. It works on a
-recognition view folded one extended grapheme cluster at a time (NFKC through `icu_normalizer`, the look-alike table,
-format characters removed, and combining marks removed except on letters of scripts other than Latin, Greek and
-Cyrillic, where they are spelling), finds addresses at anchors in one left-to-right pass, and judges boundaries and
-extents on the original characters. Scanning is linear in the label's length; a test holds it to twelve counted steps
-per UTF-16 unit on adversarial labels (some passes count bytes, so labels of multi-byte characters cost more per unit).
-Which dotted names count as sites rests on a snapshot of IANA's root zone list, `link_claims/tlds.txt` beside that
-module. To refresh it, download `https://data.iana.org/TLD/tlds-alpha-by-domain.txt` with plain `curl` (no credentials
-or identifying headers are needed), replace the file whole, keeping IANA's `# Version` first line, and run the grid
-model's tests. A refresh can change which bare names count, since every two-letter ending the snapshot holds, outside
-the excluded list in `link_claims/endings.rs`, counts as a site with nothing after it.
+is `crates/gui/farhelm-grid-model/src/link_claims.rs`, a pure function of the label's rows and the destination that the
+hover's warning (below) calls. It works on a recognition view folded one extended grapheme cluster at a time (NFKC
+through `icu_normalizer`, the look-alike table, format characters removed, and combining marks removed except on letters
+of scripts other than Latin, Greek and Cyrillic, where they are spelling), finds addresses at anchors in one
+left-to-right pass, and judges boundaries and extents on the original characters. Scanning is linear in the label's
+length; a test holds it to twelve counted steps per UTF-16 unit on adversarial labels (some passes count bytes, so
+labels of multi-byte characters cost more per unit). Which dotted names count as sites rests on a snapshot of IANA's
+root zone list, `link_claims/tlds.txt` beside that module. To refresh it, download
+`https://data.iana.org/TLD/tlds-alpha-by-domain.txt` with plain `curl` (no credentials or identifying headers are
+needed), replace the file whole, keeping IANA's `# Version` first line, and run the grid model's tests. A refresh can
+change which bare names count, since every two-letter ending the snapshot holds, outside the excluded list in
+`link_claims/endings.rs`, counts as a site with nothing after it.
+
+The hover's warning is `crates/gui/farhelm-grid-model/src/link_disclosure.rs`, in two halves. The label reader walks out
+from the hovered row with one identity lookup (`Identities`) for the whole walk, resolving the hovered row first: the
+hit test resolves the same way, so the reader's idea of the hyperlink's cells is the hit test's, and since one lookup
+reaches 129 rows back, one more than the row budget, a generated-id chain longer than the budget is over budget from
+every row instead of losing its root partway. It reads each row's visible stretches of the hyperlink, stops at a row
+with none, and gives up past 128 rows or 8,192 UTF-16 units (a one-row label's stretches each get the unit budget). Each
+seam is soft when `GridModel::edge_seam` finds the hyperlink's own runs meeting edge to edge across it: the previous
+row's piece reaches its last text column and this row's starts at column 0. That is the geometry `GridModel::wrap_seam`
+gives generated-id continuation, without the wrap flag, because a program that fills a row and writes CR LF draws
+exactly what a wrap draws and the old client joined such rows too; a hard seam with unseen ink of the hyperlink's target
+on either side of it always separates. On the same walk it notes unseen runs with something to draw and the hyperlink's
+target on the label's rows, matched by target rather than identity because an unseen run has no visible identity. The
+verdict is incomplete with no text over budget; incomplete when a multi-row label has a row with several stretches and
+any stretch mentions an address (the stretches are scanned one by one) or unseen text with its target is on its rows;
+otherwise the per-seam reading judged by `link_claims::judge`, with a second judgment with every hard seam joined when
+the first mismatches, the mismatch standing only when both do. Hidden is added whenever the unseen evidence exists.
+`TerminalLink::unseen` carries the hovered row's half of that evidence into the link's equality, beside
+`osc_label_ambiguous`, so a color change that adds or removes it re-judges a resting hover and refuses a press whose
+release lands after it. The old web client's recorded answers (`tests/fixtures/links-oracle.json`) now guard only the
+safety direction, with the cases the new rules quiet listed in `tests/fixtures/links-oracle-exceptions.json`
+(`tests/fixtures/README.md`).
 
 An admitted click always asks the helm to save into Downloads (`save_to_downloads`), adding `open` only for the
 platform's modifier-click when that hover's stat reply offered opening; otherwise the modified click saves and its

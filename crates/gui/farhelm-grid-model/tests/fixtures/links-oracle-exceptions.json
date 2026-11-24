@@ -1,0 +1,118 @@
+{
+  "exceptions": [
+    {
+      "kind": "policy",
+      "key": {
+        "text": "<U+202E>https://example.com/x",
+        "uri": "https://example.com/x"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": " \t<U+202E>https://example.com/x﻿",
+        "uri": "https://example.com/x"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": "<U+202E>https://example.com/x",
+        "uri": "https://example.com/x/"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": " \t<U+202E>https://example.com/x﻿",
+        "uri": "https://example.com/x/"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": "<U+202E>https://example.com/x",
+        "uri": "https://example.com/x?"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": " \t<U+202E>https://example.com/x﻿",
+        "uri": "https://example.com/x?"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": "<U+202E>https://example.com/x",
+        "uri": "https://example.com/x#"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": " \t<U+202E>https://example.com/x﻿",
+        "uri": "https://example.com/x#"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": "<U+202E>https://example.com/x",
+        "uri": "https://example.com/x?#"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": " \t<U+202E>https://example.com/x﻿",
+        "uri": "https://example.com/x?#"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": "<U+202E>https://example.com/x",
+        "uri": "https://example.com:443/x"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "policy",
+      "key": {
+        "text": " \t<U+202E>https://example.com/x﻿",
+        "uri": "https://example.com:443/x"
+      },
+      "rule": "Literal escape notation, not the character it names: the label spells a right-to-left override the way the hover escapes one (`<U+202E>`), and the `>` before the scheme ends that notation, so the address after it is the destination's own and nothing in it is disguised. The old client counted the notation as part of the scheme."
+    },
+    {
+      "kind": "grid",
+      "key": {
+        "grid": 3,
+        "line": 0,
+        "result": 0
+      },
+      "rule": "A hard row break before an address separates like a space, and the hover shows it as one: the label `https://example.com` above `.evil.test/x` reads `https://example.com .evil.test/x`, where the old client joined the rows with nothing. It still warns, from both rows, and still mismatches with the break joined."
+    },
+    {
+      "kind": "grid",
+      "key": {
+        "grid": 3,
+        "line": 1,
+        "result": 0
+      },
+      "rule": "A hard row break before an address separates like a space, and the hover shows it as one: the label `https://example.com` above `.evil.test/x` reads `https://example.com .evil.test/x`, where the old client joined the rows with nothing. It still warns, from both rows, and still mismatches with the break joined."
+    }
+  ]
+}

@@ -1,167 +1,114 @@
-//! Target disclosure is data, not browser authorization. These pure policies
-//! port terminal-links.js (LICENSE-PORTED); native geometry and gesture state
-//! must still establish that the current disclosure is visible before opening.
+//! What a program hyperlink's hover says before a click opens it: the real destination, and a warning when the link's
+//! visible text gives a reason to doubt it.
+//!
+//! Target disclosure is data, not browser authorization: native geometry and gesture state must still establish that
+//! the current disclosure is visible before opening. The destination's presentation (its escaping and shortening)
+//! ports terminal-links.js (LICENSE-PORTED); the warning does not, and follows SPEC.md's terminal links paragraph.
+//!
+//! The warning has five reasons, in the order the hover lists them:
+//!
+//! - the text mentions a web address that names another place (mismatch), spells one with look-alike or invisible
+//!   characters (disguised), or puts login details before the real site (credentials). [`crate::link_claims`] finds
+//!   and judges the addresses;
+//! - the whole text couldn't be read, so an address could hide in what wasn't (incomplete);
+//! - part of the text is drawn where the user can't see it (hidden).
+//!
+//! The work splits in two. The **label reader** ([`GridModel::read_label`]) walks out from the hovered row over every
+//! row the same hyperlink continues on, collects each row's visible stretches and the seam before it, and notes unseen
+//! text with the same destination. The **verdict** ([`verdict`]) turns that into the warning. Unseen text never reaches
+//! the label: identity already leaves it out ([`crate::links`]'s `visible_link`), exactly as conceal always did.
+//!
+//! The rows of a label meet at seams. A soft seam is where the terminal wrapped the text, so the rows are one line and
+//! always join. A hard seam is everything else: a program that ends a row and continues its hyperlink on the next. It
+//! separates like a space when the text after it starts with an address, and joins otherwise. A label that mismatches
+//! with its seams read that way is judged once more with every hard seam joined, and warns only when both readings
+//! mismatch: an honest address a program broke over rows by hand stays quiet, while a spoof has to fool both.
 
-use crate::constant_regex;
-use crate::{
-    GridModel, LinkKind, TerminalLink,
-    link_claims::{comparable, lookalike},
-    links::{Identities, JS_SPACE, is_js_space},
-    web_target,
-};
-use regex::Regex;
-use std::sync::LazyLock;
+use crate::link_claims::{self, MismatchKind, RowText, Seam};
+use crate::links::{Identities, is_js_space};
+use crate::{GridModel, LinkKind, TerminalLink, web_target};
+use std::collections::VecDeque;
 use url::Url;
 
-/// Address-shaped labels begin with a scheme, `www.`, or a dotted host followed by a path. Scheme and host
-/// letters include Unicode so a lookalike still enters the comparison. The optional userinfo keeps a familiar
-/// name before an `@` from hiding a different host. A leading dot can be the first visible character of an
-/// ambiguous host fragment, which still needs to warn. The classes are allow-lists, so they only see text that
-/// `INVISIBLE` has already cleaned: no format character or combining mark reaches them.
-static ADDRESS: LazyLock<Regex> = LazyLock::new(|| {
-    constant_regex(concat!(
-        r"(?i)^(?:(?P<scheme>\p{L}[\p{L}\p{N}+.-]*://)|www\.|",
-        r"(?:[\p{L}\p{N}._%+~!$&'*,;=-]+(?::[\p{L}\p{N}._%+~!$&'*,;=-]*)?@)?",
-        r"\.?[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*\.\p{L}{2,}(?::[0-9]+)?/)"
-    ))
-});
-/// Characters that draw nothing of their own, or only modify the glyph before them: format characters such as
-/// a zero-width space or a directionality mark, and combining marks such as a variation selector. The supervisor
-/// keeps zero-width characters with the preceding cell, so a label can carry them anywhere while the screen shows
-/// a clean address. Recognition ignores them so such a label still counts as an address; the comparison then
-/// parses the original text, where they make the parse fail or name a different place.
-static INVISIBLE: LazyLock<Regex> = LazyLock::new(|| constant_regex(r"[\p{Cf}\p{M}]"));
-static LEADING_BLANKS: LazyLock<Regex> = LazyLock::new(|| {
-    constant_regex(
-        &r"^(?:[^\p{L}\p{N}\x00-\x7F]|[\u{115F}\u{1160}\u{3164}\u{FFA0}]|[%s])+"
-            .replace("%s", JS_SPACE),
-    )
-});
-
-/// Fully rendered text for one web target. The actual host is never shortened
-/// or replaced with userinfo. A claimed address appears only with the mismatch
-/// warning; ordinary prose labels do not claim that their words name a URL.
-/// This owns no grid rows and cannot outlive the UI's independent evidence check.
+/// Fully rendered text for one web target. The actual host is never shortened or replaced with userinfo. This owns no
+/// grid rows and cannot outlive the UI's independent evidence check.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkDisclosure {
     /// Parsed authority host, including a nondefault port and IPv6 brackets.
     pub host: String,
-    /// Serialized destination, retaining empty query/fragment delimiters. Long
-    /// targets name the omitted middle; the separate host always remains whole.
+    /// Serialized destination, retaining empty query/fragment delimiters. Long targets name the omitted middle; the
+    /// separate host always remains whole.
     pub target: String,
-    /// Escaped address-shaped program text requiring the loud mismatch warning.
-    pub claimed: Option<String>,
-    /// The same text unescaped (trimmed, and shortened like `claimed` but counted before escaping), for a UI that
-    /// escapes host-supplied text itself: the desktop app draws it through its host-text element, which would escape
-    /// `claimed` a second time.
-    pub claimed_text: Option<String>,
+    /// Why the hover should make the user doubt the link, if it should. `None` is the ordinary display: the text
+    /// mentions no other place, or nothing in it is out of sight.
+    pub warning: Option<LinkWarning>,
 }
 
-/// How a label claims to name a web address. Only a label without a scheme borrows the target's scheme.
-enum AddressShape {
-    Scheme,
-    Host,
-}
-
-/// Whether a character puts nothing visible between a delimiter and its neighbors: whitespace, a format
-/// character or combining mark (`INVISIBLE`), or one of the blank fillers `LEADING_BLANKS` also skips. The
-/// supervisor keeps zero-width characters with the cell before them, so a label can carry them right after a
-/// closing bracket while the screen shows a plain pair.
-fn draws_nothing_beside_a_delimiter(ch: char) -> bool {
-    is_js_space(ch)
-        || matches!(
-            ch,
-            '\u{115f}' | '\u{1160}' | '\u{3164}' | '\u{ffa0}' | '\u{2800}'
-        )
-        || INVISIBLE.is_match(ch.encode_utf8(&mut [0; 4]))
-}
-
-/// The address a label claims when it shows one inside matching outer pairs of `<>`, `()`, `[]`, `""` or
-/// `''`, peeled layer by layer; otherwise the label itself, trimmed. Only matching outer pairs come off, so prose
-/// around an address stays part of the label and keeps the ordinary display. A peeled label whose first word
-/// then ends in a closing delimiter (`[https://a.test/] [docs]`) is a phrase after an address, not an address in a
-/// pair, so it is returned unpeeled: such a label gets the ordinary display even when its leading address names
-/// another place, a known limit. The hover still displays the original text either way.
+/// The loud form of a hover: its reasons, and the text that lets the user see for themselves.
 ///
-/// Pairs are found on a view of each layer with characters that draw nothing trimmed from both ends, so a
-/// zero-width character or blank filler beside a delimiter cannot hide the pair. The address the peel ends on
-/// is trimmed of whitespace only: an invisible character between the innermost delimiter and the address stays
-/// in the compared text, where it fails the parse and warns.
-fn strip_matching_wrappers(text: &str) -> &str {
-    let label = text.trim_matches(is_js_space);
-    let mut text = label;
-    loop {
-        let view = text.trim_matches(draws_nothing_beside_a_delimiter);
-        let closing = match view.as_bytes().first() {
-            Some(b'<') => '>',
-            Some(b'(') => ')',
-            Some(b'[') => ']',
-            Some(b'"') => '"',
-            Some(b'\'') => '\'',
-            _ => break,
-        };
-        // Every recognized opener is one byte. Search after it so a lone quote is not a pair.
-        let Some(inner) = view[1..].strip_suffix(closing) else {
-            break;
-        };
-        text = inner.trim_matches(is_js_space);
+/// All text here is the program's, unescaped: the desktop app draws it through its host-text element, which escapes
+/// invisible and direction-changing characters itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkWarning {
+    /// At least one reason, each at most once, in [`WarningReason`]'s order. At most one of the address reasons
+    /// (mismatch, disguised, credentials) appears: the first mismatching address's.
+    pub reasons: Vec<WarningReason>,
+    /// The visible label, every row of it, trimmed and shortened like the destination. A seam that separates shows as a
+    /// space, one that joins as nothing, and separate stretches of one row are spaced apart. Empty when the label was too
+    /// long to read ([`WarningReason::Incomplete`] alone), so no part of an unread label is ever shown as if whole.
+    pub label: String,
+    /// The first address in the label that doesn't name the destination, as written (trailing decoration such as a
+    /// sentence's full stop left off) and shortened. Present exactly when an address reason is.
+    pub address: Option<String>,
+    /// That address as the URL parser reads it, with the destination's scheme when it has none of its own: what the
+    /// destination is compared against to show where they differ. `None` when it doesn't parse.
+    pub address_parsed: Option<String>,
+    /// How many other addresses in the label don't name the destination either.
+    pub more: usize,
+}
+
+/// One reason a hover warns. The order of the variants is the order the hover lists them in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum WarningReason {
+    /// The text mentions a web address that names a different place, or one that doesn't parse.
+    Mismatch,
+    /// The text spells an address with look-alike, compatibility or invisible characters where a browser reads the
+    /// place.
+    Disguised,
+    /// The text puts login details before the real host (`github.com@evil.test/`).
+    Credentials,
+    /// The whole text couldn't be checked: it is longer than the reader's budget, or a row of a multi-row label shows it
+    /// in pieces that can't be put back together, and one of them mentions an address or unseen text with the link's
+    /// destination is on its rows.
+    Incomplete,
+    /// Part of the text, with this link's destination, is concealed or drawn too close to its background to read.
+    Hidden,
+}
+
+impl From<MismatchKind> for WarningReason {
+    fn from(kind: MismatchKind) -> Self {
+        match kind {
+            MismatchKind::Mismatch => Self::Mismatch,
+            MismatchKind::Disguised => Self::Disguised,
+            MismatchKind::Credentials => Self::Credentials,
+        }
     }
-    // A bracket or quote before a word break can end an address followed by prose. Check after peeling so
-    // spaces between genuinely nested delimiters stay legal. When nothing was peeled, `text` is `label`.
-    if text
-        .split_once(is_js_space)
-        .is_some_and(|(first, _)| first.ends_with(['>', ')', ']', '"', '\'']))
-    {
-        return label;
-    }
-    text
 }
 
-/// Judge lookalike punctuation, leading blanks and invisible characters only when recognizing the address.
-/// Parse the original text in the form recognized here, so a lookalike scheme cannot be reinterpreted as a host.
-fn address_shape(text: &str) -> Option<AddressShape> {
-    let text = LEADING_BLANKS.replace(text, "");
-    let text = INVISIBLE.replace_all(&text, "");
-    let gated: String = text.chars().map(lookalike).collect();
-    let claim = ADDRESS.captures(&gated)?;
-    Some(if claim.name("scheme").is_some() {
-        AddressShape::Scheme
-    } else {
-        AddressShape::Host
-    })
-}
-
-/// A URL-shaped label that cannot be parsed is a warning, not quiet prose.
-/// Scheme-less labels borrow only the target's scheme, never its authority.
-fn mismatch(text: &str, uri: &str) -> bool {
-    let claimed = strip_matching_wrappers(text);
-    let Some(shape) = address_shape(claimed) else {
-        return false;
-    };
-    let Ok(target) = Url::parse(uri) else {
-        return true;
-    };
-    let named = match shape {
-        AddressShape::Scheme => Url::parse(claimed),
-        AddressShape::Host => Url::parse(&format!("{}://{claimed}", target.scheme())),
-    };
-    named.map_or(true, |named| comparable(&named) != comparable(&target))
-}
-
-/// Reveal invisible controls and escape literal notation so output cannot pose
-/// as our escape syntax. Variation selectors remain readable, as in the pin.
+/// Reveal invisible controls and escape literal notation so output cannot pose as our escape syntax. Variation
+/// selectors remain readable, as in the pin.
 ///
-/// This is the app's one escape (`farhelm_proto::text::escaped`), the table the
-/// command line shares. The pinned JavaScript escaped Unicode's whole format
-/// category through a regular expression; the shared table lists that category
-/// in full, so the oracle below still pins the same output.
+/// This is the app's one escape (`farhelm_proto::text::escaped`), the table the command line shares. The pinned
+/// JavaScript escaped Unicode's whole format category through a regular expression; the shared table lists that
+/// category in full, so the oracle below still pins the same output. The model itself never escapes a disclosure (the
+/// desktop app does, as it draws); the oracle tests use this to compare against the old client's escaped answers.
+#[cfg(test)]
 fn visible(text: &str) -> String {
     farhelm_proto::text::escaped(text)
 }
 
-/// The pin budgets 300 UTF-16 units and names the omitted middle. A boundary
-/// inside a surrogate pair renders as replacement text, just as a native text
-/// widget would render the JS slice's unpaired surrogate.
+/// The pin budgets 300 UTF-16 units and names the omitted middle. A boundary inside a surrogate pair renders as
+/// replacement text, just as a native text widget would render the JS slice's unpaired surrogate.
 fn shortened(text: &str) -> String {
     let units: Vec<_> = text.encode_utf16().collect();
     if units.len() <= 300 {
@@ -175,104 +122,115 @@ fn shortened(text: &str) -> String {
     )
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// The label reader
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// The most rows a label may span and still be read: a label on more is incomplete. One identity lookup reaches 129
+/// rows back ([`Identities`]), one more than this, so a hyperlink continued over more rows than the budget is over budget
+/// from whichever row the pointer rests on, never read whole from one end and in part from the other.
+const MAX_ROWS: usize = 128;
+
+/// The most UTF-16 units of visible text a label may hold and still be read, the old client's join budget. Each of a
+/// one-row label's independent stretches has a budget of its own.
+const MAX_UNITS: usize = 8192;
+
+/// One contiguous visible piece of the hovered hyperlink on one row.
+struct Stretch {
+    /// The column the piece starts at, which is how the hovered piece of a one-row label is found again.
+    from: u16,
+    text: String,
+}
+
+/// How a label row continues the one before it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RowSeam {
+    /// The hyperlink's piece on the row before reaches that row's last text column and this row's piece starts at
+    /// column 0 ([`GridModel::edge_seam`]): the rows read as one line. That is what a wrap draws, and also what a
+    /// program draws when it fills a row and moves to the next itself; the wrap flag isn't consulted, because the user
+    /// can't tell the two apart and reads `git` at the edge above `hub.com/login` as `github.com/login`.
+    Soft,
+    /// The program continued the hyperlink on a new row itself. It separates or joins depending on what follows.
+    Hard,
+    /// Like `Hard`, but unseen text with this destination lies between the two rows' pieces. It always separates: the
+    /// user saw a gap there, so no reading of the label may stitch the pieces into one address.
+    Break,
+}
+
+/// What one row holds of the hovered hyperlink.
+struct LabelRow {
+    stretches: Vec<Stretch>,
+    /// UTF-16 units over all the row's stretches, for the budget.
+    units: usize,
+    /// Per run: whether it is a visible run of the hovered hyperlink. A soft seam needs it of the runs at the seam.
+    keyed: Vec<bool>,
+    /// Unseen text with this destination before the first stretch, and after the last one.
+    hidden_before: bool,
+    hidden_after: bool,
+    /// Unseen text with this destination anywhere on the row: the hidden reason's evidence.
+    hidden: bool,
+    /// How this row continues the previous label row; `None` on the first.
+    seam_before: Option<RowSeam>,
+}
+
+/// A hyperlink's label as the reader found it.
+enum Label {
+    /// Longer than the budget. Nothing read is evidence of anything, so the verdict is incomplete and shows no text.
+    OverBudget,
+    Read {
+        /// Top to bottom. Every row has at least one stretch.
+        rows: Vec<LabelRow>,
+        /// The column the hovered stretch starts at, on the one row of a one-row label.
+        hovered: u16,
+    },
+}
+
 impl GridModel {
-    /// Read current tagged text, including cursor-drawn hard row breaks. A join
-    /// is evidence only within 128 total rows / 8192 UTF-16 units and with one
-    /// contiguous occurrence per row. Ambiguous or bounded URL fragments warn
-    /// even when the hovered fragment alone equals the target.
+    /// The hover's text for a program hyperlink with a web destination, `None` for any other link.
+    ///
+    /// The label is read and judged afresh on every call. A resting hover's display keeps the answer it got when the
+    /// hover started; [`TerminalLink`]'s equality is how the display learns it must ask again (SPEC.md: the warning
+    /// need not follow later redraws of other rows while the pointer rests).
     pub fn link_disclosure(&self, link: &TerminalLink) -> Option<LinkDisclosure> {
         let target = web_target(&link.uri, matches!(link.kind, LinkKind::Text))?;
-        let (text, fragment) = self.link_label(link);
-        let warning = text.as_ref().filter(|text| {
-            if fragment {
-                address_shape(strip_matching_wrappers(text)).is_some()
-            } else {
-                mismatch(text, &link.uri)
-            }
-        });
+        let warning = match self.read_label(link) {
+            Some(label) => verdict(label, &target),
+            None => None,
+        };
         Some(LinkDisclosure {
             host: target[url::Position::BeforeHost..url::Position::AfterPort].into(),
             target: shortened(target.as_str()),
-            claimed: warning.map(|text| shortened(&visible(text.trim_matches(is_js_space)))),
-            claimed_text: warning.map(|text| shortened(text.trim_matches(is_js_space))),
+            warning,
         })
     }
 
-    /// An isolated repeated tag is complete. Across rows, any ambiguous run or
-    /// budget exhaustion returns the hovered row as a fragment, never a quiet
-    /// assertion that the complete program-controlled label names this target.
-    /// A joined run whose rows each show an address on their own returns the hovered row as a whole label
-    /// (not a fragment) when the rows all repeat the target or the join does not look like one address.
-    fn link_label(&self, link: &TerminalLink) -> (Option<String>, bool) {
+    /// Read the hovered program hyperlink's label: every row the hyperlink continues on, outward from the hovered one.
+    ///
+    /// `None` for a printed link, which has no label of its own, and for a link whose row no longer shows it.
+    ///
+    /// The walk uses one identity lookup for its whole duration and resolves the hovered row first, so its idea of which
+    /// cells are this hyperlink is the hit test's ([`GridModel::row_links`] resolves the same way): rows above are then
+    /// answered from the lookup's cache wherever the hovered row's resolution already passed through them. It continues
+    /// through rows that show the hyperlink in more than one stretch, and stops at a row that shows none of it (a row
+    /// that is entirely unseen included), at the boundary between the primary history and an alternate screen, or past
+    /// the budget.
+    fn read_label(&self, link: &TerminalLink) -> Option<Label> {
         let LinkKind::Osc { id } = &link.kind else {
-            return (None, false);
+            return None;
         };
-        let Some(range) = link.ranges.first() else {
-            return (None, false);
-        };
-        let Some((cols, row)) = self.selection_line(range.start.line) else {
-            return (None, false);
-        };
-        let fragment = row
-            .text(range.start.col, range.end.col.min(row.text_columns(cols)))
-            .trim_end_matches(' ')
-            .to_owned();
-        let mut identities = Identities::new(self);
-        let mut read = |line| {
-            let Some((cols, row)) = self.selection_line(line) else {
-                return (0, String::new());
-            };
-            let mut count = 0;
-            let mut from = 0;
-            let mut to = 0;
-            let mut inside = false;
-            for (run, key) in row.runs.iter().zip(identities.row(line)) {
-                let tagged = key
-                    .as_ref()
-                    .is_some_and(|key| key.id == *id && key.uri == link.uri);
-                if tagged {
-                    if !inside || run.col != to {
-                        count += 1;
-                        if count == 1 {
-                            from = run.col;
-                        }
-                    }
-                    to = run.col + run.width;
-                }
-                inside = tagged;
-            }
-            (
-                count,
-                if count == 1 {
-                    row.text(from, to.min(row.text_columns(cols)))
-                } else {
-                    String::new()
-                },
-            )
-        };
+        let range = link.ranges.first()?;
         let line = range.start.line;
-        let above = line
-            .checked_sub(1)
-            .filter(|&above| !self.has_screen_break_after(above))
-            .map(&mut read)
-            .unwrap_or_default();
-        let below = line
-            .checked_add(1)
-            .filter(|_| !self.has_screen_break_after(line))
-            .map(&mut read)
-            .unwrap_or_default();
-        if above.0 == 0 && below.0 == 0 {
-            return (Some(fragment), false);
+        let mut identities = Identities::new(self);
+        let hovered = self.label_row(&mut identities, line, id, &link.uri);
+        if hovered.stretches.is_empty() {
+            return None;
         }
-        let (count, center) = read(line);
-        if count != 1 || center.encode_utf16().count() > 8192 {
-            return (Some(fragment), true);
-        }
-        let mut characters = center.encode_utf16().count();
-        let mut rows = std::collections::VecDeque::from([center]);
-        for direction in [-1, 1] {
+        let mut units = hovered.units;
+        let mut first = line;
+        let mut rows = VecDeque::from([hovered]);
+        for up in [true, false] {
             let mut at = line;
-            while let Some(next) = if direction < 0 {
+            while let Some(next) = if up {
                 at.checked_sub(1)
             } else {
                 at.checked_add(1)
@@ -280,63 +238,429 @@ impl GridModel {
                 if self.has_screen_break_after(at.min(next)) {
                     break;
                 }
-                let (count, text) = read(next);
-                if count == 0 {
+                let row = self.label_row(&mut identities, next, id, &link.uri);
+                if row.stretches.is_empty() {
                     break;
                 }
-                characters += text.encode_utf16().count();
-                if count != 1 || rows.len() >= 128 || characters > 8192 {
-                    return (Some(fragment), true);
+                units += row.units;
+                if rows.len() >= MAX_ROWS || units > MAX_UNITS {
+                    return Some(Label::OverBudget);
                 }
-                if direction < 0 {
-                    rows.push_front(text);
+                if up {
+                    rows.push_front(row);
+                    first = next;
                 } else {
-                    rows.push_back(text);
+                    rows.push_back(row);
                 }
                 at = next;
             }
         }
-        let joined = rows.iter().map(String::as_str).collect::<String>();
-        let joined = joined.trim_matches(is_js_space);
-        // When every row shows an address of its own, the hovered row is the claim to judge if each row
-        // repeats the target, or if the rows' brackets or quotes keep the join from looking like one address
-        // (`<https://a.test/>` above `https://b.test/`). Judging the join there would quietly lose the claim.
-        if rows
-            .iter()
-            .all(|text| address_shape(strip_matching_wrappers(text)).is_some())
-            && (rows.iter().all(|text| !mismatch(text, &link.uri))
-                || address_shape(strip_matching_wrappers(joined)).is_none())
-        {
-            return (Some(fragment), false);
+        let mut rows: Vec<LabelRow> = rows.into();
+        if let [row] = rows.as_slice() {
+            // A one-row label's stretches are separate labels, each with its own budget; only the hovered one counts.
+            let over = row
+                .stretches
+                .iter()
+                .find(|stretch| stretch.from == range.start.col)
+                .map_or(row.units, |stretch| stretch.text.encode_utf16().count());
+            if over > MAX_UNITS {
+                return Some(Label::OverBudget);
+            }
         }
-        (Some(joined.to_owned()), false)
+        for index in 1..rows.len() {
+            // The walk read consecutive lines from `first`, so row `index` is line `first + index`.
+            let soft = self
+                .edge_seam(first + index as u64)
+                .is_some_and(|seam| rows[index - 1].keyed.get(seam) == Some(&true))
+                && rows[index].keyed.first() == Some(&true);
+            rows[index].seam_before = Some(if soft {
+                RowSeam::Soft
+            } else if rows[index - 1].hidden_after || rows[index].hidden_before {
+                RowSeam::Break
+            } else {
+                RowSeam::Hard
+            });
+        }
+        Some(Label::Read {
+            rows,
+            hovered: range.start.col,
+        })
     }
+
+    /// One row of the label walk: the hyperlink `(id, uri)`'s visible stretches on `line`, and the unseen text there with
+    /// the same destination. A row that doesn't exist reads as one with no stretches, which ends the walk.
+    ///
+    /// Unseen text is matched by destination alone, not by link identity: an unseen run has no visible identity to
+    /// match ([`crate::links`]'s `visible_link`), and a second hyperlink to the same place on the row sharing the
+    /// evidence errs toward warning.
+    fn label_row(
+        &self,
+        identities: &mut Identities<'_>,
+        line: u64,
+        id: &str,
+        uri: &str,
+    ) -> LabelRow {
+        let mut out = LabelRow {
+            stretches: Vec::new(),
+            units: 0,
+            keyed: Vec::new(),
+            hidden_before: false,
+            hidden_after: false,
+            hidden: false,
+            seam_before: None,
+        };
+        let Some((cols, row)) = self.selection_line(line) else {
+            return out;
+        };
+        let text_end = row.text_columns(cols);
+        out.keyed = identities
+            .row(line)
+            .iter()
+            .map(|key| {
+                key.as_ref()
+                    .is_some_and(|key| key.id == id && key.uri == uri)
+            })
+            .collect();
+        let mut spans: Vec<(u16, u16)> = Vec::new();
+        let mut inside = false;
+        // Columns of unseen runs with this destination that have something to draw.
+        let mut hidden: Vec<u16> = Vec::new();
+        for (run, &keyed) in row.runs.iter().zip(&out.keyed) {
+            if run.col >= text_end {
+                break;
+            }
+            if keyed {
+                match spans.last_mut() {
+                    Some((_, to)) if inside && *to == run.col => *to = run.col + run.width,
+                    _ => spans.push((run.col, run.col + run.width)),
+                }
+            }
+            inside = keyed;
+            if run.link.as_ref().is_some_and(|link| link.uri == uri) && self.hides_ink(run) {
+                hidden.push(run.col);
+            }
+        }
+        out.stretches = spans
+            .iter()
+            .map(|&(from, to)| Stretch {
+                from,
+                text: row.text(from, to.min(text_end)),
+            })
+            .collect();
+        out.units = out
+            .stretches
+            .iter()
+            .map(|stretch| stretch.text.encode_utf16().count())
+            .sum();
+        if let (Some(&(start, _)), Some(&(_, end))) = (spans.first(), spans.last()) {
+            out.hidden_before = hidden.iter().any(|&col| col < start);
+            out.hidden_after = hidden.iter().any(|&col| col >= end);
+        }
+        out.hidden = !hidden.is_empty();
+        out
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The verdict
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// The warning a label earns against a web destination, `None` for the ordinary display.
+///
+/// - Over budget: incomplete, with no text.
+/// - A label on several rows, one of which shows it in more than one stretch: the stretches can't be put back into one
+///   text, so each is scanned alone, and the label is incomplete when any of them mentions an address, or when unseen
+///   text with its destination is on its rows. A gap between stretches is how a program hides part of a label from the
+///   comparison, so the warning stays even when each piece on its own names the destination.
+/// - Otherwise the label is complete. A one-row label with several stretches is the hovered stretch alone: each is its
+///   own label, as the old client had it. It mismatches when it does with its hard seams read as [`separates`] says
+///   and also with every hard seam joined; the reason is the first reading's.
+///
+/// Every label adds hidden when unseen text with its destination is on one of its rows.
+fn verdict(label: Label, target: &Url) -> Option<LinkWarning> {
+    let Label::Read { rows, hovered } = label else {
+        return Some(LinkWarning {
+            reasons: vec![WarningReason::Incomplete],
+            label: String::new(),
+            address: None,
+            address_parsed: None,
+            more: 0,
+        });
+    };
+    let hidden = rows.iter().any(|row| row.hidden);
+    let mut reasons = Vec::new();
+    let mut address = None;
+    let mut address_parsed = None;
+    let mut more = 0;
+    let shown = if rows.len() > 1 && rows.iter().any(|row| row.stretches.len() > 1) {
+        let mentions = rows.iter().flat_map(|row| &row.stretches).any(|stretch| {
+            !link_claims::addresses(&[RowText::first(&stretch.text)], &[]).is_empty()
+        });
+        if mentions || hidden {
+            reasons.push(WarningReason::Incomplete);
+        }
+        // For display only: each row's stretches spaced apart, its seams read as for a complete label.
+        let texts: Vec<String> = rows
+            .iter()
+            .map(|row| {
+                let texts: Vec<&str> = row
+                    .stretches
+                    .iter()
+                    .map(|stretch| stretch.text.as_str())
+                    .collect();
+                texts.join(" ")
+            })
+            .collect();
+        let pieces: Vec<(&str, Option<RowSeam>)> = texts
+            .iter()
+            .zip(&rows)
+            .map(|(text, row)| (text.as_str(), row.seam_before))
+            .collect();
+        read_seams(&pieces).label
+    } else {
+        let pieces: Vec<(&str, Option<RowSeam>)> = match rows.as_slice() {
+            [row] => {
+                let stretch = row
+                    .stretches
+                    .iter()
+                    .find(|stretch| stretch.from == hovered)
+                    .or(row.stretches.first())?;
+                vec![(stretch.text.as_str(), None)]
+            }
+            _ => rows
+                .iter()
+                .map(|row| (row.stretches[0].text.as_str(), row.seam_before))
+                .collect(),
+        };
+        let complete = judge_complete(&pieces, target);
+        if let Some(found) = complete.mismatch {
+            reasons.push(found.kind.into());
+            address = Some(shortened(&found.text));
+            address_parsed = found.parsed;
+            more = found.more;
+        }
+        complete.label
+    };
+    if hidden {
+        reasons.push(WarningReason::Hidden);
+    }
+    (!reasons.is_empty()).then(|| LinkWarning {
+        reasons,
+        label: shortened(shown.trim_matches(is_js_space)),
+        address,
+        address_parsed,
+        more,
+    })
+}
+
+/// The first mismatching address of a complete label, ready for the hover.
+struct Found {
+    kind: MismatchKind,
+    /// The address's reported form, as written.
+    text: String,
+    parsed: Option<String>,
+    more: usize,
+}
+
+/// A complete label's judgment and the text the hover shows for it.
+struct Complete {
+    /// `Some` when the label mismatches in both readings.
+    mismatch: Option<Found>,
+    /// The label with each separating seam as a space and each joining one as nothing.
+    label: String,
+}
+
+/// A label's rows with the two readings of their hard seams, and the text the hover shows for it.
+struct Seams<'a> {
+    rows: Vec<RowText<'a>>,
+    /// Per hard seam, in order: whether it separates in the first reading ([`separates`], or a break).
+    separate: Vec<bool>,
+    /// Per hard seam: whether it separates with every hard seam joined (only a break does).
+    joined: Vec<bool>,
+    /// The rows with each separating seam as a space and each joining one as nothing.
+    label: String,
+}
+
+/// Read a label's seams, one piece per row with the seam before it.
+fn read_seams<'a>(pieces: &[(&'a str, Option<RowSeam>)]) -> Seams<'a> {
+    let rows: Vec<RowText<'a>> = pieces
+        .iter()
+        .map(|&(text, seam)| RowText {
+            text,
+            seam_before: seam.map(|seam| match seam {
+                RowSeam::Soft => Seam::Soft,
+                RowSeam::Hard | RowSeam::Break => Seam::Hard,
+            }),
+        })
+        .collect();
+    let mut separate = Vec::new();
+    let mut joined = Vec::new();
+    let mut label = String::new();
+    for (index, &(text, seam)) in pieces.iter().enumerate() {
+        let cut = match seam {
+            None | Some(RowSeam::Soft) => None,
+            Some(RowSeam::Break) => Some((true, true)),
+            Some(RowSeam::Hard) => Some((separates(&rows[index..]), false)),
+        };
+        if let Some((per_seam, all_joined)) = cut {
+            separate.push(per_seam);
+            joined.push(all_joined);
+            if per_seam {
+                label.push(' ');
+            }
+        }
+        label.push_str(text);
+    }
+    Seams {
+        rows,
+        separate,
+        joined,
+        label,
+    }
+}
+
+/// Judge a complete label, one piece per row with the seam before it.
+fn judge_complete(pieces: &[(&str, Option<RowSeam>)], target: &Url) -> Complete {
+    let Seams {
+        rows,
+        separate,
+        joined,
+        label,
+    } = read_seams(pieces);
+    let judgement = link_claims::judge(&rows, &separate, target);
+    let mismatch = judgement.first_mismatch.and_then(|(index, kind)| {
+        // Joining every hard seam can only turn a mismatch into a match when some seam separated.
+        if separate != joined
+            && link_claims::judge(&rows, &joined, target)
+                .first_mismatch
+                .is_none()
+        {
+            return None;
+        }
+        let address = &judgement.addresses[index];
+        let range = if address.trimmed.is_empty() {
+            address.span.clone()
+        } else {
+            address.trimmed.clone()
+        };
+        Some(Found {
+            kind,
+            text: link_claims::label_text(&rows)[range].to_owned(),
+            parsed: judgement.first_mismatch_url.clone(),
+            more: judgement.mismatches - 1,
+        })
+    });
+    Complete { mismatch, label }
+}
+
+/// Whether the hard seam before `rows[0]` separates like whitespace: the segment after it (its rows up to the next hard
+/// seam, soft-joined) mentions an address with no letter before it in the segment.
+///
+/// That is how a program that prints an address on a row of its own reads (`Preview` above `https://github.com/`, or a
+/// numbered `1.https://…`), and joining would glue the word before into the scheme. A segment that starts with anything
+/// else continues the row before it (`github.` above `com/login`, `https://github.com/a` above `/b`), so the seam joins
+/// and a host or path split over rows is judged whole.
+fn separates(rows: &[RowText<'_>]) -> bool {
+    let mut segment = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        if index > 0 && row.seam_before != Some(Seam::Soft) {
+            break;
+        }
+        segment.push(RowText::first(row.text));
+        if index > 0 {
+            segment[index].seam_before = Some(Seam::Soft);
+        }
+    }
+    let Some(address) = link_claims::addresses(&segment, &[]).into_iter().next() else {
+        return false;
+    };
+    !link_claims::label_text(&segment)[..address.span.start]
+        .chars()
+        .any(char::is_alphabetic)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
-    /// Expected answers come from the pinned shipping JavaScript, including
-    /// Unicode lookalikes, strict parsing, query/fragment and credential cases.
-    /// This is a cross-language contract check, not a Rust policy duplicated
-    /// inside the test. The generator verifies both source hashes first.
+    /// The exceptions to the pinned oracle's safety check, `tests/fixtures/links-oracle-exceptions.json`, after checking
+    /// the whole file: every entry has a known kind, a key and a rule, and no key appears twice. Returns the `policy`
+    /// entries' keys as `(text, uri)`.
+    fn policy_exceptions() -> BTreeSet<(String, String)> {
+        let file: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/links-oracle-exceptions.json"
+        ))
+        .unwrap();
+        let mut seen = BTreeSet::new();
+        let mut policy = BTreeSet::new();
+        for entry in file["exceptions"].as_array().unwrap() {
+            let kind = entry["kind"].as_str().unwrap();
+            assert!(
+                matches!(kind, "policy" | "grid"),
+                "unknown exception kind: {entry}"
+            );
+            assert!(
+                entry["rule"].as_str().is_some_and(|rule| !rule.is_empty()),
+                "an exception names the behavior that explains it: {entry}"
+            );
+            assert!(
+                seen.insert((kind.to_owned(), entry["key"].to_string())),
+                "duplicate exception: {entry}"
+            );
+            if kind == "policy" {
+                policy.insert((
+                    entry["key"]["text"].as_str().unwrap().to_owned(),
+                    entry["key"]["uri"].as_str().unwrap().to_owned(),
+                ));
+            }
+        }
+        policy
+    }
+
+    /// The old web client's recorded answers no longer bind the warning (SPEC.md's terminal links paragraph replaced its
+    /// address-shape rule), but they still guard one direction: a label the old client warned on, whose destination is a
+    /// web address, must still warn, unless a checked-in exception names the behavior that makes it quiet. Answers it
+    /// was quiet on are not asserted; the address tables in `link_claims/tests.rs` are the quiet side's specification.
+    /// Every non-web destination must be one the warning never looks at, and their count is pinned so a change to
+    /// `web_target` can't quietly move cases out of the check. The presentation half (escaping, shortening, parsed
+    /// targets and hosts) still binds exactly. The generator verified both source hashes first.
     #[test]
     fn pinned_disclosure_policy_oracle() {
         let oracle: serde_json::Value =
             serde_json::from_str(include_str!("../tests/fixtures/links-oracle.json")).unwrap();
+        let exceptions = policy_exceptions();
+        let mut used = BTreeSet::new();
+        let mut quiet = Vec::new();
+        let mut not_web = 0;
         for case in oracle["policy"].as_array().unwrap() {
             let text = case["text"].as_str().unwrap();
             let uri = case["uri"].as_str().unwrap();
-            // The old client accepted literal escape notation as part of a scheme. The bracket pair encloses
-            // only the notation, so this label gets the ordinary display. An actual directionality mark warns.
-            let expected = if text.trim_matches(is_js_space) == "<U+202E>https://example.com/x" {
-                false
-            } else {
-                case["mismatch"].as_bool().unwrap()
+            let Some(target) = web_target(uri, false) else {
+                not_web += 1;
+                continue;
             };
-            assert_eq!(mismatch(text, uri), expected, "{text:?} -> {uri:?}");
+            if !case["mismatch"].as_bool().unwrap() {
+                continue;
+            }
+            let warns = link_claims::judge(&[RowText::first(text)], &[], &target)
+                .first_mismatch
+                .is_some();
+            let key = (text.to_owned(), uri.to_owned());
+            if exceptions.contains(&key) {
+                assert!(
+                    !warns,
+                    "an exception for a case that still warns: {text:?} -> {uri:?}"
+                );
+                used.insert(key);
+            } else if !warns {
+                quiet.push(key);
+            }
         }
+        assert!(quiet.is_empty(), "no longer warn: {quiet:#?}");
+        assert_eq!(not_web, 414, "policy cases with a non-web destination");
+        let unused: Vec<_> = exceptions.difference(&used).collect();
+        assert!(unused.is_empty(), "unused policy exceptions: {unused:?}");
         for case in oracle["formats"].as_array().unwrap() {
             let text = case["text"].as_str().unwrap();
             assert_eq!(visible(text), case["visible"].as_str().unwrap());
@@ -361,144 +685,5 @@ mod tests {
                 .map(|url| &url[url::Position::BeforeHost..url::Position::AfterPort]);
             assert_eq!(host, case["host"].as_str(), "{uri}");
         }
-    }
-
-    /// `<https://a.test/>` is a common way to write a link, so a bracketed or quoted familiar address that goes
-    /// elsewhere is exactly the spoof the warning exists for; an earlier stricter scheme rule silenced it. The
-    /// address inside matching pairs, nested and with spaces around the layers, is compared with the target.
-    #[test]
-    fn bracketed_and_quoted_addresses_are_compared_with_the_target() {
-        for label in [
-            "<https://example.test/>",
-            "\"https://example.test/\"",
-            "'https://example.test/'",
-            "(https://example.test/)",
-            "[https://example.test/]",
-            " ( \" < '\u{a0}https://example.test/\u{a0}' > \" ) ",
-            "[example.test/]",
-        ] {
-            assert!(!mismatch(label, "https://example.test/"), "{label:?}");
-            assert!(mismatch(label, "https://other.test/"), "{label:?}");
-        }
-    }
-
-    /// A program's label can contain a URL without claiming that the whole label is an address. Punctuation
-    /// that separates the prose from the URL must keep the ordinary target disclosure.
-    #[test]
-    fn prose_glued_to_an_address_keeps_the_ordinary_disclosure() {
-        for label in [
-            "See (https://example.test/x)",
-            "<https://example.test/x)",
-            "[https://example.test/x] [docs]",
-            "( [https://example.test/x] [docs] )",
-            "ticket-42(https://example.test/tickets/42)",
-            "ticket-42(example.test/tickets/42)",
-            "[label](https://example.test/x)",
-            "label[example.test/x]",
-            "javascript:alert(1)",
-        ] {
-            assert!(!mismatch(label, "https://other.test/"), "{label:?}");
-        }
-    }
-
-    /// Peeling must stop at the outer pair: taking brackets that belong to a URL path (as wiki addresses use)
-    /// would compare a different address than the one shown, warning on an honest label or hiding a changed one.
-    #[test]
-    fn punctuation_inside_a_wrapped_address_is_part_of_the_path() {
-        let label = "(https://example.test/page_(name))";
-        assert!(!mismatch(label, "https://example.test/page_(name)"));
-        assert!(mismatch(label, "https://example.test/page_name"));
-    }
-
-    /// Zero-width characters ride along with the visible cell before them, so a label can carry one right after
-    /// a closing bracket, between nested delimiters or beside a blank filler while the screen shows a plain
-    /// bracketed address. Each must not hide the pair, or the familiar address would go elsewhere unwarned. One
-    /// just inside a delimiter, before the scheme, stays in the compared address and warns even against the
-    /// address it spells, since the parse fails.
-    #[test]
-    fn characters_that_draw_nothing_beside_a_delimiter_do_not_hide_the_pair() {
-        for label in [
-            "<https://example.test/>\u{200b}",
-            "<https://example.test/>\u{2060}",
-            "<https://example.test/>\u{fe0f}",
-            "<https://example.test/>\u{34f}",
-            "(\u{200b}\"https://example.test/\")",
-            "(\"https://example.test/\"\u{200b})",
-            "\u{3164}<https://example.test/>",
-            "<https://example.test/>\u{3164}",
-            "<https://example.test/>\u{2800}",
-        ] {
-            assert!(!mismatch(label, "https://example.test/"), "{label:?}");
-            assert!(mismatch(label, "https://other.test/"), "{label:?}");
-        }
-        assert!(mismatch(
-            "<\u{200b}https://example.test/>",
-            "https://example.test/"
-        ));
-    }
-
-    /// The narrower syntax must still recognize labels that imitate addresses with different characters
-    /// or put a familiar name in the credentials of an unrelated host.
-    #[test]
-    fn disguised_addresses_still_warn() {
-        for label in [
-            "httрs://example.test/x",
-            "httpsː//example.test/x",
-            "example。test/x",
-            "exаmple.test/x",
-            "cafe\u{301}.test/x",
-            "\u{202e}https://example.test/x",
-            "https://example.test@other.test/x",
-            "example.test@other.test/x",
-            "example.test:secret@other.test/x",
-            "example.test:example!@other.test/x",
-        ] {
-            assert!(mismatch(label, "https://other.test/x"), "{label:?}");
-        }
-    }
-
-    /// Zero-width characters ride along with the visible cell before them, so a label can look exactly like a
-    /// familiar address while carrying one in its scheme, its host or before a credentials `@`. A lookalike `@`
-    /// can stand in for the real one. Each must still warn rather than count as prose.
-    #[test]
-    fn invisible_characters_inside_an_address_still_warn() {
-        for label in [
-            "ht\u{200b}tps://example.test/x",
-            "http\u{34f}s://example.test/x",
-            "http\u{fe0f}s://example.test/x",
-            "exam\u{200b}ple.test/x",
-            "example.test\u{200b}@other.test/x",
-            "example.test\u{ff20}other.test/x",
-            "example.test\u{fe6b}other.test/x",
-        ] {
-            assert!(mismatch(label, "https://other.test/x"), "{label:?}");
-        }
-    }
-
-    /// A scheme-shaped claim is compared as written. Borrowing the destination's scheme could produce a valid
-    /// URL from an address whose original scheme cannot be parsed.
-    #[test]
-    fn a_lookalike_scheme_is_not_reinterpreted_as_a_hostname() {
-        for label in ["httрs://example.test/x", "\u{200b}https://example.test/x"] {
-            let reinterpreted = format!("https://{label}");
-            let target = Url::parse(&reinterpreted).unwrap();
-            assert!(Url::parse(label).is_err(), "{label:?}");
-            assert!(mismatch(label, target.as_str()), "{label:?}");
-        }
-    }
-
-    /// A scheme-less label can carry a full URL as query data. It borrows the target's scheme while
-    /// retaining the query, so the honest label and the same-looking label with a changed query diverge.
-    #[test]
-    fn a_query_value_can_contain_a_scheme_without_making_the_label_absolute() {
-        let label = "www.example.test?next=https://other.test";
-        assert!(!mismatch(
-            label,
-            "https://www.example.test/?next=https://other.test"
-        ));
-        assert!(mismatch(
-            label,
-            "https://www.example.test/?next=https://else.test"
-        ));
     }
 }

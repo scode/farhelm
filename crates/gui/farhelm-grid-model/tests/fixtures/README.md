@@ -31,6 +31,21 @@ The prototype generated the first version of this oracle from Farhelm `0bc984b`.
 which includes the later fix that keeps scrollback links on their displayed rows, every answer came out the same; only
 the recorded source hashes changed.
 
+The warning no longer follows the old client: SPEC.md's terminal links paragraph replaced its address-shape rule with
+one that finds an address anywhere in a label. So the recorded warning answers are history, and they bind in one
+direction only. Where the old client warned (`mismatch: true` in `policy`, a non-null `claimed` in `grids`) on a web
+destination, the hover must still warn; where it warned on a complete label for a mismatch, the label the hover shows,
+escaped, must equal `claimed`, which keeps row joining honest. Quiet answers are not asserted: the address tables in
+`src/link_claims/tests.rs` and the multi-row cases in `links.rs` are the quiet side's specification. Everything else
+(the cells of each link, its identity and evidence, the escaping and shortening, the parsed host and target) still binds
+exactly, and the 414 policy cases with a non-web destination must stay outside the warning altogether.
+
+`links-oracle-exceptions.json` is the record of every place the new rules make the hover depart from the safety check.
+Each entry has a `kind` (`policy` or `grid`), a `key` (`{text, uri}` for a policy case, `{grid, line, result}` for a
+grid answer) and the `rule`: the behavior, in words, that explains the departure. The tests refuse an unknown kind, a
+duplicate key, and an entry no case uses, so the list can only shrink when the code is fixed and must grow by hand, one
+explained case at a time.
+
 The JavaScript shortening policy counts UTF-16 units. A slice that splits a surrogate pair is stored with the
 replacement character a native text widget renders; the omitted count still follows the original units. This corpus
 checks pure recognition and disclosure policy. Pointer ownership, geometry admission and what covers a link belong to

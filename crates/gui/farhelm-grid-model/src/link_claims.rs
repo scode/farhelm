@@ -1,13 +1,11 @@
 //! What web addresses a hyperlink's visible text mentions, and whether each one names where the link goes.
 //!
-//! NOTE: Nothing outside this module's tests calls the scanner or [`judge`] yet. The hover's warning still comes from
-//! `link_disclosure.rs`, which shares only [`comparable`] and the look-alike table with this module.
-//!
 //! A program's OSC 8 hyperlink shows one text and opens another. The terminal warns when the text mentions a web
 //! address anywhere in it that differs from the destination, and stays quiet on honest decoration: quotes, arrows,
 //! emoji, bullets, sentence punctuation, words around a matching address, emails, handles and file names. This module
 //! is that judgment as a pure function of the label's text, row by row, and the destination. It knows nothing about
-//! grids, colours or identities; the caller reads the label and decides how its rows join.
+//! grids, colours or identities; the caller (the hover, `link_disclosure.rs`) reads the label and decides how its rows
+//! join.
 //!
 //! Here's the TLDR of the mechanics:
 //!
@@ -37,9 +35,6 @@ mod tests;
 use std::ops::Range;
 use url::Url;
 
-pub(crate) use compare::comparable;
-pub(crate) use fold::lookalike;
-
 /// One row of a hyperlink's label, as the caller read it from the grid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RowText<'a> {
@@ -48,6 +43,16 @@ pub struct RowText<'a> {
     /// How this row continues the one before it. `None` on the first row; a `None` anywhere else joins like a soft
     /// seam, so a caller that forgets it never splits an address in two.
     pub seam_before: Option<Seam>,
+}
+
+impl<'a> RowText<'a> {
+    /// A row with no seam before it: a label's first row, or the whole of a one-row label.
+    pub fn first(text: &'a str) -> Self {
+        Self {
+            text,
+            seam_before: None,
+        }
+    }
 }
 
 /// The boundary between two rows of one label.

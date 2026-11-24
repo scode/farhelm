@@ -1,5 +1,5 @@
-//! The scanner and comparison against tables of example labels, the cases the hover's current mismatch check pins,
-//! and a linear-time budget.
+//! The scanner and comparison against tables of example labels, the cases the hover's old address check pinned (it
+//! lived in `link_disclosure.rs` until the hover moved to this module), and a linear-time budget.
 //!
 //! The tables are the quiet-side specification as much as the loud one: a label they list as mentioning no address
 //! must keep mentioning none, or honest links start warning.
@@ -44,7 +44,8 @@ fn verdict(label: &str, target: &str) -> Option<MismatchKind> {
         .map(|(_, kind)| kind)
 }
 
-/// The hover's current check's signature, so the cases ported from it keep their assertions word for word.
+/// The hover's old check's signature, so the cases ported from it keep their assertions word for word, or change them
+/// visibly.
 fn mismatch(label: &str, uri: &str) -> bool {
     verdict(label, uri).is_some()
 }
@@ -753,7 +754,7 @@ fn every_address_is_judged_and_counted() {
 
 /// A handle whose host is followed by a port is userinfo before that host, just as an email shape followed by a
 /// port is. Suppressing it as a handle would hide the credentials `@` when the name in front of it doesn't count on
-/// its own, and the hover's current check warns on all of these.
+/// its own, and the hover's old check warned on all of these.
 #[test]
 fn an_at_before_a_host_with_a_port_is_userinfo_not_a_handle() {
     for (label, target) in [
@@ -1108,7 +1109,7 @@ fn the_first_mismatch_carries_its_parsed_form() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Cases ported from the hover's current check (`link_disclosure.rs`), with identical assertions
+// Cases ported from the hover's old check (`link_disclosure.rs`), with identical assertions unless a case says why
 // ---------------------------------------------------------------------------------------------------------------
 
 /// `<https://a.test/>` is a common way to write a link, so a bracketed or quoted familiar address that goes
@@ -1175,6 +1176,64 @@ fn invisible_characters_inside_an_address_still_warn() {
     ] {
         assert!(mismatch(label, "https://other.test/x"), "{label:?}");
     }
+}
+
+/// Ported from the fix for hidden characters beside a bracket (#4748). Zero-width characters ride along with the
+/// visible cell before them, so a label can carry one right after a closing bracket, between nested delimiters or beside
+/// a blank filler while the screen shows a plain bracketed address. None of them may hide the address, or the familiar
+/// address would go elsewhere unwarned. Spec: each label is quiet against `https://example.test/` and warns against
+/// `https://other.test/`. One case changed: a zero-width space just inside the bracket, before the scheme, used to
+/// warn even against the address it spells, because it stayed in the compared text and broke the parse. It is now
+/// outside the address, which then names exactly the destination: the screen shows the destination itself, so there is
+/// nothing to disguise (an accepted gap, SPEC.md), and it still warns against another site.
+#[test]
+fn characters_that_draw_nothing_beside_a_delimiter_do_not_hide_the_pair() {
+    for label in [
+        "<https://example.test/>\u{200b}",
+        "<https://example.test/>\u{2060}",
+        "<https://example.test/>\u{fe0f}",
+        "<https://example.test/>\u{34f}",
+        "(\u{200b}\"https://example.test/\")",
+        "(\"https://example.test/\"\u{200b})",
+        "\u{3164}<https://example.test/>",
+        "<https://example.test/>\u{3164}",
+        "<https://example.test/>\u{2800}",
+        "<\u{200b}https://example.test/>",
+    ] {
+        assert!(!mismatch(label, "https://example.test/"), "{label:?}");
+        assert!(mismatch(label, "https://other.test/"), "{label:?}");
+    }
+}
+
+/// Split from the old check's "prose glued to an address keeps the ordinary disclosure", which these labels reversed:
+/// an address anywhere in a label is a claim, so prose, Markdown or a ticket number around one no longer makes the label
+/// descriptive (SPEC.md). Spec: each label warns against another site and is quiet against the address it names.
+/// `javascript:alert(1)` mentions no web address and stays quiet as the control.
+#[test]
+fn prose_glued_to_an_address_is_compared_with_the_target() {
+    for (label, own) in [
+        ("See (https://example.test/x)", "https://example.test/x"),
+        ("<https://example.test/x)", "https://example.test/x"),
+        ("[https://example.test/x] [docs]", "https://example.test/x"),
+        (
+            "( [https://example.test/x] [docs] )",
+            "https://example.test/x",
+        ),
+        (
+            "ticket-42(https://example.test/tickets/42)",
+            "https://example.test/tickets/42",
+        ),
+        (
+            "ticket-42(example.test/tickets/42)",
+            "https://example.test/tickets/42",
+        ),
+        ("[label](https://example.test/x)", "https://example.test/x"),
+        ("label[example.test/x]", "https://example.test/x"),
+    ] {
+        assert!(mismatch(label, "https://other.test/"), "{label:?}");
+        assert!(!mismatch(label, own), "{label:?}");
+    }
+    assert!(!mismatch("javascript:alert(1)", "https://other.test/"));
 }
 
 /// A scheme-shaped claim is compared as written. Borrowing the destination's scheme could produce a valid
