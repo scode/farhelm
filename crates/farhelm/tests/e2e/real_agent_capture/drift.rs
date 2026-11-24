@@ -139,7 +139,13 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
             "pi",
             flash,
             Some(LaunchEffort::Low),
-            &["pi v", "/hotkeys", "ctrl+c"][..],
+            &[
+                "pi v", "/hotkeys", "ctrl+c",
+                // A resumed conversation can push the startup header, and with it every cue above, off the top of
+                // the screen; 1.6.0 did on 2026-11-23 when startup warnings added lines. The context-usage figure in
+                // the footer under the editor stays: "2.9%/262k", or "?/262k" while usage is unknown.
+                "%/", "?/",
+            ][..],
             Some(HookWitness::Fresh),
             false,
             None,
