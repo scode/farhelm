@@ -603,7 +603,7 @@ fn a_refused_setup_rerun_and_a_refused_submission_warn(cx: &mut TestAppContext) 
     let rerun = |cx: &mut VisualTestContext| {
         cx.update(|window, cx| {
             let mark = Mark::take(cx);
-            crate::hosts::setup::rerun(&listed()[1], mark, window, cx);
+            crate::hosts::setup::rerun(&listed()[1], false, mark, window, cx);
         });
         settle(cx);
     };

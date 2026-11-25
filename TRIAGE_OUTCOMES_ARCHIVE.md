@@ -44604,3 +44604,73 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   matching Hosts evidence. The tested candidate and required visual coverage exceed the accepted size. Change
   `prokrvmzovtvsnvxtpxumrmlznxmqkwn`, bookmark `plan/triage-helm-nov24/01c-tensorlake-rerun`,
   [PR #4844](https://github.com/scode/farhelm/pull/4844/changes).
+
+## trailing-hosts-menu-rerun-reads-live-host-state.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC_impl.md, "Questions: the prompt": "The same rule starts at the control that asks the
+  question or sends the request directly. Its handlers carry the drawn session key, row, skip preference and the parts
+  of the environment's state that determine the command. … Live state may also refuse a missing or unavailable target.
+  The question and request use the snapshot that admitted the press." SPEC_impl.md (registered setup, around line 5540):
+  "A registered SSH host's set up again sends the `ssh-host` target, naming that row and the destination the desktop
+  showed at the click". The code contradicts both. `gui/.../hosts/menu.rs:409-437` renders `which` (Setup or Update),
+  but `on_click` ignores it, re-reads `current(host, cx)` and dispatches whichever Re-run is live. It also passes the
+  live `view` (so the live destination) to `setup::rerun`. The fix follows directly: capture the drawn `which` and
+  `HostView` in the closure, and keep the live check only as a refusal. That matches the existing comment ("Checked
+  again at the click") and the Adopt and Take over pattern in the same menu. Admitting through
+  `prompt::ActionFrame`/`when_shown` follows session_list/menu.rs. The menu's live-follow drawing is not overturned,
+  since the closure from each render carries that render's values. Estimated size ~40-90 lines with a GPUI test. It may
+  approach 100 if the `when_shown` admission is included. Verified: Confirmed by reading code (menu.rs:425-437).
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code —
+  follows the quoted rule; size S-M.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
+- Execution: Fixed. Re-run uses the operation and host shown in the menu. A redraw cannot select a different operation
+  until it is visible, and live availability can only refuse the press. Change `qykuxxluxxlutrlpuzyrlvopslwvkyyy`,
+  bookmark `plan/triage-helm-nov24/02-hosts`, [PR #4849](https://github.com/scode/farhelm/pull/4849/changes).
+
+## trailing-hosts-menu-remove-reads-live-skip-confirmation.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC_impl.md, "Questions: the prompt": "Its handlers carry the drawn session key, row,
+  skip preference and the parts of the environment's state that determine the command." The code contradicts it. The
+  Remove item's `on_click` (`gui/.../hosts/menu.rs:494-512`) captures only `host`, and `remove::start` reads the live
+  `listed(host, cx)` and live `asks_first(cx)` at activation (`hosts/remove.rs:136-153`, decision at :145). The fix
+  follows directly: capture the drawn view and `asks_first` when the item renders, admit through
+  `ActionFrame`/`when_shown` as session_list/menu.rs does, and pass the snapshot to `remove::start` while live state
+  only refuses a missing or busy host. Provider deletes keep always asking (`removal.deletes.is_some()`). Estimated size
+  ~40-90 lines with a GPUI test. Verified: Confirmed by reading code.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code —
+  follows the quoted rule; size S-M.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
+- Execution: Fixed. Remove keeps the host and confirmation choice from its presented menu action. A freshly drawn choice
+  cannot authorize a removal before it is shown. Change `qykuxxluxxlutrlpuzyrlvopslwvkyyy`, bookmark
+  `plan/triage-helm-nov24/02-hosts`, [PR #4849](https://github.com/scode/farhelm/pull/4849/changes).
+
+## trailing-ssh-host-setup-reads-live-skip-confirmation-at-settle.md
+
+- Outcome: `fix code`.
+- Assessment: When you add an SSH host or re-run its failed setup, Farhelm decides whether to show the setup plan only
+  once the remote check finishes. If "Set up new hosts without asking" is turned on while that check runs, for example
+  by answering another host's setup with "Set up, don't ask again", the install starts without showing this host's plan.
+  Verified: Confirmed by source. `asks_first(cx)` is read when the reply arrives (`gui/.../hosts/setup.rs:793`,
+  `hosts/add.rs:1287`). This is a reading of "Questions: the prompt": the setup question only exists once the reply
+  arrives, and the Tensorlake sibling deliberately reads its own preference "when the plan arrives" (setup.rs:724-728
+  docs). The trigger needs the preference to flip mid-probe. In one window, that means the user's own permanent answer
+  on another setup.
+- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
+  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
+  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
+  GUI at a time". Recommendation for reference: fix code S (capture at click and thread through the callback) if the
+  maintainer wants consistency with 72. Otherwise discard. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. Add and Re-run keep the ordinary SSH setup confirmation choice from the initiating action, including
+  through sign-in and replay. Change `qykuxxluxxlutrlpuzyrlvopslwvkyyy`, bookmark `plan/triage-helm-nov24/02-hosts`,
+  [PR #4849](https://github.com/scode/farhelm/pull/4849/changes).

@@ -692,6 +692,8 @@ pub(crate) struct AddHostDialog {
     from_agent: bool,
     /// What the dialog shows below its kind choice (the module docs, "The host kind").
     body: Body,
+    /// Add and both Enter routes share the confirmation choice from the presented SSH form.
+    setup_frame: crate::prompt::ActionFrame<bool, bool>,
     /// The question view and replay belong to the exact check from this dialog. Closing releases its operation hold.
     sign_in: Option<InlineSignIn>,
     _questions: session::ObservingCurrent,
@@ -769,6 +771,7 @@ impl AddHostDialog {
         let handle = window.window_handle();
         let questions = session::observe_current(cx, move |_: &mut Self, cx| {
             Self::queue_question_refresh(handle, cx);
+            cx.notify();
         });
         let body = match sandbox {
             Some(seed) => {
@@ -792,6 +795,7 @@ impl AddHostDialog {
             accepted: false,
             from_agent,
             body,
+            setup_frame: Default::default(),
             sign_in: None,
             _questions: questions,
             _watches: watches,
@@ -941,6 +945,13 @@ impl AddHostDialog {
         if session::current_operations(cx).is_none() || self.busy(cx) {
             return;
         }
+        let Some(asks) = self
+            .setup_frame
+            .current()
+            .and_then(|frame| frame.shown().copied())
+        else {
+            return;
+        };
         let destination = self.destination.draft().value().clone();
         let alias = self.alias.draft().value().clone();
         if let Some(refused) = refusal(&destination, &alias, cx) {
@@ -954,7 +965,7 @@ impl AddHostDialog {
         self.probe_mark = Mark::take(cx);
         match self.pending().cloned() {
             Some(request) => self.allow(request, destination, alias, handle, cx),
-            None => self.probe(destination, alias, handle, cx),
+            None => self.probe(destination, alias, asks, handle, cx),
         }
     }
 
@@ -980,7 +991,7 @@ impl AddHostDialog {
                         dialog.accepted = true;
                         match refusal(&destination, &alias, cx) {
                             Some(refused) => dialog.problem = Some(refused),
-                            None => dialog.probe(destination, alias, handle, cx),
+                            None => dialog.probe(destination, alias, true, handle, cx),
                         }
                     }
                     // The request is gone, so the dialog has nothing left to approve: it closes, as the old one did
@@ -1009,11 +1020,12 @@ impl AddHostDialog {
         }
     }
 
-    /// Start the probe for `destination` under `alias`.
+    /// Start the probe under the setup consent in effect when Add was pressed.
     fn probe(
         &mut self,
         destination: String,
         alias: String,
+        asks_before_setup: bool,
         handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
@@ -1024,12 +1036,18 @@ impl AddHostDialog {
                 return;
             }
         };
-        self.request(command, handle, cx);
+        self.request(command, asks_before_setup, handle, cx);
     }
 
-    /// Probing and confirming use one operation slot. The fields stay
-    /// read-only while either request holds it.
-    fn request(&mut self, command: Command, handle: AnyWindowHandle, cx: &mut Context<Self>) {
+    /// Probing and confirming use one operation slot. The fields stay read-only, and SSH sign-in replays the
+    /// original probe with its original setup consent.
+    fn request(
+        &mut self,
+        command: Command,
+        asks_before_setup: bool,
+        handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
         let Some(operations) = session::current_operations(cx) else {
             return;
         };
@@ -1043,9 +1061,15 @@ impl AddHostDialog {
                     .flatten();
                 let updated = dialog.update(cx, |dialog, cx| {
                     if let Some(pending) = &pending {
-                        dialog.wait_for_setup(pending.attempt.clone(), replay, handle, cx);
+                        dialog.wait_for_setup(
+                            pending.attempt.clone(),
+                            replay,
+                            asks_before_setup,
+                            handle,
+                            cx,
+                        );
                     } else {
-                        dialog.settled(settled, confirming, handle, cx);
+                        dialog.settled(settled, confirming, asks_before_setup, handle, cx);
                     }
                 });
                 if updated.is_err()
@@ -1071,6 +1095,7 @@ impl AddHostDialog {
         &mut self,
         attempt: String,
         replay: Command,
+        asks_before_setup: bool,
         handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
@@ -1099,7 +1124,7 @@ impl AddHostDialog {
                         dialog.probe_mark = mark;
                         dialog.set_read_only(false, cx);
                         match result {
-                            Ok(()) => dialog.request(replay, handle, cx),
+                            Ok(()) => dialog.request(replay, asks_before_setup, handle, cx),
                             Err(reason) => dialog.problem = Some(error_line().host(&reason)),
                         }
                         cx.notify();
@@ -1204,6 +1229,7 @@ impl AddHostDialog {
         &mut self,
         settled: &Settled,
         confirming: bool,
+        asks_before_setup: bool,
         window: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
@@ -1284,7 +1310,7 @@ impl AddHostDialog {
                     mark,
                 };
                 // An agent's add asks whatever the preference says (SPEC.md, "Agent-spawned sessions").
-                if !setup::asks_first(cx) && !self.from_agent {
+                if !asks_before_setup && !self.from_agent {
                     // The close is queued first: a submission refused at once (a launch in flight) reopens Add host
                     // on a later turn, which must come after this dialog's close, or the close would take the
                     // reopened dialog with it (closing a layer closes the layers opened from it, and the reopened
@@ -1326,6 +1352,7 @@ impl AddHostDialog {
                 Some(json!({ "probe_id": probe_id })),
                 "POST /api/hosts/take-over",
             ),
+            true,
             window,
             cx,
         );
@@ -1353,7 +1380,7 @@ impl AddHostDialog {
             outcome,
             user_moved_on: false,
         };
-        self.settled(&settled, false, window.window_handle(), cx);
+        self.settled(&settled, false, true, window.window_handle(), cx);
     }
 
     /// Show a checking draft matched to the fixture's pending question. The golden does not send terminal input
@@ -1370,7 +1397,7 @@ impl AddHostDialog {
             return;
         };
         self.set_read_only(true, cx);
-        self.wait_for_setup(attempt.into(), command, window.window_handle(), cx);
+        self.wait_for_setup(attempt.into(), command, true, window.window_handle(), cx);
     }
 
     /// Hold both fields read-only while the probe is out, so the values on screen stay the ones sent.
@@ -1453,10 +1480,16 @@ fn help(words: &'static str, palette: &theme::Palette) -> AnyElement {
 }
 
 impl Render for AddHostDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
         let probing = self.probing(cx);
         let busy = self.busy(cx);
+        if matches!(self.body, Body::Ssh) {
+            self.setup_frame
+                .capture(self.from_agent || setup::asks_first(cx), busy, window);
+        } else {
+            self.setup_frame.clear();
+        }
         let weak = cx.weak_entity();
         // An agent's add names who asked, then spells out what Add approves, above the fields as the old dialog did
         // (the approvals module draws both).

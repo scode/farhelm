@@ -12,6 +12,7 @@
 //! and the host rail: Add host and the rail's Settings gear opened over an open menu, and the dialogs an avatar's
 //! menu opens.
 
+use farhelm_helm_client::collections::decode_changes;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_input_mapping::Platform;
@@ -899,6 +900,44 @@ fn add_host_takes_an_open_host_or_session_menu_away(cx: &mut TestAppContext) {
     keys(cx, "escape");
     assert!(!any_open(cx));
     assert_eq!(focused_id(cx).as_deref(), Some("host-rail-add"));
+}
+
+/// A redraw can turn a setup Re-run into an update before the new wording appears. A press in that frame sends no
+/// request. Once the menu shows the update, another press can run it.
+#[gpui::test]
+fn rerun_waits_for_its_changed_operation_to_be_shown(cx: &mut TestAppContext) {
+    let (mut helm, _, cx) = open_panel(
+        cx,
+        vec![
+            hosts(&reference_hosts()),
+            progress(&[run(2, ProvisioningOperation::Add, RunStatus::Failed)]),
+        ],
+    );
+    cx.simulate_resize(size(px(1600.), px(1000.)));
+    click(cx, "host-menu-toggle-2");
+    test_support::show_next_frame(cx);
+    assert!(painted(&frame(cx)).contains("Try the failed setup again"));
+    let position = center(cx, "host-menu-rerun");
+    let update = progress(&[run(2, ProvisioningOperation::Update, RunStatus::Failed)]);
+    let changes = decode_changes(CollectionChanges {
+        collection: update.collection,
+        meta: update.meta,
+        upsert: update.entries,
+        remove: vec![],
+    })
+    .unwrap();
+    cx.update(|window, cx| {
+        let store = session::current_store(cx).unwrap();
+        store.update(cx, |store, cx| store.apply(&changes, cx));
+        window.draw(cx).clear(cx);
+        assert!(painted(window.driver_nodes()).contains("Try the failed update again"));
+        test_support::click_before_redraw(position, window, cx);
+    });
+    test_support::settle(cx);
+    assert!(helm.commands().is_empty());
+    test_support::show_next_frame(cx);
+    click(cx, "host-menu-rerun");
+    let _ = test_support::one_command(&mut helm, Method::Post, "/api/hosts/2/update");
 }
 
 /// Why this matters: the avatar's menu is how the rail reaches a host's actions while Sessions shows, and what they

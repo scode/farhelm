@@ -202,10 +202,12 @@ pub fn open_menu(
         adopt_identity: offers::adoptable(&view.state).map(str::to_owned),
         takeover_target: super::remedies::TakeoverTarget::of(&view.state),
         rerun_focus,
+        rerun_frame: Default::default(),
         update_focus,
         settings_focus,
         uninstall_focus,
         remove_focus,
+        remove_frame: Default::default(),
         delete_focus,
         layer: None,
     });
@@ -224,7 +226,7 @@ pub fn open_menu(
 /// Host `host` as the store holds it now, with what its menu offers: [`offers::menu_offers`] over its pushed entry, its
 /// retained run, whether work on it is in flight and whether the desktop app's updater runs. `None` when the window is
 /// inert or the registry does not list it.
-fn current(host: i64, cx: &App) -> Option<(HostView, Offers)> {
+pub(super) fn current(host: i64, cx: &App) -> Option<(HostView, Offers)> {
     let store = session::current_store(cx)?;
     let key = HostView::key(host);
     let collections = store.read(cx).collections();
@@ -271,6 +273,8 @@ pub(crate) struct HostMenu {
     /// Re-run's focus handle, where the menu starts when it offers no Retry (an environment being deleted) and Re-run
     /// can act, or is the first command drawn when nothing can.
     rerun_focus: FocusHandle,
+    /// Re-run uses the displayed operation and host. A keyboard redraw may have installed a later handler.
+    rerun_frame: crate::prompt::ActionFrame<(HostView, Rerun, bool), bool>,
     /// Update's focus handle, where the menu starts when it offers no Retry and the live Update is its first command
     /// that can act, or is the first command drawn when nothing can.
     update_focus: FocusHandle,
@@ -281,13 +285,15 @@ pub(crate) struct HostMenu {
     /// starts: on the last of them that is drawn and can act.
     uninstall_focus: FocusHandle,
     remove_focus: FocusHandle,
+    /// A menu redraw cannot give a pending press consent to forget a host without its question.
+    remove_frame: crate::prompt::ActionFrame<(HostView, bool), bool>,
     delete_focus: FocusHandle,
     /// Set right after the layer opens; what a chosen command closes.
     layer: Option<LayerId>,
 }
 
 impl Render for HostMenu {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let panel = layers::panel(cx)
             .id("host-menu")
             .debug_selector(|| "host-menu".into())
@@ -295,6 +301,8 @@ impl Render for HostMenu {
         // A host the registry stopped listing takes its row, and so the menu's anchor, with it; until that frame there
         // is nothing to show.
         let Some((view, offered)) = current(self.host, cx) else {
+            self.rerun_frame.clear();
+            self.remove_frame.clear();
             return panel;
         };
         let name = display_name(&view);
@@ -408,6 +416,12 @@ impl Render for HostMenu {
             });
         let rerun = rerun(&view, &offered).map(|(which, enabled)| {
             let (menu, host) = (cx.weak_entity(), self.host);
+            let asks = which == Rerun::Setup
+                && HostKind::of(&view).setup_rerun() == Some(offers::SetupRerun::Ssh)
+                && super::setup::asks_first(cx);
+            let frame = self
+                .rerun_frame
+                .capture((view.clone(), which, asks), enabled, window);
             let help = match which {
                 Rerun::Setup => "Re-run: try this host's failed setup again",
                 Rerun::Update => "Re-run: try this host's failed update again",
@@ -423,20 +437,28 @@ impl Render for HostMenu {
             .disabled(!enabled)
             .focus(&self.rerun_focus)
             .on_click(move |_, window, cx| {
+                let Some((drawn, which, asks)) = frame.shown() else {
+                    return;
+                };
+                // Live state may refuse a stale press, but cannot substitute another run or setup destination.
+                if !current(host, cx)
+                    .is_some_and(|(view, offered)| rerun(&view, &offered) == Some((*which, true)))
+                {
+                    return;
+                }
                 // The mark of this click, taken before the menu closes, which moves focus back to the toggle; the
                 // setup confirmation and an Update's refusal open only through it.
                 let mark = Mark::take(cx);
                 close(&menu, window, cx);
-                // Checked again at the click: a run may have started, or work gone out, since the menu last drew.
-                if let Some((view, offered)) = current(host, cx) {
-                    match rerun(&view, &offered) {
-                        Some((Rerun::Setup, true)) => super::setup::rerun(&view, mark, window, cx),
-                        Some((Rerun::Update, true)) => super::update::rerun(host, mark, window, cx),
-                        Some((_, false)) | None => {}
-                    }
+                match which {
+                    Rerun::Setup => super::setup::rerun(drawn, *asks, mark, window, cx),
+                    Rerun::Update => super::update::rerun(host, mark, window, cx),
                 }
             })
         });
+        if rerun.is_none() {
+            self.rerun_frame.clear();
+        }
         let update = offered.update.map(|offered| {
             let (menu, host) = (cx.weak_entity(), self.host);
             MenuItem::new(
@@ -491,7 +513,11 @@ impl Render for HostMenu {
         // Remove where the offers say, unavailable while the host is busy; the old menu's last command, in its
         // destructive group behind a separator.
         let remove = offered.remove.map(|enabled| {
-            let (menu, host) = (cx.weak_entity(), self.host);
+            let menu = cx.weak_entity();
+            let asks = super::remove::asks_first(cx);
+            let frame = self
+                .remove_frame
+                .capture((view.clone(), asks), enabled, window);
             MenuItem::new(
                 "host-menu-remove",
                 Icon::Trash,
@@ -504,13 +530,19 @@ impl Render for HostMenu {
             .disabled(!enabled)
             .focus(&self.remove_focus)
             .on_click(move |_, window, cx| {
+                let Some((drawn, asks)) = frame.shown() else {
+                    return;
+                };
                 // The mark of this click, taken before the menu closes. Closing the menu returns focus to its
                 // toggle, which the confirmation then returns focus to when it closes.
                 let mark = Mark::take(cx);
                 close(&menu, window, cx);
-                super::remove::start(host, &mark, window, cx);
+                super::remove::start_shown(drawn, *asks, &mark, window, cx);
             })
         });
+        if remove.is_none() {
+            self.remove_frame.clear();
+        }
         // The provider's Delete in Remove's place, where removing the host deletes its machine: the old menu's one
         // removal item, labelled for the provider. Its question always asks, whatever "Remove hosts without asking"
         // says (`super::remove`).
