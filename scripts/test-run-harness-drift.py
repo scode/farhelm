@@ -87,19 +87,20 @@ class DriftRunnerTests(unittest.TestCase):
             evidence = Path(directory)
             manifest = evidence / "manifest.json"
             verdict = evidence / "missing.json"
+            recorded = runner["recorder_manifest"]
             manifest.write_text(json.dumps({"schema_version": 1, "outcome": "timed_out", "recorder": {"error": None}}))
-            result = runner["read_verdict"](verdict, 124, evidence)
+            result = runner["read_verdict"](verdict, 124, recorded(evidence))
             self.assertEqual(result.verdict, "failed")
             self.assertIn("timed out", result.detail)
             manifest.write_text(json.dumps({
                 "schema_version": 1, "outcome": "recorder-error", "recorder": {"error": "fixture refused"},
             }))
-            result = runner["read_verdict"](verdict, 125, evidence)
+            result = runner["read_verdict"](verdict, 125, recorded(evidence))
             self.assertEqual(result.verdict, "failed")
             self.assertIn("fixture refused", result.detail)
             for version in [2, True, 1.0]:
                 manifest.write_text(json.dumps({"schema_version": version, "outcome": "timed_out"}))
-                result = runner["read_verdict"](verdict, 124, evidence)
+                result = runner["read_verdict"](verdict, 124, recorded(evidence))
                 self.assertIn("without a readable drift verdict", result.detail)
 
     def test_every_selected_case_runs_and_only_an_explicit_skip_fails(self):
@@ -238,10 +239,14 @@ class DriftRunnerTests(unittest.TestCase):
             self.assertEqual(json.loads((evidence / "drift-verdict.json").read_text())["detail"], "login missing")
 
     def test_runner_only_termination_reaches_the_recorder(self):
-        """The recorder owns the test process group and must finish cleanup before the runner exits."""
+        """Wait for recorder cleanup and retain its interruption without adding a failed drift verdict."""
         prior_handler = signal.getsignal(signal.SIGTERM)
-        with patch.object(subprocess, "Popen") as spawn:
+        with (tempfile.TemporaryDirectory() as directory, patch.object(subprocess, "Popen") as spawn,
+              contextlib.redirect_stderr(io.StringIO())):
+            evidence = Path(directory).resolve()
+            (evidence / "manifest.json").write_text(json.dumps({"schema_version": 1, "outcome": "interrupted"}))
             recorder = spawn.return_value.__enter__.return_value
+            recorder.stderr = [f"test-run evidence: {evidence}\n"]
 
             def cancel(*_args, **_kwargs):
                 signal.raise_signal(signal.SIGTERM)
@@ -251,10 +256,40 @@ class DriftRunnerTests(unittest.TestCase):
             recorder.wait.return_value = 128 + signal.SIGTERM
             with self.assertRaises(SystemExit) as stopped:
                 runner["recorded_case"](Path("/synthetic/e2e"), "exact-case", "grok", {"PATH": "bin"})
+            self.assertFalse((evidence / "drift-verdict.json").exists())
         recorder.send_signal.assert_called_once_with(signal.SIGTERM)
         recorder.wait.assert_called_once()
         self.assertEqual(stopped.exception.code, 128 + signal.SIGTERM)
         self.assertEqual(signal.getsignal(signal.SIGTERM), prior_handler)
+
+    def test_finalized_recorder_outcome_distinguishes_interruption_from_a_child_exit(self):
+        """One exit code can describe either event. Keep the case's own verdict on recorder-only cancellation."""
+        status = 128 + signal.SIGTERM
+        payload = {"verdict": "passed", "detail": "case wrote this before recorder exit"}
+        for outcome in ("interrupted", "completed"):
+            with (self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory,
+                  patch.object(subprocess, "Popen") as spawn, contextlib.redirect_stderr(io.StringIO())):
+                evidence = Path(directory).resolve()
+                (evidence / "manifest.json").write_text(json.dumps({"schema_version": 1, "outcome": outcome}))
+                recorder = spawn.return_value.__enter__.return_value
+                recorder.stderr = [f"test-run evidence: {evidence}\n"]
+                recorder.wait.return_value = status
+
+                def finish(*_args, env, **_kwargs):
+                    Path(env["FARHELM_DRIFT_VERDICT_FILE"]).write_text(json.dumps(payload))
+                    return spawn.return_value
+
+                spawn.side_effect = finish
+                args = (Path("/synthetic/e2e"), "exact-case", "grok", {"PATH": "bin"})
+                if outcome == "interrupted":
+                    with self.assertRaises(SystemExit) as stopped:
+                        runner["recorded_case"](*args)
+                    self.assertEqual(stopped.exception.code, status)
+                    self.assertEqual(json.loads((evidence / "drift-verdict.json").read_text()), payload)
+                else:
+                    result = runner["recorded_case"](*args)
+                    self.assertEqual(result.verdict, "failed")
+                    self.assertIn(f"recorder exited {status}", result.detail)
 
     def test_termination_during_a_failed_spawn_stops_the_suite(self):
         """A spawn error may fail one case, but a simultaneous cancellation ends the run."""

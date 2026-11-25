@@ -321,7 +321,8 @@ hero, and `scripts/docs_shots.py` uses it for docs screenshots. In order, it:
   refused, since a short one is an ordinary word;
 - takes the bridge's screenshot (window content, at the window's scale) into `capture.png` in the run directory, and on
   Linux crops the window frame and title bar off (the screenshot batch's `crop_frame`);
-- checks the size against the viewport times its scale, as the publish script does, and only then copies it to OUT.
+- checks the size against the viewport times its scale, as the publish script does, and only then copies it to OUT. Crop
+  or size rejection keeps the checked frame under a unique name in the run directory for diagnosis.
 
 `capture OUT.png --keep-focus` skips the terminal click and the wait for its transcript's last line. Use it to capture a
 dialog or field whose focus must stay where the shot's steps left it. Pointer parking never clicks; both parks and idle

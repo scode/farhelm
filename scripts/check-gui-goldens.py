@@ -20,7 +20,8 @@ manifest's lines. The captures are tied to the manifest they were taken against,
 `--update` again after. Look at every picture its report names as changed or added before committing the manifest: the store
 only grows, so a wrong picture that was pushed costs nothing, but a manifest line naming it makes it the reference.
 Pass `--scene 'settings-*'` to compare or update only matching scenes. Repeat it to select the union of several
-patterns. Any explicit selection is for inspection. Publishing requires a full `--update` run.
+patterns. A selected update writes to `target/gui-goldens/selected-captures` for inspection. Publishing uses captures
+from a full `--update` run.
 
 Rendering uses up to four worker processes. Pass `--jobs 1` to run in one process.
 
@@ -287,7 +288,8 @@ def run_locked(tool, base_env: dict[str, str], binary: Path, names: list[str], u
     """Render against the pinned manifest. The caller holds the update lease through review and certification."""
     references = None
     if update:
-        captures = tool.CAPTURES
+        # Preserve the full update and its publish marker when inspecting a subset of scenes.
+        captures = tool.CAPTURES.with_name("selected-captures") if patterns else tool.CAPTURES
         # Drop the old marker and pictures before drawing. The digest ties this output to the manifest in this run.
         try:
             shutil.rmtree(captures)

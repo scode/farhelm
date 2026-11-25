@@ -134,10 +134,10 @@ second clippy run on floating stable is needed.
   `scripts/plans-landing/idle-watch.ts`, and `shellcheck scripts/plans-landing/notify.sh` (the landing monitor's round
   tooling, including the Python module import before checking the round safeguards)
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
-- `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy and terminal host ownership with stand-ins, no
-  vendor turns)
+- `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy, terminal host ownership and cleanup when the
+  control socket cannot be created, using stand-ins with zero vendor turns)
 - `python3 -B scripts/test-run-harness-drift.py` (runner stand-ins verify category selection, one upgrade per harness,
-  HTTPS installer downloads, per-case timeouts and verdict retention with zero vendor turns)
+  HTTPS installer downloads, per-case timeouts, cancellation and verdict retention with zero vendor turns)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
   `deno check scripts/tensorlake/rust-tests.ts` and
@@ -147,8 +147,9 @@ second clippy run on floating stable is needed.
   `.agents/tensorlake.md`.
 - `deno check scripts/boat/boat-tests.ts`, `deno test -A scripts/boat/boat-tests.ts` and
   `shellcheck scripts/boat/sandbox/*.sh` (the boat harness's own checks, including the shard configuration preserving
-  the scoped Podman payload setup while removing the local fixture build, grouping docs shot selectors by page, and
-  clearing only the selected docs outputs). Run the harness only on the maintainer's request, per `.agents/boat.md`.
+  the scoped Podman payload setup while removing the local fixture build, grouping docs shot selectors by page,
+  rejecting malformed docs member limits, and clearing only the selected docs outputs). Run the harness only on the
+  maintainer's request, per `.agents/boat.md`.
 - `shellcheck -x scripts/test-worker/test-worker.sh scripts/test-worker/remote/*.sh` and
   `python3 -m py_compile scripts/test-worker/lock-output.py scripts/test-worker/remote/prune.py scripts/test-worker/remote/run-workload.py scripts/test-worker/test-test-worker.py`
   (the SSH test worker harness's checks, including the evidence-copy driver). On Linux, run
@@ -172,17 +173,17 @@ second clippy run on floating stable is needed.
   their PNG, rendering and UI dependencies, so the first build with that profile can take longer. This sweep uses the
   full comparison and the runner's default of four processes (capped at available CPUs). While iterating on a particular
   view, use `--scene PATTERN` (repeatable). `--jobs 1` runs only one renderer process.
-- `python3 -B scripts/test-check-gui-goldens.py` (private comparison outputs, the update lock, scene selection and
-  completeness against a stand-in renderer, an interrupted worker and the golden changes page with its native review
-  requests. The GUI unit tests cover the native highlight and resize calculations.)
+- `python3 -B scripts/test-check-gui-goldens.py` (private comparison outputs, the update lock, focused update isolation,
+  render completeness and cancellation against a stand-in, and the changes page's native review requests. The GUI unit
+  tests cover the native highlight and resize calculations.)
 - `python3 -B scripts/gui-goldens.py --self-test` (fetching and publishing the golden references)
-- `python3 -B scripts/test-gui-agent.py` (including the bounded automatic parking report), and one end-to-end run of the
-  GPUI app harness from `.agents/validation.md` (`scripts/gui-agent.py <run dir> start`, a `snapshot` and a
-  `screenshot`, then `stop`), which needs `mutter` and lavapipe
+- `python3 -B scripts/test-gui-agent.py` (including the bounded automatic parking report and retained rejection frames),
+  and one end-to-end run of the GPUI app harness from `.agents/validation.md` (`scripts/gui-agent.py <run dir> start`, a
+  `snapshot` and a `screenshot`, then `stop`), which needs `mutter` and lavapipe
 - `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot batch page)
 - `python3 -B scripts/test-docs-shots.py` (repeatable page and shot selection, draft output boundaries, frozen release
-  shots, crop geometry and capture failures against a stand-in harness); one live `scripts/docs-screenshots.sh --local`
-  run on Linux, checking the images at 2x and the full capture record
+  shots and launcher recapture controls, crop geometry and capture failures against a stand-in harness); one live
+  `scripts/docs-screenshots.sh --local` run on Linux, checking the images at 2x and the full capture record
 - The recorded demo-video checks from `.agents/validation.md`: recorder unit tests, the capture-build overlay test, and
   a live `scripts/readme-video.sh` run on Linux with its marked stills checked.
 - `python3 -B scripts/test-gui-e2e-smoke.py` (the end-to-end smoke's check that every step is in its `Smoke` class,

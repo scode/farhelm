@@ -64,6 +64,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Show missing renders on the portable golden changes page.** A comparison can finish with both ordinary pixel
+  differences and scenes that never rendered. The page contains retained differences, so a reviewer cannot infer
+  coverage from missing images. Have the renderer report each selected light and dark appearance's render outcome
+  separately from its comparison result. Include missing or failed appearances in the page, including an update that
+  exits successfully with missing captures. A shared nonzero exit cannot distinguish these cases.
+
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
   started with `cursor-agent -- "$prompt"`, where the prompt starts with `--` and includes a newline. Run
   `python3 -B scripts/run-harness-drift.py --no-upgrade --category initial_prompt --harness cursor` with an existing

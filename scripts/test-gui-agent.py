@@ -1851,7 +1851,7 @@ class CaptureTest(unittest.TestCase):
         """Run `capture` on a hero scenario run in this test's directory against `bridge`, as on a Mac (no frame to
         crop); returns the run directory and the output path. Flags share the same fixture as the default path."""
         run = self.dir / "run"
-        run.mkdir()
+        run.mkdir(exist_ok=True)
         record = {"scenario": {"file": str(HERO)}, "binaries": {"farhelm": "/build/target/debug/farhelm"}}
         output = self.dir / "out" / "hero.png"
         import contextlib
@@ -1892,7 +1892,8 @@ class CaptureTest(unittest.TestCase):
             self.capture_with(bridge)
         self.assertIn("Nothing was written", str(raised.exception))
         self.assertFalse((self.dir / "out").exists())
-        self.assertTrue((self.dir / "run" / gui_agent.CAPTURE_FILE).exists())
+        retained, = (self.dir / "run").glob("failed-capture-*.png")
+        self.assertIn(str(retained), str(raised.exception))
 
         shutil.rmtree(self.dir / "run")
         bridge, asked = self.stand_in_bridge((2560, 1600), {"width": 1280.0, "height": 800.0, "scale": 2.0},
@@ -1901,6 +1902,20 @@ class CaptureTest(unittest.TestCase):
             self.capture_with(bridge)
         self.assertNotIn("screenshot", [args[0] for args in asked])
         self.assertFalse((self.dir / "out").exists())
+
+    def test_capture_after_a_failure_keeps_the_earlier_frame(self):
+        """A later screenshot in the same scenario must preserve the file named in an earlier failure."""
+        bridge, _ = self.stand_in_bridge((2048, 1360), {"width": 1024.0, "height": 680.0, "scale": 2.0})
+        with self.assertRaisesRegex(RuntimeError, "display is too small") as raised:
+            self.capture_with(bridge)
+        retained, = (self.dir / "run").glob("failed-capture-*.png")
+        self.assertIn(str(retained), str(raised.exception))
+        rejected = retained.read_bytes()
+
+        bridge, _ = self.stand_in_bridge((2560, 1600), {"width": 1280.0, "height": 800.0, "scale": 2.0})
+        _, output = self.capture_with(bridge)
+        self.assertNotEqual(output.read_bytes(), rejected)
+        self.assertEqual(retained.read_bytes(), rejected)
 
     def test_keep_focus_skips_terminal_input_and_readiness_wait(self):
         """A launcher shot must keep its field focused even while the terminal probe stays null. Specified: no click

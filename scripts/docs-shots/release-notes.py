@@ -11,6 +11,8 @@ private fleet before adding the shot. The capture skips images that are already 
 
 from docs_shots import Callout, Shot
 
+LAUNCHER_PARK = "id:launcher-destination-heading"
+
 
 def open_session_actions(bridge):
     """Use the staged session's visible title because each capture gets a new session ID."""
@@ -94,6 +96,9 @@ def antigravity(bridge):
     bridge.click("id:new-session-button")
     bridge.wait("id:launcher-harness-Antigravity")
     bridge.click("id:launcher-harness-Antigravity")
+    bridge.scroll_into_view("id:launcher-more-options")
+    bridge.click("id:launcher-more-options")
+    bridge.scroll_into_view("id:launcher-conversation")
     bridge.wait("id:launcher-conversation")
 
 
@@ -150,7 +155,8 @@ SHOTS += [
         "v0-42-0-antigravity",
         antigravity,
         ["id:launcher-harness-row", "id:launcher-conversation-row"],
-        park="id:launcher-frame-title",
+        # Revealing the conversation can scroll Destination away. Its row stays in the visible form.
+        park="id:launcher-conversation-row",
         annotations=[
             Callout("id:launcher-harness-Antigravity", "Choose Antigravity to start an agy session.", side="top",
                     dy=-95),
@@ -211,7 +217,7 @@ SHOTS += [
         "v0-43-0-shell-sessions",
         shell_sessions,
         ["id:launcher-shells-row"],
-        park="id:launcher-frame-title",
+        park=LAUNCHER_PARK,
         annotations=[
             Callout("id:launcher-shells-Zsh", "Start a shell session.", side="right"),
         ],
@@ -221,7 +227,6 @@ SHOTS += [
 
 # --- v0.44.1 --------------------------------------------------------------------------------------------------------
 
-LAUNCHER_PARK = "id:launcher-destination-heading"
 SETTINGS_PARK = "id:settings-frame-title"
 
 

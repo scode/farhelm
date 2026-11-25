@@ -52,6 +52,7 @@ class GoldenRunnerTests(unittest.TestCase):
             fetch=mock.Mock(side_effect=store.Refused("storage is unreachable")),
         )
         self.marker = self.tool.CAPTURES / f"{PLATFORM}.complete"
+        self.focused = self.tool.WORK / "selected-captures"
         self.page = root / "changes" / "index.html"
         self.references = root / "fetched"
         self.references.mkdir()
@@ -217,7 +218,7 @@ class GoldenRunnerTests(unittest.TestCase):
             task = json.loads(request.read_text(encoding="utf-8"))
             self.assertEqual(len(task["pairs"]), 1)
             reference, capture = map(Path, task["pairs"][0])
-            self.assertEqual(capture.parent, self.tool.CAPTURES / PLATFORM)
+            self.assertEqual(capture.parent, self.focused / PLATFORM)
             before = self.references / PLATFORM / capture.name
             self.assertEqual(reference.read_bytes(), before.read_bytes())
             jobs_seen.add(capture.name)
@@ -230,7 +231,7 @@ class GoldenRunnerTests(unittest.TestCase):
                                            base={"FARHELM_GOLDENS_DIR": str(self.references)}), 0)
         self.tool.fetch.assert_not_called()
         self.assertEqual(jobs_seen, {light.name, dark.name})
-        self.assertEqual({p.name for p in (self.tool.CAPTURES / PLATFORM).iterdir()}, jobs_seen)
+        self.assertEqual({p.name for p in (self.focused / PLATFORM).iterdir()}, jobs_seen)
         page = self.page.read_text(encoding="utf-8")
         self.assertIn("Reference (1 × 1)", page)
         self.assertIn("New capture (2 × 1)", page)
@@ -276,7 +277,7 @@ class GoldenRunnerTests(unittest.TestCase):
 
         self.assertEqual(self.run_suite(render, patterns=["first"]), 0)
         self.assertNotEqual(self.tool.manifest_digest(self.tool.MANIFEST), digest)
-        self.assertEqual((self.tool.CAPTURES / "manifest.sha256").read_text().strip(), digest)
+        self.assertEqual((self.focused / "manifest.sha256").read_text().strip(), digest)
         self.tool.fetch.assert_called_once()
         self.assertIn("Reference unavailable", self.page.read_text(encoding="utf-8"))
         self.assertTrue((self.page.parent / "first--light-capture.png").is_file())
@@ -457,7 +458,12 @@ class GoldenRunnerTests(unittest.TestCase):
         self.assertFalse(fetched[1].parent.exists())
 
     def test_selected_update_keeps_catalog_order_and_cannot_publish(self):
-        """Overlapping patterns pick each scene once, leaving the resulting files available for inspection."""
+        """A focused update puts its pictures aside while a previous full update stays ready to publish."""
+        earlier = self.tool.CAPTURES / PLATFORM / "launcher-new--light.png"
+        earlier.parent.mkdir(parents=True)
+        earlier.write_bytes(b"earlier full update")
+        self.marker.write_text("8\n", encoding="utf-8")
+
         def render(command, *, cwd, env, pass_fds):
             self.assertEqual(json.loads(env["FARHELM_GOLDEN_SCENES"]), ["first", "launcher-new", "launcher-search"])
             self.assertIn("goldens::component_goldens", command)
@@ -465,9 +471,11 @@ class GoldenRunnerTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0)
 
         self.assertEqual(self.run_suite(render, patterns=["launcher-*", "first", "*-new"]), 0)
-        self.assertTrue((self.tool.CAPTURES / PLATFORM / "launcher-new--light.png").is_file())
-        self.assertFalse((self.tool.CAPTURES / PLATFORM / "last--dark.png").exists())
-        self.assertFalse(self.marker.exists())
+        self.assertTrue((self.focused / PLATFORM / "launcher-new--light.png").is_file())
+        self.assertFalse((self.focused / PLATFORM / "last--dark.png").exists())
+        self.assertFalse((self.focused / self.marker.name).exists())
+        self.assertEqual(earlier.read_bytes(), b"earlier full update")
+        self.assertEqual(self.marker.read_text(encoding="utf-8"), "8\n")
 
     def test_any_unknown_pattern_prevents_render_even_when_another_matches(self):
         """Treat a typo as a failed selection, including when it accompanies a broad valid match. The refusal comes
