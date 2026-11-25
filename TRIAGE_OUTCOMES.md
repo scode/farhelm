@@ -28,7 +28,7 @@
   spec rule is explicit and the guard is tiny; size S.). Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## hook-save-uses-newer-replace-warning.md
 
@@ -57,7 +57,7 @@
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md
 
@@ -85,7 +85,7 @@
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says
   remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## settings-close-can-retry-refused-save.md
 
@@ -108,7 +108,7 @@
   and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings
   the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment
   says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-hosts-menu-rerun-reads-live-host-state.md
 
@@ -132,7 +132,7 @@
   follows the quoted rule; size S-M.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-hosts-menu-remove-reads-live-skip-confirmation.md
 
@@ -151,7 +151,7 @@
   follows the quoted rule; size S-M.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-podman-claim-and-recipe-guards-omit-tailscale.md
 
@@ -173,7 +173,7 @@
   clearly settled; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## legacy-template-can-ask-to-save-automatic-cleanup.md
 
@@ -197,7 +197,7 @@
   spec says "never" in so many words; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## antigravity-trust-hint-omits-live-announcement.md
 
@@ -218,7 +218,7 @@
   S, under 100 lines including a node-property test.). Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## settings-close-save-can-hide-credential-error.md
 
@@ -239,7 +239,7 @@
   direct; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## hook-hint-dismissal-survives-ui-reset.md
 
@@ -257,7 +257,7 @@
   the same pattern; that is outside this item.). Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## hook-hint-dismissal-reply-loss-hides-all-hints.md
 
@@ -274,7 +274,7 @@
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## hook-recovery-text-omits-direction-isolation.md
 
@@ -300,7 +300,7 @@
   hit the size gate. Size M.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## hook-setup-accepts-nonutf8-config-path.md
 
@@ -320,7 +320,7 @@
   ~100 lines with a test. Size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## trailing-retired-yolo-flag-refusal-overstates-when-farhelm-asks.md
 
@@ -338,7 +338,7 @@
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-completed-setup-save-steal-focus-from-newer-input.md
 
@@ -358,7 +358,7 @@
   follows the quoted rule; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-shortcuts-chord-opens-during-terminal-ime.md
 
@@ -381,7 +381,7 @@
   Directly follows from the spec. Size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-pending-scope-cleanups-logs-invalid-session-id-unescaped.md
 
@@ -404,7 +404,7 @@
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says
   remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-later-codex-github-failure-hides-claude-cleanup-warning.md
 
@@ -427,7 +427,7 @@
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry,
   or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-podman-settle-claim-refuses-third-host-duplicate-transfer.md
 
@@ -447,7 +447,7 @@
   clearly settled; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-custom-agent-settings-launch-preview-breaks-bidi-isolation.md
 
@@ -465,7 +465,7 @@
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-custom-agent-settings-omits-per-field-unsaved-dots.md
 
@@ -483,7 +483,7 @@
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md
 
@@ -504,7 +504,7 @@
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry,
   or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-launcher-search-custom-agent-rename-refused-as-stale.md
 
@@ -524,7 +524,7 @@
   the ID-only arm and a test; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-launcher-search-effort-default-misses-custom-effort.md
 
@@ -542,7 +542,7 @@
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-mac-reach-omits-date-for-bootout.md
 
@@ -560,7 +560,7 @@
   follows the quoted rule; size XS.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-reminder-frame-cfg-test-branch-in-render-path.md
 
@@ -581,7 +581,7 @@
   (about 5 lines, no test change, well under 100).). Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-settings-custom-agent-nav-tooltip-omits-bidi-isolation.md
 
@@ -599,7 +599,7 @@
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says
   remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-templates-editor-allows-generic-custom-on-agent-template.md
 
@@ -616,7 +616,7 @@
   the refusal and an editor test; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md
 
@@ -635,7 +635,7 @@
   custom agents to the round-trip test; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-unknown-agent-typo-fails-with-misleading-custom-flag-error.md
 
@@ -655,7 +655,7 @@
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-bell-open-announcements-silent-on-read-failure.md
 
@@ -676,7 +676,7 @@
   100).). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-link-disclosure-module-doc-soft-seam.md
 
@@ -697,7 +697,7 @@
   the next row"; size XS (well under 100 lines).). Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## tensorlake-key-discard-lacks-preservation-test.md
 
@@ -712,7 +712,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard (or fix code if test gaps are wanted) — no product
   failure; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## ntfy-test-no-longer-witnesses-pending-save-lock.md
 
@@ -726,7 +726,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard (or fix code) — no product failure; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## staged-host-update-controls-promise-unattended-installs.md
 
@@ -743,7 +743,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard (developer-only mode).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## sound-preview-regression-misses-separate-mappings.md
 
@@ -756,7 +756,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard (or fix code) — no product failure; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## recipe-delete-test-misses-warning-clipping.md
 
@@ -769,7 +769,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only, no observed clipping; size S if kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## launcher-host-reorder-test-accepts-old-host.md
 
@@ -783,7 +783,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard, or fix code with a small test edit. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-tab-test-omits-placement-premise.md
 
@@ -797,7 +797,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard, or fix code by asserting both offers in the menu
   first. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## shift-enter-test-assumes-one-program-read.md
 
@@ -816,7 +816,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. No established false failure, and the docstring
   already scopes the claim. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## terminal-prehello-test-misses-output-loss.md
 
@@ -833,7 +833,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard, or fix code with an exact-output assertion through
   the exit record. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## pi-settings-tests-miss-trust-route.md
 
@@ -845,7 +845,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## agent-settings-tests-miss-late-trust-replies.md
 
@@ -858,7 +858,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## agent-settings-search-test-omits-focus-target.md
 
@@ -871,7 +871,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## terminal-paste-test-misses-first-ack-premise.md
 
@@ -886,7 +886,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code (reuse the existing output fence) or discard. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-busy-claim-retry-test-bypasses-fleet-wake-it-depends.md
 
@@ -900,7 +900,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md
 
@@ -913,7 +913,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md
 
@@ -929,7 +929,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard, or fix code with one test (size S).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md
 
@@ -943,7 +943,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md
 
@@ -956,7 +956,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-first-deletes-live-confirmation-reply-lacks-regression-assertion.md
 
@@ -968,7 +968,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-final-frame-boundary-test-leaves-osc-8-and-file.md
 
@@ -985,7 +985,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard, or fix code with boundary tests. Size S-M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-all-phase-fixture-does-not-compare-managers-phase-strings.md
 
@@ -1000,7 +1000,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. Rebuilding the table from manager states is more than
   the roughly 20 lines Q11 allows. Size S to M if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-status-mark-tests-lost-their-per-target-geometry-check.md
 
@@ -1015,7 +1015,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. Not cheap, and the generic geometry tests cover the
   shared logic. Size M if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-maximized-relaunch-contract-has-no-first-frame-or-subsequent.md
 
@@ -1028,7 +1028,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. Not cheap (Mac VM harness work). Size L if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-one-create-test-skip-already-readable-duplicate.md
 
@@ -1045,7 +1045,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code — add `biased;` with the frame branch first (or drain
   ready frames before stopping); size S. Or discard, if test gaps are being dropped.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md
 
@@ -1058,7 +1058,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only; size S-M if kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md
 
@@ -1076,7 +1076,7 @@
   record which way it went. Recommendation for reference: discard — the signal-level tests cover Farhelm's side of the
   promise, and a real-history end-to-end test depends on the shell's configuration and costs more than it buys; size M
   if kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md
 
@@ -1093,7 +1093,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — the product path is correct, and the test needs a
   new fake listing-failure seam; size M if kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-no-existing-assertion-covers-terminal-loss-between-publication-and.md
 
@@ -1108,7 +1108,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. Size S-M if a test is added (it needs a seam to lose
   the host mid-reply).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-delete-level-tests-miss-retained-gone-host-refusal.md
 
@@ -1124,7 +1124,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — the product path is correct, and the shared refusal
   is already tested through Close; size M if kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-tab-resume-pass-without-receiving-flood-output.md
 
@@ -1139,7 +1139,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code — wait for a marker that the echo cannot contain (for
   example, `FLOOD-199999`, or a trailing printed sentinel); size S. Combine with 333.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-paused-tab-test-pass-without-exercising-pause.md
 
@@ -1152,7 +1152,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code, together with 332 — size S–M. Or discard both.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-landing-removed-ambiguous-create-refusal-marker-assertion.md
 
@@ -1171,7 +1171,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code — restore the one assertion near
   host_creates.rs:1456; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-alternate-screen-stop-diagnostics-overstate-replay-oracle.md
 
@@ -1186,7 +1186,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard, or fix code (reword the assertion messages). Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-tab-cleanup-test-leave-first-two-fixture-jobs-running.md
 
@@ -1202,7 +1202,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code — arm a `PidKillGuard` for each job as its pid is
   read; size S. Or discard.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-alternate-screen-stop-waits-on-output-written-before-term.md
 
@@ -1220,7 +1220,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code — wait for the fixture's post-handler ready marker
   before Stop; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-failed-restart-annotation-test-accepts-errors-before-restoration-is.md
 
@@ -1236,7 +1236,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code — assert the error names the spec write, or that the
   row's generation advanced; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-real-supervisor-restart-assertions-leave-recovered-socket-identity-unchecked.md
 
@@ -1255,7 +1255,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. The in-process restart tests already cover the
   durable address, so this adds little. Size S (one assertion) if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-strengthened-stop-tree-test-permits-cleanup-after-success-reply.md
 
@@ -1275,7 +1275,7 @@
   record which way it went. Recommendation for reference: fix code. The test's own spec line claims "Stop succeeds; both
   processes go", and the fix is to assert `process_is_gone` right after the reply and keep polling only for the exit
   record. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-restart-gap-open-tab-checks-survivors-but-never-witnesses.md
 
@@ -1292,7 +1292,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. Reading the code shows the gate refuses first, and
   counting launch attempts needs a seam threaded into an end-to-end test. Size S-M if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-restart-ordering-witness-record-gone-without-reading-old-pid.md
 
@@ -1311,7 +1311,7 @@
   record which way it went. Recommendation for reference: discard. The failure needs the fixture's own PID files to
   vanish mid-test. Size S if fixed (fail the wrapper on an empty or invalid PID and arm it only for the Restart's
   start).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-list-admission-test-observes-reply-timing-instead-of-list.md
 
@@ -1329,7 +1329,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. The test proves what it claims, and the construction
   placement is correct by inspection. Size S-M if fixed (a witness seam inside the task).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-stop-classification-test-pass-without-stop-waiting-for-exit.md
 
@@ -1344,7 +1344,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard (closing it needs a new scheduling seam). Size M if
   fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-seal-delete-test-cannot-show-delete-reached-directory-admission.md
 
@@ -1363,7 +1363,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. This guards a potentially work-losing regression,
   and the sibling test shows the witness pattern. Size S-M (may need a "reached the lock" seam).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-borrower-reload-lacks-completed-origin-runtime-handoff-witness.md
 
@@ -1381,7 +1381,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. Origin recovery is outside this test's subject. Size
   S-M if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-live-route-conformance-pass-when-terminal-control-skips-target.md
 
@@ -1396,7 +1396,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard, or fix code (add per-control postconditions and a
   distinct resize). Size S-M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-omp-owner-exit-test-overstates-evidence-behind-resume-offer.md
 
@@ -1412,7 +1412,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code (reword the docstring) or discard. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-borrower-classification-test-does-not-establish-checkout-membership.md
 
@@ -1427,7 +1427,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard, or fix code with one premise assertion (size S).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-ready-and-borrower-cases-do-not-assert-vanished-terminal.md
 
@@ -1443,7 +1443,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code (assert the ObservedExit proposal and the reloaded
   Exited outcome) or discard. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-running-seed-cancellation-checks-readability-without-observing-returned-screen.md
 
@@ -1460,7 +1460,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. A one-line assertion that the read sees "seed line
   01" matches the test's "gives the emulator back" claim. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md
 
@@ -1474,7 +1474,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code with one assertion (cheap), or discard. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md
 
@@ -1492,7 +1492,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. The test catches the regression it names. Size S if
   one only narrows the docstring.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md
 
@@ -1507,7 +1507,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — the finding is refuted; size n/a
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## sqlite-planner-test-misses-stale-statistics.md
 
@@ -1523,7 +1523,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. The refresh decision belongs to SQLite, and a
   stale-statistics fixture would mostly test SQLite. Size S-M if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## terminal-link-oracle-regeneration-loses-wide-padding.md
 
@@ -1539,7 +1539,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. A one-field change to the generator keeps the oracle
   reproducible. Size XS.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## remote-probe-absence-test-does-not-witness-proxy.md
 
@@ -1553,7 +1553,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## host-lifecycle-test-misses-other-host-control.md
 
@@ -1571,7 +1571,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. The per-host refusal is the only input to the
   control, and a nearby test drives the real menu. Size S if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## inline-resume-test-misses-disabled-control-state.md
 
@@ -1587,7 +1587,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. The disabled flag and the help text come from one
   value. Size S if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## environment-launch-history-test-bypasses-origin-handoff.md
 
@@ -1607,7 +1607,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — the shipped handoff is correct, and the guard would
   protect against a hypothetical regression; size S if kept (one request-level test).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## tensorlake-prepared-add-test-misses-pending-snapshot-guard.md
 
@@ -1627,7 +1627,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — the production behavior matches the spec; size S if
   kept (a Pending fixture step).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-masked-input-test-omits-a11y-value-checks.md
 
@@ -1644,7 +1644,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code, only if cheap. The guard protects a secret from
   screen readers. Size S to M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-wake-folder-tests-omit-timeouts-removal-and-replace.md
 
@@ -1662,7 +1662,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — no product defect alleged; size M if kept (several
   GPUI tests).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-wake-checkout-tests-omit-replace-with.md
 
@@ -1680,7 +1680,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — or fold the Replace with checkout test into the fix
   of the highest-bucket sibling, which would need it anyway; size M if kept separately.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-wake-checkout-tests-omit-unverified-and-stopped-hosts.md
 
@@ -1696,7 +1696,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — part 1 is handled by 405's fix and test; size S–M if
   kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-claude-trust-and-antigravity-missing-regression-tests.md
 
@@ -1717,7 +1717,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. Part 1 is mostly covered and parts 2-3 are low value.
   Alternatively fix code for parts 2-3, size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## trailing-credential-delivery-test-stale-claude-settings-assertion.md
 
@@ -1731,7 +1731,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard (or fix code) — coverage only; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-ensure-hosts-skips-tailscale-validation-for-registered.md
 
@@ -1749,7 +1749,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard. Alternatively fix code XS: move the check into the
   up-front loop with the entry index.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-codex-dual-agent-delivery-tests-raw-substring.md
 
@@ -1765,7 +1765,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Make the fixture's snapshot assert the supervisor's
   invariant and decode the three checks. It guards a launch-blocking failure and is cheap. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-codex-renamed-executable-missing-admission-and-e2e-test.md
 
@@ -1779,7 +1779,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard under Q11 (an end-to-end test is not cheap). If the
   maintainer wants parity with Grok: fix code, size M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md
 
@@ -1798,7 +1798,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code (test only). Keep the child alive across the parent's
   report, and assert the correction notice. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-custom-agent-settings-test-locks-in-kick-and-misses-dirty-delete.md
 
@@ -1813,7 +1813,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: other. Add the dirty-delete case as part of 81's fix, and
   discard the rest. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-custom-report-forwarder-lock-test-lacks-witness.md
 
@@ -1831,7 +1831,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code — add session variables and assert no report file or
   log while locked, then a positive run once unlocked; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-launcher-footer-test-checks-stale-bg2-token.md
 
@@ -1845,7 +1845,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code with a one-line test fix, or discard. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-settings-custom-agent-duplicate-host-sentence-id.md
 
@@ -1863,7 +1863,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — no user-visible effect (or fix code with a slot
   prefix, size S).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-supervisor-positional-pin-tests-omit-custom-agent.md
 
@@ -1879,7 +1879,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code — add a CUSTOM `PinCase` and a capture-clearing test;
   size M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-ticker-live-motion-resume-test-misses-blink-resume.md
 
@@ -1892,7 +1892,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Assert the intermediate `(false, 2)`. Size XS.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-toolbar-650px-height-test-unguarded-else-branch.md
 
@@ -1906,7 +1906,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. One assertion; cheap and it guards the toolbar's
   shipped layout (Q11). Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-bell-stale-reply-guards-untested.md
 
@@ -1920,7 +1920,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Two or three short test cases; they guard focus
   behavior users see (Q11), though they may come to more than 20 lines. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-credential-test-name-says-setup-refuses.md
 
@@ -1935,7 +1935,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code XS (rename the test). A rename is cheaper than
   discussing it.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-link-disclosure-warning-wording-untested.md
 
@@ -1949,7 +1949,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. One unit test per branch. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-link-oracle-exception-asserts-only-absence.md
 
@@ -1963,7 +1963,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Require a Mismatch for the excepted grid keys, or
   add the case as a loud case. Land it with 105. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-link-hidden-row-test-step-cannot-fail.md
 
@@ -1976,7 +1976,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Make row 1 continue `tag`. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-link-label-budget-untested.md
 
@@ -1991,7 +1991,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Add a test across the unit edge, plus the one-row
   two-stretch case. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-link-joined-second-reading-untested.md
 
@@ -2005,7 +2005,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code with 105: one quiet and one loud case. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-link-scanner-zwsp-scheme-test-vacuous.md
 
@@ -2021,7 +2021,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Drop the case, or put the ZWSP inside the scheme.
   Size XS.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-link-scanner-disguised-scheme-reason-unpinned.md
 
@@ -2035,7 +2035,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Add verdict rows. Size XS.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-link-scanner-comparison-leeways-untested.md
 
@@ -2054,7 +2054,7 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Add the 4-5 quiet rows the finding lists. They
   cheaply guard a spec rule in a user-facing security warning. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-link-scanner-host-start-test-docstring-wrong.md
 
@@ -2069,7 +2069,7 @@
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Reword the docstring. Size XS.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## installed-agent-runner-can-leave-interrupted-build-running.md
 
@@ -2089,7 +2089,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — the trigger is unusual and the child ends on its own. If it is kept, the fix follows
   `recorded_case`'s existing pattern; size S (~30–50 lines with a test).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## interrupted-drift-case-retains-failed-verdict.md
 
@@ -2107,7 +2107,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — the maintainer caused the interruption and the exit status says so; size S if fixed (~20 lines).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## docs-shot-partial-failure-hides-success-paths.md
 
@@ -2123,7 +2123,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — this is a missing log listing for files that are still present; size S if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## invalid-boat-member-limit-clears-previews.md
 
@@ -2140,7 +2140,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — the trigger is a maintainer typo and the outputs can be regenerated; size S if fixed (~10 lines).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## docs-shots-share-host-details-state.md
 
@@ -2161,7 +2161,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code — return Details to its initial state in the shot's cleanup; size S (~5–10 lines).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## docs-shot-run-can-overwrite-earlier-failure-frame.md
 
@@ -2179,7 +2179,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code — the message is false and a per-shot file name fixes it; size S (~10 lines).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## upgrade-highlights-feed-can-outgrow-desktop-reader.md
 
@@ -2198,7 +2198,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. The headroom is deliberate and large; a size assertion in the generator would be a nicety. Size S
   if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## focused-golden-update-replaces-unpublished-full-captures.md
 
@@ -2218,7 +2218,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — this is outside the documented order and costs one rerun; size S–M if fixed (~30 lines plus a
   test).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## golden-output-backpressure-can-block-cancellation-cleanup.md
 
@@ -2236,7 +2236,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — the user causes the output pause and it clears when output resumes; size S if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## failed-golden-reference-setup-can-leave-partial-files.md
 
@@ -2254,7 +2254,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — it leaves clutter in gitignored build output, much as failing comparisons do by design; size S if
   fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## shell-release-shot-parks-on-removed-control.md
 
@@ -2273,7 +2273,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code, together with 174 — two known-broken selectors; size S (~5 lines).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## antigravity-release-shot-waits-on-folded-field.md
 
@@ -2290,7 +2290,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code, together with 173 — click the More options toggle first; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## container-comparison-targets-removed-control.md
 
@@ -2306,7 +2306,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code if the batch is still used, otherwise retire the scene; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## launcher-comparison-heading-selector-case.md
 
@@ -2324,7 +2324,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code, together with 175 — retarget to `id:launcher-destination-heading`; size S–M (~30–60 JSON lines).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## golden-worker-interrupt-bypasses-cancel.md
 
@@ -2344,7 +2344,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — the trigger is an out-of-band signal and the only loss is the optional review page; size S if
   fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## golden-report-omits-failed-scenes.md
 
@@ -2365,7 +2365,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code — the trigger is ordinary and the page is meant to be read without the terminal output; size M
   (~50–100 lines with a test).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## capture-stop-retry-can-lose-starting-host.md
 
@@ -2387,7 +2387,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. It needs a Ctrl-C inside Popen plus a retry within the startup window, and the leak is one process
   the maintainer can kill. Size M if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## capture-close-setup-error-discards-frames.md
 
@@ -2407,7 +2407,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard on its own, or fold it into the 210 fix (move socket creation into the `try`, a two-line change).
   Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## capture-drive-error-discards-staged-screens.md
 
@@ -2428,7 +2428,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. Treat a drive `HostError` as an unsuccessful harness outcome, still publish the validated
   screens, and continue with the next harness. Size S (about 20-40 lines plus a stand-in test).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## capture-fixture-copy-can-break-screen-pair.md
 
@@ -2446,7 +2446,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. It needs an I/O failure mid-copy, and git restores the damaged files. Size S-M if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## capture-stop-retry-requires-original-binary.md
 
@@ -2465,7 +2465,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. It needs a stop that already failed, followed by a missing build, and a manual workaround exists.
   Size S if fixed (a `--farhelm` option on stop, or one line in `.agents/real-agent-tui.md`).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## release-verifier-retry-overruns-deadline.md
 
@@ -2483,7 +2483,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. It does not crash, lose evidence or change a verdict, and the overrun is small. Size S if fixed
   (pass an absolute deadline).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## release-verifier-does-not-bind-relaunch-samples.md
 
@@ -2501,7 +2501,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. A false pass would need the model to deviate, and it is limited to bonus coverage. Size S-M if
   fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## centos-gate-can-stage-sibling-binary.md
 
@@ -2520,7 +2520,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. It misattributes test evidence, which is the class Q14 fixed for Podman. Build into a
   checkout-local or run-owned path, or copy the binary before checking it. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## centos-gate-resolves-relative-target-from-caller.md
 
@@ -2538,7 +2538,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. A crash of a documented command, or a check of the wrong bytes; resolve the path against `$repo`.
   Size S; it can go with 216.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## container-golden-stays-on-loading.md
 
@@ -2560,7 +2560,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. Seed one recipe-place row (the pattern is in `goldens/settings.rs:123-135`), wait for the drawn
   note, and re-render the golden. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## capture-test-python-minimum-undocumented.md
 
@@ -2577,7 +2577,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. Every documented tooling path already needs 3.11+. Size S if fixed (one clause).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-indented-blank-lines-defeat-release-note-pr-coverage-checks.md
 
@@ -2596,7 +2596,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. A release gate can pass wrongly (misattributed release evidence). Skip whitespace-only lines in
   `_cited_prs` and add a test. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-empty-highlights-release-path-lacks-consumer-test.md
 
@@ -2613,7 +2613,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. It is coverage only, on a path never used. Size S if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## deflake-sweep-fixtures-inherit-git-hooks.md
 
@@ -2632,7 +2632,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code — a one-line fix (`-c core.hooksPath=/dev/null` on the fixture's `git` calls). Under Q14 it counts
   as "turns a real verdict into a harness failure", though only when such a hook exists. Size S (under 10 lines).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## deflake-base-refusal-test-misses-run-state.md
 
@@ -2651,7 +2651,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — the current behavior is correct, and under Q14 a missing test is "make no change"; size S if
   fixed (one test, about 30 lines).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## worker-staging-failure-leaves-in-progress-evidence.md
 
@@ -2669,7 +2669,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — under Q14, no evidence is lost or misattributed (the stamp names the right invocation) and
   nothing crashes; size S if fixed (restamp in the two failure branches, about 5 lines plus a test).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-drift-turn2-hook-check-passes-on-noop-stop-ack.md
 
@@ -2693,7 +2693,7 @@
   reference: fix code, together with 498, after `drift-model-selection` lands: require the resumed run to have a
   committed report, or distinguish committed acks from no-op acks in the hook log. Size M (the log format or a snapshot
   field changes, and four profiles are affected).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-test-worker-stop-during-prep-mutates-and-prunes.md
 
@@ -2715,7 +2715,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — the documented promise holds, and the effects are one early eviction and an empty result; size S
   if fixed (re-check the stop marker before the install and before pruning, about 10 lines plus a test).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-test-worker-relative-checkout-breaks-lock-isolation.md
 
@@ -2736,7 +2736,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code — resolve `--checkout` to an absolute path and refuse an empty or dot name, which is the shape the
   default already uses (`test-worker.sh:61`); size S (about 5 lines plus a test).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-test-worker-collect-discards-recorded-exit-status.md
 
@@ -2756,7 +2756,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code — have collect return the recorded code and stamp `collected (exit N)`; size S (about 15 lines
   plus test assertions).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-test-worker-status-hides-bootstrap-lock.md
 
@@ -2775,7 +2775,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — diagnostic only, and under Q14 "make no change"; size S if fixed (a worker-level holder file and
   a status line, about 15 lines).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-tensorlake-rust-tests-summary-head-60-evicts-count.md
 
@@ -2797,7 +2797,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code — read the count from the full console log, or write the Summary line outside the 60-line cap; a
   cheap fix for a false failure that keeps a billed sandbox; size S (under 10 lines).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-tensorlake-sandbox-tests-allocates-before-ledger.md
 
@@ -2816,7 +2816,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — the maintainer already decided no change for this exact finding; size none.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-mac-reboot-shell-discards-command-status-tag.md
 
@@ -2833,7 +2833,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. It is a misleading diagnostic and a slow failure in a manual test, with no evidence lost. Size S
   if fixed (route the helper through `run_shell`).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-cleanup-skips-p1-retry-and-preflight-evidence.md
 
@@ -2855,7 +2855,7 @@
   reference: fix code. It deletes the only evidence of a failed preparation without the required approval. In the tiered
   branch, require `phase == 'ready'`, no `preparation_error`, intact retry archives for checks in scope and intact
   native readiness evidence, then add tests. Size S-M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-dead-end-misses-deleted-p0-automation-failure.md
 
@@ -2875,7 +2875,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. It turns a real verdict (P2 could not run) into a harness failure. Treat a P0-affecting
   `automation_failure` or `preparation_error` on a deleted pair as a dead end. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-exiting-stdio-proxy-mid-scan-fails-remove.md
 
@@ -2894,7 +2894,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. The window is microseconds, the choice is documented, and the failure is false, not a false pass.
   If the maintainer wants it fixed, treat PIDs already classified as proxies in the before snapshot as proxies (size S).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-fixture-probe-forwards-sys-executable.md
 
@@ -2914,7 +2914,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. It would crash a documented setup. Pass the configured interpreter path to the peer. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-linux-remote-start-accepts-empty-sessions.md
 
@@ -2934,7 +2934,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. It weakens a release gate's retained-data proof (misattributed evidence). Require a non-empty
   start on Linux and add the `[]` subtest. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-machine-profile-conflicting-mac-address.md
 
@@ -2949,7 +2949,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. The configuration error is caught late but safely. Size S if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-old-sessions-nonexistent-unavailable-status.md
 
@@ -2967,7 +2967,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. The verdict is the same; the difference is diagnostic wording. Size S if fixed (delete the
   sentence).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-old-sessions-stdout-prints-fail.md
 
@@ -2984,7 +2984,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. Only the live progress line is wrong, and the final report is correct. A fix is about 3 lines if
   the maintainer prefers.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-p1-automation-failure-drops-unverified-fail.md
 
@@ -3004,7 +3004,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. It loses release evidence that should block promotion. Save before `record()` and add a test.
   Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-p1-permission-block-swallowed.md
 
@@ -3024,7 +3024,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. It misattributes a permission block and breaks a documented stop. Accept `permission-block`
   without receipts, preserve it on `TesterError`, and exclude it from the P1 downgrade. Size S-M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-record-settle-breaks-retry-unavailable.md
 
@@ -3044,7 +3044,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. A documented recovery command always fails on the most important pair. Size M (two coupled
   changes plus tests).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-require-no-failure-allows-rerun-on-failed-p0.md
 
@@ -3062,7 +3062,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. It turns a retriable result into a harness failure. Refuse `test` while the tester phase is
   `failed`. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-unavailable-retry-p2-stale-dict.md
 
@@ -3077,7 +3077,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. It is only a test gap and the guard works. The fix is about 2 lines if wanted.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-drift-grok-home-overwritten-by-login-shell-rc.md
 
@@ -3100,7 +3100,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. Also pass the mirror's root through the wrapper's `env` prefix, as Muse and OMP already do. Size
   S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-drift-private-config-copy-back-aborts-first-error.md
 
@@ -3121,7 +3121,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. It needs a filesystem failure inside the maintainer's own config folder. Size S if fixed (remove
   `staged` on error, collect per-file notes, always run the integrity check).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-drift-runner-list-upgrade-only-conflict.md
 
@@ -3139,7 +3139,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: other. Remove the item once #4781 lands, since the delivered code fixes it, or treat it as already fixed at
   that point. Size none.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-grok-drift-test-uses-hook-witness-fresh-after-noop-acks.md
 
@@ -3159,7 +3159,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code with 384 (one witness redesign covers both), or discard with 384. Size S-M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-harness-upgrades-orphans-updater-grandchildren.md
 
@@ -3179,7 +3179,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. It needs a vendor updater that hangs past the timeout. Size S-M if fixed (`start_new_session` plus
   `killpg`, and signal handling in `prepare`).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-session-toolbar-golden-height-clips-on-macos.md
 
@@ -3198,7 +3198,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. Derive the height from `title_band::ON`. Size S (one line). Discard is also reasonable while no
   macOS goldens are tracked.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-test-worker-disk-guard-df-du-edge-cases.md
 
@@ -3223,7 +3223,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard — no crash and no lost evidence, and the worst case is a cold rebuild in a rare window. If it is
   fixed, guard only the empty re-reading in (2) and correct the wording in (4); size S (about 15 lines plus a test).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-announcement-override-survives-app-relaunch.md
 
@@ -3244,7 +3244,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code. Add `env_remove` on both relaunch paths and extend the environment test at `updater.rs:1869`.
   Size S. The changelog fragment is `kind: none`.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-announcement-override-check-untested.md
 
@@ -3260,7 +3260,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. The guard works and only its test is weak. Size S if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-missing-announcement-feed-reported-as-candidate-failure.md
 
@@ -3279,7 +3279,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. The choice is deliberate and documented, and the detail names the cause. If the maintainer
   prefers, map 404 to could-not-run (size S, with code, tests and docs).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-brick-test-announcement-check-has-no-delivery-wait.md
 
@@ -3300,7 +3300,7 @@
   with fresh reads for a bounded time (around 60 seconds) and report could-not-run when no notice arrives. Size S for
   the prompt. Telling a network error apart from a signature or schema rejection would take a log-reading operation (M),
   which is optional.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-release-shot-custom-agent-failure-strands-settings-draft.md
 
@@ -3322,7 +3322,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code, together with 578. Wrap the steps after the first mutation in `try`/`except` with cleanup, as
   `grouped_sessions` (`release-notes.py:48-80`) already does. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-release-shot-guarded-replace-failure-leaves-yolo-question.md
 
@@ -3341,7 +3341,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code with 577 (the same try/cleanup pattern, clicking `id:prompt-cancel`). Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## template-leave-spec-still-inline.md
 
@@ -3361,7 +3361,7 @@
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec — replace
   "inline" with "centered", and optionally point to SPEC.md's leave rule. Size S, a few lines. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## sealed-container-delete-spec-conflicts.md
 
@@ -3379,7 +3379,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec — add the
   known-seal exception to the host-level paragraph. Size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## tensorlake-key-clear-spec-misstates-leftover-refresh.md
 
@@ -3394,7 +3394,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec — reword the
   trigger list; size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## release-gate-regeneration-guidance-stale.md
 
@@ -3416,7 +3416,7 @@
   `generate-workflow.py --check` afterwards, since the setup file is spliced into the workflow. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## quick-launch-placement-contract-omits-local-host.md
 
@@ -3432,7 +3432,7 @@
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. State the
   quick-launch exception, and check whether the switcher's "Quick launch:" row falls under "quick-switcher creation".
   Size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## launcher-tab-order-omits-command-message.md
 
@@ -3447,7 +3447,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec (one clause),
   or discard. Size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## terminal-steady-block-comment-stale.md
 
@@ -3465,7 +3465,7 @@
   comment fix, optionally a test that pins the exception) or discard. Size S. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## custom-command-spec-misstates-hook-arguments.md
 
@@ -3484,7 +3484,7 @@
   bullet already corrects it. A one-line narrowing is the alternative. Size S. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-environment-delete-implementation-spec-still-describes-desktop-port-as.md
 
@@ -3498,7 +3498,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec (replace the
   sentence with the shipped request and its late-notice handling). Size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-osc-52-copy-rule-omits-primary-selection-distinction.md
 
@@ -3515,7 +3515,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Qualify the
   copy sentence, and keep the notice rule. Size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-registered-all-numeric-ssh-names-bypass-first-label-shortening.md
 
@@ -3532,7 +3532,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec XS (align the
   SPEC.md wording with the decided rule), or discard. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-delete-scope-comment-describes-old-stop-behavior.md
 
@@ -3553,7 +3553,7 @@
   S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-exited-session-skips-portable-sweep.md
 
@@ -3577,7 +3577,7 @@
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec (narrow the
   SPEC_impl sentence to scopes already gone at cleanup). SPEC.md accepts the behavior, and forcing the sweep re-adds the
   cost that the 2026-11-08 decision removed. Size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-product-spec-still-promises-no-decision-after-unanswered-environment.md
 
@@ -3593,7 +3593,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec (plus the doc
   comment). Size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-interrupted-card-guide-still-names-only-host-restart.md
 
@@ -3610,7 +3610,7 @@
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Align the
   SPEC_impl.md card sentence with SPEC.md, in one edit together with 356. Size S. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-work-start-spec-still-says-rename-replaces-sampling-state.md
 
@@ -3625,7 +3625,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec by correcting
   the 4249-4254 paragraph. Size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-interrupted-recovery-guide-still-assumes-no-prior-process-remains.md
 
@@ -3643,7 +3643,7 @@
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Qualify the
   rationale with the accepted old-terminal exception, in the same edit as 354. Size S. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-clone-cli-reference-still-omits-environment-exception.md
 
@@ -3657,7 +3657,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Size S.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-migration-comments-reboot-classification-remains-disputed.md
 
@@ -3675,7 +3675,7 @@
   or discard. It is a one-line comment on the version-1 migration. Size S. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-restart-disposition-documentation-still-promises-no-external-change.md
 
@@ -3699,7 +3699,7 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-work-start-guide-omits-deferral-while-lifecycle-claim-is.md
 
@@ -3717,7 +3717,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Describe the
   deferral and why the ticker cannot wait. Size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-recent-activity-product-spec-still-promises-retired-capture-recovery.md
 
@@ -3738,7 +3738,7 @@
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Drop the
   clause, or say that a skipped sample keeps the prior reading, consistent with the 2026-11-21 "Correct the text"
   decision. Size S (one sentence). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-interrupted-be-superseded-by-inferred-preparation-failure.md
 
@@ -3758,7 +3758,7 @@
   comment only). Name the proved shim failure and the accepted preparation inference separately. Size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-session-pane-stale-doc-on-helm-pushes.md
 
@@ -3774,7 +3774,7 @@
   only), following the Q12 precedent. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-cli-effort-hyphen-and-spec-drift.md
 
@@ -3798,7 +3798,7 @@
   `--permissions` is a closed set. Size S (about 10 lines plus one parse test). Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-codex-fixture-and-notifications-stale-corridor-comments.md
 
@@ -3813,7 +3813,7 @@
   only), following the Q12 precedent. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-custom-pin-corrected-text-omits-prior-restart-consequence.md
 
@@ -3834,7 +3834,7 @@
   together with 536: add custom agents to the rule and align the text with the Codex wording; size S. Size gate: about
   100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over
   that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-docs-github-checkouts-stale-single-dir-cache-path.md
 
@@ -3853,7 +3853,7 @@
   mirror the website's wording; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-spec-impl-contradiction-orphan-discovery-local-read-bounds.md
 
@@ -3873,7 +3873,7 @@
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec — scope the
   unbounded-read clause to `POST /api/tensorlake/test` and keep the ordering rationale; size S. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-spec-md-security-still-describes-ongoing-codex-merges.md
 
@@ -3888,7 +3888,7 @@
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Reword to say
   the one-time Claude and Codex cleanups read files of at most 1 MiB. Size S. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-spec-md-status-contradicts-codex-pin-corrected-text.md
 
@@ -3903,7 +3903,7 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Align the
   pin-correction wording with positional attribution. Size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-specs-and-core-omit-grok-and-custom-from-pin-correction-lists.md
 
@@ -3923,7 +3923,7 @@
   complete both specs and the comment, and do 490's wording at the same time; size S. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-tensorlake-add-tests-misleading-codex-null-docstring.md
 
@@ -3943,7 +3943,7 @@
   S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-ticker-reduced-motion-doc-misstates-outline-fade.md
 
@@ -3958,7 +3958,7 @@
   only), following the Q12 precedent. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## stale-permanent-delete-can-remove-repaired-template.md
 
@@ -3984,7 +3984,7 @@
 - Completion criteria: Add the one-sentence Templates spec clarification: Delete removes the named template whatever
   revision is stored, and the drawn label alone decides Undo. No code change. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## settings-footer-can-save-the-wrong-page.md
 
@@ -4007,7 +4007,7 @@
   for an unshown page; with 43; size S-M. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## launcher-resize-changes-enter-action.md
 
@@ -4032,7 +4032,7 @@
   change. Share the fix with 9 and 49. Size M, likely over 100 lines with tests. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-recent-enter-before-display.md
 
@@ -4051,7 +4051,7 @@
   GUI at a time". Recommendation for reference: fix code, with the same mechanism as 8. Size M, shared. Size gate: about
   100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over
   that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## hook-settings-toggle-uses-unshown-state.md
 
@@ -4072,7 +4072,7 @@
   change); size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
   or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## replace-can-submit-before-checkout-warning.md
 
@@ -4100,7 +4100,7 @@
   (about 50-120 lines with tests). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-printed-terminal-link-stale-frame.md
 
@@ -4125,7 +4125,7 @@
   require the press to match it (file links already do this). Size M. Size gate: about 100 lines of diff (code, tests
   and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings
   the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-replace-with-folder-enter-out-of-bounds-highlight.md
 
@@ -4149,7 +4149,7 @@
   identity-versus-index choice is a design call. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-replace-with-suspended-checkout-recent-skips-warning.md
 
@@ -4178,7 +4178,7 @@
   `take_start_row`. Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-setup-rerun-omits-tailscale-allowing-ssh-downgrade.md
 
@@ -4199,7 +4199,7 @@
   frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
   destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
   code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-launcher-enter-deleted-custom-agent-chip-submits-previous-agent.md
 
@@ -4224,7 +4224,7 @@
   when the chosen custom agent became the draft's. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## template-leave-prompts-can-stack.md
 
@@ -4251,7 +4251,7 @@
   between them). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
   or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## stale-host-retry-can-continue-sandbox-delete.md
 
@@ -4271,7 +4271,7 @@
   frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
   destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
   code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## settings-footer-can-discard-the-wrong-page.md
 
@@ -4289,7 +4289,7 @@
   GUI at a time". Recommendation for reference: fix code — with 7 (same binding); size S. Size gate: about 100 lines of
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## launcher-hidden-recent-remains-enter-target.md
 
@@ -4309,7 +4309,7 @@
   is not visible, as part of the Q-A mechanism. Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## hook-save-launches-into-later-folder.md
 
@@ -4332,7 +4332,7 @@
   reasonable shapes. Size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launch-without-hook-choice-lost.md
 
@@ -4351,7 +4351,7 @@
   frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
   destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
   code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md
 
@@ -4376,7 +4376,7 @@
   (size M, and a spec decision under SPEC_impl.md:988-989). Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-visible-new-wake-replaces-tilde-and-quick-launch-error.md
 
@@ -4401,7 +4401,7 @@
   and quick-launch wording is limited to hidden launches. Size M. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-ssh-host-setup-reads-live-skip-confirmation-at-settle.md
 
@@ -4422,7 +4422,7 @@
   maintainer wants consistency with 72. Otherwise discard. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## launcher-alias-enter-can-apply-an-undrawn-model.md
 
@@ -4440,7 +4440,7 @@
   frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
   destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
   code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## unshown-upgrade-highlights-can-be-recorded-seen.md
 
@@ -4459,7 +4459,7 @@
   frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
   destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
   code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## notifications-act-on-unshown-list.md
 
@@ -4477,7 +4477,7 @@
   frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
   destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
   code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## launcher-recent-highlight-can-change-path-spelling.md
 
@@ -4494,7 +4494,7 @@
   frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
   destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
   code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## launcher-yolo-reply-uses-current-question.md
 
@@ -4515,7 +4515,7 @@
   handle) instead of "any in flight". Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-shift-click-mixes-live-range-anchor-with-displayed-row.md
 
@@ -4531,7 +4531,7 @@
   frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
   destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
   code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-replace-with-button-does-not-carry-own-rendered-delete.md
 
@@ -4552,7 +4552,7 @@
   in the button's handler. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-guarded-plain-replace-live-read-and-spec-contradiction.md
 
@@ -4573,7 +4573,7 @@
   the existing "Choose Replace again" note on the missing-row branch. Size S. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-set-tailscale-unparks-actor-on-sync-registry-failure.md
 
@@ -4590,7 +4590,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## suspend-mixes-list-and-refresh-observations.md
 
@@ -4609,7 +4609,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-credential-delivery-holds-disconnected-environment.md
 
@@ -4626,7 +4626,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## ensure-hosts-repair-omits-settings-loss.md
 
@@ -4640,7 +4640,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## antigravity-recovery-republishes-old-trust-status.md
 
@@ -4654,7 +4654,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## antigravity-restart-can-send-stale-trust-alert.md
 
@@ -4668,7 +4668,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## manual-update-check-can-be-consumed-by-automatic-skip.md
 
@@ -4684,7 +4684,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## settings-shows-unreadable-updater-as-on.md
 
@@ -4698,7 +4698,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-retired-lease-still-admit-local-provisioning-command-before-next.md
 
@@ -4712,7 +4712,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-proxy-probe-failure-handling-remains-partly-unverified.md
 
@@ -4726,7 +4726,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-unrelated-manager-settings-block-container-launch-and-cleanup.md
 
@@ -4739,7 +4739,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-attach-admits-retained-gone-main-terminal-listings-report-missing.md
 
@@ -4754,7 +4754,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-delete-verifies-stale-records-host-identity-after-requesting-takeover.md
 
@@ -4776,7 +4776,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-sampler-date-retained-final-screen-after-agent-exited.md
 
@@ -4791,7 +4791,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-pending-restart-scope-cleanups-sequential-starvation.md
 
@@ -4812,7 +4812,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-trash-deleted-drops-removal-report-on-unordered-race.md
 
@@ -4832,7 +4832,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-tailscale-retarget-skips-ssh-route-lock.md
 
@@ -4848,7 +4848,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-ssh-route-lock-leaks-cache-locks-on-delete-race.md
 
@@ -4860,7 +4860,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-podman-leftovers-run-ssh-without-ssh-route-lock.md
 
@@ -4875,7 +4875,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-reply-and-outcome-debug-can-expose-ntfy-topic.md
 
@@ -4888,7 +4888,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-versionskew-incarnation-stays-unchanged-on-different-peer-build.md
 
@@ -4904,7 +4904,7 @@
 - Decision: q-races, "Narrow internal races and rare faults whose worst outcome is recoverable": the maintainer picked
   "Discard them all". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## settings-close-can-save-unlisted-drafts.md
 
@@ -4929,7 +4929,7 @@
   leave later edits unsaved with Settings open; one fix with 6 and 47; size M. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## settings-queued-save-can-commit-later-draft.md
 
@@ -4949,7 +4949,7 @@
   skip/stop on a changed draft; fix with 5; size M. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## settings-close-can-miss-detached-credential-save.md
 
@@ -4969,7 +4969,7 @@
   question sees them; size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## settings-close-can-miss-conflicting-tensorlake-keys.md
 
@@ -4990,7 +4990,7 @@
   size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## settings-close-can-save-newly-staged-codex-login.md
 
@@ -5010,7 +5010,7 @@
   of 5. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## settings-close-can-hide-credential-delivery-warnings.md
 
@@ -5031,7 +5031,7 @@
   delivery warnings; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## hook-settings-close-hides-opt-out-failure.md
 
@@ -5052,7 +5052,7 @@
   decide a spec exception per switch); size M. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md
 
@@ -5073,7 +5073,7 @@
   if 80 moves the confirmation to the prompt. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-custom-agent-settings-delete-confirmation-bypasses-ask-inline.md
 
@@ -5097,7 +5097,7 @@
   recipe editor does, which also settles 79. Size M (about 60-120 lines with tests, so it may exceed 100). Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-custom-agent-settings-delete-dirty-leaves-ghost-draft.md
 
@@ -5119,7 +5119,7 @@
   itself, and add the dirty-delete test (487's second half). Size S. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## settings-close-save-can-hide-notification-refusal.md
 
@@ -5139,7 +5139,7 @@
   size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## settings-close-save-stalls-silently-during-tests.md
 
@@ -5159,7 +5159,7 @@
   busy line; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## settings-close-can-dismiss-a-newer-question.md
 
@@ -5181,7 +5181,7 @@
   nothing is lost; size S if fixed. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-custom-agent-settings-busy-save-button-and-saw-saved-restore.md
 
@@ -5201,7 +5201,7 @@
   focus, and the rest has no shipped route. Alternatively, a one-line `disabled` fix. Size S. Size gate: about 100 lines
   of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-custom-agent-settings-dirty-close-prompt-collapses-multiple-agents.md
 
@@ -5220,7 +5220,7 @@
   each custom-agent draft through a host sentence. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-custom-agent-settings-save-delete-collapses-retired-and-missing-store.md
 
@@ -5243,7 +5243,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-custom-agents-share-one-remembered-wrapper-prefix.md
 
@@ -5267,7 +5267,7 @@
   spec only, to say custom agents share one memory. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-custom-to-custom-switch-retains-previous-wrapper-prefix.md
 
@@ -5287,7 +5287,7 @@
   Recommendation for reference: Fold into 83's decision. Size S on top of 83. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-delete-custom-agent-leaks-remembered-wrapper-prefix.md
 
@@ -5306,7 +5306,7 @@
   S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-launcher-recents-display-literal-custom-instead-of-agent-name.md
 
@@ -5328,7 +5328,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md
 
@@ -5352,7 +5352,7 @@
   "<value> (not offered)". Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-templates-editor-hides-custom-yolo-control-and-saves-false.md
 
@@ -5373,7 +5373,7 @@
   Recommendation for reference: fix code, together with 469 and 450. Size S-M. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## launcher-keyboard-recents-hide-custom-flags.md
 
@@ -5393,7 +5393,7 @@
   flag words to the details line. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-apply-template-custom-command-yolo-diverges-from-gui.md
 
@@ -5416,7 +5416,7 @@
   the GUI agree. Size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-check-template-shape-allows-custom-agent-yolo-false.md
 
@@ -5436,7 +5436,7 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-check-template-shape-skips-validate-model-on-custom-agent.md
 
@@ -5456,7 +5456,7 @@
   Recommendation for reference: fix code. Apply the model check alongside the existing effort check. Size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-custom-agent-draft-retains-stale-builtin-effort.md
 
@@ -5478,7 +5478,7 @@
   effective value. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md
 
@@ -5499,7 +5499,7 @@
   Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md
 
@@ -5520,7 +5520,7 @@
   Recommendation for reference: fix code — add a retained, unavailable chip like the Command tab's; size S–M. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-launcher-search-recents-omits-custom-agent-id-and-name.md
 
@@ -5539,7 +5539,7 @@
   Recommendation for reference: fix code — add the ID and current display name to the matched words; size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-launcher-target-names-command-custom-agent-outside-restart-with.md
 
@@ -5559,7 +5559,7 @@
   maintainer prefers); size S. Discard is reasonable too. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-refresh-custom-capabilities-treats-unloaded-collection-as-deleted.md
 
@@ -5583,7 +5583,7 @@
   S–M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md
 
@@ -5603,7 +5603,7 @@
   Recommendation for reference: fix code — pass collections into `agent_name` and use `custom_name`; size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-settings-custom-agents-unavailable-collection-silently-appears-empty.md
 
@@ -5622,7 +5622,7 @@
   Recommendation for reference: fix code — show the helm's error as a failure line, as Recipes does; size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-settings-search-omits-registered-custom-agent-sections.md
 
@@ -5642,7 +5642,7 @@
   M (likely under 100 lines). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md
 
@@ -5662,7 +5662,7 @@
   Recommendation for reference: fix code — track the custom ID in the eligibility fold; size S. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-template-apply-custom-to-custom-misses-switched-agent.md
 
@@ -5682,7 +5682,7 @@
   Recommendation for reference: fix code — also compare `custom_agent`; size S. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-template-replay-drops-custom-agent-effort-switching-to-builtin.md
 
@@ -5704,7 +5704,7 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-unseen-quick-launch-deleted-custom-agent-wakes-suspended-host.md
 
@@ -5726,7 +5726,7 @@
   Recommendation for reference: fix code — refresh capabilities in `prepared` before waking; size S. Size gate: about
   100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over
   that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md
 
@@ -5745,7 +5745,7 @@
   launch as YOLO."; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md
 
@@ -5770,7 +5770,7 @@
   at minimum show why the restart is unavailable instead of an empty forced-open panel; size S. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md
 
@@ -5795,7 +5795,7 @@
   custom agent no longer supports resumption" (or follow stored capabilities if that is the answer); size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## antigravity-trust-warning-omitted-from-accessibility.md
 
@@ -5816,7 +5816,7 @@
   accessible description. Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## approval-omits-automatic-trust-warning-from-accessibility.md
 
@@ -5835,7 +5835,7 @@
   ahead of the answer buttons. Size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## unavailable-antigravity-trust-switch-announced-as-off.md
 
@@ -5852,7 +5852,7 @@
   the shared component. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## menu-shortcuts-omitted-from-native-accessibility.md
 
@@ -5870,7 +5870,7 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard. The cause is upstream; the workaround (repeating the chord in the description) needs a design choice. If
   kept, adding the chord to the accessible description is size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## update-accessible-names-can-collide-across-host-kinds.md
 
@@ -5886,7 +5886,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard (very rare coincidence, nothing acts on the wrong host).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## launcher-held-host-name-clipped.md
 
@@ -5901,7 +5901,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code. Add hover help carrying the full escaped name. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-shell-group-unlabelled.md
 
@@ -5916,7 +5916,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard, or fix code with an aria label on the shells row. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-host-picker-omits-expanded-state.md
 
@@ -5931,7 +5931,7 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code. Pass the live open state to `.expanded()`; the review says this keeps the trigger's look as
   `Button::discloses` does, which was not checked. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-disabled-setup-enter-gives-no-reason.md
 
@@ -5947,7 +5947,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code S. Show the refusal line on keyboard activation and expose disabled state.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-announces-two-selected-setups.md
 
@@ -5962,7 +5962,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code S. Keep the source mark visual or in the description; aria-selected only for the active row.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## sidebar-retry-warning-missing-accessible-name.md
 
@@ -5977,7 +5977,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code. Append "setup or update needs attention" to the working row's accessible description. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## agent-settings-search-omits-agent-name.md
 
@@ -5992,7 +5992,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code — include the section name in each option's accessible name; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## hook-removal-help-missing-from-accessibility.md
 
@@ -6013,7 +6013,7 @@
   page at once. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## hook-hint-omits-live-accessibility-notification.md
 
@@ -6034,7 +6034,7 @@
   hints together. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## environment-delete-title-unreachable-by-keyboard.md
 
@@ -6054,7 +6054,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (page the title line, or every host-value line). Size S-M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-muted-waiting-dots-bypass-ringless-status-tooltip-path.md
 
@@ -6070,7 +6070,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code. Give the dot a status-mark help owner with the status and mute wording. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## launcher-preview-path-no-longer-copyable.md
 
@@ -6084,7 +6084,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard, unless the maintainer wants copy back, in which case add a copy button. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-add-host-tailscale-checkbox-evicts-focus.md
 
@@ -6101,7 +6101,7 @@
 - Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md
 
@@ -6117,7 +6117,7 @@
   Recommendation for reference: fix code — render it through `choices::outcome_line`; size S. Size gate: about 100 lines
   of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## launcher-underlining-can-stall-search.md
 
@@ -6133,7 +6133,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. The fix is cheap: merge the hit ranges and sweep through them once. Size S. `discard` is also
   reasonable.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-new-container-managed-checkout-stretches-host-block.md
 
@@ -6150,7 +6150,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — apply the basis and minimum width only in the horizontal Folder row, and add a layout
   assertion. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## antigravity-trust-link-can-hide-read-failure.md
 
@@ -6168,7 +6168,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard. Rare read failure, the error is reachable by scrolling, no spec promise. Size S if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## antigravity-trust-dismissal-lost-during-recovery.md
 
@@ -6184,7 +6184,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard. It is rare and costs one extra ×. Size S-M if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## feedback-external-link-cue-is-visual-only.md
 
@@ -6200,7 +6200,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard. No spec requirement, and the link's behavior is correct. Size XS if fixed (one accessible
   description).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## sound-preview-overlay-blocks-settings-switch.md
 
@@ -6214,7 +6214,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — move the blocking hitbox to the button; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## recipe-tunnel-edit-marks-only-card.md
 
@@ -6230,7 +6230,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — per-field markers, compared by row key. Size S-M. Discard if polish is not wanted now.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## app-settings-shared-upgrade-option-has-local-heading.md
 
@@ -6245,7 +6245,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard or fix spec (say App's scope is the installation's, with the shared switch saying so itself);
   size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## podman-launch-lifetime-notice-hidden.md
 
@@ -6262,7 +6262,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — a short Podman `launch_notice`. Size S. Or discard.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## launcher-recent-highlight-mutes-yolo-cue.md
 
@@ -6278,7 +6278,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code with a red-on-selected chip treatment checked for contrast. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-recent-accepts-modified-return.md
 
@@ -6292,7 +6292,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard. There is no harm, and nothing in the spec contradicts it. Size n/a.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-highlights-escape-notation.md
 
@@ -6307,7 +6307,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard. The fix (projecting raw match ranges through escaping) costs more than the cue is worth. Size
   M if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-undo-leaves-template-source-mark.md
 
@@ -6327,7 +6327,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — capture the marker in the banner and restore it on Undo; size S. A discard is defensible
   because the literal spec text allows the current behavior.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-template-rows-rebuild-draft.md
 
@@ -6344,7 +6344,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard — no measured cost at the stated scale; size none (fix would be S-M).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## quick-launch-loses-template-source-mark.md
 
@@ -6363,7 +6363,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — carry the marker through `Prepared::Show`/`Launch` for consistency with the in-launcher
   path; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-recent-hover-can-follow-old-row.md
 
@@ -6378,7 +6378,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard, or fix code with content-derived row ids. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## hook-hint-dismissal-survives-next-launch.md
 
@@ -6395,7 +6395,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard, or fix spec to define the hook hint's occurrence. The hint is a discovery aid and the tooltip
   already says "this session". Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## hook-hint-can-repaint-old-dismissal-error.md
 
@@ -6417,7 +6417,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Clear the error when the dismissal preference changes or the session or run changes,
   mirroring the trust band. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## held-escape-discards-launcher-draft.md
 
@@ -6434,7 +6434,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Note the dismissal so its repeats are swallowed. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## hook-diagnostic-path-can-render-doc-link.md
 
@@ -6451,7 +6451,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard. The destination is restricted to Farhelm's docs, as the spec allows. Size S if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## launcher-result-pick-leaves-approval-focus.md
 
@@ -6467,7 +6467,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code with the pointer-focus route and its visibility checks. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-post-exit-alt-release-clears-short-selection-and-queues.md
 
@@ -6484,7 +6484,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code (skip the Alt cursor move once the program has exited) or discard. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-multi-clicking-exit-message-copies-different-row.md
 
@@ -6501,7 +6501,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code (start multi-click selection only on drawn grid rows) or discard. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-page-keys-skip-rows-in-lifted-terminal.md
 
@@ -6516,7 +6516,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code (page by the visible row count minus one). Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-recovery-warning-is-cut-off-in-supported-narrow-terminal.md
 
@@ -6535,7 +6535,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard (only at the minimum window width, and the notice's meaning survives truncation), or fix code
   (wrap or shorten). Size S-M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-lifted-viewport-makes-scrollbar-overstate-visible-share.md
 
@@ -6549,7 +6549,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard (cosmetic, endpoints correct). Size S if fixed.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-late-replay-history-displace-already-browsed-final-screen.md
 
@@ -6565,7 +6565,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard (rare, compound trigger, no loss). Size M if fixed (re-base provisional anchors).
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-trust-hint-save-errors-use-live-selection-instead-of.md
 
@@ -6587,7 +6587,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Bind the drawn key into the click handler and key the error by session and agent. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## terminal-selection-paints-wide-wrap-padding.md
 
@@ -6604,7 +6604,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code (clip the painted highlight at a padded row's last column). SPEC_impl's sentence supports it.
   Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-settings-containers-reload-omits-loading-keeps-error.md
 
@@ -6620,7 +6620,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — track a reading flag and show the status; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-podman-suspend-flashes-connecting-and-runs-retry-ladder.md
 
@@ -6639,7 +6639,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — have Podman's `record` publish Suspended, and make a non-fresh release run one quiet check.
   Size S-M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-trust-band-keeps-undismissable-error-after-dismissal.md
 
@@ -6662,7 +6662,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Gate the failure line on not being dismissed and clear it after a successful save,
   overturning the commented port choice. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## trailing-overflowing-banner-stack-resets-to-oldest-after-reconnect.md
 
@@ -6677,7 +6677,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Clear `drawn_banners` on the inert branch. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-shifted-wide-wrap-spacer-drops-background.md
 
@@ -6693,7 +6693,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code (skip the leading spacer only at the padded last column, as the reviewer suggests). Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-right-half-wide-erase-keeps-inverse-decoration-and-link.md
 
@@ -6710,7 +6710,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Refuse the absorption when the wide cell is inverted, decorated or linked, and add the three
   unit tests. Size S–M.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-deleting-wide-spacer-swallows-shifted-space.md
 
@@ -6727,7 +6727,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix spec (add this DCH-on-wide-spacer case to the accepted wide-character edge cases). Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-left-half-wide-erase-drops-orphaned-background.md
 
@@ -6745,7 +6745,7 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code together with the shifted-spacer sibling, emitting a styled one-column blank for an orphaned
   spacer; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-resolve-remote-status-clears-local-transport-signal.md
 
@@ -6762,7 +6762,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Keep a signal termination as a failure in `resolve_remote_status` and in `probe`. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-container-host-unanswered-embeds-raw-stderr.md
 
@@ -6779,7 +6779,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — pass the output through `shell::shown`. A one-line change plus a test, size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md
 
@@ -6794,7 +6794,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — prefix, suppress the old error, clear on settle; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-custom-agent-model-effort-error-duplicate-element-id.md
 
@@ -6811,7 +6811,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Use distinct model and effort error IDs. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-hidden-trash-button-retains-animation-handles.md
 
@@ -6829,7 +6829,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: discard — the cost is not shown to matter and the late wiggle is very rare; size S if kept.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-light-theme-primary-and-danger-buttons-identical-hover-held.md
 
@@ -6843,7 +6843,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Two Light tokens and a per-tier assertion. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md
 
@@ -6858,7 +6858,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — truncate chip labels; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-repo-cache-sweep-single-error-aborts-all-remaining-repos.md
 
@@ -6875,7 +6875,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Log and continue for each path and each repository, as the spare sweep already does. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-settings-heading-lacks-min-w-0-and-truncate-for-long-custom-agent-name.md
 
@@ -6889,7 +6889,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — add `min_w_0` and `truncate`; size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-ticker-leaks-dead-subscribers-under-reduced-motion.md
 
@@ -6906,7 +6906,7 @@
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Prune dead entries in `subscribe`, which is a one-line `retain`. Size S.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-settings-trust-help-omits-agent-requested-launches.md
 
@@ -6926,7 +6926,7 @@
   Recommendation for reference: fix code — restore the agent-requested wording and refresh goldens; size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## launcher-recent-fill-option-named-replace.md
 
@@ -6942,7 +6942,7 @@
   row's Enter cap. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-typed-recent-mislabels-enter.md
 
@@ -6959,7 +6959,7 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## exited-shell-suspend-confirmation-wording.md
 
@@ -6978,7 +6978,7 @@
   Recommendation for reference: fix code (ended-aware help and note). Size S. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## uninstall-omits-persistent-hook-cleanup.md
 
@@ -6999,7 +6999,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## pi-page-describes-wrong-trust-question.md
 
@@ -7018,7 +7018,7 @@
   extensions". Size XS. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## trailing-agent-create-host-help-omits-supported-hostless-launches.md
 
@@ -7034,7 +7034,7 @@
   Recommendation for reference: fix code. A one-line help text change. Size S. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## launcher-new-environment-folder-omits-repository-prompt.md
 
@@ -7051,7 +7051,7 @@
   Recommendation for reference: fix code (swap the two branches). Size S. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-claude-trust-hint-shows-on-command-and-legacy-ordinary-dirs.md
 
@@ -7074,7 +7074,7 @@
   `session_pane/trust_band_tests.rs` (`only_a_sessions_own_launch_names_the_agent_asking`). Size S. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## trailing-replace-with-existing-env-checkout-promises-trash.md
 
@@ -7095,7 +7095,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-tailscale-setup-probe-exit-255-blames-socket-length.md
 
@@ -7113,7 +7113,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-tailscale-destination-format-guidance-discarded.md
 
@@ -7132,7 +7132,7 @@
   sites). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-approval-card-yolo-description-wrong-on-restart-and-prompt.md
 
@@ -7149,7 +7149,7 @@
   action. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
   or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-gone-terminal-ended-confirmation.md
 
@@ -7184,7 +7184,7 @@
   follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100 lines
   of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-lifecycle-loses-held-child-after-terminal-loss.md
 
@@ -7214,7 +7214,7 @@
   turns it into a follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-authorized-stop-report-completion-without-settling-recorded-launch.md
 
@@ -7245,7 +7245,7 @@
   TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-agent-re-adoption-discard-cleanup-identities-without-confirming-host.md
 
@@ -7270,7 +7270,7 @@
   explains what is complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-tab-close-discards-retry-state-when-final-process-sweep.md
 
@@ -7293,7 +7293,7 @@
   landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-retry-delete-ambiguous-restart-record-before-scope-is-confirmed.md
 
@@ -7319,7 +7319,7 @@
   why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-unwind-failed-host-relaunch-drops-pending-scope-cleanup.md
 
@@ -7348,7 +7348,7 @@
   complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## tailscale-uninstall-does-not-bind-verified-host.md
 
@@ -7377,7 +7377,7 @@
   explains what is complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-agent-create-drops-target-incarnation-after-approval.md
 
@@ -7406,7 +7406,7 @@
   complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-agent-stop-does-not-pin-target-connection-across-approval.md
 
@@ -7435,7 +7435,7 @@
   complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-automatic-update-fresh-dev-build.md
 
@@ -7453,7 +7453,7 @@
   picked "Bind them all". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If this
   turns very complicated, the executor must abort and turn it into a follow-up to-do item explaining the complexity."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-mac-update-miss-app-installed-before-run-admission.md
 
@@ -7476,7 +7476,7 @@
   complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-linux-add-writes-frozen-install-before-rechecking-systemd-availability.md
 
@@ -7491,7 +7491,7 @@
   picked "Bind them all". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If this
   turns very complicated, the executor must abort and turn it into a follow-up to-do item explaining the complexity."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-podman-verify-place-nonce-in-argv-forgeable.md
 
@@ -7524,7 +7524,7 @@
   it into a follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about
   100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over
   that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-podman-setup-scripts-and-creation-proxy-skip-place-verification.md
 
@@ -7557,7 +7557,7 @@
   complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md
 
@@ -7585,7 +7585,7 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-podman-refresh-caches-wrong-machine-on-refusal.md
 
@@ -7613,7 +7613,7 @@
   landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-podman-refresh-settles-claims-with-stale-pre-probe-row.md
 
@@ -7636,7 +7636,7 @@
   TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-podman-build-prepare-uses-runtime-seam-bypassing-admission.md
 
@@ -7661,7 +7661,7 @@
   complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-claim-podman-place-retains-unused-claim-after-twin.md
 
@@ -7684,7 +7684,7 @@
   instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-podman-leftovers-skip-place-identity-verification.md
 
@@ -7708,7 +7708,7 @@
   a follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100 lines
   of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-container-inherits-removed-proxy-setting.md
 
@@ -7734,7 +7734,7 @@
   test. Size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or
   a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-recipe-images-retain-proxy-configuration-used-by-their-helpers.md
 
@@ -7751,7 +7751,7 @@
   file before commit); no extra size beyond 60. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-fresh-proxy-regression-overlooks-installed-boot-file.md
 
@@ -7767,7 +7767,7 @@
   otherwise discard; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-delete-anyway-forget-second-tag-whose-absence-was-never.md
 
@@ -7783,7 +7783,7 @@
 - Decision: q-recipedel, "Recipe Delete anyway bookkeeping": the maintainer picked "Discard". (2026-11-24
   fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-saved-absence-replaces-different-places-or-providers-cleanup-error.md
 
@@ -7797,7 +7797,7 @@
 - Decision: q-recipedel, "Recipe Delete anyway bookkeeping": the maintainer picked "Discard". (2026-11-24
   fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-new-launch-reservation-make-confirmed-delete-refuse-after-changing.md
 
@@ -7812,7 +7812,7 @@
 - Decision: q-recipedel, "Recipe Delete anyway bookkeeping": the maintainer picked "Discard". (2026-11-24
   fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-delete-anyway-omits-host-needed-to-locate-late-image.md
 
@@ -7824,7 +7824,7 @@
 - Decision: q-recipedel, "Recipe Delete anyway bookkeeping": the maintainer picked "Discard". (2026-11-24
   fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md
 
@@ -7852,7 +7852,7 @@
   landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-hidden-post-wake-folder-wait-wedges-launcher.md
 
@@ -7876,7 +7876,7 @@
   turns it into a follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-wake-drops-one-time-yolo-confirmation.md
 
@@ -7901,7 +7901,7 @@
   instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-restart-with-wake-refusal-hardcodes-not-launched.md
 
@@ -7924,7 +7924,7 @@
   into a follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-unverified-resumable-host-shows-checkout-allocation-notice.md
 
@@ -7948,7 +7948,7 @@
   TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-failed-post-wake-checkout-preview-omits-refusal-alert.md
 
@@ -7976,7 +7976,7 @@
   complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-replace-drops-late-checkout-warning.md
 
@@ -7999,7 +7999,7 @@
   40-80 lines with a test). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-retained-environment-queue-checkout-removal-without-waking-trash.md
 
@@ -8015,7 +8015,7 @@
 - Decision: q-latenotice, "Late "checkout left behind" notices": the maintainer picked "Every route reaches the bell".
   (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-timed-out-agent-delete-lose-late-checkout-warning.md
 
@@ -8035,7 +8035,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-environment-delete-drops-checkout-warning-received-after-inner-reply.md
 
@@ -8055,7 +8055,7 @@
   folding this in is size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-interrupted-uploads-invisible-on-card-or-retired-session.md
 
@@ -8075,7 +8075,7 @@
   interruptions to the notice center when the selected session has no terminal set. Size S. Size gate: about 100 lines
   of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-duplicate-interrupted-upload-notices-silently-dropped.md
 
@@ -8094,7 +8094,7 @@
   interrupted-upload notice its own occurrence id, which also makes the element ids unique. Size S. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-interrupted-upload-empty-title-and-batch-title-drop.md
 
@@ -8113,7 +8113,7 @@
   titles when building the notice. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-osc8-mismatch-warning-bypassed-by-u1160-hangul-filler.md
 
@@ -8136,7 +8136,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-printed-url-cut-at-contrasting-hue-opens-shorter-address.md
 
@@ -8155,7 +8155,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-misses-lookalike-punctuation.md
 
@@ -8174,7 +8174,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-ignores-all-lookalike-hosts.md
 
@@ -8191,7 +8191,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-ignores-at-prefixed-host-with-path.md
 
@@ -8206,7 +8206,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-treats-site-before-at-as-email.md
 
@@ -8221,7 +8221,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-treats-dotted-handle-as-claimless.md
 
@@ -8236,7 +8236,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-reads-slash-prefixed-host-as-path.md
 
@@ -8250,7 +8250,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-short-ipv4-is-not-an-address.md
 
@@ -8264,7 +8264,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-host-glued-to-cjk-prose.md
 
@@ -8280,7 +8280,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-backslash-path-counts-as-bare-site.md
 
@@ -8296,7 +8296,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-exempts-lookalike-idn-endings.md
 
@@ -8310,7 +8310,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-scanner-spacing-mark-after-slash-hides-host.md
 
@@ -8325,7 +8325,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-disclosure-joined-reading-treats-no-address-as-match.md
 
@@ -8344,7 +8344,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-disclosure-gap-splits-address-across-rows.md
 
@@ -8361,7 +8361,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-disclosure-letter-test-counts-spacing-marks.md
 
@@ -8376,7 +8376,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-link-text-invisible-spacing-mark-silences-warning.md
 
@@ -8393,7 +8393,7 @@
   "discard. I just did a million rounds of code review and detailed discussion with an agent just yesterday, and we
   settled on a solution. I do not have time to go through all of these random-ass nitpicks again."
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## fresh-checkout-trust-can-bind-replacement-directory.md
 
@@ -8411,7 +8411,7 @@
   it is the user's intent". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Write into SPEC.md "Local authority and trust between hosts" that this deliberate user setup is
   the user's intent. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-claude-trust-relative-config-dir-persists-relative-lock.md
 
@@ -8432,7 +8432,7 @@
   trust edit is skipped with the existing notice. Size S (about 5 lines plus a unit test). Size gate: about 100 lines of
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## antigravity-trust-falls-back-to-uncanonical-folder.md
 
@@ -8447,7 +8447,7 @@
   it is the user's intent". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Write into SPEC.md "Local authority and trust between hosts" that this deliberate user setup is
   the user's intent. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-shared-signin-triggers-auto-update-concurrently-with-manual-action.md
 
@@ -8470,7 +8470,7 @@
   code M (a manual join supersedes the automatic continuation), and fold 452's test into it. Size gate: about 100 lines
   of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-automatic-signin-tests-omit-shared-prompt-with-auto-updates-on.md
 
@@ -8485,7 +8485,7 @@
   other. Fold into 90's fix as its regression test if 90 is fixed, otherwise discard. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-spec-md-contradicts-send-handoff-auto-opening-auto-update-popover.md
 
@@ -8501,7 +8501,7 @@
 - Completion criteria: A pending automatic-update sign-in yields to any user action on that host; SPEC.md's
   contradiction about when the automatic sign-in popover opens is resolved to match. Recommendation for reference: fix
   spec XS (qualify 5997 to allow the already-waiting Send handoff). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-unanswered-auto-update-signin-blocks-set-tailscale-hostbusy.md
 
@@ -8519,7 +8519,7 @@
   discard. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-host-scoped-trash-confirmation-stays-open-invisibly.md
 
@@ -8542,7 +8542,7 @@
   section is not drawn, with a GPUI test; size S–M. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md
 
@@ -8561,7 +8561,7 @@
   replacement; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## trailing-tensorlake-orphan-cleanup-retry-falsely-succeeds-after-key-change.md
 
@@ -8583,7 +8583,7 @@
   admitted them, and refuse a retry under another key with an explanation; size M. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-tensorlake-sandboxes-inline-delete-prompt-survives-key-change.md
 
@@ -8604,7 +8604,7 @@
   whenever the saved key changes; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## grok-manual-hook-replacement-omitted.md
 
@@ -8623,7 +8623,7 @@
 - Completion criteria: Accept the behavior and say so in the spec: Grok's Farhelm hook file and Antigravity's Farhelm
   plugin folder are Farhelm's own, so setup may replace that file whole and removal may delete that folder. No code
   change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## antigravity-hook-removal-can-delete-extra-files.md
 
@@ -8641,7 +8641,7 @@
 - Completion criteria: Accept the behavior and say so in the spec: Grok's Farhelm hook file and Antigravity's Farhelm
   plugin folder are Farhelm's own, so setup may replace that file whole and removal may delete that folder. No code
   change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-implicit-home-spare-ownership.md
 
@@ -8663,7 +8663,7 @@
 - Completion criteria: Add one SPEC.md sentence: the reserved spare container belongs to Farhelm from the moment its
   folder serves as a checkout root (the sandbox home fallback included), whatever it already holds. No code change.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-antigravity-omitted-from-approval-cwd-pinning.md
 
@@ -8685,7 +8685,7 @@
   SPEC_impl list, and extend the two helm tests. Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## trailing-unstamped-host-skips-legacy-claude-settings-cleanup.md
 
@@ -8707,7 +8707,7 @@
   it in the spec". (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: State in SPEC_impl.md "Named credential catalog" that an unrecorded legacy Claude settings write
   by an older release is accepted. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-deleted-credential-stays-on-connected-host-after-lookup-failure.md
 
@@ -8729,7 +8729,7 @@
 - Completion criteria: Add the principle to SPEC.md: removing a credential from Farhelm is always best-effort at the
   next opportunity (a connected host drops it at its next connection), never a revocation guarantee; revoking at the
   vendor is the response to a leak. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-signed-announcement-feed-replayable-across-files-and-versions.md
 
@@ -8754,7 +8754,7 @@
 - Completion criteria: Record in SPEC_impl.md that the standing brick-test announcement feed deliberately shares the
   production feed's key and purpose, to minimize the difference between the brick-test path and the production path, and
   that the replay risk this leaves is accepted. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-tailscale-predictable-tmp-socket-dir-local-dos.md
 
@@ -8777,7 +8777,7 @@
   to declare it out of scope. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md
 
@@ -8802,7 +8802,7 @@
   Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## wayland-ssh-paste-blocks-window.md
 
@@ -8822,7 +8822,7 @@
   text-field paste through the async read on Linux. Size S-M. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-failed-rebuild-on-removed-host-blocks-recipe-delete.md
 
@@ -8844,7 +8844,7 @@
   admission. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-refused-setup-confirmation-persists-planned-paths-on-retargeted-host.md
 
@@ -8863,7 +8863,7 @@
   with 397 (one lock-order change in `claim_register_and_start`), or discard if lock-order risk is unwelcome. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-restart-with-custom-reporting-and-offer-use-stale-row-launch.md
 
@@ -8886,7 +8886,7 @@
   new launch with the generation bump, or pass it into publication. Size M. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## upgrade-highlights-can-open-after-sign-in.md
 
@@ -8906,7 +8906,7 @@
   answer when any focus layer opened during the lookup. Size S to M (about 40-80 lines including a fixture). Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## upgrade-highlights-opt-out-refusal-is-hidden.md
 
@@ -8926,7 +8926,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## launcher-escape-discards-template-edits.md
 
@@ -8948,7 +8948,7 @@
   is also reasonable given how little is lost. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-incomplete-template-banner-misplaced.md
 
@@ -8969,7 +8969,7 @@
   Fix spec as well if the footer placement is kept. Size S. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-template-row-edits-behind-save-panel.md
 
@@ -8989,7 +8989,7 @@
   Size S. A discard is defensible because nothing wrong is saved. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## hook-hint-settings-focus-return-mismatch.md
 
@@ -9004,7 +9004,7 @@
   (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix spec — say focus
   returns to whatever opened Settings; size S. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## launcher-loses-hook-offer-on-tab-switch.md
 
@@ -9025,7 +9025,7 @@
   the tab change restores an agent whose offer was never answered. Size S. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## resume-off-command-gets-hook-warning.md
 
@@ -9047,7 +9047,7 @@
   warning, or reword it, when the launch has no resume command. Size S. Size gate: about 100 lines of diff (code, tests
   and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings
   the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## model-picker-skips-hook-setup-offer.md
 
@@ -9066,7 +9066,7 @@
   search row's `picked_agent` check in `pick_model`. Size S. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## checkout-input-arms-hook-warning-early.md
 
@@ -9088,7 +9088,7 @@
   clock only once the shim has handed off to the agent. Size M (shim-to-supervisor phase signal). Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## trailing-full-podman-inspection-strand-container-farhelm-needs-to-remove.md
 
@@ -9105,7 +9105,7 @@
   `--format` to project only the needed fields. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md
 
@@ -9123,7 +9123,7 @@
   title and basename with `checkout_basename` before provider work. Size S-M. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-template-summary-misstates-unsupported-permissions.md
 
@@ -9149,7 +9149,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-tensorlake-setup-rerun-omits-suspended-and-sealed-refusal.md
 
@@ -9170,7 +9170,7 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-ssh-setup-existing-tensorlake-mutates-before-lock.md
 
@@ -9190,7 +9190,7 @@
   with 88. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-provisioning-service-omits-sealed-host-refusal.md
 
@@ -9214,7 +9214,7 @@
   `Deleting` arm in `suspended_refusal` (or an `is_sealed` check beside it) plus a test; size S. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-plain-replace-and-restart-do-not-disable-suspend.md
 
@@ -9234,7 +9234,7 @@
 - Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix spec — state that
   only launcher submissions hold the host's Suspend/Resume, which suppresses this class; size S. (fix code is also S–M
   if the maintainer prefers the stronger guard.) Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-suspend-read-activity-still-uses-ordered-lane.md
 
@@ -9255,7 +9255,7 @@
   read helper for `read_activity`, plus a lane test; size S. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-clone-replace-with-prefills-guarded-for-unset-permissions.md
 
@@ -9272,7 +9272,7 @@
 - Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix spec. Document
   Guarded as the deliberate prefill, or align the code if the TODO revisit chooses YOLO. Size S. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-custom-agent-validate-model-effort-allows-leading-hyphen.md
 
@@ -9286,7 +9286,7 @@
 - Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
   (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-custom-agent-validate-omits-display-name-and-command-length-caps.md
 
@@ -9299,7 +9299,7 @@
 - Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
   (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-harness-upgrades-https-redirect-downgrade.md
 
@@ -9321,7 +9321,7 @@
   follows no redirects at all. Size S (about 15 lines plus a stand-in test). Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
 ## trailing-launcher-choose-effort-omits-sync-fields.md
 
@@ -9337,7 +9337,7 @@
   sibling item's fix (`sync_fields` alongside clearing `custom_effort`) and remove this item with it. Size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-session-launch-validate-new-skips-effort-and-custom-model.md
 
@@ -9354,7 +9354,7 @@
 - Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
   (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-codex-login-save-reports-later-github-failure.md
 
@@ -9373,7 +9373,7 @@
   code as 419; doing them together is natural. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-scoped-shell-teardown-suppresses-failed-history-saving-hangup.md
 
@@ -9390,7 +9390,7 @@
   case". (2026-11-24 fewest-questions triage page (main c38b93552), second pass.) The history-saving hangup is a
   courtesy on rare degraded cleanup paths; the macOS 26+ tab case is fixed because it may happen on every such Delete.
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-portable-teardown-first-find-pinned-shell-when-it-is.md
 
@@ -9406,7 +9406,7 @@
   case". (2026-11-24 fewest-questions triage page (main c38b93552), second pass.) The history-saving hangup is a
   courtesy on rare degraded cleanup paths; the macOS 26+ tab case is fixed because it may happen on every such Delete.
 - Completion criteria: Remove the feedback file and its index entry. No code or spec change.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-bookkeeping-nov24.md` ``.
 
 ## trailing-delete-skips-hangup-for-live-tab-it-knows-only.md
 
@@ -9433,4 +9433,4 @@
   hangup set, with a unit test of a marker-invisible pinned tab; size S–M. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
