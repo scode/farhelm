@@ -850,6 +850,16 @@ impl Search {
     ) -> AnyElement {
         let weak = cx.weak_entity();
         let (section, target) = (entry.section.clone(), entry.target);
+        // Screen readers encounter the option independently of its list's visible group heading.
+        let name = if matches!(&section, Section::Agent(_) | Section::CustomAgent(_)) {
+            format!(
+                "{}, {}",
+                section.display_label(cx).accessible_text(),
+                entry.label
+            )
+        } else {
+            entry.label.to_owned()
+        };
         let (excerpt, clipped) = entry.excerpt(&self.words);
         let excerpt = if clipped {
             format!("…{excerpt}")
@@ -858,7 +868,7 @@ impl Search {
         };
         OptionRow::new(
             format!("settings-result-{}-{}", section.key(), entry.id),
-            entry.label,
+            name,
             HoverHelp::tooltip(
                 entry
                     .help

@@ -57,6 +57,11 @@ const CLAUDE_TRUST_RISK: &str = "The repository's Claude hooks and commands can 
      it tries to remove the entry when it archives the checkout.";
 const FLAG_TRUST_RISK: &str = "As when you approve it yourself, repository hooks, settings and commands are then trusted. This \
      is why the switch is off by default.";
+const FLAG_TRUST_LAUNCHES: &str = "On local, SSH and persistent recipe hosts, this setting applies to structured launches \
+     in any folder. It covers New, Clone, Restart with, Replace with, Replace as guarded instead and launches an agent \
+     requests, including a folder the agent chooses for a request Farhelm approves without asking. Structured launches \
+     in a session's own sandbox or container trust automatically. Plain Restart and any Replace that reuses the saved \
+     command keep the saved trust choice.";
 pub(super) const CAUTION: [&str; 3] = [
     "Claude has no supported way to do this. Farhelm edits the settings file selected by the login shell \
      (normally ~/.claude.json on the session's host), which also holds sign-in and per-folder state. \
@@ -216,11 +221,16 @@ impl TrustAgent {
         } else {
             FLAG_TRUST_RISK
         };
-        [Some(self.tooltip()), Some(risk), self.caveat()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" ")
+        [
+            Some(self.tooltip()),
+            (!self.has_caution()).then_some(FLAG_TRUST_LAUNCHES),
+            Some(risk),
+            self.caveat(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ")
     }
 
     /// What Farhelm does for eligible launches, the old `help` for the flag-based agents and the old help
@@ -236,20 +246,16 @@ impl TrustAgent {
                  Restart and Replace keep the session's saved launch."
             }
             TrustAgent::Codex => {
-                "In folders you choose and in managed checkouts, Farhelm passes a trust option to Codex for that \
-                 launch. Codex keeps its saved configuration."
+                "Farhelm passes Codex a per-launch trust option. Codex keeps its saved configuration."
             }
             TrustAgent::Muse => {
-                "In folders you choose and in managed checkouts, Farhelm passes Muse's trust option for that launch. \
-                 Muse keeps its saved configuration."
+                "Farhelm passes Muse a per-launch trust option. Muse keeps its saved configuration."
             }
             TrustAgent::Pi => {
-                "In folders you choose and in managed checkouts, Farhelm tells Pi to approve project settings and \
-                 extensions for that launch. Pi keeps its saved configuration."
+                "Farhelm passes Pi a launch option to approve project settings and extensions. Pi keeps its saved configuration."
             }
             TrustAgent::Antigravity => {
-                "For plain folders and managed checkouts, Farhelm passes Antigravity's --settings option for that \
-                 launch. Its saved configuration stays as it is."
+                "Farhelm passes Antigravity a per-launch --settings option. Its saved configuration stays as it is."
             }
         }
     }
@@ -262,12 +268,7 @@ impl TrustAgent {
             TrustAgent::Claude => vec![self.mechanism().to_owned()],
             TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi | TrustAgent::Antigravity => {
                 let mut paragraphs = vec![
-                    format!(
-                        "{} On installed hosts, New, Clone, Restart with and Replace with use this setting. Sandbox \
-                         and container sessions apply workspace trust automatically. Restart and Replace keep the \
-                         session's saved launch.",
-                        self.mechanism()
-                    ),
+                    format!("{} {FLAG_TRUST_LAUNCHES}", self.mechanism()),
                     FLAG_TRUST_RISK.to_owned(),
                 ];
                 paragraphs.extend(self.caveat().map(str::to_owned));

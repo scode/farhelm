@@ -49444,3 +49444,42 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   activation seam. Change `vtluomwuxmtkpyokkqvpsmxtzoqsvqvw`, bookmark
   `plan/triage-settings-nov24/05-bind-hook-switch-to-presented-state`,
   [#5007](https://github.com/scode/farhelm/pull/5007/changes).
+
+## trailing-settings-trust-help-omits-agent-requested-launches.md
+
+- Outcome: `fix code`.
+- Assessment: The workspace-trust switch help on the Codex, Muse, Pi and Antigravity Settings pages says it applies to
+  New, Clone, Restart with and Replace with, but not that it also applies to launches an agent requests. On a host where
+  agent requests are approved without asking, turning it on lets agents start trusted sessions anywhere, which the help
+  never mentions. Claude's help does mention it. Verified: confirmed. `agent_trust.rs:212-224,239` omit agent-requested
+  launches; Claude's text at `:205` includes "including launches an agent requests" (dropped for the others by
+  4aff3f1b). SPEC.md 1852-1853: "New, Clone, Restart with, Replace with and agent-requested launches apply the current
+  setting in any directory." The spec requires the help to explain that hooks and commands may run (1856-1857) but does
+  not dictate listing launch routes, so this rests on a reading. Not covered by `drift-workspace-trust.md` (that plan
+  adds live drift tests, not Settings copy).
+- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
+  Recommendation for reference: fix code — restore the agent-requested wording and refresh goldens; size S. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed as decided. Change `myznqsnrnnszklumslyporxuqxlzozmn`, bookmark
+  `plan/triage-settings-nov24/06a-clarify-trust-and-search`.
+  [Draft PR #5010](https://github.com/scode/farhelm/pull/5010/changes).
+
+## agent-settings-search-omits-agent-name.md
+
+- Outcome: `other`.
+- Assessment: In Settings search, results for different agents' pages (for example the "no settings" entry of several
+  agents) have the same accessible name, so a screen-reader user hears identical options and cannot tell which agent
+  each opens. Verified: confirmed. Each result option's accessible name is the entry label alone (`search.rs:789-799`);
+  the agent appears only in a separate heading row (`:690-697`). Screen-reader speech not verified. SPEC.md 2585-2590
+  describes grouping but not option naming; reading.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code — include the section name in each option's accessible name; size S.
+- Execution: Fixed as decided. Change `myznqsnrnnszklumslyporxuqxlzozmn`, bookmark
+  `plan/triage-settings-nov24/06a-clarify-trust-and-search`.
+  [Draft PR #5010](https://github.com/scode/farhelm/pull/5010/changes).

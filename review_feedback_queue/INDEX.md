@@ -36,10 +36,6 @@ consequences.
 ## High priority: material UX degradation
 
 
-- [`trailing-settings-trust-help-omits-agent-requested-launches.md`](trailing-settings-trust-help-omits-agent-requested-launches.md)
-  — The Settings pages for Codex, Muse, Pi, and Antigravity omit that their workspace-trust switch also applies to
-  agent-requested launches, which run without an approval card on Always-allow hosts.
-
 - [`trailing-replace-with-recent-named-fill-enter-replaces.md`](trailing-replace-with-recent-named-fill-enter-replaces.md)
   — In Replace with, a screen reader announces a highlighted recent setup as "Fill from recent setup" while Enter on it
   replaces and deletes the source session; highest if the "⏎ Replace" key cap is not announced with it.
@@ -68,9 +64,6 @@ consequences.
 
 - [`app-settings-shared-upgrade-option-has-local-heading.md`](app-settings-shared-upgrade-option-has-local-heading.md) —
   The App heading says This Mac even though it contains a helm-shared highlights setting.
-
-- [`agent-settings-search-omits-agent-name.md`](agent-settings-search-omits-agent-name.md) — Settings search can give
-  different agents' pages or hook controls the same accessible name.
 
 - [`pi-settings-tests-miss-trust-route.md`](pi-settings-tests-miss-trust-route.md) — Pi's Settings tests no longer check
   a successful trust read or the absence of a hook hint control.
