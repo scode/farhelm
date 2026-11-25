@@ -153,54 +153,97 @@ pub(crate) fn open_lock(cache: &Path) -> std::io::Result<PreparationLock> {
 /// removing its generation so an interruption leaves an unselected directory.
 /// Spare leftovers are recovered under this same guard and ready spares share
 /// the cache's eviction decision; a failed spare cleanup retains its record.
+/// Report incomplete cleanup after visiting every independently usable repo.
 pub(crate) fn sweep(
     state_dir: &Path,
     live: &crate::spare_checkouts::LiveClaims,
 ) -> std::io::Result<()> {
+    sweep_with_effects(
+        state_dir,
+        live,
+        &mut |owner| fs::File::open(owner)?.sync_all(),
+        &mut remove_if_present,
+    )
+}
+
+/// Vary only durability and final removal so tests still exercise the real
+/// enumeration, lock, selector and eviction namespace.
+fn sweep_with_effects(
+    state_dir: &Path,
+    live: &crate::spare_checkouts::LiveClaims,
+    sync_owner: &mut impl FnMut(&Path) -> io::Result<()>,
+    remove: &mut impl FnMut(&Path) -> io::Result<()>,
+) -> io::Result<()> {
     let root = state_dir.join("repo-cache");
-    let owners = match std::fs::read_dir(&root) {
+    let owners = match fs::read_dir(&root) {
         Ok(owners) => owners,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
     };
     let now = SystemTime::now();
-    let retention = Duration::from_secs(30 * 24 * 60 * 60);
+    let mut failure = None;
     for owner in owners {
-        let owner = owner?;
-        if !owner.file_type()?.is_dir() {
-            continue;
-        }
-        let mut locks = Vec::new();
-        let mut debris = HashMap::<String, Vec<PathBuf>>::new();
-        for entry in fs::read_dir(owner.path())? {
-            let entry = entry?;
-            let path = entry.path();
-            if path
-                .extension()
-                .is_some_and(|extension| extension == "lock")
-            {
-                locks.push(path);
-            } else if let Some(cache_name) = entry.file_name().to_str().and_then(debris_cache_name)
-            {
-                debris.entry(cache_name.to_owned()).or_default().push(path);
+        match owner {
+            Ok(owner) => {
+                let path = owner.path();
+                let result = owner.file_type().and_then(|kind| {
+                    if kind.is_dir() {
+                        sweep_owner(&path, live, now, sync_owner, remove, &mut failure)?;
+                    }
+                    Ok(())
+                });
+                if let Err(error) = result {
+                    record_sweep_failure(&mut failure, &path, error);
+                }
             }
+            Err(error) => record_sweep_failure(&mut failure, &root, error),
         }
+    }
+    failure.map_or(Ok(()), Err)
+}
 
-        // Every cache opens its permanent lock before creating private paths.
-        // Read the selector after taking that lock, even if enumeration saw
-        // the generation before the shim finished publishing it.
-        for lock_path in locks {
+/// A complete owner listing associates debris with known repository locks.
+/// An enumeration failure leaves the owner alone so other owners can proceed.
+fn sweep_owner(
+    owner: &Path,
+    live: &crate::spare_checkouts::LiveClaims,
+    now: SystemTime,
+    sync_owner: &mut impl FnMut(&Path) -> io::Result<()>,
+    remove: &mut impl FnMut(&Path) -> io::Result<()>,
+    failure: &mut Option<io::Error>,
+) -> io::Result<()> {
+    let mut locks = Vec::new();
+    let mut debris = HashMap::<String, Vec<PathBuf>>::new();
+    for entry in fs::read_dir(owner)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "lock")
+        {
+            locks.push(path);
+        } else if let Some(cache_name) = entry.file_name().to_str().and_then(debris_cache_name) {
+            debris.entry(cache_name.to_owned()).or_default().push(path);
+        }
+    }
+
+    // Visit a single owner's locks in a stable order so tests can place a failure before a sibling repo.
+    locks.sort_unstable();
+    let retention = Duration::from_secs(30 * 24 * 60 * 60);
+    for lock_path in locks {
+        let cache = lock_path.with_extension("git");
+        // Keep this repo's prerequisites fallible without leaving the owner loop.
+        let result = (|| {
             let lock = PreparationLock::open(&lock_path)?;
             if !lock.try_acquire()? {
-                continue;
+                return Ok(());
             }
-            let cache = lock_path.with_extension("git");
             let unused = now
                 .duration_since(lock.modified()?)
                 .is_ok_and(|age| age > retention);
             let repo_text = format!(
                 "{}/{}",
-                owner.file_name().to_string_lossy(),
+                owner.file_name().unwrap_or_default().to_string_lossy(),
                 lock_path.file_stem().unwrap_or_default().to_string_lossy()
             );
             // Permanent locks also locate a spare record after its cache is
@@ -208,17 +251,30 @@ pub(crate) fn sweep(
             if let Ok(repo) = farhelm_proto::github_checkout::parse_github_repo(&repo_text)
                 && let Err(error) = crate::spare_checkouts::sweep(&cache, &repo, live, unused)
             {
-                tracing::warn!(error = %error, "spare-checkout sweep failed; folders retained");
+                record_sweep_failure(
+                    failure,
+                    &cache.with_extension("spare.json"),
+                    io::Error::other(error),
+                );
             }
             let paths = cache
                 .file_name()
                 .and_then(|name| name.to_str())
                 .and_then(|name| debris.remove(name))
                 .unwrap_or_default();
-            sweep_generations(&cache, &lock, paths, unused)?;
+            sweep_generations(&cache, &lock, paths, unused, sync_owner, remove, failure)
+        })();
+        if let Err(error) = result {
+            record_sweep_failure(failure, &cache, error);
         }
     }
     Ok(())
+}
+
+/// Log each failed location while keeping a bounded result for the caller.
+fn record_sweep_failure(failure: &mut Option<io::Error>, path: &Path, error: io::Error) {
+    tracing::warn!(path = %path.display(), %error, "repository cache sweep step failed");
+    failure.get_or_insert(error);
 }
 
 /// Recover both unpublished generations and selector temps left by a crash.
@@ -234,36 +290,42 @@ fn debris_cache_name(name: &str) -> Option<&str> {
 /// any generation because a previous selector write may have failed after its
 /// rename. During eviction, detach both ways of selecting an expired cache
 /// before deleting its contents: move the legacy path and clear the selector.
+/// A barrier failure stops this repository. Once paths are known to be
+/// detached, a failed removal leaves the other paths eligible.
 fn sweep_generations(
     cache: &Path,
     held: &PreparationLock,
     mut paths: Vec<PathBuf>,
     unused: bool,
+    sync_owner: &mut impl FnMut(&Path) -> io::Result<()>,
+    remove: &mut impl FnMut(&Path) -> io::Result<()>,
+    failure: &mut Option<io::Error>,
 ) -> io::Result<()> {
-    let sync_owner =
-        || fs::File::open(cache.parent().expect("cache in owner directory"))?.sync_all();
+    // The selector is authoritative only after we take the repo lock.
+    let selected = current(cache, held)?;
+    let owner = cache.parent().expect("cache in owner directory");
     let trash = cache.with_extension("git.trash");
-    if trash.symlink_metadata().is_ok() {
-        sync_owner()?;
-        remove_if_present(&trash)?;
+    let mut trash_clear = true;
+    if entry_exists(&trash)? {
+        sync_owner(owner)?;
+        if let Err(error) = remove(&trash) {
+            record_sweep_failure(failure, &trash, error);
+            trash_clear = false;
+        }
     }
-    let selected = match current(cache, held) {
-        Ok(selected) => selected,
-        Err(error) => {
-            tracing::warn!(path = %cache.display(), %error, "repository cache selection unreadable; generations retained");
-            return Ok(());
-        }
-    };
-    if unused {
-        if selected.is_some() && cache.symlink_metadata().is_ok() {
-            // A migration could have renamed its selector and failed the
-            // directory sync. Stabilize the selection before moving legacy data.
-            sync_owner()?;
-        }
-        match fs::rename(cache, &trash) {
-            Ok(()) => paths.push(trash),
-            Err(e) if e.kind() == ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
+    let legacy_present = unused && entry_exists(cache)?;
+    if unused && (trash_clear || !legacy_present) {
+        if legacy_present {
+            if selected.is_some() {
+                // A migration could have renamed its selector and failed the
+                // directory sync. Stabilize the selection before moving legacy data.
+                sync_owner(owner)?;
+            }
+            match fs::rename(cache, &trash) {
+                Ok(()) => paths.push(trash),
+                Err(e) if e.kind() == ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
         }
         if let Some(selected) = selected {
             fs::remove_file(private_path(cache, SELECTOR_SUFFIX))?;
@@ -271,19 +333,32 @@ fn sweep_generations(
         }
     } else if let Some(selected) = selected {
         paths.retain(|path| *path != selected);
-        // Finish a migration interrupted after publication but before retirement.
-        if cache.symlink_metadata().is_ok() {
+        // If an expired legacy cache needs the occupied trash slot, keep its
+        // selector too. A recent cache can still finish migration.
+        if !unused && entry_exists(cache)? {
             paths.push(cache.to_owned());
         }
     }
 
     if !paths.is_empty() {
-        sync_owner()?;
+        sync_owner(owner)?;
         for path in paths {
-            remove_if_present(&path)?;
+            if let Err(error) = remove(&path) {
+                record_sweep_failure(failure, &path, error);
+            }
         }
     }
     Ok(())
+}
+
+/// A dangling link occupies a cache slot. Only a missing entry permits the
+/// sweep to proceed as if that slot were empty.
+fn entry_exists(path: &Path) -> io::Result<bool> {
+    match path.symlink_metadata() {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 /// Remove obsolete cache entries without following a symlink in the directory
@@ -309,11 +384,18 @@ mod tests {
     /// inferred from how long fixture setup took.
     fn fixture(age_days: u64) -> (tempfile::TempDir, PathBuf, PathBuf) {
         let state = tempfile::tempdir().unwrap();
+        let (cache, lock_path) = seed_cache(state.path(), "repo", age_days);
+        (state, cache, lock_path)
+    }
+
+    /// Add another repo to the same owner listing so tests can arrange
+    /// which repo fails before the sweep reaches its siblings.
+    fn seed_cache(state: &Path, name: &str, age_days: u64) -> (PathBuf, PathBuf) {
         let repo = farhelm_proto::github_checkout::GithubRepo {
             owner: "example".into(),
-            name: "repo".into(),
+            name: name.into(),
         };
-        let cache = path(state.path(), &repo);
+        let cache = path(state, &repo);
         let lock = acquire(&cache).unwrap();
         std::fs::create_dir(&cache).unwrap();
         std::fs::write(cache.join("objects"), "cached objects").unwrap();
@@ -325,7 +407,171 @@ mod tests {
         assert_eq!(lock.modified().unwrap(), modified);
         drop(lock);
         let lock_path = cache.with_extension("lock");
-        (state, cache, lock_path)
+        (cache, lock_path)
+    }
+
+    /// Publish a selected generation through the real writer alongside
+    /// debris that would be eligible once the next sweep reads the selector.
+    fn selected_and_debris(cache: &Path) -> (PathBuf, PathBuf) {
+        let lock = acquire(cache).unwrap();
+        let selected = refresh(cache, &lock, |_| Ok(())).unwrap();
+        let debris = private_path(cache, &format!("{GENERATION_PREFIX}{}", Uuid::new_v4()));
+        fs::create_dir(&debris).unwrap();
+        assert_eq!(current(cache, &lock).unwrap().as_ref(), Some(&selected));
+        assert!(selected.is_dir() && debris.is_dir());
+        (selected, debris)
+    }
+
+    /// A repo without a usable lock has no cleanup authority. Its failure
+    /// must leave a later expired cache eligible.
+    #[farhelm_testtrace::test]
+    fn sweep_skips_a_repo_with_an_unusable_lock() {
+        let (state, cache, lock_path) = fixture(31);
+        let (later, _) = seed_cache(state.path(), "z-later", 31);
+        fs::remove_file(&lock_path).unwrap();
+        fs::create_dir(&lock_path).unwrap();
+        let lock_error = PreparationLock::open(&lock_path)
+            .err()
+            .expect("a directory cannot serve as a writable lock file");
+        assert!(cache.is_dir() && later.is_dir());
+
+        let failure = sweep(state.path(), &Default::default()).unwrap_err();
+
+        assert_eq!(failure.raw_os_error(), lock_error.raw_os_error());
+        assert!(cache.join("objects").is_file());
+        assert!(!later.exists());
+    }
+
+    /// The durable selector can still refer to either layout after a failed
+    /// owner sync. Keep both generations in this repo and clean the next.
+    #[farhelm_testtrace::test]
+    fn sweep_keeps_repo_generations_when_owner_sync_fails() {
+        let (state, cache, _) = fixture(1);
+        let (selected, debris) = selected_and_debris(&cache);
+        let (later, _) = seed_cache(state.path(), "z-later", 31);
+        assert!(later.is_dir());
+        let mut first_sync = true;
+        let error = sweep_with_effects(
+            state.path(),
+            &Default::default(),
+            &mut |owner| {
+                if std::mem::take(&mut first_sync) {
+                    return Err(io::Error::other("fixture owner sync failure"));
+                }
+                fs::File::open(owner)?.sync_all()
+            },
+            &mut remove_if_present,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "fixture owner sync failure");
+        assert!(selected.is_dir() && debris.is_dir());
+        let lock = acquire(&cache).unwrap();
+        assert_eq!(current(&cache, &lock).unwrap().as_ref(), Some(&selected));
+        assert!(!later.exists());
+    }
+
+    /// A damaged selector supplies no authority to delete that repo's
+    /// generations. The next repo can still expire independently.
+    #[farhelm_testtrace::test]
+    fn sweep_keeps_repo_generations_when_its_selector_is_malformed() {
+        let (state, cache, _) = fixture(1);
+        let (selected, debris) = selected_and_debris(&cache);
+        let (later, _) = seed_cache(state.path(), "z-later", 31);
+        let selector = private_path(&cache, SELECTOR_SUFFIX);
+        fs::write(&selector, "invalid selection").unwrap();
+        assert!(later.is_dir());
+
+        let error = sweep(state.path(), &Default::default()).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+        assert!(selected.is_dir() && debris.is_dir());
+        assert_eq!(fs::read_to_string(selector).unwrap(), "invalid selection");
+        assert!(!later.exists());
+    }
+
+    /// A failed first deletion does not strand a sibling whose absence the
+    /// same selector already allows, and the current generation is kept.
+    #[farhelm_testtrace::test]
+    fn sweep_continues_after_a_debris_removal_fails() {
+        let (state, cache, _) = fixture(1);
+        let (selected, first_debris) = selected_and_debris(&cache);
+        let second_debris = private_path(&cache, &format!("{GENERATION_PREFIX}{}", Uuid::new_v4()));
+        fs::create_dir(&second_debris).unwrap();
+        let (later, _) = seed_cache(state.path(), "z-later", 31);
+        assert!(later.is_dir() && second_debris.is_dir());
+        let mut retained = None;
+        let error = sweep_with_effects(
+            state.path(),
+            &Default::default(),
+            &mut |owner| fs::File::open(owner)?.sync_all(),
+            &mut |path| {
+                if retained.is_none() {
+                    assert!(path == first_debris || path == second_debris);
+                    retained = Some(path.to_owned());
+                    return Err(io::Error::other("fixture debris removal failure"));
+                }
+                remove_if_present(path)
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "fixture debris removal failure");
+        let retained = retained.unwrap();
+        for debris in [first_debris, second_debris] {
+            assert_eq!(debris.exists(), debris == retained);
+        }
+        assert!(selected.is_dir());
+        assert!(!later.exists());
+    }
+
+    /// A leftover trash slot can still contain interrupted work. If a legacy
+    /// cache needs that slot, keep the selector and both layouts. Otherwise
+    /// the selected generation can expire alongside ordinary debris.
+    #[farhelm_testtrace::test]
+    fn sweep_defers_eviction_only_when_legacy_cache_needs_the_trash_slot() {
+        for legacy_present in [false, true] {
+            let (state, cache, _) = fixture(31);
+            let (selected, debris) = selected_and_debris(&cache);
+            if legacy_present {
+                fs::create_dir(&cache).unwrap();
+                fs::write(cache.join("objects"), "legacy objects").unwrap();
+            }
+            let trash = cache.with_extension("git.trash");
+            fs::create_dir(&trash).unwrap();
+            fs::write(trash.join("objects"), "older trash").unwrap();
+            let (later, _) = seed_cache(state.path(), "z-later", 31);
+            assert!(later.is_dir() && trash.is_dir());
+            assert_eq!(cache.is_dir(), legacy_present);
+
+            let error = sweep_with_effects(
+                state.path(),
+                &Default::default(),
+                &mut |owner| fs::File::open(owner)?.sync_all(),
+                &mut |path| {
+                    if path == trash {
+                        Err(io::Error::other("fixture trash removal failure"))
+                    } else {
+                        remove_if_present(path)
+                    }
+                },
+            )
+            .unwrap_err();
+
+            assert_eq!(error.to_string(), "fixture trash removal failure");
+            assert_eq!(
+                fs::read_to_string(trash.join("objects")).unwrap(),
+                "older trash"
+            );
+            assert_eq!(cache.is_dir(), legacy_present);
+            assert_eq!(selected.is_dir(), legacy_present);
+            let lock = acquire(&cache).unwrap();
+            assert_eq!(
+                current(&cache, &lock).unwrap().as_ref(),
+                legacy_present.then_some(&selected)
+            );
+            assert!(!debris.exists() && !later.exists());
+        }
     }
 
     /// Eviction removes stale cached contents while retaining the lock inode

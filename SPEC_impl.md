@@ -3756,7 +3756,11 @@ cache unused for more than 30 days before removing its directory. If a legacy ca
 sweep moves it out of its original slot before deleting it. A malformed selector leaves the affected generations in
 place for diagnosis. The sweep unlinks obsolete files and symlinks and recursively removes real directories. Lock files
 persist because a waiting shim can still hold their inode. One empty lock file per repository ever cached is the
-accepted leftover. A sweep failure is logged and leaves unused caches for a later startup. Sessions can still start.
+accepted leftover. A lock, selector, detachment or directory-sync failure stops cleanup for the affected repository.
+Once paths are detached and the owner directory is synced, an individual removal failure leaves only that path for a
+later sweep. If legacy trash cannot be cleared and the original legacy path still exists, the sweep defers its eviction
+and keeps the selector. Independently unselected debris remains eligible. Failures are logged where they happen. Startup
+finishes sweeping the remaining repositories and reports any incomplete cleanup. Sessions can still start.
 
 Spare-checkout recovery uses a sibling `<name>.spare.json` record containing outstanding namespace locations and their
 directory identities, plus the intended or retained ready spare's identity. A namespace is the owner directory under
