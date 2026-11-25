@@ -3960,32 +3960,6 @@
   maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
-## stale-permanent-delete-can-remove-repaired-template.md
-
-- Outcome: `fix spec`.
-- Assessment: In the Templates dialog, a stored template that fails today's save rules shows "Delete permanently", which
-  offers no Undo. If an agent or the command line repairs that same template after the screen was drawn, and the user
-  clicks the still-drawn "Delete permanently" before the redraw, the repaired template is deleted with no Undo.
-  Verified: the behavior is confirmed, but my reading is that the spec accepts it: - The label is judged from the stored
-  template each frame (`editor.rs:422-437`). - The dialog redraws on store pushes, because GPUI tracks entities read
-  during render (`vendor/gpui-pre/src/window.rs:4206-4221`). So the stale window is one frame long, or longer only while
-  the dialog is hidden behind another dialog. - Delete goes by name with no revision check (`editor.rs:790-822`). Three
-  spec passages cover it: - SPEC.md:1354-1356: "The label the user saw decides: a click on "Delete permanently" never
-  offers undo ... even if the template list changed in between." - SPEC.md:5774-5778: "Undo of a delete restores the
-  copy the Templates dialog had loaded rather than the one deleted". This presupposes that the deleted revision can
-  differ from the loaded one. - SPEC.md:5787-5790: an action inside a sub-second window "uses the target, consent and
-  preconditions from the frame the user was shown". Against that, SPEC.md:5794-5796 (2026-10-26) says "Only what a
-  destructive action or a launch is shown and fenced against has to be current". SPEC.md:5798-5800 (2026-11-21) allows
-  stale controls only "as long as the helm refuses what is no longer valid or the result is trivially undone", and
-  neither holds here. Those are the grounds the recording's independent check used to dispute coverage. Unverified:
-  whether any path keeps the dialog undrawn for longer while a repair lands.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Add the one-sentence Templates spec clarification: Delete removes the named template whatever
-  revision is stored, and the drawn label alone decides Undo. No code change. Remove the feedback file and its index
-  entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## settings-footer-can-save-the-wrong-page.md
 
 - Outcome: `fix code`.
@@ -4180,27 +4154,6 @@
   the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-setup-rerun-omits-tailscale-allowing-ssh-downgrade.md
-
-- Outcome: `fix spec`.
-- Assessment: Re-running a failed setup on a Tailscale host used to send only the destination. A concurrent removal or
-  retarget could then have probed and set up the host over ordinary SSH. That route is now refused. What remains: if the
-  host's Tailscale setting is switched off while a Re-run is in flight, the probe uses the new, ordinary SSH setting
-  rather than the Tailscale setting the menu showed. Verified: Partly fixed. 1ec7724e3 (#4714) changed `rerun_command`
-  to the `ssh-host` target with host id and destination (`gui/.../hosts/setup.rs:704-710`). `probe_owned` refuses a
-  missing row, a non-SSH row or a moved row as stale (`provisioning/service.rs:907-913`), so route (a), silent
-  re-registration or install over ordinary SSH after removal or retarget, is gone. Route (b) remains: `requested_mode`
-  is taken only from `ProbeDestination::Ssh` (`service.rs:961-964`), and the stored row's current mode decides access
-  (`service.rs:974-980`). That mode is whatever the user (or an approved edit) just saved. Unverified: whether anything
-  but the user can toggle Tailscale mode.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmless case: widen the 2026-11-21 SPEC.md sentence (Creation, "A key or click may act before a
-  frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
-  destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
-  code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## trailing-launcher-enter-deleted-custom-agent-chip-submits-previous-agent.md
 
 - Outcome: `fix code`.
@@ -4252,26 +4205,6 @@
   or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
   file and its index entry.
 - Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
-## stale-host-retry-can-continue-sandbox-delete.md
-
-- Outcome: `fix spec`.
-- Assessment: In Hosts, a sandbox or container's Retry normally means "try the connection again". If the helm reports a
-  failed deletion of that environment between the last visible frame and the user's Enter or click, the same Retry
-  finishes destroying the environment instead. Verified: partly correct. Retry sends only the host id. `remedies::retry`
-  re-reads live state and picks `/retry-delete` when the host is now `Deleting { failure }` (`hosts/menu.rs:301-331`,
-  `hosts/remedies.rs:177-191`). Retry has no shown-frame gate, unlike Adopt and Take over. The trigger needs a push that
-  arrives inside the draw-before-dispatch window (sub-second). The consequence is limited: `Deleting { failure }` arises
-  only for a sealed environment. Sealing happens only when its last session was deleted after a confirmation that warned
-  the sandbox goes too, and a seal is permanent (`SPEC.md:1693-1709`). So this finishes a deletion the user already
-  confirmed, through a control labelled differently. No route was found by which a non-sealed environment is destroyed.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmless case: widen the 2026-11-21 SPEC.md sentence (Creation, "A key or click may act before a
-  frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
-  destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
-  code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## settings-footer-can-discard-the-wrong-page.md
 
@@ -4424,78 +4357,6 @@
   to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
-## launcher-alias-enter-can-apply-an-undrawn-model.md
-
-- Outcome: `fix spec`.
-- Assessment: The user types a model-family word while models are still loading, and the results show only "Loading
-  models". If the catalog arrives and Enter lands before the redraw, Enter picks the newly preselected agent and model,
-  which the user never saw. The same can happen when a history or repository reply replaces a loading view. Nothing
-  launches: only the draft changes. Verified: confirmed. `search_enter` recomputes the live results and their default
-  row (`search.rs:316-321`, `search_highlight` at `:240-246`). SPEC.md "Creation" (1206-1207) says Enter "picks the
-  visible highlighted row, or leaves the explanation in place when there is none". The 2026-11-21 acceptance covers a
-  control still on screen, which this case lacks.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmless case: widen the 2026-11-21 SPEC.md sentence (Creation, "A key or click may act before a
-  frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
-  destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
-  code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## unshown-upgrade-highlights-can-be-recorded-seen.md
-
-- Outcome: `fix spec`.
-- Assessment: When the "What's new" dialog opens, an Escape or Enter pressed in the instant between the dialog being
-  drawn and reaching the screen can close it and record the highlights as seen, so the user never sees them. Verified:
-  Partly correct. The route matches the documented GPUI behavior (a dirty frame is drawn before a key is dispatched;
-  SPEC_impl.md 997-999), and the dismissal hook records with no check that the dialog has been shown
-  (`whats_new.rs:131-146`). The window is about one frame. SPEC.md 5787-5790 says such input "may be carried out as
-  delivered" but also "is ignored when that frame has not yet been shown". SPEC.md 1221-1222 accepts it except for
-  destructive confirmations and Replace with, but that sentence sits in the launcher section. Highlights stay reachable
-  from the Release notes page.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmless case: widen the 2026-11-21 SPEC.md sentence (Creation, "A key or click may act before a
-  frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
-  destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
-  code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## notifications-act-on-unshown-list.md
-
-- Outcome: `fix spec`.
-- Assessment: Closing the notification panel marks the items in its last displayed list as read, and Clear resolved
-  removes the resolved ones. Both use the list as last drawn, so an Escape or click in the instant before a newly drawn
-  list reaches the screen can mark a notice read, or clear one, that the user never saw. Late Delete warnings, which
-  name a checkout path left behind, are included. Verified: Confirmed as a route; timing about one frame.
-  `rail_notices.rs` builds its snapshot at render, and SPEC.md 3281-3284 says "last displayed list". The information is
-  not lost: a marked-read notice stays in history, and clearing needs a separate press. SPEC_impl.md 997-999 documents
-  the dirty-frame dispatch.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmless case: widen the 2026-11-21 SPEC.md sentence (Creation, "A key or click may act before a
-  frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
-  destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
-  code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## launcher-recent-highlight-can-change-path-spelling.md
-
-- Outcome: `fix spec`.
-- Assessment: A highlighted recent setup is keyed by its folder's canonical path. If a history refresh brings a newer
-  launch of the same folder under a different spelling (an alias or symlink), the highlight stays and Enter launches
-  with the new spelling. Verified: partly correct. `launcher/recents.rs:77-87` keys the destination by `canonical_cwd`,
-  and the representative's literal `cwd` is sent. After a redraw the new spelling is visible. A different actual folder
-  would need the aliases to resolve differently at launch, which is unverified. With that route unestablished, the only
-  established consequence is a different spelling of the same folder.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmless case: widen the 2026-11-21 SPEC.md sentence (Creation, "A key or click may act before a
-  frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
-  destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
-  code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## launcher-yolo-reply-uses-current-question.md
 
 - Outcome: `fix code`.
@@ -4516,22 +4377,6 @@
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
-## trailing-shift-click-mixes-live-range-anchor-with-displayed-row.md
-
-- Outcome: `fix spec`.
-- Assessment: Shift-click marks the range from the open session to the clicked row. If the open session changes (from a
-  helm update) just before the list redraws, the range is anchored on the new open session over the old order, so it can
-  mark rows other than the range on screen. Marks are local and reversible, and Stop or Delete on them still asks.
-  Verified: Confirmed. `session_list/marking.rs:550` reads the live selection while `mark_rows` uses the last drawn
-  order. The window is one frame. SPEC.md 5795-5797 lets convenience state, marks included, lag behind.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmless case: widen the 2026-11-21 SPEC.md sentence (Creation, "A key or click may act before a
-  frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
-  destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
-  code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-replace-with-button-does-not-carry-own-rendered-delete.md
 
@@ -7678,24 +7523,6 @@
   maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
-## fresh-checkout-trust-can-bind-replacement-directory.md
-
-- Outcome: `fix spec`.
-- Assessment: When Farhelm clones a new managed checkout with Claude trust turned on, it checks that the checkout folder
-  is the one it created, runs the user's configured post-clone command, and then marks the folder at that path trusted.
-  If something replaced the folder in between, Claude trust goes to the replacement. Verified: confirmed in the code.
-  The identity check is at `supervisor/src/launch.rs:1755-1797`, the post-clone command at `:1940-1963`, and the trust
-  write afterwards at `:1986-1999` (through `trust::resolve`, which canonicalizes the path again). Only two things could
-  replace the folder: the user's own post-clone command, or a process running under the same account. SPEC.md "Local
-  authority and trust between hosts" says: "Processes the user runs on the target host, including same-account processes
-  ... are trusted by this threat model", and that deliberately reshaped files count as the user's intent. The finding
-  itself says a lower-authority replacer is unverified.
-- Decision: q-intent, "Does a setup the user made on purpose count as the user's intent?": the maintainer picked "Yes,
-  it is the user's intent". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Write into SPEC.md "Local authority and trust between hosts" that this deliberate user setup is
-  the user's intent. No code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## trailing-claude-trust-relative-config-dir-persists-relative-lock.md
 
 - Outcome: `fix code`.
@@ -7716,21 +7543,6 @@
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## antigravity-trust-falls-back-to-uncanonical-folder.md
-
-- Outcome: `fix spec`.
-- Assessment: If a folder can no longer be resolved, or its resolved path has no text encoding, between launch admission
-  and the moment Antigravity's trust option is filled in, Farhelm puts the folder as submitted into Antigravity's trust
-  list. Verified: confirmed, and the behavior is deliberate. The comment at `agent_kind/mod.rs:2447-2451` says: "If the
-  path changes after the earlier usability check, retain the original spelling: the subsequent exec will decide whether
-  the directory still exists, without accidentally trusting another key." Codex shares the same fallback. The reviewer
-  itself says no trust grant outside scope is established. The likely effect is that Antigravity asks its own question.
-- Decision: q-intent, "Does a setup the user made on purpose count as the user's intent?": the maintainer picked "Yes,
-  it is the user's intent". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Write into SPEC.md "Local authority and trust between hosts" that this deliberate user setup is
-  the user's intent. No code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-shared-signin-triggers-auto-update-concurrently-with-manual-action.md
 
@@ -7889,65 +7701,6 @@
   maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## grok-manual-hook-replacement-omitted.md
-
-- Outcome: `fix spec`.
-- Assessment: Up to v0.43.0, the Grok guide told users to hand-create `~/.grok/hooks/farhelm.json` with three hook
-  entries. Automatic setup, from v0.44.0, overwrites that whole file when it differs. The setup prompt and the guide say
-  Farhelm "changes" or "installs or updates" Grok's configuration. Neither says that this file is replaced and any edits
-  in it are lost. Verified: partly correct. Whole-file replacement is real (`agent_kind/persistent_hooks.rs:40-58`) and
-  is spec'd (SPEC_impl.md around 4678: "replaces each differing file atomically"). The consent text is
-  `crates/gui/farhelm-gui/src/hook_setup.rs:99-105`. No loss of meaningful user edits is established. The old guide
-  asked only for the three Farhelm entries with the user's `farhelm` path, and it said to keep other hooks in other
-  files ("leave your other hook files alone").
-- Decision: q-hookwords, "Hook setup naming the exact files it replaces or tells users to delete": the maintainer picked
-  "accept and fix spec (given in the comment; no picker choice)". (2026-11-24 fewest-questions triage page (main
-  c38b93552).) Maintainer's comment: "accept and fix spec"
-- Completion criteria: Accept the behavior and say so in the spec: Grok's Farhelm hook file and Antigravity's Farhelm
-  plugin folder are Farhelm's own, so setup may replace that file whole and removal may delete that folder. No code
-  change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## antigravity-hook-removal-can-delete-extra-files.md
-
-- Outcome: `fix spec`.
-- Assessment: When the user turns off Antigravity hook setup, Settings and the docs say to delete the whole
-  `~/.gemini/config/plugins/farhelm/` folder. Farhelm writes only `plugin.json` and `hooks.json` there. Anything else in
-  that folder would be deleted too. Verified: confirmed for the wording (`hook_setup.rs:113-114`;
-  `website/src/content/docs/docs/agents/antigravity.md`, "Set up Restart": "delete that plugin directory"). Setup writes
-  two files into a directory it does not check for other contents (`agent_kind/antigravity.rs:17-50`). Nobody has shown
-  that anything other than Farhelm puts files in a directory named `farhelm`. SPEC.md (around 4134) says "The Grok and
-  Antigravity opt-in covers the files named for Farhelm."
-- Decision: q-hookwords, "Hook setup naming the exact files it replaces or tells users to delete": the maintainer picked
-  "accept and fix spec (given in the comment; no picker choice)". (2026-11-24 fewest-questions triage page (main
-  c38b93552).) Maintainer's comment: "accept and fix spec"
-- Completion criteria: Accept the behavior and say so in the spec: Grok's Farhelm hook file and Antigravity's Farhelm
-  plugin folder are Farhelm's own, so setup may replace that file whole and removal may delete that folder. No code
-  change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## trailing-implicit-home-spare-ownership.md
-
-- Outcome: `fix spec`.
-- Assessment: A sandbox or container session that uses its home folder as its working folder (with no checkout folder
-  configured, Farhelm falls back to the home) can later be replaced with a managed checkout. That first checkout uses
-  "Keep a checkout ready" and claims whatever sits at the reserved hidden spare folder
-  `~/.farhelm-spares/<owner>/<repo>` in that home. A later supervisor start can then delete it. The reviewer's worry is
-  files the user had put at that path before the home first served as a checkout root. Verified: Partly correct. The
-  fallback is real: `crates/farhelm-helm/src/sessions.rs:228-244` sets the root to `~` for session-owned hosts only.
-  `spare_take.rs` has not changed since the reviewed commit. Two things are unproven: any way for user content to end up
-  at `.farhelm-spares/<owner>/<repo>` in a Farhelm-created environment's home, and the declined-claim path and final
-  removal check, which the reviewer's own drop check said its excerpts left out. SPEC.md "Supported user environments"
-  (6030-6038) says Farhelm owns "their checkout roots and ... reserved spare container (`.farhelm-spares`)" and that
-  "anything in that container that Farhelm did not put there ... is out of band, and Farhelm may adopt it and delete
-  it". It does not say whether contents placed before the home became a checkout root count as out of band.
-- Decision: q-spare, "Who owns the reserved spare folder in a sandbox home": the maintainer picked "Farhelm owns it from
-  the start". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Add one SPEC.md sentence: the reserved spare container belongs to Farhelm from the moment its
-  folder serves as a checkout root (the sandbox home fallback included), whatever it already holds. No code change.
-  Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## trailing-antigravity-omitted-from-approval-cwd-pinning.md
 
 - Outcome: `fix spec+code`.
@@ -7969,75 +7722,6 @@
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## trailing-unstamped-host-skips-legacy-claude-settings-cleanup.md
-
-- Outcome: `fix spec`.
-- Assessment: Older Farhelm releases wrote a Claude endpoint URL into `~/.claude/settings.json` on a host and then
-  recorded locally that it had done so. If the helm crashed or lost the reply between those two steps and Farhelm was
-  then upgraded before that host reconnected, the new release thinks the host was never touched, skips cleaning the old
-  URL, and Claude may send the newly delivered token to that old endpoint. Verified: confirmed by source. Current
-  `retire_legacy_settings` cleans Claude settings only when a stamp exists
-  (`provisioning/credential_delivery.rs:1116-1120`) and otherwise records Cleared (`:1145`). The pre-#4593 code wrote
-  the file and only then set `record.claude` (`git show 67d8541dc^`, credential_delivery.rs ~600-713), so the gap
-  exists. A reconnect under the old release would have re-written and stamped, so the route needs crash-then-upgrade
-  with no successful reconnect between. SPEC_impl.md "Named credential catalog" (6219-6220): "An old Claude settings URL
-  can otherwise take precedence and receive the new token. ... A host with no legacy stamp records Cleared directly,
-  preserving its image settings." That accepts the unstamped branch for image settings but does not address an
-  unrecorded Farhelm write, so not covered-spec (the independent drop check said the same). Not the upgrade filter: a
-  token sent to a stale endpoint is a trust-boundary consequence, which that filter excludes.
-- Decision: q-legacycreds, "A pre-upgrade crash leaving an old Claude endpoint uncleaned": the maintainer picked "Accept
-  it in the spec". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: State in SPEC_impl.md "Named credential catalog" that an unrecorded legacy Claude settings write
-  by an older release is accepted. No code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## trailing-deleted-credential-stays-on-connected-host-after-lookup-failure.md
-
-- Outcome: `fix spec`.
-- Assessment: Hosts receive Claude and Codex launch credentials from Settings → Credentials through their recipe.
-  Suppose the user takes a token out of the recipe and deletes it from Credentials while a host is connected, and then
-  saves some other credential that host uses. The host keeps the deleted token in its launch credentials until it
-  reconnects, so new sessions and tabs there still get it. The host shows an amber warning meanwhile. Before the
-  reviewed change, that unrelated save happened to remove the deleted token as a side effect. Verified: Confirmed in
-  code. credential_delivery.rs:985-997 returns early with `lookup_aborted` when either agent's lookup fails, and leaves
-  the file and stamps untouched. A connection keeps the selections it read at connect time (SPEC.md:529-530).
-  SPEC.md:571-573 says "If Farhelm cannot read either Claude's or Codex's recipe credential, the host keeps both agents'
-  last delivered launch credentials". Whether a deleted credential counts as one Farhelm "cannot read" is a matter of
-  reading the spec. The independent drop check said it does not clearly cover deletion. Without that unrelated save, the
-  token stayed until reconnect both before and after the change. So the change only removed an incidental cleanup.
-- Decision: q-creddelete, "What deleting a credential promises": the maintainer picked "Removal at next connection".
-  (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "SPEC - removal is always
-  best-effort-at-next-opportunity, not a revocation guarantee."
-- Completion criteria: Add the principle to SPEC.md: removing a credential from Farhelm is always best-effort at the
-  next opportunity (a connected host drops it at its next connection), never a revocation guarantee; revoking at the
-  vendor is the response to a leak. No code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## trailing-signed-announcement-feed-replayable-across-files-and-versions.md
-
-- Outcome: `fix spec`.
-- Assessment: Released Mac apps check Farhelm's signed news feed at startup and every 12 hours. The brick test needs a
-  test feed permanently published next to the real one and signed with the same key and purpose. The app cannot tell the
-  two files apart, nor an old real feed from a current one. If the download server ever served the test file (or an old
-  feed) at the real address, because of a publishing slip, a mirror or CDN error, or a compromise, every Mac app that
-  checks while it is served would show "Farhelm brick test announcement" and keep it in its Announcements history for
-  good. Verified: Confirmed. `crates/farhelm-helm/src/network_announcements.rs:22` has a single
-  `PURPOSE = "farhelm announcements"` that does not depend on the filename. The test pair must use the same purpose and
-  keys (`releasing/AGENTS.md`, the announcements paragraph: "The same purpose and keys apply to the standing
-  `announcements-test.json`..."). The brick test probes a fixed path
-  (`releasing/mac-vm-test/checkpoint_contract.py:51`). Enqueue is permanent by id (SPEC_impl.md, "Shared preferences and
-  announcements"). Neither spec accepts the replay. SPEC.md:5133-5136 says the helm "verifies both the signature and its
-  exact announcement purpose", which the shared purpose defeats for this pair. Unverified: how the standing entry is
-  actually targeted and when it expires (it is published outside the repo), and any route by which the server would
-  serve the wrong bytes.
-- Decision: q-announce, "The brick-test announcement feed is signed like the real one": the maintainer picked "Accept
-  the risk". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "SPEC_impl - this is
-  intentional to minimize difference between brick test path and production path"
-- Completion criteria: Record in SPEC_impl.md that the standing brick-test announcement feed deliberately shares the
-  production feed's key and purpose, to minimize the difference between the brick-test path and the production path, and
-  that the replay risk this leaves is accepted. No code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-tailscale-predictable-tmp-socket-dir-local-dos.md
 
@@ -8274,21 +7958,6 @@
   item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
-## hook-hint-settings-focus-return-mismatch.md
-
-- Outcome: `fix spec`.
-- Assessment: Opening Settings from a Grok or Antigravity hook hint in a session and then closing it returns keyboard
-  focus to the hint, while the spec says closing Settings returns focus to the gear. The trust hint already behaves this
-  way. Verified: confirmed. `open_at_hook_setup` and `open_at_agent_trust` pass the hint as the return target
-  (`settings.rs:315-347` via `open_dialog`, `:261`). SPEC.md 2576-2577: "When Settings closes, focus returns to the
-  gear." The trust hint's identical, older behavior looks deliberate, so whether the spec or the code is wrong is a
-  decision.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix spec — say focus
-  returns to whatever opened Settings; size S. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## launcher-loses-hook-offer-on-tab-switch.md
 
 - Outcome: `fix code`.
@@ -8499,26 +8168,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-plain-replace-and-restart-do-not-disable-suspend.md
-
-- Outcome: `fix spec`.
-- Assessment: While a session launched from the launcher (including Restart with… and Replace with…) is starting on a
-  sandbox or container, that host's Suspend and Resume buttons are disabled. A plain Restart or Replace from the
-  session's menu does not disable them, so the user can suspend the host while the restart is in flight. The restart
-  request then fails or times out until the host is resumed. Verified: confirmed as described, but it rests on how the
-  spec is read. `host_lifecycle_refusal`/`targets_host` (`crates/gui/farhelm-gui/src/launcher/launch.rs:233-255`) only
-  checks the launcher's held slot. SPEC.md "Creation" (`SPEC.md:1522-1527`) says Suspend and Resume "are refused only
-  while this window's own launch targets or is waking that same host". That paragraph opens "After submitting a launch,
-  including Restart with or Replace with", so on its face it excludes plain Restart and Replace. SPEC_impl and
-  `Work::creates_a_session` count plain Replace and Restart as launches only for the host-registry exclusion. Whether
-  "launch" here includes plain Replace and Restart is the open question.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix spec — state that
-  only launcher submissions hold the host's Suspend/Resume, which suppresses this class; size S. (fix code is also S–M
-  if the maintainer prefers the stronger guard.) Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## trailing-suspend-read-activity-still-uses-ordered-lane.md
 
 - Outcome: `fix code`.
@@ -8539,23 +8188,6 @@
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## trailing-clone-replace-with-prefills-guarded-for-unset-permissions.md
-
-- Outcome: `fix spec`.
-- Assessment: For an old or cached session whose permission was never recorded, or is unsupported, Clone and Replace
-  with prefill Guarded. The session list, Restart with and plain Replace treat the same session as YOLO. Verified:
-  confirmed. `launcher/draft.rs:647` uses `request_permission` in `seed_launch`, while `draft.rs:124` uses
-  `stored_permission` for Restart with. SPEC.md 1573-1575 classifies a missing permission as YOLO "for confirmation" but
-  does not say in so many words what Clone and Replace with prefill (1601-1602: "compile new choices"). Related: TODO.md
-  "Plan decisions to revisit", "Revisit Clone and Replace with starting old no-permission sessions as YOLO" (not
-  `Planned`).
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix spec. Document
-  Guarded as the deliberate prefill, or align the code if the TODO revisit chooses YOLO. Size S. Remove the feedback
-  file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-harness-upgrades-https-redirect-downgrade.md
 

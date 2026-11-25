@@ -16,10 +16,6 @@ consequences.
 - [`template-delete-can-target-unshown-editor.md`](template-delete-can-target-unshown-editor.md) — Delete can remove a
   different template from the one shown. The old button can also suppress Undo.
 
-- [`stale-permanent-delete-can-remove-repaired-template.md`](stale-permanent-delete-can-remove-repaired-template.md) — A
-  stale Delete permanently button can remove a repaired revision of the same template without offering Undo. The
-  specification’s acceptance of that exact case is disputed.
-
 - [`settings-close-can-save-unlisted-drafts.md`](settings-close-can-save-unlisted-drafts.md) — Save and Close can write
   an unlisted form and clear the saved alert token outside the user’s confirmation.
 
@@ -41,27 +37,12 @@ consequences.
 - [`hook-settings-toggle-uses-unshown-state.md`](hook-settings-toggle-uses-unshown-state.md) — Space can save the
   all-hosts hook opt-in while the switch still shows the on state the user intended to turn off.
 
-- [`grok-manual-hook-replacement-omitted.md`](grok-manual-hook-replacement-omitted.md) — Enabling Grok hook setup can
-  replace local edits in the file the previous Farhelm guide asked users to create. The setup prompt leaves that
-  consequence unstated.
-
-- [`antigravity-hook-removal-can-delete-extra-files.md`](antigravity-hook-removal-can-delete-extra-files.md) — Settings
-  directs users to remove Antigravity’s entire plugin directory even though setup manages two files. Any other files in
-  that directory would also be removed.
-
 - [`replace-can-submit-before-checkout-warning.md`](replace-can-submit-before-checkout-warning.md) — Replace with can
   submit a fresh checkout before its updated warning is shown, allowing the previous checkout to move to trash without
   the displayed disclosure.
 
-- [`fresh-checkout-trust-can-bind-replacement-directory.md`](fresh-checkout-trust-can-bind-replacement-directory.md) —
-  Farhelm can grant saved Claude trust to a replacement directory after a configured checkout step changes the path that
-  was originally checked.
-
 - [`trailing-printed-terminal-link-stale-frame.md`](trailing-printed-terminal-link-stale-frame.md) — A click on a
   printed link can open an address from a newer terminal screen than the one the user clicked.
-
-- [`trailing-implicit-home-spare-ownership.md`](trailing-implicit-home-spare-ownership.md) — The first managed checkout
-  in an existing environment can claim and remove files already stored under the reserved spare directory in its home.
 
 - [`trailing-gone-terminal-ended-confirmation.md`](trailing-gone-terminal-ended-confirmation.md) — When a lost terminal
   is shown as ended, Stop or Delete can terminate a main program the confirmation did not say it would stop.
@@ -90,10 +71,6 @@ consequences.
   — Toggling Claude workspace trust while an agent checkout approval card waits or an environment starts can grant trust
   to a Not trusted approval or leave permanent trust with no archive cleanup record.
 
-- [`trailing-unstamped-host-skips-legacy-claude-settings-cleanup.md`](trailing-unstamped-host-skips-legacy-claude-settings-cleanup.md)
-  — If a pre-upgrade Farhelm wrote Claude endpoint settings remotely before crashing or losing the reply, upgrading
-  skips cleaning ~/.claude/settings.json so a stale URL there can receive the new launch token.
-
 - [`trailing-podman-verify-place-nonce-in-argv-forgeable.md`](trailing-podman-verify-place-nonce-in-argv-forgeable.md) —
   Because the place-identity guard passes its expected proof nonce in the SSH command line, a compromised host reached
   after an SSH alias move can echo the nonce to spoof container absence on Delete or accept a pending create.
@@ -101,10 +78,6 @@ consequences.
 - [`trailing-podman-setup-scripts-and-creation-proxy-skip-place-verification.md`](trailing-podman-setup-scripts-and-creation-proxy-skip-place-verification.md)
   — During a container build or setup, an external SSH alias or User change can open a fresh SSH connection and stream
   cached proxy credentials on stdin without checking the host identity, or read proxies from the moved host.
-
-- [`trailing-setup-rerun-omits-tailscale-allowing-ssh-downgrade.md`](trailing-setup-rerun-omits-tailscale-allowing-ssh-downgrade.md)
-  — Re-running failed setup on a Tailscale host omits the Tailscale flag from the probe request, so removing or toggling
-  the host concurrently lets Farhelm fall back to unpinned ordinary SSH and auto-provision or re-register it.
 
 - [`trailing-agent-stop-does-not-pin-target-connection-across-approval.md`](trailing-agent-stop-does-not-pin-target-connection-across-approval.md)
   — Approving a cross-host agent Stop does not pin the target host's connection incarnation across the approval wait, so
@@ -125,15 +98,6 @@ consequences.
   — Pressing Enter on a deleted custom-agent chip in the launcher submits the previously selected agent instead of
   refusing, which in Replace with mode can retire the running session under the wrong agent (borderline highest/high).
 
-- [`trailing-deleted-credential-stays-on-connected-host-after-lookup-failure.md`](trailing-deleted-credential-stays-on-connected-host-after-lookup-failure.md)
-  — A Claude or Codex token the user deleted from the recipe and Settings stays in a connected host's launch
-  credentials, usable by new sessions, until that host reconnects (bucket uncertain; recorded higher).
-
-- [`trailing-signed-announcement-feed-replayable-across-files-and-versions.md`](trailing-signed-announcement-feed-replayable-across-files-and-versions.md)
-  — The announcement signature does not bind the file name or freshness, so the standing production-signed brick-test
-  feed, or any older feed, served as the real feed would be accepted permanently by every released Mac app (bucket
-  uncertain; recorded higher).
-
 ## High priority: material UX degradation
 
 - [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
@@ -144,10 +108,6 @@ consequences.
 
 - [`approval-omits-automatic-trust-warning-from-accessibility.md`](approval-omits-automatic-trust-warning-from-accessibility.md)
   — Screen-reader users can miss the trusted-workspace status and warning on a launch or Restart approval.
-
-- [`stale-host-retry-can-continue-sandbox-delete.md`](stale-host-retry-can-continue-sandbox-delete.md) — A Retry still
-  shown as reconnecting can continue a sealed sandbox deletion if the failed deletion state arrives before the menu
-  updates.
 
 - [`settings-footer-can-discard-the-wrong-page.md`](settings-footer-can-discard-the-wrong-page.md) — A save refusal can
   switch pages before a stale Discard press runs, making it discard a different draft.
@@ -338,10 +298,6 @@ consequences.
   The implementation spec says clearing the Tensorlake API key refreshes the leftovers list. The app clears and
   invalidates that list instead.
 
-- [`antigravity-trust-falls-back-to-uncanonical-folder.md`](antigravity-trust-falls-back-to-uncanonical-folder.md) — If
-  the folder can no longer be resolved or encoded during launch preparation, the Antigravity trust setting can use the
-  submitted spelling.
-
 - [`antigravity-trust-hint-omits-live-announcement.md`](antigravity-trust-hint-omits-live-announcement.md) — The new
   Antigravity trust hint emits no live announcement request for screen readers.
 
@@ -353,9 +309,6 @@ consequences.
 
 - [`antigravity-trust-dismissal-lost-during-recovery.md`](antigravity-trust-dismissal-lost-during-recovery.md) — A
   terminal recovery can bring back an Antigravity trust hint the user already dismissed for the same question.
-
-- [`launcher-alias-enter-can-apply-an-undrawn-model.md`](launcher-alias-enter-can-apply-an-undrawn-model.md) — Enter can
-  fill in an agent and model from a new family alias while the launcher still says models are loading.
 
 - [`installed-agent-runner-can-leave-interrupted-build-running.md`](installed-agent-runner-can-leave-interrupted-build-running.md)
   — Stopping only the installed-agent runner during the preliminary build can leave Cargo running.
@@ -386,9 +339,6 @@ consequences.
 
 - [`upgrade-highlights-can-open-after-sign-in.md`](upgrade-highlights-can-open-after-sign-in.md) — Upgrade highlights
   can take focus after a startup SSH question has already opened and closed.
-
-- [`unshown-upgrade-highlights-can-be-recorded-seen.md`](unshown-upgrade-highlights-can-be-recorded-seen.md) — Escape or
-  Enter can mark upgrade highlights seen before they appear on screen.
 
 - [`upgrade-highlights-opt-out-refusal-is-hidden.md`](upgrade-highlights-opt-out-refusal-is-hidden.md) — A refused Don’t
   show again save can close the highlights dialog without telling the user.
@@ -530,9 +480,6 @@ consequences.
 - [`golden-report-omits-failed-scenes.md`](golden-report-omits-failed-scenes.md) — A portable screenshot report can omit
   failed scenes without telling its reviewer that the run was incomplete.
 
-- [`notifications-act-on-unshown-list.md`](notifications-act-on-unshown-list.md) — Closing Notifications or clearing
-  resolved entries can act on notices the window has drawn but has yet to show. This also affects late Delete warnings.
-
 - [`sidebar-retry-warning-missing-accessible-name.md`](sidebar-retry-warning-missing-accessible-name.md) — A retrying
   host's warning appears as an amber edge without an equivalent in the session row's accessible description.
 
@@ -579,9 +526,6 @@ consequences.
 
 - [`agent-settings-search-omits-agent-name.md`](agent-settings-search-omits-agent-name.md) — Settings search can give
   different agents' pages or hook controls the same accessible name.
-
-- [`hook-hint-settings-focus-return-mismatch.md`](hook-hint-settings-focus-return-mismatch.md) — Settings opened from a
-  hook hint returns focus to the hint even though the Settings contract names the gear.
 
 - [`pi-settings-tests-miss-trust-route.md`](pi-settings-tests-miss-trust-route.md) — Pi's Settings tests no longer check
   a successful trust read or the absence of a hook hint control.
@@ -653,9 +597,6 @@ consequences.
 - [`hook-hint-omits-live-accessibility-notification.md`](hook-hint-omits-live-accessibility-notification.md) — The hook
   setup hint exposes readable text but does not request a live announcement when it appears while focus stays in the
   terminal.
-
-- [`launcher-recent-highlight-can-change-path-spelling.md`](launcher-recent-highlight-can-change-path-spelling.md) — A
-  refreshed recent setup can keep the same highlight while changing the literal folder spelling Enter will use.
 
 - [`launcher-yolo-reply-uses-current-question.md`](launcher-yolo-reply-uses-current-question.md) — A permanent
   permission reply checks whichever launcher question is in flight. Whether a later question can receive the older
@@ -769,10 +710,6 @@ consequences.
 - [`trailing-status-mark-tests-lost-their-per-target-geometry-check.md`](trailing-status-mark-tests-lost-their-per-target-geometry-check.md)
   — The row status tests verify that each mark's help appears with a notch and no ring. They can pass if placement uses
   the bounds of a different element in the same sidebar.
-
-- [`trailing-shift-click-mixes-live-range-anchor-with-displayed-row.md`](trailing-shift-click-mixes-live-range-anchor-with-displayed-row.md)
-  — A Shift-click on a surviving row can mark a different range when the open session changes before the list redraws.
-  The click can add or omit local marks relative to the range displayed.
 
 - [`trailing-muted-waiting-dots-bypass-ringless-status-tooltip-path.md`](trailing-muted-waiting-dots-bypass-ringless-status-tooltip-path.md)
   — On a muted session waiting on a connected host, hovering the waiting dot shows the row summary. If the summary fits
@@ -1080,10 +1017,6 @@ consequences.
   — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
   admitted instead of being refused.
 
-- [`trailing-plain-replace-and-restart-do-not-disable-suspend.md`](trailing-plain-replace-and-restart-do-not-disable-suspend.md)
-  — Unlike Replace with and Restart with, an in-flight plain Replace or Restart leaves Suspend enabled on that sandbox
-  or container host so suspending can interrupt the request.
-
 - [`trailing-wake-drops-one-time-yolo-confirmation.md`](trailing-wake-drops-one-time-yolo-confirmation.md) — If a host
   suspends while the launcher's YOLO confirmation is open, clicking Start YOLO session anyway wakes the host but forgets
   the confirmation and re-asks YOLO once connected.
@@ -1329,12 +1262,6 @@ consequences.
 - [`trailing-cli-effort-hyphen-and-spec-drift.md`](trailing-cli-effort-hyphen-and-spec-drift.md) — CLI --effort rejects
   leading-hyphen custom values as unrecognized flags while --effort=-val succeeds, and SPEC_impl.md still describes
   closed-set parsing (typo guidance on --effort was separately fixed post-tip in #4752).
-
-- [`trailing-clone-replace-with-prefills-guarded-for-unset-permissions.md`](trailing-clone-replace-with-prefills-guarded-for-unset-permissions.md)
-  — When you open Clone or Replace with on an older session whose permission mode was never recorded (for example, a
-  cached session or one on a remote host whose supervisor has not been upgraded yet, or a session with an unsupported
-  stored permission) for an agent that defaults to Guarded, the launcher prefills Guarded instead of YOLO — even though
-  the session list, session summary, plain Replace, and Restart with all classify that same session as YOLO.
 
 - [`trailing-codex-dual-agent-delivery-tests-raw-substring.md`](trailing-codex-dual-agent-delivery-tests-raw-substring.md)
   — Several credential-delivery tests that share one endpoint token between Claude and Codex either check only whether a
