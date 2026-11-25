@@ -5,13 +5,13 @@
 //! through store updates, so a replaced row cannot take Enter on someone else's behalf.
 
 use farhelm_proto::RETIRED_CONTAINER_REASON;
-use farhelm_proto::launcher::{LaunchTemplate, LauncherKind};
+use farhelm_proto::launcher::LaunchTemplate;
 use farhelm_proto::session_requests::LaunchHistoryEntry;
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
-    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px, svg,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use super::super::recents::{RecentRefusal, RecentSurface};
@@ -20,7 +20,10 @@ use super::{
     draw_search_rows, status_line,
 };
 use crate::assets::{Icon, TERMINAL_FONT};
-use crate::components::{HoverHelp, OptionRow, Role, Vertical, key_chip, scroll_handle};
+use crate::components::{
+    HoverHelp, OptionRow, Role, Vertical, chips_and_words, command_glyph, command_row_content,
+    key_chip, scroll_handle,
+};
 use crate::focus::{self, Mark};
 use crate::harness;
 use crate::host_text::{HostSentence, HostText};
@@ -325,7 +328,7 @@ impl Launcher {
                     )
                 }
                 StartRow::Template(template) => {
-                    let mark = self.template_mark(&template.name, selected, palette, cx);
+                    let mark = template.mark.appearance(selected, palette);
                     let (id, label, help, contents) =
                         template_choice(template, mark, active && !disabled, selected, palette);
                     (
@@ -405,7 +408,7 @@ impl Launcher {
                         .border_color(theme::color(palette.accent_edge))
                         .rounded(metrics::RADIUS_SM)
                         .text_color(theme::color(palette.accent))
-                        .child(glyph(icon, palette.accent))
+                        .child(command_glyph(icon, palette.accent))
                         .child(div().min_w_0().truncate().child(label)),
                 )
                 .child("Change anything below before launching.")
@@ -416,22 +419,20 @@ impl Launcher {
 
 /// Announce the keys beside the options. The caps are examples and never consume focus.
 fn navigation_hint(palette: &Palette) -> AnyElement {
-    div()
-        .id("launcher-command-navigation")
-        .role(Role::Label)
-        .aria_label("Up and Down to move, Enter to take")
-        .flex()
-        .items_center()
-        .gap(px(4.))
-        .px(px(5.))
-        .text_size(metrics::TEXT_SM)
-        .text_color(theme::color(palette.fg_1))
-        .child(key_chip("↑", palette.fg_1, palette))
-        .child(key_chip("↓", palette.fg_1, palette))
-        .child("to move,")
-        .child(key_chip(RETURN_KEY, palette.fg_1, palette))
-        .child("to take")
-        .into_any_element()
+    chips_and_words([
+        key_chip("↑", palette.fg_1, palette).into_any_element(),
+        key_chip("↓", palette.fg_1, palette).into_any_element(),
+        "to move,".into_any_element(),
+        key_chip(RETURN_KEY, palette.fg_1, palette).into_any_element(),
+        "to take".into_any_element(),
+    ])
+    .id("launcher-command-navigation")
+    .role(Role::Label)
+    .aria_label("Up and Down to move, Enter to take")
+    .px(px(5.))
+    .text_size(metrics::TEXT_SM)
+    .text_color(theme::color(palette.fg_1))
+    .into_any_element()
 }
 
 /// Use the session list's short destination spelling when it keeps the matching text. A query for the full
@@ -496,60 +497,49 @@ fn recent_choice(
     let details = HostSentence::new("launcher-recent-details")
         .host(&HostText::from_host(words))
         .underline_matches(query);
-    div()
+    let title = div()
         .flex()
-        .items_start()
-        .gap(px(7.))
-        .child(div().mt(px(2.)).child(glyph(harness::icon(mark), mark_ink)))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .child(super::recent_agent_words(
-                            HostSentence::new("launcher-recent-agent"),
-                            selection,
-                            query,
-                            collections,
-                        ))
-                        .when(yolo, |line| {
-                            // Give red its own background on the accent fill so the selected row keeps the warning.
-                            line.child(
-                                key_chip(permission, palette.danger, palette)
-                                    .when(selected, |chip| chip.bg(theme::color(palette.bg_0))),
-                            )
-                        }),
-                )
-                .child(
-                    div()
-                        .truncate()
-                        .text_ellipsis_middle()
-                        .text_size(metrics::TEXT_SM)
-                        .text_color(theme::color(quiet))
-                        .font_family(TERMINAL_FONT)
-                        .child(destination),
-                )
-                .child(
-                    div()
-                        .truncate()
-                        .text_size(metrics::TEXT_SM)
-                        .text_color(theme::color(quiet))
-                        .child(details),
-                ),
-        )
-        .when(active && selection.container.is_none(), |row| {
-            row.child(
-                key_chip(enter_cap.clone(), ink, palette)
-                    .id("launcher-recent-enter")
-                    .role(Role::Label)
-                    .aria_label(enter_cap),
+        .items_center()
+        .gap(px(6.))
+        .child(super::recent_agent_words(
+            HostSentence::new("launcher-recent-agent"),
+            selection,
+            query,
+            collections,
+        ))
+        .when(yolo, |line| {
+            // Give red its own background on the accent fill so the selected row keeps the warning.
+            line.child(
+                key_chip(permission, palette.danger, palette)
+                    .when(selected, |chip| chip.bg(theme::color(palette.bg_0))),
             )
-        })
-        .into_any_element()
+        });
+    let destination = div()
+        .truncate()
+        .text_ellipsis_middle()
+        .text_size(metrics::TEXT_SM)
+        .text_color(theme::color(quiet))
+        .font_family(TERMINAL_FONT)
+        .child(destination);
+    let details = div()
+        .truncate()
+        .text_size(metrics::TEXT_SM)
+        .text_color(theme::color(quiet))
+        .child(details);
+    command_row_content(
+        Some(launcher_row_mark(harness::icon(mark), mark_ink)),
+        None,
+        [title, destination, details].map(IntoElement::into_any_element),
+    )
+    .when(active && selection.container.is_none(), |row| {
+        row.child(
+            key_chip(enter_cap.clone(), ink, palette)
+                .id("launcher-recent-enter")
+                .role(Role::Label)
+                .aria_label(enter_cap),
+        )
+    })
+    .into_any_element()
 }
 
 /// The key cap a highlighted recent setup shows. In Replace with, Enter on it replaces the source session, which
@@ -658,7 +648,17 @@ pub(super) fn typed_choice(
         Row::Template(name) => (
             HostSentence::new("launcher-result-template").host(&HostText::from_host(name.as_str())),
             Some("Apply this template"),
-            Some(launcher.template_mark(name, selected, palette, cx)),
+            Some(
+                rows::TemplateMark::from_fields(
+                    launcher
+                        .store
+                        .read(cx)
+                        .collections()
+                        .get::<LaunchTemplate>(name)
+                        .map(|template| &template.fields),
+                )
+                .appearance(selected, palette),
+            ),
         ),
         Row::Github(_) => (
             words,
@@ -677,64 +677,24 @@ pub(super) fn typed_choice(
         Row::Template(_) => title.underline_template_matches(query),
         _ => title.underline_matches(query),
     };
-    div()
-        .flex()
-        .items_start()
-        .gap(px(7.))
-        .when_some(mark, |row, (icon, ink)| {
-            row.child(div().mt(px(2.)).child(glyph(icon, ink)))
-        })
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(div().truncate().text_ellipsis_middle().child(title))
-                .when_some(detail, |body, detail| {
-                    body.child(
-                        div()
-                            .text_size(metrics::TEXT_SM)
-                            .text_color(theme::color(quiet))
-                            .child(detail),
-                    )
-                }),
-        )
-        .when(selected, |row| {
-            row.child(key_chip(RETURN_KEY, ink, palette))
-        })
-        .into_any_element()
-}
-
-impl Launcher {
-    /// The harness mark says what this template sets. A command without a declared agent gets the terminal
-    /// mark, and a partial template that leaves the kind open keeps the template glyph.
-    fn template_mark(
-        &self,
-        name: &str,
-        selected: bool,
-        palette: &Palette,
-        cx: &App,
-    ) -> (Icon, theme::Token) {
-        let (ink, quiet) = row_inks(selected, palette);
-        let collections = self.store.read(cx).collections();
-        let fields = collections
-            .get::<LaunchTemplate>(name)
-            .map(|template| &template.fields);
-        if let Some(harness) = fields.and_then(|fields| fields.agent) {
-            let mark = harness::glyph(harness);
-            (
-                harness::icon(mark),
-                if selected {
-                    ink
-                } else {
-                    harness::ink(mark, palette).unwrap_or(quiet)
-                },
-            )
-        } else if fields.is_some_and(|fields| fields.kind == Some(LauncherKind::Command)) {
-            (Icon::Terminal, quiet)
-        } else {
-            (Icon::Templates, quiet)
-        }
-    }
+    let title = div().truncate().text_ellipsis_middle().child(title);
+    let detail = detail.map(|detail| {
+        div()
+            .text_size(metrics::TEXT_SM)
+            .text_color(theme::color(quiet))
+            .child(detail)
+    });
+    command_row_content(
+        mark.map(|(icon, ink)| launcher_row_mark(icon, ink)),
+        None,
+        std::iter::once(title)
+            .chain(detail)
+            .map(IntoElement::into_any_element),
+    )
+    .when(selected, |row| {
+        row.child(key_chip(RETURN_KEY, ink, palette))
+    })
+    .into_any_element()
 }
 
 /// A template's summary and shortcut as in the catalog. Its quick-launch bolt sits beside the shortcut.
@@ -760,32 +720,27 @@ fn template_choice(
             summary::Part::Host(value) => sentence.host(&HostText::from_host(value.as_str())),
             summary::Part::Mono(value) => sentence.mono(&HostText::from_host(value.as_str())),
         });
-    let contents = div()
-        .flex()
-        .items_start()
-        .gap(px(7.))
-        .child(div().mt(px(2.)).child(glyph(icon, mark)))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(div().truncate().child(title))
-                .child(
-                    summary::line("launcher-template-summary", &template.summary)
-                        .text_size(metrics::TEXT_SM)
-                        .text_color(theme::color(quiet)),
-                ),
-        )
-        .when(template.marked, |row| {
-            row.child(glyph(
-                Icon::BoltFilled,
-                if selected { ink } else { palette.warn_bright },
-            ))
-        })
-        .when_some(template.key, |row, key| {
-            row.child(key_chip(key, quiet, palette))
-        })
-        .when(active, |row| row.child(key_chip(RETURN_KEY, ink, palette)));
+    let contents = command_row_content(
+        Some(launcher_row_mark(icon, mark)),
+        None,
+        [
+            div().truncate().child(title).into_any_element(),
+            summary::line("launcher-template-summary", &template.summary)
+                .text_size(metrics::TEXT_SM)
+                .text_color(theme::color(quiet))
+                .into_any_element(),
+        ],
+    )
+    .when(template.marked, |row| {
+        row.child(command_glyph(
+            Icon::BoltFilled,
+            if selected { ink } else { palette.warn_bright },
+        ))
+    })
+    .when_some(template.key, |row, key| {
+        row.child(key_chip(key, quiet, palette))
+    })
+    .when(active, |row| row.child(key_chip(RETURN_KEY, ink, palette)));
     (
         id,
         label.accessible_name(),
@@ -803,11 +758,7 @@ fn row_inks(selected: bool, palette: &Palette) -> (theme::Token, theme::Token) {
     }
 }
 
-/// Use the same marks and asset sizes as the adjacent form and the session list.
-fn glyph(icon: Icon, ink: theme::Token) -> impl IntoElement {
-    svg()
-        .path(icon.path())
-        .size(px(13.))
-        .flex_none()
-        .text_color(theme::color(ink))
+/// Align the launcher's leading mark with the first line even when a result has several lines of details.
+fn launcher_row_mark(icon: Icon, ink: theme::Token) -> Div {
+    div().mt(px(2.)).child(command_glyph(icon, ink))
 }

@@ -34,6 +34,7 @@
 mod banner;
 mod button;
 mod checkbox;
+mod command_surface;
 mod command_well;
 mod copy_button;
 mod copy_field;
@@ -72,6 +73,10 @@ pub(crate) use button::{
 };
 pub use button::{Button, CONDENSED_GAP, Condensed, IconButton, SplitPart, Tier};
 pub use checkbox::Checkbox;
+pub(crate) use command_surface::{
+    chips_and_words, command_field, command_glyph, command_heading, command_icon_tile,
+    command_row_content,
+};
 pub use command_well::{COMMAND_TEXT, CommandWell};
 pub use copy_button::{copy_button, copy_button_then};
 pub use copy_field::{CONFIRMATION, COPIED, CopyFeedback, CopyField};

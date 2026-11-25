@@ -17,7 +17,7 @@ use super::search::{
 };
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::tests::{aliased, connected, connecting, host};
-use crate::templates::rows::Row as TemplateRow;
+use crate::templates::rows::{Row as TemplateRow, TemplateMark};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
@@ -329,6 +329,7 @@ fn with_templates(names: &[&str]) -> Draft {
             .map(|name| TemplateRow {
                 name: (*name).to_owned(),
                 summary: Vec::new(),
+                mark: TemplateMark::Template,
                 marked: false,
                 key: None,
             })

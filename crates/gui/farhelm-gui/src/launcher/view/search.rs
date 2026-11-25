@@ -45,9 +45,9 @@ use farhelm_proto::session_requests::LaunchHistoryEntry;
 use farhelm_proto::ui_channel::HostView;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
-    WeakEntity, Window, div, px, svg,
+    AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
+    px,
 };
 
 use super::Launcher;
@@ -55,7 +55,10 @@ use super::field_list::{Drawn, FieldList, step};
 use super::host_name_with_phase;
 use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal, RecentSurface, recent_hover, wrapper_tail};
 use crate::assets::{Icon, TERMINAL_FONT};
-use crate::components::{HoverHelp, OptionRow, Role, ScrollBox, Vertical, key_chip};
+use crate::components::{
+    HoverHelp, OptionRow, Role, ScrollBox, Vertical, chips_and_words, command_field,
+    command_heading, command_icon_tile, key_chip,
+};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::short_name;
@@ -86,8 +89,6 @@ pub(super) const fn command_title(mode: &Mode) -> &'static str {
 
 /// The same Return symbol appears beside what it does in the empty field and on the action itself.
 pub(super) const RETURN_KEY: &str = "⏎";
-/// The header is the primary editing surface, with a slightly larger face than ordinary form fields.
-const COMMAND_FIELD_TEXT_SIZE: f32 = 14.5;
 /// Several lines of a message can stay visible without the header taking over a short window.
 const COMMAND_NOTICE_HEIGHT: f32 = 88.;
 /// The results' element id (`.launch-composer-search-results`), which tests find them by.
@@ -703,22 +704,8 @@ impl Launcher {
             .track_anchor("launcher-search-anchor", window, cx);
         let weak = cx.weak_entity();
         let empty = self.search.text(cx).is_empty();
-        let mark = div()
-            .debug_selector(|| "launcher-command-mark".into())
-            .flex()
-            .items_center()
-            .justify_center()
-            .size(px(24.))
-            .rounded(metrics::RADIUS_SM)
-            .border_1()
-            .border_color(theme::color(palette.border_dim))
-            .bg(theme::color(palette.bg_1))
-            .child(
-                svg()
-                    .path(Icon::Launch.path())
-                    .size(px(14.))
-                    .text_color(theme::color(palette.fg_0)),
-            );
+        let mark = command_icon_tile(Icon::Launch, palette)
+            .debug_selector(|| "launcher-command-mark".into());
         let suffix = empty.then(|| {
             key_chip(
                 format!("{RETURN_KEY} on empty launches"),
@@ -730,21 +717,21 @@ impl Launcher {
             .role(Role::Label)
             .aria_label("Enter on an empty field launches")
         });
-        let field = self.launcher_input(
-            "launcher-search",
-            &self.search,
-            SEARCH_LABEL,
-            HoverHelp::tooltip(
-                concat!(
-                    "Type a name, host, folder, harness, model, effort or permission, then press Enter to choose it. ",
-                    "Press Enter in an empty field to start this setup."
+        let field = command_field(
+            self.launcher_input(
+                "launcher-search",
+                &self.search,
+                SEARCH_LABEL,
+                HoverHelp::tooltip(
+                    concat!(
+                        "Type a name, host, folder, harness, model, effort or permission, then press Enter to choose it. ",
+                        "Press Enter in an empty field to start this setup."
+                    ),
                 ),
             ),
+            mark,
+            suffix,
         )
-        .height(px(48.))
-        .line_text_size(px(COMMAND_FIELD_TEXT_SIZE))
-        .line_prefix(mark)
-        .when_some(suffix, |field, suffix| field.line_suffix(suffix))
         .on_vertical(move |arrow, window, cx| {
             let _ = weak.update(cx, |launcher, cx| launcher.search_arrow(arrow, window, cx));
         });
@@ -878,15 +865,12 @@ impl Launcher {
                 ]
                 .into_iter()
                 .map(|(example, description)| {
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .child(
-                            key_chip(example.to_owned(), palette.accent, palette)
-                                .font_family(TERMINAL_FONT),
-                        )
-                        .child(description)
+                    chips_and_words([
+                        key_chip(example.to_owned(), palette.accent, palette)
+                            .font_family(TERMINAL_FONT)
+                            .into_any_element(),
+                        description.into_any_element(),
+                    ])
                 }),
             )
             .into_any_element()
@@ -1090,28 +1074,6 @@ fn draw_search_rows(
         children,
         highlighted: active_child,
     }
-}
-
-/// Give result groups the same quiet hierarchy as the form's section labels. Keep the ordinary spelling for speech.
-fn command_heading(
-    id: impl Into<SharedString>,
-    label: &str,
-    palette: &theme::Palette,
-) -> AnyElement {
-    let id = id.into();
-    div()
-        .id(id.clone())
-        .debug_selector(move || id.to_string())
-        .role(Role::Label)
-        .aria_label(label.to_owned())
-        .pt(px(4.))
-        .px(px(6.))
-        .pb(px(1.))
-        .text_size(px(11.))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::color(palette.fg_1))
-        .child(label.to_uppercase())
-        .into_any_element()
 }
 
 /// Show the current name of the saved registration. When search matched its ID alone, show that ID beside the name

@@ -16,14 +16,61 @@
 //! this module is what the switcher needs from the templates side for its section, its Quick launch row and its
 //! templates-only mode, the Cmd+J list: what a pick does in each, and the row's label and action.
 
-use farhelm_proto::launcher::LaunchTemplate;
+use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateFields};
 use gpui::{App, Window};
 
 use super::dispatch::{self, Origin, Reference};
 use super::shortcuts::Bindings;
 use super::summary::{self, Part};
+use crate::assets::Icon;
+use crate::harness;
 use crate::host_text::{HostSentence, HostText};
+use crate::marks::HarnessGlyph;
 use crate::session;
+use crate::theme::{Palette, Token};
+
+/// The template's declared launch determines its mark before the caller knows the row's highlight.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TemplateMark {
+    Agent(HarnessGlyph),
+    Terminal,
+    Template,
+}
+
+impl TemplateMark {
+    /// A declared agent identifies even a Command template. Without an agent, Command gets the terminal mark
+    /// and the remaining templates get the generic mark.
+    pub(crate) fn from_fields(fields: Option<&TemplateFields>) -> Self {
+        if let Some(harness) = fields.and_then(|fields| fields.agent) {
+            Self::Agent(harness::glyph(harness))
+        } else if fields.is_some_and(|fields| fields.kind == Some(LauncherKind::Command)) {
+            Self::Terminal
+        } else {
+            Self::Template
+        }
+    }
+
+    /// The identity ink belongs on the ordinary ground. A selected row uses the foreground of its selection fill.
+    pub(crate) fn appearance(self, selected: bool, palette: &Palette) -> (Icon, Token) {
+        let quiet = if selected {
+            palette.on_accent_dim
+        } else {
+            palette.fg_1
+        };
+        match self {
+            Self::Agent(mark) => (
+                harness::icon(mark),
+                if selected {
+                    palette.on_fill
+                } else {
+                    harness::ink(mark, palette).unwrap_or(quiet)
+                },
+            ),
+            Self::Terminal => (Icon::Terminal, quiet),
+            Self::Template => (Icon::Templates, quiet),
+        }
+    }
+}
 
 /// One template as a list row may show it. A row carries the name, the summary, the ⚡ mark and the number key, and the
 /// caller decides what to draw: the old switcher's templates section drew the name and summary only, and the Cmd+J
@@ -34,6 +81,8 @@ pub struct Row {
     pub name: String,
     /// What the template sets ([`summary::parts`]), as the Templates list shows it.
     pub summary: Vec<Part>,
+    /// What this template declares, for lists that render a leading mark.
+    pub(crate) mark: TemplateMark,
     /// Whether the template holds ⚡.
     pub marked: bool,
     /// The number key the template holds, if any ("1" to "9", "0").
@@ -80,6 +129,7 @@ pub fn rows(filter: &str, cx: &App) -> Result<Vec<Row>, HostSentence> {
         .map(|template| Row {
             name: template.name.clone(),
             summary: summary::parts(&template.fields),
+            mark: TemplateMark::from_fields(Some(&template.fields)),
             marked: bindings.is_marked(&template.name),
             key: bindings.key_of(&template.name),
         })
