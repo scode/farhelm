@@ -290,9 +290,8 @@ fn up_from_the_first_recent_restores_the_forms_enter(cx: &mut TestAppContext) {
     assert!(create.body.as_ref().unwrap()["launch"]["model"].is_null());
 }
 
-/// Replacement rows identify the action. Why: Enter on a highlighted row in Replace with replaces the source, which
-/// deletes it, so both the row's name ("Replace: …") and its visible key cap ("⏎ Replace") must say so. Restart's rows
-/// explain the fixed destination and cannot apply a setup.
+/// Invoking a recent option fills the form. Enter on the empty pane's highlighted recent can replace the source, so
+/// that key cap must name the replacement. Query results only fill. Restart's rows explain why its destination is held.
 #[gpui::test]
 fn replace_rows_name_the_action_and_restart_rows_are_inactive(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(codex(None, None, None));
@@ -303,11 +302,14 @@ fn replace_rows_name_the_action_and_restart_rows_are_inactive(cx: &mut TestAppCo
     );
     let answer = history(vec![launched(
         "/src/project",
-        &chosen(LaunchHarness::Codex, None, None, None),
+        &chosen(LaunchHarness::Codex, Some("recent-model"), None, None),
     )]);
     answer_history(&mut helm, cx, &answer);
     let name = name_of(cx, "launcher-recent-0").unwrap_or_default();
-    assert!(name.starts_with("Replace: /src/project · "), "{name}");
+    assert!(
+        name.starts_with("Fill from recent setup: /src/project · "),
+        "{name}"
+    );
     assert!(!recent_highlighted(cx, "launcher-recent-0"));
     test_support::click(cx, "launcher-search-row");
     keys(cx, "down");
@@ -317,6 +319,15 @@ fn replace_rows_name_the_action_and_restart_rows_are_inactive(cx: &mut TestAppCo
         Some("⏎ Replace"),
         "the highlighted row's cap names the replacement"
     );
+    super::search_view_tests::type_in(cx, "recent:project");
+    assert_eq!(
+        name_of(cx, "launcher-recent-enter").as_deref(),
+        Some("⏎ Fill")
+    );
+    assert!(draft(cx).agent.model.is_none());
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("recent-model"));
+    assert!(super::launch_tests::sent_to(&mut helm, cx, "/api/sessions/a/replace").is_empty());
 
     // A Guarded source, so the strip's permission narrowing keeps the recent Codex setup (which composes as Guarded).
     // A source with no recorded permission now restarts as YOLO, and its strip would hide that setup.

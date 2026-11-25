@@ -1527,6 +1527,8 @@ fn history_rows_are_refused_where_they_cannot_apply(cx: &mut TestAppContext) {
     let (_helm, cx) = new_in_tmp(cx, &history(vec![launched("/tmp", &retired)]));
     let before = draft(cx);
     type_in(cx, "recent:");
+    assert_eq!(selected_state(cx, "launcher-search-option-0"), Some(true));
+    assert_eq!(name_of(cx, "launcher-recent-enter"), None);
     keys(cx, "enter");
     assert!(
         name_of(cx, "launcher-search-refusal").is_some_and(|words| words.contains("Delete only")),

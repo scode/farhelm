@@ -115,9 +115,6 @@ consequences.
 - [`settings-close-can-hide-credential-delivery-warnings.md`](settings-close-can-hide-credential-delivery-warnings.md) —
   Save and Close can hide which hosts failed to receive a saved credential replacement.
 
-- [`launcher-hidden-recent-remains-enter-target.md`](launcher-hidden-recent-remains-enter-target.md) — A recent setup
-  can scroll out of view while Enter still uses it to submit the launcher.
-
 - [`launcher-underlining-can-stall-search.md`](launcher-underlining-can-stall-search.md) — Underlining matches in a long
   saved wrapper can do enough work on the GUI thread to slow launcher search.
 
@@ -330,9 +327,6 @@ consequences.
 - [`launcher-host-picker-omits-expanded-state.md`](launcher-host-picker-omits-expanded-state.md) — The Host picker gives
   assistive technology no way to tell whether Enter selects a destination or tries to launch.
 
-- [`launcher-recent-highlight-mutes-yolo-cue.md`](launcher-recent-highlight-mutes-yolo-cue.md) — Selecting a recent
-  setup replaces its red YOLO styling with ordinary highlight styling, leaving only the text cue.
-
 - [`launcher-recent-accepts-modified-return.md`](launcher-recent-accepts-modified-return.md) — The new launcher accepts
   modified Return on highlighted recent setups in addition to the displayed Return shortcut.
 
@@ -341,15 +335,6 @@ consequences.
 
 - [`quick-launch-loses-template-source-mark.md`](quick-launch-loses-template-source-mark.md) — A launcher opened for
   review or correction by quick launch can omit the source marker for the template that filled it.
-
-- [`launcher-recent-fill-option-named-replace.md`](launcher-recent-fill-option-named-replace.md) — Recent setup options
-  can announce Replace while activating the option only fills the form.
-
-- [`launcher-typed-recent-mislabels-enter.md`](launcher-typed-recent-mislabels-enter.md) — Enter on a typed recent
-  result only fills the form even though its key cue says Replace.
-
-- [`launcher-recent-hover-can-follow-old-row.md`](launcher-recent-hover-can-follow-old-row.md) — A recent setup can
-  briefly show hover help for the previous setup in its list position.
 
 - [`launcher-announces-two-selected-setups.md`](launcher-announces-two-selected-setups.md) — The launcher can report
   both the setup that filled the form and the current keyboard target as selected.
@@ -414,9 +399,6 @@ consequences.
 
 - [`launcher-keyboard-recents-hide-custom-flags.md`](launcher-keyboard-recents-hide-custom-flags.md) — Keyboard users
   can no longer reveal the custom permission flags that distinguish otherwise identical recent setups.
-
-- [`launcher-result-pick-leaves-approval-focus.md`](launcher-result-pick-leaves-approval-focus.md) — Picking a recent
-  setup or template in the wide launcher can leave keyboard input focused on a separate approval card.
 
 - [`hook-setup-accepts-nonutf8-config-path.md`](hook-setup-accepts-nonutf8-config-path.md) — Persistent hook setup can
   write to a non-UTF-8 configuration path and report success even though the path contract calls for refusing it.
