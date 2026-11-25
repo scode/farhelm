@@ -70,10 +70,12 @@ async fn execute(harness: LaunchHarness) -> DriftResult {
     for (model, effort) in choices {
         let label = format!("{model} {}", effort.as_cli_arg());
         match check_launch(&profile, harness, model, effort, effort == turn_effort).await {
-            Ok(()) if harness == Goose => {
-                println!("reasoning effort launch accepted: {label}; Goose exposes no effort value")
-            }
-            Ok(()) => println!("reasoning effort confirmed: {label}"),
+            Ok(()) => match effort_evidence(harness) {
+                EffortEvidence::Displayed => println!("reasoning effort confirmed: {label}"),
+                EffortEvidence::LaunchOnly { .. } => println!(
+                    "reasoning effort launch accepted: {label}; {harness:?} exposes no effort value"
+                ),
+            },
             Err(DriftError::CouldNotRun(reason)) => {
                 if failures.is_empty() {
                     return Err(DriftError::CouldNotRun(format!("{label}: {reason}")));
@@ -108,33 +110,26 @@ async fn check_launch(
         effort: Some(effort.into()),
         permissions: None,
         permission_flags: None,
-        // Claude installed an update between two launches on the first run. Keep the CLI version under test
-        // stable without changing the user's settings. See https://code.claude.com/docs/en/env-vars.
-        wrapper_prefix: (harness == LaunchHarness::Claude)
-            .then(|| vec!["env".into(), "DISABLE_AUTOUPDATER=1".into()]),
+        wrapper_prefix: None,
         container: None,
         workspace_trust: profile.trust_at_launch.then_some(true),
     };
     with_drift_supervisor(profile, selection, None, async |env, launch| {
-        if harness == LaunchHarness::Goose {
+        let evidence = effort_evidence(harness);
+        if let EffortEvidence::LaunchOnly { variable, .. } = evidence {
             let argv = launch.start_argv().map_err(anyhow::Error::msg)?;
-            let assignment = format!("GOOSE_THINKING_EFFORT={}", effort.as_cli_arg());
+            let assignment = format!("{variable}={}", effort.as_cli_arg());
             if !argv.starts_with(&["env".to_owned(), assignment]) {
                 return Err(anyhow::anyhow!(
-                    "Goose launch omitted the requested effort environment assignment"
+                    "{harness:?} launch omitted the requested effort environment assignment"
                 )
                 .into());
             }
         }
         env.with_session(launch, farhelm_helm::CreateExtras::default(), async |id| {
-            // Muse can open a warning beside the footer. Keep the full model and effort label visible.
-            let cols = if harness == LaunchHarness::Muse {
-                180
-            } else {
-                COLS
-            };
             let mut terminal =
-                Terminal::attach_with_width(env.sup, env.client, id, false, cols).await?;
+                Terminal::attach_with_width(env.sup, env.client, id, false, effort_cols(harness))
+                    .await?;
             tokio::time::timeout(
                 EFFORT_START_LIMIT,
                 terminal.ready(profile, TrustPolicy::AutoAnswer, false),
@@ -143,21 +138,23 @@ async fn check_launch(
             .map_err(|_| anyhow::anyhow!("composer did not open\n{}", terminal.diagnostics()))??;
 
             let deadline = tokio::time::Instant::now() + EFFORT_DISPLAY_LIMIT;
-            let (observed, goose_ready) = loop {
+            let (observed, launch_ready) = loop {
                 let screen = terminal.host.screen_tail(SCREEN_BYTES).to_ascii_lowercase();
                 terminal.check(&screen, false).await?;
                 let shown = displayed_effort(harness, model, &screen);
-                // Goose prints its banner before starting the line editor. Wait for the editor's own prompt.
-                let goose_ready = harness == LaunchHarness::Goose
-                    && screen.lines().any(|line| line.trim() == ">");
-                if goose_ready || shown == Some(effort) || tokio::time::Instant::now() >= deadline {
-                    break (shown, goose_ready);
+                let launch_ready = match evidence {
+                    EffortEvidence::Displayed => false,
+                    EffortEvidence::LaunchOnly { ready, .. } => ready(&screen),
+                };
+                if launch_ready || shown == Some(effort) || tokio::time::Instant::now() >= deadline
+                {
+                    break (shown, launch_ready);
                 }
                 pace().await;
             };
-            if harness == LaunchHarness::Goose && !goose_ready {
+            if matches!(evidence, EffortEvidence::LaunchOnly { .. }) && !launch_ready {
                 return Err(anyhow::anyhow!(
-                    "Goose did not open its composer\n{}",
+                    "{harness:?} did not open its composer\n{}",
                     terminal.diagnostics()
                 )
                 .into());
@@ -172,15 +169,17 @@ async fn check_launch(
                     effort.as_cli_arg()
                 );
                 let screen = terminal.host.screen_tail(SCREEN_BYTES).to_ascii_lowercase();
-                if harness == LaunchHarness::Claude && screen.contains("switched to opus") {
-                    println!("Claude reported a vendor model fallback during the turn");
+                if let Some(notice) = model_fallback_notice(harness)
+                    && screen.contains(notice)
+                {
+                    println!("{harness:?} reported a vendor model fallback during the turn");
                 }
                 // A visible change during the turn takes precedence over the earlier startup reading.
                 displayed_effort(harness, model, &screen).or(observed)
             } else {
                 observed
             };
-            if !goose_ready && observed != Some(effort) {
+            if !launch_ready && observed != Some(effort) {
                 return Err(anyhow::anyhow!(
                     "active effort was {:?}, expected {}\n{}",
                     observed.map(LaunchEffort::as_cli_arg),
@@ -194,6 +193,57 @@ async fn check_launch(
         .await
     })
     .await
+}
+
+/// What a case can see of the effort a harness applied.
+#[derive(Clone, Copy)]
+enum EffortEvidence {
+    /// The active effort is shown in the CLI's own status, which the case reads.
+    Displayed,
+    /// Nothing on screen shows the effort. The case checks that the launch passes it through `variable` and that
+    /// the CLI reaches its input prompt, which `ready` recognizes; the provider's effective effort stays unverified.
+    LaunchOnly {
+        variable: &'static str,
+        ready: fn(&str) -> bool,
+    },
+}
+
+/// Each harness states how its effort can be confirmed, so a new one cannot inherit a check by default.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn effort_evidence(harness: LaunchHarness) -> EffortEvidence {
+    use LaunchHarness::*;
+    match harness {
+        // Goose prints its banner before starting the line editor. Wait for the editor's own prompt.
+        Goose => EffortEvidence::LaunchOnly {
+            variable: "GOOSE_THINKING_EFFORT",
+            ready: |screen| screen.lines().any(|line| line.trim() == ">"),
+        },
+        Claude | Codex | Antigravity | Muse | Pi | Omp | Cursor | OpenCode | Grok | Bash | Zsh
+        | Custom => EffortEvidence::Displayed,
+    }
+}
+
+/// The terminal width an effort case attaches at. Muse can open a warning beside its footer, so it gets enough
+/// room to keep the full model and effort label visible.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn effort_cols(harness: LaunchHarness) -> u16 {
+    use LaunchHarness::*;
+    match harness {
+        Muse => 180,
+        Claude | Codex | Antigravity | Goose | Pi | Omp | Cursor | OpenCode | Grok | Bash | Zsh
+        | Custom => COLS,
+    }
+}
+
+/// Screen text by which a CLI says it moved the turn to another model, worth noting next to the effort it kept.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn model_fallback_notice(harness: LaunchHarness) -> Option<&'static str> {
+    use LaunchHarness::*;
+    match harness {
+        Claude => Some("switched to opus"),
+        Codex | Antigravity | Muse | Goose | Pi | Omp | Cursor | OpenCode | Grok | Bash | Zsh
+        | Custom => None,
+    }
 }
 
 /// A nonce in the reply distinguishes the model's answer from startup text and the echoed user prompt.
