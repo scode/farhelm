@@ -191,17 +191,23 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   accepting an engine result. Use a proof tied to that authenticated endpoint. A token sent with the command does not
   establish who answered. Accept capabilities and claims only from the verified machine and account. The probe collects
   capabilities over several commands, so verifying its last reply alone cannot establish where the earlier replies came
-  from. Apply the same check to recipe scripts, the creation-time proxy read and delivery of the container's proxy file.
-  Hold private input until verification succeeds on the connection that will receive it. A separate preflight can
-  succeed while a later connection reaches a different account. The existing command runner sends private input
-  immediately and exposes the final output after the process finishes. The full fix needs a transport boundary that
-  verifies before sending bytes while preserving cleanup on timeout and cancellation. Leftover discovery and Delete must
-  carry any existing claim across every command, including absence checks. When the runtime has no cached host
-  observation, its probe can replace the claim before cleanup reads it because a leftover has no registry row. Preserve
-  the cleanup identity across that refresh and retry, while keeping explicit route changes and adoption consistent. Use
-  a claim established by the first probe if one becomes available, and preserve the existing ownership checks for legacy
-  rows without a claim. Update the container-session contract and cover withheld private input, a cold-cache refusal, a
-  refused retry and successful discovery or cleanup after the original destination is restored.
+  from. Verify those observations before accepting a newly discovered place's first claim. Apply the same check to
+  recipe scripts, the creation-time proxy read and delivery of the container's proxy file. Hold private input until
+  verification succeeds on the connection that will receive it. A separate preflight can succeed while a later
+  connection reaches a different account. The existing command runner sends private input immediately and exposes the
+  final output after the process finishes. The full fix needs a transport boundary that verifies before sending bytes
+  while preserving cleanup on timeout and cancellation. Leftover discovery and Delete must carry any existing claim
+  across every command, including absence checks. When the runtime has no cached host observation, its probe can replace
+  the claim before cleanup reads it because a leftover has no registry row. Preserve the cleanup identity across that
+  refresh and retry, while keeping explicit route changes and adoption consistent. A check that refuses a moved place
+  can currently replace the runtime's last matching Podman path and proxy settings. Keep that matching observation
+  available to existing resources and recheck when the cache has no observation for their recorded machine and account.
+  Keep the refusal visible to new launches and builds. This includes a cold cache after Adopt when existing resources
+  still need their claimed machine. Only retire an unused claim after an ordinary supervisor refusal when the place
+  check establishes that the endpoint moved. Use a claim established by the first probe if one becomes available, and
+  preserve the existing ownership checks for legacy rows without a claim. Update the container-session contract and
+  cover withheld private input, a cold-cache refusal, a refused retry and successful discovery or cleanup after the
+  original destination is restored.
 
 - **Keep host proxy settings out of Podman recipe images.** Recipe build and preparation helpers write
   `90-farhelm-proxy.conf` for their systemd user managers. A captured image can carry that file, including passwords, in

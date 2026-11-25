@@ -1360,6 +1360,10 @@ pub struct ConnectionManager {
     transport: Arc<dyn HostTransport>,
     /// Provider I/O is installed before actors begin checking resource status.
     providers: Providers,
+    /// The place checks published by AppState. Adoption withdraws their
+    /// evidence at the same boundary as it withdraws the old connection.
+    podman_places:
+        std::sync::OnceLock<std::sync::Weak<crate::environment::podman_probe::PodmanPlaces>>,
     cadence: Cadence,
     /// The test gate every actor of this manager checks before publishing
     /// a duplicate result; see [`DuplicateGateSlot`].
@@ -1771,6 +1775,7 @@ impl ConnectionManager {
             store,
             transport,
             providers,
+            podman_places: Default::default(),
             cadence,
             #[cfg(test)]
             duplicate_gate: DuplicateGateSlot::default(),
@@ -1811,6 +1816,15 @@ impl ConnectionManager {
         handler: Arc<dyn crate::agent_requests::AgentRequestHandler>,
     ) {
         let _ = self.agent_requests.set(handler);
+    }
+
+    /// Share the cache that feeds this fleet's host views without extending
+    /// its lifetime beyond their AppState.
+    pub(crate) fn set_podman_places(
+        &self,
+        places: std::sync::Weak<crate::environment::podman_probe::PodmanPlaces>,
+    ) {
+        let _ = self.podman_places.set(places);
     }
 
     /// Stop `host`'s connection and keep it stopped until
@@ -2475,10 +2489,20 @@ impl ConnectionManager {
         {
             return None;
         }
-        Some(
-            self.sealed_state(row.id)
-                .unwrap_or_else(|| handle.status.borrow().state.clone()),
-        )
+        let state = self
+            .sealed_state(row.id)
+            .unwrap_or_else(|| handle.status.borrow().state.clone());
+        // A Retry started before Adopt can still publish a refusal about
+        // the superseded installation on the same route.
+        match &state {
+            HostState::IdentityMismatch { recorded, .. }
+            | HostState::IdentityUnverified { recorded }
+                if row.host_identity.as_ref() != Some(recorded) =>
+            {
+                None
+            }
+            _ => Some(state),
+        }
     }
 
     /// Wait until `host`'s state satisfies `predicate`, and return it.
@@ -3184,6 +3208,11 @@ impl ConnectionManager {
     /// retirement is preserved: only a successful revival below can replace
     /// it with a status backed by a new actor.
     pub async fn adopt(&self, host: HostId, approved: &str) -> anyhow::Result<()> {
+        let places = self.podman_places.get().and_then(std::sync::Weak::upgrade);
+        let publication = match &places {
+            Some(places) => Some(places.lock_claim_publication().await),
+            None => None,
+        };
         let (state, row, status) = {
             let map = self.actors.lock().expect("actor map mutex poisoned");
             let Some(handle) = map.actors.get(&host) else {
@@ -3213,6 +3242,7 @@ impl ConnectionManager {
             .adopt_identity(host, &DialedAs::of(&row), &recorded, &reported)
             .await
         {
+            drop(publication);
             // Another entry holds the identity this mismatch offered, which
             // no adoption can take (SPEC.md: never two entries on one
             // machine). That is a duplicate, and the actor would only learn
@@ -3229,6 +3259,9 @@ impl ConnectionManager {
                 self.nudge_now(host, false, None).await?;
             }
             return Err(error.context(format!("adopting host {host}'s new identity")));
+        }
+        if let Some(places) = &places {
+            places.invalidate_check(host);
         }
         // Logged with the actor's own metadata — host, kind, destination —
         // because this decision happens on the MANAGER, outside the actor's
@@ -3270,6 +3303,7 @@ impl ConnectionManager {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         });
         retire_withdrawn(withdrawn);
+        drop(publication);
         // Published against the COMMIT, not against whatever the reconnect
         // below manages to do: the purge is already visible in the merged
         // list, and the window is still showing the rows it deleted.
@@ -13493,6 +13527,7 @@ mod tests {
             store,
             transport: ScriptedTransport::new(),
             providers: Providers::default(),
+            podman_places: Default::default(),
             cadence: Cadence::default(),
             duplicate_gate: DuplicateGateSlot::default(),
             refresh_gate: DuplicateGateSlot::default(),

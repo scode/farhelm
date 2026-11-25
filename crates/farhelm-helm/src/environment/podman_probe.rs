@@ -463,8 +463,16 @@ impl PodmanPlaces {
 
     /// Attach to the helm that owns these checks. One cache serves one helm,
     /// so a second AppState over the same delivery service cannot redirect it.
-    pub(crate) fn publish_to(&self, manager: &Arc<ConnectionManager>) {
-        let _ = self.manager.set(Arc::downgrade(manager));
+    pub(crate) fn publish_to(self: &Arc<Self>, manager: &Arc<ConnectionManager>) {
+        if self.manager.set(Arc::downgrade(manager)).is_ok() {
+            manager.set_podman_places(Arc::downgrade(self));
+        }
+    }
+
+    /// Adoption holds this across the registry commit, probe invalidation
+    /// and withdrawal of the old actor state.
+    pub(crate) async fn lock_claim_publication(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.claim_publication.lock().await
     }
 
     /// Bump the feed for a change a host entry shows. Callers hold no cache
@@ -489,7 +497,7 @@ impl PodmanPlaces {
             .update_ssh_destination_changed(host, destination)
             .await?
         {
-            self.invalidate_route(host);
+            self.invalidate_check(host);
         }
         Ok(())
     }
@@ -503,13 +511,13 @@ impl PodmanPlaces {
     ) -> anyhow::Result<()> {
         let _published = self.claim_publication.lock().await;
         if store.set_ssh_tailscale(row, tailscale).await? {
-            self.invalidate_route(row.id);
+            self.invalidate_check(row.id);
         }
         Ok(())
     }
 
-    /// Called under claim publication so an in-flight probe loses its permit before the edit is visible.
-    fn invalidate_route(&self, host: HostId) {
+    /// Invalidate cached and pending checks under the claim-publication lock.
+    pub(crate) fn invalidate_check(&self, host: HostId) {
         let mut cache = self.cache.lock().unwrap();
         cache.probes.remove(&host);
         cache.refreshing.remove(&host);
@@ -523,10 +531,13 @@ impl PodmanPlaces {
         let ordinary_state = self.ordinary_state(row);
         let ordinary_refusal = ordinary_state.as_ref().and_then(ordinary_identity_refusal);
         let cache = self.cache.lock().unwrap();
+        // The registry can show a new installation before Adopt clears the
+        // old check. The old actor cannot vouch for a snapshot of that row.
+        let current_actor = ordinary_state.is_some() || self.manager.get().is_none();
         let probe = cache
             .probes
             .get(&row.id)
-            .filter(|probe| probe.route == route);
+            .filter(|probe| current_actor && probe.route == route);
         let ready = probe.and_then(|probe| probe.result.as_ref().ok());
         let reason = ordinary_refusal.map(str::to_owned).or_else(|| {
             probe.and_then(|probe| {
@@ -590,6 +601,8 @@ impl PodmanPlaces {
     /// identify the ordinary owner even when that owner's supervisor is
     /// unreachable. Any other refusal needs the challenger's own live hello
     /// before the store rechecks both rows and can transfer an unused claim.
+    /// The initial collision keeps the prior claim until that decision so a
+    /// resource registered between the two writes keeps its place.
     async fn settle_claim(
         &self,
         store: &HelmStore,
@@ -598,32 +611,33 @@ impl PodmanPlaces {
         verified_supervisor: Option<String>,
     ) -> anyhow::Result<Option<PlaceClaim>> {
         let claim = store
-            .claim_podman_place(row, identity.clone(), verified_supervisor.clone(), None)
+            .try_claim_podman_place(row, identity.clone(), verified_supervisor.clone())
             .await?;
         let Some(PlaceClaim::Twin { owner, .. }) = &claim else {
             return Ok(claim);
         };
-        let Ok(incumbent) = current_row(store, *owner).await else {
-            return Ok(claim);
-        };
-        let verified = match self.ordinary_state(&incumbent) {
-            Some(HostState::Duplicate { twin, identity }) if twin == row.id => Some(identity),
-            // A duplicate pointing elsewhere can show that the incumbent is
-            // refused. The challenger still needs its own verified hello.
-            Some(HostState::Duplicate { .. }) => verified_supervisor,
-            Some(HostState::IdentityMismatch { recorded, .. })
-            | Some(HostState::IdentityUnverified { recorded })
-                if incumbent.host_identity.as_ref() == Some(&recorded) =>
-            {
-                verified_supervisor
+        let incumbent = current_row(store, *owner).await.ok();
+        let verified = incumbent.as_ref().and_then(|incumbent| {
+            match self.ordinary_state(incumbent) {
+                Some(HostState::Duplicate { twin, identity }) if twin == row.id => Some(identity),
+                // These refusals can show that the incumbent is barred from new work.
+                // The challenger needs its own verified hello to take the claim.
+                Some(
+                    HostState::Duplicate { .. }
+                    | HostState::IdentityMismatch { .. }
+                    | HostState::IdentityUnverified { .. },
+                ) => verified_supervisor.clone(),
+                _ => None,
             }
-            _ => None,
-        };
-        let Some(verified) = verified else {
-            return Ok(claim);
-        };
+        });
+        let refused = incumbent.as_ref().filter(|_| verified.is_some());
         store
-            .claim_podman_place(row, identity.clone(), Some(verified), Some(&incumbent))
+            .claim_podman_place(
+                row,
+                identity.clone(),
+                verified.or(verified_supervisor),
+                refused,
+            )
             .await
     }
 
@@ -1416,6 +1430,70 @@ mod tests {
         assert!(
             places.fresh(&harness.store, usable).await.is_ok(),
             "the refused actor did not displace the usable place"
+        );
+    }
+
+    /// Adoption changes the accepted supervisor without changing the route.
+    /// The previous installation's unused place claim and check must expire
+    /// at that boundary even when no one has asked to check the new host.
+    #[farhelm_testtrace::test]
+    async fn adoption_clears_the_previous_podman_check_and_unused_claim() {
+        use crate::rest_harness::{FleetBuilder, HostScript};
+
+        let builder = FleetBuilder::new()
+            .await
+            .place_commands(scripted_places(&[TEST_PLACE_IDENTITY]));
+        let (builder, host) = builder
+            .ssh(
+                "place.example",
+                HostScript {
+                    identity: Some("before".into()),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_state(host, HostState::is_connected).await;
+        let places = &harness.state.podman_places;
+        assert!(places.fresh(&harness.store, host).await.is_ok());
+
+        harness
+            .fleet
+            .edit(host, |script| script.identity = Some("after".into()));
+        harness.manager.retry_now(host).await.unwrap();
+        harness
+            .await_state(host, |state| {
+                matches!(state, HostState::IdentityMismatch { .. })
+            })
+            .await;
+        let before = current_row(&harness.store, host).await.unwrap();
+        assert!(places.view(&before).unwrap().checked_at.is_some());
+        assert!(
+            harness
+                .store
+                .podman_place_identity(host)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let mut adopted_row = before.clone();
+        adopted_row.host_identity = Some("after".into());
+        assert!(
+            harness
+                .manager
+                .state_for_registry_row(&adopted_row)
+                .is_none(),
+            "a late refusal about the old installation cannot settle a check for the adopted row",
+        );
+        assert_eq!(places.view(&adopted_row).unwrap().checked_at, None);
+
+        harness.manager.adopt(host, "after").await.unwrap();
+        let after = current_row(&harness.store, host).await.unwrap();
+        assert_eq!(after.host_identity.as_deref(), Some("after"));
+        assert_eq!(places.view(&after).unwrap().checked_at, None);
+        assert_eq!(
+            harness.store.podman_place_identity(host).await.unwrap(),
+            None
         );
     }
 
