@@ -609,12 +609,27 @@ async fn wait_for_turn(
     hook_log: &Path,
     expected: &TurnExpectation<'_>,
 ) -> Result<SessionSnapshot, DriftError> {
+    wait_for_turn_matching(terminal, sup, id, hook_log, expected, |text| {
+        expected.saw_reply(text)
+    })
+    .await
+}
+
+/// Categories can require a complete reply across several screen rows while keeping the same capture evidence.
+async fn wait_for_turn_matching(
+    terminal: &mut Terminal<'_>,
+    sup: &Supervisor,
+    id: &str,
+    hook_log: &Path,
+    expected: &TurnExpectation<'_>,
+    mut saw_reply: impl FnMut(&str) -> bool,
+) -> Result<SessionSnapshot, DriftError> {
     let deadline = tokio::time::Instant::now() + TURN_LIMIT;
     let mut answered = false;
     let mut acked = 0;
     loop {
         let text = terminal.host.screen_tail(SCREEN_BYTES);
-        answered |= expected.saw_reply(&text);
+        answered |= saw_reply(&text);
         terminal
             .check(
                 &text.to_lowercase(),
@@ -767,15 +782,38 @@ async fn with_drift_supervisor(
     extra_config: Option<fn(&Path) -> anyhow::Result<private_config::PrivateConfig>>,
     run: impl AsyncFnOnce(DriftEnv<'_>, farhelm_proto::SessionLaunch) -> DriftResult,
 ) -> DriftResult {
-    with_drift_supervisor_hooks(profile, selection, extra_config, AgentHooks::default(), run).await
+    with_drift_supervisor_using(
+        profile,
+        selection,
+        extra_config,
+        SupervisorSeams::default(),
+        run,
+    )
+    .await
 }
 
 /// The capture category can turn hooks off while keeping the same ownership and mirror checks as ordinary drift.
 async fn with_drift_supervisor_hooks(
     profile: &Harness,
-    mut selection: LaunchSelection,
+    selection: LaunchSelection,
     extra_config: Option<fn(&Path) -> anyhow::Result<private_config::PrivateConfig>>,
     agent_hooks: AgentHooks,
+    run: impl AsyncFnOnce(DriftEnv<'_>, farhelm_proto::SessionLaunch) -> DriftResult,
+) -> DriftResult {
+    let seams = SupervisorSeams {
+        agent_hooks,
+        ..SupervisorSeams::default()
+    };
+    with_drift_supervisor_using(profile, selection, extra_config, seams, run).await
+}
+
+/// Start with an explicit supervisor policy (its hook setting, its agent instructions) while preserving the
+/// fixture's private paths and teardown.
+async fn with_drift_supervisor_using(
+    profile: &Harness,
+    mut selection: LaunchSelection,
+    extra_config: Option<fn(&Path) -> anyhow::Result<private_config::PrivateConfig>>,
+    mut seams: SupervisorSeams,
     run: impl AsyncFnOnce(DriftEnv<'_>, farhelm_proto::SessionLaunch) -> DriftResult,
 ) -> DriftResult {
     if which_binary(profile.binary).is_none() {
@@ -796,11 +834,7 @@ async fn with_drift_supervisor_hooks(
             .map(|prepare| prepare(config.path()))
             .transpose()?
     };
-    let installs_hooks = agent_hooks.allows(kind);
-    let mut seams = SupervisorSeams {
-        agent_hooks,
-        ..SupervisorSeams::default()
-    };
+    let installs_hooks = seams.agent_hooks.allows(kind);
     if let Some(private) = &private {
         private.apply(&mut seams);
     }
@@ -900,6 +934,7 @@ macro_rules! drift_cases {
 mod base;
 mod capture_timing_hooks;
 mod initial_prompt;
+mod instructions_delivery;
 mod model_selection;
 mod named_conversation;
 mod permission_modes;
