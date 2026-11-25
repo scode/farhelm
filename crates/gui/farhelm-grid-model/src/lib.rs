@@ -120,7 +120,7 @@ impl GridRow {
     }
 
     /// The boundary after this row's selectable columns, at its original width.
-    fn text_columns(&self, cols: u16) -> u16 {
+    pub fn text_columns(&self, cols: u16) -> u16 {
         cols.saturating_sub(u16::from(self.wide_wrap_padding))
     }
 

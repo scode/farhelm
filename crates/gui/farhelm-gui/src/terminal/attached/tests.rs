@@ -1371,7 +1371,18 @@ fn an_exited_terminal_reaches_the_start_of_its_history(cx: &mut TestAppContext) 
             first_visible, expected_lift,
             "the measured clip for exit={exit}, band={band}"
         );
+        let lines = |h: &mut Harness| {
+            h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).scroll_position())
+        };
+        let bottom = lines(&mut h);
+        assert_eq!(bottom.visible, usize::from(FITTED.1) - expected_lift);
+        assert_eq!(
+            bottom.total - bottom.visible,
+            40 + usize::from(trimmed) + expected_lift
+        );
+        assert_eq!(bottom.top, bottom.total - bottom.visible);
         h.wheel(1000.);
+        assert_eq!(lines(&mut h).top, 0);
         let expected = if trimmed {
             crate::terminal::TRIMMED_TEXT
         } else {
@@ -3210,6 +3221,29 @@ fn the_page_keys_page_through_history_and_send_nothing(cx: &mut TestAppContext) 
     keys(h.cx, "ctrl-shift-pagedown");
     assert!(h.following());
     assert_eq!(h.sent(), [], "the program hears nothing of the page keys");
+
+    // The exit line costs a text row. A page leaves the previous first painted row visible at the other edge.
+    let mut state = h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).state.unwrap());
+    state.exit = Some(ExitState::Code(0));
+    h.fake().output(GridOutput::State(state));
+    settle(h.cx);
+    let lift = h.read(|owner, cx| owner.shown_lift(cx));
+    assert!(lift.is_some_and(|lift| lift > 0.));
+    keys(h.cx, "shift-pageup");
+    assert_eq!(h.text().unwrap().lines().next(), Some("h41"));
+    keys(h.cx, "shift-pagedown");
+    assert!(h.following());
+    let height = h.read(|owner, cx| owner.cell(cx).unwrap().height);
+    // Leave one cell and the exit line in view while the fake retains the original committed grid.
+    h.size.set((PANE.0, 2.5 * height + 2. * PANE_PADDING));
+    redraw(h.cx);
+    let lines = |h: &mut Harness| {
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).scroll_position())
+    };
+    assert_eq!(lines(&mut h).visible, 1);
+    let before = lines(&mut h).top;
+    keys(h.cx, "shift-pageup");
+    assert_eq!(lines(&mut h).top, before - 1);
 }
 
 /// On a live alternate screen the program owns the wheel. The supervisor turns each message into arrow keys
@@ -3735,6 +3769,47 @@ fn a_double_click_copies_the_word_and_a_triple_click_the_line(cx: &mut TestAppCo
         settle(h.cx);
         assert_eq!(h.clipboard().as_deref(), Some(expected), "{count} clicks");
     }
+}
+
+/// The exit message has no terminal text to copy. Alt release on the actual final row still leaves a local selection.
+#[gpui::test]
+fn exit_line_clicks_leave_the_final_screen_selection_local(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let last = FITTED.1 - 1;
+    h.attach_rows(
+        serde_json::json!([[last,{"w":false,"r":[[0,5,"hello",[0,-1,-1]]]}]]),
+        serde_json::json!([]),
+    );
+    h.choose(&h.owner.clone());
+    let mut state = h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).state.unwrap());
+    state.exit = Some(ExitState::Code(0));
+    h.fake().output(GridOutput::State(state));
+    settle(h.cx);
+    let (from, to) = (h.at_cell(2, last), h.at_cell(3, last));
+    h.cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::alt());
+    settle(h.cx);
+    assert_eq!(h.clipboard().as_deref(), Some("l"));
+    let selected = h.selection();
+    assert!(
+        selected.is_some(),
+        "the one-cell selection stays highlighted"
+    );
+    let exit = h.cx.debug_bounds("terminal-exit").unwrap();
+    let at = point(from.x, exit.center().y);
+    for count in [2, 3] {
+        h.cx.simulate_event(MouseDownEvent {
+            position: at,
+            click_count: count,
+            ..MouseDownEvent::default()
+        });
+        h.cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+        settle(h.cx);
+        assert_eq!(h.selection(), selected);
+        assert_eq!(h.clipboard().as_deref(), Some("l"));
+    }
+    assert_eq!(h.sent(), []);
 }
 
 /// Shift-click extends the selection to where it lands, from the selection's start, and copies the result; a word drag
@@ -5174,10 +5249,8 @@ fn hostile_hyperlink_text_and_targets_stay_data(cx: &mut TestAppContext) {
     assert_eq!(h.cx.opened_url(), None, "and nothing opens");
 }
 
-/// A printed address can run past the end of a row, and output that later extends it on the next row changes where a
-/// click goes: the click must open the address as it now reads, not as it read when first hovered. Specified: with row 0
-/// soft-wrapped and ending in `https://bank.co`, a click opens that (normalized, `https://bank.co/`); once the program
-/// prints `m` at the start of row 1, the next click opens `https://bank.com/`.
+/// A printed address already on screen can be clicked before the hover draws. Appending to its next row changes the
+/// target, so a click during that update opens nothing. Once the grid draws, the click opens the extended address.
 #[gpui::test]
 fn a_printed_address_extended_on_the_next_row_opens_its_new_address(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -5204,17 +5277,34 @@ fn a_printed_address_extended_on_the_next_row_opens_its_new_address(cx: &mut Tes
     let owner = h.owner.clone();
     h.choose(&owner);
     let on = h.at_cell(cols - 4, 0);
-    h.click_at(on);
+    assert_eq!(h.hovered(), None);
+    h.cx.update(|window, cx| {
+        window.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: on,
+                ..MouseMoveEvent::default()
+            }),
+            cx,
+        );
+        test_support::click_before_redraw(on, window, cx);
+    });
     assert_eq!(h.cx.opened_url().as_deref(), Some("https://bank.co/"));
 
     let extend: GridOutput = serde_json::from_value(serde_json::json!({
         "t":"rows","rows":[[1, {"w":false,"r":[[0,1,"m",[0,-1,-1]]]}]]
     }))
     .unwrap();
-    h.fake().output(extend);
-    h.fake()
-        .output(serde_json::from_value(frame(2, cols, rows)).unwrap());
-    settle(h.cx);
+    h.cx.update(|window, cx| {
+        let view = owner.read(cx).committed.clone().unwrap();
+        view.update(cx, |view, cx| {
+            let commit = serde_json::from_value(frame(2, cols, rows)).unwrap();
+            view.apply([extend, commit], cx).1.unwrap();
+            assert_eq!(view.hovered_link().unwrap().uri, "https://bank.com");
+        });
+        test_support::click_before_redraw(on, window, cx);
+    });
+    assert_eq!(h.cx.opened_url().as_deref(), Some("https://bank.co/"));
+    redraw(h.cx);
     h.click_at(on);
     assert_eq!(h.cx.opened_url().as_deref(), Some("https://bank.com/"));
 }

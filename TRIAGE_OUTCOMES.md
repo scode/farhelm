@@ -1613,20 +1613,6 @@
   discussing it.
 - Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
-## trailing-link-disclosure-warning-wording-untested.md
-
-- Outcome: `other`.
-- Assessment: Test-only. No test checks the hover warning's quoted-text heading ("Link text:", "Link text (partial):",
-  none when over budget) or its "and N more" line, all of which the spec fixes. Verified: Confirmed. The branches are at
-  crates/gui/farhelm-gui/src/terminal/disclosure.rs:239-259 and :364. A grep finds no assertion on them in `terminal/`
-  tests (only a docstring mention at attached/tests.rs:5072).
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. One unit test per branch. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
 ## trailing-link-scanner-comparison-leeways-untested.md
 
 - Outcome: `other`.
@@ -1717,31 +1703,6 @@
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## trailing-printed-terminal-link-stale-frame.md
-
-- Outcome: `fix code`.
-- Assessment: Clicking a web address printed in a terminal opens it straight away, with no destination display, because
-  what is shown is supposed to be what opens. When the program's output changes the address under a resting pointer,
-  Farhelm updates the link it will open before the screen is redrawn. A click that lands in that gap (about one frame)
-  opens the new address, which the user never saw. Verified: Confirmed for the handler. Output goes through
-  `update_shown`, which calls `refresh_hovered_link` (crates/gui/farhelm-gui/src/terminal.rs:855-858) before the next
-  paint. The press takes the live hovered link (`pressed_link`,
-  crates/gui/farhelm-gui/src/terminal/attached.rs:2738-2744; `press`, :4072-4089), and `LinkPress` carries no
-  drawn-frame witness for a printed link (only `file_disclosure`, :2629). Nothing changed this since 0592c5c6.
-  Unverified: that a click can actually be dispatched, and the browser opened, before the compositor shows the newer
-  frame. Not filtered: the sub-second race filter excludes acting on the wrong target and trust-boundary consequences.
-  Not covered by "a change to the link that is undone between a press and its release is not noticed" either, since this
-  change happens before the press.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code. Record the hovered link from the last painted frame and
-  require the press to match it (file links already do this). Size M. Size gate: about 100 lines of diff (code, tests
-  and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings
-  the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-replace-with-suspended-checkout-recent-skips-warning.md
 
@@ -3145,88 +3106,6 @@
   for reference: discard. The destination is restricted to Farhelm's docs, as the spec allows. Size S if fixed.
 - Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
-## trailing-post-exit-alt-release-clears-short-selection-and-queues.md
-
-- Outcome: `other`.
-- Assessment: After a program exits, an Alt-click (Option-click) of one character on the final screen still runs the
-  "move the cursor here" gesture. It sends arrow keys toward the ended program, which clears the one-character highlight
-  that was just copied. The clipboard keeps the copy, and the keys are normally discarded by the closed terminal.
-  Verified: Confirmed by source. `end_selection` and `alt_click`
-  (`crates/gui/farhelm-gui/src/terminal/attached.rs:4294-4340`) have no gate on program exit. Since 0592c5c6 this also
-  happens on frames whose program had mouse reporting on. The effect on the program is unverified: keys go to the PTY
-  only if something still reads it.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code (skip the Alt cursor move once the program has exited) or discard. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-multi-clicking-exit-message-copies-different-row.md
-
-- Outcome: `other`.
-- Assessment: After a program exits, the terminal draws an exit message below the grid. Double- or triple-clicking that
-  message selects a word or the whole row from the last terminal line above it and copies it, replacing the clipboard
-  with text the user did not point at. Verified: Confirmed by source. Multi-click goes through `selection_position`,
-  which clamps rows below the grid to the last row
-  (`crates/gui/farhelm-gui/src/terminal/attached.rs:4004-4035, 4112-4131`), and the release copies it. Since 0592c5c6
-  this also applies to frames whose program had mouse reporting on. With reporting off it predates that commit. Losing
-  clipboard contents is not "user-owned work" under "Priority buckets". No native gesture was observed.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code (start multi-click selection only on drawn grid rows) or discard. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-page-keys-skip-rows-in-lifted-terminal.md
-
-- Outcome: `other`.
-- Assessment: Shift+PageUp and Shift+PageDown scroll terminal history by a page less one line, so one line stays on
-  screen as a landmark. When the exit or status line lifts the grid by one row, that overlap is lost. With two lifted
-  rows, paging skips lines that never come into view. Verified: Confirmed. `scroll_page` uses `rows.len() - 1` without
-  the lift (`crates/gui/farhelm-gui/src/terminal/attached.rs:1629-1640`). The skipped lines are still reachable by wheel
-  or scrollbar.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code (page by the visible row count minus one). Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-recovery-warning-is-cut-off-in-supported-narrow-terminal.md
-
-- Outcome: `other`.
-- Assessment: When recovery has lost part of a terminal's history, the terminal shows "Some earlier output could not be
-  recovered" above the history. In the narrowest supported window, this one-line notice is wider than the pane and is
-  cut off, and nothing reveals the rest. Verified: Partly verified. The notice is painted as one unwrapped line
-  (`crates/gui/farhelm-gui/src/terminal.rs:312-314` and the notice painter). The width arithmetic (about 353 px at 14 pt
-  against a 320-324 px main pane at the minimum window) is the reviewer's and was not re-measured. The painter predates
-  the reviewed change; that change only makes the notice reachable on exited full-screen frames. Ordinary terminals with
-  trimmed history are affected the same way. The "Dialog explanations out of view" filter does not apply: this is not a
-  dialog, and the clipped text cannot be reached at all.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: discard (only at the minimum window width, and the notice's meaning survives truncation), or fix code
-  (wrap or shorten). Size S-M.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-lifted-viewport-makes-scrollbar-overstate-visible-share.md
-
-- Outcome: `other`.
-- Assessment: When the exit or status line lifts the terminal grid, the scrollbar thumb is drawn a little larger than
-  the share of output actually visible. Scrolling still reaches both ends. Verified: Confirmed. `scroll_position`
-  reports every grid row as visible while also counting the lift padding in the total
-  (`crates/gui/farhelm-gui/src/terminal.rs:531-552`). The error is at most one or two rows' share.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: discard (cosmetic, endpoints correct). Size S if fixed.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
 ## trailing-late-replay-history-displace-already-browsed-final-screen.md
 
 - Outcome: `other`.
@@ -3264,23 +3143,6 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Bind the drawn key into the click handler and key the error by session and agent. Size S.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## terminal-selection-paints-wide-wrap-padding.md
-
-- Outcome: `other`.
-- Assessment: A wide character (a CJK glyph, say) that does not fit at the end of a row wraps to the next row and leaves
-  an unused cell. A selection across it paints that unused cell as selected, although copying correctly omits it.
-  Verified: Confirmed. The painted range comes from `selection.columns(line, cols)` through the row width
-  (`crates/gui/farhelm-gui/src/terminal.rs:838-850, 1251-1265`). SPEC_impl.md "Binary rows": "Copy, selection and link
-  detection omit that column". Whether "selection" there covers the painted highlight, or only selection text, is a
-  reading. SPEC.md's 2026-11-21 accepted wide-character list ("only ...") does not include this.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code (clip the painted highlight at a padded row's last column). SPEC_impl's sentence supports it.
-  Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-settings-containers-reload-omits-loading-keeps-error.md
 

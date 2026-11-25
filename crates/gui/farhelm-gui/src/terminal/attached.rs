@@ -1626,14 +1626,17 @@ impl AttachedTerminal {
         .into_any_element()
     }
 
-    /// Shift+PageUp (`direction` -1) or Shift+PageDown (1): scroll the shown screen a page less a line, the old app's
-    /// step, so the line at one edge stays in view as a landmark. Reaching the live screen follows it again. The
-    /// live alternate screen hides primary history. After exit the same page keys reach that history.
+    /// Shift+PageUp or Shift+PageDown leaves one visible line in common across pages. A one-row pane must still
+    /// move. Reaching the live screen follows it again. After an alternate-screen exit the keys reach primary history.
     fn scroll_page(&mut self, direction: i64, cx: &mut Context<Self>) {
         let Some(view) = self.committed.clone() else {
             return;
         };
-        let page = view.read(cx).rows.len().saturating_sub(1);
+        let rows = view.read(cx).visible_grid_rows();
+        if rows == 0 {
+            return;
+        }
+        let page = rows.saturating_sub(1).max(1);
         let lines = direction * i64::try_from(page).unwrap_or(i64::MAX);
         view.update(cx, |view, cx| view.scroll_lines(lines, cx));
         self.hold_scrollbar(cx);
@@ -3088,6 +3091,12 @@ impl AttachedTerminal {
         self.refusal_target = Some(RefusalTarget::Golden);
     }
 
+    /// Keep the scrollbar visible in the status screenshot so it shows the lift's effect on the thumb.
+    #[cfg(test)]
+    pub(crate) fn stage_scrollbar(&mut self) {
+        self.pointer_over = true;
+    }
+
     /// The terminal's file links, for tests: they hand in the fake transfers and read the clicks a check admitted.
     #[cfg(test)]
     pub(crate) fn files(&self) -> &Entity<FileLinks> {
@@ -4070,7 +4079,15 @@ impl AttachedTerminal {
             .press_visibility
             .take()
             .unwrap_or(Err(Hidden::NotVisible));
-        self.link_press = link.clone().map(|link| LinkPress {
+        // Output may have moved a new address under the pointer before paint. Mouse reporting follows its own
+        // setting, but Farhelm cannot open that address until the terminal has drawn it at the press position.
+        let admitted = link.clone().filter(|link| {
+            link.kind != LinkKind::Text
+                || self.link_cell(event.position, cx).is_some_and(|cell| {
+                    view.read(cx).printed_link_was_painted(event.position, cell)
+                })
+        });
+        self.link_press = admitted.map(|link| LinkPress {
             hinted: self.tunnel_hint(&link, cx).is_some(),
             file_disclosure: self
                 .disclosure
@@ -4111,7 +4128,8 @@ impl AttachedTerminal {
         let current = view.read(cx).selection();
         let (mode, selection) = match event.click_count {
             2 | 3 => {
-                let Some(cell) = self.selection_position(event.position, false, cx) else {
+                // Clamping belongs to drags. A multi-click on a status or exit line must not select nearby text.
+                let Some(cell) = self.link_position(event.position, cx) else {
                     return;
                 };
                 let range = if event.click_count == 2 {
@@ -4311,7 +4329,7 @@ impl AttachedTerminal {
     }
 
     /// A quick Alt-click (Option on a Mac) that selected at most one character, with the view on the live screen,
-    /// moves the program's cursor to the clicked cell by typing arrow keys, as the old app did
+    /// moves the running program's cursor to the clicked cell by typing arrow keys, as the old app did
     /// (`altClickMovesCursor`, with the input mapping's port of xterm.js's MoveToCell). The keys go to the program as
     /// one group of ordinary key messages, so the supervisor encodes them in the program's cursor-key mode; like any
     /// input they clear the selection.
@@ -4329,7 +4347,8 @@ impl AttachedTerminal {
         let (Some(view), Some(attachment)) = (self.committed.clone(), self.attachment) else {
             return;
         };
-        if !view.read(cx).is_following() {
+        let shown = view.read(cx);
+        if !shown.is_following() || shown.state.is_some_and(|state| state.exit.is_some()) {
             return;
         }
         let Some((x, y)) = self.cell_at(position, cx) else {

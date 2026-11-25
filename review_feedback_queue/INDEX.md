@@ -29,9 +29,6 @@ consequences.
   submit a fresh checkout before its updated warning is shown, allowing the previous checkout to move to trash without
   the displayed disclosure.
 
-- [`trailing-printed-terminal-link-stale-frame.md`](trailing-printed-terminal-link-stale-frame.md) — A click on a
-  printed link can open an address from a newer terminal screen than the one the user clicked.
-
 - [`trailing-gone-terminal-ended-confirmation.md`](trailing-gone-terminal-ended-confirmation.md) — When a lost terminal
   is shown as ended, Stop or Delete can terminate a main program the confirmation did not say it would stop.
 
@@ -430,24 +427,6 @@ consequences.
   — Existing assertions would miss a regression where prompt absence on a first Delete results in an ordinary error
   instead of opening Delete anyway.
 
-- [`trailing-post-exit-alt-release-clears-short-selection-and-queues.md`](trailing-post-exit-alt-release-clears-short-selection-and-queues.md)
-  — A quick Alt/Option release over the final screen can clear the highlight for a just-copied character and dispatch
-  cursor keys.
-
-- [`trailing-multi-clicking-exit-message-copies-different-row.md`](trailing-multi-clicking-exit-message-copies-different-row.md)
-  — A double or triple click on the exit message can replace the clipboard with terminal text from the row above it.
-
-- [`trailing-page-keys-skip-rows-in-lifted-terminal.md`](trailing-page-keys-skip-rows-in-lifted-terminal.md) — Keyboard
-  paging loses its shared edge row when the terminal is lifted by one row and skips retained output between pages when
-  two or more rows are lifted.
-
-- [`trailing-recovery-warning-is-cut-off-in-supported-narrow-terminal.md`](trailing-recovery-warning-is-cut-off-in-supported-narrow-terminal.md)
-  — Scrolling to the recovery warning after a full-screen program exits can reveal only the beginning of its message.
-
-- [`trailing-lifted-viewport-makes-scrollbar-overstate-visible-share.md`](trailing-lifted-viewport-makes-scrollbar-overstate-visible-share.md)
-  — The scrollback thumb can appear larger than the portion of output actually visible when a status or exit line lifts
-  grid rows.
-
 - [`trailing-late-replay-history-displace-already-browsed-final-screen.md`](trailing-late-replay-history-displace-already-browsed-final-screen.md)
   — If a replay reveals the exit frame before its history is delivered, the viewer can browse that frame and then jump
   to old history without a scroll request. An already stored selection may be dropped or name different rows.
@@ -588,10 +567,6 @@ consequences.
 
 - [`sqlite-planner-test-misses-stale-statistics.md`](sqlite-planner-test-misses-stale-statistics.md) — The startup
   maintenance test can pass if Farhelm still creates missing SQLite statistics but stops refreshing stale ones.
-
-- [`terminal-selection-paints-wide-wrap-padding.md`](terminal-selection-paints-wide-wrap-padding.md) — Selecting text
-  across a wrapped wide character can highlight the unused cell at the end of the earlier row. That cell is absent from
-  the copied text.
 
 - [`remote-probe-absence-test-does-not-witness-proxy.md`](remote-probe-absence-test-does-not-witness-proxy.md) — The
   remote probe regression test can pass through the missing-program path both times, without checking how it handles the
@@ -1045,10 +1020,6 @@ consequences.
 - [`trailing-codex-login-save-reports-later-github-failure.md`](trailing-codex-login-save-reports-later-github-failure.md)
   — Saving a new Codex login can install it on the host and still report "not delivered", naming a later GitHub token
   failure as the reason.
-
-- [`trailing-link-disclosure-warning-wording-untested.md`](trailing-link-disclosure-warning-wording-untested.md) — No
-  test checks the link warning's "Link text (partial):" heading, its omitted-text case or its "and N more" line, though
-  the spec fixes the wording.
 
 - [`trailing-link-scanner-comparison-leeways-untested.md`](trailing-link-scanner-comparison-leeways-untested.md) — No
   test covers the comparison leeways (trailing slash, escape case, empty `?`) since the oracle's quiet side was dropped,

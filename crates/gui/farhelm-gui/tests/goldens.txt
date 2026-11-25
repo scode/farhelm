@@ -410,12 +410,12 @@ linux/terminal-file-disclosures--dark.png 6ad8011a5e217a328b0862b07c6bdf1190c0f2
 linux/terminal-file-disclosures--light.png 52718675836ff621a16cb5e0a6a5c4abb5c67eb7
 linux/terminal-link-disclosures--dark.png 608212cfb8e4dbebc8f82756cc45097dd394d40b
 linux/terminal-link-disclosures--light.png dcfb1e0e826233c102bb57d686456760b62cf633
-linux/terminal-status--dark.png f0e76f0ff5752c6413f1d21e21b14e053962f9f0
-linux/terminal-status--light.png 496c39f7a367052b1904f8928a52597d69f446ea
+linux/terminal-status--dark.png 53fabe736381d77ba1387de228c460d1f39d90e8
+linux/terminal-status--light.png fb8e37d22307b0f7eada3b329c08b0bd7987b41e
 linux/terminal-styles--dark.png 1cba223f1d0cba90a1a75f647db4777e2039149d
 linux/terminal-styles--light.png 1c1142a213eda81a9955b53a6c58ce0a2f42bd6e
-linux/terminal-wide-glyphs--dark.png 240ca61cb22c3963b8fce8dcac14c95c65b85e78
-linux/terminal-wide-glyphs--light.png 89e7eef07dfd17dd68704c9100a1fa2b71540506
+linux/terminal-wide-glyphs--dark.png 78aec94aec533abcdf4cfe88e5eb257e263551a5
+linux/terminal-wide-glyphs--light.png b473e6aded75bfdd978788e6cb880d132bc4232a
 linux/text-input--dark.png c8c86c81c6e9c4ca9d1727a731a9ba9d57408cd4
 linux/text-input--light.png e0ac59e00b5baa677bf99be02df1fbc8501389e6
 linux/text-input-growing--dark.png 1d40be12bdab9c26bac835a64d19636c0807cec6

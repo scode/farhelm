@@ -212,6 +212,7 @@ fn a_cursor_covers_a_wide_characters_whole_box() {
         cursor_row: None,
         selected: Vec::new(),
         underlined: Vec::new(),
+        painted_grid: Rc::default(),
         cols: view.cols,
         cursor: view.cursor,
         visible: view.visible,
@@ -226,6 +227,23 @@ fn a_cursor_covers_a_wide_characters_whole_box() {
     assert_eq!(element.cursor_cell(cursor, 11), (0, 2));
     (cursor.x, cursor.y) = (7, 14);
     assert_eq!(element.cursor_cell(cursor, 14), (7, 1));
+}
+
+/// Selection spans the wrap without covering the unused cell at the end of its first row.
+#[test]
+fn selection_paint_omits_wide_wrap_padding() {
+    let mut view = fed(r#"
+{"t":"hello","cols":4,"rows":2,"history_cap":0}
+{"t":"state","mouse":"off","focus":false,"alt_screen":false,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}
+{"t":"rows","rows":[[0,{"w":true,"p":true,"r":[[0,3,"abc",[0,-1,-1]]]}],[1,{"w":false,"r":[[0,2,"⚡",[0,-1,-1]]]}]]}
+{"t":"frame","rev":1,"cols":4,"rows":2,"cursor":{"x":0,"y":1,"visible":false,"shape":"block","blink":false}}
+"#.trim(), true);
+    view.selection = Some(Selection::new(
+        Position { line: 0, col: 2 },
+        Position { line: 1, col: 2 },
+        SelectionMode::Linear,
+    ));
+    assert_eq!(view.selected_rows(), [(0, 2..3), (1, 0..2)]);
 }
 
 /// Damage is final-coordinate: a frame that shifts the screen by one keeps the shifted row's cache entry (its shaped
@@ -463,8 +481,13 @@ fn shown_output_redraws_and_hidden_output_does_not(cx: &mut TestAppContext) {
     }))
     .unwrap();
     terminal.update(cx, |view, cx| {
+        assert!(view.painted_grid.get().is_some(), "the grid was painted");
         let (_, applied) = view.apply([history], cx);
         applied.unwrap();
+        assert!(
+            view.painted_grid.get().is_none(),
+            "history can change the target before a new hover"
+        );
     });
     cx.run_until_parked();
     assert_eq!(

@@ -5831,6 +5831,9 @@ suspended may still be answered and get the helm's refusal, and a pin drag may l
 Throughout the app, a key or click may act before a frame shows an arriving background update, with destructive
 confirmations and launches that retire a session (Replace with) limited to the action and consent already shown.
 
+A click on a printed terminal link uses the last drawn grid at the press position. Grid or scrollback updates can make a
+click before the next draw do nothing.
+
 ### Remote input, session defaults, and availability
 
 Agents may discover the helm catalog's template names and what each sets. Listing those in lookup suggestions is
