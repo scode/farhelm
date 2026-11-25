@@ -220,7 +220,7 @@
         [
           "wait",
           "--text",
-          "Recent sessions"
+          "RECENT SESSIONS"
         ],
         [
           "wait",
@@ -242,7 +242,7 @@
         [
           "wait",
           "--gone",
-          "Recent sessions"
+          "RECENT SESSIONS"
         ],
         [
           "click",
@@ -3695,7 +3695,22 @@
     },
     {
       "golden": "quick-switcher-custom-agents",
-      "title": "The quick switcher with a registered custom agent and one whose registration was deleted",
+      "title": "The quick switcher showing a registered custom agent's name in hover help",
+      "reference": null
+    },
+    {
+      "golden": "quick-switcher-sessions",
+      "title": "The empty quick switcher with recent sessions and the pinned Quick launch action",
+      "reference": null
+    },
+    {
+      "golden": "quick-switcher-query",
+      "title": "A quick switcher query matching both a session title and a folder, with the New session action",
+      "reference": null
+    },
+    {
+      "golden": "quick-switcher-templates",
+      "title": "The quick switcher with tl: showing templates while its session read is pending",
       "reference": null
     },
     {

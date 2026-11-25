@@ -31,10 +31,11 @@
 //!   directory) is marked at its own best occurrence, not only the value that decided the row's place. A value that
 //!   did not match is never marked; one that matched only through a character shown as an escape marks less or
 //!   nothing, since no escape is drawn partly marked.
-//! - **Host marks.** A session row draws its host's chosen mark before the host's name, the sidebar row's own mark
-//!   ([`row_marks::HostMark::of`], drawn by [`row_marks::host_mark`]) in the `--on-fill` ink on the selected row. The
-//!   switcher's read names each session's host only by id, so the mark comes from the registry the store holds as the
-//!   row is drawn; a host the registry cannot place yet draws no mark and keeps its name, as in the sidebar.
+//! - **Session rows.** The harness mark leads two lines, the title and the mono `host:path`. The right-hand slots hold
+//!   the host mark, status and age, keeping long paths away from the marks. The host mark comes from the registry as
+//!   drawn because the session read carries only the host's id and name. An unplaced host keeps its name and leaves the
+//!   mark slot empty. Hover help carries the agent's name, ended details and full activity stamp, keeping the rows a
+//!   uniform height.
 //! - **Choosing.** The first match is selected after every edit; Up and Down move the selection, stopping at both
 //!   ends, and scroll it into view. Focus stays in the search field the whole time: the rows are not focusable
 //!   ([`OptionRow`]), and the field hands Up and Down over rather than moving its caret ([`TextInput::on_vertical`]).
@@ -74,16 +75,15 @@
 //!   launches; it does nothing while a dialog holds the keyboard, hence the order. A pick that opened New returns the
 //!   list from the Hosts panel, as the New row's does, since both are New handoffs.
 //! - **Quick launch.** With nothing typed, a row pinned below the matches offers "Quick launch: " and the ⚡ template's
-//!   name, or "Mark a template" ([`template_rows::quick_launch_row_label`]), with the ⚡ chord beside it. It is placed
+//!   name, or "Mark a template" ([`template_rows::quick_launch_row_target`]), with the ⚡ chord beside it. It is placed
 //!   and reached as the New row is (the two never show together): after the last match in arrow-key order, so the
 //!   first recent session stays selected, unreachable while the read is loading, and selected after a failed one. A
 //!   pick closes the switcher, then runs [`template_rows::quick_launch_from_switcher`], the ⚡ chord's own path:
 //!   it launches unseen, opens New for a template that needs more choices, or opens Templates to mark one. A launch
 //!   it started or a New it opened returns the list from the Hosts panel, as the old switcher's did (its quick launch
 //!   went through the list's `open_new`, which hid the panel); Templates opened to mark one leaves the panel shown.
-//! - **The templates hint.** A quiet section above the footer names `tl:`: "Templates" and "Type tl: to search
-//!   templates. Picking one opens New with it applied." normally, and in the templates section only "Picking a
-//!   template opens New with it applied; nothing launches yet.", in the old words.
+//! - **Hints.** The empty field shows examples for the mode's commands. The footer keeps navigation, Enter and Escape
+//!   in view while the results scroll.
 //! - **The template list (Cmd+J).** The same dialog in its templates-only mode ([`Mode::Templates`]; SPEC.md, the
 //!   Cmd+J paragraph), as the old app's `SwitcherMode::Templates` was: opened by its own chord under the same refusals
 //!   and one more, any launcher held out of sight ([`open`] says which), with the same focus, Escape and outside-press
@@ -98,15 +98,10 @@
 //!   quick launches the chosen name through [`template_rows::launch_from_list`]: it starts unseen, or opens New with the
 //!   template applied when it needs more choices, or with a refusal when no template has that name any more (SPEC.md:
 //!   "a name missing from the current catalog shows a preparation error in New"), even when the list then says "No
-//!   templates match". With nothing chosen, Enter does nothing. The hint says "Enter starts the highlighted template. A
-//!   partial template opens New to complete it."
+//!   templates match". With nothing chosen, Enter does nothing.
 //!
-//! The card is drawn here rather than in the shared dialog frame, because the old switcher had neither the frame's
-//! title header nor its answer footer: one padded column on the dialog surface, whose results list is the only part
-//! that scrolls. The layer manager places it near the window's top and caps its height
-//! ([`DialogPlacement::Top`]); the card keeps the old side margin by capping its own width.
-//!
-//! NOTE: The old layout for windows narrower than 600 pixels is not ported, because the window's minimum width is 720.
+//! The shared frame supplies the field and Close in its control header and the key strip in its footer. The top
+//! placement caps the card once, and the result scroll absorbs the cap while the field and pinned row stay reachable.
 
 #[cfg(test)]
 mod template_list_tests;
@@ -119,16 +114,18 @@ use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, FontWeight, HighlightStyle,
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, ScrollHandle,
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window,
-    div, prelude::FluentBuilder as _, px,
+    div, px,
 };
 
 use super::menu::{self, AgentName};
 use super::row_marks::{self, HelpPlace, HostMark};
 use super::selection;
 use super::status::{self, Badge};
+use crate::assets::Icon;
 use crate::components::{
-    Button, HoverHelp, OptionRow, Role, TextInput, TextInputEvent, TextInputState, Vertical,
-    dialog_shadow, key_chip,
+    DialogFrame, HoverHelp, OptionRow, Role, TextInput, TextInputEvent, TextInputState, Vertical,
+    chips_and_words, command_field, command_glyph, command_heading_with_count, command_icon_tile,
+    command_row_content, key_chip,
 };
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
@@ -139,27 +136,13 @@ use crate::templates::rows::{self as template_rows, Row as TemplateRow};
 use crate::templates::summary;
 use crate::templates::{self, QUICK_LAUNCH_SHORTCUT_NAME};
 use crate::theme::{self, Palette, metrics};
-use crate::{assets, operations, ticker};
+use crate::{actions, assets, operations, ticker};
 
-// ---- Layout: the old `.quick-switcher-*` rules ------------------------------------------------------------------------
+// ---- Layout ----------------------------------------------------------------------------------------------------------
 
-/// The card's widest (`width: min(760px, 100%)`).
-const CARD_MAX_WIDTH: Pixels = px(760.);
-/// What the card leaves free on each side of a narrower window: the old backdrop's 16-pixel side padding, which the
-/// layer manager leaves to the view. (Its height cap, `max-height: 75dvh`, and its place near the top are the layer
-/// manager's: `DialogPlacement::Top`.)
-const CARD_MARGIN: Pixels = px(16.);
-/// The card's padding and the gap between its parts.
-const CARD_PAD: Pixels = px(16.);
-const CARD_GAP: Pixels = px(10.);
-/// A row's fixed columns (`grid-template-columns: 24px minmax(0, 2fr) 70px minmax(0, 1fr) minmax(0, 2fr)`), the gap
-/// between them, and the row's own padding and edge, which the flexible columns share what is left after.
-const STATUS_COLUMN: Pixels = px(24.);
-const AGENT_COLUMN: Pixels = px(70.);
-const COLUMN_GAP: Pixels = px(10.);
-const ROW_CHROME: Pixels = px(22.);
-/// `.quick-switcher-host`'s gap between the host's mark and its name.
-const HOST_MARK_GAP: Pixels = px(6.);
+/// Align the body with the frame's heading and footer. The body owns padding so only the results scroll.
+const BODY_PAD: Pixels = px(20.);
+const BODY_GAP: Pixels = px(6.);
 
 /// A result row's host mark id prefix; the session's key follows it, then [`row_marks::host_mark`]'s own `-host`
 /// (`quick-switcher-session-<key>-host`). Not the row's own prefix, so that every id starting with
@@ -319,6 +302,23 @@ pub(crate) fn mark_positions(raw: &str, shown: &str, query: &str) -> Vec<usize> 
         return Vec::new();
     };
     find(shown, query, tier).unwrap_or_default()
+}
+
+/// Keep the chosen match in the full path. The abbreviated home has no characters of its own to highlight, but the
+/// characters in the retained suffix still explain the match, including when a scattered match began inside the home.
+fn abbreviated_path_marks(raw: &str, shown: &str, query: &str) -> Vec<usize> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    if !shown.starts_with('~') || raw.starts_with('~') {
+        return mark_positions(raw, shown, query);
+    }
+    let full = farhelm_proto::text::escaped(raw);
+    let removed = full.chars().count() - (shown.chars().count() - 1);
+    mark_positions(raw, &full, query)
+        .into_iter()
+        .filter_map(|index| index.checked_sub(removed).map(|index| index + 1))
+        .collect()
 }
 
 /// The sessions of `sessions` (the helm's activity order) that `query` finds, as indices into it, in the order the
@@ -499,6 +499,16 @@ pub(crate) fn seed_golden_listing(list: serde_json::Value, cx: &mut App) {
     switcher.update(cx, |switcher, cx| switcher.answered(Read::Loaded(list), cx));
 }
 
+/// Stage a query on the open field. This uses the same text state and result calculation as an edit in the app.
+#[cfg(test)]
+pub(crate) fn seed_golden_query(query: &str, window: &mut Window, cx: &mut App) {
+    let switcher = layers::last_opened::<QuickSwitcher>(cx).expect("golden switcher opened");
+    switcher.update(cx, |switcher, cx| {
+        switcher.input.set_text(query.to_owned(), window, cx);
+        cx.notify();
+    });
+}
+
 /// The open switcher: its field, its read, which row is selected, and its layer.
 ///
 /// Its rows, in arrow-key order, are the matches and then the New row (something typed) or the Quick launch row
@@ -527,6 +537,8 @@ pub(crate) struct QuickSwitcher {
     /// The running pulse's ticks, held exactly while the window is active and a listed row pulses, and worked out at
     /// the top of each frame, as the session list does.
     pulse: Option<ticker::Pulsing>,
+    /// Use the shared clock while a session result has an age to show.
+    clock: Option<ticker::Clock>,
     /// Set right after the layer opens; taken when the switcher closes itself, so it closes once.
     layer: Option<LayerId>,
     /// The field's events.
@@ -543,8 +555,8 @@ impl QuickSwitcher {
     ) -> Self {
         let input = TextInputState::new(window, cx);
         let placeholder = match mode {
-            Mode::Sessions => "Jump to a session · tl: for templates",
-            Mode::Templates => "Start a template",
+            Mode::Sessions => "Jump to a session, or type a name to start one…",
+            Mode::Templates => "Start a template…",
         };
         input.set_placeholder(placeholder, window, cx);
         let events = input.subscribe(window, cx, |switcher, event, window, cx| match event {
@@ -569,6 +581,7 @@ impl QuickSwitcher {
             arrowed: false,
             scroll: ScrollHandle::new(),
             pulse: None,
+            clock: None,
             layer: None,
             _events: events,
         }
@@ -846,8 +859,22 @@ impl QuickSwitcher {
 impl Render for QuickSwitcher {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
-        let viewport = window.viewport_size();
-        let width = CARD_MAX_WIDTH.min(viewport.width - CARD_MARGIN * 2.);
+        let (width, title, icon, shortcut) = match self.mode {
+            Mode::Sessions => (
+                px(640.),
+                "Quick switcher",
+                Icon::Search,
+                actions::QUICK_SWITCHER_SHORTCUT_NAME,
+            ),
+            Mode::Templates => (
+                px(560.),
+                "Template launcher",
+                Icon::Templates,
+                actions::TEMPLATE_LIST_SHORTCUT_NAME,
+            ),
+        };
+        let area = crate::desktop::linux_title_bar::content_area(window).size;
+        let width = width.min(area.width - metrics::DIALOG_SIDE_MARGIN * 2.);
         let query = self.input.text(cx);
         let listed = self.rows(cx);
         // The template list latches what it is about to draw selected, so a choice worked out this frame (an exact name
@@ -870,7 +897,16 @@ impl Render for QuickSwitcher {
         if pulses != self.pulse.is_some() {
             self.pulse = pulses.then(|| ticker::pulse(window, cx));
         }
-        let step = self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx));
+        let shows_age = listed.templates.is_none()
+            && matches!(&self.read, Read::Loaded(list) if matches.iter().any(|&index| list.sessions[index].info.effective_activity() > 0));
+        if shows_age != self.clock.is_some() {
+            self.clock = shows_age.then(|| ticker::clock(cx));
+        }
+        let row_context = RowContext::new(
+            width,
+            self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx)),
+            cx,
+        );
 
         let weak = cx.weak_entity();
         let (name, help) = match self.mode {
@@ -891,11 +927,15 @@ impl Render for QuickSwitcher {
                 // Only the results list gives up height when the card is capped.
                 .flex_none()
                 .child(
-                    TextInput::new(
-                        "quick-switcher-search",
-                        &self.input,
-                        name,
-                        HoverHelp::tooltip(help),
+                    command_field(
+                        TextInput::new(
+                            "quick-switcher-search",
+                            &self.input,
+                            name,
+                            HoverHelp::tooltip(help),
+                        ),
+                        command_icon_tile(icon, palette),
+                        Some(key_chip(shortcut, palette.fg_1, palette)),
                     )
                     .on_vertical(move |direction, _, cx| {
                         let _ = weak.update(cx, |switcher, cx| switcher.step(direction, cx));
@@ -903,17 +943,7 @@ impl Render for QuickSwitcher {
                 )
         };
         let in_templates = listed.templates.is_some();
-        let heading = quiet(
-            if in_templates {
-                "Templates"
-            } else if query.trim().is_empty() {
-                "Recent sessions"
-            } else {
-                "Sessions"
-            },
-            palette,
-        );
-        let columns = Columns::for_card(width);
+        let heading = section_heading(self.mode, &listed, &self.read, &query, palette);
         // The state line and the scrolling rows, decided together. The templates section's states stand in for the
         // session read's: that read goes on underneath, unseen.
         let (state, result_rows): (Option<AnyElement>, Vec<AnyElement>) =
@@ -980,7 +1010,7 @@ impl Render for QuickSwitcher {
                             let row = &list.sessions[index];
                             let weak = weak.clone();
                             let selected = selected == Some(Selected::Session(index));
-                            result_row(row, term, selected, catalog, step, columns, palette)
+                            result_row(row, term, selected, catalog, &row_context, palette)
                                 .on_click(move |_, window, cx| {
                                     let _ = weak.update(cx, |switcher, cx| {
                                         switcher.pick(index, window, cx)
@@ -1015,9 +1045,8 @@ impl Render for QuickSwitcher {
         let quick_row = listed.quick.then(|| {
             let weak = weak.clone();
             quick_row(
-                template_rows::quick_launch_row_label(cx),
+                template_rows::quick_launch_row_target(cx),
                 selected == Some(Selected::QuickLaunch),
-                columns,
                 palette,
             )
             .on_click(move |_, window, cx| {
@@ -1043,69 +1072,42 @@ impl Render for QuickSwitcher {
             .child(layers::beside_edge("quick-switcher-help-edge", window, cx))
             .child(results)
             .children(new_row)
-            .children(quick_row);
+            .children(quick_row.map(|row| pinned_row(row, palette)));
         let cap = match &self.read {
             Read::Loaded(list) if list.truncated && !in_templates => {
                 Some(quiet(CAP_NOTICE, palette))
             }
             Read::Loaded(_) | Read::Loading | Read::Failed(_) => None,
         };
-        let hint = templates_hint(in_templates, self.mode, palette);
-        let footer = div()
-            .flex()
-            .flex_none()
-            .flex_row()
-            .justify_between()
-            .items_center()
-            .pt(CARD_GAP)
-            .border_t_1()
-            .border_color(theme::color(palette.border_dialog))
-            .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(palette.fg_1))
-            .child("↑↓ choose · Enter pick · Escape close")
-            .child(
-                Button::new(
-                    "quick-switcher-close",
-                    "Close",
-                    HoverHelp::tooltip("Close the quick switcher"),
-                    Role::Button,
-                )
-                .help_below()
-                .on_click(move |_, window, cx| {
-                    let _ = weak.update(cx, |switcher, cx| switcher.close(window, cx));
-                }),
-            );
-
-        div()
-            .id("quick-switcher")
-            .debug_selector(|| "quick-switcher".into())
-            .role(Role::Dialog)
-            .aria_label(match self.mode {
-                Mode::Sessions => "Quick switcher",
-                Mode::Templates => "Template launcher",
-            })
+        let body = div()
             .flex()
             .flex_col()
-            .gap(CARD_GAP)
-            .p(CARD_PAD)
-            .w(width)
-            // The layer manager caps the top-placed dialog at 75% of the window's height; shrinking to that cap is
-            // this card's part, so only the results list, which scrolls, gives up the height.
-            .flex_1()
-            .min_h(px(0.))
-            .bg(theme::color(palette.bg_2))
-            .text_color(theme::color(palette.fg_0))
-            .border_1()
-            .border_color(theme::color(palette.border_dialog))
-            .rounded(metrics::RADIUS_MD)
-            .shadow(dialog_shadow(palette))
-            .child(field)
+            .flex_shrink_1()
+            .min_h_0()
+            .gap(BODY_GAP)
+            .px(BODY_PAD)
+            .py(px(10.))
             .child(heading)
             .children(state)
             .child(options)
-            .children(cap)
-            .child(hint)
-            .child(footer)
+            .children(cap);
+        DialogFrame::new("quick-switcher", title, body, vec![])
+            .width(width)
+            .split_body()
+            .heading_control(
+                field,
+                query.is_empty().then(|| header_hints(self.mode, palette)),
+                None,
+            )
+            .footer_lead(footer_hints(self.mode, palette))
+            .close(
+                "Close",
+                HoverHelp::tooltip("Close the quick switcher"),
+                false,
+                move |_, window, cx| {
+                    let _ = weak.update(cx, |switcher, cx| switcher.close(window, cx));
+                },
+            )
     }
 }
 
@@ -1188,11 +1190,7 @@ impl Rows {
     }
 }
 
-/// The New row for the trimmed query `name` (the old `.quick-switcher-new`): `New session named "name"`, with the name
-/// escaped as host text since it may hold characters that draw as nothing (the old `display_peer`), in a row with the
-/// result rows' box and a top edge in the dialog's border ink that sets it apart from the matches above. On the
-/// selected row the accent edge goes all the way round instead, as in the old sheet, where the selected rule outranked
-/// the top edge's. A click on it does `on_click`.
+/// Draw the name the pick will pass to New. The name remains host text, including when the row is selected.
 fn new_row(
     name: &str,
     selected: bool,
@@ -1211,28 +1209,34 @@ fn new_row(
     )
     .selected(selected)
     .on_click(on_click)
-    .child(div().min_w_0().truncate().child(sentence));
-    // GPUI draws one edge color for every side, so the old `border-top-color` is a one-pixel line laid over the row's
-    // transparent top edge, drawn after the row so that its hover fill does not cover it.
+    .child(
+        command_row_content(
+            Some(row_marks::cell(
+                "quick-switcher-new-mark".into(),
+                Icon::Launch,
+                row_ink(selected, palette, palette.fg_1),
+            )),
+            None,
+            [div().truncate().child(sentence).into_any_element()],
+        )
+        .items_center(),
+    );
+    pinned_row(row, palette)
+}
+
+/// Pinned actions stay below the scrolling results. The hairline separates them from matches even at the scroll cap.
+fn pinned_row(row: OptionRow, palette: &Palette) -> AnyElement {
     div()
         .flex_none()
-        .relative()
+        .mt(px(4.))
+        .pt(px(4.))
+        .border_t_1()
+        .border_color(theme::color(palette.border_dim))
         .child(row)
-        .when(!selected, |row| {
-            row.child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .h(px(1.))
-                    .bg(theme::color(palette.border_dialog)),
-            )
-        })
         .into_any_element()
 }
 
-/// The 12-pixel quiet line the old heading, footer and cap notice shared.
+/// The listing cap stays outside the result scroll so it is visible whichever row the user reaches.
 fn quiet(text: &'static str, palette: &Palette) -> AnyElement {
     div()
         .flex_none()
@@ -1267,10 +1271,100 @@ fn alert(id: &'static str, sentence: HostSentence) -> AnyElement {
         .into_any_element()
 }
 
-// ---- The templates section and the Quick launch row: the old `.quick-switcher-template*` rules -----------------------
+/// Report the fleet size from the unfiltered reply, even when the listing cap limits the rows we can search.
+fn section_heading(
+    mode: Mode,
+    listed: &Rows,
+    read: &Read,
+    query: &str,
+    palette: &Palette,
+) -> AnyElement {
+    let (label, count) = match (&listed.templates, mode, query.trim().is_empty(), read) {
+        (Some(Ok(templates)), Mode::Templates, _, _) => {
+            ("Templates", Some(templates.len().to_string()))
+        }
+        (Some(_), _, _, _) => ("Templates", None),
+        (None, _, true, Read::Loaded(list)) => (
+            "Recent sessions",
+            Some(format!("{} · every host", list.total)),
+        ),
+        (None, _, true, _) => ("Recent sessions", None),
+        (None, _, false, _) => ("Sessions", None),
+    };
+    command_heading_with_count("quick-switcher-heading", label, count, palette)
+}
 
-/// `.quick-switcher-templates-hint p`: the space between the hint's title and its sentence.
-const HINT_GAP: Pixels = px(4.);
+/// The empty field teaches the commands whose meaning would otherwise be hidden in the result rows.
+fn header_hints(mode: Mode, palette: &Palette) -> AnyElement {
+    let chip = |name| key_chip(name, palette.fg_1, palette).into_any_element();
+    let example = |name| {
+        key_chip(name, palette.accent, palette)
+            .font_family(assets::TERMINAL_FONT)
+            .into_any_element()
+    };
+    let words = |text| div().child(text).into_any_element();
+    let [first, second] = match mode {
+        Mode::Sessions => [
+            chips_and_words([example("tl:"), words("search templates")]),
+            chips_and_words([
+                example("fix login bug"),
+                chip("⏎"),
+                words("on no match starts a session with that name"),
+            ]),
+        ],
+        Mode::Templates => [
+            chips_and_words([
+                command_glyph(Icon::BoltFilled, palette.warn_bright).into_any_element(),
+                words("quick launch"),
+                chip(QUICK_LAUNCH_SHORTCUT_NAME),
+            ]),
+            chips_and_words([
+                words("number keys"),
+                key_chip(templates::number_key_name("1"), palette.fg_1, palette).into_any_element(),
+                words("…"),
+                key_chip(templates::number_key_name("0"), palette.fg_1, palette).into_any_element(),
+            ]),
+        ],
+    };
+    div()
+        .id("quick-switcher-hints")
+        .flex()
+        .flex_wrap()
+        .gap_x(px(12.))
+        .gap_y(px(4.))
+        .text_size(metrics::TEXT_SM)
+        .text_color(theme::color(palette.fg_1))
+        .child(first)
+        .child(second)
+        .into_any_element()
+}
+
+/// Keep the universal navigation keys in view while the matches scroll. Enter opens a session or starts a template.
+fn footer_hints(mode: Mode, palette: &Palette) -> AnyElement {
+    let pair = |key, words| {
+        chips_and_words([
+            key_chip(key, palette.fg_1, palette).into_any_element(),
+            div().child(words).into_any_element(),
+        ])
+    };
+    let enter = match mode {
+        Mode::Sessions => "open",
+        Mode::Templates => "start",
+    };
+    div()
+        .id("quick-switcher-footer-keys")
+        .flex()
+        .flex_wrap()
+        .gap(px(12.))
+        .text_size(metrics::TEXT_SM)
+        .text_color(theme::color(palette.fg_1))
+        .child(pair("↑ ↓", "move"))
+        .child(pair("⏎", enter))
+        .child(pair("esc", "close"))
+        .into_any_element()
+}
+
+// ---- Command rows ---------------------------------------------------------------------------------------------------
 
 /// One template's row in the templates section (the old `.quick-switcher-template`, one column): its name at weight
 /// 600 over its summary in the quiet 12-pixel ink, both host text where the template's author wrote them. The summary
@@ -1328,52 +1422,45 @@ fn template_row(row: &TemplateRow, selected: bool, mode: Mode, palette: &Palette
     )
 }
 
-/// The Quick launch row (the old `.quick-switcher-quick-launch`): the ⚡ in the status column, `label`
-/// ([`template_rows::quick_launch_row_label`]) from the title's, and the ⚡ chord after it, on the session rows' grid as
-/// the old row was. Unlike the New row it has no top edge; the old sheet gave it none. The chord keeps the old row's
-/// dimmest ink, or the dimmer inverse one on the selected row's fill.
-///
-/// Neither part is held to its old track. The old label sat in the title's track and the chord in the agent's, both cut
-/// with an ellipsis, which in this app's fonts left "Quick launch: Mark a templ…" and "Ctrl+Shif…" on Linux. So the
-/// label takes at least the title's width and may run on over the host's, and the chord follows it, never cut.
-fn quick_row(
-    label: HostSentence,
-    selected: bool,
-    columns: Columns,
-    palette: &Palette,
-) -> OptionRow {
-    let chord = if selected {
-        palette.on_accent_dim
-    } else {
-        palette.fg_2
-    };
-    let line = div()
+/// Reserve the trailing width for the complete quick-launch shortcut, even when a template name truncates.
+fn quick_row(target: HostSentence, selected: bool, palette: &Palette) -> OptionRow {
+    let quiet = row_ink(selected, palette, palette.fg_1);
+    let label = target
+        .clone()
+        .prepend_text("Quick launch: ")
+        .accessible_name();
+    let words = div()
         .flex()
-        .flex_row()
-        .items_center()
-        .gap(COLUMN_GAP)
         .min_w_0()
-        .child(div().w(STATUS_COLUMN).flex_none().child("⚡"))
+        .items_center()
+        .gap(px(4.))
         .child(
             div()
                 .flex_none()
-                .min_w(columns.title)
-                .max_w(columns.title + COLUMN_GAP + columns.host)
-                .truncate()
-                .child(label.clone()),
+                .text_color(theme::color(quiet))
+                .child("Quick launch"),
         )
         .child(
             div()
-                .min_w(AGENT_COLUMN)
-                .flex_none()
-                .whitespace_nowrap()
-                .text_size(px(summary::CHORD_TEXT))
-                .text_color(theme::color(chord))
-                .child(QUICK_LAUNCH_SHORTCUT_NAME),
+                .min_w_0()
+                .truncate()
+                .font_weight(FontWeight::MEDIUM)
+                .child(target),
         );
+    let line = command_row_content(
+        Some(row_marks::cell(
+            "quick-switcher-quick-launch-mark".into(),
+            Icon::BoltFilled,
+            row_ink(selected, palette, palette.warn_bright),
+        )),
+        None,
+        [words.into_any_element()],
+    )
+    .items_center()
+    .child(key_chip(QUICK_LAUNCH_SHORTCUT_NAME, quiet, palette).flex_none());
     OptionRow::new(
         QUICK_ROW_ID,
-        label.accessible_name(),
+        label,
         HoverHelp::tooltip(QUICK_ROW_HELP),
         Role::ListBoxOption,
     )
@@ -1381,70 +1468,38 @@ fn quick_row(
     .child(line)
 }
 
-/// The templates hint (the old `.quick-switcher-templates-hint`), a quiet section with an edge above it: "Templates"
-/// over the `tl:` sentence normally, only the templates section's own sentence while a `tl:` query shows it, and the
-/// template list's own sentence there.
-fn templates_hint(in_templates: bool, mode: Mode, palette: &Palette) -> AnyElement {
-    let hint = div()
-        .id("quick-switcher-templates-hint")
-        .flex()
-        .flex_none()
-        .flex_col()
-        .gap(HINT_GAP)
-        .pt(CARD_GAP)
-        .border_t_1()
-        .border_color(theme::color(palette.border_dialog))
-        .text_size(metrics::TEXT_SM)
-        .text_color(theme::color(palette.fg_1));
-    match mode {
-        Mode::Templates => hint.child(
-            "Enter starts the highlighted template. A partial template opens New to complete it.",
-        ),
-        Mode::Sessions if in_templates => {
-            hint.child("Picking a template opens New with it applied; nothing launches yet.")
-        }
-        Mode::Sessions => hint
-            .child("Templates")
-            .child("Type tl: to search templates. Picking one opens New with it applied."),
-    }
-    .into_any_element()
+/// The label and timestamp use the same clock for every visible result. The card width is known before drawing rows.
+struct RowContext {
+    inner_width: Pixels,
+    now: Option<i64>,
+    zone: crate::local_time::Zone,
+    pulse: u64,
 }
 
-/// The widths of a result row's flexible columns in a card `card` wide: what the fixed columns, the gaps and the
-/// padding leave, shared two to one to two between title, host and directory, as the old grid's `fr` tracks did.
-/// Computed rather than left to flex, because a flexible item with text makes layout shape it on every sizing probe,
-/// which shows at the listing cap (SPEC_impl.md, "GPUI cookbook: traps", "Layout costs show only at scale").
-#[derive(Clone, Copy)]
-struct Columns {
-    title: Pixels,
-    host: Pixels,
-    directory: Pixels,
-}
-
-impl Columns {
-    fn for_card(card: Pixels) -> Columns {
-        let inner = card - CARD_PAD * 2. - px(2.) - ROW_CHROME;
-        let shared = (inner - STATUS_COLUMN - AGENT_COLUMN - COLUMN_GAP * 4.).max(px(0.));
-        Columns {
-            title: shared * 0.4,
-            host: shared * 0.2,
-            directory: shared * 0.4,
+impl RowContext {
+    fn new(width: Pixels, pulse: u64, cx: &App) -> Self {
+        Self {
+            // The frame's border, body insets and OptionRow's own border and padding.
+            inner_width: width - BODY_PAD * 2. - px(24.),
+            now: super::age::seconds(ticker::wall_now(cx)),
+            zone: crate::local_time::zone(cx),
+            pulse,
         }
     }
 }
 
-/// One session's result row: its status mark, title, agent, host (its `host` mark, if any, before its name) and working
-/// directory on one line, and an ended status's words on a second line under the title, since they do not fit the
-/// mark's column. Everything the host wrote is host text, each value its own element, with the characters `query`
-/// (already trimmed) matches in it marked. On the selected row the title and marks take the inverse ink and the quieter
-/// columns the dimmer one, as the old sheet's selected row did.
+/// Selected marks take inverse ink, so their identity and status colors never compete with the accent fill.
+fn row_ink(selected: bool, palette: &Palette, ordinary: theme::Token) -> theme::Token {
+    if selected { palette.on_fill } else { ordinary }
+}
+
+/// Two lines fit every session type. The age, host and status stay in their own slots even when the path truncates.
 fn result_row(
     row: &SessionRow,
     query: &str,
     selected: bool,
     collections: Option<&farhelm_helm_client::Collections>,
-    step: u64,
-    columns: Columns,
+    context: &RowContext,
     palette: &Palette,
 ) -> OptionRow {
     let key = &row.info.id;
@@ -1452,46 +1507,11 @@ fn result_row(
     let title = HostText::from_host(row.info.title.as_str());
     let label = HostSentence::new(id.clone()).host(&title).accessible_name();
     let badge = status::badge(row, format!("quick-switcher-status-{key}").into());
-    // The sidebar row's form: the status word joins the help, which is also the row's accessible description, so a
-    // live status shown only as a mark still has words for hover and assistive technology.
-    let help = match Badge::word(badge.as_ref()) {
-        Some(word) => format!("{word} — open this session"),
-        None => "Open this session".to_owned(),
-    };
-    let (live, ended) = match badge {
-        Some(Badge::Live(live)) => (Some(live), None),
-        Some(Badge::Ended { kind, line }) => (None, Some((kind, line))),
-        None => (None, None),
-    };
-    let quiet = if selected {
-        palette.on_accent_dim
-    } else {
-        palette.fg_1
-    };
-    let small = |content: AnyElement, width: Pixels| {
-        div()
-            .w(width)
-            .flex_none()
-            .min_w_0()
-            .overflow_hidden()
-            .truncate()
-            .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(quiet))
-            .child(content)
-    };
-    let agent = match menu::agent_name(row, collections) {
-        AgentName::Known(agent) => div().child(agent).into_any_element(),
-        AgentName::Registered(name) | AgentName::Program(name) => {
-            host_text::element(&name).into_any_element()
-        }
-    };
-    // The old `mark`: the accent at weight 600, or the fill's ink on the selected row's accent fill.
+    let age = super::age::of(row.info.effective_activity(), context.now, context.zone);
+    let help = result_help(row, collections, badge.as_ref(), age.as_ref());
+
     let style = HighlightStyle {
-        color: Some(theme::color(if selected {
-            palette.on_fill
-        } else {
-            palette.accent
-        })),
+        color: Some(theme::color(row_ink(selected, palette, palette.accent))),
         font_weight: Some(FontWeight::SEMIBOLD),
         ..Default::default()
     };
@@ -1499,72 +1519,148 @@ fn result_row(
         host_text::marked(value, |shown| mark_positions(raw, shown, query), style)
     };
     let host_name = row.host_name.as_str();
-    // `.quick-switcher-host`: the mark at the row slot's size, which never shrinks, then the name, which the column
-    // cuts with an ellipsis.
-    let ink = selected.then_some(palette.on_fill);
-    let host = collections.and_then(|collections| HostMark::of(row, collections, ink));
-    let mark_id = format!("{HOST_MARK_ID_PREFIX}{key}");
-    let host = div()
+    let cwd = row.info.cwd.as_str();
+    let destination = div()
         .flex()
-        .flex_row()
         .items_center()
-        .gap(HOST_MARK_GAP)
         .min_w_0()
-        .children(host.map(|mark| {
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .child(row_marks::host_mark(
-                    &mark_id,
-                    mark,
-                    palette,
-                    HelpPlace::Ordinary,
-                ))
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_size(metrics::TEXT_SM)
+        .text_color(theme::color(if selected {
+            palette.on_accent_dim
+        } else {
+            palette.fg_1
         }))
+        .font_family(assets::TERMINAL_FONT)
         .child(
             marked(host_name, &HostText::from_host(host_name))
-                .min_w_0()
+                .flex_none()
+                .max_w(gpui::relative(0.4))
                 .truncate(),
         )
-        .into_any_element();
-    let cwd = row.info.cwd.as_str();
-    let directory = marked(cwd, &HostText::from_host(cwd))
-        .font_family(assets::TERMINAL_FONT)
-        .into_any_element();
-    let line = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(COLUMN_GAP)
-        .min_w_0()
+        .child(":")
         .child(
-            div()
-                .w(STATUS_COLUMN)
-                .flex_none()
-                .flex()
-                .items_center()
-                .children(live.map(|live| live.mark(palette, selected, row.stale, step))),
-        )
-        .child(
-            marked(row.info.title.as_str(), &title)
-                .w(columns.title)
-                .flex_none()
-                .min_w_0()
-                .truncate(),
-        )
-        .child(small(agent, AGENT_COLUMN))
-        .child(small(host, columns.host))
-        .child(small(directory, columns.directory));
-    let mut option = OptionRow::new(id, label, HoverHelp::tooltip(help), Role::ListBoxOption)
-        .selected(selected)
-        .child(line);
-    if let Some((kind, line)) = ended {
-        option = option.child(
-            div()
-                .pl(STATUS_COLUMN + COLUMN_GAP)
-                .child(status::ended_line(kind, line, palette, selected)),
+            host_text::marked(
+                &HostText::from_host(super::abbreviate_home(cwd)),
+                |shown| abbreviated_path_marks(cwd, shown, query),
+                style,
+            )
+            .min_w_0()
+            .truncate(),
         );
+
+    let (agent, ink) = row_marks::agent_mark(row, selected, palette);
+    let agent = row_marks::cell(
+        format!("quick-switcher-agent-{key}").into(),
+        crate::harness::icon(agent),
+        ink,
+    );
+    let inverse = selected.then_some(palette.on_fill);
+    let host = collections.and_then(|collections| HostMark::of(row, collections, inverse));
+    let mark_id = format!("{HOST_MARK_ID_PREFIX}{key}");
+    let host = host.map(|mark| row_marks::host_mark(&mark_id, mark, palette, HelpPlace::Ordinary));
+    let status = status::live(row)
+        .map(|live| {
+            live.mark(palette, selected, row.stale, context.pulse)
+                .into_any_element()
+        })
+        .or_else(|| {
+            status::EndedGlyph::of(row).map(|ended| {
+                row_marks::cell(
+                    format!("quick-switcher-ended-{key}").into(),
+                    ended.icon(),
+                    ended.color(palette, selected),
+                )
+                .into_any_element()
+            })
+        });
+    // A multi-year session can use more than four digits. Reserve the width before the text is shaped.
+    let age_width = age.as_ref().map_or(px(34.), |age| {
+        px(34_f32.max(age.short.len() as f32 * 8. + 2.))
+    });
+    let age = div()
+        .w(age_width)
+        .flex_none()
+        .text_right()
+        .text_size(metrics::TEXT_SM)
+        .font_family(assets::TERMINAL_FONT)
+        .text_color(theme::color(if selected {
+            palette.on_accent_dim
+        } else {
+            palette.fg_1
+        }))
+        .children(age.map(|age| age.short));
+    let slot = |children: Option<AnyElement>| {
+        div()
+            .w(metrics::ROW_SLOT)
+            .flex_none()
+            .flex()
+            .justify_center()
+            .items_center()
+            .children(children)
+    };
+    let trailing = div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(px(7.))
+        .child(slot(host.map(IntoElement::into_any_element)))
+        .child(slot(status))
+        .child(age);
+    let text_width =
+        (context.inner_width - px(38.) - metrics::ROW_SLOT * 2. - age_width).max(px(0.));
+    let contents = command_row_content(
+        Some(div().mt(px(3.)).child(agent)),
+        Some(text_width),
+        [
+            marked(row.info.title.as_str(), &title)
+                .truncate()
+                .font_weight(FontWeight::MEDIUM)
+                .into_any_element(),
+            destination.into_any_element(),
+        ],
+    )
+    .items_center()
+    .child(trailing);
+    OptionRow::new(id, label, help, Role::ListBoxOption)
+        .selected(selected)
+        .child(contents)
+}
+
+/// The row's marks have text equivalents in hover help. Preserve host text isolation for names and failure details.
+fn result_help(
+    row: &SessionRow,
+    collections: Option<&farhelm_helm_client::Collections>,
+    badge: Option<&Badge>,
+    age: Option<&super::age::Age>,
+) -> HoverHelp {
+    use crate::host_text::Line;
+    let agent = HostSentence::new("quick-switcher-agent-help").text("Agent: ");
+    let agent = match menu::agent_name(row, collections) {
+        AgentName::Known(name) => agent.text(name),
+        AgentName::Registered(name) | AgentName::Program(name) => agent.host(&name),
+    };
+    let mut details = vec![agent];
+    match badge {
+        Some(Badge::Live(live)) => {
+            details.push(HostSentence::new("quick-switcher-status-help").text(live.word()))
+        }
+        Some(Badge::Ended {
+            line: Line::App(words),
+            ..
+        }) => {
+            details.push(HostSentence::new("quick-switcher-status-help").text(words.clone()));
+        }
+        Some(Badge::Ended {
+            line: Line::Sentence(sentence),
+            ..
+        }) => details.push(sentence.clone()),
+        None => {}
     }
-    option
+    if let Some(age) = age {
+        details.push(HostSentence::new("quick-switcher-age-help").text(age.full.clone()));
+    }
+    details.push(HostSentence::new("quick-switcher-pick-help").text("Open this session"));
+    HoverHelp::paragraphs(details)
 }

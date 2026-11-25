@@ -118,7 +118,7 @@ EFFECT_TIMEOUT_SECONDS = 60
 MENU_DESCRIPTION = "Removes the session and its state"
 
 # The quick switcher's footer: visible text only the open switcher draws, so its going tells that the switcher closed.
-SWITCHER_FOOTER = "↑↓ choose · Enter pick · Escape close"
+SWITCHER_KEYS = "↑ ↓"
 
 # The host chip's accessible name while the local host is chosen: the snapshot shows it only while the chip is drawn.
 LOCAL_CHIP = "Filtered to host Local; remove filter"
@@ -412,7 +412,7 @@ class Smoke(unittest.TestCase):
         chord reaches the app from a focused terminal, the switcher reads the helm's listing over the UI channel, and a
         pick goes through the ordinary selection, which the helm remembers. Specified: with this step's own origin
         session open, its terminal focused and showing the echo of a stamped line typed into it, the platform's chord
-        opens the switcher ("Recent sessions"); filling its search field with part of this step's target title and
+        opens the switcher. Filling its search field with part of this step's target title and
         pressing Enter closes it, the helm records the target as the last selected session, and the focused terminal
         is the target's: the fake agent's ready line without the origin's echo. Both sessions are this step's own,
         titled with a per-run stamp so no other step's session can match."""
@@ -438,10 +438,10 @@ class Smoke(unittest.TestCase):
         self.ok("terminal-text", "--wait", f"echo:{line}")
         eventually(lambda: last_selected() == ids["origin"], "premise: the helm remembering the origin as selected")
         self.ok("press", "cmd-k" if sys.platform == "darwin" else "ctrl-shift-k")
-        self.ok("wait", "--text", "Recent sessions")
+        self.ok("wait", "id:quick-switcher")
         self.ok("fill", "text:Search sessions", f"target {stamp}")
         self.ok("press", "enter")
-        self.ok("wait", "--gone", SWITCHER_FOOTER)
+        self.ok("wait", "--gone", SWITCHER_KEYS)
         eventually(lambda: last_selected() == ids["target"], "the helm remembering the picked target as selected")
         screen = self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
         self.assertNotIn(f"echo:{line}", screen, "the focused terminal is the target's, not the origin's")
@@ -1372,12 +1372,12 @@ class Smoke(unittest.TestCase):
 
         name = f"named-{stamp}"
         self.ok("press", "cmd-k" if sys.platform == "darwin" else "ctrl-shift-k")
-        self.ok("wait", "--text", "Recent sessions")
+        self.ok("wait", "id:quick-switcher")
         self.ok("fill", "text:Search sessions", name)
         self.ok("wait", "--text", "New session named")
         self.assertIn(f'New session named \\"{name}\\"', self.ok("snapshot", "-i"), "the row names the typed name")
         self.ok("click", "id:quick-switcher-new")
-        self.ok("wait", "--gone", SWITCHER_FOOTER)
+        self.ok("wait", "--gone", SWITCHER_KEYS)
         self.ok("wait", "--text", LAUNCHER_NEW)
         self.ok("wait", "--text", name)
         self.ok("press", "escape")
@@ -1689,11 +1689,11 @@ class Smoke(unittest.TestCase):
         folder = spawn_folder("denied")
         request = self.spawn_waits_on_a_card(title, folder)
         self.ok("press", "cmd-k" if sys.platform == "darwin" else "ctrl-shift-k")
-        self.ok("wait", "--text", "Recent sessions")
+        self.ok("wait", "id:quick-switcher")
         self.answer(request, "deny")
-        self.assertIn(SWITCHER_FOOTER, self.ok("snapshot"), "the switcher stays open through the answer")
+        self.assertIn('dialog "Quick switcher"', self.ok("snapshot", "-i"), "the switcher stays open through the answer")
         self.ok("press", "escape")
-        self.ok("wait", "--gone", SWITCHER_FOOTER)
+        self.ok("wait", "--gone", SWITCHER_KEYS)
         self.ok("click", f"text:{title}")
         screen = self.ok("terminal-text", "--wait", "SPAWN-ERROR:")
         # A long refusal can wrap in a narrow terminal, and the text the bridge reads breaks lines where it wraps.

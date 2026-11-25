@@ -9920,13 +9920,18 @@ intermediate choice. A click saves icon and color together through the operation
 admits one save on that host at a time. A preview shows the mark as the session list draws it.
 
 The quick switcher draws each session's host mark from the registry the store holds, while keeping its own session
-listing. The launcher's host picker (`crates/gui/farhelm-gui/src/launcher/view/host_picker.rs`) is a button with a
-single-choice list on the layer manager's non-focusing popover, so focus and every key stay on the button. Up, Down,
-Home and End browse without committing; Enter or Space picks, Escape, a press outside or focus leaving closes without a
-choice, and closed Enter presses the main action under the choice controls' Enter rule. Typeahead uses a
-case-insensitive prefix, restarting after a one-second pause and cycling repeated letters. Browsing never changes the
-draft; only a pick does, re-seeding a folder the user has not typed or picked. Picking the host already chosen re-seeds
-nothing, so it cannot re-seed a Clone's folder (`LaunchDraft::choose_host`).
+listing. Its result rows reuse the sidebar's harness and status marks and activity-age formatter. The switcher holds the
+ticker's wall clock while an age is visible. The switcher and template list share the dialog frame's control header and
+footer. The top placement caps the frame's height and the matches take the scroll, keeping the entry field, navigation
+keys and pinned action in view.
+
+The launcher's host picker (`crates/gui/farhelm-gui/src/launcher/view/host_picker.rs`) is a button with a single-choice
+list on the layer manager's non-focusing popover, so focus and every key stay on the button. Up, Down, Home and End
+browse without committing; Enter or Space picks, Escape, a press outside or focus leaving closes without a choice, and
+closed Enter presses the main action under the choice controls' Enter rule. Typeahead uses a case-insensitive prefix,
+restarting after a one-second pause and cycling repeated letters. Browsing never changes the draft; only a pick does,
+re-seeding a folder the user has not typed or picked. Picking the host already chosen re-seeds nothing, so it cannot
+re-seed a Clone's folder (`LaunchDraft::choose_host`).
 
 A session's terminal re-reads its frame color whenever the pushed state changes (`frame_color` in
 `crates/gui/farhelm-gui/src/terminal/attached.rs`): its host's identity color while the shared preference to color

@@ -984,9 +984,28 @@ static SCENES: &[Scene] = &[
         setup: open_session_row_menu_setup,
     },
     Scene {
+        name: "quick-switcher-sessions",
+        // At the dialog's 75% cap this leaves all six statuses visible.
+        size: (960., 900.),
+        draw: quick_switcher_scene,
+        setup: quick_switcher_recent_setup,
+    },
+    Scene {
+        name: "quick-switcher-query",
+        size: (920., 560.),
+        draw: quick_switcher_scene,
+        setup: quick_switcher_query_setup,
+    },
+    Scene {
+        name: "quick-switcher-templates",
+        size: (920., 560.),
+        draw: quick_switcher_scene,
+        setup: quick_switcher_templates_setup,
+    },
+    Scene {
         name: "quick-switcher-custom-agents",
         size: (920., 560.),
-        draw: session_lists_then,
+        draw: quick_switcher_scene,
         setup: custom_agent_switcher_setup,
     },
     Scene {

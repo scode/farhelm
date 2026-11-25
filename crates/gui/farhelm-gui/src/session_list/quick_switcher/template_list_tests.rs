@@ -192,8 +192,8 @@ fn launched(main: &mut Main<'_>) -> String {
 /// launcher" with focus in its field (named "Search templates", showing "Start a template") and sends no session read;
 /// it lists redeploy, deploy and partial under "Templates" in the helm's order, redeploy selected, each helped "Start a
 /// session from this template", with no session, New or Quick launch row; deploy's row has the ⚡ chord and number key
-/// 1's chord as chips, partial's number key 8's, redeploy's none; partial's summary "Destination" shows, and the hint
-/// "Enter starts the highlighted template. A partial template opens New to complete it.".
+/// 1's chord as chips, partial's number key 8's, redeploy's none. The empty field shows how to quick launch or use
+/// number keys, and the footer names Enter's action as "start".
 #[gpui::test]
 fn the_chord_opens_the_template_list_from_a_terminal(cx: &mut TestAppContext) {
     let mut main = open_main(cx, fleet());
@@ -225,10 +225,13 @@ fn the_chord_opens_the_template_list_from_a_terminal(cx: &mut TestAppContext) {
         .map(|text| text.text.to_string())
         .collect();
     for words in [
-        "Start a template",
-        "Templates",
+        "Start a template…",
+        "TEMPLATES",
+        "3",
         "Destination",
-        "Enter starts the highlighted template. A partial template opens New to complete it.",
+        "quick launch",
+        "number keys",
+        "start",
     ] {
         assert!(
             shown.iter().any(|line| line == words),

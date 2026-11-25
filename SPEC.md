@@ -4049,25 +4049,27 @@ letter or digit; camelCase does not start a word) come first, then those where i
 where its characters are scattered; in the second group the better of host name and directory counts. Most recent
 activity comes first among equally good matches. With nothing typed, sessions appear in most recent activity order.
 Every match is reachable by scrolling; if the helm's listing cap cut the snapshot, the switcher says only the most
-recently active sessions were searched. Rows show status, agent, host (with its chosen mark) and directory, with
-matching characters marked: in each matching value, the first word-start occurrence, otherwise the first unbroken one,
-otherwise the leftmost scattered characters. Arrow keys choose and Enter opens the selected session, including while a
-session action is pending; the first match is initially selected. Opening a session hidden by the host choice or status
-filter resets both to All after the open is accepted; a refused pick keeps both choices. A pick already visible through
-both leaves them in place. Escape or a click outside closes and restores the previous focus. A loading list says
-loading, rather than no matches, and Enter picks nothing until a reply arrives; a failed read says so.
+recently active sessions were searched. Rows show the harness mark, the title, and `host:path` with home abbreviated.
+The host's chosen mark, status glyph and activity age are on the right. Hover help names the agent and gives the status
+details and last activity time. Matching characters are marked in each matching value at the first word-start
+occurrence, otherwise the first unbroken one, otherwise the leftmost scattered characters. Arrow keys choose and Enter
+opens the selected session, including while a session action is pending; the first match is initially selected. Opening
+a session hidden by the host choice or status filter resets both to All after the open is accepted; a refused pick keeps
+both choices. A pick already visible through both leaves them in place. Escape, Close (×), or a click outside closes and
+restores the previous focus. The empty field shows search and naming examples, and the navigation keys stay visible
+below the results. A loading list says loading, rather than no matches, and Enter picks nothing until a reply arrives; a
+failed read says so.
 
 While text is typed, a pinned row below the scrolling session matches offers "New session named X". It follows the
 sessions in arrow-key order and is selected when no session matches, except while the session list is still loading,
 when arrow keys cannot reach it. Picking it opens New with that name and the default launch target and directory
-(Creation), plus remembered permission defaults. A pinned templates section normally shows only a `tl:` hint. With a
-leading `tl:` (case-insensitive), sessions and the New row are replaced by matching templates, using the session
-launcher's own template search; `tl:` alone lists every template. Picking one opens New with its edits applied, without
-using the query as the session name. New shows a cancellable loading state until the template inputs are ready, before
-allowing draft edits. Neither name nor template pick launches a session: Launch remains the user's action. With no
-query, a separate final "Quick launch: <template>" row uses the direct quick-launch path, or opens Templates to mark
-one; the first recent session stays initially selected. After a failed session read, New and template search remain
-usable.
+(Creation), plus remembered permission defaults. The empty field's hints include `tl:`. With a leading `tl:`
+(case-insensitive), sessions and the New row are replaced by matching templates, using the session launcher's own
+template search; `tl:` alone lists every template. Picking one opens New with its edits applied, without using the query
+as the session name. New shows a cancellable loading state until the template inputs are ready, before allowing draft
+edits. Neither name nor template pick launches a session: Launch remains the user's action. With no query, a separate
+final "Quick launch: <template>" row uses the direct quick-launch path, or opens Templates to mark one; the first recent
+session stays initially selected. After a failed session read, New and template search remain usable.
 
 Cmd+J on macOS, Ctrl+Shift+J on Linux, opens a template-only list when no dialog is open. It follows the quick
 switcher's focus, Escape, loading and modal rules. Typing filters template names as `tl:` does, without a prefix. Rows

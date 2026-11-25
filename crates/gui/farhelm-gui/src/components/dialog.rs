@@ -127,7 +127,7 @@ enum Heading {
     Control {
         field: AnyElement,
         detail: Option<AnyElement>,
-        tracker: AnyElement,
+        tracker: Option<AnyElement>,
     },
 }
 
@@ -213,18 +213,18 @@ impl DialogFrame {
 
     /// Put the primary control in the heading and align Close to it. The detail occupies a second line across
     /// the header, so hint chips or an explanation can wrap without shifting Close out of the control's row.
-    /// The tracker covers the whole control row, so a popover can share the form's edges. The frame title is still
-    /// its accessible name. Tab visits the control before Close.
+    /// The optional tracker covers the whole control row, so a popover can share the form's edges. The frame title
+    /// is still its accessible name. Tab visits the control before Close.
     pub(crate) fn heading_control(
         mut self,
         field: impl IntoElement,
         detail: Option<AnyElement>,
-        tracker: impl IntoElement,
+        tracker: Option<AnyElement>,
     ) -> Self {
         self.heading = Some(Heading::Control {
             field: field.into_any_element(),
             detail,
-            tracker: tracker.into_any_element(),
+            tracker,
         });
         self
     }
@@ -261,8 +261,8 @@ impl DialogFrame {
         self
     }
 
-    /// Let a fixed-height two-pane dialog fill the space between the header and footer.
-    /// Each pane supplies its own padding and registers its own focus scroll region.
+    /// Give a layout with independent scrolling the whole space between the header and footer.
+    /// The caller provides its own padding and decides which part of its body scrolls.
     pub(crate) fn split_body(mut self) -> Self {
         self.split_body = true;
         self
@@ -398,6 +398,7 @@ impl RenderOnce for DialogFrame {
         let limits = frame_limits(area, self.width, self.flat_margin_when_wide);
         let (width, max_height) = (limits.width, limits.height);
 
+        let control_header = matches!(&self.heading, Some(Heading::Control { .. }));
         let mut heading = div().flex_1().min_w_0();
         let (detail, tracker) = match self.heading {
             Some(Heading::Title(drawn)) => {
@@ -410,7 +411,7 @@ impl RenderOnce for DialogFrame {
                 tracker,
             }) => {
                 heading = heading.child(field);
-                (detail, Some(tracker))
+                (detail, tracker)
             }
             None => {
                 heading = heading.child(
@@ -447,7 +448,6 @@ impl RenderOnce for DialogFrame {
                 .text_color(theme::color(palette.fg_0))
                 .child(tile)
         });
-        let control_header = tracker.is_some();
         let header_row = div()
             .relative()
             .flex()

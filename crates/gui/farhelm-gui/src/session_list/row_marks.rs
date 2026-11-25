@@ -338,21 +338,11 @@ impl RowMarks {
         palette: &Palette,
     ) -> RowMarks {
         let launch = &row.info.launch;
-        let glyph = match launch {
-            SessionLaunch::Legacy { agent_kind, .. } => harness::kind_glyph(*agent_kind),
-            SessionLaunch::Agent { .. } | SessionLaunch::Command(_) => launch
-                .agent_type()
-                .map_or(HarnessGlyph::Terminal, harness::glyph),
-        };
         let shield = permission(launch, row.info.screen_yolo);
         let ink = |own: Token| if selected { palette.on_fill } else { own };
         RowMarks {
             host: HostMark::of(row, collections, selected.then_some(palette.on_fill)),
-            // A mark with no identity color takes the agent track's foreground (the old `.session-agent`'s `--fg-1`).
-            agent: (
-                glyph,
-                ink(harness::ink(glyph, palette).unwrap_or(palette.fg_1)),
-            ),
+            agent: agent_mark(row, selected, palette),
             permission: shield.map(|shield| (shield, ink(shield.ink(palette)))),
             description: Description::of(
                 launch,
@@ -363,6 +353,26 @@ impl RowMarks {
             ),
         }
     }
+}
+
+/// The sidebar and switcher identify an agent from its stored launch. Inverse ink belongs to the selected row.
+pub(super) fn agent_mark(
+    row: &SessionRow,
+    selected: bool,
+    palette: &Palette,
+) -> (HarnessGlyph, Token) {
+    let glyph = match &row.info.launch {
+        SessionLaunch::Legacy { agent_kind, .. } => harness::kind_glyph(*agent_kind),
+        launch @ (SessionLaunch::Agent { .. } | SessionLaunch::Command(_)) => launch
+            .agent_type()
+            .map_or(HarnessGlyph::Terminal, harness::glyph),
+    };
+    let ink = if selected {
+        palette.on_fill
+    } else {
+        harness::ink(glyph, palette).unwrap_or(palette.fg_1)
+    };
+    (glyph, ink)
 }
 
 // ---- Where a mark's help shows ---------------------------------------------------------------------------------------

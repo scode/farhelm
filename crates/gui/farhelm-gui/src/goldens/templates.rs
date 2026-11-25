@@ -84,20 +84,7 @@ const EDITOR_SCENE_TEMPLATES: [(&str, &str); 3] = [
 /// `quick-claude`, nothing marked ⚡. The template list's scene shows the same reference stack.
 fn editor_scene_collections() -> Vec<CollectionState> {
     vec![
-        CollectionState {
-            collection: Collection::Templates,
-            meta: test_support::meta(&["api-repo", "codex-deep", "quick-claude"]),
-            entries: EDITOR_SCENE_TEMPLATES
-                .iter()
-                .map(|(name, fields)| KeyedEntry {
-                    key: (*name).into(),
-                    value: serde_json::json!({
-                        "name": name,
-                        "fields": serde_json::from_str::<serde_json::Value>(fields).unwrap_or_default(),
-                    }),
-                })
-                .collect(),
-        },
+        editor_scene_templates(),
         CollectionState {
             collection: Collection::Preferences,
             meta: test_support::meta(&[PREFERENCES_KEY]),
@@ -109,6 +96,24 @@ fn editor_scene_collections() -> Vec<CollectionState> {
             }],
         },
     ]
+}
+
+/// Share the same template names and summaries with the quick switcher's template search.
+pub(super) fn editor_scene_templates() -> CollectionState {
+    CollectionState {
+        collection: Collection::Templates,
+        meta: test_support::meta(&["api-repo", "codex-deep", "quick-claude"]),
+        entries: EDITOR_SCENE_TEMPLATES
+            .iter()
+            .map(|(name, fields)| KeyedEntry {
+                key: (*name).into(),
+                value: serde_json::json!({
+                    "name": name,
+                    "fields": serde_json::from_str::<serde_json::Value>(fields).unwrap_or_default(),
+                }),
+            })
+            .collect(),
+    }
 }
 
 /// The Templates dialog with `codex-deep` open in its editor, as a click on its row opens it (reference
