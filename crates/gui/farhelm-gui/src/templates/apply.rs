@@ -178,8 +178,8 @@ pub struct Applied {
     pub notice: Option<Option<String>>,
     /// The last template with an applicable edit. Repeating only held values leaves the form's source alone.
     pub(crate) template: Option<String>,
-    /// Some step of the batch changed the agent type, even if a later step changed it back. A banner an earlier action
-    /// raised goes away then, since its Undo would also take back this batch.
+    /// Some step of the batch changed the agent type or registration, even if a later step changed it back. A banner
+    /// an earlier action raised goes away then, since its Undo would also take back this batch.
     pub switched_agent: bool,
     /// The permission-escalation banner's content, if the batch raised one.
     pub escalation: Option<Escalation>,
@@ -207,8 +207,8 @@ pub fn apply(
     let cleaned = check(draft, templates, context)?;
     let before = draft.clone();
     let mut notice = None;
-    // The draft right after the last template that changed the agent type, and whether that template chose the
-    // permission itself.
+    // The draft right after the last template that changed the agent type or registration, and whether that template
+    // chose the permission itself. A different registration also retires the old switch's Undo.
     let mut last_switch: Option<(LaunchDraft, bool)> = None;
     for Cleaned {
         template,
@@ -217,6 +217,7 @@ pub fn apply(
     } in &cleaned
     {
         let harness = draft.agent.harness;
+        let custom_agent = draft.agent.custom_agent.clone();
         replay(
             draft,
             &template.fields,
@@ -225,7 +226,7 @@ pub fn apply(
             context,
             &mut notice,
         );
-        if draft.agent.harness != harness {
+        if draft.agent.harness != harness || draft.agent.custom_agent != custom_agent {
             last_switch = Some((draft.clone(), template.fields.permissions.is_some()));
         }
     }

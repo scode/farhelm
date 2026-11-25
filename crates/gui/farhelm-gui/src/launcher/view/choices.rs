@@ -263,8 +263,12 @@ impl Launcher {
             .children(permissions)
     }
 
-    /// Custom agents take raw contract values and use a fixed YOLO label because the wrapper owns permission handling.
-    pub(super) fn custom_agent_fields(&self, palette: &theme::Palette) -> Vec<AnyElement> {
+    /// Custom agents take raw contract values. Their fixed YOLO pill is the permission control for escalation.
+    pub(super) fn custom_agent_fields(
+        &self,
+        palette: &theme::Palette,
+        cx: &App,
+    ) -> Vec<AnyElement> {
         const HELP: &str = "Lowercase letters, digits, hyphens and underscores. Leave blank to use the agent's default.";
         let input = |id, row_id, error_id, label, field: &TextInputState, value: &str, changed| {
             let error = if value.is_empty() {
@@ -307,11 +311,15 @@ impl Launcher {
             &self.draft.agent.custom_effort,
             Changed::Effort,
         );
+        let yolo = div()
+            .px(px(8.))
+            .py(px(4.))
+            .rounded_full()
+            .bg(theme::color(palette.danger_bg_dim))
+            .text_color(theme::color(palette.danger))
+            .child("YOLO");
         let permissions = div().flex().items_center().gap(px(8.))
-            .child(div().px(px(8.)).py(px(4.)).rounded_full()
-                .bg(theme::color(palette.danger_bg_dim))
-                .text_color(theme::color(palette.danger))
-                .child("YOLO"))
+            .child(self.with_escalation_outline(yolo, palette, cx))
             .child(Button::new(
                 "launcher-permission-help", "About permission modes",
                 HoverHelp::tooltip("Custom agents always count as YOLO. Hosts that ask before YOLO launches still ask for confirmation."),

@@ -436,6 +436,7 @@ enum LauncherScene {
     SandboxCheckout,
     RememberedWrapper,
     CustomAgent,
+    CustomEscalation,
     CustomEffortDefault,
     UnavailableCustomAgent,
     RenamedCustomSearch,
@@ -533,6 +534,16 @@ pub(super) fn launcher_more_options_setup(state: &SceneState, window: &mut Windo
 /// Draw the registered chips and literal model and effort inputs without requiring a vendor or a launch.
 pub(super) fn launcher_custom_agent_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::CustomAgent, window, cx);
+}
+
+/// Draw the static reduced-motion outline on the fixed YOLO pill after a real registration pick.
+pub(super) fn launcher_custom_escalation_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    crate::ticker::set_reduced_motion(true, cx);
+    setup(state, LauncherScene::CustomEscalation, window, cx);
 }
 
 /// A Default result clears the literal effort while the registered agent and its model stay selected.
@@ -715,6 +726,7 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
     if matches!(
         scene,
         LauncherScene::CustomAgent
+            | LauncherScene::CustomEscalation
             | LauncherScene::CustomEffortDefault
             | LauncherScene::RenamedCustomSearch
             | LauncherScene::IncompleteCustomQuickLaunch
@@ -884,6 +896,9 @@ fn open_new_with_claude(
     } else if !remembered && !scene.custom_recents() {
         draft.choose_harness(LaunchHarness::Claude, None, None);
     }
+    if scene == LauncherScene::CustomEscalation {
+        draft.choose_permissions(Some(LaunchPermission::Guarded));
+    }
     if scene == LauncherScene::ManagedCheckout {
         draft.choose_host(1, "~".into());
         draft.choose_repository(farhelm_proto::parse_github_repo("acme/widget").unwrap());
@@ -919,9 +934,40 @@ fn open_new_with_claude(
     state.after.set(Some(match scene {
         LauncherScene::RememberedWrapper => pick_claude,
         LauncherScene::CustomAgent => open_shell_wrapper,
+        LauncherScene::CustomEscalation => pick_custom_for_escalation,
         LauncherScene::ShellWrapper | LauncherScene::ShellWrapperNote => open_shell_wrapper,
         _ => answer_new_reads,
     }));
+}
+
+/// The next draw must expose the banner from the ordinary chip action before the capture can settle.
+fn pick_custom_for_escalation(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if click_control(window, cx, "launcher-custom-acme-code") {
+        state.after.set(Some(expect_custom_escalation));
+    } else {
+        state.after.set(Some(pick_custom_for_escalation));
+    }
+}
+
+/// Wait for the banner witness within the golden harness's bounded staging frames.
+fn expect_custom_escalation(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    if !window
+        .driver_nodes()
+        .iter()
+        .any(|node| node.element_id.as_deref() == Some("launcher-escalation-undo"))
+    {
+        state.after.set(Some(expect_custom_escalation));
+    }
 }
 
 /// The wrapper's text and hover help belong to the rendered field, so open More options before resting the pointer.

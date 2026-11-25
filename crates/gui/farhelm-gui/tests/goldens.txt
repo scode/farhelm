@@ -166,6 +166,8 @@ linux/launcher-custom-agent--dark.png 9bbf7bac08c2fb6dfe24916badb28f9f9cf7d49c
 linux/launcher-custom-agent--light.png fe0bdd62e33fabca11a9556d0c431351749fbcbe
 linux/launcher-custom-effort-default--dark.png 15309b88a217803f1a64f1f602e97db865206afe
 linux/launcher-custom-effort-default--light.png 37a3b12d77f377f7bbd21197ce94ffd8c5013d2e
+linux/launcher-custom-escalation--dark.png 4dac674f9a4be83c17ca8209e9d97fd71985b8f1
+linux/launcher-custom-escalation--light.png 835570bb839d16d9239ee144589599291eca2d65
 linux/launcher-custom-recents--dark.png b7b1ebef63d31884445d463240d1b2fee4320ae2
 linux/launcher-custom-recents--light.png f7114855536042dabde382a2aba390f47c72e1ec
 linux/launcher-custom-recents-narrow--dark.png 32e17debabace9b93691c06fbe25781eb0f41e14

@@ -7,8 +7,10 @@
 
 use std::time::Duration;
 
+use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry};
 use farhelm_proto::{LaunchHarness, LaunchPermission};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
+use serde_json::json;
 
 use super::draft::LaunchDraft;
 use super::view_tests::{click_in_body, draft, launcher_on, read};
@@ -327,4 +329,59 @@ fn under_reduced_motion_the_outline_lasts_as_long_as_the_banner(cx: &mut TestApp
         cx.debug_bounds("launcher-escalation-outline").is_none(),
         "and goes with it"
     );
+}
+
+/// A switch to Custom still marks its fixed YOLO pill. A template that selects a different registration takes
+/// ownership of the agent choice, so Undo for the earlier switch must disappear with the old outline.
+#[gpui::test]
+fn custom_escalation_marks_yolo_until_a_template_switches_registrations(cx: &mut TestAppContext) {
+    let first = super::view_tests::acme_agent();
+    let other = farhelm_proto::custom_agents::CustomAgent {
+        id: "other-code".into(),
+        display_name: "Other Code".into(),
+        ..first.clone()
+    };
+    let (mut helm, cx) = super::view_tests::launcher_over(
+        cx,
+        LaunchDraft::new(Some(1), "~".into(), None),
+        vec![
+            super::view_tests::fixture_hosts(&[0]),
+            crate::session_list::tests::preferences(&[], None),
+            CollectionState {
+                collection: Collection::CustomAgents,
+                meta: test_support::meta(&["acme-code", "other-code"]),
+                entries: [first, other]
+                    .into_iter()
+                    .map(|agent| KeyedEntry {
+                        key: agent.id.clone(),
+                        value: serde_json::to_value(agent).unwrap(),
+                    })
+                    .collect(),
+            },
+            CollectionState {
+                collection: Collection::Templates,
+                meta: test_support::meta(&["other"]),
+                entries: vec![KeyedEntry {
+                    key: "other".into(),
+                    value: json!({"name": "other", "fields": {"agent": "custom", "custom_agent": "other-code"}}),
+                }],
+            },
+        ],
+    );
+    super::view_tests::answer_catalog(&mut helm, cx, Some(json!([])));
+    cx.update(|_, cx| crate::ticker::set_reduced_motion(true, cx));
+    search(cx, "harness:codex");
+    search(cx, "perms:guarded");
+    assert_eq!(draft(cx).agent.permissions, Some(LaunchPermission::Guarded));
+    click_in_body(cx, "launcher-custom-acme-code");
+    assert_eq!(draft(cx).agent.custom_agent.as_deref(), Some("acme-code"));
+    assert!(banner(cx).is_some());
+    assert!(cx.debug_bounds("launcher-escalation-outline").is_some());
+
+    test_support::click(cx, "launcher-search-row");
+    assert!(super::view_tests::search_focused(cx));
+    search(cx, "tl:other");
+    assert_eq!(draft(cx).agent.custom_agent.as_deref(), Some("other-code"));
+    assert_eq!(banner(cx), None);
+    assert!(cx.debug_bounds("launcher-escalation-outline").is_none());
 }
