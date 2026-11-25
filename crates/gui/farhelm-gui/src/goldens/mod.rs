@@ -1157,6 +1157,12 @@ static SCENES: &[Scene] = &[
         setup: template_editor_setup,
     },
     Scene {
+        name: "template-invalid-custom-model",
+        size: (1010., 940.),
+        draw: empty,
+        setup: template_invalid_custom_model_setup,
+    },
+    Scene {
         name: "template-destination-editor",
         // Show the optional fields and their actions together in the scrolling editor.
         size: (1010., 1140.),

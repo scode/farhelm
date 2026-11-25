@@ -428,6 +428,8 @@ linux/template-destination-editor--dark.png d5037e70bfbb030a81d54f9c95d6228219a0
 linux/template-destination-editor--light.png 134b0eb3e65446fe71f11d82ea6e3c669eee6346
 linux/template-editor--dark.png 1c92b06304dc9733d4d849b49c7c42e819051337
 linux/template-editor--light.png cdd62d4c83b05f6f1a01a10d7e5ef997500554bc
+linux/template-invalid-custom-model--dark.png 1591df42765c98c0ad787f5dca950373082b5858
+linux/template-invalid-custom-model--light.png 0c4faa036430c5d3140931d239eb8fed6c94675b
 linux/template-launcher--dark.png 2b33f9c101ebcb0bc734fc13ab7b8902e5c4a875
 linux/template-launcher--light.png 1ae0a718426175401f28b8bfef3cd6308f3e48a0
 linux/template-leave-question--dark.png 6a012d242788d9f8c8db3d9a76196498e0c9b62d
