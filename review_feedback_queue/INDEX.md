@@ -207,9 +207,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`antigravity-trust-hint-omits-live-announcement.md`](antigravity-trust-hint-omits-live-announcement.md) — The new
-  Antigravity trust hint emits no live announcement request for screen readers.
-
 - [`unavailable-antigravity-trust-switch-announced-as-off.md`](unavailable-antigravity-trust-switch-announced-as-off.md)
   — Accessibility metadata reports an unread trust setting as off without marking its switch unavailable.
 
@@ -305,10 +302,6 @@ consequences.
 
 - [`checkout-input-arms-hook-warning-early.md`](checkout-input-arms-hook-warning-early.md) — Enter during managed
   checkout preparation can make Farhelm warn about a missing hook report before the agent starts.
-
-- [`hook-hint-omits-live-accessibility-notification.md`](hook-hint-omits-live-accessibility-notification.md) — The hook
-  setup hint exposes readable text but does not request a live announcement when it appears while focus stays in the
-  terminal.
 
 - [`environment-delete-title-unreachable-by-keyboard.md`](environment-delete-title-unreachable-by-keyboard.md) — A long
   target title can clip in an environment Delete confirmation where keyboard paging reaches the warning but cannot

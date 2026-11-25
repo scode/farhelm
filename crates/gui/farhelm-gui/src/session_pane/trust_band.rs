@@ -37,8 +37,8 @@ use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight, HighlightStyle,
     InteractiveElement as _, IntoElement, ParentElement as _, Role, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled as _, StyledText, Subscription, WeakEntity, div,
-    prelude::FluentBuilder as _, px,
+    StatefulInteractiveElement as _, Styled as _, StyledText, Subscription, WeakEntity,
+    accesskit::Live, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::components::{Button, HoverHelp, Tier};
@@ -381,7 +381,7 @@ pub(crate) fn draw(
     )
 }
 
-/// The nonmodal hint presentation lives above the terminal and announces itself without taking focus.
+/// The nonmodal status strip above the terminal. The hint copy is live, and a refusal is a separate alert.
 pub(super) fn strip(id: &'static str, palette: &theme::Palette) -> Stateful<gpui::Div> {
     div()
         .id(id)
@@ -411,6 +411,8 @@ pub(super) fn strip(id: &'static str, palette: &theme::Palette) -> Stateful<gpui
 }
 
 /// The explanation, its lead in bold info ink (`.claude-trust-band-copy strong`).
+/// macOS and Linux both use this label's value for the announcement, so mark only the text as live. The buttons
+/// and refusal alert sit outside the live region.
 pub(super) fn copy(
     id: &'static str,
     lead_words: &str,
@@ -422,12 +424,14 @@ pub(super) fn copy(
         font_weight: Some(FontWeight::BOLD),
         ..HighlightStyle::default()
     };
-    let text = format!("{lead_words}{rest}");
+    let text: SharedString = format!("{lead_words}{rest}").into();
     div()
         .id(id)
         .debug_selector(move || id.into())
         .role(Role::Label)
-        .aria_label(SharedString::from(text.clone()))
+        .aria_label(text.clone())
+        .aria_value(text.clone())
+        .a11y_synthetic_children(|builder| builder.parent_node().set_live(Live::Polite))
         .child(StyledText::new(text).with_highlights([(0..lead_words.len(), lead)]))
 }
 

@@ -233,6 +233,7 @@ mod tests {
 
     /// The hint is bound to a run's missing setup while it waits for a capture. A pushed capture closes the
     /// occurrence, even after a local dismissal. A failed install leaves the session usable and has no hint.
+    /// The visible explanation is also the value provided to screen readers for announcements.
     #[gpui::test]
     fn hook_setup_hint_follows_the_reported_run_without_a_settings_read(cx: &mut TestAppContext) {
         let grok = session("a").agent_kind("grok");
@@ -247,6 +248,17 @@ mod tests {
                 .any(|node| node.element_id.as_deref() == Some(ID))
         };
         assert!(shown(main.cx), "a live uncaptured Grok run has no setup");
+        let copy = frame(main.cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("hook-setup-band-copy"))
+            .expect("the setup hint explains why Restart is unavailable");
+        assert_eq!(
+            copy.value.as_deref(),
+            Some(
+                "Farhelm didn’t set up conversation hooks for this session. \
+                  Restart is unavailable until Farhelm learns which conversation to resume."
+            )
+        );
         assert!(
             !main
                 .helm

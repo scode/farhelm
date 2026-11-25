@@ -385,7 +385,7 @@ fn every_condition_withdraws_the_band_on_its_own() {
 /// "Claude trust hint preserves the terminal and opens the opt-in caveats", its first part). Specified: with `a` at the
 /// question, the band reads Claude's trust once and shows nothing until the answer; answered off, it shows as a status
 /// above the terminal's grid, which loses height to it, with the old words and buttons, while the terminal keeps
-/// focus.
+/// focus. The accessible text value carries the same explanation so the screen reader can announce it.
 #[gpui::test]
 fn the_band_reads_trust_then_shows_above_the_terminal_without_taking_focus(
     cx: &mut TestAppContext,
@@ -417,14 +417,15 @@ fn the_band_reads_trust_then_shows_above_the_terminal_without_taking_focus(
         test_support::terminal_focused(trust.main.cx),
         "focus stayed in the terminal"
     );
-    assert_eq!(
-        test_support::label(trust.main.cx, COPY_ID).as_deref(),
-        Some(
-            "Claude asks this for every new folder. Farhelm can answer it for you, but it's off by default: \
-             there's no supported way to do it, so Farhelm would have to edit Claude's own settings file, which \
-             comes with caveats."
-        )
-    );
+    let copy = frame(trust.main.cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(COPY_ID))
+        .expect("the trust hint explains the question");
+    let words = "Claude asks this for every new folder. Farhelm can answer it for you, but it's off by default: \
+                 there's no supported way to do it, so Farhelm would have to edit Claude's own settings file, which \
+                 comes with caveats.";
+    assert_eq!(copy.label.as_deref(), Some(words));
+    assert_eq!(copy.value.as_deref(), Some(words));
     assert_eq!(
         test_support::label(trust.main.cx, SETTINGS_ID).as_deref(),
         Some("Settings and caveats")

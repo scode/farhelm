@@ -45738,3 +45738,49 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   that proves later repositories are still visited and selected data is retained, exceeds the 30-line polish gate.
   Change `muowvwszzooqqwxzvvqzunvsnkqnxoxm`, bookmark `plan/triage-supervisor-nov24/06-cheap-fixes-2`.
   [Draft PR](https://github.com/scode/farhelm/pull/4881/changes).
+
+## antigravity-trust-hint-omits-live-announcement.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC.md "Managed checkouts" trust section (around lines 1842-1847): the band "takes
+  layout space rather than covering the question, is announced without taking focus". Around 1868-1869: "Codex, Muse and
+  Antigravity show the same nonmodal discovery hint". The code contradicts it. `session_pane/trust_band.rs:384-400`
+  (`strip`) sets only `Role::Status`, and nothing in GPUI sets a live property by role (no `Live::` in
+  `vendor/gpui-pre/src`). In the pinned `accesskit_consumer` 0.38.0, `node.rs:889-892` defaults live to Off. In
+  `accesskit_macos` 0.26.3, `event.rs:236` announces a new node only when it has a value and live is not Off. The
+  repository already uses this pattern elsewhere (`launcher/view/checkout.rs:1209-1214` sets `Live::Polite`). Verified:
+  confirmed by inspection. Actual speech was not checked. The omission covers the shared band for Claude, Codex, Muse
+  and Antigravity alike. `strip` is also used by the hook setup band, so the fix should apply live only to the trust
+  band or accept it on both. The implementer must check that the emitted node carries both live and a value.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code. Size
+  S, under 100 lines including a node-property test.). Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
+- Execution: `kvyryqtvomtqvuttuqooxurnmoqwypry`, `plan/triage-hooks-trust-nov24/01-session-pane`,
+  [draft PR](https://github.com/scode/farhelm/pull/4857/changes). Fixed. The workspace-trust hint carries its displayed
+  words on a polite live label while focus stays in the terminal.
+
+## hook-hint-omits-live-accessibility-notification.md
+
+- Outcome: `fix code`.
+- Assessment: When the hook setup hint (or a trust hint) appears above the terminal while focus stays in the terminal,
+  screen-reader users may not be told it appeared. The strip is marked as a status area but never asks for a live
+  announcement. Verified: confirmed for the code. `session_pane/trust_band.rs:384-389`, the shared `strip`, sets only
+  `Role::Status`, and its doc comment claims it "announces itself without taking focus". Elsewhere the GUI does ask for
+  announcements explicitly (`.set_live(gpui::accesskit::Live::Polite)` at `launcher/view/checkout.rs:1214`). Whether any
+  screen reader announces a Status role with no live setting is unverified. The reviewer's claims about the AccessKit
+  sources were not re-checked. SPEC.md (~~:1844) requires Claude's trust hint to be "announced without taking focus".
+  The hook hint (~~:3185) has no such words, and SPEC.md (~:3793) leaves "how each kind of item announces itself" open.
+  So this is not clearly-settled for the hook hint. The same one-line fix would satisfy the Claude rule.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Expose this consent, warning or status text to assistive technology under that principle.
+  Recommendation for reference: fix code. Mark the shared strip as a polite live region, which fixes the trust and hook
+  hints together. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: `kvyryqtvomtqvuttuqooxurnmoqwypry`, `plan/triage-hooks-trust-nov24/01-session-pane`,
+  [draft PR](https://github.com/scode/farhelm/pull/4857/changes). Fixed. The conversation-hook hint uses the same live
+  label and carries the displayed hint text.
