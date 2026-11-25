@@ -740,7 +740,8 @@ systemd or SSH substrate ran.
   default, capped at available CPUs and selected scenes. A comparison writes highlights from the pixels it already has.
   An update gives the same binary only the changed picture pairs that have references after rendering. Use `--jobs N` to
   change the process budget for both, including `--jobs 1` for a serial run. Use Cargo's `-j N` before `--` to limit
-  build jobs. Parallel output is grouped by process.
+  build jobs. Parallel output is grouped by process. Selected updates write to `target/gui-goldens/selected-captures`
+  and preserve a full update's pictures and completion marker.
 - `python3 -B scripts/test-check-gui-goldens.py` — checks the golden runner with a stand-in renderer: private comparison
   references and captures keep earlier failures available, the renderer holds the update's capture lock, and a full
   update receives a completion marker only after rendering. Failed, incomplete or selected updates cannot be published.
@@ -751,7 +752,7 @@ systemd or SSH substrate ran.
   the runner or the page generator (`scripts/golden_changes_page.py` and
   `crates/gui/farhelm-gui/src/goldens/changes.rs`) changes. Seconds, no graphics renderer or network. The Rust unit
   tests filtered with `cargo test --locked -p farhelm-gui --lib goldens::changes` check exact highlights and size
-  changes without drawing.
+  changes without drawing. The stand-in also verifies that a selected update preserves a full capture set.
 - `python3 -B scripts/gui-goldens.py --self-test` — fetching and publishing the golden references, against a bare
   repository in a temporary directory standing in for the storage repository: a publish and a fetch round-tripping every
   picture under the one ref `refs/gui-goldens/keep` (never a branch or tag), a second publish adding a snapshot of only
@@ -799,10 +800,10 @@ systemd or SSH substrate ran.
   shield checks), a scenario `capture` (the transcript's readiness line, the pointer parked only clear of hover and
   tooltip reactions, the leak check refusing machine paths anywhere and the account's ssh spelling and the hostname only
   where drawn, the size check quoting the window's points and scale, and against a stand-in bridge the order of park,
-  focus click, park and shot, with nothing written on a failed check, and `--keep-focus` retaining the parks and leak
-  probes without a click or transcript wait, and `--park` hovering its named id without searching and naming a refused
-  target, and a failed automatic park naming the reacting elements and hover refusals with bounded output), a capture's
-  settling, which leaves the terminal's contents out of what must stop changing, the wait for a fleet's statuses,
+  focus click, park and shot, refusing failed checks, and `--keep-focus` retaining the parks and leak probes without a
+  click or transcript wait, and `--park` hovering its named id without searching and naming a refused target, and a
+  failed automatic park naming the reacting elements and hover refusals with bounded output), a capture's settling,
+  which leaves the terminal's contents out of what must stop changing, the wait for a fleet's statuses,
   `terminal-text --wait` asking again until its text shows, a helm reply without a body read as none, that a recorded
   pid whose start time no longer matches is never signalled (from /proc on Linux, `ps` on macOS, in the C locale and
   UTC), and the `--lock` rules: held until the holder is stopped, kept by `stop` while part of the run may still be
@@ -812,7 +813,8 @@ systemd or SSH substrate ran.
   itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and needs `mutter`,
   `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run the tests when the
   script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or `farhelm-desktop`, or
-  the app's startup changes.
+  the app's startup changes. Rejected images stay in the run directory under unique names that later captures cannot
+  overwrite.
 - `python3 -B scripts/test-gui-screenshot-batch.py` — the page `scripts/gui-screenshot-batch.py` builds to compare the
   GPUI app with the old app's reference pictures (`docs/gpui/screenshot-batch.md`): unported reference scenes say "not
   yet ported" and pictures the batch did not take say "not captured in this batch", mockups are labelled, a capture sits
@@ -1164,15 +1166,16 @@ systemd or SSH substrate ran.
   the script changes; seconds, no network.
 - `python3 -B scripts/test-capture-agent-screens.py` — the fixture scrubber's replacement and refusal of private IPv4
   and IPv6 proxy URLs, including authorities with multiple `@` signs, punctuation and adjacent prose. Public links still
-  pass. Stand-ins also exercise the resolved executable, cleanup after startup metadata fails and retaining the run
-  directory until stop is confirmed. Run it when the scrubber or its host backend changes. Seconds, no network or vendor
-  turns. The recorded agent screen fixtures selection independently checks the Rust guard.
+  pass. Stand-ins also exercise the resolved executable, cleanup after startup metadata fails, shutdown after control
+  socket creation fails and retaining the run directory until stop is confirmed. Run it when the scrubber or its host
+  backend changes. Seconds, no network or vendor turns. The recorded agent screen fixtures selection independently
+  checks the Rust guard.
 - `python3 -B scripts/test-run-harness-drift.py` — the drift runner's build and category discovery, default base
   selection, harness filters, child environment, per-case timeout, category verdicts and evidence retention against
-  stand-ins. It also checks the once-per-harness upgrade step (`scripts/harness_upgrades.py`): a recipe for every drift
-  case's binary, versions around each updater, stdin closed, the fallback installer only after a failed updater, HTTPS
-  throughout the download, and a failed upgrade failing the run. Run it when the runner or upgrade recipes change.
-  Seconds and zero vendor turns.
+  stand-ins, including cancellation without a failing drift verdict. It also checks the once-per-harness upgrade step
+  (`scripts/harness_upgrades.py`): a recipe for every drift case's binary, versions around each updater, stdin closed,
+  the fallback installer only after a failed updater, HTTPS throughout the download, and a failed upgrade failing the
+  run. Run it when the runner or upgrade recipes change. Seconds and zero vendor turns.
 
   The non-ignored e2e tests in `real_agent_capture::drift::tests` check the reply and recall lines, fresh accepted hook
   evidence, matching resume arguments and captured conversation selectors without starting a vendor CLI. The base module
@@ -1207,9 +1210,9 @@ systemd or SSH substrate ran.
   `shellcheck scripts/boat/sandbox/*.sh` — the boat harness's own checks (the Rust shard, GPUI and docs screenshot
   runner and its pool): the shard configuration dropping only the local fixture build and keeping the scoped Podman
   setup, how an exec's output frames are read (an exec without its exit frame is never trusted), how a docs run's pages
-  spread over its members with the same page's shots kept together, which old outputs a selected docs run clears, and
-  the default sandbox name prefix. Run them when the harness changes (seconds, no sandbox). Using the harness itself is
-  described in `.agents/boat.md`.
+  spread over its members with the same page's shots kept together, when a malformed docs member limit is refused, which
+  old outputs a selected docs run clears, and the default sandbox name prefix. Run them when the harness changes
+  (seconds, no sandbox). Using the harness itself is described in `.agents/boat.md`.
 - `shellcheck -x scripts/test-worker/test-worker.sh scripts/test-worker/remote/*.sh` and
   `python3 -m py_compile scripts/test-worker/lock-output.py scripts/test-worker/remote/prune.py scripts/test-worker/remote/run-workload.py scripts/test-worker/test-test-worker.py`
   — the SSH test worker harness's own checks (the driver, the worker's bootstrap, runners, lock and stop, and the sync's

@@ -31,7 +31,7 @@
  */
 import $ from "jsr:@david/dax@0.50.1";
 import { parseArgs } from "jsr:@std/cli@1.0.32/parse-args";
-import { assertEquals } from "jsr:@std/assert@1.0.19";
+import { assertEquals, assertThrows } from "jsr:@std/assert@1.0.19";
 
 const HERE = import.meta.dirname!;
 const SANDBOX_SCRIPTS = ["bootstrap.sh", "reset.sh", "run-rust-shard.sh", "run-gui.sh", "run-docs.sh"];
@@ -554,6 +554,15 @@ async function docsOnMember(
   return r.code === 0 && extracted;
 }
 
+/** A malformed limit must fail while the previous capture and previews are still intact. */
+function docsMemberLimit(value: string | undefined): number {
+  const requested = Number(value ?? BUDGET);
+  if (!Number.isSafeInteger(requested) || requested < 1) {
+    throw new Error("--members must be a positive integer");
+  }
+  return Math.min(requested, BUDGET);
+}
+
 /** The docs screenshots on the pool: a full capture on one member, or selected pages and shots spread over up to
  * `--members` members (default: one per selected page, within the budget). The PNGs come back into
  * `<out>/docs/shots/<page>/<shot>.png`. A run from shipped binaries is never
@@ -562,6 +571,7 @@ async function docsOnMember(
  * main recorded beside it for the capture's check that the app code is main's. Its record comes back as
  * `<out>/docs/shots/capture.json`, ready to publish. */
 async function runDocs(a: Record<string, string>, selections: string[]) {
+  const want = spread(selections, docsMemberLimit(a.members)).length;
   const buildThere = Boolean(a["build-there"]);
   if (buildThere && (selections.length || a["no-build"])) {
     throw new Error("--build-there takes neither --only nor --no-build");
@@ -572,7 +582,6 @@ async function runDocs(a: Record<string, string>, selections: string[]) {
   }
   await clearDocsOutputs(`${a.out}/docs/shots`, selections);
   const pack = await packGui(!a["no-build"] && !buildThere, true, buildThere);
-  const want = spread(selections, Math.min(Number(a.members ?? BUDGET), BUDGET)).length;
   let members: Member[] = [];
   try {
     members = await claimUpTo(want, a.type ?? "large");
@@ -720,6 +729,15 @@ Deno.test("a docs run's pages spread round-robin over the members it got, in pag
   assertEquals(spread(["a"], 0), [["a"]]);
   assertEquals(spread(["a/one", "b", "a/two", "c"], 2), [["a/one", "a/two", "c"], ["b"]]);
   assertEquals(spread(["a/one", "a/two"], 2), [["a/one", "a/two"]]);
+});
+
+Deno.test("docs member limits reject malformed sizes before a capture can be prepared", () => {
+  assertEquals(docsMemberLimit("1"), 1);
+  assertEquals(docsMemberLimit(undefined), BUDGET);
+  assertEquals(docsMemberLimit(String(BUDGET + 1)), BUDGET);
+  for (const invalid of ["many", "0", "1.5", "Infinity"]) {
+    assertThrows(() => docsMemberLimit(invalid), Error, "--members must be a positive integer");
+  }
 });
 
 Deno.test("a selected docs run clears only its outputs and invalidates a prior full capture", async () => {

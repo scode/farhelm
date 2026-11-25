@@ -193,6 +193,20 @@ class HostRunTests(unittest.TestCase):
         run.stop()
         self.assertFalse(self.run_dir.exists())
 
+    def test_stop_uses_the_owned_fallback_when_socket_creation_fails(self):
+        """Control socket exhaustion still needs a host stop before captured evidence can be published."""
+        (self.run_dir / "farhelm").write_text(str(self.farhelm))
+        run = backend.HostRun(self.run_dir)
+        self.enterContext(mock.patch.object(backend.socket, "socket", side_effect=OSError("too many open files")))
+        fallback = self.enterContext(mock.patch.object(
+            backend.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "")
+        ))
+
+        run.stop()
+
+        self.assertEqual(fallback.call_args.args[0][-2:], ["--state-dir", str(self.run_dir)])
+        self.assertFalse(self.run_dir.exists())
+
 
 class CaptureHarnessTests(unittest.TestCase):
     """What one harness's capture leaves behind when its terminal host cannot be confirmed stopped."""

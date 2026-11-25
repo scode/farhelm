@@ -83,30 +83,38 @@ def discover(binary: Path, env: dict[str, str]) -> dict[CaseKey, str]:
     return dict(sorted(cases.items()))
 
 
-def read_verdict(path: Path, exit_code: int, evidence: Path | None = None) -> Result:
-    """A skip is explicit, and even a valid success record cannot override a nonzero exit."""
+def recorder_manifest(evidence: Path | None) -> dict:
+    """The recorder's finalized outcome distinguishes cancellation from a test ending with the same code."""
+    if evidence is not None:
+        try:
+            manifest = json.loads((evidence / "manifest.json").read_text())
+            if type(manifest["schema_version"]) is int and manifest["schema_version"] == 1:
+                return manifest
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
+    return {}
+
+
+def read_verdict(path: Path, exit_code: int, manifest: dict | None = None, *, cancelled: bool = False) -> Result | None:
+    """Keep a case's own verdict on cancellation, and leave an interrupted case without a verdict unclassified."""
     try:
         payload = json.loads(path.read_text())
         verdict, detail = payload["verdict"], payload["detail"]
         if verdict not in LABELS or not isinstance(detail, str) or not detail.strip():
             raise ValueError("unknown or incomplete test verdict")
     except (OSError, ValueError, TypeError, KeyError):
+        if cancelled:
+            return None
         # Timeouts and spawn failures can end the recorder before libtest can write a verdict.
-        if evidence is not None:
-            try:
-                manifest = json.loads((evidence / "manifest.json").read_text())
-                version = manifest["schema_version"]
-                if type(version) is not int or version != 1:
-                    raise ValueError("unrecognized recorder manifest schema")
-                if manifest["outcome"] == "timed_out":
-                    return Result("failed", "recorder timed out before the test wrote a verdict")
-                error = manifest["recorder"]["error"]
-                if isinstance(error, str) and error.strip():
-                    return Result("failed", f"recorder failed before the test wrote a verdict: {error}")
-            except (OSError, ValueError, TypeError, KeyError):
-                pass
+        if manifest is not None:
+            if manifest.get("outcome") == "timed_out":
+                return Result("failed", "recorder timed out before the test wrote a verdict")
+            recorder = manifest.get("recorder")
+            error = recorder.get("error") if isinstance(recorder, dict) else None
+            if isinstance(error, str) and error.strip():
+                return Result("failed", f"recorder failed before the test wrote a verdict: {error}")
         return Result("failed", f"test exited {exit_code} without a readable drift verdict")
-    if exit_code != 0 and verdict != "failed":
+    if not cancelled and exit_code != 0 and verdict != "failed":
         return Result("failed", f"test reported {LABELS[verdict]} but its recorder exited {exit_code}")
     return Result(verdict, detail)
 
@@ -155,15 +163,29 @@ def recorded_case(binary: Path, test: str, name: str, env: dict[str, str]) -> Re
                         candidate = Path(line.removeprefix(EVIDENCE_PREFIX).strip())
                         if candidate.is_absolute() and (candidate / "manifest.json").is_file():
                             evidence = candidate
-                result = read_verdict(path, recorder.wait(), evidence)
+                exit_code = recorder.wait()
+            manifest = recorder_manifest(evidence)
+            outcome = manifest.get("outcome")
+            cancelled = outcome == "interrupted" or (
+                outcome in (None, "running") and interrupted is not None and exit_code in (128 + interrupted, -interrupted)
+            )
+            result = read_verdict(path, exit_code, manifest, cancelled=cancelled)
+            if evidence is not None and result is not None:
+                try:
+                    (evidence / "drift-verdict.json").write_text(
+                        json.dumps({"verdict": result.verdict, "detail": result.detail}, indent=2) + "\n"
+                    )
+                except OSError as error:
+                    detail = f"could not retain the drift verdict: {error}"
+                    if not cancelled:
+                        return Result("failed", detail, evidence)
+                    print(detail, file=sys.stderr)
+            if cancelled:
+                status = 128 - exit_code if exit_code < 0 else exit_code
+                raise SystemExit(status or 1)
+            assert result is not None
             if evidence is None:
                 return Result("failed", f"recorder did not retain evidence: {result.detail}")
-            try:
-                (evidence / "drift-verdict.json").write_text(
-                    json.dumps({"verdict": result.verdict, "detail": result.detail}, indent=2) + "\n"
-                )
-            except OSError as error:
-                return Result("failed", f"could not retain the drift verdict: {error}", evidence)
             return result._replace(evidence=evidence)
         finally:
             for signum, handler in previous.items():

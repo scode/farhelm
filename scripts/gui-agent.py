@@ -1811,13 +1811,20 @@ def size_problem(actual: tuple[int, int] | None, plan: dict, window: dict) -> st
     )
 
 
+def retain_failed_capture(shot: Path) -> Path:
+    """Give checked failure evidence a durable path within a run that can capture more shots."""
+    retained = shot.with_name(f"failed-capture-{uuid.uuid4().hex}.png")
+    shot.rename(retained)
+    return retained
+
+
 def capture(run: Path, record: dict, args: list[str], platform: str = sys.platform, bridge_cli=None) -> int:
     """`capture OUT.png`: the scenario run's picture, written to OUT only if every check passes (see the section
     comment above). Each step says what it waits for or what it found; a failure raises a RuntimeError naming the step,
-    and the shot taken so far stays at CAPTURE_FILE in the run directory. `platform` decides the Linux frame crop and
-    `bridge_cli` is `cli` unless a test hands in a stand-in bridge. `--keep-focus` leaves dialogs and their fields
-    focused, skipping the terminal click and transcript wait so a picture can show those surfaces. `--park` uses the
-    shot's chosen spot directly; the bridge still refuses a covered target."""
+    and a shot rejected by crop or size checks stays under a unique name in the run directory. `platform` decides the
+    Linux frame crop and `bridge_cli` is `cli` unless a test hands in a stand-in bridge. `--keep-focus` leaves dialogs
+    and their fields focused, skipping the terminal click and transcript wait so a picture can show those surfaces.
+    `--park` uses the shot's chosen spot directly; the bridge still refuses a covered target."""
     import argparse
     import shutil
 
@@ -1915,13 +1922,15 @@ def capture(run: Path, record: dict, args: list[str], platform: str = sys.platfo
         problem = batch.crop_frame(shot, batch.LINUX_FRAME_MARGIN * scale, batch.LINUX_FRAME_BORDER * scale,
                                    batch.LINUX_TITLE_BAR * scale)
         if problem:
-            raise RuntimeError(f"the Linux window frame could not be cropped off {shot}: {problem}")
+            retained = retain_failed_capture(shot)
+            raise RuntimeError(f"the Linux window frame could not be cropped off {retained}: {problem}")
     actual = batch.png_size(shot)
     print(f"capture: the shot is {actual[0]}x{actual[1]} pixels" if actual else "capture: the shot is unreadable",
           flush=True)
     problem = size_problem(actual, plan, window)
     if problem:
-        raise RuntimeError(f"{problem}. Nothing was written to {options.output}; the shot is kept at {shot} to look "
+        retained = retain_failed_capture(shot)
+        raise RuntimeError(f"{problem}. Nothing was written to {options.output}; the shot is kept at {retained} to look "
                            "at, and it is not the scenario's picture")
     options.output.parent.mkdir(parents=True, exist_ok=True)
     staged = options.output.with_name(options.output.name + ".partial")

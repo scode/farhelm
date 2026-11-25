@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, call
 
 spec = importlib.util.spec_from_file_location("docs_shots", Path(__file__).with_name("docs_shots.py"))
 engine = importlib.util.module_from_spec(spec)
@@ -114,6 +115,24 @@ class DocsShots(unittest.TestCase):
         pages = dict(engine.load_pages(engine.HERE / "docs-shots", []))
         self.assertIn("release-notes", pages)
         self.assertIsInstance(pages["release-notes"], list)
+
+    def test_selected_launcher_release_recaptures_use_current_controls(self):
+        """Keep deliberate recaptures of the frozen launcher pictures usable after the layout changed."""
+        pages = dict(engine.load_pages(engine.HERE / "docs-shots", ["release-notes"]))
+        shots = {shot.name: shot for shot in pages["release-notes"]}
+        antigravity = shots["v0-42-0-antigravity"]
+        bridge = Mock(spec=engine.Bridge)
+
+        antigravity.steps(bridge)
+
+        self.assertEqual(bridge.mock_calls[-4:], [
+            call.scroll_into_view("id:launcher-more-options"),
+            call.click("id:launcher-more-options"),
+            call.scroll_into_view("id:launcher-conversation"),
+            call.wait("id:launcher-conversation"),
+        ])
+        self.assertEqual(antigravity.park, "id:launcher-conversation-row")
+        self.assertEqual(shots["v0-43-0-shell-sessions"].park, "id:launcher-destination-heading")
 
     def test_mixed_selectors_capture_once_in_declaration_order(self):
         """A page and its shot may overlap. Preserve capture order without starting the app for each selector."""

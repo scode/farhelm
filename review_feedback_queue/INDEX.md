@@ -300,23 +300,8 @@ consequences.
 - [`antigravity-trust-dismissal-lost-during-recovery.md`](antigravity-trust-dismissal-lost-during-recovery.md) — A
   terminal recovery can bring back an Antigravity trust hint the user already dismissed for the same question.
 
-- [`installed-agent-runner-can-leave-interrupted-build-running.md`](installed-agent-runner-can-leave-interrupted-build-running.md)
-  — Stopping only the installed-agent runner during the preliminary build can leave Cargo running.
-
-- [`interrupted-drift-case-retains-failed-verdict.md`](interrupted-drift-case-retains-failed-verdict.md) — A cancelled
-  case can leave a failed drift verdict in its retained evidence before the test binary starts.
-
-- [`docs-shot-partial-failure-hides-success-paths.md`](docs-shot-partial-failure-hides-success-paths.md) — One failed
-  page can hide the paths of sibling screenshots that were captured successfully and kept in the archive.
-
-- [`invalid-boat-member-limit-clears-previews.md`](invalid-boat-member-limit-clears-previews.md) — An invalid Boat
-  worker limit can erase selected previews and the publish record before any capture starts.
-
 - [`docs-shots-share-host-details-state.md`](docs-shots-share-host-details-state.md) — A docs screenshot can show
   different host row details depending on which other shots run on the same worker.
-
-- [`docs-shot-run-can-overwrite-earlier-failure-frame.md`](docs-shot-run-can-overwrite-earlier-failure-frame.md) — A
-  later shot can overwrite the raw image retained for a failed capture, leaving its error linked to the wrong frame.
 
 - [`menu-shortcuts-omitted-from-native-accessibility.md`](menu-shortcuts-omitted-from-native-accessibility.md) — The new
   menu shortcut labels do not reach the native accessibility shortcut fields.
@@ -354,15 +339,6 @@ consequences.
 - [`sound-preview-overlay-blocks-settings-switch.md`](sound-preview-overlay-blocks-settings-switch.md) — The Play
   overlay leaves parts of its sound switch row unclickable.
 
-- [`focused-golden-update-replaces-unpublished-full-captures.md`](focused-golden-update-replaces-unpublished-full-captures.md)
-  — A valid focused golden update can overwrite a complete set of unpublished captures.
-
-- [`golden-output-backpressure-can-block-cancellation-cleanup.md`](golden-output-backpressure-can-block-cancellation-cleanup.md)
-  — Blocked parallel render output can delay cancellation cleanup and retain the update lock.
-
-- [`failed-golden-reference-setup-can-leave-partial-files.md`](failed-golden-reference-setup-can-leave-partial-files.md)
-  — A failed reference fetch can strand partial files from a golden comparison that never started rendering.
-
 - [`staged-host-update-controls-promise-unattended-installs.md`](staged-host-update-controls-promise-unattended-installs.md)
   — Host update controls can still promise automatic installation while a staged build requires a manual update.
 
@@ -395,12 +371,6 @@ consequences.
 
 - [`launcher-shell-group-unlabelled.md`](launcher-shell-group-unlabelled.md) — The launcher separates Bash and Zsh from
   agent choices with a divider that exposes no accessible Shells label.
-
-- [`shell-release-shot-parks-on-removed-control.md`](shell-release-shot-parks-on-removed-control.md) — The shell
-  release-note recapture tries to park on a launcher title that the form no longer draws.
-
-- [`antigravity-release-shot-waits-on-folded-field.md`](antigravity-release-shot-waits-on-folded-field.md) — The
-  Antigravity release-note recapture waits for a conversation field that stays folded under More options.
 
 - [`container-comparison-targets-removed-control.md`](container-comparison-targets-removed-control.md) — The container
   comparison scene targets the removed Runs on control and cannot reach the new Host menu route.
@@ -453,13 +423,6 @@ consequences.
 - [`launcher-announces-two-selected-setups.md`](launcher-announces-two-selected-setups.md) — The launcher can report
   both the setup that filled the form and the current keyboard target as selected.
 
-- [`golden-worker-interrupt-bypasses-cancel.md`](golden-worker-interrupt-bypasses-cancel.md) — A screenshot worker
-  interrupted on its own can leave the runner packaging a partial result or certifying an update after the review worker
-  was interrupted.
-
-- [`golden-report-omits-failed-scenes.md`](golden-report-omits-failed-scenes.md) — A portable screenshot report can omit
-  failed scenes without telling its reviewer that the run was incomplete.
-
 - [`sidebar-retry-warning-missing-accessible-name.md`](sidebar-retry-warning-missing-accessible-name.md) — A retrying
   host's warning appears as an amber edge without an equivalent in the session row's accessible description.
 
@@ -475,9 +438,6 @@ consequences.
 
 - [`capture-stop-retry-can-lose-starting-host.md`](capture-stop-retry-can-lose-starting-host.md) — Retrying cleanup
   after an interrupted capture start can remove the recovery directory before the host finishes starting.
-
-- [`capture-close-setup-error-discards-frames.md`](capture-close-setup-error-discards-frames.md) — A shutdown socket
-  setup failure can skip cleanup and discard already staged agent screens.
 
 - [`capture-drive-error-discards-staged-screens.md`](capture-drive-error-discards-staged-screens.md) — A capture
   controller error can discard previously verified frames even after shutdown handling runs.

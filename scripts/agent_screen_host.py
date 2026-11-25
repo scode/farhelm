@@ -152,9 +152,10 @@ class HostRun:
     def request(self, payload: dict[str, object]) -> dict[str, object]:
         """Send one request on the control socket and return its answer, raising `HostError` on a refusal."""
 
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-            conn.settimeout(REQUEST_SECONDS)
-            try:
+        try:
+            # Socket setup can fail before connect. It still needs the HostError path so stop can reap the host.
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                conn.settimeout(REQUEST_SECONDS)
                 conn.connect(str(self.dir / "control"))
                 conn.sendall(json.dumps(payload).encode() + b"\n")
                 chunks = []
@@ -163,8 +164,8 @@ class HostRun:
                     if not chunk:
                         break
                     chunks.append(chunk)
-            except OSError as error:
-                raise HostError(f"the run does not answer ({error}); is it stopped?") from error
+        except OSError as error:
+            raise HostError(f"the run does not answer ({error}); is it stopped?") from error
         try:
             answer = json.loads(b"".join(chunks))
         except ValueError as error:
