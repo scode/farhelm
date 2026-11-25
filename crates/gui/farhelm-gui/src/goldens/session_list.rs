@@ -355,6 +355,31 @@ pub(super) fn session_row_hover_setup(state: &SceneState, window: &mut Window, c
     session_list_then(state, rest_on_idle_age, cx);
 }
 
+/// A muted waiting dot has its own beside help without a ring, and the Unmute bell stays after the title.
+pub(super) fn muted_waiting_dot_hover_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    window.set_driver_enabled(true);
+    let [selected, waiting, ..] = fleet();
+    session_list_scene(state, &[selected, waiting.muted(None)], cx);
+    state.after.set(Some(rest_on_muted_waiting_dot));
+}
+
+/// Pick the noninteractive status dot so the capture proves which target owns this help.
+fn rest_on_muted_waiting_dot(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    rest_pointer_on(
+        state,
+        "session-seen-b",
+        gpui::Bounds::center,
+        rest_on_muted_waiting_dot,
+        window,
+        cx,
+    );
+}
+
 /// [`rest_pointer_on`] row `c`'s age.
 fn rest_on_idle_age(
     _: &Entity<SessionList>,

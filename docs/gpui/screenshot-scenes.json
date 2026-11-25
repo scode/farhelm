@@ -2693,6 +2693,11 @@
       "reference": "tooltip-last-activity"
     },
     {
+      "golden": "muted-waiting-dot-hover",
+      "title": "A muted waiting session's status help beside the sidebar, with a notch and no ring",
+      "reference": null
+    },
+    {
       "golden": "session-summary-card",
       "title": "An idle local row's summary card beside the sidebar: title, status, agent, host, managed checkout, directory, start and last-activity times, and the click hints, with the notch and the accent ring around the row",
       "reference": "tooltip-session-summary"

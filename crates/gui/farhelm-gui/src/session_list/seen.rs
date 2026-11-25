@@ -32,10 +32,11 @@ use gpui::{AnyElement, App, IntoElement as _, SharedString};
 use serde_json::json;
 
 use super::delete;
+use super::row::Steps;
 use super::row_marks::HelpPlace;
 use super::selection::Listed;
 use super::status::{self, Live};
-use crate::components::{HoverHelp, MarkToggle, Role};
+use crate::components::{HoverHelp, MarkToggle, Role, StatusMark};
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, Work};
 use crate::theme;
@@ -132,22 +133,35 @@ pub(crate) fn send(key: &str, toggle: Toggle, cx: &mut App) {
     super::menu::send(key, command(key, toggle), cx);
 }
 
-/// `session`'s live status mark as drawn in its row, at pulse step `step`: the dot, as a [`MarkToggle`] that sends the
+/// `session`'s live status dot. A muted wait has ringless help because its separate bell owns the action.
+/// The ordinary dot is a [`MarkToggle`] that sends the
 /// row's toggle when clicked. Its accessible name is the action and the session's title ("Mark read: <title>", the title
 /// as host text), so a screen reader's list of buttons tells one row's dot from another's; its hover help names the
 /// status and the action, beside the sidebar as every row hover is ([`HelpPlace::Row`]). Its ring is square on the
 /// dot's 8-pixel box, as the old outline was (`.status-dot.tooltip-target-ring`, on a box with no radius of its own): a
 /// ring of the dot's own round size would lie on the shape's edge and vanish into it, where a square's corners stand
 /// clear of every shape. While the session has a request in flight the click does nothing.
-pub(super) fn dot(session: Listed, live: Live, selected: bool, step: u64, cx: &App) -> AnyElement {
+pub(super) fn dot(
+    session: Listed,
+    live: Live,
+    selected: bool,
+    steps: Steps,
+    cx: &App,
+) -> AnyElement {
     let row = session.row;
-    let mark = live.mark(theme::palette(cx), selected, row.stale, step);
-    // The connected waiting dot can remain visible under a mute. Its
-    // Unmute control is beside the title instead.
+    let mark = live.mark(theme::palette(cx), selected, row.stale, steps.pulse);
+    let id = SharedString::from(format!("{DOT_ID_PREFIX}{}", session.key));
     let Some(toggle) = offered(row) else {
+        if let Some(muted) = super::mute::label(row, steps.now, steps.zone) {
+            let words = format!("{} — {muted}", live.word());
+            let help = HelpPlace::Row { selected }.place(HoverHelp::tooltip(words.clone()));
+            return StatusMark::new(id, words.clone(), help, Role::Status, words)
+                .described(false)
+                .content(mark)
+                .into_any_element();
+        }
         return mark.into_any_element();
     };
-    let id = SharedString::from(format!("{DOT_ID_PREFIX}{}", session.key));
     let name = HostSentence::new(id.clone())
         .text(format!("{}: ", toggle.label()))
         .host(&HostText::from_host(row.info.title.as_str()))

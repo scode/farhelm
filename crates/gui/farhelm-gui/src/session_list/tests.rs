@@ -242,7 +242,7 @@ impl Fixture {
         self
     }
     /// The helm reports this session as muted, with a Unix-millisecond deadline if timed.
-    pub(super) fn muted(mut self, until: Option<i64>) -> Self {
+    pub(crate) fn muted(mut self, until: Option<i64>) -> Self {
         self.mute = Some(farhelm_proto::SessionMute { until });
         self
     }

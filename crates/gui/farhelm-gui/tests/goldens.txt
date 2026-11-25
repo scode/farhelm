@@ -168,6 +168,8 @@ linux/launcher-yolo-question--dark.png 00f054e900816752ab1c74ad1e0def24f6e40492
 linux/launcher-yolo-question--light.png 63ec86c28a2201aa9ef727d85b3b7f1362938b0e
 linux/linux-title-bar--dark.png 46842af44551445cbb6fba4a4be0b6d321874947
 linux/linux-title-bar--light.png bf63e2f218b51f882bc6a66258bbf7a1c8a187e5
+linux/muted-waiting-dot-hover--dark.png 66d644e8cab0c915c618a0b3564347d3e7ead925
+linux/muted-waiting-dot-hover--light.png 94f7dca34523a1cfbc3c8710182d4c9dece29a2a
 linux/notice-banner--dark.png 9212f1193c905cec2c8ab32435f9e48b944203d6
 linux/notice-banner--light.png b99436e21877a4dc761854893b5504c733af133a
 linux/notices-alerting--dark.png 8196609dfb6dfe58d63d929e33e0c9297be89660

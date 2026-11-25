@@ -250,7 +250,7 @@ pub(super) fn classify<'a>(
                 words,
                 steps,
                 cue,
-                // Live progress owns the row's text. The warning keeps its edge until it is acknowledged or resolved.
+                // Live progress owns the visible text. The edge and accessible name also report the unresolved warning.
                 warning: status.warned,
             })
         })
@@ -259,6 +259,9 @@ pub(super) fn classify<'a>(
     rows.sort_by_key(|row| row.kind.group());
     rows
 }
+
+/// The warning is named both on a problem row and alongside the accessible status of a working row.
+const SETUP_WARNING: &str = "Setup or update needs attention";
 
 /// What is wrong with `host`, or `None` when nothing is: its phase's words for a phase that waits for someone (SPEC.md:
 /// "Unreachable (worded **Unreachable, retrying**), Identity mismatch, Identity unverified, Duplicate, Retired"), a
@@ -274,7 +277,7 @@ fn problem(host: &HostView, status: &HostStatus) -> Option<(String, Option<CueRe
     // them, as the old line kept a connection failure beside them.
     let credentials = phase::credential_warning(host).map(|_| "Credentials not delivered");
     let tunnels = phase::tunnels_failed(host).then_some("Tunnels failed");
-    let warning = status.warned.then_some("Setup or update needs attention");
+    let warning = status.warned.then_some(SETUP_WARNING);
     let words: Vec<&str> = phase
         .into_iter()
         .chain(credentials)
@@ -830,7 +833,10 @@ fn row_element(
         sentence = sentence.text(" · ").host(step);
     }
     let sentence = sentence.text("; open Hosts for details");
-    let label = sentence.accessible_name();
+    let mut label = sentence.accessible_name();
+    if row.kind == Kind::Working && row.warning {
+        label = format!("{label}; {SETUP_WARNING}").into();
+    }
     // A working row with a run's steps shows the progress card, made only while it shows; before the steps arrive it
     // shares the plain hover help.
     let help = match (&row.kind, &row.steps) {

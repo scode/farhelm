@@ -374,7 +374,7 @@ pub(crate) fn row(
     let activity_mark = if super::mute::replaces_dot(row) {
         Some(super::mute::bell(session, selected, steps, cx))
     } else {
-        live.map(|live| super::seen::dot(session, live, selected, steps.pulse, cx))
+        live.map(|live| super::seen::dot(session, live, selected, steps, cx))
     };
     let identity = div()
         .flex()
