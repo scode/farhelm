@@ -175,7 +175,8 @@ fn an_empty_history_shows_no_strip(cx: &mut TestAppContext) {
 }
 
 /// A click fills the setup and returns focus to the command field. This lets the user keep refining the draft.
-/// Down moves only the highlight, and Enter on that row launches through the ordinary path. A held Enter does nothing.
+/// Down moves only the highlight, and plain Enter on that row launches through the ordinary path. Modified or held
+/// Enter leaves the launch for a fresh plain press.
 #[gpui::test]
 fn a_click_fills_and_enter_launches(cx: &mut TestAppContext) {
     let (mut helm, cx) = new_in_tmp(cx, &two_setups());
@@ -203,6 +204,10 @@ fn a_click_fills_and_enter_launches(cx: &mut TestAppContext) {
     keys(cx, "down");
     assert!(recent_highlighted(cx, "launcher-recent-0"));
     assert!(super::view_tests::search_focused(cx));
+    keys(cx, "shift-enter ctrl-enter cmd-enter");
+    assert!(recent_highlighted(cx, "launcher-recent-0"));
+    assert_eq!(draft(cx).tab, Tab::Command, "modified Enter fills nothing");
+    assert!(creates(&mut helm, cx).is_empty(), "and launches nothing");
     test_support::press(cx, "enter", true);
     assert_eq!(draft(cx).tab, Tab::Command, "a held Enter fills nothing");
     assert!(creates(&mut helm, cx).is_empty(), "and launches nothing");

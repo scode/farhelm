@@ -43530,3 +43530,71 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: `znmrtwowwywpnoovuqmypllmumrluwtk`, `plan/triage-launcher-nov24/06d-permission-wording`,
   [draft PR](https://github.com/scode/farhelm/pull/4847/changes). Fixed. A plain Restart describes its exemption from
   the host launch rule, and the dormant Prompt card says it sends text to an existing session without starting an agent.
+
+## trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md
+
+- Outcome: `other`.
+- Assessment: The supervisor test for agent-verb validation documents that Clone may omit its host, but never checks a
+  Clone with a source and no host. A regression that reinstated a host requirement would still pass. Verified:
+  confirmed. `crates/farhelm-supervisor/src/service/handlers.rs:7225-7340` has no positive absent-host Clone case, and
+  its positive Clone cases all name a host. Test gap only.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code with one assertion (cheap), or discard. Size S.
+- Execution: `xmzsysrzmkyktxkwytlmxvryqwptxsrt`, `plan/triage-launcher-nov24/07-cheap-fixes`,
+  [draft PR](https://github.com/scode/farhelm/pull/4850/changes). Fixed the test. A valid explicit Clone source with no
+  host must pass the supervisor's existing admission check so Clone can default to the source host.
+
+## launcher-underlining-can-stall-search.md
+
+- Outcome: `other`.
+- Assessment: When a typed query matches a recent setup, the launcher underlines every match in that row's full saved
+  wrapper prefix. The underline code is quadratic in the number of hits, so a wrapper thousands of characters long with
+  many hits could make each redraw slow while the user types. Verified: confirmed. `host_text.rs:513-563`
+  (`sentence_runs`) runs `hits.iter().any(...)` once per edge. Severity is unverified: a material stall needs an unusual
+  stored wrapper of thousands of characters with thousands of hits, and no measurement was taken.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code. The fix is cheap: merge the hit ranges and sweep through them once. Size S. `discard` is also
+  reasonable.
+- Execution: `xmzsysrzmkyktxkwytlmxvryqwptxsrt`, `plan/triage-launcher-nov24/07-cheap-fixes`,
+  [draft PR](https://github.com/scode/farhelm/pull/4850/changes). Fixed. The renderer walks the match ranges once after
+  sorting the existing run boundaries. The same text and font ranges remain underlined.
+
+## launcher-recent-accepts-modified-return.md
+
+- Outcome: `other`.
+- Assessment: In the command field, Shift+Return and Cmd+Return (Ctrl+Return on Linux) do exactly what Return does,
+  including taking the highlighted recent setup. The previous launcher accepted only plain Return there. Verified:
+  confirmed. `components/text_input.rs:428` maps every `PressEnter` to `Submitted { held }` without modifiers. No spec
+  rule requires plain-only Return in the editor. Harmless: the action is the one plain Return takes.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: discard. There is no harm, and nothing in the spec contradicts it. Size n/a.
+- Execution: `xmzsysrzmkyktxkwytlmxvryqwptxsrt`, `plan/triage-launcher-nov24/07-cheap-fixes`,
+  [draft PR](https://github.com/scode/farhelm/pull/4850/changes). Fixed. The command field consumes the text input
+  framework's Shift and secondary Enter actions before they can submit. Plain Enter still picks or launches.
+
+## launcher-highlights-escape-notation.md
+
+- Outcome: `other`.
+- Assessment: When a saved folder contains a hidden character, the launcher shows it in escape notation. Search
+  underlining can mark letters inside that notation even though the match came from elsewhere in the real path. Display
+  only: the action uses the raw folder. Verified: confirmed. `host_text.rs:525-534` searches the rendered, escaped text
+  again. Cosmetic.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: discard. The fix (projecting raw match ranges through escaping) costs more than the cue is worth. Size
+  M if fixed.
+- Execution: `xmzsysrzmkyktxkwytlmxvryqwptxsrt`, `plan/triage-launcher-nov24/07-cheap-fixes`,
+  [draft PR](https://github.com/scode/farhelm/pull/4850/changes). No change. Correcting the cosmetic cue requires
+  projecting matches from raw host text through escaping and font runs. That is larger than the polish limit. Launch
+  still uses the raw folder.

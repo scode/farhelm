@@ -746,6 +746,12 @@ impl Launcher {
             .id("launcher-search-row")
             // Tests press the box by where its row is drawn, as they do the other fields' rows.
             .debug_selector(|| "launcher-search-row".into())
+            // Kit submits both modified Enter actions in a single-line field. Only plain Enter picks or launches.
+            .capture_action(|enter: &gpui_component::input::Enter, _, cx| {
+                if enter.secondary || enter.shift {
+                    cx.stop_propagation();
+                }
+            })
             .child(
                 div()
                     .debug_selector(|| "launcher-search-box".into())

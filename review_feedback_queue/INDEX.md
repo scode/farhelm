@@ -109,9 +109,6 @@ consequences.
 - [`settings-close-can-hide-credential-delivery-warnings.md`](settings-close-can-hide-credential-delivery-warnings.md) —
   Save and Close can hide which hosts failed to receive a saved credential replacement.
 
-- [`launcher-underlining-can-stall-search.md`](launcher-underlining-can-stall-search.md) — Underlining matches in a long
-  saved wrapper can do enough work on the GUI thread to slow launcher search.
-
 - [`hook-settings-close-hides-opt-out-failure.md`](hook-settings-close-hides-opt-out-failure.md) — Closing Settings
   while an opt-out saves can hide the refusal and leave automatic hook setup active.
 
@@ -305,12 +302,6 @@ consequences.
 
 - [`podman-launch-lifetime-notice-hidden.md`](podman-launch-lifetime-notice-hidden.md) — The launcher only explains in
   Host help that deleting the last session removes a new container and its files.
-
-- [`launcher-recent-accepts-modified-return.md`](launcher-recent-accepts-modified-return.md) — The new launcher accepts
-  modified Return on highlighted recent setups in addition to the displayed Return shortcut.
-
-- [`launcher-highlights-escape-notation.md`](launcher-highlights-escape-notation.md) — The launcher can underline the
-  escape notation displayed for a path even when that notation was absent from the matching path.
 
 - [`exited-shell-suspend-confirmation-wording.md`](exited-shell-suspend-confirmation-wording.md) — Stop and suspend can
   still tell users it will stop a shell that has already exited.
@@ -582,10 +573,6 @@ consequences.
 - [`trailing-running-seed-cancellation-checks-readability-without-observing-returned-screen.md`](trailing-running-seed-cancellation-checks-readability-without-observing-returned-screen.md)
   — The strengthened assertion detects a stranded or lost emulator after the seed caller cancels. It can still pass if
   an empty emulator takes the old one's place and loses the screen.
-
-- [`trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md`](trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md)
-  — The test whose contract #4529 repairs would still pass if the supervisor reinstated a blanket host requirement for
-  Clone.
 
 - [`trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md`](trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md)
   — The fixture checks publication after first-stage entry. Its coverage of the ordering relied on by startup recovery

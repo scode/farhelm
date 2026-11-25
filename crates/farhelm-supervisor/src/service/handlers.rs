@@ -7321,10 +7321,10 @@ mod tests {
         // An explicitly empty clone --cwd is refused at this hop: the helm
         // would otherwise use "" instead of the source's directory. Absent
         // stays legal (it means "the source's directory").
-        let clone_cwd = |cwd: Option<&str>| {
+        let clone = |host: Option<&str>, cwd: Option<&str>| {
             validate_agent_verb(&AgentVerb::Clone {
                 source_session_id: Some("source".to_string()),
-                host: Some("host".to_string()),
+                host: host.map(str::to_string),
                 cwd: cwd.map(str::to_string),
                 title: None,
                 intent_key: None,
@@ -7332,11 +7332,15 @@ mod tests {
             })
         };
         assert!(
-            clone_cwd(Some(""))
+            clone(Some("host"), Some(""))
                 .unwrap_err()
                 .contains("--cwd must not be empty")
         );
-        assert!(clone_cwd(None).is_ok());
+        assert!(clone(Some("host"), None).is_ok());
+        assert!(
+            clone(None, None).is_ok(),
+            "Clone can default to the source host"
+        );
 
         // A bad clone source names the flag clone actually has, and not the
         // lifecycle verbs' "name the asking session" remedy: the source can

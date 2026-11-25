@@ -540,17 +540,21 @@ fn sentence_runs(
         .collect();
     edges.sort_unstable();
     edges.dedup();
+    // Both match paths return ranges in start order. Keep the furthest end seen so overlapping hits stay underlined
+    // across the font boundaries without rescanning every hit for each edge.
+    let mut hits = hits.into_iter().peekable();
+    let mut underlined_through = 0;
     edges
         .windows(2)
         .map(|edge| {
             let start = edge[0];
-            let underline = hits
-                .iter()
-                .any(|hit| hit.contains(&start))
-                .then_some(UnderlineStyle {
-                    thickness: px(1.),
-                    ..Default::default()
-                });
+            while let Some(hit) = hits.next_if(|hit| hit.start <= start) {
+                underlined_through = underlined_through.max(hit.end);
+            }
+            let underline = (start < underlined_through).then_some(UnderlineStyle {
+                thickness: px(1.),
+                ..Default::default()
+            });
             (
                 start..edge[1],
                 HighlightStyle {
@@ -687,6 +691,18 @@ pub(crate) mod tests {
         let sentence = HostSentence::new("result").mono(&HostText::from_host("/ΟΣ"));
         assert_eq!(matches(sentence.clone().underline_matches("Σ")), ["Σ"]);
         assert_eq!(matches(sentence.underline_template_matches("ος")), ["ΟΣ"],);
+    }
+
+    /// Overlapping hits share underline coverage across font boundaries. A gap before a later hit stays clear.
+    #[test]
+    fn underlining_overlapping_hits_keeps_the_font_boundaries() {
+        let query = ("ana".to_owned(), false);
+        let runs = sentence_runs("bananas ana", std::slice::from_ref(&(2..5)), Some(&query));
+        let underlined: Vec<_> = runs
+            .into_iter()
+            .filter_map(|(range, style)| style.underline.is_some().then_some(range))
+            .collect();
+        assert_eq!(underlined, [1..2, 2..3, 3..4, 4..5, 5..6, 8..11]);
     }
 
     /// Spoofing strings a host could put in a session title or host name, each paired with what the GUI must show.
