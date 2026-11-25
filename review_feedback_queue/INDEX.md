@@ -215,10 +215,6 @@ consequences.
   — The product requires restricted sessions to be denied this operation. The independent inspection did not establish
   the exact denial path from the supplied source excerpts.
 
-- [`launcher-new-environment-folder-omits-repository-prompt.md`](launcher-new-environment-folder-omits-repository-prompt.md)
-  — When no repository has been selected for a new environment, the Folder row says cloning will happen and omits its
-  invitation to select a repository.
-
 - [`environment-launch-history-test-bypasses-origin-handoff.md`](environment-launch-history-test-bypasses-origin-handoff.md)
   — The launch-history regression test can pass if an agent-requested environment starts becoming the desktop’s default
   host again.

@@ -1226,6 +1226,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_container_checkout_refusal_setup,
     },
     Scene {
+        name: "launcher-new-sandbox-checkout",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_sandbox_checkout_setup,
+    },
+    Scene {
         name: "launcher-more-options",
         size: (1080., 1160.),
         draw: session_lists_then,
