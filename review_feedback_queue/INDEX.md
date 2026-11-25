@@ -264,12 +264,6 @@ consequences.
 - [`agent-settings-search-test-omits-focus-target.md`](agent-settings-search-test-omits-focus-target.md) — The Settings
   search test can pass with a trust result that names the right agent and focuses the wrong control.
 
-- [`hook-hint-dismissal-survives-next-launch.md`](hook-hint-dismissal-survives-next-launch.md) — Dismissing a hook hint
-  for one run can hide the hint on a later run of the same session.
-
-- [`hook-hint-can-repaint-old-dismissal-error.md`](hook-hint-can-repaint-old-dismissal-error.md) — An old dismissal
-  error can reappear after Settings has successfully restored the hint.
-
 - [`hook-recovery-text-omits-direction-isolation.md`](hook-recovery-text-omits-direction-isolation.md) — Restart and
   recovery text escape host-supplied hook errors without isolating their text direction.
 
@@ -353,10 +347,6 @@ consequences.
   — The product requires restricted sessions to be denied this operation. The independent inspection did not establish
   the exact denial path from the supplied source excerpts.
 
-- [`trailing-trust-hint-save-errors-use-live-selection-instead-of.md`](trailing-trust-hint-save-errors-use-live-selection-instead-of.md)
-  — A busy or refused Don't show again click can attach its error to a different session if selection moved after the
-  hint was drawn.
-
 - [`launcher-new-environment-folder-omits-repository-prompt.md`](launcher-new-environment-folder-omits-repository-prompt.md)
   — When no repository has been selected for a new environment, the Folder row says cloning will happen and omits its
   invitation to select a repository.
@@ -427,10 +417,6 @@ consequences.
 - [`trailing-claude-trust-hint-shows-on-command-and-legacy-ordinary-dirs.md`](trailing-claude-trust-hint-shows-on-command-and-legacy-ordinary-dirs.md)
   — When Claude asks about folder trust in a Command or legacy launch inside an ordinary folder, Farhelm shows the
   Settings trust hint banner even though the Settings switch does not apply to those launches.
-
-- [`trailing-trust-band-keeps-undismissable-error-after-dismissal.md`](trailing-trust-band-keeps-undismissable-error-after-dismissal.md)
-  — After a failed or busy Don't show again click, dismissing the trust hint in Settings (or having the first click
-  succeed after a rapid second click) leaves a red Not saved alert stuck with no Close button.
 
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed

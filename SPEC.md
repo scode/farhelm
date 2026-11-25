@@ -1862,7 +1862,7 @@ stores a shared dismissal, reversible beside the switch. × hides only the curre
 the screen. A change made elsewhere updates the hint band as it happens; Settings reads the current shared values when
 opened. A failed Don't show again save restores the band with an adjacent error while that session is still shown;
 leaving the session drops the error. If the corrective settings read also fails, only the save error appears until trust
-is known to be off again, without the normal explanation or its actions.
+is known to be off again, without the normal explanation or its actions. A stored dismissal also drops the error.
 
 The Settings pages for Codex, Muse and Pi each offer their own off-by-default, all-hosts trust switch. New, Clone,
 Restart with, Replace with and agent-requested launches apply the current setting in any directory. An inherited spawn

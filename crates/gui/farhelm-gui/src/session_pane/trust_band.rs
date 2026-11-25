@@ -98,8 +98,10 @@ impl Facts {
     /// The failure line of a refused Don't show again, which `failed` says the open session has: while the question is
     /// up in its agent terminal and the occurrence is not hidden, unless trust is known to be on. An unknown trust keeps
     /// the line, without the explanation, which needs trust known off (the old `error_visible`).
+    /// Dismissing the hint also drops its error.
     pub(crate) fn shows_failure(self, failed: bool) -> bool {
-        failed && self.question && self.agent_shown && !self.hidden && self.trust != Some(true)
+        let visible = self.question && self.agent_shown && !self.dismissed && !self.hidden;
+        failed && visible && self.trust != Some(true)
     }
 }
 
@@ -124,7 +126,7 @@ struct Known {
     hiding: Option<TrustAgent>,
     /// The session whose Don't show again was refused while it was open, with the line's words: [`ERROR`] for the
     /// helm's refusal, [`busy`] for a press the operation store refused because another preference save was out.
-    /// Dropped when another session opens.
+    /// Dropped when its question leaves the open session or the shared preference dismisses the hint.
     failed: Option<(String, SharedString)>,
     /// How many trust reads are out (sent, not yet answered), whether or not their answers will apply. A tick reads
     /// only while none is.
@@ -218,12 +220,13 @@ impl TrustBand {
             let agent = question(&key, cx)?.1?;
             Some((key, agent))
         });
-        let known = self.known.current(cx);
-        if known
-            .failed
+        let dismissed = wanted
             .as_ref()
-            .is_some_and(|(key, _)| Some(key) != open.as_ref())
-        {
+            .is_some_and(|(_, agent)| !settings::trust_hint_shown(*agent, cx));
+        let known = self.known.current(cx);
+        if known.failed.as_ref().is_some_and(|(key, _)| {
+            dismissed || Some(key) != open.as_ref() || known.read_for != wanted
+        }) {
             known.failed = None;
             changed = true;
         }
@@ -309,13 +312,16 @@ impl TrustBand {
         cx.notify();
     }
 
-    /// Don't show again, pressed for `pressed`, settled: a refusal shows only while `pressed` is still open.
+    /// A refusal shows only while `pressed` is still open. A successful save there drops any leftover error.
     fn hide_settled(&mut self, pressed: &str, refused: bool, cx: &mut Context<Self>) {
         let open = local_state::selected(cx);
         let known = self.known.current(cx);
-        known.hiding = None;
-        if refused && open.as_deref() == Some(pressed) {
-            known.failed = Some((pressed.to_owned(), ERROR.into()));
+        let shown = known
+            .hiding
+            .take()
+            .is_some_and(|agent| settings::trust_hint_shown(agent, cx));
+        if open.as_deref() == Some(pressed) {
+            known.failed = (refused && shown).then(|| (pressed.to_owned(), ERROR.into()));
         }
         cx.notify();
     }

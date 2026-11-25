@@ -369,7 +369,7 @@ fn every_condition_withdraws_the_band_on_its_own() {
         (|facts| facts.agent_shown = false, false),
         (|facts| facts.trust = Some(true), false),
         (|facts| facts.trust = None, true),
-        (|facts| facts.dismissed = true, true),
+        (|facts| facts.dismissed = true, false),
         (|facts| facts.hidden = true, false),
     ];
     for (change, failure) in withdrawn {
@@ -658,6 +658,7 @@ fn the_band_follows_only_the_stored_dismissal(cx: &mut TestAppContext) {
 /// drops the line; a second refusal brings it back, and a press that the helm stores takes it away with the band; a
 /// refusal that lands after the user opened `b` shows on neither session, and `a` opened again shows the band without
 /// the line.
+/// A dismissal pushed from elsewhere also retires the error before the hint is enabled again.
 #[gpui::test]
 fn a_refused_dont_show_again_says_so_only_while_its_session_is_open(cx: &mut TestAppContext) {
     let mut trust = open(cx);
@@ -692,6 +693,10 @@ fn a_refused_dont_show_again_says_so_only_while_its_session_is_open(cx: &mut Tes
     trust.refuse(save);
     trust.trust_is(read, false);
     assert_eq!(trust.parts(), (true, true), "refused again");
+    trust.dismissed_is(Some(true));
+    assert_eq!(trust.parts(), (false, false));
+    trust.dismissed_is(Some(false));
+    assert_eq!(trust.parts(), (true, false), "re-enabled with no old error");
     click(trust.main.cx, DISMISS_ID);
     let save = trust.dismissals()[0].0;
     let read = trust.one_read();
