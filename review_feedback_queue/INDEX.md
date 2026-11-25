@@ -63,6 +63,21 @@ consequences.
   — Pressing Enter on a deleted custom-agent chip in the launcher submits the previously selected agent instead of
   refusing, which in Replace with mode can retire the running session under the wrong agent (borderline highest/high).
 
+- [`agent-environment-launch-skips-place-host-incarnation-pin.md`](agent-environment-launch-skips-place-host-incarnation-pin.md)
+  — An approved agent container-environment launch can create the container on a different machine than the card named
+  if the place host was retargeted or re-identified while the card waited; the environment-launch path never pins the
+  place host's connection (the ordinary-create path does).
+
+- [`uninstall-newline-stripping-defeats-state-inside-lib-guard.md`](uninstall-newline-stripping-defeats-state-inside-lib-guard.md)
+  — Uninstall's `readlink -f | tr -d '\n'` strips embedded newlines, corrupting the spellings every containment/identity
+  guard consumes; a constructed dual-newline layout can make uninstall delete the user's data directory (traced, not
+  run; deliberate-setup drop rejected by independent check).
+
+- [`installer-leftover-cleanup-deletes-unverified-previous-app.md`](installer-leftover-cleanup-deletes-unverified-previous-app.md)
+  — After an interrupted install, leftover cleanup deletes the displaced "previous" app without verifying ownership
+  whenever the place is occupied — the exact case the restoration promise was written for; can destroy a foreign app
+  (double-swap trigger rare; single-swap variant deletes the user's reinstallable prior install).
+
 ## High priority: material UX degradation
 
 - [`antigravity-trust-warning-omitted-from-accessibility.md`](antigravity-trust-warning-omitted-from-accessibility.md) —
@@ -699,3 +714,59 @@ consequences.
   confirmation dialog explains the YOLO classification as "Farhelm treats every Custom permission choice as YOLO."
   Because "Custom" is also the name of the Custom permission flags mode, this reads as if the launch used custom
   permission flags rather than a registered custom agent.
+
+- [`ui-channel-displaced-notice-lost-to-reader-race.md`](ui-channel-displaced-notice-lost-to-reader-race.md) — A
+  displaced UI channel's Displaced notice can be dropped by a reader/writer drain race, so the displaced window
+  reconnects and steals the seat back (latent: a second UI cannot arise in the shipped embedded app).
+
+- [`ui-channel-command-backlog-unbounded-bytes.md`](ui-channel-command-backlog-unbounded-bytes.md) — The UI channel's
+  1000-command backlog allowance bounds count but not bytes, letting a credential-holding client buffer ~4 GiB of
+  command bodies and OOM the helm (hardening).
+
+- [`upload-cancel-mid-publication-reported-not-published.md`](upload-cancel-mid-publication-reported-not-published.md) —
+  An upload cancelled while the host is publishing it can be reported to the user as "definitely not published" although
+  the host's answer says the outcome is unknown (reachability premise unverified; recorded higher).
+
+- [`helm-agent-create-dispatch-logs-asking-session-unescaped.md`](helm-agent-create-dispatch-logs-asking-session-unescaped.md)
+  — The helm's agent-create audit log writes the supervisor-reported asking session id unescaped (every sibling site
+  escapes it), allowing forged log lines or a disguised asker.
+
+- [`preapproved-agent-requests-skip-deleting-session-refusal.md`](preapproved-agent-requests-skip-deleting-session-refusal.md)
+  — While a session is being deleted, a new request from it that the host already allows without asking is carried out
+  instead of refused, deviating from the deny-until-delete-finishes contract (no new authority granted).
+
+- [`provisioning-orphan-sweep-deletes-concurrent-helm-upload.md`](provisioning-orphan-sweep-deletes-concurrent-helm-upload.md)
+  — Two helms provisioning the same host concurrently can delete each other's active staging temporary via the orphan
+  sweep (no liveness check); the victim run fails visibly and retryably (cross-helm premise unverified).
+
+- [`provisioning-run-panic-strands-host-busy.md`](provisioning-run-panic-strands-host-busy.md) — A provisioning run task
+  has no panic guard; a mid-run panic leaves the host marked busy with a Running run forever, blocking further
+  Setup/Update/Uninstall until Remove or restart (reachable-panic premise unverified).
+
+- [`probe-group-kill-after-reap-pid-reuse.md`](probe-group-kill-after-reap-pid-reuse.md) — A failing supervisor probe
+  SIGKILLs its saved process-group id after reaping the child, so a reused pid could make the kill hit an unrelated
+  group (microsecond window, route not established; sibling helper kills before reap).
+
+- [`update-identity-unverified-misleading-plan-again-remedy.md`](update-identity-unverified-misleading-plan-again-remedy.md)
+  — Update on a host whose supervisor reports no identity (record has one) is accepted then fails with "identity changed
+  / plan again", a futile remedy; the real remedies are not named (rare state, safe refusal).
+
+- [`installer-fallback-lock-world-openable.md`](installer-fallback-lock-world-openable.md) — On a lock-unsupported
+  volume the installer's fallback lock file is created 0644, so another local account can hold it and block the owner's
+  installs (DoS); umask 0 also allows substituting it (premises named).
+
+- [`release-payload-cache-misses-private-dir-hardening.md`](release-payload-cache-misses-private-dir-hardening.md) — The
+  release payload cache is created umask-dependent without symlink refusal, unlike the deliberately hardened sibling
+  directory cache; protected today only by the 0700 state dir (hardening consistency).
+
+- [`podman-settle-claim-incumbent-state-non-atomic.md`](podman-settle-claim-incumbent-state-non-atomic.md) — A place
+  claim transfer reads the incumbent's live identity refusal non-atomically; if it resolves to Connected in the window,
+  the claim still moves (benign routing shift between twins on the same machine; resource guards hold).
+
+- [`supervisor-error-kind-sealed-not-decodable.md`](supervisor-error-kind-sealed-not-decodable.md) — The supervisor's
+  error-kind encoder emits "sealed" but the decoder has no arm for it, so a failed reservation carrying Sealed could
+  never be read back (latent: no current writer emits it; trivial round-trip fix).
+
+- [`reconcile-archive-moves-creation-time-unconfirmed-checkout.md`](reconcile-archive-moves-creation-time-unconfirmed-checkout.md)
+  — reconcile_archive lacks the creation-time-unconfirmed refusal archive_move has, so recovering a legacy interrupted
+  archive can move an unconfirmed checkout to trash (displaced/recoverable, not destroyed; legacy-journal premise).
