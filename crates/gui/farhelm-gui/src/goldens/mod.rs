@@ -1612,6 +1612,12 @@ static SCENES: &[Scene] = &[
         setup: settings_custom_agent_empty_setup,
     },
     Scene {
+        name: "settings-custom-agent-save-refused",
+        size: (800., 900.),
+        draw: empty,
+        setup: settings_custom_agent_save_refused_setup,
+    },
+    Scene {
         name: "settings-codex",
         size: (800., 830.),
         draw: empty,

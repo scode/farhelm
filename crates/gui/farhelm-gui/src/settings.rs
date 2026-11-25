@@ -74,6 +74,8 @@ mod containers_tests;
 mod credential_tests;
 mod credentials;
 mod custom_agents;
+#[cfg(test)]
+pub(crate) use custom_agents::stage_custom_agent_save_refusal;
 mod editing;
 mod file_types;
 #[cfg(test)]

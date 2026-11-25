@@ -354,6 +354,8 @@ linux/settings-custom-agent-empty--dark.png 2cd9f25869a65c7c8950dc1c420e32726936
 linux/settings-custom-agent-empty--light.png 1069b5dcd14efb9fe673d50fb866a1bc32f3257d
 linux/settings-custom-agent-nav-tooltip--dark.png 281d1f67b054be300960740b48860882a0198675
 linux/settings-custom-agent-nav-tooltip--light.png fc27cbea6599e54db2aae6261244dae15c36fb4f
+linux/settings-custom-agent-save-refused--dark.png e7565c3c2d312549a0cec5f5c69a561b4ea2a8a5
+linux/settings-custom-agent-save-refused--light.png 5b50429620da649a6b1424aa122c573953244942
 linux/settings-grok--dark.png ac5cfbf9a2a44e14c72621c1557a3c68aaabae20
 linux/settings-grok--light.png d7fd713e0f49a1bd74b5f2014b744e9ad6c1a606
 linux/settings-hosts--dark.png 46a06d13dd4bd244fdb89d16b9bbf5c0f7b6c18d

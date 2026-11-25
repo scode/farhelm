@@ -72,6 +72,8 @@ struct SettingsFixture {
     search: Option<&'static str>,
     /// An available catalog can be empty after deletion. Omitting it represents a snapshot without the collection.
     custom_agents: Option<CollectionState>,
+    /// Stage the busy refusal once after the saved registration is open.
+    custom_agent_save_refusal: bool,
 }
 
 /// `entries` as a pushed collection's first snapshot, each filed under the key `key` gives it, in their order.
@@ -114,6 +116,7 @@ fn settings_scene_with(
         tensorlake_key,
         search,
         custom_agents,
+        custom_agent_save_refusal,
     } = fixture;
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -164,6 +167,9 @@ fn settings_scene_with(
             if credential_editor {
                 crate::settings::open_agent_credential_for_opened(window, cx);
             }
+            if custom_agent_save_refusal {
+                crate::settings::stage_custom_agent_save_refusal(window, cx);
+            }
             if let Some(query) = search {
                 crate::settings::search_for_opened(query, window, cx);
             }
@@ -182,7 +188,7 @@ fn settings_scene_with(
 
 /// Scroll the saved registration to its two capabilities and command previews. The pinned heading keeps its ID.
 pub(super) fn settings_custom_agent_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    open_custom_agent(state, window, cx);
+    open_custom_agent(state, false, window, cx);
     stage_scroll_end(state, false);
 }
 
@@ -215,7 +221,7 @@ pub(super) fn settings_custom_agent_nav_tooltip_setup(
     window: &mut Window,
     cx: &mut App,
 ) {
-    open_custom_agent(state, window, cx);
+    open_custom_agent(state, false, window, cx);
     window.set_driver_enabled(true);
     state.hover.set(Some("settings-section-custom-acme-code"));
     state
@@ -224,13 +230,23 @@ pub(super) fn settings_custom_agent_nav_tooltip_setup(
         .push(Box::new(super::Pending(Cell::new(true))));
 }
 
-/// Both captures use the same registration so the Settings page and sidebar refer to the same agent.
-fn open_custom_agent(state: &SceneState, window: &mut Window, cx: &mut App) {
+/// Show the refusal where the user can retry the same draft.
+pub(super) fn settings_custom_agent_save_refused_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open_custom_agent(state, true, window, cx);
+}
+
+/// Use the same saved registration for the editor, sidebar and refusal scenes.
+fn open_custom_agent(state: &SceneState, save_refusal: bool, window: &mut Window, cx: &mut App) {
     settings_scene_with(
         state,
         crate::settings::Section::CustomAgent("acme-code".into()),
         SettingsFixture {
             custom_agents: Some(super::custom_agent_state()),
+            custom_agent_save_refusal: save_refusal,
             ..SettingsFixture::default()
         },
         window,

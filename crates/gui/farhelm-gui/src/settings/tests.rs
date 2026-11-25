@@ -273,6 +273,7 @@ pub(super) fn heading(cx: &mut VisualTestContext) -> Option<String> {
 /// back to Add while retaining the draft and its receipt. A delete confirmed on the page removes it entirely.
 /// The previews and sidebar hover help isolate registered text so it cannot reorder the surrounding app words.
 /// The retained draft also exposes the deletion and recovery instructions as a screen-reader status.
+/// A busy key refuses either write with the shared reason and leaves the draft available for retry.
 #[gpui::test]
 fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppContext) {
     const DISPLAY_NAME: &str = "Example Code סוכן";
@@ -345,6 +346,28 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     );
 
     fill(cx, "custom-agent-command", "~/bin/example-v2");
+    let key = crate::operations::OpKey::custom_agent("example-code");
+    let operations = cx.update(|_, cx| crate::session::current_operations(cx).expect("connected"));
+    cx.update(|_, cx| {
+        operations.update(cx, |store, cx| {
+            store
+                .hold(&key, crate::operations::Work::Save, cx)
+                .expect("hold the saved registration's key");
+        })
+    });
+    click(cx, "custom-agent-save");
+    assert_eq!(
+        label(cx, "custom-agent-error").as_deref(),
+        Some("Not saved: another operation was in progress. Try again.")
+    );
+    click(cx, "custom-agent-delete");
+    click(cx, "custom-agent-confirm-delete");
+    assert_eq!(
+        label(cx, "custom-agent-error").as_deref(),
+        Some("Not deleted: another operation was in progress. Try again.")
+    );
+    assert!(drawn(cx, "custom-agent-save") && sent(&mut helm).is_empty());
+    cx.update(|_, cx| operations.update(cx, |store, cx| store.release(&key, cx)));
     click(cx, "custom-agent-save");
     let (update, edited) = one_command(&mut helm, Method::Put, "/api/custom-agents/example-code");
     assert_eq!(edited["command"], "~/bin/example-v2");

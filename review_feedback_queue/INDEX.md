@@ -208,11 +208,6 @@ consequences.
   — Editing Display name, ID, Command, or capability checkboxes on a custom-agent page marks the sidebar row and footer
   as unsaved, but never shows the unsaved dot next to any edited field.
 
-- [`trailing-custom-agent-settings-save-delete-collapses-retired-and-missing-store.md`](trailing-custom-agent-settings-save-delete-collapses-retired-and-missing-store.md)
-  — When saving or deleting a custom agent cannot start because the helm session is resetting or unavailable, Settings
-  misleadingly reports 'Another change to this custom agent is in progress' (or fails silently with no error when no
-  operation store exists), and when the key is busy it ignores Farhelm's shared busy-reason wording.
-
 - [`trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md`](trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md)
   — When switching from a safer agent (such as Guarded Claude or Codex) to a registered custom agent (which always
   counts as YOLO), the red permission-escalation banner appears at the top of the launcher, but the custom agent's YOLO
