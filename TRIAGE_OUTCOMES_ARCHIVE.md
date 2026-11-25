@@ -44920,3 +44920,27 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. The launcher refreshes checkout availability when Save completes. Moving focus to Repository
   requires the same host and no click or key press since Save started. Change `pnoxvlnswmmxzztnzsomzplsopsokluu`,
   bookmark `plan/triage-helm-nov24/05d-checkout-focus`, [PR #4867](https://github.com/scode/farhelm/pull/4867/changes).
+
+## wayland-ssh-paste-blocks-window.md
+
+- Outcome: `fix code`.
+- Assessment: On Linux (Wayland), pasting into a text field such as an SSH sign-in answer reads the clipboard on the
+  window's own thread. If the app that owns the clipboard is slow to supply the text, the whole Farhelm window freezes
+  for up to about four seconds per read. Verified: Confirmed by source, not observed. gpui-base 0.9.1 `paste` calls the
+  synchronous `read_from_clipboard` first (`~/.cargo/registry/.../gpui-base-0.9.1/src/input/base/state.rs:3217-3224`).
+  The vendored Wayland clipboard's sync path blocks in `read_fd_with_timeout(fd, PIPE_READ_TIMEOUT)` with a 4 s timeout
+  (`vendor/gpui-pre-linux/src/linux/wayland/clipboard.rs:349-366`, `platform.rs:1329`). SPEC.md (terminal clipboard
+  rules, around 3566-3571) allows only "A paste the user starts on macOS may stall the window" and says "Farhelm must
+  stay responsive during other clipboard operations." The fix shape is a choice: intercept Paste in `TextInput` on Linux
+  with an async read plus a focus check, or patch Kit.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code. Route
+  text-field paste through the async read on Linux. Size S-M. Size gate: about 100 lines of diff (code, tests and docs,
+  not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
+  back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to TODO.md, Make Wayland text-field paste nonblocking. The shared text edit needs Kit’s guarded
+  paste path and an async text-first receive. The existing async receiver gives files and images priority for the
+  terminal, and changing that contract or reproducing Kit’s text editing exceeds the scope. Change
+  `swwpnpqmvrxktlrrytnrntwtmmnlxmpw`, bookmark `plan/triage-helm-nov24/05e-wayland-text-paste`,
+  [PR #4869](https://github.com/scode/farhelm/pull/4869/changes).
