@@ -19,8 +19,8 @@
 //!   launches with consent once. The one-off answer is the filled one on purpose: the permanent choice must not be the
 //!   reflex target (the old app's reasoning).
 //! - **While the host write is out**, the launcher holds still: Escape, Close and Cancel keep it open, and Launch does
-//!   nothing, so the only launch is the one the answer sends. An edit of the draft retires the question, and the
-//!   write's success then starts nothing: the question it answered is gone.
+//!   nothing, so the only launch is the one the answer sends. Edits can retire the question and a reconnect can change
+//!   the launch's preconditions. The host-setting answer stays bound to its shown question and request.
 //!
 //! Plain Replace shares the question and supplies its own actions. Its
 //! guarded button composes a guarded replacement when the saved agent offers it.
@@ -32,9 +32,9 @@ use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchPermission, LaunchSelection, SessionLaunch};
 use std::rc::Rc;
 
-use gpui::{AppContext as _, Context, WeakEntity, Window};
+use gpui::{App, AppContext as _, Context, WeakEntity, Window};
 
-use super::{Launcher, SourceConsent};
+use super::{Launcher, Request, SourceConsent};
 use crate::components::{HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
@@ -47,7 +47,7 @@ use crate::session;
 
 /// What the question is about, frozen when the refusal arrives: the host the launch targeted and why it counts as
 /// YOLO. The question describes that launch even if the store's view of the host changes while it is up.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct YoloAsk {
     /// The host to stop asking on, for the permanent answer.
     host: i64,
@@ -58,6 +58,8 @@ pub struct YoloAsk {
     pub(in crate::launcher) guarded: bool,
     /// The source warning beside this question. A lifecycle launcher sets it when drawing both together.
     source: Option<SourceConsent>,
+    /// The launch request shown with this question. The host write can start it only while it still matches.
+    request: Option<Rc<Request>>,
 }
 
 impl YoloAsk {
@@ -79,6 +81,7 @@ impl YoloAsk {
                     && choice.harness.offers_permission(LaunchPermission::Guarded)
             }),
             source: None,
+            request: None,
         }
     }
 }
@@ -91,11 +94,17 @@ pub(in crate::launcher) struct YoloState {
 }
 
 impl YoloState {
-    /// Refresh the question's consent when its source warning changes on screen.
-    pub(super) fn show_source(&self, source: SourceConsent, cx: &mut gpui::App) {
+    /// Bind the permanent answer's launch to the same frame as its source warning.
+    pub(super) fn show_request(
+        &self,
+        source: SourceConsent,
+        request: Option<Request>,
+        cx: &mut App,
+    ) {
         if let Some(inline) = &self.inline {
             let mut ask = self.ask.clone();
             ask.source = Some(source);
+            ask.request = request.map(Rc::new);
             inline.refresh_value(ask, cx);
         }
     }
@@ -147,6 +156,7 @@ impl Launcher {
                 guarded: reason.offers_guarded(selection.as_ref())
                     && self.draft.guarded_still_changes(),
                 source: None,
+                request: None,
             },
             inline: None,
         });
@@ -205,6 +215,9 @@ impl Launcher {
 /// Send a launch again with consent, for the user's answer at the given mark.
 type LaunchAgain = Rc<dyn Fn(SourceConsent, Mark, &mut Window, &mut gpui::App)>;
 
+/// Whether this permanent answer's question and shown request still match the launcher.
+type CurrentQuestion = Rc<dyn Fn(&YoloAsk, &Attempt, &gpui::App) -> bool>;
+
 /// A plain Replace's retry with consent, the caller's own.
 pub(in crate::launcher) type Retry = Rc<dyn Fn(Mark, &mut Window, &mut gpui::App)>;
 
@@ -241,9 +254,7 @@ impl GuardedAction {
 pub(in crate::launcher) struct Owner {
     /// Send the launch again with consent, for the user's answer at the given mark.
     launch: LaunchAgain,
-    /// Whether the question is still current when the permanent answer's host write succeeds: the launcher's is not
-    /// once an edit of its draft has retired it.
-    current: Rc<dyn Fn(&gpui::App) -> bool>,
+    current: CurrentQuestion,
     /// Redraw the owner when the host write starts or fails (the launcher draws its controls busy meanwhile).
     redraw: Rc<dyn Fn(&mut gpui::App)>,
 }
@@ -253,13 +264,12 @@ pub(in crate::launcher) struct Owner {
 pub(in crate::launcher) fn replace_owner(retry: Retry) -> Owner {
     Owner {
         launch: Rc::new(move |_, mark, window, cx| retry(mark, window, cx)),
-        current: Rc::new(|_| true),
+        current: Rc::new(|_, _, _| true),
         redraw: Rc::new(|_| {}),
     }
 }
 
-/// The launcher as a question's owner: it launches its own draft with consent, its question is current while it is in
-/// flight, and it redraws itself.
+/// The launcher as a question's owner. Retry the draft only while it still represents the confirmed launch.
 fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
     let (launching, checking, redrawing) = (launcher.clone(), launcher.clone(), launcher);
     Owner {
@@ -268,10 +278,18 @@ fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
                 launcher.submit(true, false, source, mark, window, cx)
             });
         }),
-        current: Rc::new(move |cx| {
-            checking
-                .upgrade()
-                .is_some_and(|launcher| launcher.read(cx).yolo_in_flight(cx))
+        current: Rc::new(move |ask, attempt, cx| {
+            checking.upgrade().is_some_and(|launcher| {
+                let launcher = launcher.read(cx);
+                // The attempt's own prompt may still be updating, so compare its identity without reading its view.
+                let same_question = launcher
+                    .yolo_inline()
+                    .is_some_and(|inline| attempt.belongs_to(inline));
+                let source = ask.source.unwrap_or_default();
+                same_question
+                    && ask.request.is_some()
+                    && launcher.request(false, source, cx).as_ref() == ask.request.as_deref()
+            })
         }),
         redraw: Rc::new(move |cx| {
             let _ = redrawing.update(cx, |_, cx| cx.notify());
@@ -364,6 +382,11 @@ fn stop_asking_then_launch(
     window: &mut Window,
     cx: &mut gpui::App,
 ) {
+    if !(owner.current)(&ask, &attempt, cx) {
+        // Close a stale answer before it can write the setting or start a launch.
+        attempt.succeeded(cx);
+        return;
+    }
     let (Some(operations), Ok(command)) = (
         session::current_operations(cx),
         crate::hosts::start_yolo_without_asking_command(ask.host),
@@ -376,11 +399,11 @@ fn stop_asking_then_launch(
     let mark = Mark::take(cx);
     let source = ask.source.unwrap_or_default();
     let handle = window.window_handle();
-    let host_name = ask.host_name.clone();
     // The attempt settles from the write's reply; a write the store refuses to start settles it at once instead.
     let pending = Rc::new(std::cell::Cell::new(Some(attempt)));
     let settling = pending.clone();
     let on_reply = owner.clone();
+    let answered = ask.clone();
     let started = operations.update(cx, |operations, cx| {
         operations.start(
             &OpKey::host(&HostView::key(ask.host)),
@@ -394,14 +417,13 @@ fn stop_asking_then_launch(
                     Outcome::Refused(refusal) => {
                         // The old answer trimmed the helm's closing period, which the sentence supplies itself.
                         let words = HostText::from_host(refusal.words.raw().trim_end_matches('.'));
-                        attempt.failed(stop_asking_failed(&host_name, &words), cx);
+                        attempt.failed(stop_asking_failed(&answered.host_name, &words), cx);
                         (on_reply.redraw)(cx);
                     }
                     Outcome::Done(_) | Outcome::Accepted(_) => {
-                        // Only while the question this write answered is still current: for the launcher, an edit
-                        // of the draft since then retired it, and launching now would send a draft the user never
-                        // confirmed.
-                        let current = (on_reply.current)(cx);
+                        // Edits can retire the question. Registry changes can alter the request with the question
+                        // still open. In both cases the write can finish but the old consent cannot start a launch.
+                        let current = (on_reply.current)(&answered, &attempt, cx);
                         attempt.succeeded(cx);
                         if current {
                             let _ = cx.update_window(handle, |_, window, cx| {

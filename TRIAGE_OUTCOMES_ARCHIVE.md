@@ -43065,3 +43065,26 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: `lwouxlrumyxkqskslnsqxukwvwrnplps`, `plan/triage-launcher-nov24/02-launcher-2`,
   [draft PR](https://github.com/scode/farhelm/pull/4819/changes). Fixed. Template picks preserve the draft, query and
   focus while Save as template is open. The batch path also refuses them.
+
+## launcher-yolo-reply-uses-current-question.md
+
+- Outcome: `fix code`.
+- Assessment: When the user answers the launcher's YOLO question with "Start, and don't ask again on this host", the
+  launch waits for that host-setting write. When the write succeeds, the launcher checks only that some YOLO question is
+  in flight, not that it is the same one, and then launches the live draft with the earlier answer's source consent.
+  Verified: confirmed that the question identity is missing. `launcher/view/yolo_question.rs:272-276` defines `current`
+  as `yolo_in_flight()`, and `:362-376` uses it. Whether a second question can be in flight before the first write
+  settles is unverified. While the write is out, the footer is only marked busy (`view.rs:2300-2858`) and the form stays
+  editable. An edit could retire question 1, and a press, a host change and a permanent answer on question 2 could
+  follow before write 1 settles. Neither that path nor its exclusion was established, so no filter was applied.
+- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
+  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
+  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
+  GUI at a time". Recommendation for reference: fix code. Compare the question's identity (for example the `Inline`
+  handle) instead of "any in flight". Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: `umqkoqqkzwylmtwvrnosllrnlzkmsrzu`, `plan/triage-launcher-nov24/02b-launcher-yolo`,
+  [draft PR](https://github.com/scode/farhelm/pull/4823/changes). Fixed. The answer issues a host-setting write only
+  while its question and shown launch request match, and checks both again before launching.

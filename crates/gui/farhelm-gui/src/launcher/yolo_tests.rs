@@ -6,8 +6,8 @@
 //! host that asks first. The fake answers commands only when told, so each test answers the create, then the host
 //! write.
 
-use farhelm_helm_client::fake::FakeHelm;
-use farhelm_proto::ui_channel::HelmMarker;
+use farhelm_helm_client::{collections::decode_changes, fake::FakeHelm};
+use farhelm_proto::ui_channel::{CollectionChanges, HelmMarker, HostView};
 use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
 use gpui::VisualTestContext;
 use serde_json::json;
@@ -352,6 +352,44 @@ fn the_launcher_holds_still_while_stop_asking_is_out(cx: &mut gpui::TestAppConte
         creates(&mut helm, cx).is_empty(),
         "after the edit retired the question, the write's success launched nothing"
     );
+}
+
+/// A reconnect after the last frame can leave its confirmation visible. The old button must leave both the host
+/// preference and the new connection alone.
+#[gpui::test]
+fn a_stale_permanent_answer_does_not_write_after_reconnect(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, create) = launched_with(cx, yolo_command_draft());
+    refuse_for_yolo(&mut helm, cx, create.id);
+    test_support::show_next_frame(cx);
+    let at = test_support::center(cx, "prompt-alternative-0");
+    let mut hosts = super::view_tests::fixture_hosts(&[0]);
+    let previous = create.body.unwrap()["expected_incarnation"]
+        .as_u64()
+        .unwrap();
+    hosts.entries[0].value["incarnation"] = json!(previous + 1);
+    let changes = decode_changes(CollectionChanges {
+        collection: hosts.collection,
+        meta: hosts.meta,
+        upsert: hosts.entries,
+        remove: Vec::new(),
+    })
+    .unwrap();
+    cx.update(|window, cx| {
+        let store = crate::session::current_store(cx).unwrap();
+        store.update(cx, |store, cx| store.apply(&changes, cx));
+        let host = store.read(cx).collections().get::<HostView>("1").unwrap();
+        assert_eq!(host.incarnation, previous + 1);
+        test_support::click_before_redraw(at, window, cx);
+    });
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "prompt-confirm"),
+        None,
+        "the stale answer closed"
+    );
+    assert!(helm.commands().iter().all(|sent| {
+        sent.path != "/api/hosts/1/yolo-without-asking" && sent.path != "/api/sessions"
+    }));
 }
 
 /// SPEC.md, "Creation": a launch opens its session only if the user "has pressed no key or pointer button anywhere in

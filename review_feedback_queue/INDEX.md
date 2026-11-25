@@ -428,10 +428,6 @@ consequences.
   setup hint exposes readable text but does not request a live announcement when it appears while focus stays in the
   terminal.
 
-- [`launcher-yolo-reply-uses-current-question.md`](launcher-yolo-reply-uses-current-question.md) — A permanent
-  permission reply checks whichever launcher question is in flight. Whether a later question can receive the older
-  launch permission remains unverified.
-
 - [`environment-delete-title-unreachable-by-keyboard.md`](environment-delete-title-unreachable-by-keyboard.md) — A long
   target title can clip in an environment Delete confirmation where keyboard paging reaches the warning but cannot
   reveal the full title.
