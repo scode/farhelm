@@ -3559,7 +3559,10 @@ mod tests {
             // the test compares the result with the frozen v26 DDL, which
             // has none of them.
             conn.execute_batch(
-                "-- Schema 100 added registered custom agents, the newest table.
+                "-- Schema 102 added global repository history.
+                 DROP TABLE github_repository_replacement_admissions;
+                 DROP TABLE github_repository_history;
+                 -- Schema 100 added registered custom agents.
                  DROP TABLE custom_agents;
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;

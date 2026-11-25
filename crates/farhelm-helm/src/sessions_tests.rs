@@ -729,7 +729,8 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
 
 /// The home fallback also applies when Replace with starts a fresh checkout
 /// on an existing session-owned host. The accepted preview and the create
-/// agree on the target's root before the original session is deleted.
+/// agree on the target's root before the original session is deleted. The new
+/// checkout teaches the global repository list without changing host suggestions.
 #[farhelm_testtrace::test]
 async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
     use farhelm_proto::ControlMsg;
@@ -828,6 +829,13 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
     h.manager.sync_registry().await.unwrap();
     h.await_refreshed_as(host, "fresh-recipe-install", 1).await;
     assert!(h.manager.status(host).unwrap().is_session_owned);
+    assert!(
+        h.store
+            .global_github_repository_history()
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let (status, preview) = post_text(
         &h,
         "/api/github-checkout-preview",
@@ -848,6 +856,17 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{result}");
+    assert_eq!(
+        h.store.global_github_repository_history().await.unwrap(),
+        [farhelm_proto::parse_github_repo("acme/bar").unwrap()],
+    );
+    assert!(
+        h.store
+            .github_repository_history(host, "fresh-recipe-install")
+            .await
+            .unwrap()
+            .is_empty()
+    );
     done.send(()).unwrap();
     responder.await.unwrap();
 }
