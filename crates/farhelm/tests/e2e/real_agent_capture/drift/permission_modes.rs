@@ -57,11 +57,8 @@ fn modes(harness: LaunchHarness) -> Vec<Mode> {
             }
         };
         modes.push(choice(Custom, custom));
-        if harness == LaunchHarness::Antigravity {
-            modes.push(choice(
-                Custom,
-                &["--mode", "auto", "--settings", "{}", "--"],
-            ));
+        if let Some(delimited) = delimited_custom(harness) {
+            modes.push(choice(Custom, delimited.words));
         }
     }
     modes
@@ -132,12 +129,39 @@ async fn check_mode(profile: &Harness, harness: LaunchHarness, mode: &Mode) -> D
     .await
 }
 
-/// These integrations classify a rendered permission footer into the supervisor's shared session listing.
+/// These integrations classify a rendered permission footer into the supervisor's shared session listing. The list
+/// mirrors the supervisor's permission footer readers (`status_line_yolo`), which this test cannot call; a harness
+/// gaining a reader there has to be moved to `true` here so the case checks it.
+#[warn(clippy::wildcard_enum_match_arm)]
 fn reads_yolo(harness: LaunchHarness) -> bool {
-    matches!(
-        harness,
-        LaunchHarness::Claude | LaunchHarness::Grok | LaunchHarness::Muse | LaunchHarness::Cursor
-    )
+    use LaunchHarness::*;
+    match harness {
+        Claude | Grok | Muse | Cursor => true,
+        Codex | Goose | Pi | Omp | Antigravity | OpenCode | Bash | Zsh | Custom => false,
+    }
+}
+
+/// A Custom launch ending in a bare `--`, for a CLI that reads `--` as the end of its options: anything Restart adds
+/// after it would be taken as an operand, so the conversation option has to stay before it.
+struct DelimitedCustom {
+    /// The Custom words to launch, ending in `--`.
+    words: &'static [&'static str],
+    /// The option Restart uses to select the conversation, which must come before the `--`.
+    selector: &'static str,
+}
+
+/// The harnesses whose CLI ends its options at `--` get a second Custom launch that ends in one.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn delimited_custom(harness: LaunchHarness) -> Option<DelimitedCustom> {
+    use LaunchHarness::*;
+    match harness {
+        Antigravity => Some(DelimitedCustom {
+            words: &["--mode", "auto", "--settings", "{}", "--"],
+            selector: "--conversation",
+        }),
+        Claude | Codex | Muse | Grok | Omp | Goose | Cursor | Pi | OpenCode | Bash | Zsh
+        | Custom => None,
+    }
 }
 
 /// Check what Farhelm read from the live screen. The permission choice in the session row alone proves nothing.
@@ -182,16 +206,17 @@ fn require_words(argv: &[String], words: &[&str]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Antigravity's `--` ends its option list. Independent checks for the Custom option words and the delimiter leave
-/// space for the conversation selector between them while rejecting a selector that would be parsed as an operand.
+/// For a CLI whose `--` ends its option list (Antigravity's does), independent checks for the Custom option words and
+/// the delimiter leave space for the conversation selector between them while rejecting a selector that would be
+/// parsed as an operand.
 fn require_resume_words(
     harness: LaunchHarness,
     argv: &[String],
     words: &[&str],
 ) -> anyhow::Result<()> {
-    if harness != LaunchHarness::Antigravity {
+    let Some(delimited) = delimited_custom(harness) else {
         return require_words(argv, words);
-    }
+    };
     let marker = argv.iter().position(|word| word == "--");
     let options = if let Some(custom_options) = words.strip_suffix(&["--"]) {
         anyhow::ensure!(marker.is_some(), "Restart dropped Custom's -- marker");
@@ -202,8 +227,9 @@ fn require_resume_words(
     let before_marker = &argv[..marker.unwrap_or(argv.len())];
     require_words(before_marker, options)?;
     anyhow::ensure!(
-        before_marker.iter().any(|word| word == "--conversation"),
-        "Antigravity puts the Restart conversation option after Custom's -- marker"
+        before_marker.iter().any(|word| word == delimited.selector),
+        "{harness:?} puts the Restart conversation option {} after Custom's -- marker",
+        delimited.selector
     );
     Ok(())
 }
