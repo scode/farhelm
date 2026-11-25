@@ -100,6 +100,13 @@ with these overrides on top of the skill's own rules:
 - If the plan depends on another plan's work being on main first, the goal file says which, and so does its `INDEX.md`
   line.
 
+Write each plan from the skill, these overrides, the files they name, and what the maintainer settled for it, never by
+modelling it on the plans already in `plans/queue/`. A queued plan holds the rules as they stood when it was written,
+and a planner that copies one carries a rule forward after the maintainer has dropped it: a commit message cold read
+kept appearing in new plans after the standing instruction that asked for it was gone. Where the goal file needs a
+convention an instruction file already states (commit message format, changelog fragments, validation), cite that file
+and section instead of restating it, so the run follows the rule as it stands when the plan executes.
+
 New plans go at the end of `INDEX.md` unless the maintainer places them elsewhere. A new line is `[pending]` unless the
 maintainer asked for that plan to go on hold ("plan these but hold them", "plan X on hold", or a picker or
 questions-page instruction saying so), in which case it is `[held]`: fully planned, never picked, and scheduled later
