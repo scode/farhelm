@@ -698,9 +698,11 @@ fn tab_shortcuts_leave_dialog_focus_and_terminal_composition_alone(cx: &mut Test
 
     keys(window.cx, crate::actions::RENAME_SESSION_CHORD);
     assert!(window.focus_inside("rename-title"), "Rename owns focus");
-    keys(window.cx, previous);
-    keys(window.cx, next);
-    assert_eq!(window.chosen(), None, "the dialog prevents switching");
+    // One chord at a time: with one shell tab, previous then next would come back to the main terminal anyway.
+    for chord in [next, previous] {
+        keys(window.cx, chord);
+        assert_eq!(window.chosen(), None, "the dialog prevents switching");
+    }
     assert!(window.focus_inside("rename-title"), "Rename keeps focus");
     keys(window.cx, "escape");
 
@@ -715,9 +717,10 @@ fn tab_shortcuts_leave_dialog_focus_and_terminal_composition_alone(cx: &mut Test
         });
     };
     mark_text(&mut window, "日本");
-    keys(window.cx, previous);
-    keys(window.cx, next);
-    assert_eq!(window.chosen(), None, "marked text prevents switching");
+    for chord in [next, previous] {
+        keys(window.cx, chord);
+        assert_eq!(window.chosen(), None, "marked text prevents switching");
+    }
     assert!(
         window
             .cx
@@ -1701,8 +1704,9 @@ fn leaving_a_session_cancels_its_terminals_pending_reconnects(cx: &mut TestAppCo
 /// SPEC.md, "Session list": a terminal of an unreachable host "keeps its last screen and tab strip dimmed and inert
 /// beneath the card", and the card covers whichever terminal is shown, so every terminal goes inert, hidden tabs
 /// included, and the strip takes no presses (choosing a tab would show a terminal the card does not explain).
-/// Specified: once the set is made inert, every terminal reports inert and a click on Terminal 1 chooses nothing; made
-/// usable again, the click chooses t1.
+/// Specified: once the set is made inert, every terminal reports inert, and neither a click on Terminal 1 nor a tab
+/// shortcut chooses anything; made usable again, the click chooses t1, and from the main terminal a single next-tab
+/// press chooses t1, so the inert assertions above would fail if the set stopped ignoring the shortcut.
 #[gpui::test]
 fn an_inert_set_makes_every_terminal_and_the_strip_inert(cx: &mut TestAppContext) {
     let mut window = open(cx, snapshot(&["t1"]));
@@ -1720,13 +1724,14 @@ fn an_inert_set_makes_every_terminal_and_the_strip_inert(cx: &mut TestAppContext
     click(window.cx, T1_TAB);
     assert_eq!(window.chosen(), None, "the strip takes no presses");
     let (previous, next) = tab_chords();
-    keys(window.cx, previous);
-    keys(window.cx, next);
-    assert_eq!(
-        window.chosen(),
-        None,
-        "the shortcuts leave the inert set alone"
-    );
+    for chord in [next, previous] {
+        keys(window.cx, chord);
+        assert_eq!(
+            window.chosen(),
+            None,
+            "the shortcuts leave the inert set alone"
+        );
+    }
 
     window
         .cx
@@ -1734,6 +1739,18 @@ fn an_inert_set_makes_every_terminal_and_the_strip_inert(cx: &mut TestAppContext
     settle(window.cx);
     click(window.cx, T1_TAB);
     assert_eq!(window.chosen().as_deref(), Some("t1"));
+    keys(window.cx, next);
+    assert_eq!(
+        window.chosen(),
+        None,
+        "next wraps around to the main terminal"
+    );
+    keys(window.cx, next);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t1"),
+        "one press from the main terminal chooses t1"
+    );
 }
 
 /// SPEC.md, "Session view": the strip "scrolls horizontally when needed", and every control stays keyboard reachable.
