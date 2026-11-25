@@ -3200,11 +3200,11 @@ launcher. The third saves the agent's shared dismissal and leaves the draft open
 change to the agent's configuration.
 
 A live Grok or Antigravity session whose launch did not request setup shows a nonmodal hint above the agent terminal
-while Restart is waiting for a captured conversation. The hint opens Settings at the setup switch, saves the shared
-dismissal with **Don't show again**, or hides this occurrence with **×**. The Settings page can restore both the
-launcher prompt and the hint. An accepted conversation ends the hint when Restart can resume it. A failed install has
-its own notification and Restart explanation. A host policy that disables setup supplies a reason for Restart without
-adding a notification.
+while Restart is waiting for a captured conversation. The hint is announced without taking focus. It opens Settings at
+the setup switch, saves the shared dismissal with **Don't show again**, or hides this occurrence with **×**. The
+Settings page can restore both the launcher prompt and the hint. An accepted conversation ends the hint when Restart can
+resume it. A failed install has its own notification and Restart explanation. A host policy that disables setup supplies
+a reason for Restart without adding a notification.
 
 OMP and Grok use generic activity only. Their approval prompts, and Antigravity's, show the generic running/idle
 classification, never waiting — a settled scope decision, not a reader waiting to be written.
