@@ -137,8 +137,9 @@ to supply your own endpoint. A new Farhelm session or terminal on that host gets
 **Restart** on an existing session to pick up a replacement. Claude started outside a Farhelm terminal uses that shell's
 own credentials. Claude settings already in the recipe's base image, such as a base URL in `~/.claude/settings.json`,
 take precedence over the recipe, and Claude would then send the recipe's token to that URL; choose **None** for such an
-image. Choose **None** to use credentials already set up on the host. Claude may show its own first-run setup when you
-open it on a new host.
+image. Choose **None** to use credentials already set up on the host. On a new host made from a recipe, Claude can go
+straight to the session once it has credentials and uses its default config file. Farhelm preserves any first-run
+choices already set in the image.
 
 For Codex **API endpoint**, Farhelm supplies the endpoint whenever it starts or resumes a Codex session. Use **Restart**
 to pick up a replacement in a running session. Typing `codex` in a terminal tab uses that shell's usual Codex settings.

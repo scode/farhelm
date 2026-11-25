@@ -2,8 +2,8 @@
 //! provisioning orchestration without changing its HTTP or state path.
 
 use super::backend::{
-    ActionOutcome, BackendFailure, HostPath, PreparedPayload, ProbeObservation, ProbeTarget,
-    ProvisioningBackend, Reach, ReachOutcome, UninstallInspection,
+    ActionOutcome, BackendFailure, ExpectedSettings, HostPath, PreparedPayload, ProbeObservation,
+    ProbeTarget, ProvisioningBackend, Reach, ReachOutcome, UninstallInspection,
 };
 use super::payloads::PayloadSource;
 use super::plan::{DirectorySpec, PayloadTarget, ProvisioningTarget};
@@ -278,6 +278,12 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         Ok(self.behavior(target).await?.home.into())
     }
 
+    /// Use the same fixture home as setup when delivery probes the login's physical directory.
+    async fn host_home(&self, target: &ProvisioningTarget) -> Result<PathBuf, BackendFailure> {
+        self.action(target, "read-home").await?;
+        Ok(self.behavior(target).await?.home.into())
+    }
+
     /// The scripted backend models the explicit checkpoint-safety result and its
     /// failure propagation, not a remote filesystem or real supervisor boot.
     /// Production command tests and the two-clone gate supply those proofs.
@@ -294,9 +300,14 @@ impl ProvisioningBackend for E2eProvisioningBackend {
     async fn read_small_file(
         &self,
         target: &ProvisioningTarget,
-        _path: &Path,
+        path: &Path,
     ) -> Result<Option<Vec<u8>>, BackendFailure> {
-        self.action(target, "read-agent-settings").await?;
+        let event = if path.ends_with(".claude.json") {
+            "read-claude-onboarding"
+        } else {
+            "read-agent-settings"
+        };
+        self.action(target, event).await?;
         Ok(None)
     }
 
@@ -382,7 +393,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         destination: &Path,
         _temporary: &Path,
         _mode: u32,
-        _expected: Option<Option<&str>>,
+        _expected: Option<ExpectedSettings<'_>>,
     ) -> Result<ActionOutcome, BackendFailure> {
         // This fixture records workflow only; owned-filesystem and real
         // finishing-command tests exercise the content precondition itself.
@@ -393,6 +404,8 @@ impl ProvisioningBackend for E2eProvisioningBackend {
             "write-proxy"
         } else if destination.ends_with("agent-credentials") {
             "wrote-agent-credentials"
+        } else if destination.ends_with(".claude.json") {
+            "write-claude-onboarding"
         } else {
             "write-unit"
         };
