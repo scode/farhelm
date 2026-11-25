@@ -1644,12 +1644,7 @@ impl SettingsDialog {
                 }
                 if panels.is_empty() {
                     panels.push(
-                        div()
-                            .id(NO_AGENT_SETTINGS_ID)
-                            .role(Role::Label)
-                            .aria_label(NO_AGENT_SETTINGS)
-                            .child(card::help(NO_AGENT_SETTINGS, cx))
-                            .into_any_element(),
+                        card::help(NO_AGENT_SETTINGS_ID, NO_AGENT_SETTINGS, cx).into_any_element(),
                     );
                 }
                 panels

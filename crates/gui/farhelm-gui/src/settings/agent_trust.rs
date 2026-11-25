@@ -52,6 +52,11 @@ const CAUTION_GAP: f32 = 8.;
 
 pub(super) const CAUTION_ID: &str = "settings-claude-trust-caution";
 pub(super) const CAUTION_TITLE: &str = "How this works, and why it's off by default";
+const CLAUDE_TRUST_RISK: &str = "The repository's Claude hooks and commands can run, as when you answer Yes. In a folder you choose, \
+     the trust entry stays after the session ends. For checkouts Farhelm cloned with the switch on, \
+     Farhelm makes a best-effort removal when it archives the checkout.";
+const FLAG_TRUST_RISK: &str = "As when you approve it yourself, repository hooks, settings and commands are then trusted. This \
+     is why the switch is off by default.";
 pub(super) const CAUTION: [&str; 3] = [
     "Claude has no supported way to do this. Farhelm edits the settings file selected by the login shell \
      (normally ~/.claude.json on the session's host), which also holds sign-in and per-folder state. \
@@ -61,9 +66,7 @@ pub(super) const CAUTION: [&str; 3] = [
      own updates. Any Claude update can change the file or its locking without notice: the edit may \
      stop working, so Claude asks again, or collide with Claude's writes. Farhelm cannot detect every \
      such change. This is best effort; Farhelm cannot promise it stays safe across Claude versions.",
-    "The repository's Claude hooks and commands can run, as when you answer Yes. In a folder you choose, \
-     the trust entry stays after the session ends. For checkouts Farhelm cloned with the switch on, \
-     Farhelm makes a best-effort removal when it archives the checkout.",
+    CLAUDE_TRUST_RISK,
 ];
 
 /// An agent with a workspace trust switch: the GUI's per-agent trust vocabulary. Everything the section and the
@@ -196,6 +199,20 @@ impl TrustAgent {
         }
     }
 
+    /// Keep the warning with the focused switch. The longer paragraphs also remain readable on the page.
+    fn switch_description(self) -> String {
+        let risk = if self.has_caution() {
+            CLAUDE_TRUST_RISK
+        } else {
+            FLAG_TRUST_RISK
+        };
+        [Some(self.tooltip()), Some(risk), self.caveat()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// What Farhelm does for eligible launches, the old `help` for the flag-based agents and the old help
     /// paragraph for Claude.
     fn mechanism(self) -> &'static str {
@@ -240,9 +257,7 @@ impl TrustAgent {
                          session's saved launch.",
                         self.mechanism()
                     ),
-                    "As when you approve it yourself, repository hooks, settings and commands are then trusted. This \
-                     is why the switch is off by default."
-                        .to_owned(),
+                    FLAG_TRUST_RISK.to_owned(),
                 ];
                 paragraphs.extend(self.caveat().map(str::to_owned));
                 paragraphs
@@ -420,7 +435,8 @@ pub(super) fn block(
                     agent
                         .help()
                         .into_iter()
-                        .map(|text| super::card::help(text, cx)),
+                        .enumerate()
+                        .map(|(index, text)| card::help(("trust-help", index), text, cx)),
                 ),
         );
     let switch = Checkbox::new(
@@ -431,6 +447,7 @@ pub(super) fn block(
     )
     .switch()
     .content(contents)
+    .accessible_description(agent.switch_description())
     .checked(trust.state.shown())
     .disabled(!trust.state.available())
     .focus(&trust.focus)
@@ -460,7 +477,11 @@ pub(super) fn block(
 /// the 3-pixel amber rule down its left edge.
 fn caution(cx: &App) -> impl IntoElement {
     let palette = theme::palette(cx);
-    let paragraph = |text: &'static str| div().child(text);
+    let paragraph = |(index, text)| {
+        card::help(("settings-claude-trust-caution", index), text, cx)
+            .line_height(px(CAUTION_LINE_HEIGHT))
+            .text_color(theme::color(palette.warn_bright))
+    };
     div()
         .id(CAUTION_ID)
         .flex()
@@ -483,6 +504,6 @@ fn caution(cx: &App) -> impl IntoElement {
                 .line_height(px(CAUTION_LINE_HEIGHT))
                 .text_color(theme::color(palette.warn_bright))
                 .child(div().font_weight(FontWeight::BOLD).child(CAUTION_TITLE))
-                .children(CAUTION.map(paragraph)),
+                .children(CAUTION.into_iter().enumerate().map(paragraph)),
         )
 }

@@ -3780,6 +3780,8 @@ power loss or system crash right after its upload completed is best effort.
 
 ## Keyboard focus
 
+Consent, warning and status text in the desktop app must be available to assistive technology.
+
 NOTE: This section is the rulebook for where keyboard focus (where typing goes) moves in the GUI. It takes precedence
 over older focus wording elsewhere in this document. Parts of the current UI predate it; where they differ, this section
 is the intended behavior and the UI is behind.

@@ -1849,27 +1849,6 @@
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## antigravity-trust-warning-omitted-from-accessibility.md
-
-- Outcome: `fix spec+code`.
-- Assessment: Settings shows a warning under each agent's automatic-trust switch: repository hooks, settings and
-  commands become trusted, and for Antigravity the per-launch trust list replaces the saved one. A screen reader cannot
-  reach those paragraphs. The switch's accessible description carries only the short mechanism text. Verified:
-  confirmed, and the scope is wider than reported. The help paragraphs are plain text with no accessible role
-  (`settings/card.rs:103-110`), and the tooltip used as the accessible description is the mechanism only
-  (`settings/agent_trust.rs:186-233`). The same holds for Codex, Muse and Pi, including first-class Codex, and for
-  Settings help text in general. SPEC requires the help's content but says nothing about screen-reader exposure. Actual
-  screen-reader output was not checked.
-- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
-  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Add a SPEC.md principle: consent, warning and status text must reach assistive technology. Expose
-  this consent, warning or status text to assistive technology under that principle. Recommendation for reference: fix
-  spec+code. Record the parity principle for consent text, then put the risk sentence into each trust switch's
-  accessible description. Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
-  the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
-  Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
 ## approval-omits-automatic-trust-warning-from-accessibility.md
 
 - Outcome: `fix code`.
@@ -1920,27 +1899,6 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code — include the section name in each option's accessible name; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
-## hook-removal-help-missing-from-accessibility.md
-
-- Outcome: `fix code`.
-- Assessment: A screen-reader user on the Grok or Antigravity Settings page hears the hook switch and its short tooltip.
-  The visible explanation (that the files persist and which path to delete to remove them) is not exposed to assistive
-  technology. The same is true of every Settings card's help text. Verified: confirmed by source.
-  `settings/hook_settings.rs:38-40` draws the consent and removal text through `card::help`
-  (`settings/card.rs:104-110`), which passes a bare `SharedString`. GPUI exposes no node for that: it has no id
-  (`vendor/gpui-pre/src/elements/text.rs:84-95,330-336`). The checkbox exposes only its label and tooltip
-  (`hook_settings.rs:47`). This is Settings-wide: `card::help` has 6 callers, and `switch_copy` descriptions use it too.
-  SPEC.md (~:3177-3178) says "the setting names the path to remove". No spec text requires visible help to be accessible
-  text. How it actually sounds on each platform was not measured.
-- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
-  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Expose this consent, warning or status text to assistive technology under that principle.
-  Recommendation for reference: fix code. Give `card::help` an accessible text id or role, which fixes every Settings
-  page at once. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
-  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
-  feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## environment-delete-title-unreachable-by-keyboard.md
 

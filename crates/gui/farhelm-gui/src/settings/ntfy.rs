@@ -773,11 +773,12 @@ impl Render for NtfyAlerts {
                     .px(px(8.))
                     .py(px(5.))
                     .child(
-                        card::help("⚠", cx)
+                        card::help_style(cx)
                             .flex_none()
-                            .text_color(theme::color(palette.warn)),
+                            .text_color(theme::color(palette.warn))
+                            .child("⚠"),
                     )
-                    .child(card::help(TOPIC_HELP, cx).min_w_0()),
+                    .child(card::help("notification-topic-help", TOPIC_HELP, cx).min_w_0()),
             )
             .child(
                 div()

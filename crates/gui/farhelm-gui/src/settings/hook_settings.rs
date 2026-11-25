@@ -36,8 +36,8 @@ pub(super) fn row(
                 .flex_col()
                 .gap(px(4.))
                 .child(card::switch_copy(LABEL, "", cx))
-                .child(card::help(agent.consent(), cx))
-                .child(card::help(agent.removal(), cx)),
+                .child(card::help("hook-setup-consent", agent.consent(), cx))
+                .child(card::help("hook-setup-removal", agent.removal(), cx)),
         );
     div()
         .flex()
@@ -47,6 +47,7 @@ pub(super) fn row(
             Checkbox::new(agent.id(), LABEL, HoverHelp::tooltip(TOOLTIP), Role::Switch)
                 .switch()
                 .content(contents)
+                .accessible_description(format!("{} {}", agent.consent(), agent.removal()))
                 .checked(switch.state.shown())
                 .disabled(!switch.state.available())
                 .focus(&switch.focus)
