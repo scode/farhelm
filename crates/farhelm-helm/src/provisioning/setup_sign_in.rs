@@ -63,8 +63,11 @@ pub(super) enum SetupSettlement {
 /// The planning caller determines whether an existing automatic check must reserve its Ready answer.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum SignInIntent {
+    /// Setup's discovery probe. It joins or starts a check like any caller but never reserves the answer.
     Discovery,
+    /// Planning for an automatic update. Its interest is what an explicit action's reservation fences.
     AutomaticUpdate,
+    /// An explicit Update or Uninstall. Finding a pending automatic check, it reserves first use of a Ready answer.
     ManualHostAction,
 }
 
@@ -83,6 +86,8 @@ struct ActiveAttempt {
     outcome: watch::Sender<Option<SetupSettlement>>,
     /// Publishing the pending reply gives it manual ownership and keeps the question alive on opt-out.
     manual: bool,
+    /// An automatic update has joined this check. Only a check that is both automatic and preferred by a manual
+    /// action starts the manual handoff when it settles Ready.
     automatic: bool,
     /// Planning can reserve Ready before publication without keeping an unowned child alive.
     prefers_manual: bool,
@@ -157,8 +162,11 @@ impl AutomaticSignIn {
         }
     }
 
-    /// While this host is ineligible, an owned manual check can still fail and consume the
-    /// automatic attempt. Decide whether to release it under the same lock that attaches the owner.
+    /// Release the automatic update's interest in this check, and report whether the check is still alive.
+    ///
+    /// Not a pure predicate: it cancels the automatic side first. While this host is ineligible, an owned manual check
+    /// can still fail and consume the automatic attempt. Decide whether to release it under the same lock that attaches
+    /// the owner.
     pub(super) fn retain_while_ineligible(&self) -> bool {
         if let Some(setup) = self.setup.upgrade() {
             setup.cancel_automatic(&self.attempt);
@@ -181,6 +189,10 @@ pub(super) struct SetupSignIn {
     connect_timeout: Duration,
     completed: Mutex<VecDeque<Completion>>,
     /// Cancel by attempt or by removed host. The same lock also arbitrates concurrent starts for a route.
+    ///
+    /// Lock order: the provisioning service's `memory` lock comes before this one. The completion task takes `memory`
+    /// first because an automatic scan can drop its interest, and so take this lock, while holding `memory`; a path
+    /// that took `memory` while holding this lock would deadlock against it.
     active: Mutex<HashMap<String, ActiveAttempt>>,
 }
 

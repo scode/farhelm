@@ -1004,6 +1004,15 @@ async fn retarget(
     }
 }
 
+/// How long a Tailscale mode edit waits for the host's route write guard before answering busy.
+///
+/// Retiring an automatic-only sign-in check releases its read guard at once, so this only has to cover that teardown
+/// and a short probe still finishing. It is kept well below [`crate::sessions::HOST_REPLY_BOUND`] because the desktop
+/// sends the edit in its ordered command lane: every later command waits behind it, the answer to a sign-in question a
+/// manual Update or Uninstall owns included, and the edit's reconnect can add up to the manager's 15-second park bound
+/// before the client's 30-second reply watchdog resets the window.
+const TAILSCALE_ROUTE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Park dials before closing shared masters, then replace the policy and restart the actor.
 /// Holding the provisioning lock also keeps setup, update and removal from using the old mode during the change.
 pub(crate) async fn set_tailscale(
@@ -1032,11 +1041,9 @@ pub(crate) async fn set_tailscale(
             state.provisioning.cancel_automatic_sign_in_on_host(host);
             let _routing = match queued {
                 std::task::Poll::Ready(guard) => guard,
-                std::task::Poll::Pending => {
-                    tokio::time::timeout(crate::sessions::HOST_REPLY_BOUND, routing)
-                        .await
-                        .map_err(|_| crate::environment::lifecycle::HostBusy)?
-                }
+                std::task::Poll::Pending => tokio::time::timeout(TAILSCALE_ROUTE_WAIT, routing)
+                    .await
+                    .map_err(|_| crate::environment::lifecycle::HostBusy)?,
             };
             let destination = state.provisioning.lock_tailscale_destination(&old).await?;
             state
@@ -2475,6 +2482,10 @@ mod tests {
 
     /// The old master has to exit while its route is still the registered
     /// route. Only the replacement connection can use the new policy.
+    ///
+    /// A route held by a reader the edit cannot retire answers busy after the
+    /// editor's own short wait, which keeps the desktop's ordered command lane
+    /// from stalling for the whole host reply bound.
     #[farhelm_testtrace::test]
     async fn tailscale_toggle_releases_the_old_route_before_writing() {
         let harness = lone_local_helm().await;
@@ -2516,7 +2527,10 @@ mod tests {
             Some(serde_json::json!({ "tailscale": false })),
         )
         .await;
-        assert!(before_wait.elapsed() >= crate::sessions::HOST_REPLY_BOUND);
+        // The editor gives up after its own short wait, not the 20-second host reply bound, so the desktop's ordered
+        // command lane is not held long enough to trip its 30-second watchdog.
+        assert!(before_wait.elapsed() >= super::TAILSCALE_ROUTE_WAIT);
+        assert!(before_wait.elapsed() < crate::sessions::HOST_REPLY_BOUND);
         tokio::time::resume();
         assert_eq!(status, StatusCode::CONFLICT, "{text}");
         assert!(registry_row(&harness.state, host).await.unwrap().tailscale);

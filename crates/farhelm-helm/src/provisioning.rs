@@ -7832,6 +7832,20 @@ master.touch()
         key: &str,
         direct: bool,
     ) -> crate::ssh::tailscale::TailscaleSshAccess {
+        uninstall_peer_in(root, root, address, key, direct).await
+    }
+
+    /// Like [`uninstall_peer`], with the setup master's socket directory under `runtime`.
+    ///
+    /// Two pins of one peer prepared under different runtime directories compare as the same peer but name different
+    /// setup masters, which is how a test tells the planning pin from the confirmation pin.
+    async fn uninstall_peer_in(
+        root: &Path,
+        runtime: &Path,
+        address: &str,
+        key: &str,
+        direct: bool,
+    ) -> crate::ssh::tailscale::TailscaleSshAccess {
         use std::os::unix::fs::PermissionsExt;
 
         let program = root.join("fixture-tailscale");
@@ -7857,7 +7871,7 @@ master.touch()
         crate::ssh::tailscale::TailscaleSshAccess::prepare_with(
             &program,
             &root.join("state"),
-            root,
+            runtime,
             "uninstall.example",
         )
         .await
@@ -7936,7 +7950,8 @@ master.touch()
         assert!(client.peer_hello().host_identity.is_none());
     }
 
-    /// An accepted run uses one fresh pin for the setup master and every backend step.
+    /// An accepted run uses one fresh pin for the setup master and every backend step: the pin confirmation prepared,
+    /// never the planning pin, which may name another setup master for the same peer.
     /// Either kind of drift refuses before querying sessions or changing the registered host.
     #[farhelm_testtrace::test]
     async fn tailscale_uninstall_pins_the_confirmed_peer_or_refuses_peer_drift() {
@@ -8013,11 +8028,37 @@ if gate.exists():
                     .with_timeout(Duration::from_secs(45)),
             ));
 
+            // In the accepted case the confirmation pins the same peer under another socket directory. The run must
+            // use that pin, whose setup master the confirmation signed in, rather than the planning pin; the peer
+            // comparison alone cannot tell the two apart.
+            let relocated = if change == "none" {
+                let runtime = root.path().join("r");
+                std::fs::create_dir(&runtime).unwrap();
+                let relocated = uninstall_peer_in(
+                    root.path(),
+                    &runtime,
+                    "100.100.1.11",
+                    "ssh-ed25519 AAAA",
+                    true,
+                )
+                .await;
+                assert!(relocated.same_peer(&original));
+                assert_ne!(
+                    relocated, original,
+                    "the pins must differ in their setup master"
+                );
+                Some(relocated)
+            } else {
+                None
+            };
             let confirmed = if matches!(change, "address" | "key" | "policy") {
                 &changed
+            } else if let Some(relocated) = &relocated {
+                relocated
             } else {
                 &original
             };
+            let confirmed_access = crate::ssh::SshAccess::Tailscale(confirmed.clone());
             *backend.uninstall_peers.lock().unwrap() = Some(UninstallPeers {
                 available: VecDeque::from([original.clone(), confirmed.clone(), changed.clone()]),
                 requests: Vec::new(),
@@ -8096,7 +8137,7 @@ if gate.exists():
                 wait_forgotten(&harness, host).await;
                 assert_eq!(harness.fleet.host_requests(host), list_requests + 2);
                 let options = std::fs::read_to_string(&receipt).unwrap();
-                for option in original.options() {
+                for option in confirmed.options() {
                     assert!(
                         options.lines().any(|line| line == option),
                         "missing {option}"
@@ -8117,7 +8158,7 @@ if gate.exists():
             expected.extend(
                 steps
                     .iter()
-                    .map(|&step| (step, Some(original_access.clone()))),
+                    .map(|&step| (step, Some(confirmed_access.clone()))),
             );
             let peers = backend.uninstall_peers.lock().unwrap();
             let peers = peers.as_ref().unwrap();

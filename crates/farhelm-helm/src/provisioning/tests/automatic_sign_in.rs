@@ -525,6 +525,10 @@ async fn automatic_admission_declines_when_skew_gives_way_to_sign_in_needed() {
 
 /// A cancelled question consumes the old skewed connection's attempt. An explicit Sessions sign-in
 /// can then reach an old supervisor again and open a fresh Update question.
+///
+/// The question here is shared: a manual Update joins it before the cancel, so this covers a shared check
+/// failing. An automatic-only check that fails also consumes the attempt, which
+/// `opt_out_preserves_a_failure_that_settled_before_the_scan` covers.
 #[farhelm_testtrace::test]
 async fn cancelling_an_automatic_setup_question_waits_for_a_new_incarnation() {
     let fixture = Fixture::new(true, false).await;

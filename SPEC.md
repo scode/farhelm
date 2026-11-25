@@ -191,9 +191,11 @@ does not clear this memory. A planning refusal starts no run: the helm logs the 
 under the same no-retry rule. The badge remains, and a manual Update from the host menu can show the refusal. There is
 no separate automatic failure surface. If an SSH host needs to sign in before updating, the attention row offers
 **Answer** without taking focus. Other hosts can still update. Answering the Setup question lets Farhelm plan and run
-the update automatically. Cancelling, letting it expire, or failing to sign in uses the same no-retry rule as a failed
-update. Reconnecting to a host with an older protocol or explicitly retrying that connection can give it a fresh
-attempt. Periodic probes that keep seeing the same protocol mismatch preserve the previous attempt.
+the update automatically. When an Update or Uninstall the user started shares that question, the user's action gets the
+answer first, and the automatic update waits until that run finishes or for 30 seconds. Cancelling, letting it expire,
+or failing to sign in uses the same no-retry rule as a failed update. Reconnecting to a host with an older protocol or
+explicitly retrying that connection can give it a fresh attempt. Periodic probes that keep seeing the same protocol
+mismatch preserve the previous attempt.
 
 Turning the switch off prevents new automatic starts, including planning still in flight. It cancels pending sign-ins
 opened only for automatic updates and preserves their retry opportunity. A sign-in shared with an explicit Update or
@@ -301,7 +303,9 @@ with an optional SSH login. The peer must advertise the host key its SSH server 
 ordinary SSH server may have no advertised key. With the option enabled, the helm checks the advertised keys, leaves the
 user's known-hosts files untouched, and reports an actionable error if Tailscale cannot verify the host. The user's SSH
 credentials and interactive sign-in still apply. Changing the setting reconnects the host and keeps its registry
-identity and sessions. If the host still owns Podman resources, its SSH route is protected from edits.
+identity and sessions. It dismisses a sign-in question opened only for an automatic update; a question that an Update or
+Uninstall the user started is waiting on stays open, and the change answers busy if that question still holds the
+connection after a few seconds. If the host still owns Podman resources, its SSH route is protected from edits.
 
 Whenever a surface uses a host's **short name**, it derives it from that host alone: an explicit alias exactly as
 stored, otherwise `Local` for the local host, otherwise the first label of its SSH hostname. For that last case it
@@ -467,8 +471,9 @@ destination change that does not adopt a new identity keeps the host's settings,
 contacted. The identity rules above still hold: adopting a new identity resets all five permissions to asking, and the
 New dialog's default host and recent setups stay tied to the install the user saw.
 
-For a Tailscale host, Uninstall verifies at confirmation that Tailscale still identifies the same peer it inspected for
-the proposal. The run keeps that peer's address, advertised SSH keys and connection policy for its checks and removals.
+For a Tailscale host whose destination is unchanged, Uninstall still verifies at confirmation that Tailscale identifies
+the same peer it inspected for the proposal, since the same name can come to resolve to another machine. The run keeps
+that peer's address, advertised SSH keys and connection policy for its checks and removals.
 
 Exactly one helm can own each supervisor and all of its sessions. A host with no owner records the first helm that
 connects to manage it, including after an upgrade from a version without ownership. A helm keeps its identity across
