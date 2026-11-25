@@ -1732,15 +1732,13 @@ fn submit_inline_setup(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestCon
     (helm, cx, save.id)
 }
 
-/// This one launcher must be usable as soon as its setup succeeds. Saving must check the preview and
-/// suggestions again, then move focus to the repository field if it finds setup can go away.
-#[gpui::test]
-fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppContext) {
-    let (mut helm, cx, save) = submit_inline_setup(cx);
+/// Settle the held save and the reads it starts. The focus assertions depend on the setup field having been removed,
+/// so both paths wait for the host to confirm its new checkout folder.
+fn finish_inline_setup(helm: &mut FakeHelm, cx: &mut VisualTestContext, save: u64) {
     helm.reply(save, 204, None);
     settle(cx);
     test_support::advance(cx, Duration::from_millis(160));
-    let after = sent(&mut helm, cx);
+    let after = sent(helm, cx);
     let previews = to(&after, PREVIEW);
     assert_eq!(previews.len(), 1, "the preview is asked again");
     let reads = to(&after, REPOSITORIES);
@@ -1762,11 +1760,35 @@ fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppCont
         cx.debug_bounds("launcher-checkout-setup").is_none(),
         "the host needs no setup now"
     );
+}
+
+/// This one launcher must be usable as soon as its setup succeeds. Saving must check the preview and
+/// suggestions again, then move focus to the repository field if it finds setup can go away.
+#[gpui::test]
+fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppContext) {
+    let (mut helm, cx, save) = submit_inline_setup(cx);
+    finish_inline_setup(&mut helm, cx, save);
     assert!(
         read(cx, |launcher, window, cx| launcher
             .repository_focused(window, cx)),
         "focus moved on to the repository field"
     );
+}
+
+/// SPEC.md, "Who may move focus": a save that finishes after another click can refresh the launcher without pulling
+/// focus away from the field the user chose while the save was still pending.
+#[gpui::test]
+fn a_late_inline_checkout_save_keeps_focus_in_the_new_field(cx: &mut TestAppContext) {
+    let (mut helm, cx, save) = submit_inline_setup(cx);
+    click_in_body(cx, "launcher-name");
+    let name_focused = |cx: &mut VisualTestContext| {
+        read(cx, |launcher, window, cx| {
+            launcher.name.focus_handle(cx).is_focused(window)
+        })
+    };
+    assert!(name_focused(cx), "the user moved to the name during Save");
+    finish_inline_setup(&mut helm, cx, save);
+    assert!(name_focused(cx), "the completed save left focus alone");
 }
 
 /// A new container can use a typed repository when the source host has no checkout folder. The suggestions can still
