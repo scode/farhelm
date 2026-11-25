@@ -73,6 +73,58 @@ fn a_word_and_enter_choose_it_and_empty_the_box(cx: &mut TestAppContext) {
     assert!(search_focused(cx), "focus stays in the box");
 }
 
+/// A pushed display-name edit leaves the selected ID in the live results. Enter still picks that registration
+/// when the query matches its ID and the user explicitly highlighted it before the rename.
+#[gpui::test]
+fn a_custom_agent_rename_keeps_its_search_highlight(cx: &mut TestAppContext) {
+    use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, KeyedEntry};
+
+    let mut agent = super::view_tests::acme_agent();
+    let mut entry = KeyedEntry {
+        key: agent.id.clone(),
+        value: serde_json::to_value(&agent).unwrap(),
+    };
+    let meta = test_support::meta(&[&agent.id]);
+    let (mut helm, cx) = super::view_tests::launcher_over(
+        cx,
+        LaunchDraft::new(Some(1), "~".into(), None),
+        vec![
+            fixture_hosts(&[0]),
+            CollectionState {
+                collection: Collection::CustomAgents,
+                meta: meta.clone(),
+                entries: vec![entry.clone()],
+            },
+        ],
+    );
+    assert!(search_focused(cx));
+    type_in(cx, &agent.id);
+    let row = "launcher-search-option-0";
+    assert!(name_of(cx, row).is_some_and(|name| name.starts_with("Acme Code")));
+    keys(cx, "down");
+    assert_eq!(selected_state(cx, row), Some(true));
+    assert!(read(cx, |launcher, _, _| launcher.has_explicit_search_choice()));
+
+    agent.display_name = "New Acme".into();
+    entry.value = serde_json::to_value(&agent).unwrap();
+    helm.push(CollectionChanges {
+        collection: Collection::CustomAgents,
+        meta,
+        upsert: vec![entry],
+        remove: Vec::new(),
+    });
+    settle(cx);
+    assert!(name_of(cx, row).is_some_and(|name| name.starts_with("New Acme")));
+    assert_eq!(selected_state(cx, row), Some(true));
+    keys(cx, "enter");
+    assert_eq!(
+        draft(cx).agent.custom_agent.as_deref(),
+        Some(agent.id.as_str())
+    );
+    assert_eq!(search_text(cx), "");
+    assert!(creates(&mut helm, cx).is_empty());
+}
+
 /// An exact shell word preselects its result, and the second Enter sends
 /// the normal create. An existing Guarded choice belongs to the agent draft
 /// and must never become a shell option or trigger an escalation banner.

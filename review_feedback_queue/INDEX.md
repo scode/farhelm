@@ -253,11 +253,6 @@ consequences.
   counts as YOLO), the red permission-escalation banner appears at the top of the launcher, but the custom agent's YOLO
   permission control does not show the required thick red escalation outline.
 
-- [`trailing-launcher-search-custom-agent-rename-refused-as-stale.md`](trailing-launcher-search-custom-agent-rename-refused-as-stale.md)
-  — If a registered custom agent is renamed while it is highlighted in the launcher's search results, or between drawing
-  a search result and clicking it, the launcher drops the selection and warns that the choice is no longer available
-  even though that agent is still present and matches the search.
-
 - [`trailing-launcher-target-names-command-custom-agent-outside-restart-with.md`](trailing-launcher-target-names-command-custom-agent-outside-restart-with.md)
   — When creating, cloning, or replacing a session on the Command tab with a registered custom agent declared, the main
   action's accessible name includes the custom agent's name ("Launch Command · <name> · <host> · <folder>"), whereas
@@ -353,11 +348,6 @@ consequences.
   `--prompt`, `--permissions guarded`, or a built-in model name containing `.` or `/` (such as `gpt-6.2-sol`), Farhelm
   refuses the command with a misleading Custom-agent flag error (e.g., "--prompt/--prompt-file is not offered by this
   agent") instead of telling the agent that the agent name is unknown and listing the built-in types.
-
-- [`trailing-unseen-quick-launch-deleted-custom-agent-wakes-suspended-host.md`](trailing-unseen-quick-launch-deleted-custom-agent-wakes-suspended-host.md)
-  — Triggering a quick launch (⚡ shortcut, number shortcut, sequence, or Cmd+J) whose template names a deleted custom
-  agent on a suspended host (such as a suspended Tensorlake sandbox or Podman container) wakes the suspended host
-  anyway, only failing with "no longer registered" / "was deleted" after the host finishes waking.
 
 - [`trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md`](trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md)
   — When you launch or plain-replace a registered custom agent on a host that asks before YOLO launches, the

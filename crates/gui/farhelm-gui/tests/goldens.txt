@@ -170,6 +170,8 @@ linux/launcher-custom-recents--dark.png b7b1ebef63d31884445d463240d1b2fee4320ae2
 linux/launcher-custom-recents--light.png f7114855536042dabde382a2aba390f47c72e1ec
 linux/launcher-custom-recents-narrow--dark.png 32e17debabace9b93691c06fbe25781eb0f41e14
 linux/launcher-custom-recents-narrow--light.png dc9014071089cef1ee3f4a36595fbcd90488cdd8
+linux/launcher-deleted-custom-quick-launch--dark.png b8559e790b1a86933ce4c25cc878fb8d70023b18
+linux/launcher-deleted-custom-quick-launch--light.png 1c0f2826755cd8b516a5370923f8bae163911bce
 linux/launcher-held-host-help--dark.png 097f5b560a99fcf67386ec892d757e07c6713e06
 linux/launcher-held-host-help--light.png 19ce524f9b9ed6139de961cdd2b2e626a7a0ec9a
 linux/launcher-hook-setup--dark.png e2da2eaf5eddb2649daab8f6cc50987e0b6a3c49
@@ -194,6 +196,8 @@ linux/launcher-new-sandbox-checkout--dark.png 780d91c87bf28e4c57f491b16f6e7667ca
 linux/launcher-new-sandbox-checkout--light.png 18d3b755107b493be317d9b7885e6ae30a32a3f8
 linux/launcher-replace-checkout-in-sandbox--dark.png df192030b7fe57147939cfe17d29828e72db6735
 linux/launcher-replace-checkout-in-sandbox--light.png eda7f68d7dcd76795b95d4bd3270ad067c5ecf6b
+linux/launcher-renamed-custom-search--dark.png 68e597cbd66917743aad096222cb4db333f58032
+linux/launcher-renamed-custom-search--light.png 73cee4c008c142ffca190f33d36c5e5166427f0e
 linux/launcher-replace-typed-recent--dark.png 3d2bea617746751dfc87fc0265406f387ced2bbb
 linux/launcher-replace-typed-recent--light.png bd0041c6fb7087614d158b8ad384b475869450dd
 linux/launcher-replace-with--dark.png 6963005db3c2776b2617eacec108dd5f5bfae107

@@ -241,6 +241,12 @@ impl Launcher {
         self.search_box.pane_revealed = None;
     }
 
+    /// A sole result can look selected without an arrow pick. Rename fixtures require the explicit choice.
+    #[cfg(test)]
+    pub(crate) fn has_explicit_search_choice(&self) -> bool {
+        self.search_box.typed_choice.is_some()
+    }
+
     /// Whether the results are open: opened by the box and not since closed by the layer manager.
     pub(super) fn search_open(&self, window: &Window, cx: &App) -> bool {
         self.search_box.inline_results || self.search_box.list.is_open(window, cx)
@@ -899,10 +905,11 @@ fn command_summary(words: &'static str, palette: &theme::Palette) -> AnyElement 
         .into_any_element()
 }
 
-/// Match a keyboard target across updates to a host's status, a model's catalog label, or a setup's history record.
+/// Keep a keyboard target through a rename or other display update. The ID says which live choice the user meant.
 fn same_search_choice(a: &Row, b: &Row) -> bool {
     match (a, b) {
         (Row::Host { id: a, .. }, Row::Host { id: b, .. }) => a == b,
+        (Row::CustomAgent { id: a, .. }, Row::CustomAgent { id: b, .. }) => a == b,
         (
             Row::Model {
                 id: a, harness: x, ..

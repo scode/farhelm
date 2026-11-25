@@ -608,13 +608,12 @@ fn begin_suspended_quick_launch(
     )
 }
 
-/// Press the marked template or its number key against an actual suspended destination. No preview or create
-/// can precede Resume, even when the template already carries a managed checkout and a base name.
-fn begin_template_wake(
+/// Press the marked template or its number key against a suspended host with a loaded custom-agent catalog.
+fn press_template_on_suspended_host(
     cx: &mut TestAppContext,
     fields: TemplateFields,
     numbered: bool,
-) -> (FakeHelm, &mut VisualTestContext, HostView, FakeCommand) {
+) -> (FakeHelm, &mut VisualTestContext, HostView) {
     let (mut helm, connection) = started(cx);
     let mut hosts = fixture_hosts(&[0, 11]);
     hosts.entries[1].value["name"] = json!("שלום\u{202e}box");
@@ -624,6 +623,11 @@ fn begin_template_wake(
     let snapshot = vec![
         listing(&[], &[]),
         hosts,
+        CollectionState {
+            collection: Collection::CustomAgents,
+            meta: meta(&[]),
+            entries: Vec::new(),
+        },
         if numbered {
             bound(None, &[("1", "paused")])
         } else {
@@ -647,6 +651,17 @@ fn begin_template_wake(
     } else {
         chord(cx);
     }
+    (helm, cx, host)
+}
+
+/// Hold the authorized Resume for inspection. No preview or create can precede it, even when the template
+/// already carries a managed checkout and a base name.
+fn begin_template_wake(
+    cx: &mut TestAppContext,
+    fields: TemplateFields,
+    numbered: bool,
+) -> (FakeHelm, &mut VisualTestContext, HostView, FakeCommand) {
+    let (mut helm, cx, host) = press_template_on_suspended_host(cx, fields, numbered);
     let sent = answer_except(&mut helm, cx, |command| {
         matches!(
             command.path.as_str(),
@@ -659,6 +674,41 @@ fn begin_template_wake(
     assert_eq!(resume.path, "/api/hosts/12/resume");
     assert!(!any_open(cx));
     (helm, cx, host, resume.clone())
+}
+
+/// A shortcut for a withdrawn registration brings New forward to explain the refusal. Waking its suspended host
+/// first could start billing for a launch that cannot happen.
+#[gpui::test]
+fn a_deleted_custom_agent_shortcut_leaves_the_host_suspended(cx: &mut TestAppContext) {
+    let (mut helm, cx, _) = press_template_on_suspended_host(
+        cx,
+        TemplateFields {
+            agent: Some(LaunchHarness::Custom),
+            custom_agent: Some(Some("withdrawn-code".into())),
+            destination: Some(TemplateDestination::Folder("~".into())),
+            ..TemplateFields::default()
+        },
+        false,
+    );
+    let sent = answer_except(&mut helm, cx, |command| {
+        matches!(
+            command.path.as_str(),
+            "/api/sessions" | "/api/hosts/12/resume"
+        )
+    });
+    assert!(sent.is_empty(), "an invalid draft sent {sent:?}");
+    assert!(any_open(cx));
+    assert_eq!(
+        crate::launcher::view_tests::shown_draft(cx)
+            .agent
+            .custom_agent
+            .as_deref(),
+        Some("withdrawn-code"),
+    );
+    assert_eq!(
+        refusal(cx).as_deref(),
+        Some("Not launched. The selected custom agent is no longer registered")
+    );
 }
 
 /// The tests with an explicit folder all authorize a complete launch at the shortcut.

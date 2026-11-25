@@ -101,26 +101,6 @@
   or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-launcher-search-custom-agent-rename-refused-as-stale.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md, "Creation" (launcher search, lines 1209-1211): "If an explicitly highlighted
-  choice disappears before Enter, or a clicked row has already disappeared, the field shows 'That choice is no longer
-  available...'". A renamed custom agent has not disappeared, yet `same_search_choice`
-  (`crates/gui/farhelm-gui/src/launcher/view/search.rs:870-886`) has no `Row::CustomAgent` arm. The `_ => a == b`
-  fallback compares the label as well, so a rename drops the highlight and Enter or click gives the stale-choice
-  refusal. The fix is the one-line ID arm the code already uses for hosts. That is the intent documented on
-  `Row::CustomAgent` ("A registration's ID selects it even after the display name changes"), so it overturns nothing.
-  Verified: Confirmed by reading the code. Not executed. The trigger is a rename (from Settings or another client) while
-  the row is highlighted or drawn.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code — add
-  the ID-only arm and a test; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
-  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## trailing-settings-custom-agent-nav-tooltip-omits-bidi-isolation.md
 
 - Outcome: `fix code`.
@@ -1126,28 +1106,6 @@
   Recommendation for reference: fix code — also compare `custom_agent`; size S. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## trailing-unseen-quick-launch-deleted-custom-agent-wakes-suspended-host.md
-
-- Outcome: `fix code`.
-- Assessment: The user may trigger a quick launch (⚡, a number shortcut, a sequence or Cmd+J) whose template names a
-  deleted custom agent, aimed at a suspended sandbox or container host. Farhelm resumes the host first and only then
-  refuses the launch as "no longer registered". A Tensorlake sandbox then bills while it runs, until its idle timeout
-  suspends it again. Verified: Confirmed by reading the code; I did not observe it running. The out-of-sight path
-  reaches `begin_host_wake` (`launcher/view.rs:2962-2971`, which checks `self.refusal`) before
-  `refresh_custom_capabilities` runs; that runs only in render, `press_at` and `submit` (`view.rs:1336`, `1425`,
-  `2279`). This contradicts that function's own doc ("before dispatch, including template launches prepared out of
-  sight"). SPEC.md:388 says "A launch on a suspended host resumes it first", and no spec rule says a launch that cannot
-  succeed must not wake the host.
-- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
-  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
-  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
-  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
-  Recommendation for reference: fix code — refresh capabilities in `prepared` before waking; size S. Size gate: about
-  100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over
-  that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md
