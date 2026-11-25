@@ -499,6 +499,32 @@ fn network_announcements_open_from_the_bell_and_record_only_the_displayed_batch(
         Some("Notifications: 1 unread")
     );
 
+    // Moving focus inside the panel supersedes the click. Closing the panel without input tests its identity guard
+    // independently of the focus mark. A nonempty reply should create no dialog in either case.
+    let pending = queue(vec![second.clone()], vec![]).entries.remove(0).value;
+    for press_tab in [true, false] {
+        open_panel(cx);
+        test_support::click(cx, "rail-notice-open-announcements-2");
+        let (read, _) = test_support::one_command(&mut fake, Method::Get, "/api/announcements");
+        let mark = cx.cx.update(|cx| crate::focus::Mark::take(cx));
+        if press_tab {
+            test_support::keys(cx, "tab");
+        } else {
+            cx.cx.update(crate::layers::close_all);
+        }
+        let moved = cx.cx.update(|cx| crate::focus::has_moved_on(&mark, cx));
+        assert_eq!(moved, press_tab, "only the Tab case supersedes the click");
+        assert_eq!(node(&frame(cx), PANEL_ID).is_some(), press_tab);
+        fake.reply(read, 200, Some(pending.clone()));
+        test_support::settle(cx);
+        assert!(node(&frame(cx), "announcements-got-it").is_none());
+        assert_eq!(node(&frame(cx), PANEL_ID).is_some(), press_tab);
+        if press_tab {
+            test_support::keys(cx, "escape");
+        }
+        marks(&mut fake, cx, 200);
+    }
+
     // Simulate another window handling the remaining batch, leaving the latest bell history entry resolved.
     push(&mut fake, queue(vec![], vec![second, first]), vec![]);
     push(&mut fake, notices(&[notice(2, true)]), vec![]);

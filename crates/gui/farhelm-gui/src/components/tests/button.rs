@@ -499,7 +499,6 @@ fn the_held_fill_belongs_to_available_buttons_at_rest() {
     let button =
         |tier| Button::new("b", "Action", HoverHelp::tooltip("Action"), Role::Button).tier(tier);
     for palette in [&crate::theme::DARK, &crate::theme::LIGHT] {
-        assert_ne!(palette.button_hover, palette.button_held);
         for (tier, rest, hover, held, ink) in [
             (
                 Tier::Neutral,
@@ -537,6 +536,7 @@ fn the_held_fill_belongs_to_available_buttons_at_rest() {
                 palette.on_fill,
             ),
         ] {
+            assert_ne!(hover, held, "{tier:?} shows a pointer press");
             assert_eq!(
                 button(tier).colors(palette),
                 (Some(rest), hover, None, ink),

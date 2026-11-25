@@ -2448,6 +2448,26 @@
       "reference": null
     },
     {
+      "golden": "solid-button-primary-hover",
+      "title": "The Save button under the pointer",
+      "reference": null
+    },
+    {
+      "golden": "solid-button-primary-held",
+      "title": "The Save button while the pointer press is held",
+      "reference": null
+    },
+    {
+      "golden": "solid-button-danger-hover",
+      "title": "The Delete button under the pointer",
+      "reference": null
+    },
+    {
+      "golden": "solid-button-danger-held",
+      "title": "The Delete button while the pointer press is held",
+      "reference": null
+    },
+    {
       "golden": "dialog",
       "title": "The dialog frame",
       "reference": "rename-dialog"
@@ -2580,6 +2600,11 @@
     {
       "golden": "interrupted-upload-notices",
       "title": "Interrupted upload notices for the files sent and the ones still waiting",
+      "reference": null
+    },
+    {
+      "golden": "restored-notice-stack",
+      "title": "An overflowing notice stack showing the newest notice after reconnect",
       "reference": null
     },
     {

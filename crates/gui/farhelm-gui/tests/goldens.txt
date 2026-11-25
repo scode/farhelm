@@ -198,6 +198,8 @@ linux/radio-group-variants--dark.png 3d9306e39a6f212cbb23034b363cc691245988d5
 linux/radio-group-variants--light.png d753970cbf9e5aaa7f613564607f74ab896ca385
 linux/rename-dialog--dark.png bb6d0cdf4bf36aa1c034c0dcf6689054a824dbf7
 linux/rename-dialog--light.png 3bbab6a1f23f828a90bee379742ae204d92c22dc
+linux/restored-notice-stack--dark.png a10a3739c34fa6066a6479e0443552fc488ec80b
+linux/restored-notice-stack--light.png 54a4e12dc4f44ec0890247cd77b68e39c6e58373
 linux/row-delete-confirmation--dark.png 9ee7ca4d19b0e01eb23fe2c832ddcbe929195e8a
 linux/row-delete-confirmation--light.png 11612414855da9cb0e8dfc6f02ad5409d9aee7b3
 linux/scroll-box--dark.png 30924a80902d5f6d799e005c0fb8529f62a7b559
@@ -338,6 +340,14 @@ linux/settings-terminal-edited--dark.png a8a82e30939f289604fa23b0dd302c046e6b70e
 linux/settings-terminal-edited--light.png 18fe4fc9326d64ecfafd1f12ca547a0317396096
 linux/settings-unsaved--dark.png d954a23d96202ad50d80895eb2fb15cab041afab
 linux/settings-unsaved--light.png c9d17af7959b251487e7b6dfe652a06e4d1b379d
+linux/solid-button-danger-held--dark.png 90ccd0f77da0946224c592547b42300ea1864c31
+linux/solid-button-danger-held--light.png 054d2c8e6efe21df9bc294995731314ca69a973c
+linux/solid-button-danger-hover--dark.png 35e9d6c249d2d14526cb2c7ae68de42ccf9cca04
+linux/solid-button-danger-hover--light.png 412df078c335d2d919645eebf66aef0508bdbdd6
+linux/solid-button-primary-held--dark.png a541992fbce6130d9daf9fa5bbd0bf66a754a1ed
+linux/solid-button-primary-held--light.png 15f084934ad8c51f1ec3db9111675db640c7f559
+linux/solid-button-primary-hover--dark.png 0d4add622d670fb1a450204c73056b97792589fc
+linux/solid-button-primary-hover--light.png 40db137281032bd3eae91838b9a36901fe76759a
 linux/ssh-sign-in-code--dark.png 2ac6b6b96fe0a3bf10f6e0257bd12c28033bc40a
 linux/ssh-sign-in-code--light.png f7f4828f8525b7c77ff4f5b515dea5ea6a106729
 linux/ssh-sign-in-duo--dark.png 9cd0e8b4ad813e40271df5e8c756fbaa732c718a
@@ -355,7 +365,7 @@ linux/stop-while-launching-confirmation--light.png 46fbf0459709457fa7b795b320e01
 linux/switch--dark.png 7b2651bfe584447fd4daea73e59508a1dac0cd54
 linux/switch--light.png c9201c7be7cddf684884b2764fa0365e33df51d5
 linux/tab-only-stop-confirmation--dark.png e2acf7e40ac1022a52a8da97683e4275c8b45685
-linux/tab-only-stop-confirmation--light.png 1801765da0af1f12b9825a6a027a0070a2514008
+linux/tab-only-stop-confirmation--light.png 27d08e4f2c384648d64cd308ceea25144c7b43c3
 linux/tab-strip--dark.png 96bdfde8dfff295c92ec1f824c750bcaf058a13c
 linux/tab-strip--light.png 9f909e41b6604fa2551fdad6a8c3d28da18d6b38
 linux/template-destination-editor--dark.png d5037e70bfbb030a81d54f9c95d6228219a0a181

@@ -120,6 +120,24 @@ fn the_active_override_makes_an_inactive_window_tick(cx: &mut TestAppContext) {
     );
 }
 
+/// New registrations keep the paused registry bounded while retaining handles that can animate when motion returns.
+#[gpui::test]
+fn a_paused_animation_registry_drops_dead_handles_on_subscribe(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    cx.update(|cx| ticker::set_reduced_motion(true, cx));
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let live = ticker::animate(window, cx);
+        for _ in 0..10 {
+            drop(ticker::animate(window, cx));
+        }
+        assert_eq!(ticker::animation_subscribers(cx), 2);
+        Spinner {
+            animating: Some(live),
+        }
+    });
+    assert!(cx.update(|_, cx| ticker::reduced_motion(cx) && !ticker::holds_animation_task(cx)));
+}
+
 /// Under reduced motion views keep their state but nothing moves on its own: no animation ticks at all, even in an
 /// active window, where they would otherwise run.
 #[gpui::test]

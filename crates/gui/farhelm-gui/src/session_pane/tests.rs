@@ -1412,6 +1412,7 @@ fn deleting_the_only_filtered_session_shows_interrupted_uploads_without_a_termin
 
 /// Undismissed uploads can outnumber the window's available lines. A second interruption of the same file must
 /// scroll into view on its own without moving focus. The pane keeps its working area and older notices stay reachable.
+/// Rebuilding the scroll region after reconnect still shows the newest notice, even if it was already present.
 #[gpui::test]
 fn a_full_notice_stack_reveals_the_latest_upload_without_hiding_the_pane(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -1509,6 +1510,31 @@ fn a_full_notice_stack_reveals_the_latest_upload_without_hiding_the_pane(cx: &mu
     let posted = fleet.cx.update(|_, cx| notices::posted(cx));
     assert!(!posted.contains(&Notice::InterruptedUpload(latest.clone())));
     assert!(posted.contains(&Notice::InterruptedUpload(previous.clone())));
+
+    let latest_visible = |cx: &mut VisualTestContext| {
+        frame(cx).iter().any(|node| {
+            node.element_id.as_deref() == Some("notice-dismiss-ConnectionLost")
+                && node.bounds.top() >= viewport.top()
+                && node.bounds.bottom() <= viewport.bottom()
+        })
+    };
+    fleet
+        .cx
+        .update(|_, cx| notices::post(Notice::ConnectionLost, cx));
+    settle(fleet.cx);
+    assert!(
+        latest_visible(fleet.cx),
+        "the latest notice is already on screen"
+    );
+    fleet.helm.break_channel();
+    settle(fleet.cx);
+    assert!(!fleet.drawn("window-notice-banners"));
+    fleet.helm.connect(a_and_b());
+    settle(fleet.cx);
+    assert!(
+        latest_visible(fleet.cx),
+        "the rebuilt stack reveals the same latest notice"
+    );
 }
 
 /// The hold and the scrim belong to the open session's own Delete: SPEC.md lets Deletes of other sessions run while

@@ -42607,3 +42607,132 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: Fixed in jj change `qssmvqtrzmtstyrozkvqptopxnmrlyry`, bookmark
   `plan/triage-sessions-ui-nov24/04-other-fixes` ([#4822](https://github.com/scode/farhelm/pull/4822/changes)).
+
+## trailing-all-phase-fixture-does-not-compare-managers-phase-strings.md
+
+- Outcome: `other`.
+- Assessment: A test that checks every host phase uses the same word in the agent-facing view and on the wire starts
+  from view values rather than from the host manager's own states, so a phase renamed only in the manager would pass.
+  Verified: Confirmed as a test gap; there is no current mismatch. The earlier sibling,
+  trailing-host-phase-vocabulary-test-omits-stopped.md, was fixed in PR #4510 under Q11.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard. Rebuilding the table from manager states is more than
+  the roughly 20 lines Q11 allows. Size S to M if fixed.
+- Execution: No change. Exhaustively comparing the manager's own phase strings would require rebuilding the test table
+  from manager states. Existing projection checks cover some states. Recorded in jj change
+  `uwmtwrxloporzpotkvuyltnvumpxmsoz`, bookmark `plan/triage-sessions-ui-nov24/05-cheap-fixes`
+  ([#4826](https://github.com/scode/farhelm/pull/4826/changes)).
+
+## trailing-bell-stale-reply-guards-untested.md
+
+- Outcome: `other`.
+- Assessment: If you press Open Announcements and then click elsewhere or close the panel before the helm answers, the
+  late answer must not pop the dialog. The code guards this, but no test checks it. Verified: Confirmed. Only the
+  happy-path test exists (`rail_notices/tests.rs`). The guards are at `rail_notices.rs:248,253`.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code. Two or three short test cases; they guard focus
+  behavior users see (Q11), though they may come to more than 20 lines. Size S.
+- Execution: Fixed in jj change `uwmtwrxloporzpotkvuyltnvumpxmsoz`, bookmark
+  `plan/triage-sessions-ui-nov24/05-cheap-fixes` ([#4826](https://github.com/scode/farhelm/pull/4826/changes)).
+
+## trailing-light-theme-primary-and-danger-buttons-identical-hover-held.md
+
+- Outcome: `other`.
+- Assessment: In Light appearance, pressing and holding a primary (blue) or destructive (red) button looks the same as
+  hovering it, so nothing shows the press. Verified: Confirmed. `theme.rs:364-365` and `:377,398` give Light's hover and
+  held fills the same colors, and Dark's differ. The test `components/tests/button.rs:498` states that hover and held
+  must differ but asserts it only for ordinary buttons. No SPEC rule covers pressed tints.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code. Two Light tokens and a per-tier assertion. Size S.
+- Execution: Fixed in jj change `uwmtwrxloporzpotkvuyltnvumpxmsoz`, bookmark
+  `plan/triage-sessions-ui-nov24/05-cheap-fixes` ([#4826](https://github.com/scode/farhelm/pull/4826/changes)).
+
+## trailing-maximized-relaunch-contract-has-no-first-frame-or-subsequent.md
+
+- Outcome: `other`.
+- Assessment: No test checks that a Mac app relaunched while maximized opens maximized without first showing the
+  ordinary frame, or that the next Zoom restores the remembered rectangle. Verified: Confirmed as a coverage gap; no
+  wrong behavior has been shown. Closing it needs native window sampling across a relaunch in the Mac VM harness.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard. Not cheap (Mac VM harness work). Size L if fixed.
+- Execution: No change. The native Zoom fixture measures a single window. Proving the first frame and following Zoom
+  after relaunch requires extending the Mac capture sequence and its geometry checks. Recorded in jj change
+  `uwmtwrxloporzpotkvuyltnvumpxmsoz`, bookmark `plan/triage-sessions-ui-nov24/05-cheap-fixes`
+  ([#4826](https://github.com/scode/farhelm/pull/4826/changes)).
+
+## trailing-overflowing-banner-stack-resets-to-oldest-after-reconnect.md
+
+- Outcome: `other`.
+- Assessment: When enough notices are open that the banner stack scrolls, a reconnect or Take back whose newest notice
+  was already present before the disconnect scrolls the stack back to the oldest notice. The newest one (such as
+  "connection lost") ends up hidden below. Verified: Confirmed. `main_view.rs:204-207` keeps `drawn_banners` across the
+  inert branch (`:261`), while the scroll state is rebuilt. It is not filtered: a reconnect is not a rare trigger in the
+  filter's sense, and the display does not correct itself.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code. Clear `drawn_banners` on the inert branch. Size S.
+- Execution: Fixed in jj change `uwmtwrxloporzpotkvuyltnvumpxmsoz`, bookmark
+  `plan/triage-sessions-ui-nov24/05-cheap-fixes` ([#4826](https://github.com/scode/farhelm/pull/4826/changes)).
+
+## trailing-status-mark-tests-lost-their-per-target-geometry-check.md
+
+- Outcome: `other`.
+- Assessment: The session row's status-mark hover tests check the help text, the notch and the missing ring, but no
+  longer check that each mark's help points at that mark, so placement bound to the wrong element would pass. Verified:
+  Confirmed as a test gap; no wrong placement has been shown. Generic placement and clamp tests and one golden still
+  cover parts of it.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard. Not cheap, and the generic geometry tests cover the
+  shared logic. Size M if fixed.
+- Execution: Fixed in jj change `uwmtwrxloporzpotkvuyltnvumpxmsoz`, bookmark
+  `plan/triage-sessions-ui-nov24/05-cheap-fixes` ([#4826](https://github.com/scode/farhelm/pull/4826/changes)).
+
+## trailing-ticker-leaks-dead-subscribers-under-reduced-motion.md
+
+- Outcome: `other`.
+- Assessment: With the operating system's Reduce Motion kept on, the app's animation registry gains a dead entry each
+  time a cursor blink, pulse or spinner starts and stops. Nothing removes them until Reduce Motion is turned off, so
+  memory grows slowly over a long session. Verified: Confirmed. `crates/gui/farhelm-gui/src/ticker.rs:421-437` pushes
+  entries; pruning happens only in `tick` and in `motion_changed` when motion returns (`:441-455`, whose comment says so
+  on purpose). Each entry is a few dozen bytes. SPEC_impl.md's line "accumulation without bound over time during
+  ordinary operation" (Supervisor metadata retention; Leftover files) is written for the helm and for files, not GUI
+  memory.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code. Prune dead entries in `subscribe`, which is a one-line `retain`. Size S.
+- Execution: Fixed in jj change `uwmtwrxloporzpotkvuyltnvumpxmsoz`, bookmark
+  `plan/triage-sessions-ui-nov24/05-cheap-fixes` ([#4826](https://github.com/scode/farhelm/pull/4826/changes)).
+
+## trailing-toolbar-650px-height-test-unguarded-else-branch.md
+
+- Outcome: `other`.
+- Assessment: A layout test meant to check that the environment button keeps its condensed 23-pixel height in a
+  650-pixel pane also passes when the toolbar never condenses. Verified: Confirmed.
+  `session_pane/header_tests.rs:3046-3050` picks the expected height from Stop's height without asserting Stop's height.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code. One assertion; cheap and it guards the toolbar's
+  shipped layout (Q11). Size S.
+- Execution: Fixed in jj change `uwmtwrxloporzpotkvuyltnvumpxmsoz`, bookmark
+  `plan/triage-sessions-ui-nov24/05-cheap-fixes` ([#4826](https://github.com/scode/farhelm/pull/4826/changes)).

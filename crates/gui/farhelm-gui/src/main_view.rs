@@ -256,6 +256,8 @@ impl Render for MainView {
                 )
                 .into_any_element()
         } else {
+            // The scroll handle is tied to the drawn region. Reveal the latest notice when that region returns.
+            self.drawn_banners.clear();
             self.sidebar
                 .update(cx, |sidebar, cx| sidebar.suspend_update_reminder(cx));
             inert(&state, cx)
@@ -447,9 +449,9 @@ fn is_banner(notice: &Notice) -> bool {
     }
 }
 
-/// Leave room for the workspace even when several interrupted uploads are waiting for Dismiss. A new notice
-/// reveals the end of the stack without moving keyboard focus. Tab can still reach earlier Dismiss buttons.
-fn notice_banners(
+/// Leave room for the workspace even when several interrupted uploads are waiting for Dismiss. A new or restored
+/// stack reveals its latest notice without moving keyboard focus. Tab can still reach earlier Dismiss buttons.
+pub(crate) fn notice_banners(
     posted: Vec<Notice>,
     reveal_latest: bool,
     window: &mut Window,

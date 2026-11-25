@@ -503,7 +503,7 @@ fn a_host_list_never_read_shows_the_unavailable_status(cx: &mut TestAppContext) 
         .expect("the status help is shown");
     assert_eq!(shown.side(), layers::TooltipSide::Beside);
     assert!(shown.ring().is_none());
-    assert!(cx.debug_bounds("tooltip-notch").is_some());
+    crate::session_list::summary_tests::assert_status_notch(cx, "host-rail-unavailable", &shown);
     let card = test_support::bounds(cx, "tooltip-card");
     assert!((card.left() - rail.right() - px(6.)).abs() <= px(1.));
 }

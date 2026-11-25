@@ -561,18 +561,6 @@ consequences.
   — If a replay reveals the exit frame before its history is delivered, the viewer can browse that frame and then jump
   to old history without a scroll request. An already stored selection may be dropped or name different rows.
 
-- [`trailing-all-phase-fixture-does-not-compare-managers-phase-strings.md`](trailing-all-phase-fixture-does-not-compare-managers-phase-strings.md)
-  — The strengthened fixture catches client/wire phase drift. A manager-only rename for a phase can still pass this
-  fixture.
-
-- [`trailing-status-mark-tests-lost-their-per-target-geometry-check.md`](trailing-status-mark-tests-lost-their-per-target-geometry-check.md)
-  — The row status tests verify that each mark's help appears with a notch and no ring. They can pass if placement uses
-  the bounds of a different element in the same sidebar.
-
-- [`trailing-maximized-relaunch-contract-has-no-first-frame-or-subsequent.md`](trailing-maximized-relaunch-contract-has-no-first-frame-or-subsequent.md)
-  — The checked cases could pass if a maximized Mac relaunch still flashed the ordinary frame or if the next Zoom
-  returned to a different rectangle.
-
 - [`trailing-one-create-test-skip-already-readable-duplicate.md`](trailing-one-create-test-skip-already-readable-duplicate.md)
   — The test can pass with a duplicate request already waiting on the scripted supervisor stream when the successful
   launch returns.
@@ -830,10 +818,6 @@ consequences.
   — When discarding a malformed session ID from startup scope cleanup, the supervisor logs it with raw Display (%id)
   instead of escaped Debug (?id), violating the session-ID logging rule.
 
-- [`trailing-overflowing-banner-stack-resets-to-oldest-after-reconnect.md`](trailing-overflowing-banner-stack-resets-to-oldest-after-reconnect.md)
-  — When an overflowing banner stack reconnects or takes back control and its newest notice was already drawn before
-  going inert, the stack resets to the top and hides the newest banner off the bottom.
-
 - [`trailing-later-codex-github-failure-hides-claude-cleanup-warning.md`](trailing-later-codex-github-failure-hides-claude-cleanup-warning.md)
   — If legacy Claude (or, since #4751, Codex) settings cleanup fails on a host and a later Codex or GitHub credential
   step also fails, Farhelm hides the cleanup warning and reports the unrelated error for that agent's replacements.
@@ -1056,10 +1040,6 @@ consequences.
   action's accessible name includes the custom agent's name ("Launch Command · <name> · <host> · <folder>"), whereas
   declaring any built-in agent or generic Custom omits the agent name ("Launch Command · <host> · <folder>").
 
-- [`trailing-light-theme-primary-and-danger-buttons-identical-hover-held.md`](trailing-light-theme-primary-and-danger-buttons-identical-hover-held.md)
-  — In Light appearance, pressing and holding a primary or destructive button produces no visual change from hovering
-  it, because both states use the exact same color.
-
 - [`trailing-mac-reach-omits-date-for-bootout.md`](trailing-mac-reach-omits-date-for-bootout.md) — Remote Mac setup,
   Update, and uninstall are specified to refuse during inspection if any command their shell path requires is missing
   from the host's PATH.
@@ -1172,19 +1152,9 @@ consequences.
   sandbox stays open — keeping the Sandboxes section visible even after Clear, or letting you confirm deleting an
   old-key sandbox under the new key.
 
-- [`trailing-ticker-leaks-dead-subscribers-under-reduced-motion.md`](trailing-ticker-leaks-dead-subscribers-under-reduced-motion.md)
-  — When the user keeps the operating system's Reduce Motion setting turned on, Farhelm's GUI animation list accumulates
-  stale entries every time a cursor blink, pulsing indicator, or spinner starts and stops, leaking memory slowly over a
-  long desktop session because nothing prunes dead entries until Reduce Motion is turned back off.
-
 - [`trailing-ticker-live-motion-resume-test-misses-blink-resume.md`](trailing-ticker-live-motion-resume-test-misses-blink-resume.md)
   — The test checking that live Reduce Motion changes pause and then resume both the terminal cursor blink and the
   running-session pulse does not actually verify that the cursor blink resumes blinking after motion is turned back on.
-
-- [`trailing-toolbar-650px-height-test-unguarded-else-branch.md`](trailing-toolbar-650px-height-test-unguarded-else-branch.md)
-  — The layout test meant to guard the condensed environment button's 23-pixel height in a 650-pixel session pane does
-  not actually assert that the row condensed or that the neighboring action buttons have a valid height, so a regression
-  that keeps ordinary heights or breaks Stop's height can slip past it.
 
 - [`trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md`](trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md)
   — Changes to registered custom agents are wired to push over the UI channel, but the helm test suite never exercises a
@@ -1213,10 +1183,6 @@ consequences.
   confirmation dialog explains the YOLO classification as "Farhelm treats every Custom permission choice as YOLO."
   Because "Custom" is also the name of the Custom permission flags mode, this reads as if the launch used custom
   permission flags rather than a registered custom agent.
-
-- [`trailing-bell-stale-reply-guards-untested.md`](trailing-bell-stale-reply-guards-untested.md) — No test covers the
-  bell's guards that stop a late announcements reply from opening the dialog after the user moved on or closed the
-  popover.
 
 - [`trailing-credential-test-name-says-setup-refuses.md`](trailing-credential-test-name-says-setup-refuses.md) — A test
   name says a failed Claude credential lookup makes host setup fail, while setup actually completes with a notice.

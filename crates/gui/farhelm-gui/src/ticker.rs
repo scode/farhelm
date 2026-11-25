@@ -424,6 +424,12 @@ fn subscribe<V: 'static>(window: &Window, cx: &mut Context<V>, cadence: Cadence)
     let Some(ticker) = installed_mut::<Ticker>(cx) else {
         return (alive, 0);
     };
+    // A paused loop cannot visit dead handles. Bound that backlog as new animations arrive.
+    if !ticker.running {
+        ticker
+            .animating
+            .retain(|subscriber| subscriber.alive.strong_count() > 0);
+    }
     let since = cadence.start(ticker.ticks);
     ticker.animating.push(Subscriber {
         alive: Rc::downgrade(&alive),
@@ -437,7 +443,7 @@ fn subscribe<V: 'static>(window: &Window, cx: &mut Context<V>, cadence: Cadence)
 }
 
 /// Stop the animation timer at the preference change. Keep the holders so a cursor or pulse can resume on the
-/// same handle. While paused, nothing prunes dead holders until motion returns.
+/// same handle. New registrations prune dead holders even while the loop is paused.
 fn motion_changed(cx: &mut App) {
     let reduced = reduced_motion(cx);
     let Some(ticker) = installed_mut::<Ticker>(cx) else {
@@ -635,6 +641,12 @@ pub(crate) fn ticks(cx: &App) -> u64 {
 #[cfg(test)]
 pub(crate) fn holds_animation_task(cx: &App) -> bool {
     installed::<Ticker>(cx).is_some_and(|ticker| ticker.tick_loop.is_some())
+}
+
+/// Count all registry entries, including dead handles a paused loop has yet to remove.
+#[cfg(test)]
+pub(crate) fn animation_subscribers(cx: &App) -> usize {
+    installed::<Ticker>(cx).map_or(0, |ticker| ticker.animating.len())
 }
 
 /// The crate's one timer: everything time-based goes through [`after`], the tick loop that [`animate`], [`blink`] and
