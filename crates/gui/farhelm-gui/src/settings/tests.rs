@@ -2582,7 +2582,8 @@ fn the_hint_switches_are_the_shared_dismissals_inverted(cx: &mut TestAppContext)
 }
 
 /// The trust hint opens Antigravity's own page and waits for its switch to become available before taking focus.
-/// Escape returns focus to the opening button, even when it did not have focus when Settings opened.
+/// The unread switch must not report a saved off value. Escape returns focus to the opening button, even when it
+/// did not have focus when Settings opened.
 #[gpui::test]
 fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut TestAppContext) {
     let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
@@ -2601,12 +2602,28 @@ fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut Test
         "the dialog itself holds focus while the reads are out"
     );
     assert_eq!(available(cx, TrustAgent::Antigravity.id()), Some(false));
+    let switch = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(TrustAgent::Antigravity.id()))
+        .expect("the unread trust switch is drawn");
+    assert_eq!((switch.role, switch.toggled), (Some(Role::Label), None));
+    let unavailable = format!("{}. Unavailable.", TrustAgent::Antigravity.label());
+    assert_eq!(switch.label.as_deref(), Some(unavailable.as_str()));
+    assert_eq!(switch.value.as_deref(), Some(unavailable.as_str()));
     let reads = sent_reads(&mut helm);
     assert_eq!(
         reads.first().map(|(_, path)| path.as_str()),
         Some(TRUST_PATHS[4])
     );
     answer_trust(&mut helm, &reads, false, cx);
+    let switch = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(TrustAgent::Antigravity.id()))
+        .expect("the trust read kept the switch visible");
+    assert_eq!(
+        (switch.role, switch.toggled),
+        (Some(Role::Switch), Some(Toggled::False))
+    );
     assert_eq!(
         focused_id(cx).as_deref(),
         Some(TrustAgent::Antigravity.id())

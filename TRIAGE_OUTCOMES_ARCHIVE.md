@@ -46183,3 +46183,41 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: `zlvsvkmlkzkquklzrxmnxnvxukpmxttm`, `plan/triage-hooks-trust-nov24/05c-absolute-claude-config`,
   [draft PR](https://github.com/scode/farhelm/pull/4902/changes). Fixed. Automatic workspace trust requires an absolute nonempty Claude config directory override. The terminal notice explains a skipped edit.
+
+## approval-omits-automatic-trust-warning-from-accessibility.md
+
+- Outcome: `fix code`.
+- Assessment: When an agent asks to launch or restart a session, the approval card shows a "Trusted workspace" or "Not
+  trusted" chip and a warning. A screen reader does not hear them, so a screen-reader user can allow a trusted launch
+  without being told. Verified: confirmed, and the scope is wider than reported. The whole Permissions fact has no
+  accessible node: the permission label, the YOLO or guarded chip and its description, and the trust chip and warning
+  (`approvals/card.rs:388-405`, `:544-608`). Other one-line facts get named tab stops (`FactLine`). SPEC.md
+  (around 4646) requires the chip visually only. The approval itself is still bound to the drawn request. Real
+  screen-reader output was not checked.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Expose this consent, warning or status text to assistive technology under that principle.
+  Recommendation for reference: fix spec+code. Expose the Permissions fact, chip and warning text as named card content
+  ahead of the answer buttons. Size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: `zkwsxwrnpplzqkluplonkmkvvysymlmy`, `plan/triage-hooks-trust-nov24/05d-trust-accessibility`,
+  [draft PR](https://github.com/scode/farhelm/pull/4905/changes). Fixed. The Permissions fact exposes its chip, description and any trust warning as one static label before the answers.
+
+## unavailable-antigravity-trust-switch-announced-as-off.md
+
+- Outcome: `fix code`.
+- Assessment: While a trust setting is loading or could not be read, its switch is dimmed and cannot be used. Screen
+  readers are still told it is simply "off", with no unavailable state. Verified: confirmed. The shared switch component
+  reports `Toggled::False` for the visual fallback and exports no disabled flag (`components/checkbox.rs:246-285`,
+  `:315`; `settings/configured.rs:90-116`). This affects every disabled switch in the app, not only Antigravity's. No
+  spec rule covers it.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Expose this consent, warning or status text to assistive technology under that principle.
+  Recommendation for reference: discard, or fold into the parity principle if 40 and 41 get a spec rule. Size S-M for
+  the shared component. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: `zkwsxwrnpplzqkluplonkmkvvysymlmy`, `plan/triage-hooks-trust-nov24/05d-trust-accessibility`,
+  [draft PR](https://github.com/scode/farhelm/pull/4905/changes). Fixed under the desktop accessibility parity rule. An unread workspace trust switch is presented to assistive technology as an unavailable label. It reports a toggle value once the saved choice is known.

@@ -462,7 +462,7 @@ pub(super) fn block(
     .content(contents)
     .accessible_description(agent.switch_description())
     .checked(trust.state.shown())
-    .disabled(!trust.state.available())
+    .value_unknown(!trust.state.available())
     .focus(&trust.focus)
     .on_toggle(on_toggle);
     let failure = configured::failure(

@@ -24,7 +24,7 @@ use gpui::{
 };
 
 use super::card::{CardState, NARROW_WIDTH, card};
-use super::model::{Card, TunnelOffer};
+use super::model::{Card, TRUSTED_WORKSPACE, TunnelOffer};
 use crate::host_text::HostText;
 use crate::host_text::tests::paints_isolated;
 use crate::layers;
@@ -187,10 +187,20 @@ fn escaped(raw: &str) -> String {
 
 /// SPEC.md: the card shows the "Agent request" badge, the action as its heading, the waiting count, the compact From
 /// line, the labelled facts and the answers. Every one of them is painted from the model, in the old app's words.
+/// The Permissions fact names the same warning for assistive technology before the answer buttons.
 #[gpui::test]
 fn the_card_paints_its_badge_heading_count_from_line_facts_and_answers(cx: &mut TestAppContext) {
+    let mut approval = launch("build");
+    let ApprovalAction::Launch {
+        launch: SessionLaunch::Agent { selection, .. },
+        ..
+    } = &mut approval.action
+    else {
+        panic!("expected a structured launch approval");
+    };
+    selection.workspace_trust = Some(true);
     let drawn = Rc::new(RefCell::new(Drawn {
-        approval: launch("build"),
+        approval,
         width: 660.,
         busy: false,
         refusal: None,
@@ -214,6 +224,7 @@ fn the_card_paints_its_badge_heading_count_from_line_facts_and_answers(cx: &mut 
         "Permissions",
         "Guarded",
         "Guarded · Claude auto mode",
+        "Trusted workspace",
         "Agent",
         "Command",
     ] {
@@ -222,6 +233,29 @@ fn the_card_paints_its_badge_heading_count_from_line_facts_and_answers(cx: &mut 
             "{expected:?} painted in {texts:?}"
         );
     }
+    let permissions = nodes
+        .iter()
+        .position(|node| {
+            node.label
+                .as_deref()
+                .is_some_and(|label| label.starts_with("Permissions."))
+        })
+        .expect("the drawn Permissions fact has an accessible name");
+    let expected = format!(
+        "Permissions. Guarded. Guarded · Claude auto mode. Trusted workspace. {TRUSTED_WORKSPACE}"
+    );
+    let permission_node = &nodes[permissions];
+    assert_eq!(permission_node.role, Some(Role::Label));
+    assert_eq!(permission_node.label.as_deref(), Some(expected.as_str()));
+    assert_eq!(permission_node.value.as_deref(), Some(expected.as_str()));
+    let allow = nodes
+        .iter()
+        .position(|node| node.label.as_deref() == Some("Allow"))
+        .unwrap();
+    assert!(
+        permissions < allow,
+        "consent details precede the first answer"
+    );
     assert!(
         texts.iter().any(|text| text == "12345678…ijkl"),
         "the From line shows the bare ID shortened: {texts:?}"
