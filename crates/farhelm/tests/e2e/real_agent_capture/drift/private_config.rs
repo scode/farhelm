@@ -307,13 +307,15 @@ impl PrivateConfig {
         Ok(())
     }
 
-    /// Run after the case, on every path: re-check the real hook files and copy back what the vendor rewrote. The
-    /// notes name rewritten files that could not be copied back.
-    pub(super) fn finish(&self) -> anyhow::Result<Vec<String>> {
+    /// Re-check the real hook files after every case. Copy back replaced files only after host shutdown is confirmed,
+    /// so a still-running vendor cannot race the copy-back. Notes name files that could not be copied back.
+    pub(super) fn finish(&self, stopped: bool) -> anyhow::Result<Vec<String>> {
         let mut notes = Vec::new();
         for mirror in &self.mirrors {
-            notes.extend(mirror.copy_back()?);
             mirror.real_leaves_unchanged()?;
+            if stopped {
+                notes.extend(mirror.copy_back()?);
+            }
         }
         Ok(notes)
     }
@@ -442,8 +444,8 @@ mod tests {
         assert!(mirror.real_leaves_unchanged().is_err());
     }
 
-    /// A vendor that saves by rename replaces the link; the new file must reach the real tree unless the real file
-    /// also changed, in which case the newer real file wins and the loss is reported.
+    /// A vendor that saves by rename replaces the link. Wait for confirmed shutdown before copying the new file
+    /// over its unchanged original. A concurrent change to the real file wins and is reported.
     #[farhelm_testtrace::test]
     fn a_file_the_vendor_replaced_is_copied_back_only_over_an_unchanged_original() {
         let scratch = farhelm_teststate::tempdir().unwrap();
@@ -462,7 +464,15 @@ mod tests {
         fs::remove_file(real.join("state.json")).unwrap();
         fs::write(real.join("state.json"), "state-from-elsewhere").unwrap();
 
-        let notes = mirror.copy_back().unwrap();
+        let config = PrivateConfig {
+            mirrors: vec![mirror],
+        };
+        assert!(config.finish(false).unwrap().is_empty());
+        assert_eq!(
+            fs::read_to_string(real.join("auth.json")).unwrap(),
+            "token-1"
+        );
+        let notes = config.finish(true).unwrap();
         assert_eq!(
             fs::read_to_string(real.join("auth.json")).unwrap(),
             "token-2"

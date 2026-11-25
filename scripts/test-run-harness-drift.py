@@ -19,7 +19,7 @@ import harness_upgrades
 runner = runpy.run_path(str(Path(__file__).with_name("run-harness-drift.py")))
 # runpy returns a copy of the globals. Patch the actual function namespace so main uses the stand-ins.
 globals_of_runner = runner["main"].__globals__
-DRIFT_SOURCE = Path(__file__).resolve().parents[1] / "crates/farhelm/tests/e2e/real_agent_capture/drift.rs"
+DRIFT_SOURCE = Path(__file__).resolve().parents[1] / "crates/farhelm/tests/e2e/real_agent_capture/drift"
 
 
 def no_upgrades(names, env, upgrade):
@@ -37,9 +37,11 @@ class DriftRunnerTests(unittest.TestCase):
         }
         listing = (
             "real_agent_capture::real_claude_session_reports_its_identity_across_clear: test\n"
-            "real_agent_capture::drift::drift_codex: test\n"
-            "real_agent_capture::drift::drift_antigravity: test\n\n"
-            "3 tests, 0 benchmarks\n"
+            "real_agent_capture::drift::tests::a_drift_unit_test: test\n"
+            "real_agent_capture::drift::base::drift_codex: test\n"
+            "real_agent_capture::drift::base::drift_antigravity: test\n"
+            "real_agent_capture::drift::model_selection::drift_codex: test\n\n"
+            "5 tests, 0 benchmarks\n"
         )
         outputs = [
             subprocess.CompletedProcess([], 0, json.dumps(artifact)),
@@ -49,8 +51,9 @@ class DriftRunnerTests(unittest.TestCase):
         with patch.object(subprocess, "run", side_effect=outputs) as run:
             binary = runner["build_binary"](env)
             cases = runner["discover"](binary, env)
-        self.assertEqual(list(cases), ["antigravity", "codex"])
-        self.assertEqual(cases["codex"], "real_agent_capture::drift::drift_codex")
+        self.assertEqual(list(cases), [("base", "antigravity"), ("base", "codex"), ("model_selection", "codex")])
+        self.assertEqual(cases["base", "codex"], "real_agent_capture::drift::base::drift_codex")
+        self.assertEqual(cases["model_selection", "codex"], "real_agent_capture::drift::model_selection::drift_codex")
         self.assertIn("--no-run", run.call_args_list[0].args[0])
         self.assertEqual(run.call_args_list[1].args[0], [str(binary), "--ignored", "--list"])
         self.assertEqual(run.call_count, 2)
@@ -99,7 +102,12 @@ class DriftRunnerTests(unittest.TestCase):
 
     def test_every_selected_case_runs_and_only_an_explicit_skip_fails(self):
         """Missing prerequisites are distinguishable and do not prevent another harness from running."""
-        cases = {"claude": "case-claude", "codex": "case-codex", "grok": "case-grok"}
+        cases = {
+            ("base", "claude"): "case-claude",
+            ("base", "codex"): "case-codex",
+            ("base", "grok"): "case-grok",
+            ("model_selection", "codex"): "case-model",
+        }
         result = runner["Result"]
         for requested, verdicts, code in [
             ([], [result("could_not_run", "no login"), result("passed", "ok"), result("passed", "ok")], 0),
@@ -122,7 +130,7 @@ class DriftRunnerTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()) as output,
             ):
                 self.assertEqual(runner["main"](requested), code)
-            self.assertEqual(called, ["grok", "codex"] if requested else list(cases))
+            self.assertEqual(called, ["base/grok", "base/codex"] if requested else ["base/claude", "base/codex", "base/grok"])
             self.assertIn("COULD NOT RUN", output.getvalue())
             self.assertIn("PASSED", output.getvalue())
 
@@ -133,12 +141,64 @@ class DriftRunnerTests(unittest.TestCase):
 
         with patch.dict(globals_of_runner, {
             "build_binary": lambda env: Path("/synthetic/e2e"),
-            "discover": lambda binary, env: {"claude": "case-claude"},
+            "discover": lambda binary, env: {("base", "claude"): "case-claude", ("model_selection", "codex"): "case-model"},
             "recorded_case": unexpected,
             "prepare": unexpected,
         }), contextlib.redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(runner["main"](["--list"]), 0)
-        self.assertEqual(output.getvalue().strip(), "claude")
+            self.assertEqual(runner["main"](["--list", "--category", "model_selection", "--harness", "codex"]), 0)
+        self.assertEqual(output.getvalue().strip(), "model_selection/codex")
+
+    def test_category_selection_deduplicates_upgrades_but_retains_every_verdict(self):
+        """A pass in one category cannot overwrite the same harness's failure in another."""
+        cases = {("base", "codex"): "base-case", ("model_selection", "codex"): "model-case"}
+        for filters in [
+            ["--category", "all"],
+            ["--category", "base", "--category", "model_selection", "--category", "base", "--harness", "codex"],
+        ]:
+            calls = []
+
+            def prepare(names, env, upgrade):
+                calls.append(("upgrade", names))
+                return no_upgrades(names, env, upgrade)
+
+            def recorded(binary, test, name, env):
+                calls.append(("case", test))
+                if test == "base-case":
+                    return runner["Result"]("failed", "base failure")
+                return runner["Result"]("passed", "model success")
+
+            with patch.dict(globals_of_runner, {
+                "build_binary": lambda env: Path("/synthetic/e2e"),
+                "discover": lambda binary, env: cases,
+                "prepare": prepare,
+                "recorded_case": recorded,
+            }), contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(runner["main"](filters), 1)
+            self.assertEqual(calls, [("upgrade", ["codex"]), ("case", "base-case"), ("case", "model-case")])
+            self.assertRegex(output.getvalue(), r"FAILED +base +codex +1\.0 +base failure")
+            self.assertRegex(output.getvalue(), r"PASSED +model_selection +codex +1\.0 +model success")
+
+    def test_invalid_category_combinations_run_no_upgrades_or_cases(self):
+        """Upgrade-only needs no build, and a category without a selected harness cannot report success."""
+        def unexpected(*args, **kwargs):
+            self.fail("the rejected selection must not start work")
+
+        cases = {("base", "grok"): "base-grok", ("model_selection", "codex"): "model-codex"}
+        for argv, diagnostic, builds in [
+            (["--upgrade-only", "--category", "base"], "--category cannot be used with --upgrade-only", False),
+            (["--list", "--upgrade-only"], "--list cannot be used with --upgrade-only", False),
+            (["--category", "model_selection", "--harness", "grok"], "available harnesses: codex", True),
+            (["--category", "missing"], "unknown category: missing", True),
+        ]:
+            with patch.dict(globals_of_runner, {
+                "build_binary": (lambda env: Path("/synthetic/e2e")) if builds else unexpected,
+                "discover": lambda binary, env: cases,
+                "prepare": unexpected,
+                "recorded_case": unexpected,
+            }), contextlib.redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit) as exited:
+                runner["main"](argv)
+            self.assertEqual(exited.exception.code, 2)
+            self.assertIn(diagnostic, errors.getvalue())
 
     def test_retains_the_structured_verdict_with_the_recorder_files(self):
         """Give the recorder time for both turns and retain the verdict beside its manifest."""
@@ -211,13 +271,16 @@ class UpgradePhaseTests(unittest.TestCase):
 
     def test_every_drift_case_has_a_recipe_for_the_binary_it_launches(self):
         """A new drift case without a recipe would quietly test a stale CLI; a renamed binary would upgrade nothing."""
-        source = DRIFT_SOURCE.read_text()
-        block = source[source.index("drift_cases! {"):]
-        cases = re.findall(r"drift_([a-z][a-z0-9_]*) =>", block[:block.index("}")])
-        self.assertTrue(cases)
-        self.assertEqual(sorted(cases), sorted(harness_upgrades.RECIPES))
+        source = (DRIFT_SOURCE / "mod.rs").read_text()
         for name, recipe in harness_upgrades.RECIPES.items():
             self.assertIn(f'"{recipe.binary}"', source, name)
+        categories = {
+            path.name: re.findall(r"^\s+drift_([a-z][a-z0-9_]*) =>", path.read_text(), re.MULTILINE)
+            for path in DRIFT_SOURCE.glob("*.rs")
+        }
+        self.assertEqual(sorted(categories["base.rs"]), sorted(harness_upgrades.RECIPES))
+        for category, registered in categories.items():
+            self.assertLessEqual(set(registered), harness_upgrades.RECIPES.keys(), category)
 
     def stand_in(self, directory, body):
         """Write an executable `fake` CLI whose `--version` prints the file `version` beside it."""
@@ -296,7 +359,7 @@ class UpgradePhaseTests(unittest.TestCase):
             patch.object(harness_upgrades, "probe", probe),
             patch.dict(globals_of_runner, {
                 "build_binary": lambda env: calls.append(("build",)) or Path("/synthetic/e2e"),
-                "discover": lambda binary, env: {"claude": "case-claude", "newcomer": "case-newcomer"},
+                "discover": lambda binary, env: {("base", "claude"): "case-claude", ("base", "newcomer"): "case-newcomer"},
                 "recorded_case": lambda binary, test, name, env: calls.append(("case", name)) or runner["Result"]("passed", "ok"),
             }),
             contextlib.redirect_stdout(io.StringIO()) as output,
@@ -307,24 +370,24 @@ class UpgradePhaseTests(unittest.TestCase):
     def test_cases_run_after_their_upgrade_and_a_failed_upgrade_fails_the_run(self):
         """A pass on a CLI that could not be upgraded is not the evidence the suite exists to give."""
         code, output, calls = self.run_main(["--harness", "claude"])
-        self.assertEqual((code, calls), (0, [("build",), ("upgrade", "claude"), ("case", "claude")]))
-        self.assertRegex(output, r"PASSED +claude +1\.0")
+        self.assertEqual((code, calls), (0, [("build",), ("upgrade", "claude"), ("case", "base/claude")]))
+        self.assertRegex(output, r"PASSED +base +claude +1\.0")
         failed = harness_upgrades.Upgrade("failed", "1.0", "1.0", "offline")
         code, output, calls = self.run_main(["--harness", "claude"], failed)
-        self.assertEqual((code, calls[-1]), (1, ("case", "claude")))
+        self.assertEqual((code, calls[-1]), (1, ("case", "base/claude")))
         self.assertIn("UPGRADE FAILED claude", output)
         self.assertIn("UPGRADE FAILED for claude", output)
 
     def test_a_case_without_a_recipe_is_reported_as_a_failed_upgrade(self):
         """Adding a harness to the suite must come with a decision about how it gets upgraded."""
         code, output, calls = self.run_main(["--harness", "newcomer"])
-        self.assertEqual((code, calls), (1, [("build",), ("case", "newcomer")]))
+        self.assertEqual((code, calls), (1, [("build",), ("case", "base/newcomer")]))
         self.assertIn("no recipe in scripts/harness_upgrades.py", output)
 
     def test_no_upgrade_probes_versions_and_upgrade_only_builds_nothing(self):
         """Reproducing a failure needs the same version; upgrading alone needs neither the build nor a vendor turn."""
         code, _, calls = self.run_main(["--harness", "claude", "--no-upgrade"])
-        self.assertEqual((code, calls), (0, [("build",), ("probe", "claude"), ("case", "claude")]))
+        self.assertEqual((code, calls), (0, [("build",), ("probe", "claude"), ("case", "base/claude")]))
         code, _, calls = self.run_main(["--upgrade-only", "--harness", "codex"])
         self.assertEqual((code, calls), (0, [("upgrade", "codex")]))
         code, _, calls = self.run_main(["--upgrade-only"])
