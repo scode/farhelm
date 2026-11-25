@@ -20,12 +20,6 @@ consequences.
   stale Delete permanently button can remove a repaired revision of the same template without offering Undo. The
   specification’s acceptance of that exact case is disputed.
 
-- [`test-state-guards-accept-replaceable-parent.md`](test-state-guards-accept-replaceable-parent.md) — With some shared
-  temporary directories, the ownership check can accept a test-state path another account can replace.
-
-- [`deflake-run-consumers-skip-state-ownership-check.md`](deflake-run-consumers-skip-state-ownership-check.md) — Deflake
-  Stop can trust run state from a location Start would refuse and affect a process outside that sweep.
-
 - [`settings-close-can-save-unlisted-drafts.md`](settings-close-can-save-unlisted-drafts.md) — Save and Close can write
   an unlisted form and clear the saved alert token outside the user’s confirmation.
 
@@ -54,10 +48,6 @@ consequences.
 - [`antigravity-hook-removal-can-delete-extra-files.md`](antigravity-hook-removal-can-delete-extra-files.md) — Settings
   directs users to remove Antigravity’s entire plugin directory even though setup manages two files. Any other files in
   that directory would also be removed.
-
-- [`failed-restart-clears-goose-resume-target.md`](failed-restart-clears-goose-resume-target.md) — A failed named Goose
-  Restart can leave the saved resume target cleared if Farhelm also cannot restore the previous outcome. The client only
-  sees the launch error.
 
 - [`replace-can-submit-before-checkout-warning.md`](replace-can-submit-before-checkout-warning.md) — Replace with can
   submit a fresh checkout before its updated warning is shown, allowing the previous checkout to move to trash without
@@ -203,9 +193,6 @@ consequences.
 - [`launch-without-hook-choice-lost.md`](launch-without-hook-choice-lost.md) — A launch accepted with Launch without can
   still install hooks after the user enables setup for future launches while provisioning continues.
 
-- [`terminal-link-panel-abbreviates-destination.md`](terminal-link-panel-abbreviates-destination.md) — The terminal link
-  panel can abbreviate the destination it will open, with no way to read the complete URL before opening it.
-
 - [`suspend-mixes-list-and-refresh-observations.md`](suspend-mixes-list-and-refresh-observations.md) — Suspend can use
   an old idle session list alongside a newer successful refresh and skip asking before it freezes active work.
 
@@ -318,11 +305,6 @@ consequences.
   Settings sidebar as an unsaved draft instead of being removed; choosing Save when closing Settings then silently
   re-registers the agent they just deleted.
 
-- [`trailing-custom-agent-settings-external-delete-kicks-user-mid-edit.md`](trailing-custom-agent-settings-external-delete-kicks-user-mid-edit.md)
-  — If a custom agent is deleted from the CLI or another client while the user is editing or saving it in Settings,
-  Farhelm abruptly switches them to the Add custom agent page even though it keeps their draft in the sidebar,
-  interrupting their typing and hiding both the 'deleted — register again' banner and any 404 save failure.
-
 - [`trailing-custom-agents-share-one-remembered-wrapper-prefix.md`](trailing-custom-agents-share-one-remembered-wrapper-prefix.md)
   — Remembered wrapper prefixes are stored per agent type, but every registered custom agent shares a single bucket.
 
@@ -340,11 +322,6 @@ consequences.
   for a registered custom agent shows the generic label "Custom" instead of that agent's display name or ID, so users
   cannot visually tell different custom agents apart in recent setups without hovering.
 
-- [`trailing-osc8-mismatch-warning-dropped-for-unicode-lookalike-hyphens.md`](trailing-osc8-mismatch-warning-dropped-for-unicode-lookalike-hyphens.md)
-  — Tightening terminal link label matching dropped the mismatched-destination warning for scheme-less hosts and
-  credential lookalikes using Unicode lookalike hyphens or valid RFC 3986 userinfo (borderline high/highest; ordinary
-  hover preview still names the real host).
-
 - [`trailing-refused-setup-confirmation-persists-planned-paths-on-retargeted-host.md`](trailing-refused-setup-confirmation-persists-planned-paths-on-retargeted-host.md)
   — Confirming Setup for an already-registered SSH host writes the plan's remote Farhelm binary and state-directory
   paths into the host's database row before taking the host's provisioning lock.
@@ -357,12 +334,6 @@ consequences.
 - [`trailing-shared-signin-triggers-auto-update-concurrently-with-manual-action.md`](trailing-shared-signin-triggers-auto-update-concurrently-with-manual-action.md)
   — When automatic host updates are on (the default) and a remote SSH host needs SSH sign-in, choosing Uninstall or
   Update on that host shares the waiting Setup sign-in question.
-
-- [`trailing-templates-editor-agent-dropdown-duplicate-keys-without-agent.md`](trailing-templates-editor-agent-dropdown-duplicate-keys-without-agent.md)
-  — Opening a stored template that sets a custom agent ID without an agent type (valid under the helm's save rules)
-  breaks the Agent type dropdown in the Templates editor: it adds a duplicate 'unavailable' entry with the same internal
-  key as the real registered agent, prevents clicking the real registered agent to fix the template, and can panic in
-  debug builds with assistive technology active.
 
 - [`trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md`](trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md)
   — When a launch template has a custom effort value without an agent type (a valid modifier template) or after
@@ -439,9 +410,6 @@ consequences.
 - [`template-leave-spec-still-inline.md`](template-leave-spec-still-inline.md) — The implementation spec still describes
   the Templates leave question as inline, although the app centers it.
 
-- [`launcher-model-field-can-reinterpret-show-all.md`](launcher-model-field-can-reinterpret-show-all.md) — An arriving
-  model catalog can turn Enter on the highlighted Show all option into a model selection.
-
 - [`legacy-template-can-ask-to-save-automatic-cleanup.md`](legacy-template-can-ask-to-save-automatic-cleanup.md) — A
   legacy template can ask to save when the only remaining change is automatic cleanup of a retired trust field.
 
@@ -465,9 +433,6 @@ consequences.
   the folder can no longer be resolved or encoded during launch preparation, the Antigravity trust setting can use the
   submitted spelling.
 
-- [`antigravity-dismissal-can-hide-next-trust-hint.md`](antigravity-dismissal-can-hide-next-trust-hint.md) — A delayed
-  close from an earlier Antigravity trust hint can hide a later hint in the same session.
-
 - [`antigravity-trust-hint-omits-live-announcement.md`](antigravity-trust-hint-omits-live-announcement.md) — The new
   Antigravity trust hint emits no live announcement request for screen readers.
 
@@ -483,29 +448,8 @@ consequences.
 - [`launcher-alias-enter-can-apply-an-undrawn-model.md`](launcher-alias-enter-can-apply-an-undrawn-model.md) — Enter can
   fill in an agent and model from a new family alias while the launcher still says models are loading.
 
-- [`installed-agent-hook-preflight-accepts-incomplete-setup.md`](installed-agent-hook-preflight-accepts-incomplete-setup.md)
-  — The installed-agent check can report agent drift when its manual conversation hook is configured for the wrong
-  event.
-
-- [`installed-agent-teardown-hides-test-failure.md`](installed-agent-teardown-hides-test-failure.md) — A teardown
-  failure can hide the original launch or Restart failure in the installed-agent check.
-
-- [`drift-suite-lacks-blocking-update-classification.md`](drift-suite-lacks-blocking-update-classification.md) — The
-  drift guide calls for an unavailable verdict on a blocking CLI update, but the suite has no update-specific
-  classification. The exact verdict for the documented Codex screen has not been established.
-
-- [`installed-agent-readiness-oracle-is-too-weak.md`](installed-agent-readiness-oracle-is-too-weak.md) — Launch-only
-  checks can pass on identifying text without establishing that the agent is interactive.
-
-- [`installed-agent-turn-oracle-accepts-old-output.md`](installed-agent-turn-oracle-accepts-old-output.md) — The
-  first-turn check can credit text that was already visible before its prompt was submitted.
-
 - [`installed-agent-runner-can-leave-interrupted-build-running.md`](installed-agent-runner-can-leave-interrupted-build-running.md)
   — Stopping only the installed-agent runner during the preliminary build can leave Cargo running.
-
-- [`installed-agent-preflight-can-misclassify-executable-access.md`](installed-agent-preflight-can-misclassify-executable-access.md)
-  — Binary preflight can mark an inaccessible executable as available and misreport the resulting launch failure as
-  drift.
 
 - [`interrupted-drift-case-retains-failed-verdict.md`](interrupted-drift-case-retains-failed-verdict.md) — A cancelled
   case can leave a failed drift verdict in its retained evidence before the test binary starts.
@@ -571,14 +515,8 @@ consequences.
 - [`sound-preview-overlay-blocks-settings-switch.md`](sound-preview-overlay-blocks-settings-switch.md) — The Play
   overlay leaves parts of its sound switch row unclickable.
 
-- [`golden-runner-bypasses-cargo-runtime-setup.md`](golden-runner-bypasses-cargo-runtime-setup.md) — Custom screenshot
-  builds can succeed but fail to run when they depend on Cargo’s runner or shared-library setup.
-
 - [`focused-golden-update-replaces-unpublished-full-captures.md`](focused-golden-update-replaces-unpublished-full-captures.md)
   — A valid focused golden update can overwrite a complete set of unpublished captures.
-
-- [`golden-runner-misdecodes-cargo-json-paths.md`](golden-runner-misdecodes-cargo-json-paths.md) — A successful golden
-  build can fail before rendering when Cargo reports a path the runner decodes or splits incorrectly.
 
 - [`golden-output-backpressure-can-block-cancellation-cleanup.md`](golden-output-backpressure-can-block-cancellation-cleanup.md)
   — Blocked parallel render output can delay cancellation cleanup and retain the update lock.
@@ -604,14 +542,6 @@ consequences.
 - [`app-settings-shared-upgrade-option-has-local-heading.md`](app-settings-shared-upgrade-option-has-local-heading.md) —
   The App heading says This Mac even though it contains a helm-shared highlights setting.
 
-- [`settings-radio-click-can-use-clipped-bounds.md`](settings-radio-click-can-use-clipped-bounds.md) — The new Settings
-  card geometry changes where an accessibility activation is aimed when a radio row is partly offscreen. A failure on a
-  supported native adapter remains unverified.
-
-- [`container-leftover-confirmation-host-identity-uncertain.md`](container-leftover-confirmation-host-identity-uncertain.md)
-  — A registered-container cleanup confirmation passes the displayed host number. Whether it can reach a different
-  installation after that number’s identity changes remains unverified.
-
 - [`launcher-escape-discards-template-edits.md`](launcher-escape-discards-template-edits.md) — Escape can discard Save
   as template edits while the launcher still shows the search results that received the key.
 
@@ -634,9 +564,6 @@ consequences.
 - [`launcher-shell-group-unlabelled.md`](launcher-shell-group-unlabelled.md) — The launcher separates Bash and Zsh from
   agent choices with a divider that exposes no accessible Shells label.
 
-- [`stacked-template-shot-does-not-check-effort.md`](stacked-template-shot-does-not-check-effort.md) — The
-  stacked-template capture can pass without verifying that the selected effort matches its caption.
-
 - [`shell-release-shot-parks-on-removed-control.md`](shell-release-shot-parks-on-removed-control.md) — The shell
   release-note recapture tries to park on a launcher title that the form no longer draws.
 
@@ -652,17 +579,11 @@ consequences.
 - [`launcher-host-picker-omits-expanded-state.md`](launcher-host-picker-omits-expanded-state.md) — The Host picker gives
   assistive technology no way to tell whether Enter selects a destination or tries to launch.
 
-- [`vanished-recent-traps-launcher-enter.md`](vanished-recent-traps-launcher-enter.md) — When the highlighted recent
-  setup disappears, Enter can stay bound to the missing choice and do nothing.
-
 - [`launcher-recent-highlight-mutes-yolo-cue.md`](launcher-recent-highlight-mutes-yolo-cue.md) — Selecting a recent
   setup replaces its red YOLO styling with ordinary highlight styling, leaving only the text cue.
 
 - [`launcher-recent-accepts-modified-return.md`](launcher-recent-accepts-modified-return.md) — The new launcher accepts
   modified Return on highlighted recent setups in addition to the displayed Return shortcut.
-
-- [`launcher-reconnect-discards-search-selection.md`](launcher-reconnect-discards-search-selection.md) — A reconnect can
-  clear the selected search result and make Enter apply a different result.
 
 - [`launcher-highlights-escape-notation.md`](launcher-highlights-escape-notation.md) — The launcher can underline the
   escape notation displayed for a path even when that notation was absent from the matching path.
@@ -704,28 +625,11 @@ consequences.
   interrupted on its own can leave the runner packaging a partial result or certifying an update after the review worker
   was interrupted.
 
-- [`golden-reference-failure-hides-cached-images.md`](golden-reference-failure-hides-cached-images.md) — One unavailable
-  screenshot reference can hide other originals that were already cached.
-
-- [`golden-report-packages-partial-capture.md`](golden-report-packages-partial-capture.md) — A failed screenshot
-  renderer can leave a partial PNG that the changes page labels as a new capture.
-
 - [`golden-report-omits-failed-scenes.md`](golden-report-omits-failed-scenes.md) — A portable screenshot report can omit
   failed scenes without telling its reviewer that the run was incomplete.
 
 - [`notifications-act-on-unshown-list.md`](notifications-act-on-unshown-list.md) — Closing Notifications or clearing
   resolved entries can act on notices the window has drawn but has yet to show. This also affects late Delete warnings.
-
-- [`orphan-delete-promises-unadmitted-cleanup.md`](orphan-delete-promises-unadmitted-cleanup.md) — Sandbox Delete can
-  report cleanup in progress before the helm has accepted it, so a later admission failure never appears when Settings
-  refreshes.
-
-- [`restart-cleanup-comment-misstates-record-order.md`](restart-cleanup-comment-misstates-record-order.md) — The Restart
-  cleanup comment promises a host record survives a failed sweep even though removal happens first.
-
-- [`restart-failure-hides-unconfirmed-cleanup.md`](restart-failure-hides-unconfirmed-cleanup.md) — After a failed
-  replacement, Restart can restore the previous run and show only the launch error while cleanup of the replacement
-  scope is unconfirmed.
 
 - [`sidebar-retry-warning-missing-accessible-name.md`](sidebar-retry-warning-missing-accessible-name.md) — A retrying
   host's warning appears as an amber edge without an equivalent in the session row's accessible description.
@@ -739,9 +643,6 @@ consequences.
 - [`shift-enter-test-assumes-one-program-read.md`](shift-enter-test-assumes-one-program-read.md) — The Shift+Enter
   integration check assumes the program receives the key in one read, which the terminal host contract leaves to the PTY
   and program.
-
-- [`terminal-primary-selection-hint-delayed.md`](terminal-primary-selection-hint-delayed.md) — A checkpoint can delay
-  the terminal's selection notice and leave stale drag guidance visible.
 
 - [`terminal-prehello-test-misses-output-loss.md`](terminal-prehello-test-misses-output-loss.md) — The terminal
   lifecycle test checks a substring and can pass when other expected output is missing at exit.
@@ -762,9 +663,6 @@ consequences.
   capture cannot use the advertised stop retry when the exact build path disappears, even if a compatible executable is
   available.
 
-- [`worker-refusal-can-copy-old-evidence.md`](worker-refusal-can-copy-old-evidence.md) — A test worker refusal can
-  return evidence from an earlier invocation under the current run's output directory.
-
 - [`release-verifier-retry-overruns-deadline.md`](release-verifier-retry-overruns-deadline.md) — The release verifier
   can start a retry whose action allowance extends past the shared checkpoint deadline.
 
@@ -776,9 +674,6 @@ consequences.
 
 - [`centos-gate-resolves-relative-target-from-caller.md`](centos-gate-resolves-relative-target-from-caller.md) — The
   CentOS gate can verify the wrong file when Cargo output is relative and the command starts outside the checkout.
-
-- [`release-verifier-can-downgrade-product-failure.md`](release-verifier-can-downgrade-product-failure.md) — Missing
-  retry diagnostics can downgrade a recorded product failure to Could not run.
 
 - [`agent-settings-search-omits-agent-name.md`](agent-settings-search-omits-agent-name.md) — Settings search can give
   different agents' pages or hook controls the same accessible name.
@@ -795,12 +690,6 @@ consequences.
 - [`agent-settings-search-test-omits-focus-target.md`](agent-settings-search-test-omits-focus-target.md) — The Settings
   search test can pass with a trust result that names the right agent and focuses the wrong control.
 
-- [`hook-failure-notice-lost-on-create-recovery.md`](hook-failure-notice-lost-on-create-recovery.md) — A recovered
-  launch can keep its hook setup failure state while losing the notification that explains it.
-
-- [`hook-silent-warning-lost-on-create-recovery.md`](hook-silent-warning-lost-on-create-recovery.md) — An agent that
-  survives an interrupted create can permanently lose the warning that its installed hooks have gone silent.
-
 - [`hook-hint-dismissal-survives-next-launch.md`](hook-hint-dismissal-survives-next-launch.md) — Dismissing a hook hint
   for one run can hide the hint on a later run of the same session.
 
@@ -816,35 +705,17 @@ consequences.
 - [`hook-recovery-text-omits-direction-isolation.md`](hook-recovery-text-omits-direction-isolation.md) — Restart and
   recovery text escape host-supplied hook errors without isolating their text direction.
 
-- [`launcher-model-list-loses-highlight-on-load.md`](launcher-model-list-loses-highlight-on-load.md) — Loading the model
-  catalog can clear Enter's selection while the same model is still listed.
-
 - [`container-golden-stays-on-loading.md`](container-golden-stays-on-loading.md) — The new-container golden settles on a
   loading status because its fixture never supplies the build result.
 
 - [`launcher-loses-hook-offer-on-tab-switch.md`](launcher-loses-hook-offer-on-tab-switch.md) — Switching tabs during the
   hook settings read can suppress the setup offer while retaining the chosen agent.
 
-- [`restart-recovery-shows-other-hook-result.md`](restart-recovery-shows-other-hook-result.md) — An interrupted Restart
-  with can recover the previous terminal and display the hook setup result for a replacement that never started.
-
-- [`failed-launch-clears-installed-hook-result.md`](failed-launch-clears-installed-hook-result.md) — A failed create can
-  later say hook setup was skipped even though Farhelm wrote the persistent files.
-
 - [`resume-off-command-gets-hook-warning.md`](resume-off-command-gets-hook-warning.md) — A command launch with Resume
   off can get a misleading silent-hook warning that an arriving report does not clear.
 
-- [`launch-setup-recording-failure-looks-skipped.md`](launch-setup-recording-failure-looks-skipped.md) — A launch that
-  verifies the hook files can later say setup was skipped if only the result write failed.
-
 - [`held-escape-discards-launcher-draft.md`](held-escape-discards-launcher-draft.md) — On Wayland, holding Escape can
   discard the launcher draft after dismissing a highlighted result or the hook setup question.
-
-- [`sandbox-recent-source-mark-follows-host.md`](sandbox-recent-source-mark-follows-host.md) — Changing the host can
-  remove the mark from a still-listed sandbox setup while the form still names it as the source.
-
-- [`launcher-host-search-rebuilds-registry-per-row.md`](launcher-host-search-rebuilds-registry-per-row.md) — Wide host
-  search rebuilds the full host list for each matched row, increasing work as the fleet grows.
 
 - [`terminal-paste-test-misses-first-ack-premise.md`](terminal-paste-test-misses-first-ack-premise.md) — The interrupted
   paste check can pass without demonstrating that the runtime processed the first acknowledgement.
@@ -858,15 +729,6 @@ consequences.
 
 - [`hook-diagnostic-path-can-render-doc-link.md`](hook-diagnostic-path-can-render-doc-link.md) — A path inside a hook
   setup error can be shown as a Farhelm documentation link even though Farhelm supplied only diagnostic text.
-
-- [`antigravity-drift-check-misses-plugin-manifest.md`](antigravity-drift-check-misses-plugin-manifest.md) — The
-  Antigravity drift check can accept a callback file whose plugin manifest is missing.
-
-- [`launcher-edit-hides-hook-save-refusal.md`](launcher-edit-hides-hook-save-refusal.md) — Editing the launcher while a
-  hook setting saves can hide a later refusal.
-
-- [`hook-hint-opens-unshown-agent-settings.md`](hook-hint-opens-unshown-agent-settings.md) — After automatic session
-  selection, the focused hook hint can open the next agent's Settings page before that selection is visible.
 
 - [`hook-removal-help-missing-from-accessibility.md`](hook-removal-help-missing-from-accessibility.md) — The Grok and
   Antigravity Settings pages can expose their setup switches without the persistence and removal guidance.
@@ -886,16 +748,9 @@ consequences.
 - [`checkout-input-arms-hook-warning-early.md`](checkout-input-arms-hook-warning-early.md) — Enter during managed
   checkout preparation can make Farhelm warn about a missing hook report before the agent starts.
 
-- [`lost-grok-record-shows-hook-setup-hint.md`](lost-grok-record-shows-hook-setup-hint.md) — Losing a saved Grok
-  conversation can bring back setup advice even though Farhelm already received a successful hook report.
-
 - [`hook-hint-omits-live-accessibility-notification.md`](hook-hint-omits-live-accessibility-notification.md) — The hook
   setup hint exposes readable text but does not request a live announcement when it appears while focus stays in the
   terminal.
-
-- [`launcher-recent-highlight-omits-installation.md`](launcher-recent-highlight-omits-installation.md) — The launcher
-  keys an armed recent setup by registry entry and setup, leaving cross-installation rebinding possible if matching
-  history arrives without resetting that launcher.
 
 - [`launcher-recent-highlight-can-change-path-spelling.md`](launcher-recent-highlight-can-change-path-spelling.md) — A
   refreshed recent setup can keep the same highlight while changing the literal folder spelling Enter will use.
@@ -903,10 +758,6 @@ consequences.
 - [`launcher-yolo-reply-uses-current-question.md`](launcher-yolo-reply-uses-current-question.md) — A permanent
   permission reply checks whichever launcher question is in flight. Whether a later question can receive the older
   launch permission remains unverified.
-
-- [`fixture-privacy-checks-miss-link-local-addresses.md`](fixture-privacy-checks-miss-link-local-addresses.md) — The
-  capture scrubber and committed fixture checks can miss link-local IPv4 endpoints. No actual disclosure was
-  established.
 
 - [`capture-test-python-minimum-undocumented.md`](capture-test-python-minimum-undocumented.md) — The standalone capture
   test gained a Python 3.11 dependency while its documented command still only names python3.
@@ -918,24 +769,6 @@ consequences.
 - [`pi-page-describes-wrong-trust-question.md`](pi-page-describes-wrong-trust-question.md) — Pi’s Settings description
   promises folder-trust behavior even though the setting approves project resources.
 
-- [`hook-setting-read-can-miss-older-save.md`](hook-setting-read-can-miss-older-save.md) — Settings reopened after
-  reconnect can read the old hook switch before an accepted save from the previous connection finishes.
-
-- [`late-rename-persists-old-hook-advice.md`](late-rename-persists-old-hook-advice.md) — A late Rename reply can save
-  the previous run’s hook advice in the helm cache until an authoritative refresh corrects it.
-
-- [`hook-setup-can-report-partial-antigravity-plugin.md`](hook-setup-can-report-partial-antigravity-plugin.md) —
-  Removing the Antigravity plugin directory during an accepted launch can leave it partly installed while Farhelm
-  reports setup succeeded.
-
-- [`hook-consent-summary-has-limited-keyboard-scroll.md`](hook-consent-summary-has-limited-keyboard-scroll.md) —
-  Keyboard focus reveals the hook setup buttons without providing a separate way to scroll the notices. Whether this can
-  hide the hook’s lasting effects in a supported window remains unverified.
-
-- [`trailing-hosts-delete-just-registered-environment-from-approved-agent-launch.md`](trailing-hosts-delete-just-registered-environment-from-approved-agent-launch.md)
-  — A user-approved agent launch can expose its new environment to the Hosts delete control before provisioning takes
-  the host lock. A deletion that wins can leave a stale launch task and a misleading cleanup failure.
-
 - [`trailing-mac-update-miss-app-installed-before-run-admission.md`](trailing-mac-update-miss-app-installed-before-run-admission.md)
   — Installing the desktop app after Update's reach check but before the run is accepted can leave a separately
   installed launchd service where Update should refuse.
@@ -943,10 +776,6 @@ consequences.
 - [`trailing-busy-claim-retry-test-bypasses-fleet-wake-it-depends.md`](trailing-busy-claim-retry-test-bypasses-fleet-wake-it-depends.md)
   — The new test proves the planner can try again when explicitly called, while regressions that leave a host idle
   without waking automatic Update can pass this test.
-
-- [`trailing-setup-and-takeover-offer-binding-remains-unverified.md`](trailing-setup-and-takeover-offer-binding-remains-unverified.md)
-  — It remains unclear whether a setup answer always consumes the offer shown when the user confirmed, especially if the
-  draft changes while the offer is pending.
 
 - [`trailing-linux-add-writes-frozen-install-before-rechecking-systemd-availability.md`](trailing-linux-add-writes-frozen-install-before-rechecking-systemd-availability.md)
   — An approved Linux setup can install the binary and unit, then fail on reload, when the user service manager became
@@ -1010,10 +839,6 @@ consequences.
   — A container with enough otherwise valid metadata can fail Farhelm's ownership inspection and remain undeletable from
   Farhelm.
 
-- [`trailing-cleanup-report-failure-when-verified-container-has-already-disappeared.md`](trailing-cleanup-report-failure-when-verified-container-has-already-disappeared.md)
-  — Delete can report a failure and leave a host or helper record for retry even though the requested container is
-  already absent.
-
 - [`trailing-delete-anyway-forget-second-tag-whose-absence-was-never.md`](trailing-delete-anyway-forget-second-tag-whose-absence-was-never.md)
   — One Delete anyway warning can let Farhelm forget multiple unfinished saves, including a tag whose first absence
   check occurs during confirmed Delete.
@@ -1040,10 +865,6 @@ consequences.
 - [`trailing-post-exit-alt-release-clears-short-selection-and-queues.md`](trailing-post-exit-alt-release-clears-short-selection-and-queues.md)
   — A quick Alt/Option release over the final screen can clear the highlight for a just-copied character and dispatch
   cursor keys.
-
-- [`trailing-losing-terminal-host-hide-history-already-exposed-after-exit.md`](trailing-losing-terminal-host-hide-history-already-exposed-after-exit.md)
-  — During recovery from loss of an already exited terminal host, the retained screen can lose its exit line and stop
-  showing primary history even though recovery has kept the same grid.
 
 - [`trailing-final-frame-boundary-test-leaves-osc-8-and-file.md`](trailing-final-frame-boundary-test-leaves-osc-8-and-file.md)
   — Existing exit tests would miss a regression that joins a file path or combines OSC 8 labels across the
@@ -1152,9 +973,6 @@ consequences.
   — An assertion can pass after this patch's late recovery-status sample is removed, despite a Restart acknowledgement
   again being able to hide the recovery card.
 
-- [`trailing-restart-with-samples-terminal-availability-before-final-database-work.md`](trailing-restart-with-samples-terminal-availability-before-final-database-work.md)
-  — Restart with can return and cache a terminal-present acknowledgement after the replacement terminal is gone.
-
 - [`trailing-agent-re-adoption-discard-cleanup-identities-without-confirming-host.md`](trailing-agent-re-adoption-discard-cleanup-identities-without-confirming-host.md)
   — Recovery can drop the main terminal's saved host and child identities while the recorded host may still run,
   weakening later Delete cleanup.
@@ -1167,15 +985,9 @@ consequences.
   — The existing assertions do not show that Delete keeps a session and its launch record if a terminal classified Gone
   still has a live adopted process.
 
-- [`trailing-create-and-create-replay-sample-terminal-availability-before-projecting.md`](trailing-create-and-create-replay-sample-terminal-availability-before-projecting.md)
-  — A create or a keyed replay can answer that its session has a terminal after that host has disappeared.
-
 - [`trailing-retry-delete-ambiguous-restart-record-before-scope-is-confirmed.md`](trailing-retry-delete-ambiguous-restart-record-before-scope-is-confirmed.md)
   — If a failed Restart leaves an unresolved scope, another refused Restart can erase the evidence that blocks startup
   from reopening the older terminal.
-
-- [`trailing-re-adoption-publish-missing-terminal-without-invalidating-session-list.md`](trailing-re-adoption-publish-missing-terminal-without-invalidating-session-list.md)
-  — If re-adoption finds that an unreadable main terminal has gone, the recovery card can wait for a later refresh.
 
 - [`trailing-attach-admits-retained-gone-main-terminal-listings-report-missing.md`](trailing-attach-admits-retained-gone-main-terminal-listings-report-missing.md)
   — A request to attach can be admitted after the supervisor already knows the main terminal is gone.
@@ -1286,10 +1098,6 @@ consequences.
   — The migration wording may imply that a Launching row avoids the interruption assigned to Running rows. The ensuing
   reboot classification gap remains unverified.
 
-- [`trailing-restart-republish-tab-exited-during-relaunch.md`](trailing-restart-republish-tab-exited-during-relaunch.md)
-  — A tab that exits during a slow Restart can still appear in the Restart result and be published by the helm before a
-  fresh listing corrects it.
-
 - [`trailing-restart-disposition-documentation-still-promises-no-external-change.md`](trailing-restart-disposition-documentation-still-promises-no-external-change.md)
   — The implementation has contradictory descriptions of whether a failed Restart may have run a replacement.
 
@@ -1308,10 +1116,6 @@ consequences.
 - [`trailing-interrupted-be-superseded-by-inferred-preparation-failure.md`](trailing-interrupted-be-superseded-by-inferred-preparation-failure.md)
   — The protocol docs promise a definitive launch error before Interrupted changes, while the supervisor can reclassify
   from missing or unreadable preparation evidence.
-
-- [`trailing-legacy-interrupted-settles-launch-reads-without-proving-writer-stopped.md`](trailing-legacy-interrupted-settles-launch-reads-without-proving-writer-stopped.md)
-  — After same-boot legacy retirement, the ticker can stop checking for a later launch failure without proving the
-  writer ended.
 
 - [`trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md`](trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md)
   — The product requires restricted sessions to be denied this operation. The independent inspection did not establish
@@ -1353,10 +1157,6 @@ consequences.
 - [`worker-staging-failure-leaves-in-progress-evidence.md`](worker-staging-failure-leaves-in-progress-evidence.md) — A
   failed worker upload can leave its local evidence directory marked as staging after the command has returned an error.
 
-- [`launcher-first-podman-check-hides-known-host-refusal.md`](launcher-first-podman-check-hides-known-host-refusal.md) —
-  While Farhelm runs the first Podman check, the launcher can show a generic check-needed message even when the helm
-  already knows why the host is refused.
-
 - [`host-lifecycle-test-misses-other-host-control.md`](host-lifecycle-test-misses-other-host-control.md) — The test
   checks that a launch leaves another host available through a helper. It can pass even if the other host’s actual menu
   is disabled.
@@ -1376,10 +1176,6 @@ consequences.
 - [`trailing-drift-turn2-hook-check-passes-on-noop-stop-ack.md`](trailing-drift-turn2-hook-check-passes-on-noop-stop-ack.md)
   — The opt-in Codex and Antigravity drift tests can pass after Restart even when Turn-2 hook verification did not
   commit, because an ignored Stop callback still logs an ack carrying Turn 1's conversation ID.
-
-- [`trailing-test-worker-stop-reports-ended-before-lock-release.md`](trailing-test-worker-stop-reports-ended-before-lock-release.md)
-  — Stopping a test-worker run can report ended while the remote checkout flock is still held during stage cleanup,
-  causing an immediate follow-up run to fail as busy with an unknown holder.
 
 - [`trailing-test-worker-stop-during-prep-mutates-and-prunes.md`](trailing-test-worker-stop-during-prep-mutates-and-prunes.md)
   — A stop requested after worker admission during preparation still overwrites the remote checkout, evicts an older
@@ -1441,14 +1237,6 @@ consequences.
   — Unlike Replace with and Restart with, an in-flight plain Replace or Restart leaves Suspend enabled on that sandbox
   or container host so suspending can interrupt the request.
 
-- [`trailing-suspend-silently-dropped-when-launch-starts-mid-check.md`](trailing-suspend-silently-dropped-when-launch-starts-mid-check.md)
-  — Clicking Suspend or Stop and suspend quietly does nothing without an error note if a launch on that host begins
-  while the pre-flight session activity read is in flight.
-
-- [`trailing-post-wake-disconnect-or-start-fail-reveals-silently.md`](trailing-post-wake-disconnect-or-start-fail-reveals-silently.md)
-  — If a waking host disconnects right as a post-wake checkout preview settles or launch start fails, the launcher can
-  reopen without any error alert explaining why nothing launched.
-
 - [`trailing-wake-drops-one-time-yolo-confirmation.md`](trailing-wake-drops-one-time-yolo-confirmation.md) — If a host
   suspends while the launcher's YOLO confirmation is open, clicking Start YOLO session anyway wakes the host but forgets
   the confirmation and re-asks YOLO once connected.
@@ -1505,10 +1293,6 @@ consequences.
   — An interrupted upload in a session with an empty title renders 'to was', and batched interrupted uploads discard a
   later upload's title if the first upload started before the session row loaded.
 
-- [`trailing-terminal-set-restore-blocks-carried-upload-interruptions.md`](trailing-terminal-set-restore-blocks-carried-upload-interruptions.md)
-  — After reconnecting with a remembered shell tab while the session row is omitted or delayed, the visible Agent
-  terminal never receives carried upload-interruption lines even after the user starts typing.
-
 - [`trailing-overflowing-banner-stack-resets-to-oldest-after-reconnect.md`](trailing-overflowing-banner-stack-resets-to-oldest-after-reconnect.md)
   — When an overflowing banner stack reconnects or takes back control and its newest notice was already drawn before
   going inert, the stack resets to the top and hides the newest banner off the bottom.
@@ -1553,11 +1337,6 @@ consequences.
   — If the local SSH or Podman client process is killed by a signal after stderr delivers the status record, Farhelm
   discards the signal termination and can treat truncated stdout as exit 0.
 
-- [`trailing-podman-place-commands-lack-ssh-exit-status-wrapping.md`](trailing-podman-place-commands-lack-ssh-exit-status-wrapping.md)
-  — Podman commands over SSH trust raw SSH exit codes rather than status-tag wrapping, which would break container
-  builds and deletion checks on any Linux SSH server that loses exit codes; whether a supported Linux SSH server does so
-  remains unverified.
-
 - [`trailing-container-host-unanswered-embeds-raw-stderr.md`](trailing-container-host-unanswered-embeds-raw-stderr.md) —
   When a verified container host command fails before the guard runs, Farhelm copies up to 64 KiB of uncropped,
   unsanitized remote stderr directly into host status and HTTP errors.
@@ -1569,10 +1348,6 @@ consequences.
 - [`trailing-podman-settle-claim-refuses-third-host-duplicate-transfer.md`](trailing-podman-settle-claim-refuses-third-host-duplicate-transfer.md)
   — When a stale unused container-host entry is refused as a duplicate of a third host, the verified owner of the
   container machine cannot automatically take over the unused claim.
-
-- [`trailing-podman-probe-swallows-session-limit-on-identity-read.md`](trailing-podman-probe-swallows-session-limit-on-identity-read.md)
-  — Hitting SSH MaxSessions on the final machine-identity step of a container host check reports an unreadable identity
-  instead of naming the SSH session limit.
 
 - [`trailing-podman-build-prepare-uses-runtime-seam-bypassing-admission.md`](trailing-podman-build-prepare-uses-runtime-seam-bypassing-admission.md)
   — Later recipe build and preparation stages look up cached runtime capabilities instead of rechecking fresh admission,
@@ -1621,10 +1396,6 @@ consequences.
 - [`trailing-podman-leftovers-run-ssh-without-ssh-route-lock.md`](trailing-podman-leftovers-run-ssh-without-ssh-route-lock.md)
   — Listing or deleting leftover containers on an unused SSH host races turning off Tailscale mode or removing the host,
   risking failed SSH commands or orphaned Tailscale keys and ControlMasters.
-
-- [`trailing-probe-tailscale-mismatch-runs-before-new-entry-validation.md`](trailing-probe-tailscale-mismatch-runs-before-new-entry-validation.md)
-  — Probing an already-registered destination with the opposite Tailscale mode or probing a managed environment host
-  with Tailscale enabled asks to change Host settings instead of reporting AlreadyAdded or an invalid target.
 
 - [`trailing-add-host-tailscale-checkbox-evicts-focus.md`](trailing-add-host-tailscale-checkbox-evicts-focus.md) —
   Pressing Enter on the Tailscale checkbox in Add host or receiving a background approval card during an agent host-add
@@ -1675,15 +1446,6 @@ consequences.
   probe can fail to start over SSH even when the peer has Python installed at the documented path, because the GUI Mac
   sends its own resolved Python binary path instead of the configured path.
 
-- [`trailing-brick-test-fixture-probe-launchctl-list-vs-user-domain.md`](trailing-brick-test-fixture-probe-launchctl-list-vs-user-domain.md)
-  — The Mac release-verifier fixture probe checks remote-mac launchd jobs with legacy launchctl list instead of
-  launchctl print user/<uid> (unverified after investigation: whether an orphaned user-domain job without a plist
-  escapes launchctl list on current macOS remains unverified).
-
-- [`trailing-brick-test-guest-ui-p1-remote-mac-bonus-preflight.md`](trailing-brick-test-guest-ui-p1-remote-mac-bonus-preflight.md)
-  — In the release brick-test UI bridge, `p1-remote-mac` is still misclassified as a bonus pass during
-  `native-preflight` because `guest_ui.py` checks `not pass_id.startswith('p0-')` instead of `is_bonus_pass(pass_id)`.
-
 - [`trailing-brick-test-linux-remote-start-accepts-empty-sessions.md`](trailing-brick-test-linux-remote-start-accepts-empty-sessions.md)
   — The release brick test's Linux remote host Remove and Uninstall checks accept a starting remote database that
   contains zero sessions, so an empty or freshly recreated sessions table after Uninstall can pass the retained-data
@@ -1712,11 +1474,6 @@ consequences.
 - [`trailing-brick-test-p1-permission-block-swallowed.md`](trailing-brick-test-p1-permission-block-swallowed.md) — In
   the release brick test, if the guest tester hits an OS/CUA/authentication permission prompt during UI inspection
   before running any fixed command operation, the executor turns `permission-block` into an `automation-failure`.
-
-- [`trailing-brick-test-plain-update-relaunch-requires-local-supervisor.md`](trailing-brick-test-plain-update-relaunch-requires-local-supervisor.md)
-  — The release brick test's non-managed instruction envelope for P0 relaunches still tells the guest tester to wait for
-  the upgraded local supervisor during `update-relaunch` instead of deferring that check to `local-supervisor-upgrade`,
-  and the new unit test only checks the managed envelope.
 
 - [`trailing-brick-test-record-settle-breaks-retry-unavailable.md`](trailing-brick-test-record-settle-breaks-retry-unavailable.md)
   — During a release brick test run in full, stop-after-P1, or stop-after-P2 scope, the documented
@@ -1770,12 +1527,6 @@ consequences.
   — The change that enables Restart to resume Codex sessions launched from renamed or versioned executables adds no
   admission or end-to-end test using a renamed Codex executable.
 
-- [`trailing-codex-subscription-replacement-suppresses-legacy-cleanup-warning.md`](trailing-codex-subscription-replacement-suppresses-legacy-cleanup-warning.md)
-  — When a host upgraded from an older Farhelm still has a failing legacy Codex settings cleanup (leaving the old
-  `farhelm` provider selected in `~/.codex/config.toml` or leaving `config.toml` unparseable), replacing a Codex
-  Subscription login in Settings -> Credentials reports a clean save with no failure for that host, even though Codex on
-  that host still cannot use the replaced subscription login until the cleanup succeeds.
-
 - [`trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md`](trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md)
   — The end-to-end test that claims to verify a custom agent parent can correct a child-first conversation report would
   still pass even if custom-agent ancestor correction and its user-facing correction notification were completely
@@ -1785,11 +1536,6 @@ consequences.
   — When cloning, replacing, or loading a recent setup for a custom agent whose effort matches a built-in effort word
   (such as "high" or "low"), or switching from a built-in agent to a custom agent before the model catalog loads,
   editing or clearing Effort in the launcher leaves a hidden stale effort behind.
-
-- [`trailing-custom-agent-id-matching-model-family-hidden-without-catalog.md`](trailing-custom-agent-id-matching-model-family-hidden-without-catalog.md)
-  — If you register a custom agent with an ID that happens to be a model family word (such as `auto`, `sol`, `flash`,
-  `spark`, or `luna`), typing that ID in the launcher's unlabelled search shows "Loading models…" while the model
-  catalog is loading and "No model matches" if the model catalog failed to load, hiding the registered custom agent.
 
 - [`trailing-custom-agent-model-effort-error-duplicate-element-id.md`](trailing-custom-agent-model-effort-error-duplicate-element-id.md)
   — When a user enters invalid values in both the Model and Effort fields of a custom agent in the session launcher at
@@ -1857,16 +1603,6 @@ consequences.
   — silently exercising whatever hook file is in the real configuration (or failing to capture) rather than the hook
   file installed by the build under test.
 
-- [`trailing-drift-grok-trust-retry-resends-printable-y.md`](trailing-drift-grok-trust-retry-resends-printable-y.md) —
-  In the opt-in Grok drift test, redraw detection and the 3-second retry can resend printable 'y' into Grok's composer
-  ahead of the test prompt without the echo check noticing (unverified after investigation: live Grok trust-dismissal
-  timing and input buffering are unverified).
-
-- [`trailing-drift-harness-skips-private-config-finish-on-error.md`](trailing-drift-harness-skips-private-config-finish-on-error.md)
-  — During a real-agent drift test for Grok or Antigravity, if session creation or initial terminal attachment fails,
-  the harness skips both the check that the maintainer's real hook files were untouched and the copy-back of any vendor
-  config/login files rewritten before the failure.
-
 - [`trailing-drift-private-config-copy-back-aborts-first-error.md`](trailing-drift-private-config-copy-back-aborts-first-error.md)
   — If copying back one rewritten file during drift-test cleanup fails (for instance, because a symlinked dotfile
   resolves to a read-only location or setting permissions/renaming fails), cleanup aborts immediately: any staged
@@ -1898,19 +1634,9 @@ consequences.
   SIGTERM during the upgrade phase, only the top-level shell/wrapper process is killed while its download or extraction
   subprocesses keep running and can mutate the agent binary while the drift test runs.
 
-- [`trailing-harness-upgrades-unhandled-http-exception.md`](trailing-harness-upgrades-unhandled-http-exception.md) —
-  When upgrading an agent CLI falls back to downloading its vendor installer (used for Goose and Cursor) and the
-  download hits a truncated response or malformed HTTP reply, the drift test runner crashes with an unhandled traceback
-  instead of recording that agent's upgrade as failed and continuing with the remaining agents.
-
 - [`trailing-hidden-trash-button-retains-animation-handles.md`](trailing-hidden-trash-button-retains-animation-handles.md)
   — If the Trash button stops being shown (because the user opens the Hosts panel or marks sessions) while its archive
   wiggle or emptying bob is running, Farhelm does not release that animation handle while the button is hidden.
-
-- [`trailing-host-removal-replies-200-before-signin-cancel-settles.md`](trailing-host-removal-replies-200-before-signin-cancel-settles.md)
-  — When you remove an SSH host while a Setup, Update, or Uninstall sign-in question is open, the helm can reply that
-  the removal succeeded slightly before the background sign-in task has actually closed the question, stopped the SSH
-  child, and recorded cancellation.
 
 - [`trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md`](trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md)
   — When the Agent tab holds a deleted custom agent (for example from Clone, Replace with, a recent setup, a template,
@@ -1959,11 +1685,6 @@ consequences.
   Update, and uninstall are specified to refuse during inspection if any command their shell path requires is missing
   from the host's PATH.
 
-- [`trailing-mac-uninstall-stop-discards-absent.md`](trailing-mac-uninstall-stop-discards-absent.md) — When retrying a
-  remote Mac uninstall after the supervisor job and its terminal hosts are already gone (for example after a later
-  directory-removal step failed), the stop step is reported as completed instead of unchanged/skipped, unlike Linux
-  uninstall.
-
 - [`trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md`](trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md)
   — In Restart with for a custom-agent session that has no captured conversation, if the custom agent's registration has
   resumption disabled (or is deleted), the More options disclosure is locked open with "A setting here is required or
@@ -1978,11 +1699,6 @@ consequences.
   agent (on the Agent or Command tab) as deleted—blocking launch with "no longer registered" / "was deleted" messages,
   hiding or erroring its conversation-ID field, and prompting the user to replace a registration that was not actually
   deleted.
-
-- [`trailing-refused-no-confirm-remove-during-signin-loses-error-on-ready.md`](trailing-refused-no-confirm-remove-during-signin-loses-error-on-ready.md)
-  — With "Remove hosts without asking" enabled, if you click Remove on an SSH host while a Setup, Update, or Uninstall
-  sign-in finishes and the helm refuses or times out the Remove, the refusal message disappears immediately before you
-  can see it because the desktop replays the pending setup/update/uninstall right away and clears the host's error slot.
 
 - [`trailing-reminder-frame-cfg-test-branch-in-render-path.md`](trailing-reminder-frame-cfg-test-branch-in-render-path.md)
   — The pending-update reminder screenshot test relies on a test-only compile branch inside the rendering path,
@@ -2082,11 +1798,6 @@ consequences.
   permission-escalation banner with Undo — and then apply a launch template that selects a different custom agent, the
   old escalation banner stays open instead of closing.
 
-- [`trailing-template-fields-implied-kind-ignores-custom-agent.md`](trailing-template-fields-implied-kind-ignores-custom-agent.md)
-  — A launch template saved through the API with only a custom agent ID (without also setting launch kind or agent type)
-  does not infer a launch kind when opened in the desktop Templates editor, causing it to display under "Don't switch"
-  with a bogus "registration unavailable" agent row that refuses saving.
-
 - [`trailing-template-replay-drops-custom-agent-effort-switching-to-builtin.md`](trailing-template-replay-drops-custom-agent-effort-switching-to-builtin.md)
   — Applying a launch template (or quick-launch sequence) that switches from a custom agent with a standard effort word
   such as `high` to a built-in agent like Claude drops the effort to Default in the desktop launcher, whereas the CLI
@@ -2095,12 +1806,6 @@ consequences.
 - [`trailing-templates-editor-allows-generic-custom-on-agent-template.md`](trailing-templates-editor-allows-generic-custom-on-agent-template.md)
   — Switching a Command template with generic 'Custom' to an Agent template shows 'Custom (not offered)' in the Agent
   type dropdown, yet the editor still allows saving it without an error.
-
-- [`trailing-tensorlake-504-cleanup-finishes-before-outage-leaves-stale-row.md`](trailing-tensorlake-504-cleanup-finishes-before-outage-leaves-stale-row.md)
-  — If you delete a remembered leftover sandbox while Tensorlake's sandbox listing is failing or timing out, and the
-  deletion takes just over 20 seconds (so Settings reports that cleanup carries on) and then succeeds before the
-  follow-up list check finishes failing, the already-deleted sandbox stays in the Settings list with an active Delete
-  button until listing recovers.
 
 - [`trailing-tensorlake-add-tests-misleading-codex-null-docstring.md`](trailing-tensorlake-add-tests-misleading-codex-null-docstring.md)
   — A test docstring in Tensorlake setup tests inaccurately claims a fresh host leaves its Codex cleanup stamp unset
