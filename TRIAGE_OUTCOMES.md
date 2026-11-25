@@ -437,23 +437,6 @@
   record which way it went. Recommendation for reference: discard (or fix code) — no product failure; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## staged-host-update-controls-promise-unattended-installs.md
-
-- Outcome: `other`.
-- Assessment: When Farhelm runs with a locally staged host build (a developer-only launch mode), it never updates hosts
-  automatically. The attention row's "Always update" tooltip and the Settings help still promise later updates will
-  install without asking. Verified: Confirmed. Staged mode is set only by `FARHELM_HELM_PAYLOAD_DIR`
-  (`farhelm-desktop/src/bundle.rs:15-31`, "opt-in per launch"), and the automatic gate refuses (`payloads.rs`,
-  `service.rs:1969-1971`). SPEC.md (attention rows, around 3011-3015) itself prescribes the tooltip text "later updates
-  install without asking", and SPEC.md 199-200 says staged mode skips all hosts. That is a spec-internal tension visible
-  only in a developer mode.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard (developer-only mode).
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## sound-preview-regression-misses-separate-mappings.md
 
 - Outcome: `other`.
@@ -1154,40 +1137,6 @@
   record which way it went. Recommendation for reference: discard (or fix code) — coverage only; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-ensure-hosts-skips-tailscale-validation-for-registered.md
-
-- Outcome: `other`.
-- Assessment: In the startup host list that agent builds use (the ensure-hosts file), a Tailscale entry with a malformed
-  address is not checked if the host is already registered. When it is checked, the error does not name the entry or
-  explain the Tailscale format. Verified: Confirmed (`store.rs:7916-7985`; the Tailscale check sits inside
-  `if !already_registered` and returns `InvalidDestination`). SPEC_impl.md says the file "adds what is missing and
-  touches nothing else", so skipping registered entries is consistent with that, but also "fails startup with the entry
-  named". The file is set outside tests only by the desktop's agent builds (`FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`), so
-  this is maintainer tooling.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard. Alternatively fix code XS: move the check into the
-  up-front loop with the entry index.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
-## trailing-codex-dual-agent-delivery-tests-raw-substring.md
-
-- Outcome: `other`.
-- Assessment: Several credential-delivery tests share one token between Claude and Codex and check only that the token
-  appears somewhere in the delivered file, or that Codex's endpoint is missing without checking its token is too. A
-  regression that drops one agent's credentials, or leaves an orphan Codex token that makes the supervisor refuse every
-  launch, would still pass. Verified: Confirmed. `credential_delivery_tests.rs:629` and others still use raw `contains`.
-  The gap guards user-facing behavior: a file the supervisor rejects blocks launches.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. Make the fixture's snapshot assert the supervisor's
-  invariant and decode the three checks. It guards a launch-blocking failure and is cheap. Size S.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## trailing-codex-renamed-executable-missing-admission-and-e2e-test.md
 
 - Outcome: `other`.
@@ -1287,21 +1236,6 @@
   record which way it went. Recommendation for reference: fix code — add a CUSTOM `PinCase` and a capture-clearing test;
   size M.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## trailing-credential-test-name-says-setup-refuses.md
-
-- Outcome: `other`.
-- Assessment: Maintainer-only. A test's name says a failed Claude login lookup makes host setup refuse, but setup
-  actually completes and shows a note, as the spec and the test's own description say. Verified: Confirmed
-  (`credential_delivery_tests.rs:1353`, `claude_lookup_failure_allows_codex_login_rotation_and_refuses_setup`). The
-  callers treat the error as a notice.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code XS (rename the test). A rename is cheaper than
-  discussing it.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## settings-footer-can-save-the-wrong-page.md
 
