@@ -105,7 +105,6 @@ consequences.
   — A Tensorlake checkout launch can admit a newer recipe size than the one shown when the user confirms, if the same
   named recipe is edited before admission.
 
-
 - [`trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md`](trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md)
   — When waking a stopped container or previously failed sandbox fails past 20 seconds or repeats the same error, the
   launcher either hangs for 60 seconds or reports that the host was suspended again.
@@ -337,7 +336,6 @@ consequences.
   — Existing assertions would miss a regression where prompt absence on a first Delete results in an ordinary error
   instead of opening Delete anyway.
 
-
 - [`trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md`](trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md)
   — The no-default fixture checks numbering after a preview conflict and a successful create, leaving the specific
   create-time lost-race cleanup unasserted.
@@ -346,30 +344,8 @@ consequences.
   — The desktop can offer a sandbox launch for a checkout name that cannot produce a valid directory. The helm can
   create the environment and attempt cleanup before telling the user to fix the name.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 - [`trailing-borrower-classification-test-does-not-establish-checkout-membership.md`](trailing-borrower-classification-test-does-not-establish-checkout-membership.md)
   — This borrower classification case can pass if its second session never joins the managed checkout.
-
-
 
 - [`trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md`](trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md)
   — The product requires restricted sessions to be denied this operation. The independent inspection did not establish
@@ -383,12 +359,9 @@ consequences.
   — When no repository has been selected for a new environment, the Folder row says cloning will happen and omits its
   invitation to select a repository.
 
-
 - [`remote-probe-absence-test-does-not-witness-proxy.md`](remote-probe-absence-test-does-not-witness-proxy.md) — The
   remote probe regression test can pass through the missing-program path both times, without checking how it handles the
   stand-in's exit.
-
-
 
 - [`environment-launch-history-test-bypasses-origin-handoff.md`](environment-launch-history-test-bypasses-origin-handoff.md)
   — The launch-history regression test can pass if an agent-requested environment starts becoming the desktop’s default
@@ -457,8 +430,6 @@ consequences.
   — After a failed or busy Don't show again click, dismissing the trust hint in Settings (or having the first click
   succeed after a rapid second click) leaves a red Not saved alert stuck with no Close button.
 
-
-
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
   agent-credentials and Codex config targets unverified before and after retry.
@@ -517,7 +488,6 @@ consequences.
   — Saving a custom-agent launch template from the CLI or API accepts invalid model values (such as uppercase letters,
   spaces, control characters, or empty strings) even though Farhelm refuses those same values in the desktop Templates
   editor and whenever the template is applied.
-
 
 - [`trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md`](trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md)
   — The end-to-end test that claims to verify a custom agent parent can correct a child-first conversation report would
@@ -625,7 +595,6 @@ consequences.
   agent (on the Agent or Command tab) as deleted—blocking launch with "no longer registered" / "was deleted" messages,
   hiding or erroring its conversation-ID field, and prompting the user to replace a registration that was not actually
   deleted.
-
 
 - [`trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md`](trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md)
   — When you open Restart with on an existing custom-agent session after turning off "Supports resumption" for that
