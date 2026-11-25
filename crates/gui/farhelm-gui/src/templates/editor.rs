@@ -230,8 +230,7 @@ pub(super) struct Editor {
     /// The raw stored template, or an empty template before the first save. Differences enable Save.
     baseline: Draft,
     /// What the editor showed on opening or just after Save. Leaving asks only when the draft differs from this and
-    /// from `baseline` ([`Editor::needs_leave_confirmation`]), so an inferred switch or removed legacy trust field never
-    /// asks on its own.
+    /// from storage after ignoring retired workspace trust ([`Editor::needs_leave_confirmation`]).
     leave_baseline: Draft,
     /// The template being edited.
     draft: Draft,
@@ -407,13 +406,16 @@ impl Editor {
         self.draft != self.baseline
     }
 
-    /// Whether leaving would lose something the user did: the draft differs from what the editor showed on opening or
-    /// after the last save, and Save would store it. Farhelm's own fill-ins on opening (the inferred switch, the dropped
-    /// workspace-trust field) differ only from the stored template, and an edit back to the stored template differs only
-    /// from what opened; neither asks, since leaving keeps the stored template as it is. A new or duplicated draft's
-    /// `leave_baseline` is its empty baseline, so for those this is [`Editor::dirty`].
+    /// Leaving asks only about edits that differ from both the opening draft and storage. In particular, removing the
+    /// inferred switch from a kindless template restores the stored choices even when Save would drop legacy trust.
+    /// For a new or duplicated draft both baselines are the empty template.
     pub(super) fn needs_leave_confirmation(&self) -> bool {
-        self.dirty() && self.draft != self.leave_baseline
+        if self.draft == self.leave_baseline {
+            return false;
+        }
+        let mut stored = self.baseline.clone();
+        stored.fields.workspace_trust = None;
+        self.draft != stored
     }
 
     /// Which Delete the footer offers ([`DeleteKind`]), judged on the stored template, not the draft: Delete removes

@@ -1704,11 +1704,10 @@ pub fn dismiss(id: LayerId, window: &mut Window, cx: &mut App) {
     }
 }
 
-/// The topmost layer the user answers in `window` (Escape, a dismissible veil's outside press), if any is open: any but
-/// a popover that lets the pointer through, which its owner alone closes ([`Popover::passes_pointer`]). Both callers
-/// ask this one question, so a display-only popover above the quick switcher neither takes Escape from it nor keeps a
-/// press on its veil from dismissing it.
-fn top_layer(window: &Window, cx: &App) -> Option<LayerId> {
+/// The topmost layer the user answers in `window`, skipping popovers that let the pointer through. Escape and an
+/// outside press on a dismissible veil target the same layer. A display-only popover over the quick switcher leaves
+/// both inputs with the quick switcher until the popover's owner closes it ([`Popover::passes_pointer`]).
+pub(crate) fn top_layer(window: &Window, cx: &App) -> Option<LayerId> {
     stack(window, cx)?
         .read(cx)
         .layers

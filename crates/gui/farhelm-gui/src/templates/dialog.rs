@@ -198,6 +198,9 @@ pub struct TemplatesDialog {
     /// Whether the catalog read was sent, so it is sent once per dialog. A failed read is not retried: without a
     /// catalog the editor refuses no effort and suggests no model, as the old editor did.
     catalog_requested: bool,
+    /// The unanswered leave question and its initial Save focus. A departure before the veil draws can reach
+    /// the editor's buttons and take focus away from the question that just opened.
+    leave_question: Option<(LayerId, FocusHandle)>,
     /// Where the user was heading when they answered the leave question with Save, and their press: the departure runs
     /// once that save has succeeded, and is forgotten if it fails.
     leaving: Option<(Departure, Mark)>,
@@ -317,6 +320,7 @@ fn open_dialog(
         editor: None,
         catalog: None,
         catalog_requested: false,
+        leave_question: None,
         leaving: None,
         undo: None,
         restoring: false,
@@ -552,9 +556,20 @@ impl TemplatesDialog {
         }
     }
 
-    /// Ask over the dialog so the question stays visible at any scroll position. Set the return target without
-    /// focusing the name field first, which would scroll the editor before the question appears.
+    /// Ask once for the editor that was open at the departure press. Its name field identifies that editor even
+    /// for a new template. Set the return target without focusing it first, which would scroll the editor.
     fn ask_leave(&mut self, departure: Departure, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((layer, start)) = &self.leave_question
+            && layers::is_open(*layer, window, cx)
+        {
+            if layers::top_layer(window, cx) == Some(*layer)
+                && !start.is_focused(window)
+                && !layers::focus_is_where_dialogs_allow(window, cx)
+            {
+                focus::enter_layer(start, window, cx);
+            }
+            return;
+        }
         let Some(name) = self
             .editor
             .as_ref()
@@ -570,7 +585,7 @@ impl TemplatesDialog {
         let question = Question::new(
             "Save these changes before leaving?",
             answer("Save", "Save these changes, then continue", Tier::Primary),
-            departure,
+            (departure, name.clone()),
         )
         .returns_to(name)
         .cancel_answer(answer(
@@ -584,24 +599,24 @@ impl TemplatesDialog {
                 "Discard these changes, then continue",
                 Tier::Neutral,
             ),
-            move |departure, window, cx| {
+            move |(departure, editor), window, cx| {
                 let _ = discard.update(cx, |dialog, cx| {
-                    let mark = Mark::take(cx);
-                    dialog.depart(departure, &mark, window, cx)
+                    if dialog.is_open_editor(&editor, cx) {
+                        let mark = Mark::take(cx);
+                        dialog.depart(departure, &mark, window, cx);
+                    }
                 });
             },
         );
         let save = cx.weak_entity();
-        prompt::ask(
+        let asked = prompt::ask(
             question,
             None,
             &mark,
-            move |departure, window, cx| {
+            move |(departure, editor), window, cx| {
                 let _ = save.update(cx, |dialog, cx| {
                     let mark = Mark::take(cx);
-                    // The question opens only over a draft Save would store, and the veil keeps the draft as it was,
-                    // so there is no "nothing to save" case here; a save refused before any write keeps the draft.
-                    if dialog.save_editor(window, cx) {
+                    if dialog.is_open_editor(&editor, cx) && dialog.save_editor(window, cx) {
                         dialog.leaving = Some((departure, mark));
                     }
                 });
@@ -609,6 +624,16 @@ impl TemplatesDialog {
             window,
             cx,
         );
+        self.leave_question = asked.zip(window.focused(cx));
+    }
+
+    /// A leave answer belongs to the editor instance it asked about, even if another editor has the same name.
+    fn is_open_editor(&self, name_field: &FocusHandle, cx: &App) -> bool {
+        self.editor
+            .as_ref()
+            .and_then(|editor| editor.name_focus(cx))
+            .as_ref()
+            == Some(name_field)
     }
 
     /// Go where `departure` leads, whatever the editor holds, for the user's action at `mark`: a stored template (by
