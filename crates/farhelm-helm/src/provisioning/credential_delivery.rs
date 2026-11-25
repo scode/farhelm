@@ -822,7 +822,7 @@ impl CredentialDelivery {
             .await
             .map_err(|error| error.to_string())?
         {
-            crate::access::HostAccess::Remote(route) => ProvisioningTarget::Remote(route),
+            crate::access::HostAccess::Remote(route) => ProvisioningTarget::remote(route),
             crate::access::HostAccess::Local => {
                 return Err("environment credentials require a remote route"
                     .to_owned()

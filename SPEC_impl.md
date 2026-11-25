@@ -6405,6 +6405,12 @@ resolved address and verifies its key against an immutable, private known-hosts 
 OpenSSH still reads its config for credentials and ports. In userspace networking mode it reaches the peer through
 `tailscale nc`. A missing peer or key stops the attempt before SSH runs.
 
+Uninstall keeps the prepared access that inspected the removal proposal. Confirmation prepares access once and checks it
+against that proposal even when continuing after the supervisor has stopped. The matching confirmation access then
+supplies the interactive sign-in, supervisor probe, inspection and every removal command. The live session list can
+clear Uninstall only if its supervisor connection opened with the same peer and policy. The connection carries those
+facts from its own dial, which lets this check work even for a supervisor with no identity.
+
 Tailscale supervisor and provisioning ControlMasters use distinct names incorporating the address, advertised keys, and
 network path. A short private, OS-allocated socket directory keeps those names within both platforms' Unix socket
 limits. The helm atomically records its basename with the destination's key snapshots so a restarted helm can find the

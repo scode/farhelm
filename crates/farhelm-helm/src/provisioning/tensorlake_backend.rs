@@ -533,7 +533,7 @@ stat() {
     #[farhelm_testtrace::test]
     async fn preparation_classifies_key_and_systemd_refusals() {
         let root = tempfile::tempdir().unwrap();
-        let target = ProvisioningTarget::Remote(crate::tensorlake::ssh::route(
+        let target = ProvisioningTarget::remote(crate::tensorlake::ssh::route(
             "sandbox@sandbox.sandbox.tensorlake.ai",
         ));
         for (scripts, expected) in [
@@ -567,7 +567,7 @@ stat() {
         let mut backend = SystemBackend::new(root.path().to_path_buf());
         backend.launcher = scripts.clone();
         backend
-            .wait_sandbox_ssh(&ProvisioningTarget::Remote(crate::tensorlake::ssh::route(
+            .wait_sandbox_ssh(&ProvisioningTarget::remote(crate::tensorlake::ssh::route(
                 "clone@clone.sandbox.tensorlake.ai",
             )))
             .await

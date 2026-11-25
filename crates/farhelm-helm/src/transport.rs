@@ -37,12 +37,18 @@ pub type TransportPair = (
 pub struct TransportConnection {
     pub io: TransportPair,
     pub ssh: Option<SshDiagnostics>,
+    /// The peer and policy that opened this exact Tailscale byte stream.
+    pub(crate) tailscale_peer: Option<Box<crate::ssh::tailscale::TailscaleSshAccess>>,
 }
 
 impl TransportConnection {
     /// Local sockets and scripted peers have no SSH evidence or child to retain.
     pub fn plain(io: TransportPair) -> Self {
-        Self { io, ssh: None }
+        Self {
+            io,
+            ssh: None,
+            tailscale_peer: None,
+        }
     }
 }
 
@@ -287,7 +293,7 @@ impl HostTransport for SystemTransport {
                 .establish(
                     &self.ssh_program,
                     destination,
-                    kind,
+                    crate::ssh_sign_in::SignInAccess::Resolve(kind),
                     &attempt,
                     deadline,
                     on_question,
@@ -331,13 +337,30 @@ impl HostTransport for SystemTransport {
                         host.remote_farhelm.as_deref().unwrap_or("farhelm"),
                         host.remote_state_dir.as_deref(),
                     );
+                    // Keep the access used to open the bytes alongside the resulting connection.
+                    // Looking it up later could describe a different peer still using this name.
+                    let prepared = match route {
+                        crate::access::RemoteRoute::Ssh {
+                            destination,
+                            access: crate::ssh::SshAccessKind::Tailscale,
+                        } => Some(
+                            crate::ssh::SshAccess::prepare(
+                                crate::ssh::SshAccessKind::Tailscale,
+                                &self.state_dir,
+                                destination,
+                            )
+                            .await?,
+                        ),
+                        _ => None,
+                    };
                     let mut lowered = route
-                        .command(
+                        .command_with_access(
                             &self.state_dir,
                             crate::access::ConnectionPolicy::Shared(
                                 crate::ssh::SharedConnection::Supervisor,
                             ),
                             crate::access::RemoteCommand::Argv(&argv),
+                            prepared.as_ref(),
                         )
                         .await?;
                     if lowered.program == std::path::Path::new("ssh") {
@@ -366,12 +389,16 @@ impl HostTransport for SystemTransport {
                         .kill_on_drop(true)
                         .spawn()
                         .context("spawning the supervisor connection process")?;
-                    Ok(process_connection(
+                    let mut connection = process_connection(
                         child,
                         host.id,
                         route.destination().to_string(),
                         ProcessRoute::for_route(route),
-                    ))
+                    );
+                    if let Some(crate::ssh::SshAccess::Tailscale(peer)) = prepared {
+                        connection.tailscale_peer = Some(Box::new(peer));
+                    }
+                    Ok(connection)
                 }
             }
         })
@@ -844,6 +871,7 @@ fn process_connection(
             lifetime,
             observation,
         }),
+        tailscale_peer: None,
     }
 }
 

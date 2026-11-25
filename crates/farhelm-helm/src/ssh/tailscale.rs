@@ -83,6 +83,14 @@ pub(crate) struct TailscaleSshAccess {
 }
 
 impl TailscaleSshAccess {
+    /// Peer comparison follows the address, verified key snapshot and network path.
+    /// A relocated local socket directory only changes where the same peer's master lives.
+    pub(crate) fn same_peer(&self, other: &Self) -> bool {
+        self.address == other.address
+            && self.known_hosts == other.known_hosts
+            && self.proxy == other.proxy
+    }
+
     /// Ask the local daemon for current keys on each preparation. An unavailable daemon is a connection error.
     pub(crate) async fn prepare(state: &Path, destination: &str) -> anyhow::Result<Self> {
         let fallback = cfg!(target_os = "macos")
@@ -92,7 +100,7 @@ impl TailscaleSshAccess {
     }
 
     /// Supplying the executable directly keeps the process PATH out of tests and binds the proxy to the same CLI.
-    async fn prepare_with(
+    pub(crate) async fn prepare_with(
         program: &Path,
         state: &Path,
         runtime: &Path,

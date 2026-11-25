@@ -721,7 +721,7 @@ impl Podman {
             .delivery
             .backend()
             .context("this helm has no provisioning transport")?;
-        let target = ProvisioningTarget::Remote(self.route(place, id, user.clone()).await?);
+        let target = ProvisioningTarget::remote(self.route(place, id, user.clone()).await?);
         self.script(
             place,
             id,
@@ -1473,7 +1473,7 @@ impl EnvironmentProvider for Podman {
                     .delivery
                     .backend()
                     .context("this helm has no provisioning transport")?;
-                let target = ProvisioningTarget::Remote(
+                let target = ProvisioningTarget::remote(
                     self.route(current.place_host, &info.id, login).await?,
                 );
                 backend

@@ -49,7 +49,7 @@ impl SnapshotPreparer for TensorlakeSnapshotPreparer {
         let route = super::ssh::route(super::ssh::destination(sandbox));
         let home = self
             .backend
-            .prepare_tensorlake_sandbox(&crate::provisioning::ProvisioningTarget::Remote(
+            .prepare_tensorlake_sandbox(&crate::provisioning::ProvisioningTarget::remote(
                 route.clone(),
             ))
             .await?;

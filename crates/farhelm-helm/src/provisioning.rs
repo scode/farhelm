@@ -449,6 +449,13 @@ mod tests {
         /// the script's output into the real planning checks without building
         /// an already-normalized inspection in the test.
         uninstall_script: Mutex<Option<Arc<SystemBackend>>>,
+        /// With a scripted resolver, every uninstall request records the exact access it would use.
+        uninstall_peers: Mutex<Option<UninstallPeers>>,
+    }
+
+    struct UninstallPeers {
+        available: VecDeque<crate::ssh::tailscale::TailscaleSshAccess>,
+        requests: Vec<(&'static str, Option<crate::ssh::SshAccess>)>,
     }
 
     /// The supervisor `FakeBackend::repeat_probe` reports on every probe.
@@ -464,6 +471,15 @@ mod tests {
     type OperationHook = (&'static str, Box<dyn FnOnce() + Send>);
 
     impl FakeBackend {
+        /// Record the authority of an operation independently of its simulated result.
+        fn record_uninstall_peer(&self, operation: &'static str, target: &ProvisioningTarget) {
+            if let Some(fixture) = self.uninstall_peers.lock().unwrap().as_mut() {
+                fixture
+                    .requests
+                    .push((operation, target.prepared_access().cloned()));
+            }
+        }
+
         pub(super) fn absent(home: PathBuf) -> Arc<Self> {
             Arc::new(Self {
                 probe: Mutex::new(Some(Ok(ProbeObservation::Absent))),
@@ -497,6 +513,7 @@ mod tests {
                 unit_fragment: Mutex::new(None),
                 mounts: Mutex::new(Vec::new()),
                 uninstall_script: Mutex::new(None),
+                uninstall_peers: Mutex::new(None),
             })
         }
 
@@ -569,6 +586,20 @@ mod tests {
 
     #[async_trait]
     impl ProvisioningBackend for FakeBackend {
+        async fn prepare_uninstall_access(
+            &self,
+            _state_dir: &Path,
+            _destination: &str,
+        ) -> anyhow::Result<crate::ssh::tailscale::TailscaleSshAccess> {
+            let mut fixture = self.uninstall_peers.lock().unwrap();
+            let fixture = fixture.as_mut().expect("a scripted Tailscale resolver");
+            fixture.requests.push(("resolve", None));
+            Ok(fixture
+                .available
+                .pop_front()
+                .expect("a prepared fixture peer"))
+        }
+
         async fn remove_owned_file(
             &self,
             _target: &ProvisioningTarget,
@@ -635,7 +666,8 @@ mod tests {
                 )),
             }
         }
-        async fn probe(&self, _target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
+        async fn probe(&self, target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
+            self.record_uninstall_peer("probe", &target.transport);
             self.probes
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if self
@@ -660,7 +692,8 @@ mod tests {
             })
         }
 
-        async fn inspect(&self, _target: &ProbeTarget) -> Result<ReachOutcome, BackendFailure> {
+        async fn inspect(&self, target: &ProbeTarget) -> Result<ReachOutcome, BackendFailure> {
+            self.record_uninstall_peer("inspect", &target.transport);
             if let Some(message) = self.inspect_failure.lock().unwrap().take() {
                 return Err(BackendFailure::new("planted inspection failure", message));
             }
@@ -799,8 +832,9 @@ mod tests {
 
         async fn daemon_reload(
             &self,
-            _target: &ProvisioningTarget,
+            target: &ProvisioningTarget,
         ) -> Result<ActionOutcome, BackendFailure> {
+            self.record_uninstall_peer("daemon-reload", target);
             self.record("daemon-reload")
         }
 
@@ -842,6 +876,7 @@ mod tests {
             paths: &[&Path],
             removed: &Path,
         ) -> Result<UninstallInspection, BackendFailure> {
+            self.record_uninstall_peer("inspect-uninstall", target);
             self.operations
                 .lock()
                 .unwrap()
@@ -904,27 +939,30 @@ mod tests {
 
         async fn disable(
             &self,
-            _target: &ProvisioningTarget,
+            target: &ProvisioningTarget,
             _unit: &str,
         ) -> Result<ActionOutcome, BackendFailure> {
+            self.record_uninstall_peer("disable-supervisor", target);
             self.record("disable-supervisor")
         }
 
         async fn remove_unit(
             &self,
-            _target: &ProvisioningTarget,
+            target: &ProvisioningTarget,
             _destination: &Path,
         ) -> Result<ActionOutcome, BackendFailure> {
+            self.record_uninstall_peer("remove-unit", target);
             self.record("remove-unit")
         }
 
         async fn stop(
             &self,
-            _target: &ProvisioningTarget,
+            target: &ProvisioningTarget,
             _unit: &str,
             _farhelm_program: &Path,
             _state_dir: &Path,
         ) -> Result<ActionOutcome, BackendFailure> {
+            self.record_uninstall_peer("stop-supervisor", target);
             self.record("stop-supervisor")
         }
 
@@ -932,17 +970,19 @@ mod tests {
         /// the bundled tmux is the only file a plan removes this way.
         async fn remove_file(
             &self,
-            _target: &ProvisioningTarget,
+            target: &ProvisioningTarget,
             _path: &Path,
         ) -> Result<ActionOutcome, BackendFailure> {
+            self.record_uninstall_peer("remove-bundled-tmux", target);
             self.record("remove-bundled-tmux")
         }
 
         async fn remove_directory(
             &self,
-            _target: &ProvisioningTarget,
+            target: &ProvisioningTarget,
             _path: &Path,
         ) -> Result<ActionOutcome, BackendFailure> {
+            self.record_uninstall_peer("remove-directory", target);
             self.record("remove-directory")
         }
     }
@@ -2496,8 +2536,8 @@ mod tests {
             panic!("an absent supervisor must be offered setup: {response:?}");
         };
         assert!(matches!(
-            &plan.target,
-            ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh {
+            plan.target.route(),
+            Some(crate::access::RemoteRoute::Ssh {
                 access: crate::ssh::SshAccessKind::Tailscale,
                 ..
             })
@@ -3576,8 +3616,8 @@ mod tests {
             panic!("the absent SSH host must produce a plan")
         };
         assert!(matches!(
-            plan.target,
-            ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh { destination, .. }) if destination == "local"
+            plan.target.route(),
+            Some(crate::access::RemoteRoute::Ssh { destination, .. }) if destination == "local"
         ));
     }
 
@@ -6720,7 +6760,7 @@ mod tests {
             Arc::get_mut(&mut service).unwrap().setup_sign_in = Some(Arc::new(
                 super::setup_sign_in::SetupSignIn::new(sign_in, "/bin/true".into()),
             ));
-            let target = ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh {
+            let target = ProvisioningTarget::remote(crate::access::RemoteRoute::Ssh {
                 destination: "setup.example".into(),
                 access: crate::ssh::SshAccessKind::UserConfig,
             });
@@ -7528,13 +7568,33 @@ master.touch()
         Arc<FakeBackend>,
         Arc<ProvisioningService>,
     ) {
+        uninstall_fixture_with_peer(sessions, truncated, tempfile::tempdir().unwrap(), None).await
+    }
+
+    /// An identityless Tailscale supervisor lets the fixture vary its SSH peer
+    /// independently of the application identity checked by the probe.
+    async fn uninstall_fixture_with_peer(
+        sessions: Vec<farhelm_proto::SessionInfo>,
+        truncated: bool,
+        root: tempfile::TempDir,
+        peer: Option<crate::ssh::tailscale::TailscaleSshAccess>,
+    ) -> (
+        Harness,
+        HostId,
+        tempfile::TempDir,
+        Arc<FakeBackend>,
+        Arc<ProvisioningService>,
+    ) {
+        let tailscale = peer.is_some();
         let count = sessions.len();
+        let identity = (!tailscale).then(|| UNINSTALL_IDENTITY.to_string());
         let (builder, host) = FleetBuilder::new()
             .await
             .ssh(
                 "uninstall.example",
                 HostScript {
-                    identity: Some(UNINSTALL_IDENTITY.to_string()),
+                    identity: identity.clone(),
+                    tailscale_peer: peer,
                     sessions,
                     truncated,
                     ..HostScript::default()
@@ -7542,14 +7602,22 @@ master.touch()
             )
             .await;
         let harness = builder.start().await;
-        harness
-            .await_refreshed_as(host, UNINSTALL_IDENTITY, count)
-            .await;
-        let root = tempfile::tempdir().unwrap();
+        if tailscale {
+            harness.await_refreshed(host).await;
+            let previous = harness.manager.status(host).unwrap().incarnation;
+            let row = stored_row(&harness.store, host).await;
+            assert!(harness.store.set_ssh_tailscale(&row, true).await.unwrap());
+            harness.manager.sync_registry().await.unwrap();
+            harness.await_refreshed_after(host, previous).await;
+        } else {
+            harness
+                .await_refreshed_as(host, UNINSTALL_IDENTITY, count)
+                .await;
+        }
         let backend = FakeBackend::absent(root.path().to_path_buf());
         *backend.probe.lock().unwrap() = None;
         *backend.repeat_probe.lock().unwrap() = Some(RepeatProbe {
-            identity: Some(UNINSTALL_IDENTITY.to_string()),
+            identity,
             dial_farhelm: root.path().join("lib/farhelm"),
             dial_state_dir: Some(root.path().join("state")),
         });
@@ -7755,6 +7823,307 @@ master.touch()
         assert!(!memory.busy.contains(&host));
         assert!(!memory.plans.contains_key(&second.probe_id));
         drop(probe);
+    }
+
+    /// Prepare real SSH pins from an isolated status command while the fixture simulates removal.
+    async fn uninstall_peer(
+        root: &Path,
+        address: &str,
+        key: &str,
+        direct: bool,
+    ) -> crate::ssh::tailscale::TailscaleSshAccess {
+        use std::os::unix::fs::PermissionsExt;
+
+        let program = root.join("fixture-tailscale");
+        let status = serde_json::json!({
+            "BackendState": "Running",
+            "TUN": direct,
+            "Peer": {"fixture": {
+                "HostName": "uninstall",
+                "DNSName": "uninstall.example.",
+                "TailscaleIPs": [address],
+                "sshHostKeys": [key]
+            }}
+        });
+        std::fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\nprintf '%s' {}\n",
+                crate::ssh::shell_quote(&status.to_string())
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        crate::ssh::tailscale::TailscaleSshAccess::prepare_with(
+            &program,
+            &root.join("state"),
+            root,
+            "uninstall.example",
+        )
+        .await
+        .unwrap()
+    }
+
+    /// Capture the production command at the spawn boundary without starting SSH or a removal script.
+    #[derive(Default)]
+    struct UninstallCommandRecorder(Mutex<Vec<Vec<std::ffi::OsString>>>);
+
+    impl CommandLauncher for UninstallCommandRecorder {
+        fn spawn(
+            &self,
+            command: &mut tokio::process::Command,
+        ) -> std::io::Result<tokio::process::Child> {
+            assert_eq!(command.as_std().get_program(), "ssh");
+            self.0
+                .lock()
+                .unwrap()
+                .push(command.as_std().get_args().map(ToOwned::to_owned).collect());
+            Err(std::io::Error::other(
+                "fixture captures argv without executing it",
+            ))
+        }
+    }
+
+    /// The supervisor probe and the shared batch path must both carry the pin when building a command.
+    async fn check_pinned_uninstall_commands(
+        root: &Path,
+        target: &ProvisioningTarget,
+        peer: &crate::ssh::tailscale::TailscaleSshAccess,
+    ) {
+        let recorder = Arc::new(UninstallCommandRecorder::default());
+        let mut backend = SystemBackend::new(root.join("state"));
+        backend.launcher = recorder.clone();
+        let probe = ProbeTarget {
+            transport: target.clone(),
+            probe_farhelm: root.join("lib/farhelm"),
+            probe_state_dir: Some(root.join("state")),
+        };
+        assert!(backend.probe(&probe).await.is_err());
+        assert!(backend.inspect(&probe).await.is_err());
+        assert!(
+            backend
+                .remove_directory(target, &root.join("lib"))
+                .await
+                .is_err()
+        );
+        let commands = recorder.0.lock().unwrap();
+        assert_eq!(commands.len(), 3);
+        for args in commands.iter() {
+            for option in peer.options() {
+                assert!(
+                    args.iter()
+                        .any(|arg| arg.as_os_str() == std::ffi::OsStr::new(&option)),
+                    "missing {option}"
+                );
+            }
+        }
+    }
+
+    /// The replacement connection must finish its first refresh so every later list request is attributable to it.
+    async fn reconnect_uninstall_fixture(
+        harness: &Harness,
+        host: HostId,
+        peer: &crate::ssh::tailscale::TailscaleSshAccess,
+    ) {
+        let previous = harness.manager.status(host).unwrap().incarnation;
+        harness
+            .fleet
+            .edit(host, |script| script.tailscale_peer = Some(peer.clone()));
+        assert!(harness.manager.retry_now(host).await.unwrap());
+        harness.await_refreshed_after(host, previous).await;
+        let client = harness.manager.status(host).unwrap().client.unwrap();
+        assert_eq!(client.tailscale_peer(), Some(peer));
+        assert!(client.peer_hello().host_identity.is_none());
+    }
+
+    /// An accepted run uses one fresh pin for the setup master and every backend step.
+    /// Either kind of drift refuses before querying sessions or changing the registered host.
+    #[farhelm_testtrace::test]
+    async fn tailscale_uninstall_pins_the_confirmed_peer_or_refuses_peer_drift() {
+        use std::os::unix::fs::PermissionsExt;
+        use tokio::io::AsyncWriteExt;
+
+        for change in [
+            "none",
+            "address",
+            "key",
+            "policy",
+            "sessions-peer",
+            "during-sign-in",
+        ] {
+            // Keep the simulated setup master within macOS's Unix socket limit as well.
+            let root = tempfile::Builder::new()
+                .prefix("f")
+                .tempdir_in("/tmp")
+                .unwrap();
+            let original =
+                uninstall_peer(root.path(), "100.100.1.11", "ssh-ed25519 AAAA", true).await;
+            let original_access = crate::ssh::SshAccess::Tailscale(original.clone());
+            assert!(
+                original_access
+                    .control_socket(root.path(), crate::ssh::SharedConnection::Provisioning,)
+                    .is_some(),
+                "the fixture needs a shareable setup master"
+            );
+            let (address, key, direct) = match change {
+                "key" => ("100.100.1.11", "ssh-ed25519 BBBB", true),
+                "policy" => ("100.100.1.11", "ssh-ed25519 AAAA", false),
+                _ => ("100.100.1.12", "ssh-ed25519 AAAA", true),
+            };
+            let changed = uninstall_peer(root.path(), address, key, direct).await;
+            assert!(!original.same_peer(&changed));
+            let (harness, host, root, backend, mut service) =
+                uninstall_fixture_with_peer(Vec::new(), false, root, Some(original.clone())).await;
+            let row = stored_row(&harness.store, host).await;
+            assert!(row.tailscale && row.host_identity.is_none());
+            let live_client = || harness.manager.status(host).unwrap().client.unwrap();
+            assert_eq!(live_client().tailscale_peer(), Some(&original));
+
+            // An already live setup master must be checked with the same pin as the removal commands.
+            // The script stands in for ssh -O check and records the literal options it received.
+            let program = root.path().join("fixture-ssh");
+            let receipt = root.path().join("ssh-options");
+            std::fs::write(
+                &program,
+                r#"#!/usr/bin/env python3
+from pathlib import Path
+import socket
+import sys
+
+root = Path(__file__).parent
+mode = sys.argv.index("-O")
+assert sys.argv[mode + 1] == "check"
+gate = root / "setup-check"
+if gate.exists():
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.connect(str(gate))
+        assert connection.recv(1) == b"1"
+(root / "ssh-options").write_text("\n".join(sys.argv[1:]))
+"#,
+            )
+            .unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let relay = Arc::new(crate::ssh_sign_in::SignIn::new(
+                root.path().join("state"),
+                "/bin/true".into(),
+                Arc::default(),
+            ));
+            Arc::get_mut(&mut service).unwrap().setup_sign_in = Some(Arc::new(
+                super::setup_sign_in::SetupSignIn::new(relay, program)
+                    .with_timeout(Duration::from_secs(45)),
+            ));
+
+            let confirmed = if matches!(change, "address" | "key" | "policy") {
+                &changed
+            } else {
+                &original
+            };
+            *backend.uninstall_peers.lock().unwrap() = Some(UninstallPeers {
+                available: VecDeque::from([original.clone(), confirmed.clone(), changed.clone()]),
+                requests: Vec::new(),
+            });
+
+            let proposal = service.plan_uninstall(host).await.unwrap();
+            assert_eq!(
+                proposal.plan.target.prepared_access(),
+                Some(&original_access)
+            );
+            assert_eq!(
+                serde_json::to_value(&proposal.plan.target).unwrap(),
+                serde_json::json!({
+                    "kind": "ssh", "destination": "uninstall.example", "tailscale": true
+                })
+            );
+            if change == "none" {
+                check_pinned_uninstall_commands(root.path(), &proposal.plan.target, &original)
+                    .await;
+            }
+
+            if change == "sessions-peer" {
+                reconnect_uninstall_fixture(&harness, host, &changed).await;
+            }
+            let gate = (change == "during-sign-in")
+                .then(|| tokio::net::UnixListener::bind(root.path().join("setup-check")).unwrap());
+            let mut list_requests = harness.fleet.host_requests(host);
+            std::fs::remove_file(&receipt).unwrap();
+            backend
+                .uninstall_peers
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .requests
+                .clear();
+            service
+                .start_uninstall(
+                    host,
+                    ProvisionRequest {
+                        probe_id: proposal.probe_id,
+                    },
+                )
+                .await
+                .unwrap();
+
+            if let Some(gate) = gate {
+                let (mut held_check, _) =
+                    tokio::time::timeout(Duration::from_secs(5), gate.accept())
+                        .await
+                        .expect("confirmation reached its pinned setup check")
+                        .unwrap();
+                assert_eq!(harness.fleet.host_requests(host), list_requests + 1);
+                reconnect_uninstall_fixture(&harness, host, &changed).await;
+                list_requests = harness.fleet.host_requests(host);
+                held_check.write_all(b"1").await.unwrap();
+            }
+
+            let steps: &[&str] = if change != "none" {
+                let view = wait_finished(&service, host).await;
+                assert_eq!(view.status, RunStatus::Failed, "{view:?}");
+                let reason = if matches!(change, "sessions-peer" | "during-sign-in") {
+                    "The sessions connection reaches a different Tailscale peer"
+                } else {
+                    "The Tailscale peer changed"
+                };
+                assert!(format!("{view:?}").contains(reason), "{view:?}");
+                assert_eq!(harness.fleet.host_requests(host), list_requests);
+                assert_eq!(receipt.exists(), change == "during-sign-in");
+                assert_eq!(
+                    stored_row(&harness.store, host).await.entry_uuid,
+                    row.entry_uuid
+                );
+                &[]
+            } else {
+                wait_forgotten(&harness, host).await;
+                assert_eq!(harness.fleet.host_requests(host), list_requests + 2);
+                let options = std::fs::read_to_string(&receipt).unwrap();
+                for option in original.options() {
+                    assert!(
+                        options.lines().any(|line| line == option),
+                        "missing {option}"
+                    );
+                }
+                &[
+                    "probe",
+                    "inspect",
+                    "inspect-uninstall",
+                    "disable-supervisor",
+                    "remove-unit",
+                    "daemon-reload",
+                    "stop-supervisor",
+                    "remove-directory",
+                ]
+            };
+            let mut expected = vec![("resolve", None)];
+            expected.extend(
+                steps
+                    .iter()
+                    .map(|&step| (step, Some(original_access.clone()))),
+            );
+            let peers = backend.uninstall_peers.lock().unwrap();
+            let peers = peers.as_ref().unwrap();
+            assert_eq!(peers.requests, expected);
+            assert_eq!(peers.available, [changed]);
+        }
     }
 
     /// Live sessions and tabs refuse uninstall before confirmation, so the
@@ -12062,7 +12431,7 @@ master.touch()
             assert_eq!(directories[0].path, lib);
             assert_eq!(directories[1].path, expected_state);
             assert_eq!(directories[2].path, user_units);
-            let install_index = if matches!(plan.target, ProvisioningTarget::Remote(_)) {
+            let install_index = if plan.target.route().is_some() {
                 assert!(matches!(
                     &plan.actions[1],
                     ProvisioningAction::UploadPayload { destination, temporary, .. }
@@ -14694,7 +15063,7 @@ master.touch()
             (accepted, planned.plan)
         };
         assert_eq!(
-            matches!(plan.target, ProvisioningTarget::Remote(_)),
+            plan.target.route().is_some(),
             use_ssh,
             "the local case must never silently become SSH-to-self"
         );

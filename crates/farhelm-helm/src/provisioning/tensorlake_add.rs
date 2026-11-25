@@ -1506,7 +1506,7 @@ impl ProvisioningService {
             .await?;
         let running_after = spawn_started.elapsed();
         let target =
-            ProvisioningTarget::Remote(crate::tensorlake::ssh::route(plan.destination.clone()));
+            ProvisioningTarget::remote(crate::tensorlake::ssh::route(plan.destination.clone()));
         // The provider already waited for its gateway after Running. A cold
         // clone must boot on its own, without ordinary machine preparation.
         self.set_step(
@@ -1626,7 +1626,7 @@ impl ProvisioningService {
         host_write: &mut Option<crate::manager::ProvisionLockGuard>,
     ) -> anyhow::Result<()> {
         let target =
-            ProvisioningTarget::Remote(crate::tensorlake::ssh::route(plan.destination.clone()));
+            ProvisioningTarget::remote(crate::tensorlake::ssh::route(plan.destination.clone()));
         self.set_step(host, *index, StepStatus::Running, None).await;
         let home = self.backend.prepare_tensorlake_sandbox(&target).await?;
         let home_notice = self

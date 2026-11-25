@@ -294,7 +294,8 @@ impl SshAccess {
         }
     }
 
-    fn kind(&self) -> SshAccessKind {
+    /// A prepared handle can only serve a route that requested its access policy.
+    pub(crate) fn kind(&self) -> SshAccessKind {
         match self {
             Self::UserConfig => SshAccessKind::UserConfig,
             Self::Tailscale(_) => SshAccessKind::Tailscale,

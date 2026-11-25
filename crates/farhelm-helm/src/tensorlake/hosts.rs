@@ -505,7 +505,7 @@ impl Tensorlake {
         {
             let backend = backend.context("this helm has no provisioning transport")?;
             backend
-                .wait_tensorlake_ssh(&crate::provisioning::ProvisioningTarget::Remote(
+                .wait_tensorlake_ssh(&crate::provisioning::ProvisioningTarget::remote(
                     super::ssh::route(super::ssh::destination(&current.sandbox)),
                 ))
                 .await?;

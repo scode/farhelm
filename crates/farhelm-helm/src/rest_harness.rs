@@ -117,6 +117,8 @@ pub(crate) struct HostScript {
     /// The identity the hello reports. `None` models a supervisor with
     /// none, which connects but caches nothing.
     pub(crate) identity: Option<String>,
+    /// The scripted Tailscale pin is captured by each new dial just like peer identity.
+    pub(crate) tailscale_peer: Option<crate::ssh::tailscale::TailscaleSshAccess>,
     /// The session list this host serves, whole, in one reply.
     pub(crate) sessions: Vec<SessionInfo>,
     /// The `truncated` flag that reply carries: the supervisor saying its
@@ -147,6 +149,7 @@ impl Default for HostScript {
             protocol: PROTOCOL_VERSION,
             build: "peer-build".to_string(),
             identity: None,
+            tailscale_peer: None,
             sessions: Vec::new(),
             truncated: false,
             sealed: false,
@@ -425,7 +428,7 @@ impl HostTransport for ScriptedFleet {
                 .lock()
                 .expect("dial log mutex")
                 .push(host.clone());
-            let (behavior, peer) = {
+            let (behavior, peer, tailscale_peer) = {
                 let mut scripts = self.scripts.lock().expect("script mutex");
                 let unknown_is_down = self
                     .unknown_hosts_are_down
@@ -458,6 +461,7 @@ impl HostTransport for ScriptedFleet {
                         identity: script.identity.clone(),
                     },
                     script.peer.take(),
+                    script.tailscale_peer.clone(),
                 )
             };
             let (ours, theirs) = tokio::io::duplex(256 * 1024);
@@ -472,10 +476,14 @@ impl HostTransport for ScriptedFleet {
                 }
             });
             let (r, w) = tokio::io::split(ours);
-            Ok(TransportConnection::plain((
+            let mut connection = TransportConnection::plain((
                 Box::new(r) as Box<dyn AsyncRead + Send + Unpin>,
                 Box::new(w) as Box<dyn AsyncWrite + Send + Unpin>,
-            )))
+            ));
+            if host.tailscale {
+                connection.tailscale_peer = tailscale_peer.map(Box::new);
+            }
+            Ok(connection)
         })
     }
 }

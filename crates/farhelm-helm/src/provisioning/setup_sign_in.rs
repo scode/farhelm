@@ -23,7 +23,7 @@ use super::service::ProvisioningService;
 use crate::AppState;
 use crate::access::RemoteRoute;
 use crate::ssh::{SharedConnection, SshAccessKind};
-use crate::ssh_sign_in::{Attempt, BeforeQuestion, SignIn, SignInNeeded};
+use crate::ssh_sign_in::{Attempt, BeforeQuestion, SignIn, SignInAccess, SignInNeeded};
 use crate::store::{HostId, HostRow};
 
 const CONNECT: Duration = Duration::from_secs(15);
@@ -171,13 +171,12 @@ impl SetupSignIn {
 
     /// Setup sign-in uses the same SSH access policy as the first batch command, including its master.
     pub(super) fn destination(transport: &ProvisioningTarget) -> Option<(&str, SshAccessKind)> {
-        match transport {
-            ProvisioningTarget::Remote(RemoteRoute::Ssh {
+        match transport.route() {
+            Some(RemoteRoute::Ssh {
                 destination,
                 access,
             }) => access.asks_user().then_some((destination, *access)),
-            ProvisioningTarget::Remote(RemoteRoute::PodmanExec { .. })
-            | ProvisioningTarget::Local => None,
+            Some(RemoteRoute::PodmanExec { .. }) | None => None,
         }
     }
 
@@ -211,7 +210,9 @@ impl SetupSignIn {
             .setup_ready(
                 &self.program,
                 destination,
-                access,
+                transport
+                    .prepared_access()
+                    .map_or(SignInAccess::Resolve(access), SignInAccess::Prepared),
                 Instant::now() + self.connect_timeout,
             )
             .await?
@@ -330,7 +331,13 @@ impl SetupSignIn {
                 } else {
                     None
                 };
-                setup.wait(&route.destination, route.access, &attempt).await
+                setup
+                    .wait(
+                        &route.destination,
+                        SignInAccess::Resolve(route.access),
+                        &attempt,
+                    )
+                    .await
             };
             let result = tokio::select! {
                 biased;
@@ -422,6 +429,9 @@ impl SetupSignIn {
         let Some((destination, access)) = Self::destination(transport) else {
             return Ok(());
         };
+        let access = transport
+            .prepared_access()
+            .map_or(SignInAccess::Resolve(access), SignInAccess::Prepared);
         self.wait(
             destination,
             access,
@@ -433,7 +443,7 @@ impl SetupSignIn {
     async fn wait(
         &self,
         destination: &str,
-        access: SshAccessKind,
+        access: SignInAccess<'_>,
         attempt: &Attempt,
     ) -> Result<(), BackendFailure> {
         self.relay
