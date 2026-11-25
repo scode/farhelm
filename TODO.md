@@ -53,6 +53,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Verify OpenRouter reasoning effort with credentials.** The new reasoning effort checks for Goose 1.60.2, Pi 1.6.0
+  and OMP 19.1.1 stopped before launch because `OPENROUTER_API_KEY` was missing. Run
+  `python3 -B scripts/run-harness-drift.py --no-upgrade --category reasoning_effort` with the key to exercise Goose's
+  `GOOSE_THINKING_EFFORT` and the two `--thinking` flags. Confirm that Pi and OMP display each requested effort and that
+  at least one enabled effort per CLI completes a turn. Goose 1.60.2 shows the chosen provider and model in its startup
+  banner and status, so its terminal can confirm the launch and reply. Verifying the effective provider effort for Goose
+  needs other evidence.
+
 - **Finish live Cursor model verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” with
   both `--model auto` and `--model composer-2.5`. Reproduce with
   `python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection --harness cursor`. Run with an
@@ -167,11 +175,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   disabled, verify Cursor's default launch without a permission flag ("Agent's own setting"), and send a real prompt to
   Cursor and OpenCode to confirm interactive turns work under Farhelm's terminal host (today both stop at the initial
   TUI or trust screen).
-
-- **Drift tests: reasoning effort selection.** Add live coverage for Muse (`--reasoning-effort`) and Goose
-  (`GOOSE_THINKING_EFFORT`), which currently have zero drift-test coverage, and exercise non-`low` effort values
-  (especially `off`, `minimal`, `xhigh`, and `max`, which vendors rename or drop) across Claude, Codex, Antigravity, Pi,
-  and OMP, confirming each CLI accepts and applies the requested effort. Plan: `plans/queue/drift-reasoning-effort.md`.
 
 - **Drift tests: permission modes and custom permission flags.** Cover YOLO launch flags on Claude, Codex, Antigravity,
   Grok, Muse, and OMP (currently only Guarded is exercised for those six); Goose's `approve`, `smart_approve`, and
