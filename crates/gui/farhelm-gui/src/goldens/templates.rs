@@ -119,6 +119,15 @@ pub(super) fn template_editor_setup(state: &SceneState, window: &mut Window, cx:
     open_template_editor(state, "codex-deep", None, window, cx);
 }
 
+/// An older template can still be opened, but Undo could not resave its invalid custom model.
+pub(super) fn template_invalid_custom_model_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open_template_editor(state, "old-custom", None, window, cx);
+}
+
 /// Open the template that sets both Host and Destination so the shared switch and separate fields are visible.
 pub(super) fn template_destination_editor_setup(
     state: &SceneState,
@@ -163,6 +172,21 @@ fn open_template_editor(
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let mut snapshot = editor_scene_collections();
+    if template == "old-custom" {
+        snapshot[0] = CollectionState {
+            collection: Collection::Templates,
+            meta: test_support::meta(&[template]),
+            entries: vec![KeyedEntry {
+                key: template.into(),
+                value: serde_json::json!({
+                    "name": template, "fields": {
+                        "kind": "agent", "agent": "custom", "custom_agent": "acme-code", "model": "BAD MODEL"
+                    }
+                }),
+            }],
+        };
+        snapshot.push(super::custom_agent_state());
+    }
     if template == "shell-profile" {
         let templates = &mut snapshot[0];
         templates.meta = test_support::meta(&["shell-profile", "shell-direct", "quick-claude"]);

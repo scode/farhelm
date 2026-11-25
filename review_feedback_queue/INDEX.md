@@ -200,11 +200,6 @@ consequences.
   desktop editor the Approvals toggle is hidden behind a static YOLO message, so the user cannot even see or fix the
   saved non-YOLO flag without removing the field).
 
-- [`trailing-check-template-shape-skips-validate-model-on-custom-agent.md`](trailing-check-template-shape-skips-validate-model-on-custom-agent.md)
-  — Saving a custom-agent launch template from the CLI or API accepts invalid model values (such as uppercase letters,
-  spaces, control characters, or empty strings) even though Farhelm refuses those same values in the desktop Templates
-  editor and whenever the template is applied.
-
 - [`trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md`](trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md)
   — For a registered custom agent session created without session resumption enabled, the disabled Restart with menu
   item tells the user "Custom sessions can't be resumed" instead of explaining that this launch has no stored resume

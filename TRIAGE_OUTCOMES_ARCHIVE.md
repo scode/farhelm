@@ -48107,3 +48107,24 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: Fixed by including a registered custom agent in the per-collection JSON round-trip test. Change `szrmzlxvlnmlzzlonlvwpoyqqnkxsrvz`, bookmark `plan/triage-custom-agents-nov24/02h-custom-agent-round-trip`,
   https://github.com/scode/farhelm/pull/4838/changes.
+
+## trailing-check-template-shape-skips-validate-model-on-custom-agent.md
+
+- Outcome: `fix code`.
+- Assessment: Saving a custom-agent template from the CLI or the API accepts a model the custom-agent rules forbid, such
+  as uppercase letters or spaces. The desktop editor refuses the same value, and so does every apply. Verified:
+  Confirmed. `check_template_shape` validates a custom effort but not the model
+  (`crates/farhelm-proto/src/launcher.rs:579-594`). `apply_template` validates the model (`launcher.rs:987-989`), and so
+  does the GUI (`templates/fields.rs:243-259`). SPEC.md 493-494 defines the value grammar, and SPEC.md 4801 says agent
+  template writes "go through the same path as the GUI's template editor". Neither says in so many words that a save
+  must refuse it.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code. Apply the model check alongside the existing effort check. Size S. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed by checking an explicit custom model at save time with the grammar used at launch. Change `rlqmnpnoqtprwxzknkpxuuqxtyltrnvy`, bookmark `plan/triage-custom-agents-nov24/02i-template-model-check`,
+  https://github.com/scode/farhelm/pull/4846/changes.

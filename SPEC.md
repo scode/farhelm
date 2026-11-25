@@ -1351,7 +1351,7 @@ agent choice is independent of that destination:
   command, or don't switch; don't switch offers only host, destination and session name. Agent and command choices store
   their matching launch kind, so applying the template switches tabs. Existing kindless templates keep applying as
   stored; opening one infers its switch in an unsaved draft, and saving stores that switch. Choices follow the agent
-  type when one is set, while model text may be arbitrary and other fields need no agent type. The initial prompt uses a
+  type when one is set, and other fields need no agent type. The model takes free text. The initial prompt uses a
   multiline box that grows with its text up to a cap and then scrolls, offered on the agent tab when the template's
   agent supports it or no agent is set. It explains that the message is sent on every launch from the template and can
   be edited in the launcher first; the list summary mentions it. Newline and tab remain editable. Invisible formatting
@@ -1376,6 +1376,9 @@ agent choice is independent of that destination:
   decides: a click on "Delete permanently" never offers undo, and a click on plain "Delete" always does, even if the
   stored copy changed in between. Delete removes the named template at whatever revision is currently stored. Closing
   the dialog ends its undo notice.
+
+  A template that chooses the custom agent type or names a registration checks its model against the custom agent
+  grammar on save. A template that leaves both choices open can still carry a built-in model name for another template.
 
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Its list button shows a muted outline bolt
   when unmarked and a filled amber bolt when marked, at the same size. Cmd+P on macOS or Ctrl+Shift+P elsewhere starts

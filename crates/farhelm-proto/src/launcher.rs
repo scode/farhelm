@@ -576,6 +576,17 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
             return Err("a custom agent ID needs the custom agent type".into());
         }
     }
+    // A registration ID can apply only to the custom harness, even if an earlier template chose it.
+    // Without either choice, the model can still belong to a built-in harness.
+    if let Some(Some(model)) = &template.fields.model
+        && (template
+            .fields
+            .agent
+            .is_some_and(LaunchHarness::uses_custom_catalog)
+            || matches!(template.fields.custom_agent, Some(Some(_))))
+    {
+        crate::custom_agents::validate_model_or_effort(model).map_err(str::to_owned)?;
+    }
     if let Some(Some(LaunchEffortValue::Custom(effort))) = &template.fields.effort {
         // A modifier with no agent can acquire its harness from an earlier template. An
         // explicit built-in agent still uses the closed effort vocabulary when saved.
@@ -1744,6 +1755,43 @@ mod tests {
             known_places: &[],
             host_fixed,
         }
+    }
+
+    /// Save rejects invalid models when a template chooses the custom harness or pins its registration.
+    /// A modifier that leaves both choices open can still combine with a built-in model.
+    #[test]
+    fn a_custom_agent_template_checks_its_model_at_save_time() {
+        let fields = |agent, id: Option<&str>, model: Option<&str>| TemplateFields {
+            agent,
+            custom_agent: id.map(|id| Some(id.to_owned())),
+            model: model.map(|value| Some(value.to_owned())),
+            ..Default::default()
+        };
+        let custom = Some(LaunchHarness::Custom);
+        for model in ["", "BAD MODEL", "gpt-6.2-sol", "line\nbreak"] {
+            for fields in [
+                fields(custom, None, Some(model)),
+                fields(None, Some("acme-code"), Some(model)),
+            ] {
+                let candidate = template("custom", fields);
+                assert_eq!(
+                    check_template_shape(&candidate),
+                    Err("use 1 to 256 lowercase letters, digits, hyphens, or underscores".into()),
+                    "{candidate:?}"
+                );
+            }
+        }
+        assert!(
+            check_template_shape(&template("custom", fields(custom, None, Some("deep_work"))))
+                .is_ok()
+        );
+        assert!(
+            check_template_shape(&template(
+                "modifier",
+                fields(None, None, Some("gpt-6.2-sol"))
+            ))
+            .is_ok()
+        );
     }
 
     /// Template writes can list the built-in effort vocabulary without a model catalog. A harness

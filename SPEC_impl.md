@@ -9333,6 +9333,10 @@ branch checks before approval. The shared store and collision checks remain perm
 save unchanged and delete undo can recreate them. Duplicate normalizes whitespace to hyphens in its suggested name and
 uses `-copy` / `-copy-N` suffixes, retaining the byte cap and collision search.
 
+The shared shape check also validates literal model values for a template that chooses the custom agent type or names a
+custom registration. Either choice constrains the model to custom syntax, even if the template gets its agent type from
+a draft or another template. A model-only modifier's compatibility is decided when it applies.
+
 An agent's quick-launch and number-key edits travel separately from template fields in protocol 60: those bindings
 belong to fleet preferences, not to a template's composable choices. The helm and Templates editor share the ⚡
 eligibility check. An agent write that changes a binding uses `TemplateWriteWithShortcuts`, a distinct approval kind
