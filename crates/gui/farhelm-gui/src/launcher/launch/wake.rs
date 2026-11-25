@@ -31,6 +31,8 @@ pub(super) struct Wake {
     window: AnyWindowHandle,
     mark: Mark,
     consent: SourceConsent,
+    /// A YOLO answer already checked against `install`. Readiness keeps checking that same installation.
+    confirm_yolo: bool,
     words: ProviderUi,
     started_stopped: bool,
     alarm: Option<ticker::Deadline>,
@@ -64,10 +66,15 @@ impl Wake {
 
 /// Hide a launch only after its first Resume can be sent. The pending create key is separate so a refused Resume
 /// cannot show as the future session's create failure or leave a false error under Hosts.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the wake owns the pressed launch and its consent"
+)]
 pub(in crate::launcher) fn start(
     launcher: Entity<Launcher>,
     draft: &LaunchDraft,
     host: &HostView,
+    confirm_yolo: bool,
     consent: SourceConsent,
     mark: Mark,
     window: &mut Window,
@@ -107,6 +114,7 @@ pub(in crate::launcher) fn start(
                 window: window.window_handle(),
                 mark,
                 consent,
+                confirm_yolo,
                 words: ProviderUi(provider),
                 started_stopped: stopped,
                 alarm: None,
@@ -254,6 +262,7 @@ pub(super) fn follow(slot: &mut LaunchSlot, cx: &mut Context<LaunchSlot>) {
         Advance::Ready => {
             let launcher = held.launcher.clone();
             let (window, mark, consent) = (wake.window, wake.mark, wake.consent);
+            let yolo_consent = wake.confirm_yolo.then(|| wake.install.clone());
             let key = wake.key.clone();
             cx.defer(move |cx| {
                 if !is_current(&key, cx) {
@@ -261,7 +270,7 @@ pub(super) fn follow(slot: &mut LaunchSlot, cx: &mut Context<LaunchSlot>) {
                 }
                 let waiting = cx.update_window(window, |_, window, cx| {
                     launcher.update(cx, |launcher, cx| {
-                        launcher.continue_after_wake(consent, mark, window, cx)
+                        launcher.continue_after_wake(yolo_consent, consent, mark, window, cx)
                     })
                 });
                 if !matches!(waiting, Ok(true)) {

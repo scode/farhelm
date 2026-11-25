@@ -68,7 +68,7 @@ use super::draft::{
     Catalog, FOLDER_INSTALLATION_MOVED, Field, FolderDefault, Install, LaunchDraft, Mode, Tab,
     harness_label, remembered_permission,
 };
-use super::launch::{self, Request};
+use super::launch::{self, Request, YoloTarget};
 use super::read_model_catalog;
 use super::request::{Account, Recipes, Refusal, SELECT_REPOSITORY, Target};
 use super::words::agent_note;
@@ -399,7 +399,7 @@ impl Launcher {
     ) -> bool {
         // A hidden draft has no render to resolve the registration before the first host wake.
         self.refresh_custom_capabilities(cx);
-        if self.begin_host_wake(SourceConsent::default(), mark, window, cx) {
+        if self.begin_host_wake(None, SourceConsent::default(), mark, window, cx) {
             return true;
         }
         // The launcher is never drawn, so the history is asked for, and the default settled, here; only while Launch
@@ -422,7 +422,7 @@ impl Launcher {
             cx.notify();
             return false;
         }
-        self.submit_or_wait_for_preview(SourceConsent::default(), mark, window, cx)
+        self.submit_or_wait_for_preview(None, SourceConsent::default(), mark, window, cx)
     }
 
     /// The chosen host's history answered: a quick launch waiting out of sight for New's folder default goes on, in
@@ -577,6 +577,20 @@ pub(super) struct SourceConsent {
 /// The automatic folder New or Clone offers for an installation, with its history state and wake eligibility.
 /// An unread history reply can make Launch available without changing the displayed `~`.
 type DefaultFolderTarget = (Install, String, FolderDefault, bool);
+
+/// One YOLO answer follows its original target. For a checkout answered once, the first
+/// dispatch also establishes the exact connected destination the answer can use.
+struct YoloConsent {
+    target: YoloTarget,
+    checkout: Option<YoloCheckout>,
+}
+
+/// A connected retry must use this path. A wake started by a frame that showed the wake notice can obtain its own
+/// allocation after connecting.
+struct YoloCheckout {
+    path: String,
+    shown_wake: bool,
+}
 
 /// The open launcher. See the module docs.
 pub(crate) struct Launcher {
@@ -1433,7 +1447,7 @@ impl Launcher {
             }
             _ => SourceConsent::default(),
         };
-        self.submit(false, None, source, mark, window, cx);
+        self.submit(None, None, source, mark, window, cx);
     }
 
     /// The request a press would send now, with `confirm_yolo` as the user's answer to the YOLO question, or `None`
@@ -1489,13 +1503,20 @@ impl Launcher {
         }
     }
 
-    /// [`Launcher::press`], with `confirm_yolo` saying whether the user consented to a YOLO launch on a host that asks
-    /// first (the YOLO question's answers, `yolo_question`), and `confirmed_size` the size they agreed to in the sandbox
-    /// question (`sandbox_question`). Both permissions last for this submit. `source` carries the warning's permission
-    /// across any wait. `mark` is the answer the reply's moved-on check counts from ([`launch::start`]).
+    /// Whether the chosen host still matches the original dispatch that elicited the question.
+    fn matches_yolo_target(&self, target: &YoloTarget, cx: &App) -> bool {
+        self.draft.target.is_none()
+            && self
+                .chosen_host(cx)
+                .is_some_and(|host| target.applies_to(host))
+    }
+
+    /// [`Launcher::press`], with the installation approved by the YOLO question or the size approved by the
+    /// sandbox question. A plain press carries neither. `source` carries the warning's permission across a wait
+    /// and `mark` is the answer the reply's moved-on check counts from ([`launch::start`]).
     fn submit(
         &mut self,
-        confirm_yolo: bool,
+        yolo_consent: Option<YoloConsent>,
         confirmed_size: Option<RecipeSize>,
         source: SourceConsent,
         mark: Mark,
@@ -1508,11 +1529,37 @@ impl Launcher {
         self.sandbox = None;
         // A press speaks for itself: a quick launch's or a shortcut's refusal said before it would hide its reason.
         self.note = None;
-        if self.begin_host_wake(source, mark, window, cx) {
+        if yolo_consent
+            .as_ref()
+            .is_some_and(|consent| !self.matches_yolo_target(&consent.target, cx))
+        {
+            self.yolo_installation_changed(cx);
+            return;
+        }
+        let checkout = yolo_consent
+            .as_ref()
+            .and_then(|consent| consent.checkout.as_ref());
+        if checkout.is_some_and(|checkout| !checkout.shown_wake)
+            && self.checkout_wake_notice(cx).is_some()
+        {
+            self.wake_refused(
+                HostSentence::new("launcher-yolo-checkout-wake-changed")
+                    .text("The host now needs to wake before it can prepare a checkout. Launch again to review the current setup."),
+                cx,
+            );
+            return;
+        }
+        if self.begin_host_wake(
+            yolo_consent.as_ref().map(|consent| &consent.target),
+            source,
+            mark,
+            window,
+            cx,
+        ) {
             return;
         }
         let hosts = self.hosts(cx);
-        let mut request = self.request(confirm_yolo, source, cx);
+        let mut request = self.request(yolo_consent.is_some(), source, cx);
         // A billed environment asks first ("Create a sandbox for this session?"), and its answer submits again.
         let recipes = Recipes::for_draft(&self.draft, self.store.read(cx).collections());
         if let Some(Request::Environment(body)) = request.as_mut()
@@ -1523,18 +1570,34 @@ impl Launcher {
         // The progress pill's host, captured now for the request's life: the registry's display name, without the
         // footer's phase, or the new environment's label (the old pill named its target the same way). A request exists
         // only for a host the refusal check found among `hosts`.
-        let host = match &self.draft.target {
-            Some(environment) => request
+        let destination = match &self.draft.target {
+            Some(environment) => request.as_ref().map(|_| {
+                (
+                    crate::environment_ui::launch_target_label(environment, &hosts),
+                    None,
+                )
+            }),
+            None => request
                 .as_ref()
-                .map(|_| crate::environment_ui::launch_target_label(environment, &hosts)),
-            None => request.as_ref().and(self.chosen_host(cx)).map(display_name),
+                .and(self.chosen_host(cx))
+                .map(|host| (display_name(host), Some(YoloTarget::of(host)))),
         };
-        let (Some(request), Some(host)) = (request, host) else {
+        let (Some(request), Some((host, target))) = (request, destination) else {
             self.pressed = true;
             cx.notify();
             return;
         };
-        if launch::start(cx.entity(), request, host, mark, window, cx) {
+        if checkout.is_some_and(|checkout| request.checkout_path() != Some(checkout.path.as_str()))
+        {
+            self.wake_refused(
+                HostSentence::new("launcher-yolo-checkout-path-changed").text(
+                    "The checkout folder changed. Launch again to confirm the folder shown here.",
+                ),
+                cx,
+            );
+            return;
+        }
+        if launch::start(cx.entity(), request, host, target, mark, window, cx) {
             // Template batches still waiting for the catalog spoke of the draft just sent.
             self.waiting_batches.clear();
             if let Some(layer) = self.layer.take() {
@@ -2394,7 +2457,15 @@ impl Render for Launcher {
             None
         };
         if let Some(state) = &self.yolo {
-            state.show_request(source, self.request(false, source, cx), cx);
+            let shown_checkout_wake = self
+                .checkout_wake_notice(cx)
+                .is_some_and(|(status, _)| status == "wake");
+            state.show_request(
+                source,
+                self.request(false, source, cx),
+                shown_checkout_wake,
+                cx,
+            );
         }
 
         // A held destination (Restart with's) is shown, not edited: its folder as read-only text, its name not at all
@@ -3060,12 +3131,17 @@ impl Launcher {
     /// refusal checks still run first so a missing argument or invalid destination cannot start the host.
     fn begin_host_wake(
         &mut self,
+        yolo_consent: Option<&YoloTarget>,
         source: SourceConsent,
         mark: Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if launch::waking(cx) || self.refusal(cx).is_some() {
+        // A wake always ends the connection that authorized an identity-less answer.
+        if matches!(yolo_consent, Some(YoloTarget::Connection { .. }))
+            || launch::waking(cx)
+            || self.refusal(cx).is_some()
+        {
             return false;
         }
         let Some(host) = self
@@ -3081,7 +3157,16 @@ impl Launcher {
         {
             self.sync_fields(window, cx);
         }
-        if !launch::wake::start(cx.entity(), &self.draft, &host, source, mark, window, cx) {
+        if !launch::wake::start(
+            cx.entity(),
+            &self.draft,
+            &host,
+            yolo_consent.is_some(),
+            source,
+            mark,
+            window,
+            cx,
+        ) {
             return false;
         }
         self.retire_checkout_root_refresh();
@@ -3104,15 +3189,21 @@ impl Launcher {
     /// permission and focus mark. A hidden launcher that waits after this retains its wake's destination hold.
     pub(in crate::launcher) fn continue_after_wake(
         &mut self,
+        yolo_consent: Option<Install>,
         source: SourceConsent,
         mark: Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.quick_launch_unseen && self.draft.folder_default_waiting() {
+        if yolo_consent.is_none() && self.quick_launch_unseen && self.draft.folder_default_waiting()
+        {
             return self.start_or_wait_for_folder(mark, window, cx);
         }
-        self.submit_or_wait_for_preview(source, mark, window, cx)
+        let consent = yolo_consent.map(|installation| YoloConsent {
+            target: YoloTarget::Installation(installation),
+            checkout: None,
+        });
+        self.submit_or_wait_for_preview(consent, source, mark, window, cx)
     }
 
     /// An unsuccessful preparation has sent no create or restart. Keep its reason for the mode's usual alert when

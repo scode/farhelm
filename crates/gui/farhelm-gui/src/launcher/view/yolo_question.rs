@@ -40,6 +40,7 @@ use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::display_name;
 use crate::launcher::draft::Tab;
+use crate::launcher::launch::YoloTarget;
 use crate::launcher::yolo::YoloReason;
 use crate::operations::{OpKey, Outcome};
 use crate::prompt::{self, Answer, Attempt, Inline, Question};
@@ -51,6 +52,12 @@ use crate::session;
 pub struct YoloAsk {
     /// The host to stop asking on, for the permanent answer.
     host: i64,
+    /// The host the launcher originally dispatched to. Plain Replace owns its retry separately.
+    target: Option<YoloTarget>,
+    /// A connected checkout's exact path from the refused request, independent of the current preview.
+    checkout_path: Option<String>,
+    /// Whether the frame with these answers offered automatic allocation after waking the host.
+    shown_checkout_wake: bool,
     /// The host's name as the launcher shows it.
     host_name: HostText,
     reason: HostSentence,
@@ -75,6 +82,9 @@ impl YoloAsk {
         let selection = launch.agent_selection();
         YoloAsk {
             host,
+            target: None,
+            checkout_path: None,
+            shown_checkout_wake: false,
             host_name,
             reason: yolo_reason(
                 YoloReason::of_launch(selection),
@@ -123,17 +133,19 @@ pub(in crate::launcher) struct YoloState {
 }
 
 impl YoloState {
-    /// Bind the permanent answer's launch to the same frame as its source warning.
+    /// Bind the launch request and the option to allocate on wake to the frame with the answer and source warning.
     pub(super) fn show_request(
         &self,
         source: SourceConsent,
         request: Option<Request>,
+        shown_checkout_wake: bool,
         cx: &mut App,
     ) {
         if let Some(inline) = &self.inline {
             let mut ask = self.ask.clone();
             ask.source = Some(source);
             ask.request = request.map(Rc::new);
+            ask.shown_checkout_wake = shown_checkout_wake;
             inline.refresh_value(ask, cx);
         }
     }
@@ -162,10 +174,16 @@ impl Launcher {
     /// The helm refused this launcher's launch because its host asks before YOLO launches: freeze what the question
     /// will ask about, from the draft that was sent (it has not changed: the launcher is hidden while its create is
     /// out). The question itself is asked when the launcher is next shown ([`Launcher::ask_pending_yolo`]).
-    pub(in crate::launcher) fn yolo_asked(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::launcher) fn yolo_asked(
+        &mut self,
+        target: Option<YoloTarget>,
+        checkout_path: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         self.pressed = false;
         self.refused = None;
-        let Some(host) = self.draft.host else {
+        let Some(target) = target.filter(|target| self.matches_yolo_target(target, cx)) else {
+            self.yolo_installation_changed(cx);
             return;
         };
         let (selection, agent, id) = match self.draft.tab {
@@ -187,7 +205,10 @@ impl Launcher {
             .unwrap_or_else(|| HostText::from_host("this host"));
         self.yolo = Some(YoloState {
             ask: YoloAsk {
-                host,
+                host: target.installation().host,
+                target: Some(target),
+                checkout_path,
+                shown_checkout_wake: false,
                 host_name,
                 reason: yolo_reason(reason, agent, id, cx),
                 guarded: reason.offers_guarded(selection.as_ref())
@@ -197,6 +218,16 @@ impl Launcher {
             },
             inline: None,
         });
+        cx.notify();
+    }
+
+    /// A refusal or answer from an earlier installation cannot authorize a wake or a launch here.
+    pub(super) fn yolo_installation_changed(&mut self, cx: &mut Context<Self>) {
+        self.yolo = None;
+        self.note = Some(super::Note::WakeRefusal(
+            HostSentence::new("launcher-yolo-installation-changed")
+                .text("The original host installation could not be verified. Launch again to confirm the current host."),
+        ));
         cx.notify();
     }
 
@@ -222,12 +253,20 @@ impl Launcher {
                     "Start this session in guarded mode instead, where the agent's own safety checks stay on",
                     Tier::Primary,
                 ),
-                run: Box::new(move |source, window, cx| {
+                run: Box::new(move |ask, window, cx| {
                     let mark = Mark::take(cx);
                     let _ = launcher.update(cx, |launcher, cx| {
+                        if !ask.target.as_ref().is_some_and(|target| {
+                            launcher.matches_yolo_target(target, cx)
+                        }) {
+                            launcher.yolo_installation_changed(cx);
+                            return;
+                        }
                         launcher.draft.choose_permissions(Some(LaunchPermission::Guarded));
                         // Changing permission invalidates a managed checkout's preview.
-                        let _ = launcher.submit_or_wait_for_preview(source, mark, window, cx);
+                        let _ = launcher.submit_or_wait_for_preview(
+                            None, ask.source.unwrap_or_default(), mark, window, cx,
+                        );
                     });
                 }),
             }
@@ -249,8 +288,15 @@ impl Launcher {
     }
 }
 
+/// The immediate answer refers to the first dispatch. The permanent answer saves a setting and checks its own shown
+/// request again before continuing, so it has its own snapshot of the destination.
+enum AnswerKind {
+    Once,
+    Permanent,
+}
+
 /// Send a launch again with consent, for the user's answer at the given mark.
-type LaunchAgain = Rc<dyn Fn(SourceConsent, Mark, &mut Window, &mut gpui::App)>;
+type LaunchAgain = Rc<dyn Fn(&YoloAsk, AnswerKind, Mark, &mut Window, &mut gpui::App)>;
 
 /// Whether this permanent answer's question and shown request still match the launcher.
 type CurrentQuestion = Rc<dyn Fn(&YoloAsk, &Attempt, &gpui::App) -> bool>;
@@ -259,7 +305,7 @@ type CurrentQuestion = Rc<dyn Fn(&YoloAsk, &Attempt, &gpui::App) -> bool>;
 pub(in crate::launcher) type Retry = Rc<dyn Fn(Mark, &mut Window, &mut gpui::App)>;
 
 /// Start the guarded launch once, carrying any restart consent from the question.
-type RunGuarded = Box<dyn FnOnce(SourceConsent, &mut Window, &mut gpui::App)>;
+type RunGuarded = Box<dyn FnOnce(&YoloAsk, &mut Window, &mut gpui::App)>;
 
 /// The guarded answer uses the original surface's verb and launch action.
 pub(in crate::launcher) struct GuardedAction {
@@ -300,7 +346,7 @@ pub(in crate::launcher) struct Owner {
 /// consent; its question stays current (there is no draft to edit), and nothing of the launcher redraws.
 pub(in crate::launcher) fn replace_owner(retry: Retry) -> Owner {
     Owner {
-        launch: Rc::new(move |_, mark, window, cx| retry(mark, window, cx)),
+        launch: Rc::new(move |_, _, mark, window, cx| retry(mark, window, cx)),
         current: Rc::new(|_, _, _| true),
         redraw: Rc::new(|_| {}),
     }
@@ -310,9 +356,26 @@ pub(in crate::launcher) fn replace_owner(retry: Retry) -> Owner {
 fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
     let (launching, checking, redrawing) = (launcher.clone(), launcher.clone(), launcher);
     Owner {
-        launch: Rc::new(move |source, mark, window, cx| {
+        launch: Rc::new(move |ask, kind, mark, window, cx| {
             let _ = launching.update(cx, |launcher, cx| {
-                launcher.submit(true, None, source, mark, window, cx)
+                if let Some(target) = ask.target.clone() {
+                    let checkout = match kind {
+                        AnswerKind::Once => {
+                            ask.checkout_path.clone().map(|path| super::YoloCheckout {
+                                path,
+                                shown_wake: ask.shown_checkout_wake,
+                            })
+                        }
+                        AnswerKind::Permanent => None,
+                    };
+                    launcher.submit_or_wait_for_preview(
+                        Some(super::YoloConsent { target, checkout }),
+                        ask.source.unwrap_or_default(),
+                        mark,
+                        window,
+                        cx,
+                    );
+                }
             });
         }),
         current: Rc::new(move |ask, attempt, cx| {
@@ -324,6 +387,10 @@ fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
                     .is_some_and(|inline| attempt.belongs_to(inline));
                 let source = ask.source.unwrap_or_default();
                 same_question
+                    && ask
+                        .target
+                        .as_ref()
+                        .is_some_and(|target| launcher.matches_yolo_target(target, cx))
                     && ask.request.is_some()
                     && launcher.request(false, source, cx).as_ref() == ask.request.as_deref()
             })
@@ -350,7 +417,7 @@ pub(in crate::launcher) fn ask_question(
         mark,
         move |ask: YoloAsk, window, cx| {
             let mark = Mark::take(cx);
-            launch(ask.source.unwrap_or_default(), mark, window, cx);
+            launch(&ask, AnswerKind::Once, mark, window, cx);
         },
         window,
         cx,
@@ -391,7 +458,7 @@ fn question(ask: &YoloAsk, guarded: Option<GuardedAction>, owner: Owner) -> Ques
     ));
     if let Some(guarded) = guarded {
         question = question.alternative(guarded.button, move |ask, window, cx| {
-            (guarded.run)(ask.source.unwrap_or_default(), window, cx)
+            (guarded.run)(&ask, window, cx)
         });
     }
     question
@@ -434,7 +501,6 @@ fn stop_asking_then_launch(
     };
     // The answer is the user's press the launch's moved-on check counts from, not the write's reply.
     let mark = Mark::take(cx);
-    let source = ask.source.unwrap_or_default();
     let handle = window.window_handle();
     // The attempt settles from the write's reply; a write the store refuses to start settles it at once instead.
     let pending = Rc::new(std::cell::Cell::new(Some(attempt)));
@@ -464,7 +530,13 @@ fn stop_asking_then_launch(
                         attempt.succeeded(cx);
                         if current {
                             let _ = cx.update_window(handle, |_, window, cx| {
-                                (on_reply.launch)(source, mark, window, cx)
+                                (on_reply.launch)(
+                                    &answered,
+                                    AnswerKind::Permanent,
+                                    mark,
+                                    window,
+                                    cx,
+                                )
                             });
                         }
                     }

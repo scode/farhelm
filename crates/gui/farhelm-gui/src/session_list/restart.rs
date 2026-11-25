@@ -323,6 +323,7 @@ pub(crate) fn confirm(frozen: Frozen, _: &mut Window, cx: &mut App) {
 /// (it relaunches a choice already made).
 pub(crate) fn command(session: &str, stop_if_running: bool) -> Result<Command, PathError> {
     let request = RestartSessionBody {
+        expected_incarnation: None,
         conversation: None,
         stop_if_running,
         with: None,

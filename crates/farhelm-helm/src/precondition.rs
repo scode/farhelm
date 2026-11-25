@@ -1,12 +1,6 @@
-//! The one precondition a session create may carry: which CONNECTION the
-//! caller prepared it against.
+//! A request can pin the CONNECTION its launch or displayed data belongs to.
 //!
-//! ## Why only the create carries it
-//!
-//! This module once held checks for other host-scoped mutations too; they
-//! went with the routes they guarded. The session CREATE kept its guard on
-//! purpose, because a create is an ACTION and the failure it closes is a
-//! silent success on the wrong machine:
+//! ## What it protects
 //!
 //! A create names its host by REGISTRY ID, and a registry id outlives the
 //! install it points at — a retarget or an adoption made elsewhere replaces
@@ -16,10 +10,13 @@
 //! its own check and the helm's routing, so the check travels WITH the
 //! request. The still-open TODO entry on the HostId-reuse create-default
 //! window relies on this check by name.
+//! Restart with uses the same comparison to pin each dispatch. On a host
+//! without a verified identity, the launcher must keep the connection that
+//! refused the first dispatch through its answer.
 //!
 //! ## Optional, always
 //!
-//! Absent means "no expectation", and the create behaves exactly as it did
+//! Absent means "no expectation", and the request behaves exactly as it did
 //! before this guard existed: `curl`, scripts, the CLI, and older UI builds
 //! have no incarnation to name, and a mandatory precondition would make the
 //! API unusable by hand for the sake of a race those callers are not in.

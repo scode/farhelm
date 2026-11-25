@@ -1006,6 +1006,17 @@ setting write or a wait for the checkout preview. The hook-setup answer carries 
 the checkout preview is still loading when it continues, the launcher refuses the attempt and requires a fresh press
 after the preview is ready.
 
+A launcher's YOLO question binds to the original New, Clone, Replace with or Restart with dispatch. On a verified
+installation the answer survives a reconnect to that installation. It can wake the suspended sandbox or stopped
+container and follow the resulting connection through a checkout preview. On a host with no recorded identity the answer
+applies only while the original connection is live. The helm checks the connection named by both the initial request and
+its retry against the routed claim. Restart with pins each dispatch, as Create and Replace with do. A verified answer
+can then use a fresh connection to the same installation, once the launcher has seen it. After a wake, reconnect or
+installation change outside that binding, a fresh launch needs its own confirmation. A connected checkout retry must use
+the first request's directory. Only an answer that starts a wake from a frame offering allocation after wake can use a
+different directory. Replace with and Restart with keep the same source warning and folder guards. The one-time
+permission leaves with the launch that carries it.
+
 **Create and launch** carries the sandbox's displayed CPU, memory and disk from the answered question. A confirmed
 request to `POST /api/environment-sessions` requires that size. The helm compares it against the recipe definition used
 for registration and creation and refuses a mismatch before registering the host or calling the provider. The legacy

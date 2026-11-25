@@ -7275,6 +7275,77 @@ async fn restart_with_an_invalid_selection_is_a_400_and_never_reaches_the_superv
     peer.await.unwrap();
 }
 
+/// The request that asks for YOLO confirmation and the answer must both target their original Restart connection.
+/// The peer's first frame proves that neither stale request reached it. A fresh retry still starts normally.
+#[farhelm_testtrace::test]
+async fn restart_with_yolo_rejects_a_stale_connection_before_dispatch() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::RestartSession {
+            req_id,
+            with: Some(launch),
+            ..
+        } = message
+        else {
+            panic!("expected the current connection's edited restart, got {message:?}");
+        };
+        assert_eq!(launch.display_command(), "fresh-agent");
+        writer
+            .write_control(&ControlMsg::SessionRestarted {
+                req_id,
+                session: rest_harness::session("sess-1", 1),
+            })
+            .await
+            .unwrap();
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let local = rest_harness::local_id(&harness.store).await;
+    let current = harness
+        .manager
+        .status(local)
+        .expect("live host actor")
+        .incarnation;
+    assert_ne!(current, 0);
+    let route = harness.local_session_uri("/api/sessions/sess-1/restart");
+    for confirm_yolo in [false, true] {
+        let (status, headers, body) = post_text_headers(
+            &harness,
+            &route,
+            serde_json::json!({
+                "with_command": {"command":"earlier-agent", "yolo": true},
+                "expected_incarnation": current - 1,
+                "confirm_yolo": confirm_yolo,
+            }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+        assert!(is_stale_precondition(&headers), "{body}");
+    }
+    let (status, body) = post_text(
+        &harness,
+        &route,
+        serde_json::json!({
+            "with_command": {"command":"fresh-agent", "yolo": true},
+            "expected_incarnation": current,
+            "confirm_yolo": true,
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    peer.await.unwrap();
+}
+
 /// A stale-offer refusal must reach the client as a 409 carrying the
 /// supervisor's own prose — that message names the CURRENT offer, and
 /// re-presenting it is the client's prescribed response (the wire
@@ -13820,6 +13891,7 @@ mod client_bodies {
     fn a_restart_body_decodes_into_the_helms_restart_request() {
         for (with, with_command) in [(Some(selection()), None), (None, Some(command()))] {
             let body = RestartSessionBody {
+                expected_incarnation: Some(14),
                 conversation: Some("0123-abcd".into()),
                 stop_if_running: true,
                 with,
@@ -13829,12 +13901,14 @@ mod client_bodies {
             let req: RestartReq = decode(&body);
             // Without `..`, so a new client field must be checked here.
             let RestartSessionBody {
+                expected_incarnation,
                 conversation,
                 stop_if_running,
                 with,
                 with_command,
                 confirm_yolo,
             } = body;
+            assert_eq!(req.expected_incarnation, expected_incarnation);
             assert_eq!(req.conversation, conversation);
             assert_eq!(req.stop_if_running, stop_if_running);
             assert_eq!(req.with, with);
@@ -13851,6 +13925,7 @@ mod client_bodies {
     fn a_plain_restart_body_decodes_with_only_its_consent() {
         for stop_if_running in [false, true] {
             let body = RestartSessionBody {
+                expected_incarnation: None,
                 conversation: None,
                 stop_if_running,
                 with: None,
@@ -13858,6 +13933,7 @@ mod client_bodies {
                 confirm_yolo: false,
             };
             let req: RestartReq = decode(&body);
+            assert_eq!(req.expected_incarnation, None);
             assert_eq!(req.conversation, None);
             assert_eq!(req.stop_if_running, stop_if_running);
             assert_eq!(req.with, None);

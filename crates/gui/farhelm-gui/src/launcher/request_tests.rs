@@ -558,6 +558,7 @@ fn restart_with_needs_an_edit_and_sends_it() {
     let body = draft
         .restart_body(target(&hosts, None), Some(&launch), true)
         .expect("an edit");
+    assert_eq!(body.expected_incarnation, Some(hosts[0].incarnation));
     let with = body.with.expect("an agent edit");
     assert_eq!(with.effort, Some(LaunchEffort::Low.into()));
     assert_eq!(
@@ -565,6 +566,30 @@ fn restart_with_needs_an_edit_and_sends_it() {
         Some(vec!["--sandbox".to_owned(), "danger full".to_owned()])
     );
     assert!(body.stop_if_running && body.with_command.is_none());
+}
+
+/// Restart with gives the helm the connection token for an identity-less host so the request cannot be rerouted to
+/// a later connection before the supervisor sees it.
+#[test]
+fn restart_with_pins_the_connection_when_the_host_has_no_identity() {
+    let mut hosts = hosts();
+    let host = hosts.iter_mut().find(|host| host.id == 1).unwrap();
+    host.identity = None;
+    let incarnation = host.incarnation;
+    assert_ne!(incarnation, 0);
+    let launch = agent_launch(codex());
+    let mut draft = LaunchDraft::restart_with(
+        "s1",
+        &session(launch.clone(), RestartOffer::Resume),
+        Some(1),
+    )
+    .unwrap();
+    draft.choose_effort(Some(LaunchEffort::Low));
+    let body = draft
+        .restart_body(target(&hosts, None), Some(&launch), false)
+        .expect("an edit on a connected host");
+    assert_eq!(body.expected_incarnation, Some(incarnation));
+    assert!(!body.confirm_yolo);
 }
 
 /// A session with no captured conversation must name one to restart; a stored launch that changed since the launcher
