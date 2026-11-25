@@ -151,7 +151,8 @@ impl Launcher {
                 self.close_search(window, cx);
                 focus::focus_in_layer(&self.search.focus_handle(cx), &mark, window, cx);
                 if keyboard {
-                    self.press(window, cx);
+                    // This Enter takes the presented recent row, which supplies its own destination.
+                    self.press_at(None, Mark::take(cx), window, cx);
                 }
             }
             Err(RecentRefusal::Retired) => self.notice = Some(RETIRED_CONTAINER_REASON.into()),

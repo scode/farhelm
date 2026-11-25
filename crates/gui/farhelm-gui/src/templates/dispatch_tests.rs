@@ -878,6 +878,45 @@ fn a_suspended_quick_launch_returns_if_the_host_drops_out_during_history(cx: &mu
     assert!(creates(&mut helm, cx).is_empty());
 }
 
+/// A connected-to-connected update invalidates the pending history without ending the wake. The hidden launch
+/// must ask again and bind its create to the new connection and that connection's folder.
+#[gpui::test]
+fn a_suspended_quick_launch_retries_history_for_the_new_connection(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, resume) = begin_suspended_quick_launch(cx, None);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    let stale = wake_to_folder_history(&mut helm, cx, &mut host);
+    let incarnation = host.incarnation;
+    let connected = crate::session_list::environment_tests::connected();
+    push_waking_host(&mut helm, cx, &mut host, connected);
+    assert!(host.incarnation > incarnation);
+    assert!(label(cx, "launch-wake").is_some());
+    let mut old = folder_history_after_wake();
+    old["launches"][0]["cwd"] = json!("/srv/stale");
+    old["launches"][0]["canonical_cwd"] = json!("/srv/stale");
+    helm.reply(stale.id, 200, Some(old));
+    settle(cx);
+    let sent = answer_except(&mut helm, cx, |command| {
+        command.path == "/api/launch-history?host=12" || command.path == "/api/sessions"
+    });
+    let [history] = &sent[..] else {
+        panic!("one renewed history read expected, got {sent:?}");
+    };
+    assert_eq!(history.path, stale.path);
+    assert_ne!(history.id, stale.id);
+    helm.reply(history.id, 200, Some(folder_history_after_wake()));
+    settle(cx);
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create expected on the new connection, got {sent:?}");
+    };
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["expected_incarnation"], host.incarnation);
+    assert_eq!(body["cwd"], "/srv/last-work");
+    helm.reply(create.id, 409, Some(json!("The test refused the create")));
+    settle(cx);
+}
+
 /// History on the awakened installation includes a recent plain-folder launch, which New inherits.
 fn folder_history_after_wake() -> serde_json::Value {
     json!({

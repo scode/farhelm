@@ -1207,7 +1207,7 @@ impl LaunchDraft {
     /// Whether the folder is still the default New seeded: untouched, on a folder destination this draft may change. A
     /// new environment's fixed home is no host's default, so nothing waits for a host's history to decide it, and a
     /// history answer seeds nothing into it.
-    fn folder_is_the_default(&self) -> bool {
+    pub(super) fn folder_is_the_default(&self) -> bool {
         !self.folder.is_touched()
             && self.checkout.is_none()
             && !self.holds(Field::Destination)

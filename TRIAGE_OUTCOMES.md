@@ -660,31 +660,6 @@
   back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-visible-new-wake-replaces-tilde-and-quick-launch-error.md
-
-- Outcome: `fix code`.
-- Assessment: Open New on a suspended sandbox or stopped container and leave Folder at the `~` it shows, then press
-  Launch. The host wakes and the session silently starts in the folder last used on that host, not `~`. If that host's
-  history cannot be read, New comes back with "Couldn't prepare quick launch: …" although no quick launch was used.
-  Verified: confirmed by source. `draft_refusal` exempts a wakeable host from `FOLDER_DEFAULT_WAITING` for any launcher,
-  not just hidden quick launches (`launcher/request.rs:268-272`). `continue_after_wake` routes any launcher whose
-  default is still pending into `start_or_wait_for_folder` (`view.rs:2994-3004`). That function settles from history and
-  submits, or sets `QUICK_LAUNCH_FOLDER_UNREAD` without checking `quick_launch_unseen` (`view.rs:401-417`).
-  `draft.rs:461-463` states the opposite intent for a visible launcher ("launches into it as any `~`"). SPEC.md,
-  "Working directory" (`SPEC.md:1092-1097`) prefills from history and says "a refresh of the recent setups never
-  rewrites an open draft's folder"; SPEC_impl.md:995-999 binds actions to what was drawn. Not clearly settled: either
-  launch into the drawn `~`, or show that the folder will be chosen after wake. Workspace trust and YOLO in an
-  unintended folder were raised as a possible `highest` route, but harm to files there is not established.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code. A visible launcher settles to the drawn folder at press time,
-  and quick-launch wording is limited to hidden launches. Size M. Size gate: about 100 lines of diff (code, tests and
-  docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
-  item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
 ## settings-close-can-save-unlisted-drafts.md
 
 - Outcome: `fix code`.
@@ -1837,30 +1812,6 @@
   landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## trailing-hidden-post-wake-folder-wait-wedges-launcher.md
-
-- Outcome: `fix code`.
-- Assessment: A quick launch (or a launch that just woke its host) waits out of sight for the host's recent-folder
-  history. If the host reconnects meanwhile without being reported as disconnected, the history answer is thrown away
-  and nothing retries. The launch stays stuck with its "Resuming…" pill, and new launches and that host's Suspend/Resume
-  are blocked until the host disconnects or the window reconnects to the helm. Verified: confirmed by source. After
-  wake, `wake::follow` returns early whenever the host is still `Connected` with the same installation, without
-  comparing incarnation or verification (`launcher/launch/wake.rs:214-219`). The history reply callback returns before
-  `history_settled_for_quick_launch` when the key moved (`launcher/view/history.rs:135-139` vs `:161`). `folder_wait` is
-  then never taken again (`view.rs:401-410, 425-441`). The same early return can also strand a non-wake hidden quick
-  launch whose host changes during the read (by inspection; not run). This is a persistent wedge, so no filter applies.
-- Decision: q-wake, "What waking a host at launch must guarantee": the maintainer picked "Never wedge, fail fast, word
-  per provider". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "Wait, another
-  complexity gate. If this turns complicated, the executor must stop and turn it into a follow-up to the item explaining
-  what's complicated and why."
-- Completion criteria: Launch-time waking never wedges, fails fast and words failures per provider. Recommendation for
-  reference: fix code (settle or re-drive the folder wait when a stale reply is dropped while one is pending). Size S-M
-  with a test. Complexity gate (maintainer): if the fix turns very complicated during execution, the executor stops and
-  turns it into a follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-wake-drops-one-time-yolo-confirmation.md

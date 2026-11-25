@@ -64,8 +64,8 @@ use gpui::{
 };
 
 use super::draft::{
-    Catalog, FOLDER_INSTALLATION_MOVED, Field, LaunchDraft, Mode, Tab, harness_label,
-    remembered_permission,
+    Catalog, FOLDER_INSTALLATION_MOVED, Field, FolderDefault, Install, LaunchDraft, Mode, Tab,
+    harness_label, remembered_permission,
 };
 use super::launch::{self, Request};
 use super::read_model_catalog;
@@ -81,7 +81,7 @@ use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, phase};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
 use crate::operations::OpKey;
-use crate::prompt::ActionFrame;
+use crate::prompt::{ActionFrame, ShownAction};
 use crate::session_list::replace;
 use crate::store::HelmStore;
 use crate::templates::checkout_name;
@@ -569,10 +569,15 @@ pub(super) struct SourceConsent {
     delete: Option<DeleteGuard>,
 }
 
+/// The automatic folder New or Clone offers for an installation, with its history state and wake eligibility.
+/// An unread history reply can make Launch available without changing the displayed `~`.
+type DefaultFolderTarget = (Install, String, FolderDefault, bool);
+
 /// The open launcher. See the module docs.
 pub(crate) struct Launcher {
     pub(super) draft: LaunchDraft,
     source_frame: ActionFrame<SourceConsent>,
+    default_folder_frame: ActionFrame<DefaultFolderTarget>,
     /// The store, read while drawing for the hosts, the source session and the preferences.
     store: Entity<HelmStore>,
     /// The model catalog once read; `None` until then, or after a failed read.
@@ -921,6 +926,7 @@ impl Launcher {
             notice: None,
             pressed: false,
             source_frame: ActionFrame::default(),
+            default_folder_frame: ActionFrame::default(),
             refused: None,
             folder,
             name,
@@ -1336,7 +1342,37 @@ impl Launcher {
     /// layer closes, and the launcher waits for the reply out of sight. The press is the user's answer the reply's
     /// moved-on check counts from, so this runs in the handler of that press, never deferred.
     pub(super) fn press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.press_at(None, Mark::take(cx), window, cx);
+        if self.accepts_default_folder(self.default_folder_frame.current().as_ref(), cx) {
+            self.press_at(None, Mark::take(cx), window, cx);
+        }
+    }
+
+    /// The only folder a history answer can change without a new user edit. Replace and Restart have their own guards.
+    fn default_folder_target(&self, cx: &App) -> Option<DefaultFolderTarget> {
+        if self.draft.holds(Field::Host) || !self.draft.folder_is_the_default() {
+            return None;
+        }
+        let host = self.chosen_host(cx)?;
+        Some((
+            Install::of(host),
+            self.draft.folder.value().to_owned(),
+            self.draft.folder_default,
+            self.draft.can_wake(host),
+        ))
+    }
+
+    /// GPUI can draw a new history default to handle Enter before it presents the frame. Both a button and a
+    /// shortcut can launch into the automatic folder only after its own frame has shown it.
+    fn accepts_default_folder(
+        &self,
+        action: Option<&ShownAction<DefaultFolderTarget>>,
+        cx: &App,
+    ) -> bool {
+        match (action, self.default_folder_target(cx)) {
+            (None, None) => true,
+            (Some(action), Some(target)) => action.shown() == Some(&target),
+            _ => false,
+        }
     }
 
     /// A button or hook answer carries its own source warning. Shortcuts without a button use the current presented
@@ -2306,6 +2342,12 @@ impl Render for Launcher {
         if self.settle_folder_default(cx) {
             self.sync_fields(window, cx);
         }
+        let folder_action = self
+            .default_folder_target(cx)
+            .map(|target| self.default_folder_frame.capture(target, (), window));
+        if folder_action.is_none() {
+            self.default_folder_frame.clear();
+        }
         self.follow_folder_list(window, cx);
         self.reflow_search(window, cx);
         let palette = theme::palette(cx);
@@ -2877,13 +2919,16 @@ impl Render for Launcher {
             // Busy while the YOLO question's host write is out, when a press does nothing (`Launcher::press`).
             .busy(holding || self.hook_answer_pending(cx))
             .on_click(on_launcher(weak.clone(), move |launcher, window, cx| {
+                if !launcher.accepts_default_folder(folder_action.as_ref(), cx) {
+                    return;
+                }
                 // A click on this button can authorize only the source warning from its own rendered frame.
                 if let Some(action) = &source_action {
                     if let Some(&source) = action.shown() {
                         launcher.press_at(Some(source), Mark::take(cx), window, cx);
                     }
                 } else {
-                    launcher.press(window, cx);
+                    launcher.press_at(None, Mark::take(cx), window, cx);
                 }
             })),
         );
@@ -3005,13 +3050,24 @@ impl Launcher {
         else {
             return false;
         };
-        if self.draft.folder_default_waiting() && self.settle_folder_default(cx) {
+        if self.quick_launch_unseen
+            && self.draft.folder_default_waiting()
+            && self.settle_folder_default(cx)
+        {
             self.sync_fields(window, cx);
         }
         if !launch::wake::start(cx.entity(), &self.draft, &host, source, mark, window, cx) {
             return false;
         }
         self.retire_checkout_root_refresh();
+        // A visible press authorizes the folder shown at the time. Once the wake is sent,
+        // a new connection's history must not replace that folder with a different default.
+        if !self.quick_launch_unseen && self.draft.folder_default_waiting() {
+            self.draft.settle_folder_default(
+                Some(self.draft.folder.value().to_owned()),
+                Install::of(&host),
+            );
+        }
         self.waiting_batches.clear();
         if let Some(layer) = self.layer.take() {
             layers::close(layer, window, cx);
@@ -3028,7 +3084,7 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.draft.folder_default_waiting() {
+        if self.quick_launch_unseen && self.draft.folder_default_waiting() {
             return self.start_or_wait_for_folder(mark, window, cx);
         }
         self.submit_or_wait_for_preview(source, mark, window, cx)

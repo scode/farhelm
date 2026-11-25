@@ -19,7 +19,7 @@ use crate::test_support::{advance, click, label, meta, settle};
 
 const RESUME: &str = "/api/hosts/12/resume";
 
-/// One real launcher on the pinned sandbox suspension, ready to submit a complete command without needing history.
+/// One real launcher on the pinned sandbox suspension, whose home is available before history can be read.
 fn open(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, HostView) {
     let hosts = fixture_hosts(&[0, 11]);
     let host: HostView = serde_json::from_value(hosts.entries[1].value.clone()).unwrap();
@@ -28,7 +28,7 @@ fn open(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, HostView)
     open_on(cx, host)
 }
 
-/// Use the same install and selected folder across lifecycle phases so only the host's ability to wake changes.
+/// Use the same install and pending home folder across lifecycle phases, with no stored folder to take.
 fn open_on(
     cx: &mut TestAppContext,
     host: HostView,
@@ -37,7 +37,6 @@ fn open_on(
     hosts.entries[1].value = serde_json::to_value(&host).unwrap();
     let mut draft = command_draft();
     draft.choose_host(host.id, "~".into());
-    draft.edit_folder("/home/user/work".into());
     let (helm, cx) = launcher_with_hosts(cx, draft, hosts);
     (helm, cx, host)
 }
@@ -87,11 +86,13 @@ pub(crate) fn push(
     settle(cx);
 }
 
-/// An accepted Resume can arrive while the pushed row still says Suspended. Keep the form hidden and
-/// the preparation capsule honest until a fresh connection can bind the create.
+/// A visible New press on the home folder uses that folder on the fresh connection. The accepted Resume can
+/// arrive first, so the form stays hidden and the capsule describes the wake until a create is possible.
 #[gpui::test]
 fn a_wake_uses_the_fresh_connection_and_the_unsuffixed_host_name(cx: &mut TestAppContext) {
     let (mut helm, cx, mut host) = open(cx);
+    assert!(super::view_tests::draft(cx).folder_default_waiting());
+    assert!(label(cx, "launcher-launch").unwrap().contains('~'));
     let resume = press(&mut helm, cx);
     assert!(label(cx, "launch-wake").unwrap().starts_with("Resuming "));
     helm.reply(resume.id, 200, None);
@@ -101,13 +102,18 @@ fn a_wake_uses_the_fresh_connection_and_the_unsuffixed_host_name(cx: &mut TestAp
     assert!(label(cx, "launch-wake").is_some());
 
     push(&mut helm, cx, &mut host, connected());
-    let sent = creates(&mut helm, cx);
+    // A history reply must never get to choose a different folder for this press.
+    let sent = answer_except(&mut helm, cx, |command| {
+        command.path == "/api/sessions" || command.path == "/api/launch-history?host=12"
+    });
     let [create] = &sent[..] else {
         panic!("one create expected, got {sent:?}")
     };
+    assert_eq!(create.path, "/api/sessions");
     let body = create.body.as_ref().unwrap();
     assert_eq!(body["host"], host.id);
     assert_eq!(body["expected_incarnation"], host.incarnation);
+    assert_eq!(body["cwd"], "~");
     advance(cx, Duration::from_secs(2));
     let words = label(cx, "launch-progress").expect("the slow-create pill");
     assert!(words.contains("host12"), "{words}");

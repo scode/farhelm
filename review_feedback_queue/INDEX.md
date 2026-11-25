@@ -85,15 +85,6 @@ consequences.
   — When waking a stopped container or previously failed sandbox fails past 20 seconds or repeats the same error, the
   launcher either hangs for 60 seconds or reports that the host was suspended again.
 
-- [`trailing-hidden-post-wake-folder-wait-wedges-launcher.md`](trailing-hidden-post-wake-folder-wait-wedges-launcher.md)
-  — If a waking or quick-launch host changes connection incarnation while the hidden launcher reads its recent folders,
-  the stale reply is ignored and the launcher stays permanently stuck until disconnect or reset.
-
-- [`trailing-visible-new-wake-replaces-tilde-and-quick-launch-error.md`](trailing-visible-new-wake-replaces-tilde-and-quick-launch-error.md)
-  — Launching from a visible New dialog on a suspended or stopped host showing ~ wakes the host and silently starts in
-  an unshown remembered folder (which can also enable workspace trust or YOLO there), or fails with quick-launch
-  wording.
-
 - [`trailing-settings-trust-help-omits-agent-requested-launches.md`](trailing-settings-trust-help-omits-agent-requested-launches.md)
   — The Settings pages for Codex, Muse, Pi, and Antigravity omit that their workspace-trust switch also applies to
   agent-requested launches, which run without an approval card on Always-allow hosts.
