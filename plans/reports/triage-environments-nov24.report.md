@@ -124,3 +124,116 @@ The independent Sol code review and Opus visual gates passed for the delivered c
 installation and deadline assertions, checked what the launcher had actually shown before Enter, and added a notice-only
 Trash case. Light and dark references were reviewed together. A fresh Sol pass found no blocking integration issues on
 the rebase. It noted inherited repository-scan documentation drift.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round, through its eighteen PRs and the landing fix
+[#4961](https://github.com/scode/farhelm/pull/4961/changes). Since the plan's PRs were written, main gained the sandbox
+workspace trust plan (#4943, #4955, #4958), which landed in the previous round: launches into a session's own sandbox or
+container now get workspace trust automatically, and recipe host setup fills in Claude Code's first-run setting. Both
+plans change how the helm creates sessions in sandboxes and how it provisions hosts, so the landing's review read them
+against each other and found no interaction:
+
+- **Launches that wait for a host to wake.** This plan changes several of them (a visible Launch press, a quick launch,
+  Restart with, a managed checkout's preview after a wake). Each reaches the helm only after the host has reconnected,
+  and the helm then decides workspace trust from the connection it creates the session on, so a destination that changed
+  during the wake is judged afresh.
+- **Setup and Update refused during environment deletion.** This does not collide with the new Claude first-run step,
+  which runs as part of credential delivery when a host is added or connects, not through Setup or Update.
+- **Specs.** The two plans' SPEC.md and SPEC_impl.md edits are in different paragraphs and agree.
+
+The rebase applied without conflicts, and a file-by-file comparison confirmed every file's change is exactly what the
+executor pushed. Before rebasing I removed stale copies of the plan's commits that an earlier fetch, made while the
+executor was pushing, had left in the landing checkout; they were older revisions of the same commits and never part of
+what landed.
+
+The review counted no blockers, no should-fix items and six small points. Three are fixed below (the two changelog
+drafts and the code comment); the missing scene list entries were found by the checks, not the review. The other three
+are the last three items of the last section.
+
+#### Fixes made while landing
+
+- **Eight new screenshots were missing from the screenshot scene list.** The plan added golden pictures of its new
+  launcher, Stop, Trash and Tensorlake cleanup states, but not their entries in the scene list of the screenshot batch
+  tool (the side-by-side page of the app's screens next to the old app's), so that tool's test failed on the plan's
+  final revision. #4961 adds them.
+- **Two changelog drafts misstated their scope.** The draft for the late checkout notice limited it to disposable
+  environments, but it also covers Replace with on any host; the draft for the checkout lifetime note limited it to
+  Replace with, but it appears for any new managed checkout inside an existing sandbox or container. #4961 corrects
+  both, so the release curation does not copy the narrower claims.
+- **A stale code comment.** The comment on the launcher's wake refusal note still described a complete refusal, though
+  the launcher now adds the "Not launched." or "Restart error." lead itself and the note also carries a failed checkout
+  preview after a wake. #4961 updates it.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the plan's PRs rebased onto main as it stood at the start of the landing (`455d5f00`), without conflicts; the rebased
+stack's top commit was `5923a344`. The only later change is the landing fix
+[#4961](https://github.com/scode/farhelm/pull/4961/changes), which adds eight entries to the screenshot scene list and
+corrects two changelog drafts and one code comment; after it I ran the scene list's test again (recorder run
+`1b16bdfc-56b2-48a5-94ff-d2c97b6870a8`, passed) and the formatters and the changelog check, which passed. That final
+tree is what main now holds outside the plans queue.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `0ac3e74c-40b1-4590-b68b-131c6d761933`): 8672 of 8673 tests passed, with no runtime skip. The one failure,
+  `codex_subscription_and_none_enter_setup_without_an_endpoint` in the helm's Tensorlake Add tests, is a known flake on
+  main, not this plan's: run alone ten times on the test worker it failed 3 times on this plan's tree and 3 times on
+  main's tree without the plan (recorder runs under the selection "tensorlake_add
+  codex_subscription_and_none_enter_setup_without_an_endpoint", for example `c2361467-e105-43a7-82bd-bdf634b8f0fa` and
+  `d980e1a7-7c6f-447f-9c89-b42e5b3f57df` failing on the plan's tree, and `74684414-d0a4-4527-844f-2df823127ddd` failing
+  on main's). The last section says more. The plan changed the helm's sessions, sandbox, provisioning, agent requests
+  and Tensorlake leftover cleanup, the supervisor's create path, and the GUI's launcher, session list, Trash and
+  Settings, with their tests; the whole suite was the narrowest run that covered them and their callers.
+- The desktop app's tests, `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run
+  `8764b7c2-4ae1-43d6-b564-ab59de279eac`): all 184 passed.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings`, on the test worker: passed.
+- The desktop app's end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run
+  `8c76f477-b3b8-461b-800e-54b5c3c6ae06`): 50 steps passed, one skipped by design on Linux (paste). It drives the
+  launcher, Stop and Trash.
+- The desktop app's screenshot comparison, `python3 scripts/check-gui-goldens.py`, all scenes, locally (recorder run
+  `41ea61e8-6a5e-412e-a6f4-0c055bd8107c`): passed, including the plan's eight new scenes.
+- The screenshot batch tool's test, `python3 -B scripts/test-gui-screenshot-batch.py`, locally: failed on the plan's
+  stack (recorder run `6f7fcb81-cf3d-4107-b160-16cc832ea526`) because the eight new scenes were not listed, and passed
+  with the landing fix.
+- `cargo fmt --all -- --check`, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no
+  errors; one warning, about an old citation in the triage archive, already on main),
+  `python -B scripts/check-test-sleeps.py` and `dprint check`, locally: passed.
+
+Reused: none. The executor's runs were focused selections on the older base, and everything they covered ran again
+above.
+
+Skipped: live Tensorlake and container launches, which need provider accounts; the workspace doctests, since no
+documentation example changed; a Mac run, since nothing changed is Mac-specific; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+- Nothing. The executor did not run the screenshot scene list's test, which failed on the plan's final revision as
+  above, but the report does not claim it passed.
+
+#### Things you should know that the report does not say
+
+- **A Tensorlake setup test on main now fails about a third of the time.** The workspace run's one failure is
+  `codex_subscription_and_none_enter_setup_without_an_endpoint`, which adds a Tensorlake host whose recipe uses a Codex
+  subscription login, or no Codex login, and checks what the host's record of delivered credentials says about Codex
+  afterwards. It is the flake recorded in the draft flake-record PR
+  [#4757](https://github.com/scode/farhelm/pull/4757/changes), still open for you. That PR's suspected cause, not yet
+  confirmed, is that the credential delivery that runs when the new host connects can write to that record before the
+  test reads it. It failed 2 of 25 runs when that PR was written; here it failed 3 of 10 both with and without this
+  plan, so this plan does not cause it, but something since then has made it fail more often. I suspect, without having
+  checked, the previous round's Claude first-run step, which adds another write to that same delivery. I recommend
+  merging #4757 and fixing the test's wait; say if you want me to update #4757 with these numbers.
+- **Replace with's timeout message does not point at the notices bell.** When Replace with takes too long to answer, its
+  message says the session list will show the result, but the bell is now the only place the left-behind checkout's path
+  appears. Delete's timeout message does point at the bell. A one-sentence wording change; say if you want a TODO entry.
+- **One test pins a reply a real sandbox never sends.** The new Replace with Trash test has a sandbox or container
+  report the source checkout as archived, which never happens there, since Delete in a sandbox discards the checkout. It
+  checks the right refresh, but a correct later change that skipped the Trash refresh for such hosts would fail it. A
+  follow-up could have the test use a host that can archive; I judge it minor, so say if you want a TODO entry.
+- **A Launch press in the first frame after opening can do nothing.** If it lands before the untouched default folder
+  has been drawn, the press is ignored without feedback, on purpose, so that it can never launch into a folder the user
+  did not see. The review judged that acceptable.
