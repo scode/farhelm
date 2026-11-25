@@ -62,6 +62,47 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   with the launcher. Settings and the other dialogs come after this, once the look is settled. Plan:
   `plans/queue/launcher-style-quick-dialogs.md`.
 
+- **Remove GPT-5.6 models from the catalog.** OpenAI is retiring the GPT-5.6 models (Codex 0.172.0 already interrupts
+  `gpt-5.6-terra` with a retirement prompt). Remove the `gpt-5.6-*` entries from Farhelm's model catalog across Codex,
+  OpenRouter (Goose, Pi, OMP), and OpenCode, along with SPEC.md and tests.
+
+- **Deduplicate OpenCode's conversation lookup in the drift tests.** `initial_prompt` and `named_conversation` each look
+  up the test conversation in OpenCode's session list by folder path, and the two copies disagree on symlink resolution
+  and verdict (`COULD NOT RUN` vs `FAILED`). Share one helper so both categories behave the same way.
+
+- **Derive `instructions_delivery` drift coverage from agent capabilities.** The `instructions_delivery` drift category
+  hardcodes its six agent names instead of deriving them from agent capabilities like the other categories, so a future
+  agent that gains the `$farhelm` hint would not fail coverage checks until added by hand.
+
+- **Keep cached repository cleanup moving past one repo's error.** At supervisor startup, if cleaning up an old cache
+  generation for one repository fails (for example because a leftover git process is still writing in it), the sweep
+  stops early and skips every remaining repository until the next restart
+  (`crates/farhelm-supervisor/src/repo_cache.rs`). Log and continue across repositories while still stopping cleanup of
+  an affected repository on selector or directory-sync failures, and add a test proving later repositories are still
+  cleaned while selected caches stay intact.
+
+- **Allow Goose named launches to capture and offer plain Restart.** When reopening a Goose conversation that Farhelm
+  originally created, Goose runs its persisted `farhelm-reporter` MCP server, so Farhelm captures the destination
+  conversation and offers plain Restart. `SPEC.md` and the UI copy currently state unconditionally that Goose never
+  captures named conversations and Restart will be unavailable (lumping Goose with Cursor and OpenCode), which makes the
+  `named_conversation` drift test fail
+  (`python3 -B scripts/run-harness-drift.py --no-upgrade --category named_conversation --harness goose`). Update
+  `SPEC.md`, the launcher/UI note, and the drift test so Restart is allowed and expected to work when a named Goose
+  conversation carries Farhelm's reporter, while noting that Goose conversations created outside Farhelm are not
+  captured. Check both named Create and named Restart.
+
+- **Accept leading-hyphen custom `--effort` values as a separate argument.** `farhelm agent create --effort -fast` (with
+  a space) is rejected by clap as an unknown flag even though custom agents allow `[a-z0-9_-]` effort values and
+  `--model` already sets `allow_hyphen_values = true` (`crates/farhelm/src/main.rs`). Add `allow_hyphen_values = true`
+  to `--effort` (matching `--model` and the `SPEC_impl.md` free-text option rule), add a parse test, and update
+  `SPEC_impl.md` to drop the `--effort=-fast` workaround.
+
+- **Assert that Tensorlake host setup never reads agent settings.** In
+  `crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs`,
+  `codex_subscription_and_none_enter_setup_without_an_endpoint` checks that no Codex settings cleanup was recorded
+  during setup, but never asserts against the stand-in backend that setup made no `read-agent-settings` call. Add that
+  negative assertion.
+
 ## Plan follow-ups
 
 - **Make Wayland text-field paste nonblocking.** Pasting into a text field such as an SSH sign-in answer can freeze the
@@ -241,13 +282,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   at least one enabled effort per CLI completes a turn. Goose 1.60.2 shows the chosen provider and model in its startup
   banner and status, so its terminal can confirm the launch and reply. Verifying the effective provider effort for Goose
   needs other evidence.
-
-- **Keep Goose from offering plain Restart after a named Restart.** Farhelm cleared the previous capture, and Goose
-  1.60.2 recalled the selected conversation. The selected conversation's persisted reporter registered it during launch
-  and made plain Restart available again. The live check reported
-  `captured conversation = true, Restart offer = Resume`. Reproduce with
-  `python3 -B scripts/run-harness-drift.py --no-upgrade --category named_conversation --harness goose`. Check both named
-  Create and named Restart. Normal Goose Restart still needs its persisted reporter.
 
 - **Finish live Cursor model and permission verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log
   in...” with both `--model auto` and `--model composer-2.5`. Reproduce with
