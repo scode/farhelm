@@ -78,3 +78,88 @@ The three PRs passed independent Opus 5.5 source reviews at high effort after fi
 added coverage for an earlier leftover blocking removal of a remaining cache. The rerun review added coverage for active
 and failed deletion and kept the existing deletion safeguard for first setup. The settings review led to clearer
 documentation of the fresh-host assertion. All findings were resolved in the final revisions.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round, through its three PRs. Since the plan's PRs were written, main gained the plans landed
+in the previous rounds, among them the environment triage, which made Setup and Update refuse a host whose environment
+is being deleted, and the sandbox workspace trust plan, which added a Claude first-run step to Tensorlake setup. This
+plan's refusal of a setup rerun builds on the environment triage's refusal and agrees with it: a sandbox being deleted
+is refused by both. They differ only in wording: this plan's refusal suggests Retry only once a deletion has actually
+failed, while the environment triage's says the host's environment is being deleted. The landing's review found no other
+interaction.
+
+The review also checked what the plan changed about the order in which a setup rerun takes its locks, since that order
+moved: there is no deadlock, a refusal now happens before the earlier failed run's progress is touched, so nothing is
+left half replaced for Hosts to recover from, and a new sandbox's setup waits for its own new host entry exactly as
+before. The repository cache cleanup still stops for a repository whenever continuing could touch a checkout in use;
+only removals of leftovers already set aside continue past an error. The review counted no blockers, no should-fix items
+and five small points: the startup warning and the four in the last bullet of the last section.
+
+#### Fixes made while landing
+
+- None.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the plan's PRs rebased onto main as it stood at the start of the landing (`508a81df`); the rebase conflicted only in
+TODO.md, where both sides removed entries and I kept both, and every other file's change is exactly what the executor
+pushed. The rebased stack's top commit was `da1caf4a`, and that tree is what main now holds outside the plans queue,
+apart from a review queue triage record (#4978) that landed on main while this landing ran and touches no code.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `d88239f2-8794-460e-bcea-f2aab455c115`): all 8708 tests passed, with no runtime skip. The plan changed the helm's
+  Tensorlake setup, the supervisor's repository cache cleanup and one GUI Hosts setup test; the whole suite was the
+  narrowest run that covered them and their callers.
+- The Tensorlake setup test `codex_subscription_and_none_enter_setup_without_an_endpoint`, run alone ten times on the
+  test worker (recorder runs under the selection "tensorlake_add
+  codex_subscription_and_none_enter_setup_without_an_endpoint, attempt N on the rebased stack" in the recorder, for
+  example `7ce3f031-d3b3-47ea-87fd-37e35d51c3ec`): passed all ten. The same loop on main as it stood in the previous
+  round (`455d5f00`, without this plan) failed 3 of 10, for example recorder run `74684414-d0a4-4527-844f-2df823127ddd`;
+  the last section says why that matters.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `cargo fmt --all -- --check`, `python3 releasing/check-changelog.py format`, `python -B scripts/check-test-sleeps.py`
+  and `dprint check`, locally: passed. `python3 scripts/check-agents-md.py`, locally: failed, on an error already on
+  main that this plan does not touch (the last section says more).
+
+Reused: none. The executor's runs were focused selections on an older base, and everything they covered ran again above.
+
+Skipped: the desktop app's tests, screenshot comparison and end-to-end smoke, since the plan changed nothing the desktop
+app draws or does (its one GUI change is a test, which the workspace suite ran); a live Tensorlake sandbox, which needs
+a provider account; the workspace doctests, since no documentation example changed; a Mac run, since nothing changed is
+Mac-specific; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+- Nothing.
+
+#### Things you should know that the report does not say
+
+- **This plan fixes the flaky Tensorlake setup test from draft PR
+  [#4757](https://github.com/scode/farhelm/pull/4757/changes).** Its third PR keeps the test's new host offline from
+  registration, so the credential delivery that runs once a host connects can no longer change the record before the
+  test reads it, which was that draft's suspected cause. The test passed ten of ten runs on this stack, against three
+  failures in ten on main just before. The draft, which records the test as an open flake, is now out of date. I
+  recommend turning it into a record of a flake closed by this plan (in the flake archive), so the flake's history is
+  kept; closing it unmerged is the alternative. Say which you prefer.
+- **Main fails `python3 scripts/check-agents-md.py` already.** A review finding recorded by an earlier trailing code
+  review (#4923) cites `docs/harness-drift-tests.md` under a heading that page does not have (the words are a sentence
+  in it, not a heading). This plan does not touch either file. The fix is a one-line wording change in that finding, but
+  nothing will make it on its own, and every instruction change runs that check meanwhile. I recommend a small PR for
+  it; say if you want me to open one.
+- **(Small) Startup can log a second warning about spare checkout cleanup.** A spare checkout is the managed checkout
+  Farhelm keeps ready for the next session. A failure to clean up its record used to be logged and ignored; now the
+  cache sweep still finishes the remaining work but also reports itself as failed at the end, so a recurring problem
+  there prints two warning lines at every start. It is harmless; no follow-up unless you see it.
+- **(Small) Four more small points the review noticed.** The code comment on the new setup refusal says the marker
+  Farhelm sets while a sandbox is being deleted means a failed deletion, though it means any deletion in progress; a
+  rerun reads the host entry twice, the first time redundantly; the "being deleted" case of the new confirmation test
+  sets up a state a real removal cannot produce at that moment (a real removal holds the host's lock, so it is refused
+  as busy first), though the case still covers the refusal it is named for; and the plan's SPEC_impl.md amendment, which
+  lists the sandbox states that refuse a setup rerun (suspended, changing state, being deleted), leaves out "stopped",
+  which the code also refuses, though Tensorlake hosts do not appear to reach that state. None needs a follow-up on its
+  own; they would fit a small cleanup PR.

@@ -4,7 +4,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight ecd716] `triage-settings-nov24.md` — execute the 2026-11-24 triage outcomes for the Settings dialog, in grouped PRs
 - [in-flight 071fb2] `launcher-style-quick-dialogs.md` — Give the quick switcher (Cmd+K), the template list (Cmd+J) and Rename (Cmd+L) the session launcher's look, with its pieces shared as components
-- [landing 1bb684] `tensorlake-setup-and-repo-cache-fixes.md` — Isolate repository-cache startup sweep errors, refuse Tensorlake setup reruns on suspended or deleting sandboxes, and assert setup never reads agent settings
 - [pending] `launcher-style-whats-new.md` — Give What's new the session launcher's look, every entry in full, with release curation marking each highlight's headline (after `launcher-style-quick-dialogs.md`)
 - [pending] `welcome-empty-state.md` — Replace the startup Welcome card with a welcome in the empty main area, shown whenever there are no sessions (after `launcher-style-quick-dialogs.md`)
 - [in-flight 98ba47] `tab-switch-shortcuts.md` — Add Cmd+Shift+[ / Cmd+Shift+] (Ctrl+Shift+[ / Ctrl+Shift+] on Linux) to switch between terminal tabs within a session
