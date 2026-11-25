@@ -49241,3 +49241,24 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   visible result, and verification beyond this outcome’s size allowance. Change `lrsvknvzkvyvzwwmxxtsmtqkotupxkvq`,
   bookmark `plan/triage-settings-nov24/02d-hook-opt-out-refusal-follow-up`,
   [#4979](https://github.com/scode/farhelm/pull/4979/changes).
+
+## settings-close-save-stalls-silently-during-tests.md
+
+- Outcome: `fix code`.
+- Assessment: If Notifications' Send test or Tensorlake's Test is running when you choose Save and Close, the form
+  refuses to save because it is busy; Settings stays open on that page with no message, so it looks as if nothing
+  happened. Verified: confirmed. The close question counts only `Saving` as pending (`editing.rs:594-597`); a locked
+  form's save returns false (`ntfy.rs:368,481`; Tensorlake key `holds_save`), which `dispatch_edit` treats as a failure
+  with no text (`editing.rs:432-434,457-468`). SPEC.md 2574-2575 asks for sequencing or showing the failure; whether to
+  wait for the test or explain the refusal is a design choice. Not the rare-glitch filter: a test can run for seconds
+  (not a narrow window).
+- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
+  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
+  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
+  prompt contracts. Recommendation for reference: fix code — treat a held form as pending (wait for the test) or show a
+  busy line; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Fixed as decided. Change `opqulrrvypmwoxvqtqkqkrmtvzokusyp`, bookmark
+  `plan/triage-settings-nov24/02e-explain-held-close-save`, [#4982](https://github.com/scode/farhelm/pull/4982/changes).

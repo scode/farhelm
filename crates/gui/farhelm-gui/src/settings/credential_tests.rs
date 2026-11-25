@@ -933,7 +933,8 @@ fn a_cancelled_file_dialog_frees_choose_file(cx: &mut TestAppContext) {
 /// only the field it owns, and Test must use the saved key, never the field. Specified: with no key saved the field
 /// says "No key saved"; a typed key's Save sends `PUT /api/tensorlake` with only the key under the preference row's
 /// key, and the answer shows "API key saved", empties the field's draft and says a key is saved; Test sends `POST
-/// /api/tensorlake/test` with no body and shows the count; Clear sends only the clear flag, shows "API key cleared"
+/// /api/tensorlake/test` with no body and shows the count. It holds the replacement's Save and Close and the dialog
+/// shows how to retry. Clear sends only the clear flag, shows "API key cleared"
 /// and "No key saved", and empties a key typed meanwhile, as the old form did; a refused Save keeps the typed key with
 /// the helm's words.
 #[gpui::test]
@@ -970,6 +971,7 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
     );
     assert_eq!(key_typed(cx), "", "the field was emptied");
 
+    fill(cx, "tensorlake-key", "fictional-unsaved-key");
     reach(cx, "tensorlake-key-test");
     keys(cx, "space");
     let (id, method, path, body) = one_command(&mut helm);
@@ -977,6 +979,16 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
         (method, path.as_str(), body),
         (Method::Post, "/api/tensorlake/test", Value::Null)
     );
+    // The test uses the stored key. Close must preserve and explain why it could not save the replacement.
+    assert!(drawn(cx, "tensorlake-key-working"));
+    assert!(drawn(cx, "settings-unsaved"));
+    click(cx, "settings-footer-close");
+    click(cx, "prompt-confirm");
+    assert_eq!(
+        label_of(cx, "settings-close-save-held").as_deref(),
+        Some(super::CLOSE_SAVE_HELD)
+    );
+    assert!(sent(&mut helm).is_empty(), "the test is the only request");
     helm.reply(id, 200, Some(json!({ "sandboxes": 2 })));
     settle(cx);
     assert_eq!(
@@ -984,11 +996,14 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
         Some("The key works. It can see 2 sandboxes.")
     );
 
-    fill(cx, "tensorlake-key", "fictional-unsaved-key");
     assert_eq!(
         key_typed(cx),
         "fictional-unsaved-key",
         "the premise: a key typed"
+    );
+    assert!(
+        drawn(cx, "settings-close-save-held"),
+        "the notice survives Test"
     );
     reach(cx, "tensorlake-key-clear");
     keys(cx, "space");
@@ -1002,8 +1017,13 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
     );
     assert!(painted(cx).contains("No key saved"));
     assert_eq!(key_typed(cx), "", "Clear emptied the typed key");
+    assert!(!drawn(cx, "settings-close-save-held"));
 
     fill(cx, "tensorlake-key", "fictional-bad-key");
+    assert!(
+        !drawn(cx, "settings-close-save-held"),
+        "a new draft has no old refusal"
+    );
     reach(cx, "settings-footer-save");
     keys(cx, "space");
     let (id, _, _, _) = one_command(&mut helm);

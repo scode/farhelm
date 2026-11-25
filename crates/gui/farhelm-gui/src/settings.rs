@@ -78,7 +78,7 @@ mod custom_agents;
 pub(crate) use custom_agents::{stage_custom_agent_draft, stage_custom_agent_save_refusal};
 mod editing;
 #[cfg(test)]
-pub(crate) use editing::{stage_ntfy_refusal, stage_settled_key_conflict};
+pub(crate) use editing::{stage_held_close, stage_ntfy_refusal, stage_settled_key_conflict};
 mod file_types;
 #[cfg(test)]
 mod file_types_tests;
@@ -191,6 +191,7 @@ const FOOTER_NOTE: &str = "Switches save at once; forms save with Save below.";
 
 /// Both close buttons and Escape go through the same draft check.
 const CLOSE_HELP: &str = "Close Settings. Unsaved changes ask first.";
+const CLOSE_SAVE_HELD: &str = "A test or another operation on this form blocked saving. After it finishes, select Close and choose Save.";
 
 const SOUNDS_ID: &str = "settings-sounds";
 const SOUNDS_LABEL: &str = "Sounds";
@@ -776,6 +777,8 @@ pub(crate) struct SettingsDialog {
     page_scroll: ScrollHandle,
     /// A close refusal scrolls only the Notifications page drawn next. Navigation can supersede it before layout.
     scroll_to_ntfy_refusal: bool,
+    /// Explain a blocked close beside its actions while the original draft still needs a save.
+    close_save_held: Option<editing::ApprovedEdit>,
     /// The explicit saves still owned by the last footer or close action.
     batch: Option<editing::Batch>,
     save_generation: u64,
@@ -890,6 +893,7 @@ impl SettingsDialog {
             shown,
             page_scroll: ScrollHandle::new(),
             scroll_to_ntfy_refusal: false,
+            close_save_held: None,
             batch: None,
             save_generation: 0,
             key_conflict: false,
@@ -1867,6 +1871,9 @@ impl Render for SettingsDialog {
         let frame = match editor_footer {
             Some((actions, Some(notices), _)) => frame.footer_actions(actions).notices(notices),
             Some((actions, None, _)) => frame.footer_actions(actions),
+            None if !searching && self.held_close_on_page(cx) => frame.notices(
+                choices::failure_line("settings-close-save-held".into(), CLOSE_SAVE_HELD, cx),
+            ),
             None => frame,
         };
         let frame = if divided {

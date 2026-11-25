@@ -102,6 +102,21 @@ pub(crate) fn stage_ntfy_refusal(window: &mut Window, cx: &mut App) -> Option<()
     Some(())
 }
 
+/// Show the held-close result after the staged Notifications draft arrives. The interaction test drives Send test.
+#[cfg(test)]
+pub(crate) fn stage_held_close(cx: &mut App) -> Option<()> {
+    let dialog = layers::last_opened::<SettingsDialog>(cx)?;
+    dialog.update(cx, |dialog, cx| {
+        let edit = dialog
+            .edits(cx)
+            .into_iter()
+            .find(|edit| matches!(edit, Edit::Alerts(_)))?;
+        dialog.close_save_held = Some(edit.approval(cx));
+        cx.notify();
+        Some(())
+    })
+}
+
 type OnSaveSettled = Box<dyn FnOnce(bool, &mut App)>;
 
 /// The dialog can join an explicit Save that a form already sent, or wait on one it just started. The continuation
@@ -146,7 +161,7 @@ enum Edit {
 /// What one Save or Discard authorized. Keep identities independent of values so closing a question does not keep
 /// a detached editor alive. A save that was already running can only be observed, never reissued.
 #[derive(Clone)]
-struct ApprovedEdit {
+pub(super) struct ApprovedEdit {
     id: EntityId,
     version: EditVersion,
     was_saving: bool,
@@ -378,6 +393,15 @@ impl SettingsDialog {
         self.edits(cx).iter().any(|edit| &edit.section() == section)
     }
 
+    /// A discard, a successful Clear, or a fresh edit makes this result irrelevant to the current draft.
+    pub(super) fn held_close_on_page(&self, cx: &App) -> bool {
+        self.close_save_held.as_ref().is_some_and(|held| {
+            self.edits(cx)
+                .iter()
+                .any(|edit| edit.section() == self.shown && held.permits(edit, cx))
+        })
+    }
+
     /// An editor owns its actions, but its dirty marker follows the same draft as the section and close question.
     pub(super) fn editor_note(&self, cx: &App) -> Option<&'static str> {
         self.edits(cx)
@@ -462,6 +486,7 @@ impl SettingsDialog {
         if self.batch.is_some() {
             return;
         }
+        self.close_save_held = None;
         self.key_conflict = false;
         if close && self.keys_disagree(cx) {
             self.reveal_key_conflict(window, cx);
@@ -541,6 +566,13 @@ impl SettingsDialog {
             });
         });
         if !started {
+            if edit.holds_save(cx)
+                && self.batch.as_ref().is_some_and(|batch| {
+                    batch.close || matches!(batch.after, AfterBatch::SaveAndClose(_))
+                })
+            {
+                self.close_save_held = Some(edit.approval(cx));
+            }
             self.edit_finished(generation, id, false, window, cx);
         }
     }
@@ -720,6 +752,7 @@ impl SettingsDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Dismissal {
+        self.close_save_held = None;
         let edits = self.edits(cx);
         if edits.is_empty() {
             return Dismissal::Close;

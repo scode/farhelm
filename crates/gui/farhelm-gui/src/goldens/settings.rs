@@ -1127,12 +1127,14 @@ struct DraftScene {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DraftStep {
     Edit,
+    EditForHeldClose,
     VerifyDraft,
     OpenNotifications,
     EditNotifications,
     AskToClose,
     ShowKeyConflict,
     ShowNtfyRefusal,
+    ShowHeldClose,
     Done,
 }
 
@@ -1177,6 +1179,20 @@ pub(super) fn settings_notifications_edited_setup(
     stage_draft(state, Section::Notifications, DraftStep::Edit);
 }
 
+/// Show the shared close refusal in the pinned footer at the minimum window height.
+pub(super) fn settings_close_save_held_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    settings_notifications_setup(state, window, cx);
+    stage_draft(
+        state,
+        crate::settings::Section::Notifications,
+        DraftStep::EditForHeldClose,
+    );
+}
+
 pub(super) fn settings_checkouts_edited_setup(
     state: &SceneState,
     window: &mut Window,
@@ -1207,7 +1223,9 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
     };
     let step = draft.step.get();
     let section = match step {
-        DraftStep::Edit | DraftStep::OpenNotifications => draft.section.clone(),
+        DraftStep::Edit | DraftStep::EditForHeldClose | DraftStep::OpenNotifications => {
+            draft.section.clone()
+        }
         DraftStep::EditNotifications => Section::Notifications,
         DraftStep::ShowNtfyRefusal => {
             if window.driver_nodes().iter().any(|node| {
@@ -1227,6 +1245,15 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
             let step = draft.step.clone();
             window.defer(cx, move |window, cx| {
                 if settings::stage_settled_key_conflict(window, cx).is_some() {
+                    step.set(DraftStep::Done);
+                }
+            });
+            return div().into_any_element();
+        }
+        DraftStep::ShowHeldClose => {
+            let step = draft.step.clone();
+            window.defer(cx, move |_, cx| {
+                if settings::stage_held_close(cx).is_some() {
                     step.set(DraftStep::Done);
                 }
             });
@@ -1278,10 +1305,12 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
             DraftStep::OpenNotifications => DraftStep::EditNotifications,
             DraftStep::EditNotifications => DraftStep::AskToClose,
             DraftStep::Edit => DraftStep::VerifyDraft,
+            DraftStep::EditForHeldClose => DraftStep::ShowHeldClose,
             DraftStep::VerifyDraft
             | DraftStep::AskToClose
             | DraftStep::ShowKeyConflict
             | DraftStep::ShowNtfyRefusal
+            | DraftStep::ShowHeldClose
             | DraftStep::Done => {
                 unreachable!("these steps do not edit a field")
             }
