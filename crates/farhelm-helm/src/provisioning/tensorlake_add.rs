@@ -752,6 +752,9 @@ impl ProvisioningService {
                         return Err(refused(reason));
                     }
                     let row = self.host_row(host).await?;
+                    if let Some(reason) = self.tensorlake_setup_refusal(&row, true) {
+                        return Err(refused(reason));
+                    }
                     let binding = row
                         .tensorlake
                         .ok_or_else(|| refused("this host is not a Tensorlake sandbox"))?;
@@ -874,6 +877,24 @@ impl ProvisioningService {
         Ok(response)
     }
 
+    /// Setup cannot reinstall Farhelm while a sandbox is being destroyed.
+    /// The seal identifies a failed deletion for which Hosts offers Retry.
+    /// Reruns also respect the existing sandbox's published lifecycle state.
+    fn tensorlake_setup_refusal(&self, row: &HostRow, rerun: bool) -> Option<&'static str> {
+        if self.manager.is_sealed(row.id) {
+            return Some(if self.manager.sealed_failed(row.id) {
+                "this sandbox is being deleted, so it cannot be set up again; use Retry to finish deleting it"
+            } else {
+                "this sandbox is being deleted, so it cannot be set up again"
+            });
+        }
+        if rerun {
+            self.lifecycle_refusal(row)
+        } else {
+            None
+        }
+    }
+
     /// Register before any billed work, claim progress, and run on an owned
     /// task under the normal host lock and fleet-wide run limit.
     ///
@@ -888,10 +909,9 @@ impl ProvisioningService {
     /// is plain words with no busy marker: the plan is already spent, so
     /// sending the same confirmation again after the wait could only be
     /// refused as an unknown plan, and the remedy is running setup again.
-    /// Taken before the claim, the refusal leaves a failed earlier run's
-    /// progress (its Re-run) as it was. A new sandbox's lock is expected to be
-    /// free, as its row was registered just above; it is waited for as
-    /// before.
+    /// Check the existing sandbox's binding and lifecycle while holding
+    /// that lock, before replacing failed progress or parking the connection.
+    /// New sandboxes wait for the lock after registration.
     pub(super) async fn start_tensorlake_add(
         self: Arc<Self>,
         plan: TensorlakeAddPlan,
@@ -932,24 +952,35 @@ impl ProvisioningService {
                 host
             }
         };
-        // Taken without waiting, ahead of the claim: holding a host's
-        // provisioning lock while taking `memory` is the order every run
-        // already uses, and nothing waits for this lock while holding
-        // `memory`. The holder may be any other operation on the host (a
-        // Suspend, Resume or removal, another setup, an update, an edit), so
-        // the refusal names none.
-        let rerun_write = match plan.host {
-            Some(_) => Some(self.manager.try_host_provision_lock(host).ok_or_else(|| {
+        // Take the provisioning lock before touching progress. A rerun must
+        // refuse promptly rather than wait behind another operation on this
+        // host, because it holds the shared confirmation lock. A fresh Add
+        // waits for the lock belonging to its newly registered row.
+        let host_write = match plan.host {
+            Some(_) => self.manager.try_host_provision_lock(host).ok_or_else(|| {
                 refused(
                     "this sandbox is busy with another operation; once it finishes, run setup again if it \
                      is still needed",
                 )
-            })?),
-            None => None,
+            })?,
+            None => self.manager.host_provision_lock(host).await,
         };
         if plan.host.is_some()
             && let Some(reason) = self.known_owner_refusal(host)
         {
+            return Err(refused(reason));
+        }
+        let row = self
+            .host_row(host)
+            .await
+            .ok()
+            .filter(|row| {
+                row.tensorlake
+                    .as_ref()
+                    .is_some_and(|binding| binding.sandbox == plan.sandbox)
+            })
+            .ok_or_else(|| refused("this Tensorlake host was removed or changed; probe again"))?;
+        if let Some(reason) = self.tensorlake_setup_refusal(&row, plan.host.is_some()) {
             return Err(refused(reason));
         }
         let run_id = uuid::Uuid::new_v4().to_string();
@@ -961,31 +992,6 @@ impl ProvisioningService {
             memory
                 .runs
                 .insert(host, progress(host, run_id.clone(), &plan.steps));
-        }
-        let host_write = match rerun_write {
-            Some(host_write) => host_write,
-            None => self.manager.host_provision_lock(host).await,
-        };
-        let valid = self.host_row(host).await.is_ok_and(|row| {
-            row.tensorlake
-                .as_ref()
-                .is_some_and(|binding| binding.sandbox == plan.sandbox)
-        });
-        if !valid {
-            self.withdraw_claim(host).await;
-            return Err(refused(
-                "this Tensorlake host was removed or changed; probe again",
-            ));
-        }
-        // A sandbox whose Farhelm sealed it is being deleted, and setting it
-        // up again (reinstalling Farhelm into a machine about to be
-        // destroyed) can only get in the way of that. Checked under the
-        // provisioning lock the deletion takes too.
-        if self.manager.is_sealed(host) {
-            self.withdraw_claim(host).await;
-            return Err(refused(
-                "this sandbox is being deleted, so it cannot be set up again; use Retry to finish deleting it",
-            ));
         }
         // A fleet-wide run slot can stay queued for minutes. Stop dialing
         // now, before that wait, so a copied supervisor cannot be claimed
@@ -1015,20 +1021,6 @@ impl ProvisioningService {
             host_id: host,
             run_id,
         })
-    }
-
-    /// Withdraw the busy claim and progress [`Self::start_tensorlake_add`] took
-    /// for `host` when it refuses after taking them (the host was removed or
-    /// changed, or is sealed). A connected GUI may already show that run (any
-    /// feed bump since the claim re-read it), so the withdrawal bumps the
-    /// feed, as every progress change does.
-    async fn withdraw_claim(&self, host: HostId) {
-        {
-            let mut memory = self.memory.lock().await;
-            memory.busy.remove(&host);
-            memory.runs.remove(&host);
-        }
-        self.manager.events().bump();
     }
 
     /// Set up a Tensorlake host, retaining failed progress for a setup retry.

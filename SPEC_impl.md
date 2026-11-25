@@ -6769,7 +6769,10 @@ the add uses the confirmed definition. A snapshot whose recorded disk is larger 
 Setup skips the build when the host's sandbox is visible, when its ID is recorded (a recorded, deleted sandbox is never
 replaced), or while a pending create is inside the settle window. Only a settled absence with no recorded ID builds. The
 rerun probe describes these steps from local records only. This keeps reruns of hosts created from old reuse recipes
-from starting a newly required build. Host creation adopts an existing sandbox by the pre-chosen name only when this row
+from starting a newly required build. An existing sandbox's setup probe refuses while the sandbox is suspended, changing
+state or being deleted, before ensuring the host key or saving an offer. Confirmation checks the binding and lifecycle
+again under the provisioning lock before holding the connection or replacing progress. A refusal leaves the host state
+and any earlier failed setup visible. Host creation adopts an existing sandbox by the pre-chosen name only when this row
 records an outstanding create, including after a lost create response; a saved sandbox ID is looked up directly. Without
 either record, a name collision refuses setup before preparation or credential delivery. The refusal names the sandbox
 and tells the user to delete this host entry first; that removal leaves the existing sandbox alone, and it then appears
