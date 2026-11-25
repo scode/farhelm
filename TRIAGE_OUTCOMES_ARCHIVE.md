@@ -47838,3 +47838,24 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: Fixed search by saved registration ID and current display name. Change `rzotlqtwnowmkpmpmpnlklnmqyzwptlz`, bookmark `plan/triage-custom-agents-nov24/02-launcher-2`,
   https://github.com/scode/farhelm/pull/4817/changes.
+
+## launcher-keyboard-recents-hide-custom-flags.md
+
+- Outcome: `fix code`.
+- Assessment: Two recent setups that differ only in their custom permission flags look the same in the launcher's Recent
+  list. A keyboard user highlighting one cannot see the flags. Only pointer hover and the screen-reader name carry them.
+  Verified: Confirmed. The row's visible details give the mode but not the words
+  (`launcher/view/search/start.rs:466- 478`), and the full summary with flags is only in hover and the accessible name
+  (`launcher/recents.rs:355-373`). No spec sentence requires keyboard reveal. SPEC.md 1502 says "The list adds no Tab
+  stops". Actual user confusion is unverified.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: discard, since setups that differ only in custom flags are rare. Alternatively add the
+  flag words to the details line. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to the TODO.md entry “Show Custom approval flags in keyboard-highlighted Recent setups.” A complete keyboard reveal needs scrolling without changing the highlight. Change `vnpmwptlszvrqxmvxovwtzllollvrwpl`, bookmark `plan/triage-custom-agents-nov24/02b-launcher-recent-flags`,
+  https://github.com/scode/farhelm/pull/4820/changes.
