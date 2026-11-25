@@ -82,22 +82,27 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
    highlights, and every change in the full list, highlighted or not, with proposed highlights there alone until the
    maintainer promotes them. A plan's entry goes in word for word, and its possible inaccuracies are called out on the
    review page and in the handover message rather than fixed, per `releasing/.agents/changelog.md`, "Plans' release
-   notes". Keep the whole proposed `## vX.Y.Z - YYYY-MM-DD` section in a Markdown file in your scratch directory,
-   written exactly as it will go into `CHANGELOG.md`, the full list's `<details>` frame included, and show it using the
-   `interactive-artifact` skill. Load and follow that skill by name. Do not publish the page as a snippet or anywhere
-   else unless the maintainer asks.
+   notes". Draft a headline for every highlight that needs one, including each proposed addition to the highlights.
+   Follow the headline format in "Format". Keep the maintainer's wording in the draft while its headline is awaiting
+   approval, whether the wording came from a plan or during curation. Keep the whole proposed `## vX.Y.Z - YYYY-MM-DD`
+   section in a Markdown file in your scratch directory, written exactly as it will go into `CHANGELOG.md`, the full
+   list's `<details>` frame included, and show it using the `interactive-artifact` skill. Load and follow that skill by
+   name. Do not publish the page as a snippet or anywhere else unless the maintainer asks.
 
    Write a body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent
    scratch space"), rendering the scratch section faithfully with its categories, entries and PR diff links. Show the
    full list as its own part of the page below the highlights, open, so the maintainer can comment on it without
    unfolding anything. Mark every proposed highlight with the reason for proposing it and a picker to promote it, and
    every deferred plan's draft (which sits in the full list alone until the maintainer answers) with a picker to approve
-   it as a highlight and a field for their own text. Do not use the legacy notes-review page generator: it emits a full
-   document with its own scripts, which the skill does not accept. The Markdown scratch file stays authoritative; page
-   markup is only its presentation. Follow the skill for styling, serving, sharing the URL and any tunnel instructions,
-   waiting for submissions, status, replies and shutdown. Use its chosen port and tokenized URL. If the skill is
-   unavailable or its server fails, stop and report why. Give the maintainer the URL as soon as the page is served, and
-   list the proposed highlights in that message.
+   it as a highlight and a field for their own text. Show each proposed headline as a suggestion on its entry, so the
+   maintainer can approve or edit the headline with the rest of the wording. Apply approved suggestions to the scratch
+   file. Offer final approval of the section once every retained highlight has its approved headline or is exempt from
+   the headline rule. Do not use the legacy notes-review page generator: it emits a full document with its own scripts,
+   which the skill does not accept. The Markdown scratch file stays authoritative; page markup is only its presentation.
+   Follow the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions, status,
+   replies and shutdown. Use its chosen port and tokenized URL. If the skill is unavailable or its server fails, stop
+   and report why. Give the maintainer the URL as soon as the page is served, and list the proposed highlights in that
+   message.
 
    The maintainer comments on entries, suggests replacements, or submits general notes through the skill. Match feedback
    to the quoted text and section, rather than positional entry ids that shift between rounds. Apply the feedback to the
@@ -306,11 +311,12 @@ shipped. The maintainer chose this on 2026-10-11, over stopping for wording revi
 with only the fix cherry-picked.
 
 The re-cut's section is therefore a draft again, whether or not the previous attempt's notes were finalized: it opens
-with the draft notice in `CHANGELOG.md`, and its review and finalization follow steps 2 and 3. The scratch file and the
-review page still hold the section without the notice, as step 2 says: update both with the re-cut's entries rather than
-starting new ones (serve the page again as step 2 does if its server was stopped), and in the message that hands the
-maintainer the updated page, list every entry added without their review, every proposed highlight, every fragment left
-out, and every callout on a plan's entry.
+with the draft notice in `CHANGELOG.md`, and its review and finalization follow steps 2 and 3. If the new version
+requires headlines and a carried-over highlight still needs one, propose a headline for approval on the review page. The
+scratch file and the review page still hold the section without the notice, as step 2 says: update both with the
+re-cut's entries rather than starting new ones (serve the page again as step 2 does if its server was stopped), and in
+the message that hands the maintainer the updated page, list every entry added without their review, every proposed
+highlight, every fragment left out, and every callout on a plan's entry.
 
 Then continue from step 5 at the new changelog PR's merge commit. A `release-X.Y.Z` branch from an attempt that never
 pushed a tag is replaced, since nothing points at it; one whose tag was pushed is left as it is. A GitHub release from

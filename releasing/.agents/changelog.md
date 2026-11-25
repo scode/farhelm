@@ -106,6 +106,11 @@ instruction for older sections; the checker accepts the historical formats that 
   The full list replaced it from v0.42.0 on; a new section has no Misc fixes.
 - Every category is bullets (after Misc fixes' fixed opening paragraph, in the sections that have one): one `-` item per
   entry, one paragraph, ending in its PR reference as `(#N)` or `(#N, #M)`.
+- Each finalized highlight in a section newer than v0.45.0 starts with a bold headline. Write a sentence in plain words
+  and optional inline links, keep its final `.`, `?` or `!` inside the closing `**`, then continue with a space and the
+  rest of the entry. Keep code, italics and nested bold out of the headline so the upgrade feed carries it as one bold
+  piece. For example, `- **You can register your own agent types.** Use Custom agents in Settings. (#123)`. Draft
+  highlights can still be awaiting an approved headline. The folded full list keeps its ordinary entry format.
 - One paragraph per physical line, however long. `CHANGELOG.md` and the fragments are excluded from dprint in
   `dprint.json` for this reason: GitHub renders a release body the way it renders a comment, with every newline as a
   line break, so a section hard-wrapped at 120 columns shows up ragged on the release page. The checker tolerates
@@ -277,7 +282,9 @@ At curation, each plan's answer works like this:
   describes, which by default is every one of them that carries a required type or a fragment. The plan's PRs still get
   their full-list entries from their fragments (and step 1's entries for any that are `MISSING`), like any other work:
   the plan's entry is the highlight on top of them, not a replacement, so the full list cites every PR the entry cites.
-  The agent sorts the entry into a highlight category by the rules in `releasing/.agents/changelog.md`, "Format".
+  The agent sorts the entry into a highlight category by the rules in `releasing/.agents/changelog.md`, "Format". When
+  it needs a headline, show the proposed wording on the review page as a suggestion. The draft in `CHANGELOG.md` keeps
+  the plan's wording until the maintainer approves the headline with the rest of the entry.
 - `No release note needed.` means the maintainer wants no highlight for the plan's work. Curate the work into the full
   list from its fragments, exactly as for work outside the planning system: an entry when it changed something for
   users, nothing when it did not. The agent may still propose a highlight for it, as for any full-list entry, when the
