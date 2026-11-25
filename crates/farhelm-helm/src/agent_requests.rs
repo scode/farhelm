@@ -167,7 +167,7 @@ use crate::AppState;
 use crate::store::TemplateBindings;
 use crate::store::{HostId, SessionKey};
 use crate::workspace_trust::{
-    ApprovedLaunchTrust, TrustDestination, TrustResolvedLaunch, normalize_launch_workspace_trust,
+    TrustDestination, TrustResolvedLaunch, normalize_launch_workspace_trust,
     try_without_workspace_trust,
 };
 use farhelm_proto::SessionRef;
@@ -2294,7 +2294,7 @@ async fn create_checkout_for_agent(
         .github_repo
         .clone()
         .expect("managed destination selected");
-    let launch = ApprovedLaunchTrust::resolve(
+    let launch = normalize_launch_workspace_trust(
         state,
         resolution.launch,
         TrustDestination::for_host(claim.is_session_owned),
@@ -2318,7 +2318,7 @@ async fn create_checkout_for_agent(
     crate::yolo_guard::check_agent_wrapper(
         state,
         claim.host,
-        resolution.launch.mode.as_launch(),
+        resolution.launch.as_launch(),
         resolution.agent_wrapper_supplied,
     )
     .await?;
@@ -2440,7 +2440,7 @@ async fn create_checkout_for_agent(
             cwd: preview.binding.cwd.clone(),
             repo: Some(repo.clone()),
             title: resolution.title.clone(),
-            launch: resolution.launch.mode.as_launch().clone(),
+            launch: resolution.launch.as_launch().clone(),
             agent_wrapper_supplied: resolution.agent_wrapper_supplied,
             source: None,
         },
@@ -4641,8 +4641,8 @@ async fn launch_environment_for_agent(
     // The card and dispatch share one launch. The destination is already
     // known to be disposable even though the host has not been registered.
     let launch =
-        ApprovedLaunchTrust::resolve(state, plan.launch, TrustDestination::Disposable).await?;
-    let shown = launch.mode.as_launch().clone();
+        normalize_launch_workspace_trust(state, plan.launch, TrustDestination::Disposable).await?;
+    let shown = launch.as_launch().clone();
     let mut request = crate::sessions::CreateReq::for_agent_environment(
         launch,
         plan.agent_wrapper_supplied,
@@ -12016,8 +12016,8 @@ mod tests {
     /// approved name/path are the ones dispatched. A keyed replay must return
     /// that child without another preview or card. The same scripted peer
     /// proves that Fixed/explicit titles, non-occupancy errors and the shared
-    /// cap never turn into another automatic create. Checkout preparation
-    /// retains trust from before approval so the supervisor can record cleanup.
+    /// cap never turn into another automatic create. The Command launch's
+    /// checkout payload leaves Claude's settings alone even with its switch on.
     #[farhelm_testtrace::test]
     async fn template_base_checkout_names_are_previewed_before_approval_and_replayed() {
         use farhelm_proto::ControlMsg;
@@ -12110,7 +12110,10 @@ mod tests {
                         // choose the directory on the target supervisor.
                         assert!(cwd.is_empty());
                         let checkout = github_checkout.expect("managed payload");
-                        assert!(checkout.claude_trust, "carry the pre-approval trust choice");
+                        assert!(
+                            !checkout.claude_trust,
+                            "a managed checkout for a Command launch carries no Claude trust"
+                        );
                         assert_eq!(checkout.preview.basename, "project-review-2");
                         assert_eq!(checkout.preview.cwd, "/checkouts/project-review-2");
                         let mut child = session("numbered-child", 100);
@@ -12173,9 +12176,6 @@ mod tests {
         assert_eq!(cwd, "/checkouts/project-review-2");
         assert_eq!(repo.as_deref(), Some("owner/project"));
         assert_eq!(previews.lock().unwrap().as_slice(), &["review", "review-2"]);
-        h.store.set_claude_trust(false).await.unwrap();
-        let at_dispatch = h.store.resolve_checkout_config(None).await.unwrap();
-        assert!(!at_dispatch.claude_trust);
         assert_eq!(
             answer_card(&h, "allow").await,
             axum::http::StatusCode::NO_CONTENT
@@ -16125,7 +16125,7 @@ mod tests {
         // planted environment: what the supervisor is asked to run is the
         // approved launch itself.
         let approved =
-            ApprovedLaunchTrust::resolve(&h.state, historical, TrustDestination::Disposable)
+            normalize_launch_workspace_trust(&h.state, historical, TrustDestination::Disposable)
                 .await
                 .unwrap();
         let request = crate::sessions::CreateReq::for_agent_environment(

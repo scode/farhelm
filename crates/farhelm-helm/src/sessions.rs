@@ -55,7 +55,7 @@
 
 use crate::manager;
 use crate::workspace_trust::{
-    ApprovedLaunchTrust, TrustDestination, TrustResolvedLaunch, configured_launch_workspace_trust,
+    TrustDestination, TrustResolvedLaunch, configured_launch_workspace_trust,
     normalize_launch_workspace_trust, retain_stored_launch_workspace_trust,
 };
 use crate::{
@@ -1087,14 +1087,14 @@ pub(crate) struct CreateReq {
 }
 
 /// What an agent's environment launch carries into the launcher's create:
-/// the launch exactly as its card showed it, both trust choices already decided,
-/// and the agent's wrapper facts. Carried rather than recomputed because the
+/// the launch exactly as its card showed it, including the trust choice,
+/// and the agent's wrapper facts. Carried through the wait because the
 /// create runs minutes later, after the environment is built, and neither a
 /// Settings change in between nor the user-create path's history bookkeeping
 /// may change or claim what the user approved.
 #[derive(Clone)]
 pub(crate) struct AgentEnvironmentCreate {
-    launch: ApprovedLaunchTrust,
+    launch: TrustResolvedLaunch,
     agent_wrapper_supplied: bool,
     wrapper_approved: bool,
 }
@@ -1124,13 +1124,13 @@ impl CreateReq {
     /// before launch kinds has neither and is refused, as Clone and Replace
     /// refuse it.
     pub(crate) fn for_agent_environment(
-        launch: ApprovedLaunchTrust,
+        launch: TrustResolvedLaunch,
         agent_wrapper_supplied: bool,
         prompt: Option<String>,
         title: Option<String>,
         repo: Option<String>,
     ) -> anyhow::Result<CreateReq> {
-        let (selection, command) = match launch.mode.as_launch() {
+        let (selection, command) = match launch.as_launch() {
             farhelm_proto::SessionLaunch::Agent { selection, .. } => {
                 (Some(selection.clone()), None)
             }
@@ -1249,7 +1249,7 @@ impl CreateReq {
         // Compile their copy so a catalog edit cannot swap the executable
         // after admission. Agent launches already carry their approved command.
         let launch = match &self.agent {
-            Some(agent) => agent.launch.mode.as_launch().clone(),
+            Some(agent) => agent.launch.as_launch().clone(),
             None => create_mode(store, &mut self.clone()).await?,
         };
         launch
@@ -1404,7 +1404,7 @@ fn github_checkout_resolution(
         repo,
         root,
         post_clone: config.post_clone.clone(),
-        claude_trust: config.claude_trust,
+        claude_trust: false,
         keep_spare: config.keep_spare,
         preview: preview.binding.clone(),
     })))
@@ -1830,7 +1830,7 @@ async fn create_session_request(
     // An agent's approved launch keeps the trust its card showed; a user's
     // create decides trust now, for the folder it lands in.
     let mode = match approved {
-        Some(approved) => approved.mode,
+        Some(approved) => approved,
         None => {
             let mode = ordinary_mode
                 .expect("fresh and agent requests returned or took their own launch above");
@@ -2389,7 +2389,7 @@ struct FreshCreateContext {
     client_identity: String,
     accept_result: Option<CreatedSessionCheck>,
     origin: CreateOrigin,
-    approved: Option<ApprovedLaunchTrust>,
+    approved: Option<TrustResolvedLaunch>,
 }
 
 /// Fresh admission after either a client choice or an approved agent
@@ -2470,18 +2470,13 @@ async fn create_fresh_session_resolved(
         if req.title.is_none() {
             req.title = checkout.title.clone();
         }
-        let mut config = checkout_config_for(state, claim.host).await?;
-        if let Some(approved) = &approved {
-            // Preview admission still uses the destination's current revision.
-            // Preparation and its cleanup record use the approved trust choice.
-            config.claude_trust = approved.claude_after_clone;
-        }
+        let config = checkout_config_for(state, claim.host).await?;
         let github_checkout = github_checkout_resolution(&req, client_identity.clone(), &config)
             .expect("fresh request requires resolution")?;
         let mode = match approved {
             // An agent's approval already fixed this trust choice. Reading
             // Settings again here must not change the approved launch.
-            Some(approved) => approved.mode,
+            Some(approved) => approved,
             None => configured_launch_workspace_trust(
                 create_mode(&state.store, &mut req).await?,
                 &config,
@@ -2612,7 +2607,7 @@ pub(crate) async fn create_agent_checkout(
     claim: &manager::SessionClaim,
     client: &SupervisorClient,
     checkout: farhelm_proto::GithubCheckoutRequest,
-    resolution: crate::agent_launch::Resolution<ApprovedLaunchTrust>,
+    resolution: crate::agent_launch::Resolution<TrustResolvedLaunch>,
     wrapper_approved: bool,
     intent_key: Option<String>,
     client_identity: String,
@@ -2761,7 +2756,7 @@ mod workspace_trust_tests {
     use farhelm_proto::{LaunchHarness, LaunchSelection};
 
     /// Spec: an agent's environment launch request carries the launch its card
-    /// showed, both trust choices included, and speaks with the agent's origin,
+    /// showed, including its trust choice, and speaks with the agent's origin,
     /// its direct-Allow answering any wrapper the agent supplied; a request
     /// decoded from a client body carries neither (SPEC.md, "Agents and
     /// environments").
@@ -2805,12 +2800,8 @@ mod workspace_trust_tests {
         assert_eq!(
             shown.agent_selection().unwrap().workspace_trust,
             None,
-            "premise: Claude preparation trust is independent of Codex launch trust"
+            "enabling Claude trust leaves the approved Codex launch's trust unset"
         );
-        let approved = ApprovedLaunchTrust {
-            mode: approved,
-            claude_after_clone: settings.claude_trust,
-        };
         let req =
             CreateReq::for_agent_environment(approved, true, None, None, Some("acme/web".into()))
                 .unwrap();
@@ -2822,13 +2813,10 @@ mod workspace_trust_tests {
             }
         ));
         assert_eq!(
-            req.agent
-                .as_ref()
-                .map(|agent| agent.launch.mode.as_launch()),
+            req.agent.as_ref().map(|agent| agent.launch.as_launch()),
             Some(&shown),
             "the approved launch, trust included, is what the create will run"
         );
-        assert!(req.agent.as_ref().unwrap().launch.claude_after_clone);
         let browser: CreateReq = serde_json::from_value(serde_json::json!({
             "cwd": "~",
             "agent": { "launch": "ignored" },
@@ -2842,7 +2830,8 @@ mod workspace_trust_tests {
     }
 
     /// Fresh resolution reads the saved global spare choice once, alongside
-    /// root/hook/trust; later saves cannot mutate the already resolved payload.
+    /// root and hook. Later saves cannot mutate the already resolved payload.
+    /// The checkout request leaves workspace trust to the selected launch.
     #[farhelm_testtrace::test]
     async fn fresh_checkout_resolution_freezes_the_saved_spare_choice() {
         let dir = tempfile::tempdir().unwrap();
@@ -2858,15 +2847,18 @@ mod workspace_trust_tests {
             }}
         }))
         .unwrap();
-        let enabled = github_checkout_resolution(
-            &req,
-            "same-client".into(),
-            &store.resolve_checkout_config(None).await.unwrap(),
-        )
-        .unwrap()
-        .unwrap()
-        .unwrap();
-        assert!(enabled.keep_spare && enabled.claude_trust);
+        let config = store.resolve_checkout_config(None).await.unwrap();
+        assert!(config.claude_trust, "premise: Claude trust is on");
+        let enabled = github_checkout_resolution(&req, "same-client".into(), &config)
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(enabled.keep_spare);
+        let wire = serde_json::to_value(&enabled).unwrap();
+        assert!(
+            wire.get("claude_trust").is_none(),
+            "checkout carries no Claude opt-in"
+        );
         store.set_keep_spare(false).await.unwrap();
         let disabled = github_checkout_resolution(
             &req,

@@ -16,7 +16,7 @@ specific to Claude.
   status line and show a YOLO shield; this is best effort, not a check of your allow rules or hooks.
 - On an installed host, Claude may ask whether you trust a directory the first time it starts there. Answer in the
   session's terminal, or enable **Answer Claude's "trust this folder?"** under **Settings → Agents → Claude Code**. The
-  switch lets Farhelm edit Claude's own settings before launch. See
+  switch lets Farhelm edit Claude's own settings when you launch a Claude Code session from the **Agent** tab. See
   [workspace trust](/docs/using/start-a-session/#workspace-trust) for disposable sessions, the home directory
   protections and when Farhelm removes the entry.
 - If you start Claude through a [wrapper prefix](/docs/agents/agent-wrappers/) or a

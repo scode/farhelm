@@ -507,12 +507,11 @@ pub struct ResolvedGithubCheckout {
     /// Carried by the helm (the only holder of configuration); the
     /// supervisor never derives it itself.
     pub post_clone: Option<String>,
-    /// Opt-in vendor trust for every new managed checkout. Frozen alongside
-    /// the hook so a create retry cannot pick up a later settings change.
+    /// Legacy post-clone Claude setting. The supervisor uses the structured
+    /// launch's trust choice. New checkout requests leave this field false.
     ///
-    /// Omitted when off: supervisors compare create fingerprints that embed
-    /// this struct as exact strings, so an always-present key would turn every
-    /// managed-checkout retry crossing the upgrade into a refused key reuse.
+    /// Preserve both encodings for retained creates. The supervisor compares
+    /// fingerprints that embed this struct as exact strings.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub claude_trust: bool,
     /// Freeze spare consumption and replenishment for this create. Off omits

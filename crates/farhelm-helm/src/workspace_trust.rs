@@ -77,29 +77,6 @@ impl TrustResolvedLaunch {
     }
 }
 
-/// Trust resolved before an agent's approval. Checkout preparation uses the
-/// Claude switch even for other agents, so retain it alongside the compiled launch.
-#[derive(Clone)]
-pub(crate) struct ApprovedLaunchTrust {
-    pub(crate) mode: TrustResolvedLaunch,
-    pub(crate) claude_after_clone: bool,
-}
-
-impl ApprovedLaunchTrust {
-    /// Resolve both choices from one snapshot before approval or provisioning can wait.
-    pub(crate) async fn resolve(
-        state: &AppState,
-        launch: SessionLaunch,
-        destination: TrustDestination,
-    ) -> anyhow::Result<Self> {
-        let config = state.store.resolve_checkout_config(None).await?;
-        Ok(Self {
-            mode: configured_launch_workspace_trust(launch, &config, destination)?,
-            claude_after_clone: config.claude_trust,
-        })
-    }
-}
-
 /// Choose the no-trust policy only when this launch has no workspace-trust knob.
 ///
 /// Commands keep all literal words, even if they declare a trust-capable harness

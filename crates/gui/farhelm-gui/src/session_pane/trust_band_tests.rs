@@ -767,11 +767,12 @@ const FLAG: &str = "Farhelm can answer it through a command-line flag. It's off 
 
 /// The agent the band names decides whose switch it advertises and whose dismissal it stores, so a session must never
 /// borrow another agent's: the harness-neutral question flag says only that some agent asks (the old
-/// `TrustAgent::for_session`). Claude's flag names Claude in the fixture's fresh managed checkout. The neutral flag
-/// names Codex, Muse or Antigravity only for a structured launch of that harness.
+/// `TrustAgent::for_session`). Claude's flag names a structured Claude launch in the fixture's fresh managed checkout.
+/// The neutral flag names Codex, Muse or Antigravity only for a structured launch of that harness.
 #[test]
 fn only_a_sessions_own_launch_names_the_agent_asking() {
     let flagged = [
+        (LaunchHarness::Claude, TrustAgent::Claude),
         (LaunchHarness::Codex, TrustAgent::Codex),
         (LaunchHarness::Muse, TrustAgent::Muse),
         (LaunchHarness::Antigravity, TrustAgent::Antigravity),
@@ -806,10 +807,15 @@ fn only_a_sessions_own_launch_names_the_agent_asking() {
                 fixture = fixture.at_workspace_trust_question();
             }
             let row: SessionRow = serde_json::from_value(fixture.entry().value).unwrap();
-            let expected = match (claude, workspace) {
-                (true, _) => Some(TrustAgent::Claude),
-                (false, true) => named,
-                (false, false) => None,
+            assert!(
+                row.info.github_repo.is_some(),
+                "premise: fresh managed checkout"
+            );
+            assert_eq!(row.info.claude_trust_prompt, claude);
+            assert_eq!(row.info.workspace_trust_prompt, workspace);
+            let expected = match named {
+                Some(TrustAgent::Claude) => claude.then_some(TrustAgent::Claude),
+                other => other.filter(|_| workspace),
             };
             assert_eq!(
                 TrustAgent::asking(&row.info),
@@ -820,20 +826,20 @@ fn only_a_sessions_own_launch_names_the_agent_asking() {
     }
 }
 
-/// A Command or legacy Claude session can use the settings edit after a fresh clone. A borrower in the same
-/// checkout and a session in an ordinary folder both answer Claude's question directly.
+/// A Command or legacy Claude session answers the question directly wherever it runs. The hint would send users
+/// to a switch that cannot answer for their launch.
 #[test]
-fn claude_command_and_legacy_hints_require_fresh_checkout_provenance() {
+fn claude_command_and_legacy_launches_have_no_trust_hint() {
     for launch in [
         json!({"kind": "command", "command": "claude", "yolo": false, "agent": "claude", "resume": null}),
         json!({"kind": "legacy", "invocation": "claude", "agent_kind": "claude", "resume_template": null}),
     ] {
         let fresh = session("a").launch(launch).at_claude_trust_question();
         let borrower = fresh.clone().not_launched_as_checkout();
-        for (fixture, member, expected) in [
-            (fresh, true, Some(TrustAgent::Claude)),
-            (borrower.clone(), true, None),
-            (borrower.unmanaged(), false, None),
+        for (fixture, member, new_checkout) in [
+            (fresh, true, true),
+            (borrower.clone(), true, false),
+            (borrower.unmanaged(), false, false),
         ] {
             let info = serde_json::from_value::<SessionRow>(fixture.entry().value)
                 .unwrap()
@@ -841,10 +847,10 @@ fn claude_command_and_legacy_hints_require_fresh_checkout_provenance() {
             assert!(info.claude_trust_prompt);
             assert!(info.launch.agent_selection().is_none());
             assert_eq!(info.working_copy.is_some(), member);
-            assert_eq!(info.github_repo.is_some(), expected.is_some());
+            assert_eq!(info.github_repo.is_some(), new_checkout);
             assert_eq!(
                 TrustAgent::asking(&info),
-                expected,
+                None,
                 "{:?}, checkout membership {member}",
                 info.launch.launch_kind()
             );

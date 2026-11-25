@@ -283,10 +283,6 @@ pub struct CheckoutPreparation {
     /// the working directory; the shim deliberately does not shell-expand
     /// the repo identifier or cwd into it.
     pub post_clone: Option<String>,
-    /// Frozen opt-in for this new managed checkout, independent of the agent
-    /// initially launched there. Existing launch specs remain off.
-    #[serde(default)]
-    pub claude_trust: bool,
     /// Frozen permission to consume a prepared checkout. Omitted false keeps
     /// retained launch specs unchanged. The helm freezes its default-on global
     /// setting for each new create; older accepted creates remain off.
@@ -1215,16 +1211,15 @@ pub fn exec_launch_spec_with_seam(
         let report = record_launch_failure(&status_path, format!("{error:#}"), seam);
         return error.context(report);
     }
-    if spec.claude_workspace_trust
-        && !spec
-            .preparation
-            .as_ref()
-            .is_some_and(|prep| prep.claude_trust)
-    {
-        // The shell has installed Claude's config environment and the shim
-        // has entered the final directory. Fresh checkout preparation owns
-        // the edit when it can record its removal at archive time.
-        apply_claude_workspace_trust(Path::new("."), |_| Ok(()));
+    if spec.claude_workspace_trust {
+        // Claude's config selection depends on the login shell environment
+        // and its project key must name the final directory.
+        apply_claude_workspace_trust(Path::new("."), |trust_record| {
+            if let Some(preparation) = &spec.preparation {
+                record_preparation_trust(preparation, trust_record, seam)?;
+            }
+            Ok(())
+        });
     }
 
     // No synthetic screen is written to the terminal before `exec`. The shim once
@@ -1980,27 +1975,34 @@ fn run_checkout_preparation(
         );
     }
 
-    // Setup is already Ready. Trust is deliberately outside its success
-    // contract: any vendor/config failure leaves the agent free to ask its
-    // ordinary question, and never turns a successful checkout into an error.
-    if preparation.claude_trust {
-        apply_claude_workspace_trust(cwd, |trust_record| {
-            let mut record =
-                read_preparation_state(&preparation.state_path, &preparation.working_copy_id)?
-                    .context("ready preparation record is absent")?;
-            record.claude_trust = Some(trust_record.clone());
-            crate::files::write_durable_sync(
-                &preparation.state_path,
-                &serde_json::to_vec(&record)?,
-                seam,
-            )?;
-            Ok(())
-        });
-    }
-
-    // Released before the agent exec (the lock file is closed here), and
+    // Released when preparation finishes (the lock file is closed here), and
     // CLOEXEC'd at open so git/hook children never inherited it either.
     drop(lock);
+    Ok(())
+}
+
+/// Give archive the exact Claude config and project key before either can change.
+/// The preparation lock serializes the durable update with shim retries. Archive
+/// waits for process teardown, so the lock can be released before the vendor edit.
+/// A recovered create can repeat the recorded edit. It cannot replace the only
+/// cleanup record with one for a different config.
+fn record_preparation_trust(
+    preparation: &CheckoutPreparation,
+    trust_record: &ClaudeTrustRecord,
+    seam: &dyn crate::files::FaultSeam,
+) -> anyhow::Result<()> {
+    let _lock = acquire_preparation_lock(&preparation_lock_path(&preparation.state_path))?;
+    let mut record = read_preparation_state(&preparation.state_path, &preparation.working_copy_id)?
+        .context("ready preparation record is absent")?;
+    if let Some(previous) = &record.claude_trust {
+        anyhow::ensure!(
+            previous == trust_record,
+            "this checkout's archive record names a different Claude settings file or folder"
+        );
+        return Ok(());
+    }
+    record.claude_trust = Some(trust_record.clone());
+    crate::files::write_durable_sync(&preparation.state_path, &serde_json::to_vec(&record)?, seam)?;
     Ok(())
 }
 
@@ -3312,7 +3314,6 @@ mod tests {
                 directory_device: 0,
                 directory_inode: 0,
                 post_clone: None,
-                claude_trust: false,
                 keep_spare: false,
                 shell: "/bin/sh".into(),
                 state_path: preparation_state.clone(),
@@ -4023,7 +4024,6 @@ exec sleep 60
                 directory_device: cwd_metadata.dev(),
                 directory_inode: cwd_metadata.ino(),
                 post_clone,
-                claude_trust: false,
                 keep_spare: false,
                 shell: shell.to_string(),
                 state_path,
@@ -4373,6 +4373,28 @@ exec sleep 60
         let kind = std::env::var(PREP_CHILD_KIND).expect("the parent must provide the kind");
         let error = match kind.as_str() {
             "real" => exec_launch_spec(&spec_path),
+            "witness-trust-write" => {
+                // Observe the real durable write from a second open of the
+                // checkout flock. Checking after exec would miss its lifetime.
+                struct WitnessTrustWrite(PathBuf);
+                impl crate::files::FaultSeam for WitnessTrustWrite {
+                    fn write(&self, file: &mut std::fs::File, bytes: &[u8]) -> std::io::Result<()> {
+                        if let Ok(record) = serde_json::from_slice::<PreparationRecord>(bytes)
+                            && let Some(trust) = record.claude_trust
+                        {
+                            assert_eq!(record.state, PreparationState::Ready);
+                            assert!(!PreparationLock::open(&self.0)?.try_acquire()?);
+                            assert_eq!(std::fs::read_to_string(trust.config_path)?, "{}");
+                            eprintln!("TRUST-RECORD-WRITTEN-UNDER-LOCK");
+                        }
+                        std::io::Write::write_all(file, bytes)
+                    }
+                }
+                let spec: LaunchSpec =
+                    serde_json::from_slice(&std::fs::read(&spec_path).unwrap()).unwrap();
+                let lock = preparation_lock_path(&spec.preparation.unwrap().state_path);
+                exec_launch_spec_with_seam(&spec_path, &WitnessTrustWrite(lock))
+            }
             "fail-at-write" => {
                 struct FailEveryWrite;
                 impl crate::files::FaultSeam for FailEveryWrite {
@@ -4582,14 +4604,17 @@ printf 'AGENT-RAN\n'
         fixture
     }
 
-    /// The opt-in runs in the real launch child after successful setup, using
-    /// only that child's config environment. Invalid vendor state remains
-    /// untouched and cannot prevent the agent from starting.
+    /// Only the Claude launch opt-in can edit the child's selected vendor config.
+    /// Retained specs can still contain the old checkout-wide switch. A fresh
+    /// Claude launch records its edit under the flock so archive can undo it.
     #[farhelm_testtrace::test]
     fn claude_trust_launch_is_opt_in_and_best_effort_after_ready() {
-        for (enabled, content) in [(false, "{}"), (true, "{}"), (true, "[]")] {
-            let mut fixture = build_d1_fixture(Some("true".into()));
-            fixture.preparation.claude_trust = enabled;
+        for (enabled, content, child) in [
+            (false, "{}", "witness-trust-write"),
+            (true, "{}", "witness-trust-write"),
+            (true, "[]", "real"),
+        ] {
+            let fixture = build_d1_fixture(Some("true".into()));
             let config_dir = fixture.tmp.path().join("vendor-config");
             std::fs::create_dir(&config_dir).unwrap();
             let config = config_dir.join(".claude.json");
@@ -4597,11 +4622,19 @@ printf 'AGENT-RAN\n'
             // The launch record resolves symlinked temp roots, as on macOS.
             // Establish that expected spelling before the child edits the file.
             let canonical_config = std::fs::canonicalize(&config).unwrap();
-            let (report, terminal, status) = fixture.run_shim_in_child_with(
+            assert_eq!(fixture.state().unwrap(), PreparationState::NotStarted);
+            fixture.write_spec();
+            let mut spec: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&fixture.spec_path).unwrap()).unwrap();
+            spec["claude_workspace_trust"] = enabled.into();
+            spec["preparation"]["claude_trust"] = true.into();
+            std::fs::write(&fixture.spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+            let (report, terminal, status) = fixture.run_written_shim_in_child(
                 None,
                 &[
                     ("CLAUDE_CONFIG_DIR", config_dir.as_os_str()),
                     ("HOME", fixture.tmp.path().as_os_str()),
+                    (PREP_CHILD_KIND, std::ffi::OsStr::new(child)),
                 ],
                 &["CLAUDE_CODE_CUSTOM_OAUTH_URL"],
             );
@@ -4617,6 +4650,12 @@ printf 'AGENT-RAN\n'
                 .unwrap()
                 .unwrap();
             assert_eq!(record.state, PreparationState::Ready);
+            let writes = terminal.matches("TRUST-RECORD-WRITTEN-UNDER-LOCK").count();
+            assert_eq!(
+                writes,
+                usize::from(enabled && content == "{}"),
+                "{terminal}"
+            );
             if enabled && content == "{}" {
                 let document: serde_json::Value =
                     serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
@@ -4626,6 +4665,23 @@ printf 'AGENT-RAN\n'
                     true
                 );
                 assert_eq!(record.claude_trust.unwrap().config_path, canonical_config);
+                let state_dir = fixture.tmp.path().join("state");
+                remove_preparation_trust_sync(&state_dir, "wc-1", Duration::ZERO).unwrap();
+                let document: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+                assert!(
+                    document["projects"][path.to_str().unwrap()]
+                        .get("hasTrustDialogAccepted")
+                        .is_none()
+                );
+                assert!(
+                    read_preparation_state(&fixture.preparation.state_path, "wc-1")
+                        .unwrap()
+                        .unwrap()
+                        .claude_trust
+                        .is_none(),
+                    "archive clears its cleanup record after removing the key"
+                );
             } else {
                 assert_eq!(std::fs::read_to_string(&config).unwrap(), content);
                 if enabled {
@@ -4635,6 +4691,86 @@ printf 'AGENT-RAN\n'
                 }
             }
         }
+    }
+
+    /// A retained create can reach a Ready checkout after losing its first
+    /// terminal. If the shell now selects a different vendor config, archive
+    /// still needs the first record and the second file must stay untouched.
+    #[farhelm_testtrace::test]
+    fn recovered_create_preserves_the_first_claude_trust_record() {
+        let fixture = build_d1_fixture(Some("true".into()));
+        let original_dir = fixture.tmp.path().join("original-config");
+        let replacement_dir = fixture.tmp.path().join("replacement-config");
+        for directory in [&original_dir, &replacement_dir] {
+            std::fs::create_dir(directory).unwrap();
+            std::fs::write(directory.join(".claude.json"), "{}").unwrap();
+        }
+        fixture.write_spec();
+        let mut spec: LaunchSpec =
+            serde_json::from_slice(&std::fs::read(&fixture.spec_path).unwrap()).unwrap();
+        spec.claude_workspace_trust = true;
+        let launch = |config_dir: &Path| {
+            std::fs::write(&fixture.spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+            let (report, terminal, status) = fixture.run_written_shim_in_child(
+                None,
+                &[
+                    ("CLAUDE_CONFIG_DIR", config_dir.as_os_str()),
+                    ("HOME", fixture.tmp.path().as_os_str()),
+                ],
+                &["CLAUDE_CODE_CUSTOM_OAUTH_URL"],
+            );
+            assert!(
+                status.success() && report.is_empty(),
+                "{terminal}\n{report}"
+            );
+            assert!(terminal.contains("AGENT-RAN"), "{terminal}");
+            terminal
+        };
+        assert_eq!(fixture.state().unwrap(), PreparationState::NotStarted);
+        let terminal = launch(&original_dir);
+        assert!(!terminal.contains("Claude may ask"), "{terminal}");
+        assert_eq!(fixture.state().unwrap(), PreparationState::Ready);
+        let first_record = std::fs::read(&fixture.preparation.state_path).unwrap();
+        let original_config = original_dir.join(".claude.json");
+        let trusted_config = std::fs::read(&original_config).unwrap();
+        let document: serde_json::Value = serde_json::from_slice(&trusted_config).unwrap();
+        let project = std::fs::canonicalize(&fixture.preparation.cwd).unwrap();
+        assert_eq!(
+            document["projects"][project.to_str().unwrap()]["hasTrustDialogAccepted"],
+            true,
+            "premise: the first launch applied trust"
+        );
+        let record: PreparationRecord = serde_json::from_slice(&first_record).unwrap();
+        assert_eq!(
+            record.claude_trust.unwrap().config_path,
+            std::fs::canonicalize(&original_config).unwrap(),
+            "premise: archive knows which file the first launch edited"
+        );
+        let terminal = launch(&replacement_dir);
+        assert!(
+            terminal.contains("archive record names a different Claude settings file"),
+            "{terminal}"
+        );
+        assert_eq!(
+            std::fs::read(replacement_dir.join(".claude.json")).unwrap(),
+            b"{}"
+        );
+        assert_eq!(std::fs::read(&original_config).unwrap(), trusted_config);
+        assert_eq!(
+            std::fs::read(&fixture.preparation.state_path).unwrap(),
+            first_record
+        );
+
+        // Reusing the original config is still useful if an external write
+        // had lost the key. That repair needs no new archive record.
+        std::fs::write(&original_config, "{}").unwrap();
+        let terminal = launch(&original_dir);
+        assert!(!terminal.contains("Claude may ask"), "{terminal}");
+        assert_eq!(std::fs::read(&original_config).unwrap(), trusted_config);
+        assert_eq!(
+            std::fs::read(&fixture.preparation.state_path).unwrap(),
+            first_record
+        );
     }
 
     /// Claude sees the trust edit by the time it starts in an ordinary
