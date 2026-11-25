@@ -4690,10 +4690,10 @@ printf 'AGENT-RAN\n'
         }
     }
 
-    /// A separate Claude config directory cannot bypass the home check. Even with a writable config present,
-    /// the launch reaches the agent and leaves the file untouched when the shell cannot name an absolute home.
+    /// With a writable Claude config override, the shim still starts the agent and leaves that config alone
+    /// when HOME is unusable or the launch would trust HOME itself.
     #[farhelm_testtrace::test]
-    fn plain_claude_launch_skips_trust_when_home_is_unusable() {
+    fn plain_claude_launch_skips_trust_when_home_is_unusable_or_is_the_working_directory() {
         let fixture = build_d1_fixture(None);
         fixture.install_script("fake-agent", "#!/bin/sh\nprintf 'AGENT-RAN\\n'\n");
         let config_dir = fixture.tmp.path().join("vendor-config");
@@ -4708,7 +4708,7 @@ printf 'AGENT-RAN\n'
         let mut spec: LaunchSpec =
             serde_json::from_slice(&std::fs::read(&fixture.spec_path).unwrap()).unwrap();
         spec.preparation = None;
-        spec.working_directory = Some(project);
+        spec.working_directory = Some(project.clone());
         spec.claude_workspace_trust = true;
 
         for (home, notice) in [
@@ -4719,6 +4719,10 @@ printf 'AGENT-RAN\n'
                 "HOME is empty or relative",
             ),
             (Some(missing_home.as_os_str()), "could not resolve HOME"),
+            (
+                Some(project.as_os_str()),
+                "the session folder is your home directory",
+            ),
         ] {
             let mut env = vec![("CLAUDE_CONFIG_DIR", config_dir.as_os_str())];
             let mut removed = vec!["CLAUDE_CODE_CUSTOM_OAUTH_URL"];

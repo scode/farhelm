@@ -358,10 +358,6 @@ consequences.
   — Every wake-checkout test uses a verified suspended sandbox, leaving unverified resumable hosts and stopped Podman
   containers uncovered.
 
-- [`trailing-claude-trust-and-antigravity-missing-regression-tests.md`](trailing-claude-trust-and-antigravity-missing-regression-tests.md)
-  — No child-process test verifies the launch shim skips .claude.json in HOME, pins_approval_cwd has no direct unit
-  test, and trust-independence tests never turn Antigravity trust on.
-
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
   agent-credentials and Codex config targets unverified before and after retry.

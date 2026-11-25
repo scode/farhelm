@@ -569,27 +569,6 @@
   kept.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-claude-trust-and-antigravity-missing-regression-tests.md
-
-- Outcome: `other`.
-- Assessment: Three test-coverage gaps around folder trust. Nothing is wrong in the product; the claim is that some
-  behavior is not pinned by tests. Verified: Part 1 (an end-to-end shim test that Claude trust is skipped at home) is
-  largely addressed by a4cdd1bbd (#4664). It removed `claude_trust_covers_too_much` and added the child-process test
-  `plain_claude_launch_skips_trust_when_home_is_unusable` (`crates/farhelm-supervisor/src/launch.rs:4696`) plus the unit
-  test `trust_resolves_only_projects_outside_the_home_ancestor_chain` (`agent_kind/claude/trust.rs:555`). A
-  child-process test of cwd equal to HOME specifically still does not exist. Part 2 still stands: `pins_approval_cwd`
-  (`crates/farhelm-helm/src/workspace_trust.rs:53-58`) has no direct test. Part 3 still stands:
-  `workspace_trust_settings_remain_independent` (`crates/farhelm-helm/src/sessions.rs:3119-3145`) omits Antigravity.
-  However, `workspace_trust_enabled` is an exhaustive match (`crates/farhelm-helm/src/launches.rs:793-812`), so the
-  practical value is low.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard. Part 1 is mostly covered and parts 2-3 are low value.
-  Alternatively fix code for parts 2-3, size S.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
 ## trailing-credential-delivery-test-stale-claude-settings-assertion.md
 
 - Outcome: `other`.
