@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 62395c] `drift-instructions-delivery.md` — Add live `$farhelm` instructions pointer delivery drift tests across supporting agents (after `drift-model-selection.md`)
 - [complete] `triage-spec-text-nov24.md` — write the 2026-11-24 triage's text corrections and new spec principles into SPEC.md, SPEC_impl.md, docs and comments
 - [in-flight 66113d] `triage-tooling-nov24.md` — execute the 2026-11-24 triage outcomes for maintainer tooling and test infrastructure, in grouped PRs
 - [in-flight 2b20d7] `triage-custom-agents-nov24.md` — execute the 2026-11-24 triage outcomes for registered custom agents, in grouped PRs

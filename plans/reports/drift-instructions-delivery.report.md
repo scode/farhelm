@@ -61,3 +61,62 @@ A fresh-context Sol high reviewer checked the source and cleared the final chang
 and wrapped prompts could confuse the first matcher. The final reply markers require a complete answer and keep the
 prompt echo out of the match. A scope review supported reusing the existing conversation-capture waiter. A cold reader
 reviewed the commit title.
+
+### Landing
+
+#### What landed with it
+
+Two plans landed this round: this one, through [#4804](https://github.com/scode/farhelm/pull/4804/changes), then
+triage-spec-text-nov24, which changes the specs, docs and comments for a batch of triage decisions and does not touch
+the drift tests. Since this plan was based, main gained the previous rounds' drift categories, among them the capture
+timing category, which had added its own variant of the drift tests' shared launch helper (to start a supervisor with
+hooks off) where this plan added one to start a supervisor with its startup instructions on or off. The rebase
+conflicted there, and I merged the two into one helper that takes the supervisor's settings, with the two variants as
+thin wrappers, so each category gets exactly what it had. The drift docs and the list of categories only needed both
+sides kept.
+
+#### Fixes made while landing
+
+None beyond that conflict resolution.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. This round landed two
+plans, drift-instructions-delivery and triage-spec-text-nov24. Both reports' checks ran before their stacks were rebased
+onto the drift and triage changes that landed meanwhile, so the landing ran its checks on the two plans stacked together
+on main, with the rebase's conflict resolutions in them (`140e156e`):
+
+- `cargo nextest run --locked -p farhelm --test e2e` filtered to `real_agent_capture::drift::` and `hook_identity::`, on
+  the test worker (recorder run `ea45d013-8e11-4428-86d3-84882969acf9`): all 67 passed, with no runtime skip. These are
+  the drift tests that need no vendor CLI and every hook identity test, which includes the two that check the rewritten
+  conversation notices.
+- `cargo nextest run --locked -p farhelm-supervisor --lib` filtered to `core::vendor::`, `claude_pin` and
+  `notifications::`, on the test worker (recorder run `34e4e046-fe01-45e1-b5b3-85f228cd1827`): all 17 passed. The notice
+  texts live in those modules.
+- `python3 -B scripts/run-harness-drift.py --list --category all`, on the test worker: it listed every category's cases,
+  the six new instructions delivery cases included, starting no agent.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `python3 releasing/generate-workflow.py --check` (the release workflow's source file changed), the website build
+  (`bun run build` in `website`), `python3 releasing/check-changelog.py format`, `cargo fmt --all -- --check`,
+  `python -B scripts/check-test-sleeps.py` (in its pinned interpreter), `dprint check`,
+  `python3 scripts/check-agents-md.py` (no errors; one warning, about an old citation in the triage archive, already on
+  main) and `python3 -B scripts/test-run-harness-drift.py` (recorder run `1d1aca37-53b3-415f-9350-5c808cf57091`, all 18
+  passed), locally: passed.
+
+Reused: the executor's live run of the instructions delivery category against the installed agents, recorded in its
+report; the rebase changed how the category reaches the shared launch helper, not what it launches.
+
+Skipped: the live drift cases themselves, since they spend vendor turns, need the vendor logins and are opt-in by
+design; the rest of the workspace Rust suite and the desktop checks, since the only behavior change in either plan is
+the text of two notices, which the tests above cover; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+Nothing. The checks the report lists ran before the rebase; the ones above ran after it.
+
+#### Things you should know that the report does not say
+
+- **The category's coverage check lists its six agents by name**, as the plan asked. The other categories derive theirs
+  from what each agent supports, so an agent that later starts getting the `$farhelm` hint would not make this one fail
+  until someone adds it.
