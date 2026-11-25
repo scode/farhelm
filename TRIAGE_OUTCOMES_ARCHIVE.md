@@ -46160,7 +46160,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   back to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says
   remains.
 - Execution: `lvosouloqlswqqmkxvrylmoqusqoyvpz`, `plan/triage-hooks-trust-nov24/05b-checkout-approval-trust`,
-  [draft PR](https://github.com/scode/farhelm/pull/4900/changes). Fixed the settled behavior. The approved checkout preparation retains the earlier Claude trust choice for an existing host or a new environment. Showing Claude checkout trust on an approval card for another agent remains an open question.
+  [draft PR](https://github.com/scode/farhelm/pull/4900/changes). Fixed the settled behavior. The approved checkout
+  preparation retains the earlier Claude trust choice for an existing host or a new environment. Showing Claude checkout
+  trust on an approval card for another agent remains an open question.
 
 ## trailing-claude-trust-relative-config-dir-persists-relative-lock.md
 
@@ -46182,7 +46184,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: `zlvsvkmlkzkquklzrxmnxnvxukpmxttm`, `plan/triage-hooks-trust-nov24/05c-absolute-claude-config`,
-  [draft PR](https://github.com/scode/farhelm/pull/4902/changes). Fixed. Automatic workspace trust requires an absolute nonempty Claude config directory override. The terminal notice explains a skipped edit.
+  [draft PR](https://github.com/scode/farhelm/pull/4902/changes). Fixed. Automatic workspace trust requires an absolute
+  nonempty Claude config directory override. The terminal notice explains a skipped edit.
 
 ## approval-omits-automatic-trust-warning-from-accessibility.md
 
@@ -46202,7 +46205,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
 - Execution: `zkwsxwrnpplzqkluplonkmkvvysymlmy`, `plan/triage-hooks-trust-nov24/05d-trust-accessibility`,
-  [draft PR](https://github.com/scode/farhelm/pull/4905/changes). Fixed. The Permissions fact exposes its chip, description and any trust warning as one static label before the answers.
+  [draft PR](https://github.com/scode/farhelm/pull/4905/changes). Fixed. The Permissions fact exposes its chip,
+  description and any trust warning as one static label before the answers.
 
 ## unavailable-antigravity-trust-switch-announced-as-off.md
 
@@ -46220,7 +46224,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
 - Execution: `zkwsxwrnpplzqkluplonkmkvvysymlmy`, `plan/triage-hooks-trust-nov24/05d-trust-accessibility`,
-  [draft PR](https://github.com/scode/farhelm/pull/4905/changes). Fixed under the desktop accessibility parity rule. An unread workspace trust switch is presented to assistive technology as an unavailable label. It reports a toggle value once the saved choice is known.
+  [draft PR](https://github.com/scode/farhelm/pull/4905/changes). Fixed under the desktop accessibility parity rule. An
+  unread workspace trust switch is presented to assistive technology as an unavailable label. It reports a toggle value
+  once the saved choice is known.
 
 ## hook-setup-accepts-nonutf8-config-path.md
 
@@ -46241,7 +46247,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: `vqnmznxwtprkqzrzqrzktyvruwqmpxyp`, `plan/triage-hooks-trust-nov24/05e-hook-setup-and-warning`,
-  [draft PR](https://github.com/scode/farhelm/pull/4908/changes). Fixed. The optional Grok and Antigravity hook installation reports an unsupported path before writing files. The session can still start.
+  [draft PR](https://github.com/scode/farhelm/pull/4908/changes). Fixed. The optional Grok and Antigravity hook
+  installation reports an unsupported path before writing files. The session can still start.
 
 ## resume-off-command-gets-hook-warning.md
 
@@ -46264,7 +46271,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings
   the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: `vqnmznxwtprkqzrzqrzktyvruwqmpxyp`, `plan/triage-hooks-trust-nov24/05e-hook-setup-and-warning`,
-  [draft PR](https://github.com/scode/farhelm/pull/4908/changes). Fixed. The missing conversation-hook notification requires a resume command. Hook setup, reports and the supervisor diagnostic are available with Resume off.
+  [draft PR](https://github.com/scode/farhelm/pull/4908/changes). Fixed. The missing conversation-hook notification
+  requires a resume command. Hook setup, reports and the supervisor diagnostic are available with Resume off.
 
 ## hook-recovery-text-omits-direction-isolation.md
 
@@ -46291,7 +46299,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: `ykqpvoywrzotvlrykxtpskxkrzmnyxpv`, `plan/triage-hooks-trust-nov24/05f-hook-guidance`,
-  [draft PR](https://github.com/scode/farhelm/pull/4911/changes). Deferred to the Plan follow-ups entry for isolating hook setup errors in recovery. Preserving host-text boundaries across Restart, Restart with and recovery surfaces needs more than the 100-line gate with tests.
+  [draft PR](https://github.com/scode/farhelm/pull/4911/changes). Deferred to the Plan follow-ups entry for isolating
+  hook setup errors in recovery. Preserving host-text boundaries across Restart, Restart with and recovery surfaces
+  needs more than the 100-line gate with tests.
 
 ## uninstall-omits-persistent-hook-cleanup.md
 
@@ -46313,7 +46323,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
 - Execution: `ykqpvoywrzotvlrykxtpskxkrzmnyxpv`, `plan/triage-hooks-trust-nov24/05f-hook-guidance`,
-  [draft PR](https://github.com/scode/farhelm/pull/4911/changes). Fixed in the uninstall guide. The cleanup instructions link to the existing per-agent steps for hosts on which Farhelm installed conversation hooks.
+  [draft PR](https://github.com/scode/farhelm/pull/4911/changes). Fixed in the uninstall guide. The cleanup instructions
+  link to the existing per-agent steps for hosts on which Farhelm installed conversation hooks.
 
 ## trailing-claude-trust-and-antigravity-missing-regression-tests.md
 
@@ -46335,4 +46346,6 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   record which way it went. Recommendation for reference: discard. Part 1 is mostly covered and parts 2-3 are low value.
   Alternatively fix code for parts 2-3, size S.
 - Execution: `xqtttpvyptwkpyrzmzvspvzurxktmutt`, `plan/triage-hooks-trust-nov24/06-trust-test`,
-  [draft PR](https://github.com/scode/farhelm/pull/4914/changes). Added the cheap Antigravity Settings independence case. The Antigravity approval-folder draft covers the normal dispatch contract with trust on and off. Extended the existing Claude launch fixture to verify the agent starts and its config is unchanged when launched in HOME.
+  [draft PR](https://github.com/scode/farhelm/pull/4914/changes). Added the cheap Antigravity Settings independence
+  case. The Antigravity approval-folder draft covers the normal dispatch contract with trust on and off. Extended the
+  existing Claude launch fixture to verify the agent starts and its config is unchanged when launched in HOME.

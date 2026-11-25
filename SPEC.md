@@ -1833,11 +1833,11 @@ override restores inheritance; an empty hook override disables the inherited hoo
 attempts, not an already accepted attempt or its retries.
 
 Settings offers an off-by-default, all-hosts choice under **Agents → Claude Code** to answer Claude's "trust this
-folder?" for structured Claude launches in any directory. New, Clone, Restart with, Replace with and Spawn read it.
-Plain Restart and the Replace answers that reuse the saved command keep the stored choice. **Replace as guarded
-instead** reads Settings as Replace with does. On a new managed checkout the same switch also enables trust after clone
-and its post-clone command, including checkouts initially started with another agent. Changing the switch does not
-invalidate an already displayed path preview.
+folder?" for structured Claude launches in any directory. New, Clone, Restart with, Replace with and agent-requested
+launches read it. Plain Restart and the Replace answers that reuse the saved command keep the stored choice. **Replace
+as guarded instead** reads Settings as Replace with does. On a new managed checkout the same switch also enables trust
+after clone and its post-clone command, including checkouts initially started with another agent. Changing the switch
+does not invalidate an already displayed path preview.
 
 The help leads with the mechanism: Claude has no supported switch, so Farhelm edits its settings file (normally
 `~/.claude.json`), which also holds sign-in, settings and per-directory state. It changes only that directory's trust
