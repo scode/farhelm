@@ -925,17 +925,21 @@ impl Podman {
             .context("the recipe no longer exists")?;
         let mut failures = Vec::new();
         let mut unconfirmed_capture = false;
-        for (place, _) in state.podman {
+        for (place, recorded) in state.podman {
             let result = async {
                 let _source = self.0.builds.lock_podman_cleanup(name, place, deletion).await?;
-                self.reconcile_helpers(name, place).await?;
-                self.edit(name, place, |state| {
-                    if let Some(image) = state.image.take() { state.retired_images.push(image.id); }
-                    if let Some(image) = state.prepared.take() { state.retired_images.push(image.id); }
-                }).await?;
-                self.retire_images_unlocked(name, place, deletion.may_forget_missing_captures()).await?;
-                anyhow::ensure!(!self.state(name, place).await?.needs_cleanup(),
-                    "owned images are still in use; delete their containers before deleting the recipe");
+                // A failure-only record can outlive its host. Admission is closed
+                // and the jobs have drained, so it has no remote cleanup to do.
+                if recorded.needs_cleanup() {
+                    self.reconcile_helpers(name, place).await?;
+                    self.edit(name, place, |state| {
+                        if let Some(image) = state.image.take() { state.retired_images.push(image.id); }
+                        if let Some(image) = state.prepared.take() { state.retired_images.push(image.id); }
+                    }).await?;
+                    self.retire_images_unlocked(name, place, deletion.may_forget_missing_captures()).await?;
+                    anyhow::ensure!(!self.state(name, place).await?.needs_cleanup(),
+                        "owned images are still in use; delete their containers before deleting the recipe");
+                }
                 self.0.store.update_tensorlake_recipe_state(name, move |_, state| { state.podman.remove(&place); }).await?;
                 Ok::<_, anyhow::Error>(())
             }.await;

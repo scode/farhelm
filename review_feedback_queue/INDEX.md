@@ -110,10 +110,6 @@ consequences.
   — Choosing New container and Managed checkout inserts roughly 300 px of empty vertical space below the Container host
   picker because a horizontal flex basis is applied inside a vertical flex column.
 
-- [`trailing-failed-rebuild-on-removed-host-blocks-recipe-delete.md`](trailing-failed-rebuild-on-removed-host-blocks-recipe-delete.md)
-  — If a recipe rebuild or preparation fails on an empty container host and that host is later removed, deleting the
-  recipe always fails because cleanup still requires the removed host row.
-
 - [`trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md`](trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md)
   — After adopting a reinstalled or recycled container host, Farhelm can fail new container launches for up to 5 minutes
   with a misleading moved-destination error and lock out another entry for the old machine across restarts.

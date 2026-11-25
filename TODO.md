@@ -166,6 +166,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   again and preserve a question that a manual action owns. Cover both shared authentication and route edits in tests
   with automatic updates still on. Cancelling the prompt alone cannot arbitrate the admission race after the answer.
 
+- **Show container recipe admission failures before recording build ownership.** An explicit Rebuild can answer Accepted
+  before a fresh Podman check fails. The existing recipe place record keeps that failure visible after the job ends.
+  Suppressing the record alone loses the reason if the old host check still says Ready, for example after a refresh
+  times out. Return the refusal before acceptance or keep it in the existing build status without creating a recipe
+  place entry. Fence the first recipe place write to the host settings and machine/account claim that passed admission.
+  Looking up the host again by row ID can use different settings after a retarget or an SSH mode change. Cover a first
+  Rebuild that fails admission and still shows the reason, plus a route change between admission and the first write.
+  Recipe Delete now handles historical records with no resources. Preventing those records at the admission boundary
+  also needs a way to show the outcome of an already accepted Rebuild.
+
 - **Verify container hosts before trusting results or sending private input.** Each provider command for a claimed
   container host must verify the recorded machine and account on the connection that will run it, before executing or
   accepting an engine result. Use a proof tied to that authenticated endpoint. A token sent with the command does not

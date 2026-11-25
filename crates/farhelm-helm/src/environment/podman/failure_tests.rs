@@ -1415,6 +1415,51 @@ async fn absent_helper_create_allows_immediate_rebuild_only_after_definite_refus
     }
 }
 
+/// A failed admitted build can leave a diagnostic without remote resources.
+/// Removing that host must still allow the ordinary recipe Delete route.
+#[farhelm_testtrace::test]
+async fn recipe_delete_drops_failure_only_state_for_a_removed_host() {
+    use axum::extract::{Path, Query, State};
+    use axum::http::{StatusCode, Uri};
+
+    let f = Fixture::new().await;
+    f.commands.fail("pull-base");
+    assert!(f.prepare(&Progress::default()).await.is_err());
+    assert_eq!(f.commands.failed().as_deref(), Some("pull-base"));
+    let saved = f.recipe_state().await;
+    assert!(saved.last_failure.is_some() && !saved.needs_cleanup());
+    f.store.remove_ssh_host(f.place).await.unwrap();
+    assert!(
+        f.store
+            .list_hosts()
+            .await
+            .unwrap()
+            .iter()
+            .all(|row| row.id != f.place)
+    );
+    assert_eq!(f.recipe_state().await.last_failure, saved.last_failure);
+    let calls = f.commands.state.lock().unwrap().calls.len();
+    let response = crate::tensorlake::recipes::delete_recipe(
+        State(f.state()),
+        Path("dev".into()),
+        Query::try_from_uri(&Uri::from_static("/api/tensorlake/recipes/dev")).unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        f.store
+            .tensorlake_recipe_row("dev")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        f.commands.state.lock().unwrap().calls.len(),
+        calls,
+        "no engine cleanup is required"
+    );
+}
+
 /// An interrupted capture can leave a durable tag with no image. Recipe
 /// Delete keeps that tag until the user agrees to forget it, and even a
 /// confirmed retry needs a positive absence report from the container host.
