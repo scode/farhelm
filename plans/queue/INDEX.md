@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `triage-settings-nov24.md` — execute the 2026-11-24 triage outcomes for the Settings dialog, in grouped PRs
 - [in-flight ad6b94] `triage-supervisor-nov24.md` — execute the 2026-11-24 triage outcomes for the supervisor's session lifecycle, in grouped PRs
 - [in-flight 00b06a] `triage-hooks-trust-nov24.md` — execute the 2026-11-24 triage outcomes for agent hooks and workspace trust, in grouped PRs
-- [complete] `triage-helm-nov24.md` — execute the 2026-11-24 triage outcomes for hosts, setup, updates and agent requests, in grouped PRs
+- [landing 4529fe] `triage-helm-nov24.md` — execute the 2026-11-24 triage outcomes for hosts, setup, updates and agent requests, in grouped PRs
 - [in-flight 78cae4] `triage-podman-nov24.md` — execute the 2026-11-24 triage outcomes for containers (Podman), in grouped PRs
 - [pending] `triage-environments-nov24.md` — execute the 2026-11-24 triage outcomes for sandboxes, waking, suspend and Trash, in grouped PRs
 - [pending] `sandbox-auto-trust-and-claude-onboarding.md` — Automatically suppress workspace trust prompts in per-session sandboxes/containers and skip Claude Code first-run setup on new recipe hosts
