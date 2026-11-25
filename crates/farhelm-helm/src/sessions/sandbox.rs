@@ -572,6 +572,7 @@ async fn stop_then_suspend(
         &key,
         request.refuse_if_tabs_open,
         request.refuse_if_agent_running,
+        None,
     )
     .await?;
     if let Some(notice) = outcome.notice {

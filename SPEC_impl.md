@@ -9763,14 +9763,15 @@ its selection. That last condition is what keeps a clone honest: a clone copies 
 source supervisor, which is untrusted, and without it a source could pair non-YOLO choices with a YOLO command line. A
 command launch can never be vouched for, since Farhelm does not read commands, and `confirm_yolo` in a request is
 ignored. A launch is also refused if the target host's connection changed while the card waited, since the approval was
-for the machine the card named. A lifecycle verb routes its target before asking, so a session no host knows is refused
-without a card. A plain restart re-runs the session's stored launch; the card shows the helm's cached copy of it (a
-restart whose copy the helm cannot read is refused before any card, since there would be nothing to show or to hold it
-to), and the restart carries that copy to the supervisor as `RestartSession::expected_launch` (protocol 41). The
-supervisor refuses, before stopping anything, unless the stored launch is still exactly that, comparing under the
-session's lifecycle claim, which every Restart with also takes, so a Restart with from the GUI while the card waited
-cannot make the approval resume a launch the card did not show. The helm also refuses up front when its cache already
-shows the change, which only gives a clearer message.
+for the machine the card named. The helm keeps that connection through the final launch checks and dispatch. A lifecycle
+verb routes its target before asking, so a session no host knows is refused without a card. An agent-requested Stop
+refuses if its target connection changed between describing the session and dispatch. A plain restart re-runs the
+session's stored launch; the card shows the helm's cached copy of it (a restart whose copy the helm cannot read is
+refused before any card, since there would be nothing to show or to hold it to), and the restart carries that copy to
+the supervisor as `RestartSession::expected_launch` (protocol 41). The supervisor refuses, before stopping anything,
+unless the stored launch is still exactly that, comparing under the session's lifecycle claim, which every Restart with
+also takes, so a Restart with from the GUI while the card waited cannot make the approval resume a launch the card did
+not show. The helm also refuses up front when its cache already shows the change, which only gives a clearer message.
 
 Template writes (`TemplateCreate`, `TemplateEdit`, `TemplateDelete`, protocol 42) go through the same card. An edit is
 merged with the stored template before the card, so the card shows the whole result, command text the listing withholds

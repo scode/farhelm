@@ -37,10 +37,6 @@ consequences.
   — When Antigravity workspace trust is on, agent Create, Spawn, and Clone show an unpinned symlink on the approval card
   and resolve it only at start, allowing symlink masking or redirection during the approval wait.
 
-- [`trailing-agent-create-drops-target-incarnation-after-approval.md`](trailing-agent-create-drops-target-incarnation-after-approval.md)
-  — For agent-requested launches that do not pin an approval folder, a target host reconnect or retarget during the
-  final post-approval check can let the launch dispatch to the replacement connection.
-
 - [`trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md`](trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md)
   — Toggling Claude workspace trust while an agent checkout approval card waits or an environment starts can grant trust
   to a Not trusted approval or leave permanent trust with no archive cleanup record.
@@ -52,11 +48,6 @@ consequences.
 - [`trailing-podman-setup-scripts-and-creation-proxy-skip-place-verification.md`](trailing-podman-setup-scripts-and-creation-proxy-skip-place-verification.md)
   — During a container build or setup, an external SSH alias or User change can open a fresh SSH connection and stream
   cached proxy credentials on stdin without checking the host identity, or read proxies from the moved host.
-
-- [`trailing-agent-stop-does-not-pin-target-connection-across-approval.md`](trailing-agent-stop-does-not-pin-target-connection-across-approval.md)
-  — Approving a cross-host agent Stop does not pin the target host's connection incarnation across the approval wait, so
-  a retarget or reconnect during approval can stop a matching session ID on the replacement connection (requires a rare
-  cross-host retarget with a colliding session ID).
 
 - [`trailing-claude-trust-relative-config-dir-persists-relative-lock.md`](trailing-claude-trust-relative-config-dir-persists-relative-lock.md)
   — If the login shell exports a relative CLAUDE_CONFIG_DIR, Farhelm accepts it, letting a symlink in a cloned

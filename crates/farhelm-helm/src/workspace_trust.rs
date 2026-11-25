@@ -48,8 +48,8 @@ impl TrustResolvedLaunch {
     }
 
     /// Whether [`Self::pin_trusted_approval_cwd`] checks the folder at all: only when this launch carries trust for an
-    /// agent whose trust follows the folder. A caller that ties the approval to the host connection the check used
-    /// does so only then, so a launch without trust does not depend on that connection surviving the wait for Allow.
+    /// agent whose trust follows the folder. When this checks a directory, launch dispatch holds the connection
+    /// that resolved it. An approval still binds the launch to its target connection when no path check is needed.
     pub(crate) fn pins_approval_cwd(&self) -> bool {
         self.0.agent_selection().is_some_and(|selection| {
             selection.workspace_trust == Some(true)
