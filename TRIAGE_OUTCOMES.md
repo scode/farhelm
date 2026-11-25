@@ -2987,22 +2987,6 @@
   feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
-## trailing-agent-create-host-help-omits-supported-hostless-launches.md
-
-- Outcome: `fix code`.
-- Assessment: `farhelm agent create --help` says `--host` is required unless a template sets the host or `--recipe` is
-  given. It leaves out two other cases where no host is needed: a template that launches a recipe, and an agent already
-  running inside a Farhelm sandbox or container. Verified: Confirmed. `crates/farhelm/src/main.rs:364-366` carries that
-  text. SPEC.md 4723-4724 and the confined- create rules allow the omitted cases. The cost is help wording only; the
-  commands themselves work.
-- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
-  Recommendation for reference: fix code. A one-line help text change. Size S. Size gate: about 100 lines of diff (code,
-  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
-  brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## launcher-new-environment-folder-omits-repository-prompt.md
 
 - Outcome: `fix code`.
@@ -3732,22 +3716,6 @@
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## trailing-spec-md-contradicts-send-handoff-auto-opening-auto-update-popover.md
-
-- Outcome: `fix spec`.
-- Assessment: The spec contradicts itself about when an automatic update's sign-in question may open on its own. One
-  place says only when you press Answer. The focus rules (and the app) let answering another host's sign-in question
-  move straight on to an already-waiting automatic-update question. Verified: Confirmed. SPEC.md:5996-5998 says "…its
-  popover opens only when the user presses **Answer**". SPEC.md:3797-3799 says "…the field may move to the same
-  sign-in's next question or to another question that was already waiting." `gui/.../sign_in.rs` was unchanged since
-  d26b59f31.
-- Decision: q-autoupd, "Automatic host updates against what the user explicitly asked for": the maintainer picked "The
-  user's action wins". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: A pending automatic-update sign-in yields to any user action on that host; SPEC.md's
-  contradiction about when the automatic sign-in popover opens is resolved to match. Recommendation for reference: fix
-  spec XS (qualify 5997 to allow the already-waiting Send handoff). Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-host-scoped-trash-confirmation-stays-open-invisibly.md
 

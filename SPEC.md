@@ -4778,14 +4778,14 @@ retry whose templates changed into a launch the host's YOLO rule refuses is refu
 harmless, and a retry whose first attempt was interrupted before its session started is refused, rather than started
 with what the first attempt resolved to, when its launch, folder or title differs. `farhelm spawn --inherit-agent` is
 the exception: its retry is compared by the launch it inherits after destination trust normalization, so a Settings
-change can refuse the reused key. `farhelm agent create` requires `--host` with an idempotency key, because the key's
-record lives only on the host the first attempt reached, and a host taken from a template could change between an
-attempt and its retry. A host name that comes to mean another machine between the two (hosts renamed or reassigned) is a
-known, accepted gap: the retry is then a new create on that machine and starts a second session, with every check a
-fresh create gets. `farhelm agent clone` copies its explicitly selected source's stored launch onto an explicitly named
-host, changing only workspace trust, which follows current Settings. Clone carries no translation between hosts: a
-command written for one machine may name a binary that is absent, a different build, or one that takes different flags
-on another.
+change can refuse the reused key. For a create on a fleet host, `farhelm agent create` requires `--host` with an
+idempotency key because the key's record lives only on the host the first attempt reached, and a host taken from a
+template could change between an attempt and its retry. A host name that comes to mean another machine between the two
+(hosts renamed or reassigned) is a known, accepted gap: the retry is then a new create on that machine and starts a
+second session, with every check a fresh create gets. `farhelm agent clone` copies its explicitly selected source's
+stored launch onto an explicitly named host, changing only workspace trust, which follows current Settings. Clone
+carries no translation between hosts: a command written for one machine may name a binary that is absent, a different
+build, or one that takes different flags on another.
 
 A known model ID in a template or `--model` can supply the agent type when it has a single owner and no agent type is
 chosen. This works for current and older catalog models.
@@ -6027,10 +6027,11 @@ offer **Sign in**. An open question can play a chime under **Settings → Notifi
 Add host shows the setup connection's question inside the dialog, below the destination field. Cancelling this sign-in
 stops the check and keeps the destination and alias. The sessions connection may ask again after the dialog closes.
 Setup, Update and Uninstall can ask for the setup connection through the attention row. If the setup connection expired
-while a confirmation was open, confirming can require another sign-in before work starts. A question gets focus only
-while the user is still waiting on the action that caused it. An automatic Update's Setup question waits in the
-attention row, and its popover opens only when the user presses **Answer**. A manual action that needs the same
-connection can open the question already waiting for that host.
+while a confirmation was open, confirming can require another sign-in before work starts. A question opened by a manual
+action takes focus only while the user is still waiting on that action. An automatic Update's Setup question waits in
+the attention row. The popover can open when the user presses **Answer**, starts a manual action that needs the same
+connection, or sends an answer that hands focus to this question under the [keyboard focus rules](#who-may-move-focus).
+The handoff may open the next question of the same sign-in or an already-waiting question from another sign-in.
 
 Confirmed 2026-10-14: for commands it offers for copying, Farhelm trusts the user's own configured host names, SSH
 destinations and helm state directory path (including the working directory a relative one resolves against) not to
