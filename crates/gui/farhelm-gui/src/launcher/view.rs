@@ -2312,15 +2312,15 @@ impl Render for Launcher {
         // While the YOLO question's host write is out, the launcher holds still (`yolo_question`).
         let holding = self.yolo_in_flight(cx) || self.hook_write_in_flight(cx);
         let restart = matches!(self.draft.mode, Mode::RestartWith(_));
+        let source = self.source_consent(cx);
         if restart || matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
-            let source = self.source_consent(cx);
             self.source_frame.capture(source, (), window);
-            if let Some(state) = &self.yolo {
-                state.show_source(source, cx);
-            }
             if let Some(state) = &self.hook_question {
                 state.show_source(source, cx);
             }
+        }
+        if let Some(state) = &self.yolo {
+            state.show_request(source, self.request(false, source, cx), cx);
         }
 
         // A held destination (Restart with's) is shown, not edited: its folder as read-only text, its name not at all

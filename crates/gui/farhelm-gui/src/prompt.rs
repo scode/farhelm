@@ -697,6 +697,7 @@ type Settle = Box<dyn FnOnce(Option<Line>, &mut App)>;
 /// through its dismissal hook ([`Question::fallible_alternative`]); a centered question holds its own dismissals.
 #[must_use = "an unsettled attempt leaves its question frozen"]
 pub struct Attempt {
+    prompt: gpui::EntityId,
     settle: Settle,
 }
 
@@ -704,6 +705,7 @@ impl Attempt {
     /// The attempt for `prompt`, drawn in `window`.
     fn new<T: Clone + 'static>(prompt: WeakEntity<Prompt<T>>, window: AnyWindowHandle) -> Self {
         Attempt {
+            prompt: prompt.entity_id(),
             settle: Box::new(move |reason, cx| {
                 // Deferred: the action may settle from inside the prompt's own update, which cannot be re-entered.
                 cx.defer(move |cx| {
@@ -713,6 +715,12 @@ impl Attempt {
                 });
             }),
         }
+    }
+
+    /// Whether this answer came from the question the owner still shows. A delayed action can still settle its
+    /// own attempt after the owner replaces the question, but it cannot use the replacement's consent.
+    pub(crate) fn belongs_to<T: 'static>(&self, inline: &Inline<T>) -> bool {
+        self.prompt == inline.prompt.entity_id()
     }
 
     /// The action did what the answer asked: the question closes as any answer does, returning focus where it was.
