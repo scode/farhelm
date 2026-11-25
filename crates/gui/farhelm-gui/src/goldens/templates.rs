@@ -128,6 +128,15 @@ pub(super) fn template_invalid_custom_model_setup(
     open_template_editor(state, "old-custom", None, window, cx);
 }
 
+/// Show the incompatible choice without erasing it when the template uses the Agent tab.
+pub(super) fn template_generic_agent_refusal_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open_template_editor(state, "generic-agent", None, window, cx);
+}
+
 /// Open the template that sets both Host and Destination so the shared switch and separate fields are visible.
 pub(super) fn template_destination_editor_setup(
     state: &SceneState,
@@ -172,20 +181,21 @@ fn open_template_editor(
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let mut snapshot = editor_scene_collections();
-    if template == "old-custom" {
+    if matches!(template, "old-custom" | "generic-agent") {
+        let mut fields = serde_json::json!({"kind": "agent", "agent": "custom"});
+        if template == "old-custom" {
+            fields["custom_agent"] = "acme-code".into();
+            fields["model"] = "BAD MODEL".into();
+            snapshot.push(super::custom_agent_state());
+        }
         snapshot[0] = CollectionState {
             collection: Collection::Templates,
             meta: test_support::meta(&[template]),
             entries: vec![KeyedEntry {
                 key: template.into(),
-                value: serde_json::json!({
-                    "name": template, "fields": {
-                        "kind": "agent", "agent": "custom", "custom_agent": "acme-code", "model": "BAD MODEL"
-                    }
-                }),
+                value: serde_json::json!({"name": template, "fields": fields}),
             }],
         };
-        snapshot.push(super::custom_agent_state());
     }
     if template == "shell-profile" {
         let templates = &mut snapshot[0];

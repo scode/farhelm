@@ -444,6 +444,8 @@ linux/template-destination-editor--dark.png af17d5ca6cd38fbaab037fb5b63995235799
 linux/template-destination-editor--light.png f17aa2e5a4ff16de41f7e1cd6ffe2922e0a03c09
 linux/template-editor--dark.png 1c92b06304dc9733d4d849b49c7c42e819051337
 linux/template-editor--light.png cdd62d4c83b05f6f1a01a10d7e5ef997500554bc
+linux/template-generic-agent-refusal--dark.png 8a3dd4d503b36a4c858c0eaccafe25c57b19867f
+linux/template-generic-agent-refusal--light.png bbeedf45f629dd5d0988d0492f0e1f8901f1ce6b
 linux/template-invalid-custom-model--dark.png 1591df42765c98c0ad787f5dca950373082b5858
 linux/template-invalid-custom-model--light.png 0c4faa036430c5d3140931d239eb8fed6c94675b
 linux/template-launcher--dark.png 2b33f9c101ebcb0bc734fc13ab7b8902e5c4a875

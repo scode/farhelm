@@ -241,6 +241,14 @@ impl Field {
             );
         }
         let custom = fields.agent.is_some_and(LaunchHarness::uses_custom_catalog);
+        // Switching tabs keeps the selected agent visible. Generic Custom only describes a Command launch.
+        if self == Field::Agent
+            && custom
+            && fields.kind == Some(LauncherKind::Agent)
+            && fields.custom_agent.as_ref().is_none_or(Option::is_none)
+        {
+            return Some("Generic Custom is only for Command templates. Choose a registered or built-in agent.".into());
+        }
         if custom {
             let custom_value = match self {
                 Field::Model => fields.model.as_ref().and_then(Option::as_deref),

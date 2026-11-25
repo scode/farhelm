@@ -240,10 +240,6 @@ consequences.
   permission-escalation banner with Undo — and then apply a launch template that selects a different custom agent, the
   old escalation banner stays open instead of closing.
 
-- [`trailing-templates-editor-allows-generic-custom-on-agent-template.md`](trailing-templates-editor-allows-generic-custom-on-agent-template.md)
-  — Switching a Command template with generic 'Custom' to an Agent template shows 'Custom (not offered)' in the Agent
-  type dropdown, yet the editor still allows saving it without an error.
-
 - [`trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md`](trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md)
   — When you replace your saved Tensorlake API key with a different key in Settings without clicking Clear first, the
   list of sandboxes not on this helm keeps showing leftover sandboxes from the old key while the new check runs — and
