@@ -69,11 +69,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching
   indicators come later and should fit the layout. Plan: `plans/queue/welcome-empty-state.md`.
 
-- **Deduplicate OpenCode's conversation lookup in the drift tests.** `initial_prompt` and `named_conversation` each look
-  up the test conversation in OpenCode's session list by folder path, and the two copies disagree on symlink resolution
-  and verdict (`COULD NOT RUN` vs `FAILED`). Share one helper so both categories behave the same way. Plan:
-  `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
-
 - **Derive `instructions_delivery` drift coverage from agent capabilities.** The `instructions_delivery` drift category
   hardcodes its six agent names instead of deriving them from agent capabilities like the other categories, so a future
   agent that gains the `$farhelm` hint would not fail coverage checks until added by hand. Plan:
