@@ -293,7 +293,9 @@ pub enum Note {
     /// box as one plain line in the warning ink, as the box's own refusal is, where the old launcher said why a
     /// template did not apply (`view::search`), and cleared by the next press of Launch as by an edit.
     Refusal(HostSentence),
-    /// The host could not be prepared for this launch. Drawn beside Launch as a complete pre-create refusal.
+    /// Why the host could not be prepared for this launch, or why a managed checkout's preview failed once the host
+    /// woke. Holds the reason only: the launcher draws it beside Launch after the mode's own lead ("Not launched." or
+    /// "Restart error.").
     WakeRefusal(HostSentence),
 }
 
