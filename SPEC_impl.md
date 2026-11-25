@@ -4471,9 +4471,9 @@ no path values are stored in the notice.
   its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
-  Attribution checks apply to Claude, Codex, Muse, Grok, OMP and Antigravity. Goose and Pi retain their existing
-  acceptance behind the discriminator gate, and new framework entry points default to deny rather than allow. Claude
-  admission runs under the shared capture claim, reloading the complete binding and pin before attribution and
+  Attribution checks apply to Claude, Codex, Muse, Grok, OMP, Antigravity and custom agents. Goose and Pi retain their
+  existing acceptance behind the discriminator gate, and new framework entry points default to deny rather than allow.
+  Claude admission runs under the shared capture claim, reloading the complete binding and pin before attribution and
   committing them in one CAS. The report's anchored chain (`procs::positional_corridor`), skipping the hook's narrow
   `sh -c` trampolines, identifies the first remaining process as the emitter at any depth below the terminal's root
   process; that anchor itself ends that search. Every process above the emitter through the root process is retained as
@@ -5938,42 +5938,43 @@ installation it is on, so it follows an open session the sidebar's filter hides
   Codex or Grok record whose verification withdrew the resume offer (recorded only after the withdrawal is committed,
   and only on a clean verdict, not a read error; the background refresh and Grok's final check before a Restart both
   record it), an OMP launch whose recorded reporter is older than this build's or whose installed reporter file is there
-  with different contents (a missing or unreadable file records nothing), and a Claude, Codex, Muse or Antigravity
-  process pin corrected after a recorded ancestor replaces a child-first conversation (verified against the exact record
-  for Codex). These are separate `ClaudePinCorrected`, `CodexPinCorrected`, `MusePinCorrected` and
-  `AntigravityPinCorrected` kinds. Each correction records the consequence for Restart before adoption and remains
-  unresolved, giving one notification per launch. The old-terminal kind (`old_terminal`,
-  `NotificationKind::OldTerminal`) was the one about the session rather than a launch, recorded by earlier releases
-  while something in the session ran in an old terminal; every supervisor start now resolves every unresolved row of it
-  in one update fenced by neither session, generation nor conversation (`SessionStore::resolve_notifications_of_kind`).
-  Its successor, `old_terminal_ended` (`NotificationKind::OldTerminalEnded`), is recorded at startup, at the converted
-  launch's generation, for each session whose agent the startup's ending of the old terminals converted to interrupted
-  ("Ending the old private tmux server"); nothing resolves it, so a later start, which resolves `old_terminal` rows,
-  leaves it as it is. The capture pass touches neither. `podman_stop_failed` (`NotificationKind::PodmanStopFailed`)
-  records a failed Podman cleanup on Stop, Restart or tab close against the launch current at the reap. It never
-  resolves on conversation capture. Delete carries the warning in its reply because the row and its notifications go
-  away together. The helm discards the reply's warning when it destroys the environment. The first two kinds say Restart
-  cannot resume, so they are refused whenever the launch's row holds a captured conversation, checked in the same
-  statement as the insert, which is also what closes the race between a report's commit and the tripwire. The listing
-  carries the last 10 on `SessionInfo::notifications` as sequence number, time, text and an additive `resolved` bool
-  (false omitted and the decode default): the kind and generation stay private to the store and supervisor's in-memory
-  notification snapshot, because an enum on `SessionInfo` that a newer supervisor extended would make the whole record
-  fail to decode in an older helm, which drops a session it cannot decode. The field is additive with a decode default,
-  so an older helm shows no bell and an older supervisor sends none, and needed no protocol bump. Replies are built from
-  immutable entries, so the list lives in a session-scoped cell beside the activity time, seeded from the store when an
-  entry is built from a row and replaced after each recording or resolution, which then sends the `SessionsChanged`
-  hint. Each capture pass resolves the silent-hook and resume-withdrawn kinds only when the generic restart offer is
-  Resume, rather than merely when a captured conversation exists. This includes reports admitted before startup
-  publishes the entry. An unresolved non-resolving kind or an earlier launch's warning remains history; clearing in the
-  helm does not remove it from the store. The in-memory snapshot retains kind and generation beside the wire fields, so
-  a pass with no unresolved, resolving kind for the current launch skips the store call entirely. An eligible pass uses
-  two indexed updates in one transaction. The resolve SQL compares the exact captured conversation and generation on the
-  session row, so an earlier Resume observation cannot erase a later withdrawal. Notification reloads order snapshots by
-  newest sequence and then resolved count: with the newest sequence fixed, only resolution changes, and it only grows;
-  reopening raises the sequence. Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history;
-  older supervisors refuse the upgraded database on downgrade, as accepted for this change. The helm keeps read and
-  cleared state as two per-session sequence marks ("read through N", "cleared through N") in a
-  `session_notification_marks` table beside `session_seen`, keyed and cleaned up the same way, set by the two endpoints
+  with different contents (a missing or unreadable file records nothing), and a Claude, Codex, Grok, Muse, Antigravity
+  or custom agent's process pin corrected after a recorded ancestor replaces a child-first conversation (verified
+  against the exact record for Codex). These are separate `ClaudePinCorrected`, `CodexPinCorrected`, `GrokPinCorrected`,
+  `MusePinCorrected`, `AntigravityPinCorrected` and `CustomPinCorrected` kinds. Each correction records the consequence
+  for Restart before adoption and remains unresolved, giving one notification per launch. The old-terminal kind
+  (`old_terminal`, `NotificationKind::OldTerminal`) was the one about the session rather than a launch, recorded by
+  earlier releases while something in the session ran in an old terminal; every supervisor start now resolves every
+  unresolved row of it in one update fenced by neither session, generation nor conversation
+  (`SessionStore::resolve_notifications_of_kind`). Its successor, `old_terminal_ended`
+  (`NotificationKind::OldTerminalEnded`), is recorded at startup, at the converted launch's generation, for each session
+  whose agent the startup's ending of the old terminals converted to interrupted ("Ending the old private tmux server");
+  nothing resolves it, so a later start, which resolves `old_terminal` rows, leaves it as it is. The capture pass
+  touches neither. `podman_stop_failed` (`NotificationKind::PodmanStopFailed`) records a failed Podman cleanup on Stop,
+  Restart or tab close against the launch current at the reap. It never resolves on conversation capture. Delete carries
+  the warning in its reply because the row and its notifications go away together. The helm discards the reply's warning
+  when it destroys the environment. The first two kinds say Restart cannot resume, so they are refused whenever the
+  launch's row holds a captured conversation, checked in the same statement as the insert, which is also what closes the
+  race between a report's commit and the tripwire. The listing carries the last 10 on `SessionInfo::notifications` as
+  sequence number, time, text and an additive `resolved` bool (false omitted and the decode default): the kind and
+  generation stay private to the store and supervisor's in-memory notification snapshot, because an enum on
+  `SessionInfo` that a newer supervisor extended would make the whole record fail to decode in an older helm, which
+  drops a session it cannot decode. The field is additive with a decode default, so an older helm shows no bell and an
+  older supervisor sends none, and needed no protocol bump. Replies are built from immutable entries, so the list lives
+  in a session-scoped cell beside the activity time, seeded from the store when an entry is built from a row and
+  replaced after each recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves
+  the silent-hook and resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a
+  captured conversation exists. This includes reports admitted before startup publishes the entry. An unresolved
+  non-resolving kind or an earlier launch's warning remains history; clearing in the helm does not remove it from the
+  store. The in-memory snapshot retains kind and generation beside the wire fields, so a pass with no unresolved,
+  resolving kind for the current launch skips the store call entirely. An eligible pass uses two indexed updates in one
+  transaction. The resolve SQL compares the exact captured conversation and generation on the session row, so an earlier
+  Resume observation cannot erase a later withdrawal. Notification reloads order snapshots by newest sequence and then
+  resolved count: with the newest sequence fixed, only resolution changes, and it only grows; reopening raises the
+  sequence. Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history; older supervisors
+  refuse the upgraded database on downgrade, as accepted for this change. The helm keeps read and cleared state as two
+  per-session sequence marks ("read through N", "cleared through N") in a `session_notification_marks` table beside
+  `session_seen`, keyed and cleaned up the same way, set by the two endpoints
   `PUT /api/sessions/{id}/notifications/read` and `PUT /api/sessions/{id}/notifications/cleared`, each taking
   `{"through": N}`. A mark never moves backwards and is clamped to the newest sequence number the helm's cached row
   holds, so a mark can never cover an entry that arrives later; the fleet-events revision is bumped only when a mark
@@ -6551,10 +6552,12 @@ deadline derived from the supervisor's wait bound and teardown's own bounds. Not
 answer, or past the deadline: the helm sends `ENVIRONMENT_UNASKED_HEADER` and the client offers the warned
 whole-environment Delete. For a sent request with no answer, the supervisor's decision can still be pending or have
 committed. The route itself answers within the host reply bound ("The UI channel"), so only a marker decided within it
-reaches the client. The desktop app does not send this Delete yet: its environment session Delete comes with the
-environment sessions' port (`crates/gui/farhelm-gui/src/session_list/delete.rs`). `Deleted` runs the ordinary local
-forgetting and reports the supervisor's count; `Sealed` destroys the environment through the same removal path as host
-removal, under the lock already held.
+reaches the client. The desktop app sends `DELETE /api/sessions/{id}?delete_environment_session=true`
+(`crates/gui/farhelm-gui/src/session_list/environment_delete.rs`). A timely success can show the remaining-session count
+and any cleanup notice. On the 504 that says Delete carries on, the app drops the pending UI operation and follows later
+host and session pushes without offering the whole-environment confirmation at once or showing a late count. `Deleted`
+runs the ordinary local forgetting and reports the supervisor's count; `Sealed` destroys the environment through the
+same removal path as host removal, under the lock already held.
 
 Whenever a connection publishes a listing with `sealed` set for a session-owned, machine-deleting host, a helm-owned
 finisher destroys it through that same function, at most one at a time per host. A sealed listing from any other host is
@@ -7237,11 +7240,11 @@ automatically. A helm restart loses this in-memory operation state; a session-ow
 resource record and remains visible in Hosts. Other unowned sandboxes gain no persistent ownership ledger, and neither
 path adds automatic startup reconciliation. The desktop list
 (`crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs`) is read only when its answer can have changed, never on
-a timer: when the opening's account first says a key is saved, on Refresh, after a key Save or Clear in this opening,
-after every answer to a Delete, and when the pushed hosts list gains or loses a Tensorlake host. No other fleet change
-reads it, so a rejected key is never resent on unrelated notices. A successful Test reads nothing, whether the list was
-healthy or failed (decided 2026-11-15); a key saved elsewhere, or a failure fixed elsewhere, shows after Refresh or
-reopening Settings.
+a timer: when the opening's account first says a key is saved, on Refresh, after a key Save in this opening, after every
+answer to a Delete, and when the pushed hosts list gains or loses a Tensorlake host. No other fleet change reads it, so
+a rejected key is never resent on unrelated notices. A successful Test reads nothing, whether the list was healthy or
+failed (decided 2026-11-15); a key saved elsewhere, or a failure fixed elsewhere, shows after Refresh or reopening
+Settings.
 
 The list keeps the last successful discovery, the current cleanup snapshot, and a "checked HH:MM" time in the viewer's
 local time. A saved key keeps it drawn when empty, with Refresh beside the heading, unavailable while a Delete is out.

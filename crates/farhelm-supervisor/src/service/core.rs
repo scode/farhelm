@@ -15675,8 +15675,9 @@ impl Supervisor {
     }
 
     /// Dispatch report authority independently of the Restart provenance gate.
-    /// Claude, Muse and Antigravity use a process pin with ownership version 0;
-    /// routing them through the proof predicate would withdraw Restart offers.
+    /// Claude, Muse, Antigravity and custom agents use a process pin with
+    /// ownership version 0. Routing them through the versioned proof
+    /// predicate would withdraw Restart offers.
     /// Every integration chooses its admission explicitly so a new kind cannot
     /// inherit another vendor's process or record rules.
     /// **Default process attribution** in SPEC_impl.md describes the shared

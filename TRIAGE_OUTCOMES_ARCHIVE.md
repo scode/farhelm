@@ -40776,3 +40776,197 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
   `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
   [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## trailing-environment-delete-implementation-spec-still-describes-desktop-port-as.md
+
+- Outcome: `fix spec`.
+- Assessment: The implementation spec says the desktop app does not yet send the Delete for a session in a sandbox or
+  container. It does. Verified: confirmed. SPEC_impl.md:6546-6547 still says "The desktop app does not send this Delete
+  yet". The desktop sends `DELETE …?delete_environment_session=true` (`session_list/environment_delete.rs:206-216`,
+  dispatched from `session_list/delete.rs`). Documentation only.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec (replace the
+  sentence with the shipped request and its late-notice handling). Size S. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
+  `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
+  [#4805](https://github.com/scode/farhelm/pull/4805/changes).
+
+## trailing-session-pane-stale-doc-on-helm-pushes.md
+
+- Outcome: `fix code`.
+- Assessment: A developer comment in the session pane still says the helm pushes nothing to the window while a command
+  is in flight, which stopped being true in #4623. Verified: Confirmed.
+  `crates/gui/farhelm-gui/src/session_pane.rs:60-63` still has the old wording. The helm's `feed.changed()` branch
+  (`ui_channel.rs:1064`) is no longer gated on an in-flight command.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code (comment
+  only), following the Q12 precedent. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
+  `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
+  [#4805](https://github.com/scode/farhelm/pull/4805/changes).
+
+## trailing-product-spec-still-promises-no-decision-after-unanswered-environment.md
+
+- Outcome: `fix spec`.
+- Assessment: The product spec says that when Delete of a session in a sandbox gets no answer within 20 seconds,
+  "nothing is decided". In fact the environment's Farhelm may still delete the session, and even seal the sandbox.
+  Verified: confirmed. SPEC.md:1714-1716 still groups "cannot ask" with "no answer within 20 seconds ... nothing is
+  decided". SPEC_impl.md:6544-6545 ("the supervisor's decision can still be pending or have committed") and the helm's
+  error text (`sessions/sandbox.rs:254-266`) say otherwise. The doc comment at `sandbox.rs:123-128` keeps the absolute
+  "Nothing was decided", although `:130-132` qualifies it. Documentation only; no consent gap.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec (plus the doc
+  comment). Size S. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
+  `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
+  [#4805](https://github.com/scode/farhelm/pull/4805/changes).
+
+## terminal-steady-block-comment-stale.md
+
+- Outcome: `fix code`.
+- Assessment: Terminal cursor drawing. A program that asks for a steady block cursor gets a blinking one. This is an
+  accepted, documented difference. One inline source comment still says the cursor blinks "unless the program says
+  otherwise". Only the comment is affected, not behavior. Verified: Confirmed. The inline comment is at
+  `crates/farhelm-supervisor/src/grid_output.rs:396-397`. The module docs at `grid_output.rs:45-51` and
+  `farhelm-proto/src/grid.rs:192-195` state the exception correctly. No test pins the steady-block exception. No product
+  effect.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code (one-line
+  comment fix, optionally a test that pins the exception) or discard. Size S. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
+  brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
+  `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
+  [#4805](https://github.com/scode/farhelm/pull/4805/changes).
+
+## trailing-custom-pin-corrected-text-omits-prior-restart-consequence.md
+
+- Outcome: `fix spec+code`.
+- Assessment: When a custom agent's nested process reports a conversation first and a parent process later corrects it,
+  Farhelm posts a notice. Unlike every other agent's notice, it does not say what a Restart before now would have
+  resumed. It also says "its parent" even when a more distant ancestor made the correction. Verified: Confirmed.
+  `crates/farhelm-supervisor/src/service/notifications.rs:238-239` reads "Farhelm was following a conversation reported
+  by a child process in this session. Restart now uses the conversation reported by its parent." Its own doc comment at
+  :237 promises the prior-Restart fact. The rule in SPEC.md:3227-3230 ("says which conversation a Restart before now
+  would have resumed ... without claiming no further ancestor can correct it") lists only "a Claude, Codex, Muse or
+  Antigravity launch". So the spec does not govern custom agents in so many words, which is why this is not clearly
+  settled. SPEC_impl.md:5934-5938 lists the same four agents.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec+code — do it
+  together with 536: add custom agents to the rule and align the text with the Codex wording; size S. Size gate: about
+  100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over
+  that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
+  `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
+  [#4805](https://github.com/scode/farhelm/pull/4805/changes).
+
+## trailing-specs-and-core-omit-grok-and-custom-from-pin-correction-lists.md
+
+- Outcome: `fix spec+code`.
+- Assessment: The specs and one code comment still say that only Claude, Codex, Muse and Antigravity correct a
+  conversation first reported by a nested process. Grok and custom agents now do it too, each with its own notice. Some
+  lists of which agents use the shared process-pin admission also leave out custom agents. Verified: Confirmed. These
+  still list only those agents: SPEC.md:3227-3230; SPEC_impl.md:5934-5937; SPEC.md:4254 ("These three use version-0
+  captures"); SPEC_impl.md:4471 (attribution list without custom); and
+  `crates/farhelm-supervisor/src/service/core.rs:15685`. The code emits `GrokPinCorrected` and `CustomPinCorrected`
+  (`notifications.rs:98`, `vendor/positional.rs:71-72`). The Grok notice text also uses the older "child ... the Grok
+  process that started it" wording.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec+code —
+  complete both specs and the comment, and do 490's wording at the same time; size S. Size gate: about 100 lines of diff
+  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
+  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
+  `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
+  [#4805](https://github.com/scode/farhelm/pull/4805/changes).
+
+## trailing-migration-comments-reboot-classification-remains-disputed.md
+
+- Outcome: `fix code`.
+- Assessment: A code comment on a very old database migration explains why old sessions are backfilled as "launching"
+  rather than "running". Part of its reason is that "running" would make them show as interrupted after the next reboot.
+  A "launching" row is turned into interrupted at a reboot too, so that contrast is wrong. Verified: confirmed.
+  `crates/farhelm-supervisor/src/store.rs:1871-1879` ("would additionally paint such a session `interrupted` at the next
+  reboot"). The boot conversion covers `launching`, `running` and `stop_requested` (`store.rs:6567-6576` and the blanket
+  update after it). The migration logic is correct.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code (comment only)
+  or discard. It is a one-line comment on the version-1 migration. Size S. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
+  brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
+  `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
+  [#4805](https://github.com/scode/farhelm/pull/4805/changes).
+
+## trailing-delete-scope-comment-describes-old-stop-behavior.md
+
+- Outcome: `fix code`.
+- Assessment: Two code comments describe how Stop worked before it began closing terminal tabs. They say Stop leaves
+  tabs running and that Delete is the only operation that takes tabs down. SPEC.md now says Stop closes tabs. Only the
+  comments are wrong. The code is right. Verified: Confirmed. teardown.rs:370-373 says "delete is the one lifecycle
+  operation that takes tabs down with the agent (SPEC.md — stop leaves them running)". launch.rs:105-106 says "Stop and
+  restart must reap the agent and leave the session's tabs running". SPEC.md:2144-2150 says Stop "then closes the
+  session's terminal tabs", and SPEC_impl.md (Process-tree ownership, :4839-4842) has Stop's agent reap followed by
+  separate tab closes. Behavior matches the spec, so this is not clearly settled under the rule, which needs code
+  behavior to contradict the spec.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code — reword both
+  comments to say Delete reaps the whole session in one sweep while Stop reaps the agent and then closes each tab; size
+  S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
+  `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
+  [#4805](https://github.com/scode/farhelm/pull/4805/changes).
+
+## tensorlake-key-clear-spec-misstates-leftover-refresh.md
+
+- Outcome: `fix spec`.
+- Assessment: The implementation spec lists a Tensorlake key Clear among the events that re-read "Sandboxes not on this
+  helm"; the app actually just empties the list on Clear without asking the helm. Verified: confirmed. SPEC_impl.md
+  7232: "after a key Save or Clear in this opening"; same section 7240: "Clear ends the round and empties both lists."
+  Code reads only when a key is saved and otherwise clears (`tensorlake_sandboxes.rs: 164-173`); the module docs say "(a
+  Clear empties it at once)". Documentation drift only.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec — reword the
+  trigger list; size S. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
+  `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
+  [#4805](https://github.com/scode/farhelm/pull/4805/changes).
+
+## trailing-ticker-reduced-motion-doc-misstates-outline-fade.md
+
+- Outcome: `fix code`.
+- Assessment: A developer comment says the permission control's fading outline "shows its final state at once" under
+  reduced motion. It actually holds its first, full-color outline, which is why the check exists. Verified: Confirmed.
+  `ticker.rs:366-367` versus `components/transition.rs` and SPEC_impl.md "Animation time: the ticker".
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code (comment
+  only), following the Q12 precedent. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
+  `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
+  [#4805](https://github.com/scode/farhelm/pull/4805/changes).

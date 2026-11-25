@@ -102,10 +102,10 @@ pub const TAB_ID_ENV_VAR: &str = "FARHELM_TAB_ID";
 ///
 /// # Why both kinds are marked positively
 ///
-/// Stop and restart must reap the agent and leave the session's tabs
-/// running (SPEC.md); delete must take everything; close must take one
-/// tab. Three different sets over the same session-marked processes, so
-/// something has to tell them apart.
+/// Stop reaps the agent first and then closes tabs individually. Restart
+/// reaps the agent while keeping tabs, Delete takes the whole session in
+/// one sweep, and Close takes one tab. The positive markers let each
+/// sweep select the processes it owns.
 ///
 /// An earlier cut did that by EXCLUSION — sweep the session marker,
 /// subtract anything wearing a tab marker — and it had a hole that only

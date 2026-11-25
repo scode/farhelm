@@ -364,7 +364,7 @@ pub(crate) fn set_reduced_motion(reduced: bool, cx: &mut App) {
 }
 
 /// The same live preference GPUI and Kit use, for motion neither the ticks nor GPUI's animation element drive: the
-/// permission control's fading outline, for example, shows its final state at once under reduced motion.
+/// permission control's outline keeps its initial full color for as long as it is drawn under reduced motion.
 pub fn reduced_motion(cx: &App) -> bool {
     cx.reduce_motion()
 }

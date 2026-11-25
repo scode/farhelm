@@ -121,10 +121,10 @@ pub(crate) async fn create_environment_session(
     }
 }
 
-/// Nothing was decided about an environment session's Delete: its
-/// environment's supervisor could not be asked (the environment is suspended,
-/// paused or unreachable, or its Farhelm is a version this helm cannot talk
-/// to), or the request got no answer in time. The HTTP edge marks it with
+/// The helm has no confirmed decision for an environment session's Delete.
+/// The request may have stayed unsent, for instance because the environment
+/// was suspended, paused or unreachable, or it may have gone unanswered.
+/// The HTTP edge marks the reply with
 /// `ENVIRONMENT_UNASKED_HEADER`, which asks a client to offer the warned
 /// whole-environment Delete; the helm itself never escalates.
 ///
@@ -153,7 +153,7 @@ pub(crate) const ENVIRONMENT_DELETE_TURN_WAIT: std::time::Duration =
     std::time::Duration::from_secs(60);
 
 /// How long the helm waits for an environment's supervisor to answer an
-/// environment session Delete before reporting that nothing was decided.
+/// environment session Delete before reporting an unconfirmed outcome.
 ///
 /// Above everything the supervisor may spend before it answers: its bounded
 /// wait for its own locks (`SEAL_DELETE_ADMISSION_WAIT` there, 30 seconds),

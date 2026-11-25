@@ -214,9 +214,9 @@ pub(crate) const CODEX_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a 
     conversation. Farhelm now follows the conversation reported by one of that process's ancestors.";
 
 /// Record the previous Restart target after a Grok ancestor corrects the selection.
-pub(crate) const GROK_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a conversation \
-    reported by a child Grok process in this session. Restart may have offered that conversation. \
-    Farhelm now follows the conversation reported by the Grok process that started it.";
+pub(crate) const GROK_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a Grok conversation \
+    reported by another process in this session. A Restart before now could have resumed that \
+    conversation. Farhelm now follows the conversation reported by one of that process's ancestors.";
 
 /// Preserve the consequence of child-first capture after the ancestor takes over.
 /// Like Codex's correction, this remains unresolved and appears once per launch.
@@ -235,9 +235,10 @@ pub(crate) const ANTIGRAVITY_PIN_CORRECTED_TEXT: &str = "Farhelm had been follow
     conversation. \
     Farhelm now follows the conversation reported by the Antigravity process that started it.";
 
-/// Preserve the fact that an earlier Restart would have used the child process's conversation.
-pub(crate) const CUSTOM_PIN_CORRECTED_TEXT: &str = "Farhelm was following a conversation reported by a child \
-    process in this session. Restart now uses the conversation reported by its parent.";
+/// Tell the user what an earlier Restart could have resumed after a custom agent's ancestor corrects the choice.
+pub(crate) const CUSTOM_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a conversation \
+    reported by another process in this session. A Restart before now could have resumed that \
+    conversation. Farhelm now follows the conversation reported by one of that process's ancestors.";
 
 /// Explain the missed report using the same agent name and timing as Restart.
 ///

@@ -43,7 +43,7 @@
 //!   ([`super::delete_notice`]). A 404 counts as deleted: an earlier Delete, perhaps elsewhere, sealed and destroyed the
 //!   environment. The helm's 504 at its 20-second bound is routine, not a failure: the Delete carries on and the pushed
 //!   state shows how it ended, so its record is dropped. A session-lane answer carrying the helm's "unasked" marker
-//!   (nothing was decided, because the helm could not ask) asks the whole-lane question where the first one was asked,
+//!   (the helm could not confirm the outcome) asks the whole-lane question where the first one was asked,
 //!   the row's menu button or the header's Delete, when the user has not moved on since answering (the operation
 //!   store's [`Settled::user_moved_on`]), and only the helm's own marker does that, never its words. Any other refusal
 //!   stays on the session's key, which the row and the header show as any Delete refusal.
