@@ -276,9 +276,10 @@ Look in this order.
 **1. The per-session hook log**, `<state dir>/hook-log/<session id>.log`, where `<state dir>` is the supervisor's state
 directory (`$XDG_STATE_HOME/farhelm`, or `~/.local/state/farhelm` by default), and `<session id>` is the session's
 `$FARHELM_SESSION_ID`, the part after the first colon in the full id `farhelm agent sessions` shows. Two things write
-lines there, each shaped `<unix-seconds> <outcome> [<detail> ]<conversation-id> <source>`; the trailing id and source
-appear only once there is an id to name, and `<source>` is `-` when the vendor sent none or sent something that is not a
-string.
+lines there, each shaped `<unix-seconds> <outcome> [<detail> ]<conversation-id> <source>`; the id and source appear only
+once there is an id to name, and `<source>` is `-` when the vendor sent none or sent something that is not a string.
+When the agent named the moment it reported (`Stop` at the end of a turn, Grok's `UserPromptSubmit` when you send a
+prompt, or Antigravity's `SessionStart`), the `written` line ends with a tab and `event=` and that name.
 
 The hook writes one line each time it runs, saying what it did:
 

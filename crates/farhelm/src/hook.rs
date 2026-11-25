@@ -851,6 +851,23 @@ struct Outcome {
     event: Option<&'static str>,
 }
 
+/// Whether a written `SessionStart` line names its event. Only Antigravity's is named: it sends SessionStart with no
+/// `source`, so the event name is what tells its line apart from its other source-less reports.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn session_start_needs_event(vendor: ReportVendor) -> bool {
+    match vendor {
+        ReportVendor::Antigravity => true,
+        ReportVendor::Claude
+        | ReportVendor::Codex
+        | ReportVendor::Goose
+        | ReportVendor::Pi
+        | ReportVendor::Omp
+        | ReportVendor::Grok
+        | ReportVendor::Muse
+        | ReportVendor::Custom => false,
+    }
+}
+
 impl Outcome {
     /// An outcome with no detail, such as `written` or `no-credential`.
     fn word(word: &'static str) -> Self {
@@ -880,10 +897,12 @@ impl Outcome {
 
     /// Name successful callbacks that can share a source with another event from the same conversation.
     fn with_written_event(mut self, vendor: ReportVendor, event: Option<&str>) -> Self {
-        self.event = match (self.word, vendor, event) {
-            ("written", _, Some("UserPromptSubmit")) => Some("UserPromptSubmit"),
-            ("written", _, Some("Stop")) => Some("Stop"),
-            ("written", ReportVendor::Antigravity, Some("SessionStart")) => Some("SessionStart"),
+        self.event = match (self.word, event) {
+            ("written", Some("UserPromptSubmit")) => Some("UserPromptSubmit"),
+            ("written", Some("Stop")) => Some("Stop"),
+            ("written", Some("SessionStart")) if session_start_needs_event(vendor) => {
+                Some("SessionStart")
+            }
             _ => None,
         };
         self
@@ -916,6 +935,8 @@ fn append_log(path: Option<&Path>, line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+    use std::time::Instant;
 
     /// Stop and submit callbacks can share a report slot and source. A successful write keeps the known event in
     /// its diagnostic so a later slot replacement cannot erase which callback arrived.
@@ -950,8 +971,6 @@ mod tests {
             "17 write-failed conv-1 -"
         );
     }
-    use std::io::Cursor;
-    use std::time::Instant;
 
     /// The Claude Code 2.1.241 `SessionStart` payload, verbatim from the
     /// hand-verified vendor audit (re-run by `real_agent_capture.rs`'s

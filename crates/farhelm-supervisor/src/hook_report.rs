@@ -470,7 +470,9 @@ pub(crate) fn read_report(path: &Path) -> Result<HookReport, ReadError> {
 // `farhelm` crate's `hook` module), and the supervisor, for its verdict on
 // each report it settles (`acked`, or `refused` with the reason). Both render
 // through [`render_log_line`] and append through [`append_hook_log`], so the
-// line shape and its sanitizing have one definition.
+// line shape and its sanitizing have one definition. The hook's `written`
+// line may end with a tab and `event=<name>` after that shape, which only the
+// hook adds (see its module docs).
 
 /// Size past which the hook log is truncated before the next append.
 ///
