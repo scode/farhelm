@@ -185,9 +185,9 @@ pub(crate) struct ScriptedFleet {
     gate: Arc<ListGate>,
 }
 
-/// Pause one master release at the point where the caller must still expose the old registry route.
+/// Pause one master release and expose the route passed to the transport, independently of the current registry.
 struct ReleaseGate {
-    reached: tokio::sync::oneshot::Sender<bool>,
+    reached: tokio::sync::oneshot::Sender<HostRow>,
     proceed: tokio::sync::oneshot::Receiver<()>,
 }
 
@@ -331,12 +331,12 @@ impl ScriptedFleet {
             .collect()
     }
 
-    /// Receive the prior route's Tailscale bit when release begins, then let it complete.
+    /// Receive the route's saved row when release begins, then let it complete.
     pub(crate) fn hold_next_release(
         &self,
         host: HostId,
     ) -> (
-        tokio::sync::oneshot::Receiver<bool>,
+        tokio::sync::oneshot::Receiver<HostRow>,
         tokio::sync::oneshot::Sender<()>,
     ) {
         let (reached, observation) = tokio::sync::oneshot::channel();
@@ -409,7 +409,7 @@ impl HostTransport for ScriptedFleet {
         let gate = self.release_gates.lock().unwrap().remove(&host.id);
         Box::pin(async move {
             if let Some(gate) = gate {
-                let _ = gate.reached.send(host.tailscale);
+                let _ = gate.reached.send(host.clone());
                 let _ = gate.proceed.await;
             }
         })

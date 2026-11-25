@@ -6393,8 +6393,13 @@ gets a new allocation. A prepared command keeps its exact trust snapshot through
 gets a different master name. Retirement checks only the recorded directory and the exact legacy directory for that
 destination. It asks published masters to exit and removes a checked directory only when it is empty. An explicit mode
 edit parks the host actor and releases the masters for its old route before committing. The write invalidates any unused
-Podman place claim and in-flight probe for that route. Turning the mode off or forgetting the host clears its private
-key snapshots on a best-effort basis.
+Podman place claim and in-flight probe for that route. Retarget and Remove release the former destination's masters
+after committing and withdrawing the old connection, when no registered Tailscale host uses that destination. The edit
+reserves the destination's private files before the write. A replacement host can register after the write and prepares
+its files after the exit commands finish. Cleanup checks for that registration again before clearing pins. Earlier
+discovery and place checks can finish independently of the edit. An SSH command they already prepared may still use its
+old path, so retirement of that work is best effort. Pin cleanup retries removal of an empty private directory after the
+exit. If the directory survives, cleanup keeps its basename so a later retirement can find it.
 
 The constructor builds argv layers with quoting once per parsing shell. Podman exec uses `-i`, the recorded login user,
 home working directory, explicit HOME/USER/LOGNAME and `XDG_RUNTIME_DIR=/run/user/<uid>`, then `sh -c` for the script. A

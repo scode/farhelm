@@ -926,11 +926,19 @@ async fn retarget(
     // the in-flight write it fences out. Dropped before the reply is built,
     // which needs nothing from it.
     let provisioning = state.manager.host_provision_lock(host).await;
-    let serialized = state.manager.host_write_lock(host).await;
     let old = match registry_row(&state, host).await {
         Ok(row) => row,
         Err(error) => return http_error(error),
     };
+    let destination = if old.destination.as_deref() != Some(spec.ssh.as_str()) {
+        match state.provisioning.lock_tailscale_destination(&old).await {
+            Ok(guard) => guard,
+            Err(error) => return http_error(error),
+        }
+    } else {
+        None
+    };
+    let serialized = state.manager.host_write_lock(host).await;
     if let Err(e) = state
         .podman_places
         .retarget(&state.store, host, &spec.ssh)
@@ -938,7 +946,35 @@ async fn retarget(
     {
         return http_error(e);
     }
-    if let Err(reconcile) = state.manager.sync_registry().await {
+    let reconcile = state.manager.sync_registry().await;
+    // Refresh on the new route can commit while the old route's master exits run.
+    drop(serialized);
+    let parked_for_cleanup = if reconcile.is_err() && destination.is_some() {
+        // Keep the registered host visible while withdrawing its old connection until the masters exit.
+        state
+            .manager
+            .hold_connection(
+                host,
+                HostState::Connecting {
+                    attempt: 0,
+                    stage: crate::manager::ConnectionStage::WaitingToConnect,
+                    last_error: None,
+                },
+            )
+            .await
+    } else {
+        false
+    };
+    if let Some(files) = destination {
+        state
+            .provisioning
+            .cleanup_tailscale_route(&old, files, true)
+            .await;
+    }
+    if parked_for_cleanup {
+        state.manager.release_hold(host, true);
+    }
+    if let Err(reconcile) = reconcile {
         // Converge rather than roll back: the durable write is what the
         // user asked for, and `retry_now` makes the ACTOR reload its row and
         // dial whatever the registry says now.
@@ -960,14 +996,6 @@ async fn retarget(
              the next successful reconcile"
         )));
     }
-    if old.destination.as_deref() != Some(spec.ssh.as_str()) {
-        state.provisioning.forget_tailscale_keys(&old).await;
-    }
-    // Released here rather than at the end of the function: the reply is
-    // built from the registry and the actor set, both already settled, and
-    // holding a host's write lock across a read would stall its next refresh
-    // commit for no reason.
-    drop(serialized);
     drop(provisioning);
     tracing::info!(host, destination = spec.ssh.as_str(), "host retargeted");
     match host_view(&state, host).await {
@@ -1001,6 +1029,7 @@ pub(crate) async fn set_tailscale(
                 crate::ssh::tailscale::destination_host(destination)?;
             }
             state.store.check_ssh_tailscale_edit(host).await?;
+            let destination = state.provisioning.lock_tailscale_destination(&old).await?;
             state
                 .manager
                 .hold_connection(
@@ -1024,8 +1053,14 @@ pub(crate) async fn set_tailscale(
                 .podman_places
                 .set_ssh_tailscale(&state.store, &old, spec.tailscale)
                 .await;
-            if changed.is_ok() {
-                state.provisioning.forget_tailscale_keys(&old).await;
+            if changed.is_ok()
+                && let Some(files) = destination
+            {
+                // The actor was parked while the old route's masters were released above.
+                state
+                    .provisioning
+                    .cleanup_tailscale_route(&old, files, false)
+                    .await;
             }
             let reconciled = match changed {
                 Ok(()) => state.manager.sync_registry().await.context(
@@ -1255,13 +1290,10 @@ pub(crate) async fn registry_row(state: &AppState, host: HostId) -> anyhow::Resu
 /// host's provisioning lock, so removing the same host again meanwhile meets
 /// the "busy" refusal ([`provision_lock_or_busy`]).
 ///
-/// Only a machine-deleting removal can meet the bound; every other removal
-/// touches nothing but the registry and the actor map, so the wrapper costs
-/// it nothing and needs no decision by host kind here. Decided by the
-/// migration's orchestrator on 2026-11-15, under its rule that every
-/// host-waiting route the GUI sends is bounded. The agent relay's removal
-/// ([`remove_host_checked`]) refuses machine-deleting hosts before any card,
-/// so it never waits this way and is left as it was.
+/// Machine deletion can reach the bound. Removing an ordinary Tailscale SSH
+/// host can also wait briefly for its old masters to exit. The agent relay's
+/// removal ([`remove_host_checked`]) refuses machine-deleting hosts before
+/// any card and uses the same bounded master retirement for SSH hosts.
 ///
 /// FAILS CLOSED through an INFALLIBLE teardown rather than a reconcile.
 /// `stop_actor` takes the id this handler already committed and needs no
@@ -2486,12 +2518,13 @@ mod tests {
                 Some(serde_json::json!({ "tailscale": false }))
             ),
             async {
-                let old_mode =
+                let released =
                     tokio::time::timeout(std::time::Duration::from_secs(5), release_started)
                         .await
                         .expect("the old connection reached release")
                         .unwrap();
-                assert!(old_mode);
+                assert!(released.tailscale);
+                assert_eq!(released.destination.as_deref(), Some(destination));
                 assert!(registry_row(&harness.state, host).await.unwrap().tailscale);
                 assert!(key_dir.is_dir());
                 finish_release.send(()).unwrap();
@@ -2572,6 +2605,186 @@ mod tests {
             Some("user@correct"),
             "the edit must be DIALED, not merely recorded: {dialed:?}"
         );
+    }
+
+    /// Retarget and Remove retire the saved Tailscale route after the registry stops offering it, while the
+    /// old pins are still available to retirement. A replacement registered during exit keeps its pins.
+    #[farhelm_testtrace::test]
+    async fn retarget_and_remove_retire_the_old_tailscale_route() {
+        use futures_util::FutureExt as _;
+
+        const OLD: &str = "user@old.tailnode.example";
+        const NEW: &str = "user@new.tailnode.example";
+        for (retarget, replacement) in [(true, false), (true, true), (false, false), (false, true)]
+        {
+            let case = format!("retarget={retarget} replacement={replacement}");
+            let harness = lone_local_helm().await;
+            let (status, added, text) = call(
+                &harness,
+                "POST",
+                "/api/hosts",
+                Some(serde_json::json!({ "ssh": OLD, "tailscale": true })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{text}");
+            let host = added["id"].as_i64().unwrap();
+            harness.await_refreshed(host).await;
+            let old = registry_row(&harness.state, host).await.unwrap();
+            assert!(old.tailscale);
+            assert_eq!(old.destination.as_deref(), Some(OLD));
+            let key_dir = crate::ssh::tailscale::known_hosts_dir(
+                harness.state.provisioning.helm_state_dir(),
+                OLD,
+            )
+            .unwrap();
+            tokio::fs::create_dir_all(&key_dir).await.unwrap();
+            let pin = key_dir.join("fixture-pin");
+            tokio::fs::write(&pin, b"old").await.unwrap();
+            // Discovery can still hold the old host's route while retirement uses the destination gate.
+            let _discovery = harness.manager.ssh_route_lock(host).read_owned().await;
+
+            let (started, finish) = harness.fleet.hold_next_release(host);
+            let request = async {
+                if retarget {
+                    call(
+                        &harness,
+                        "POST",
+                        &format!("/api/hosts/{host}/destination"),
+                        Some(serde_json::json!({"ssh": NEW})),
+                    )
+                    .await
+                } else {
+                    call(&harness, "DELETE", &format!("/api/hosts/{host}"), None).await
+                }
+            };
+            let ((status, _, text), ()) = tokio::join!(request, async {
+                let released = tokio::time::timeout(std::time::Duration::from_secs(5), started)
+                    .await
+                    .unwrap_or_else(|_| {
+                        panic!("retirement reached the old host's transport: {case}")
+                    })
+                    .unwrap();
+                assert!(released.tailscale);
+                assert_eq!(released.destination.as_deref(), Some(OLD));
+                let rows = harness.store.list_hosts().await.unwrap();
+                assert!(
+                    rows.iter()
+                        .all(|row| row.destination.as_deref() != Some(OLD)),
+                    "old destination freed before retiring: {case}"
+                );
+                assert_eq!(
+                    rows.iter()
+                        .find(|row| row.id == host)
+                        .and_then(|row| row.destination.as_deref()),
+                    retarget.then_some(NEW),
+                    "registry before retiring: {case}"
+                );
+                assert_eq!(
+                    harness
+                        .manager
+                        .snapshots()
+                        .iter()
+                        .find(|row| row.id == host)
+                        .and_then(|row| row.destination.as_deref()),
+                    retarget.then_some(NEW),
+                    "actor after the edit: {case}"
+                );
+                assert_eq!(tokio::fs::read(&pin).await.unwrap(), b"old");
+                if replacement {
+                    let id = harness
+                        .store
+                        .add_ssh_host_with_mode(OLD, None, None, true)
+                        .await
+                        .unwrap();
+                    assert_ne!(id, host);
+                }
+                assert!(
+                    crate::ssh::tailscale::lock_destination_files(key_dir.clone())
+                        .now_or_never()
+                        .is_none(),
+                    "fresh preparation must wait for exit: {case}"
+                );
+                finish.send(()).unwrap();
+            });
+            assert_eq!(status, StatusCode::OK, "{case}: {text}");
+            let files = crate::ssh::tailscale::lock_destination_files(key_dir.clone())
+                .now_or_never()
+                .expect("the finished retirement released the destination");
+
+            if replacement {
+                // A later cleanup for the former row must also skip the exit while the destination is in use.
+                let (mut started, finish) = harness.fleet.hold_next_release(host);
+                drop(finish);
+                harness
+                    .state
+                    .provisioning
+                    .cleanup_tailscale_route(&old, files, true)
+                    .await;
+                assert!(matches!(
+                    started.try_recv(),
+                    Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+                ));
+                assert_eq!(tokio::fs::read(&pin).await.unwrap(), b"old");
+            } else {
+                assert!(!key_dir.exists());
+            }
+        }
+    }
+
+    /// A destination claimed before the durable write must leave the old Tailscale connection and its pins available.
+    /// Call the commit path directly to model a claim made after the HTTP preflight.
+    #[farhelm_testtrace::test]
+    async fn failed_tailscale_retarget_preserves_the_old_route() {
+        const OLD: &str = "user@old.tailnode.example";
+        const TAKEN: &str = "user@taken.tailnode.example";
+        let harness = lone_local_helm().await;
+        let host = harness
+            .store
+            .add_ssh_host_with_mode(OLD, None, None, true)
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        harness.await_refreshed(host).await;
+        harness
+            .store
+            .check_ssh_destination(host, TAKEN)
+            .await
+            .unwrap();
+        harness.store.add_ssh_host(TAKEN, None, None).await.unwrap();
+        let pins = crate::ssh::tailscale::known_hosts_dir(
+            harness.state.provisioning.helm_state_dir(),
+            OLD,
+        )
+        .unwrap();
+        tokio::fs::create_dir_all(&pins).await.unwrap();
+        let pin = pins.join("fixture-pin");
+        tokio::fs::write(&pin, b"old").await.unwrap();
+        let (mut started, finish) = harness.fleet.hold_next_release(host);
+        drop(finish);
+        let response = super::retarget(
+            Arc::clone(&harness.state),
+            host,
+            super::DestinationSpec {
+                ssh: TAKEN.into(),
+                _remote_farhelm: None,
+                _remote_state_dir: None,
+            },
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            registry_row(&harness.state, host)
+                .await
+                .unwrap()
+                .destination
+                .as_deref(),
+            Some(OLD)
+        );
+        assert!(matches!(
+            started.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(tokio::fs::read(pin).await.unwrap(), b"old");
     }
 
     /// Removing a host forgets it AND its cached sessions, while the host

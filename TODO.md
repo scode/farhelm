@@ -255,13 +255,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   spans the Wayland receive code and the clipboard API used by Kit and the terminal. Cover keyboard and Edit menu paste,
   mixed offers and a reply that arrives after the target changes.
 
-- **Allocate Tailscale socket folders securely across helm restarts.** On a machine with several accounts, Farhelm can
-  lose access to a Tailscale host if its shared SSH socket folder is already occupied. Use a short, private temporary
-  directory allocated by the OS. A helm restart can leave earlier SSH masters alive, so retain a trusted way to find
-  each route's masters when the host is changed or removed, including those opened before an upgrade. A new directory on
-  every start would lose that lookup. Keep the existing short socket paths and verify retirement after a restart. Plan:
-  `plans/queue/tailscale-private-socket-dirs.md`.
-
 - **Refuse setup reruns on suspended or deleting Tensorlake sandboxes.** In `provisioning/tensorlake_add.rs`,
   `TensorlakeHost` can offer setup even when it should tell the user to resume the sandbox or finish its deletion.
   Refuse before ensuring a host key or keeping a plan. Check again under the provisioning lock when confirming an older
