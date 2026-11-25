@@ -347,11 +347,23 @@ impl PrivateConfig {
         }
     }
 
-    /// The fixture premise once the session exists: Farhelm's setup wrote every planned file into a mirror, and none
-    /// of the maintainer's real hook files changed.
-    pub(super) fn check_installed(&self) -> anyhow::Result<()> {
+    /// The fixture starts with all planned hook paths private and empty. A consented launch either installs every
+    /// reporter there or keeps the paths absent when the supervisor's hook setting is off.
+    pub(super) fn check_hook_setup(&self, expected: bool) -> anyhow::Result<()> {
         for mirror in &self.mirrors {
-            mirror.private_leaves_installed()?;
+            if expected {
+                mirror.private_leaves_installed()?;
+            } else {
+                for (leaf, _) in &mirror.leaves {
+                    let path = mirror.private.join(leaf);
+                    ensure!(
+                        fs::symlink_metadata(&path)
+                            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+                        "hook setup with hooks off did not leave {} absent",
+                        path.display()
+                    );
+                }
+            }
             mirror.real_leaves_unchanged()?;
         }
         Ok(())
