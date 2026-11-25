@@ -99,9 +99,10 @@ pub struct DialogFrame {
     title: Line,
     summary: Option<Line>,
     heading: Option<Heading>,
-    body: AnyElement,
+    body: Option<AnyElement>,
     answers: Vec<Button>,
     close: Option<IconButton>,
+    close_first: bool,
     tile: Option<AnyElement>,
     note: Option<SharedString>,
     width: Option<Pixels>,
@@ -149,9 +150,10 @@ impl DialogFrame {
             title: title.into(),
             summary: None,
             heading: None,
-            body: body.into_any_element(),
+            body: Some(body.into_any_element()),
             answers,
             close: None,
+            close_first: false,
             tile: None,
             note: None,
             width: None,
@@ -226,6 +228,20 @@ impl DialogFrame {
             detail,
             tracker,
         });
+        self
+    }
+
+    /// Preserve Close-first Tab order for a control header with Close at its visual right edge.
+    /// Rename starts in the field but Shift+Tab must still reach Close.
+    pub(crate) fn close_first_in_control_header(mut self) -> Self {
+        self.close_first = true;
+        self
+    }
+
+    /// Omit the body when a control header and footer carry the whole dialog. An empty scrolling region
+    /// would otherwise reserve the same padding and minimum height as one with content.
+    pub(crate) fn without_body(mut self) -> Self {
+        self.body = None;
         self
     }
 
@@ -385,6 +401,7 @@ impl RenderOnce for DialogFrame {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
         let name = self.title.accessible_text();
+        let has_body = self.body.is_some();
         let ((head_y, head_x), (pad_y, pad_x), (foot_y, foot_x)) = if self.compact {
             (COMPACT_HEADER_PAD, COMPACT_BODY_PAD, COMPACT_FOOTER_PAD)
         } else {
@@ -452,17 +469,25 @@ impl RenderOnce for DialogFrame {
             .relative()
             .flex()
             .items_center()
-            .gap(px(if control_header { 8. } else { 14. }))
-            .children(tile)
-            .child(heading)
-            // `align-self: flex-start`: the Close sits level with the title, not centered on a two-line heading.
-            .children(self.close.map(|close| {
-                div()
-                    .flex_shrink_0()
-                    .when(!control_header, Styled::self_start)
-                    .child(close)
-            }))
-            .children(tracker);
+            .gap(px(if control_header { 8. } else { 14. }));
+        // Keep title-header Close level with the title, even if the summary wraps.
+        let close = self.close.map(|close| {
+            div()
+                .flex_shrink_0()
+                .when(!control_header, Styled::self_start)
+                .child(close)
+        });
+        let header_row = if control_header && self.close_first {
+            // The frame records Tab stops in child order. Reversing the layout keeps the field visually first.
+            header_row
+                .flex_row_reverse()
+                .children(close)
+                .child(heading)
+                .children(tile)
+        } else {
+            header_row.children(tile).child(heading).children(close)
+        }
+        .children(tracker);
         let header = if control_header {
             div()
                 .flex()
@@ -495,7 +520,7 @@ impl RenderOnce for DialogFrame {
             })
             .text_size(metrics::TEXT_SM)
             .text_color(theme::color(palette.fg_0))
-            .child(self.body);
+            .children(self.body);
         // Page Up, Page Down, Home and End from a control in the body scroll it, as WebKit scrolled the container
         // around a focused control (SPEC_impl.md, "The component layer and theme"). With a scroll stop drawn, the stop
         // holds focus around the body rather than in it, so this never sees the stop's keys.
@@ -685,7 +710,7 @@ impl RenderOnce for DialogFrame {
                 self.top_band
                     .map(|band| div().flex_shrink_0().overflow_hidden().child(band)),
             )
-            .child(body)
+            .children(has_body.then_some(body))
             .when(has_footer, |card| card.child(footer));
         focus::scroll_region(card, &card_scroll)
     }

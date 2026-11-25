@@ -9927,6 +9927,12 @@ ticker's wall clock while an age is visible. The switcher and template list shar
 footer. The top placement caps the frame's height and the matches take the scroll, keeping the entry field, navigation
 keys and pinned action in view.
 
+Rename and the group naming dialogs use the same control header. The field and Close are laid out in reversed child
+order so the keyboard keeps its Close-first traversal. Session Rename reads its context line from the current store row
+and draws it in the header's detail slot. The body appears only for a refusal or unavailability and scrolls that
+message. A naming dialog opened before the session row arrives shows the supplied draft immediately and adds the context
+line when the row arrives.
+
 The launcher's host picker (`crates/gui/farhelm-gui/src/launcher/view/host_picker.rs`) is a button with a single-choice
 list on the layer manager's non-focusing popover, so focus and every key stay on the button. Up, Down, Home and End
 browse without committing; Enter or Space picks, Escape, a press outside or focus leaving closes without a choice, and

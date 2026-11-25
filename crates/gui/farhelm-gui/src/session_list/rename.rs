@@ -14,8 +14,7 @@
 //!   untouched sends back the helm's own bytes, hidden characters included. Until the user edits it, the draft follows
 //!   a rename the helm pushes (the command line, an agent); once edited, a push never overwrites it (SPEC.md, "Things
 //!   changing underneath": "A refresh never changes what the user is typing"). It does not follow while a save is in
-//!   flight; an untouched draft whose save the helm refused takes up the current title again. The current title above
-//!   the field always follows, escaped.
+//!   flight. An untouched draft whose save the helm refused takes up the current title again.
 //! - **Saving.** Save, or Enter in the field, sends exactly what the field holds: no trimming, no emptiness check, no
 //!   screening ([`command`]). The field keeps a pasted line feed ([`TextInputState::new_keeping_line_breaks`]),
 //!   so a title the supervisor refuses reaches the supervisor, and its refusal is what the user reads. A refusal keeps
@@ -24,8 +23,8 @@
 //!   editor's dismissal hook), and Save draws busy and ignores presses (the old app's busy rules; SPEC.md: "Close uses
 //!   the same cancellation and busy-state rules as Cancel"). Save is busy rather than disabled because a disabled
 //!   button gives up focus, and the old app kept a clicked Save focused.
-//! - **Focus.** It starts in the title field, and Tab follows Close, the field, Cancel, Save (the dialog frame draws
-//!   them in that order). Closing it, however it closes, moves focus only if focus is still inside it: that is the
+//! - **Focus.** It starts in the title field, and Tab follows Close, the field, Cancel, Save, even with Close
+//!   visually to the field's right. Closing it, however it closes, moves focus only if focus is still inside it. That is the
 //!   layer manager's rule, and it is also the rule decided for a successful save
 //!   ([`crate::operations::Settled::user_moved_on`]). Opened from a row's menu, focus then goes back to what held it
 //!   when the editor opened (the menu's button). Opened with the shortcut, it goes to the open session's terminal,
@@ -64,22 +63,29 @@ use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
 use farhelm_proto::session_requests::UpdateSessionGroup;
 use farhelm_proto::ui_channel::{Availability, Collection, SessionRow};
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Entity, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, Styled as _, Subscription, WeakEntity, Window, div,
-    px,
+    AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Entity,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _, Subscription,
+    WeakEntity, Window, div, px,
 };
 
-use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier};
+use crate::assets::{Icon, TERMINAL_FONT};
+use crate::components::{
+    Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier, command_field,
+    command_icon_tile, key_chip,
+};
 use crate::drafts::DraftInput;
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Dialog, DismissHook, Dismissal, LayerId, MainAction};
 use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::store::HelmStore;
-use crate::theme::{self, metrics};
+use crate::theme::{self, Palette, metrics};
 use crate::{local_state, session};
 
 use super::SessionList;
+use super::menu::{self, AgentName};
+use super::row_marks::{self, HelpPlace, HostMark};
+use super::status::{self, Badge, EndedGlyph};
 use super::{groups, outcome};
 
 /// Open the Rename editor for the session the helm files under `key`, on top of everything else in `window`. The one
@@ -206,6 +212,25 @@ pub(super) fn group(
     let store = session::current_store(cx)?;
     let title = subject.title(store.read(cx).collections())?;
     open_editor(subject, &title, returns_to, mark, window, cx)
+}
+
+/// Open the same group editor the row menu uses, without needing to place the menu for the golden capture.
+#[cfg(test)]
+pub(crate) fn open_group_for_golden(id: Option<i64>, window: &mut Window, cx: &mut App) {
+    let mark = Mark::take(cx);
+    assert!(
+        group(
+            id,
+            vec!["a".into()],
+            None,
+            ReturnTo::Opener,
+            &mark,
+            window,
+            cx
+        )
+        .is_some(),
+        "the fixture group editor opens"
+    );
 }
 
 /// One dialog lifecycle for names from any list item. A layer belongs to
@@ -361,7 +386,7 @@ impl Subject {
 /// the subject disappears while the user is typing.
 pub(crate) struct RenameEditor {
     subject: Subject,
-    /// The title the store holds now, shown escaped above the field. Kept when the session drops out of the listing.
+    /// The current title for naming mode's unchanged-save check. Retained when the session leaves the listing.
     current: HostText,
     /// The title field (one row that keeps pasted line feeds) over its draft: the raw title until the user edits it,
     /// their text after.
@@ -411,7 +436,7 @@ impl RenameEditor {
     }
 
     /// The store changed: follow the session's title where the draft allows, and recompute whether the listing proves
-    /// the session gone. A session missing from a listing that proves nothing keeps the last title it showed.
+    /// the session gone. A listing that proves nothing leaves the last known title available for naming mode.
     fn pushed(&mut self, store: &Entity<HelmStore>, window: &mut Window, cx: &mut Context<Self>) {
         let collections = store.read(cx).collections();
         let title = self.subject.title(collections);
@@ -504,24 +529,21 @@ impl Render for RenameEditor {
         let palette = theme::palette(cx);
         let busy = self.title.draft().is_saving();
         let weak = cx.weak_entity();
-        let (heading, summary, field, help, unavailable) = match self.subject {
+        let (heading, field, help, unavailable) = match self.subject {
             Subject::Session { .. } => (
                 "Rename session",
-                "Change this session's title",
                 "New session title",
                 "The session's new title; Enter saves it",
                 "This session is no longer available; copy the draft or Cancel",
             ),
             Subject::Group(_) => (
                 "Rename group",
-                "Change this group's name",
                 "New group name",
                 "The group's new name. Enter saves it.",
                 "This group is no longer available. You can copy the draft or cancel.",
             ),
             Subject::NewGroup { .. } => (
                 "New group",
-                "Name this group of sessions",
                 "Group name",
                 "Enter saves the name and creates the group.",
                 "",
@@ -552,31 +574,33 @@ impl Render for RenameEditor {
                 "Close new group; create no group",
             ),
         };
-        let creating = matches!(self.subject, Subject::NewGroup { .. });
-        // `.rename-body`: the current title, the field and what the editor has to say, 10 pixels apart.
+        let shortcut = matches!(self.subject, Subject::Session { .. }).then(|| {
+            key_chip(
+                crate::actions::RENAME_SESSION_SHORTCUT_NAME,
+                palette.fg_1,
+                palette,
+            )
+        });
+        let field = div()
+            .debug_selector(|| "rename-field".into())
+            .child(command_field(
+                TextInput::new(
+                    "rename-title",
+                    self.title.input(),
+                    field,
+                    HoverHelp::tooltip(help),
+                ),
+                command_icon_tile(Icon::Edit, palette).debug_selector(|| "rename-pencil".into()),
+                shortcut,
+            ));
+        // The notices remain in the frame's scrolling body, independently of the field at the top.
+        let context = session_context(&self.subject, palette, cx);
+        let refusal = self.title.draft().refusal();
+        let has_body = self.unavailable || refusal.is_some();
         let body = div()
             .flex()
             .flex_col()
             .gap(px(10.))
-            .children((!creating).then(|| {
-                // `.rename-current-title`: one line, cut with an ellipsis, in the quieter text color.
-                host_text::element(&self.current)
-                    .min_w_0()
-                    .truncate()
-                    .text_size(metrics::TEXT_SM)
-                    .text_color(theme::color(palette.fg_1))
-            }))
-            .child(
-                // The selector is for tests, which find the field by where it is drawn.
-                div()
-                    .debug_selector(|| "rename-field".into())
-                    .child(TextInput::new(
-                        "rename-title",
-                        self.title.input(),
-                        field,
-                        HoverHelp::tooltip(help),
-                    )),
-            )
             .children(self.unavailable.then(|| {
                 div()
                     .debug_selector(|| "rename-unavailable".into())
@@ -584,7 +608,7 @@ impl Render for RenameEditor {
                     .text_color(theme::color(palette.warn))
                     .child(unavailable)
             }))
-            .children(self.title.draft().refusal().map(|refusal| {
+            .children(refusal.map(|refusal| {
                 // The helm's words may quote the refused title, so they are host text: escaped, as one labelled node.
                 div()
                     .text_size(metrics::TEXT_SM)
@@ -600,11 +624,29 @@ impl Render for RenameEditor {
         .tier(Tier::Neutral)
         .disabled(busy)
         .on_click(on_editor(weak.clone(), RenameEditor::cancel));
+        let key_ink = if busy || self.unavailable {
+            palette.fg_2
+        } else {
+            palette.on_fill
+        };
         let save = Button::new(
             "rename-save",
             save_label,
             HoverHelp::tooltip(save_help),
             Role::Button,
+        )
+        .content(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(save_label)
+                .child(
+                    key_chip("⏎", key_ink, palette)
+                        .px(px(4.))
+                        .py(px(0.))
+                        .border_color(theme::color(key_ink)),
+                ),
         )
         .tier(Tier::Primary)
         // Busy, not disabled, while a save is in flight: a disabled button drops out of focus, and the old app kept a
@@ -612,8 +654,11 @@ impl Render for RenameEditor {
         .busy(busy)
         .disabled(self.unavailable)
         .on_click(on_editor(weak.clone(), RenameEditor::save));
-        DialogFrame::new("rename", heading, body, vec![cancel, save])
-            .summary(summary)
+        let frame = DialogFrame::new("rename", heading, body, vec![cancel, save])
+            .width(px(440.))
+            .heading_control(field, context, None)
+            .close_first_in_control_header()
+            .note(heading)
             .close(
                 close_label,
                 HoverHelp::tooltip(close_help),
@@ -626,6 +671,85 @@ impl Render for RenameEditor {
                         layers::dismiss(layer, window, cx);
                     }
                 },
-            )
+            );
+        if has_body {
+            frame
+        } else {
+            frame.without_body()
+        }
     }
+}
+
+/// Name the session below the draft field so a user can distinguish similar titles. A rename can outlive the
+/// listing row and quick-launch naming can open before it arrives. In either case there is no context to show yet.
+fn session_context(subject: &Subject, palette: &Palette, cx: &App) -> Option<AnyElement> {
+    let Subject::Session { key, .. } = subject else {
+        return None;
+    };
+    let store = session::current_store(cx)?;
+    let collections = store.read(cx).collections();
+    let row = collections.get::<SessionRow>(key)?;
+    let (agent_icon, agent_ink) = row_marks::agent_mark(row, false, palette);
+    let agent = match menu::agent_name(row, Some(collections)) {
+        AgentName::Known(name) => div().child(name),
+        AgentName::Registered(name) | AgentName::Program(name) => host_text::element(&name),
+    };
+    let host = HostMark::of(row, collections, None)
+        .map(|mark| row_marks::host_mark("rename-context", mark, palette, HelpPlace::Ordinary));
+    let path = HostText::from_host(format!(
+        "{}:{}",
+        row.host_name,
+        super::abbreviate_home(&row.info.cwd)
+    ));
+    let badge = status::badge(row, "rename-context-status".into());
+    let status = Badge::word(badge.as_ref()).map(|word| {
+        let mark = status::live(row)
+            .map(|live| live.mark(palette, false, row.stale, 0).into_any_element())
+            .or_else(|| {
+                EndedGlyph::of(row).map(|ended| {
+                    row_marks::cell(
+                        "rename-context-ended".into(),
+                        ended.icon(),
+                        ended.color(palette, false),
+                    )
+                    .into_any_element()
+                })
+            });
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(5.))
+            .child("·")
+            .children(mark)
+            .child(word)
+    });
+    Some(
+        div()
+            .id("rename-session-context")
+            .debug_selector(|| "rename-session-context".into())
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .whitespace_nowrap()
+            .text_size(metrics::TEXT_SM)
+            .text_color(theme::color(palette.fg_1))
+            .child(row_marks::cell(
+                "rename-context-agent".into(),
+                crate::harness::icon(agent_icon),
+                agent_ink,
+            ))
+            .child(agent.max_w(gpui::relative(0.32)).min_w_0().truncate())
+            .child("·")
+            .children(host)
+            .child(
+                host_text::element(&path)
+                    .flex_shrink_1()
+                    .min_w_0()
+                    .truncate()
+                    .font_family(TERMINAL_FONT),
+            )
+            .children(status)
+            .into_any_element(),
+    )
 }

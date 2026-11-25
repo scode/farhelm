@@ -212,8 +212,8 @@ fn the_header_close_closes_the_editor_like_escape(cx: &mut TestAppContext) {
 
 /// The old `modal-trap.spec.ts` case "Rename wraps Close through Save while a real approval remains usable", its Rename
 /// half (the approval half is the layer manager's `an_approval_card_stays_usable_over_a_dialog`): Tab walks the dialog
-/// in reading order, the header's Close, the field, then the footer's Cancel and Save, and never leaves it, so the
-/// header's Close coming first does not take the field's opening focus. On macOS, Tab skips buttons unless the system's
+/// in the editor's established order even though Close is drawn to the right of the field. Close coming first in that
+/// order does not take the field's opening focus. On macOS, Tab skips buttons unless the system's
 /// Keyboard navigation setting is on, so the test runs under both answers of that setting.
 /// Specified, opened by the shortcut from a's terminal with focus in the field: where Tab reaches every control, Tab
 /// moves to Cancel, Save, Close (wrapping) and back to the field, and Shift+Tab then to Close and Save; where Tab skips
@@ -226,6 +226,21 @@ fn tab_walks_close_the_field_cancel_and_save_and_wraps(cx: &mut TestAppContext) 
     cx.update(|_, cx| focus::follow_tab_reach(Rc::new(move || source.get()), cx));
     keys(cx, RENAME);
     assert!(field_focused(cx), "the premise: focus starts in the field");
+    let field_bounds = test_support::bounds(cx, "rename-field");
+    assert_eq!(
+        field_bounds.size.height,
+        gpui::px(48.),
+        "the title uses command-field height"
+    );
+    assert!(
+        cx.debug_bounds("rename-pencil").is_some(),
+        "the pencil stays visible in the decorated field"
+    );
+    let close_bounds = test_support::bounds(cx, "rename-close");
+    assert!(
+        close_bounds.left() >= field_bounds.right(),
+        "Close is drawn to the field's right"
+    );
 
     for next in ["rename-cancel", "rename-save", "rename-close"] {
         keys(cx, "tab");
@@ -316,7 +331,8 @@ fn a_rename_is_refused_while_a_delete_of_that_session_is_in_flight(cx: &mut Test
 /// SPEC_impl.md, "Drafts", and SPEC.md's "A refresh never changes what the user is typing": until the user edits the
 /// field it follows a rename pushed from elsewhere, so they save from the title as it now is; once they edit it, a push
 /// must never overwrite what they typed. Specified: a pushed title replaces the untouched field's text; after a typed
-/// letter, a second pushed title leaves the field as typed and still updates the current-title line above it.
+/// letter, a second pushed title leaves the field as typed and still updates the name checked by an unchanged save
+/// in naming mode.
 #[gpui::test]
 fn an_untouched_draft_follows_a_pushed_rename_and_a_touched_one_does_not(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_main(cx, fleet("first"));
@@ -345,7 +361,10 @@ fn an_untouched_draft_follows_a_pushed_rename_and_a_touched_one_does_not(cx: &mu
     assert_eq!(field(cx), typed, "the touched field kept what was typed");
     let opened = editor(cx);
     let current = cx.update(|_, cx| opened.read(cx).current.raw().to_owned());
-    assert_eq!(current, "pushed again", "the current title still follows");
+    assert_eq!(
+        current, "pushed again",
+        "the editor still knows the current title"
+    );
 }
 
 /// SPEC.md, "Things changing underneath": "Text, caret and focus stay as they are". The store notifies the editor on
@@ -498,16 +517,23 @@ fn a_typed_title_is_sent_verbatim_and_an_empty_one_too(cx: &mut TestAppContext) 
 /// A click on the title field must leave focus in it. Rename's empty-space rule moves focus to the dialog itself, and
 /// until the layer manager told a click into a field apart from one on empty space, every click into the field lost
 /// focus that way, so the field could be typed into only from the keyboard. The layer manager's own test covers dialogs
-/// in general; this pins it for the editor. Specified: after Tab moves focus off the field, a click on the field
-/// focuses it again, and a typed letter reaches it.
+/// in general; this pins it for the editor. From another control, clicks on the text area and on the visible well's
+/// padding both move focus to the editor, where typing replaces the selected title.
 #[gpui::test]
 fn a_click_on_the_field_focuses_it(cx: &mut TestAppContext) {
     let (_helm, cx) = open_main(cx, fleet("old"));
     keys(cx, RENAME);
-    keys(cx, "tab");
-    assert!(!field_focused(cx), "the premise: focus left the field");
-    test_support::click(cx, "rename-field");
-    assert!(field_focused(cx), "the click focused the field");
+    let bounds = test_support::bounds(cx, "rename-field");
+    for target in [
+        bounds.center(),
+        point(bounds.left() + px(3.), bounds.center().y),
+    ] {
+        keys(cx, "tab");
+        assert!(!field_focused(cx), "the premise: focus left the field");
+        cx.simulate_click(target, Modifiers::none());
+        test_support::check(cx);
+        assert!(field_focused(cx), "clicking {target:?} focused the field");
+    }
     crate::test_support::select_all_text(cx);
     keys(cx, "z");
     assert_eq!(field(cx), "z");
@@ -539,7 +565,7 @@ fn the_field_is_read_only_while_saving_and_keeps_its_caret(cx: &mut TestAppConte
 /// SPEC.md: "Close uses the same cancellation and busy-state rules as Cancel", and Escape is a Close. A click on the
 /// dialog's empty space gives the dialog itself focus (Rename's rule, so Enter then saves), and Escape from there must
 /// not close the editor mid-save either: the draft and the refusal that may follow would be lost, leaving only the
-/// row's copy. Specified: during a save, a click on the body's empty space puts focus on the dialog itself; Escape
+/// row's copy. Specified: during a save, a click on the card's empty margin puts focus on the dialog itself. Escape
 /// leaves the editor open; after the helm's refusal the draft is still there, and Escape then closes the editor.
 #[gpui::test]
 fn escape_on_the_dialog_itself_does_not_close_it_while_saving(cx: &mut TestAppContext) {
@@ -547,10 +573,10 @@ fn escape_on_the_dialog_itself_does_not_close_it_while_saving(cx: &mut TestAppCo
     keys(cx, RENAME);
     keys(cx, "end x enter");
     let (id, _) = one_rename(&mut helm);
-    // Inside the body's padding: empty space.
-    let corner = test_support::bounds(cx, "rename-body").origin;
+    // Beside the field, inside the card's left margin.
+    let corner = test_support::bounds(cx, "rename").origin;
     cx.simulate_click(
-        point(corner.x + px(3.), corner.y + px(3.)),
+        point(corner.x + px(4.), corner.y + px(20.)),
         Modifiers::none(),
     );
     test_support::check(cx);
@@ -616,6 +642,10 @@ fn a_complete_listing_without_the_session_disables_save_and_keeps_the_draft(
 ) {
     let (mut helm, cx) = open_main(cx, fleet("old"));
     keys(cx, RENAME);
+    assert!(
+        cx.debug_bounds("rename-session-context").is_some(),
+        "the listed session has context"
+    );
     keys(cx, "x");
     let typed = field(cx);
     assert_ne!(
@@ -635,6 +665,10 @@ fn a_complete_listing_without_the_session_disables_save_and_keeps_the_draft(
     assert!(
         cx.debug_bounds("rename-unavailable").is_some(),
         "it says why"
+    );
+    assert!(
+        cx.debug_bounds("rename-session-context").is_none(),
+        "the disappeared session leaves no stale context"
     );
     assert!(field_focused(cx), "focus stayed in the field");
     assert_eq!(field(cx), typed, "the draft is kept");

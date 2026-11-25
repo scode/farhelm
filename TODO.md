@@ -51,13 +51,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Give Cmd+K, Cmd+J and Cmd+L the session launcher's look.** The quick switcher, the template list and Rename are
-  plain and untuned; Cmd+L in particular wraps one short field in a tall header and a lot of empty space. Restyle them
-  as direction 1, "Launcher sibling", in
-  [the dialog directions mockup](https://snippets.scode.org/s/farhelm-dialog-directions/), so they read as one family
-  with the launcher. Settings and the other dialogs come after this, once the look is settled. Plan:
-  `plans/queue/launcher-style-quick-dialogs.md`.
-
 - **Give What's new the session launcher's look.** Restyle the upgrade highlights window as direction 2, "Launcher
   sibling", in
   [the What's new and Welcome directions mockup](https://snippets.scode.org/s/farhelm-whats-new-directions/), showing

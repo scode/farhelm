@@ -1171,15 +1171,22 @@ pub(super) fn session_list_empty_setup(state: &SceneState, _: &mut Window, cx: &
     session_list_scene(state, &[], cx);
 }
 
-/// The Rename editor over a session the fake helm lists, as the shortcut or a row's menu opens it (reference
-/// `rename-dialog`): the current title, the field holding it with focus, and Cancel and Save. The fake and the
-/// connection are kept for the scene's life, like the session list's.
+/// The listed session's title is in the focused field. Its running agent, host and directory identify the session
+/// below the field, using the same marks as the sidebar.
 pub(super) fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
+    let [row, ..] = fleet();
     helm.connect(vec![
-        listing(&["a"], &[session("a").title("bench tokenizer")]),
+        listing(
+            &["a"],
+            &[row
+                .title("Refactor the API client")
+                .host_name("Local")
+                .agent_kind("claude")],
+        ),
         preferences(&["a"], None),
+        super::hosts(&[super::local()]),
     ]);
     // The snapshot reaches the store from the connection's pump, on the executor, after this setup returns; the
     // editor needs it to seed its draft, so it opens once the connection has a UI session, and only once.
@@ -1187,8 +1194,41 @@ pub(super) fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &
     super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
-            crate::session_list::rename::open("a", &mark, window, cx);
+            assert!(crate::session_list::rename::open("a", &mark, window, cx).is_some());
         });
+    });
+}
+
+/// The blank editor that creates a group for the selected session.
+pub(super) fn new_group_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    group_dialog_setup(state, None, window, cx);
+}
+
+/// An existing group supplies the draft name and leaves the session-identification line out.
+pub(super) fn rename_group_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    group_dialog_setup(state, Some(10), window, cx);
+}
+
+/// Run the real group editor once the fake store holds the roster from which it seeds the draft.
+fn group_dialog_setup(state: &SceneState, id: Option<i64>, window: &mut Window, cx: &mut App) {
+    let mut sessions = listing(&["a"], &[session("a")]);
+    sessions.meta.session_groups = vec![SessionGroup {
+        id: 10,
+        name: "Documentation".into(),
+        position: 0,
+        collapsed: false,
+        members: 0,
+    }];
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![sessions, preferences(&["a"], None)]);
+    let handle = window.window_handle();
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
+        handle
+            .update(cx, |_, window, cx| {
+                crate::session_list::rename::open_group_for_golden(id, window, cx);
+            })
+            .expect("the group editor's window is live");
     });
 }
 
