@@ -69,13 +69,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching
   indicators come later and should fit the layout. Plan: `plans/queue/welcome-empty-state.md`.
 
-- **Keep cached repository cleanup moving past one repo's error.** At supervisor startup, if cleaning up an old cache
-  generation for one repository fails (for example because a leftover git process is still writing in it), the sweep
-  stops early and skips every remaining repository until the next restart
-  (`crates/farhelm-supervisor/src/repo_cache.rs`). Log and continue across repositories while still stopping cleanup of
-  an affected repository on selector or directory-sync failures, and add a test proving later repositories are still
-  cleaned while selected caches stay intact. Plan: `plans/queue/tensorlake-setup-and-repo-cache-fixes.md`.
-
 - **Assert that Tensorlake host setup never reads agent settings.** In
   `crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs`,
   `codex_subscription_and_none_enter_setup_without_an_endpoint` checks that no Codex settings cleanup was recorded
