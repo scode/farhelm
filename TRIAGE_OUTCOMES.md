@@ -2073,67 +2073,6 @@
   for reference: fix code — a short Podman `launch_notice`. Size S. Or discard.
 - Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
-## hook-hint-dismissal-survives-next-launch.md
-
-- Outcome: `other`.
-- Assessment: Grok and Antigravity sessions launched without hook setup show a "set up Restart" hint above the terminal.
-  Hiding it with × also hides it for a later run of the same session, for example after Restart with. Verified:
-  confirmed. The dismissal is keyed by session and agent and kept while the row stays eligible
-  (`session_pane/hook_band.rs:36-38`, `:59-75`, `:133-136`). SPEC.md (around 3186-3188) says × "hides this occurrence"
-  but does not define an occurrence for this hint. The button's own tooltip says "Hide this hint for this session"
-  (`hook_band.rs:168`), so the code matches its own wording.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: discard, or fix spec to define the hook hint's occurrence. The hint is a discovery aid and the tooltip
-  already says "this session". Size S.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## hook-hint-can-repaint-old-dismissal-error.md
-
-- Outcome: `other`.
-- Assessment: The Grok/Antigravity session hint above the terminal offers "Don't show again". If that save is refused,
-  the hint shows a red "Could not save hiding the hook setup prompt and hint. Try again." Suppose the user then turns
-  the offer off and back on in Settings. The hint comes back with the old failure line still under it, even though
-  nothing failed since. The line stays until another Don't show again is pressed, even across switching sessions.
-  Verified: confirmed. `crates/gui/farhelm-gui/src/session_pane/hook_band.rs:88` is the only place the error clears, at
-  the start of the next dismiss. It is set at :93-99 (refusal) and :106 (busy). `draw` hides the band while the shared
-  dismissal is on (:133-137). The error is kept by session key alone and redrawn when the band returns (:180-191).
-  `follow` (:60-76) never clears it, unlike the trust band, which drops its error when another session opens
-  (`trust_band.rs:222-229`). SPEC.md "Status" (hook hint paragraph, ~:3185-3190) says nothing about the error's
-  lifetime. Not filtered: a refused save followed by a Settings toggle is not one of the rare-trigger kinds the filter
-  lists.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code. Clear the error when the dismissal preference changes or the session or run changes,
-  mirroring the trust band. Size S.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## trailing-trust-hint-save-errors-use-live-selection-instead-of.md
-
-- Outcome: `other`.
-- Assessment: A trust hint's "Don't show again" files any save error under whatever session is selected when the click
-  is handled, not the session the hint was drawn on. Separately, the error is kept per session but not per agent. After
-  a failed save, if a Replace switches the same session to another agent that also asks about trust, the old "Could not
-  save hiding this trust hint" line shows under the new agent's hint. Verified: confirmed by source.
-  `session_pane/trust_band.rs:273` reads the live selection, and :288-304 attributes the error to it. The drawn key is
-  available to the click handler but not passed (:465-475). `Known::failed` is keyed by session only (:128) and cleared
-  only when the session changes (:222-229). The live-selection part (and the silent no-op when nothing is selected,
-  :273-275) needs the selection to change between a frame and the click. That matches "Races a person would have to win
-  inside a sub-second window": the dismissal is a shared, per-agent preference saved with the drawn agent, and the stray
-  error drops when the user leaves the session. The Replace-to-another-agent part is not a timing race and remains. The
-  reviewer's point (2), `self.read` using the live target, is harmless, because the read is for the band currently
-  shown.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code. Bind the drawn key into the click handler and key the error by session and agent. Size S.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
 ## trailing-settings-containers-reload-omits-loading-keeps-error.md
 
 - Outcome: `other`.
@@ -2168,29 +2107,6 @@
   for reference: fix code — have Podman's `record` publish Suspended, and make a non-fresh release run one quiet check.
   Size S-M.
 - Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
-## trailing-trust-band-keeps-undismissable-error-after-dismissal.md
-
-- Outcome: `other`.
-- Assessment: After a failed "Don't show again" on a trust hint, suppose the user turns the hint off in Settings, or
-  another client stores the dismissal. The hint goes away, but its red "Could not save hiding this trust hint" line
-  stays above the terminal with no close button. It goes away only when the user leaves the session or the question goes
-  away. Verified: confirmed by source. `Facts::shows_failure` (`session_pane/trust_band.rs:101-103`) ignores
-  `dismissed`. `draw` draws the error even when the explanation and its buttons are hidden (:358-379). `hide_settled`
-  (:313-321) never clears an earlier error after a later success. This port of the old app's `error_visible` is
-  commented as intended and pinned by a test. Path 2 (a second click that hits "busy" before the redraw, followed by the
-  first click's success) is a sub-second window whose stray line clears on leaving the session, so it fits "Races a
-  person would have to win inside a sub-second window". Path 1 (refusal, then dismissal through Settings) is not a race
-  and remains. SPEC.md (~:1848-1850): "A failed Don't show again save restores the band with an adjacent error while
-  that session is still shown; leaving the session drops the error". It does not settle what happens once the hint is
-  dismissed by other means.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code. Gate the failure line on not being dismissed and clear it after a successful save,
-  overturning the commented port choice. Size S.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## trailing-container-host-unanswered-embeds-raw-stderr.md
 
