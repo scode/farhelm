@@ -225,6 +225,9 @@ pub struct LayerStack {
     layers: Vec<Layer>,
     cues: cue::Cues,
     next_id: u64,
+    /// The latest layer to take focus, even if it has since closed. A delayed startup dialog can tell that
+    /// another layer took the keyboard without a click or keypress while it was waiting.
+    last_focus_layer: Option<LayerId>,
     /// The pill showing in this window, if any ([`show_pill`]). Kept apart from `layers` so that nothing that walks the
     /// layers for focus, Escape or "is anything open" can count it.
     pill: Option<ShownPill>,
@@ -448,6 +451,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         layers: Vec::new(),
         cues: cue::Cues::default(),
         next_id: 0,
+        last_focus_layer: None,
         pill: None,
         launch_pill: None,
         terminal_refusal: None,
@@ -1166,6 +1170,7 @@ pub(crate) fn enter_submenu(id: LayerId, window: &Window, cx: &mut App) -> bool 
             return false;
         }
         top.takes_focus = true;
+        stack.last_focus_layer = Some(id);
         cx.notify();
         true
     })
@@ -1255,6 +1260,9 @@ fn open(
     let id = stack.update(cx, |stack, cx| {
         let id = LayerId(stack.next_id);
         stack.next_id += 1;
+        if start.is_some() {
+            stack.last_focus_layer = Some(id);
+        }
         let window = stack.window;
         let watches = subjects
             .into_iter()
@@ -1747,6 +1755,12 @@ pub fn any_open(window: &Window, cx: &App) -> bool {
 /// the list's closest control rather than sending it home.
 pub fn focus_layer_open(window: &Window, cx: &App) -> bool {
     top_container(window, cx).is_some()
+}
+
+/// Identity of the last layer to take the keyboard, preserved on close. An asynchronous caller can compare it
+/// with the value at request time to detect a prompt that opened and disappeared before the answer.
+pub(crate) fn last_focus_layer(window: &Window, cx: &App) -> Option<LayerId> {
+    stack(window, cx).and_then(|stack| stack.read(cx).last_focus_layer)
 }
 
 /// The container Tab must stay inside: the topmost layer's, dialog or menu alike (SPEC.md: "Inside a dialog or menu,

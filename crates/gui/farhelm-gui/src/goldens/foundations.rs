@@ -961,6 +961,21 @@ pub(super) fn notice_banner(_: &SceneState, _: &mut Window, _: &mut App) -> AnyE
         .into_any_element()
 }
 
+/// The desktop reports an explicit opt-out refusal after the dialog is gone. Use the main view's banner so
+/// the wording and the Dismiss control use the same layout here and in the window.
+pub(super) fn upgrade_highlights_opt_out_notice(
+    _: &SceneState,
+    _: &mut Window,
+    _: &mut App,
+) -> AnyElement {
+    div()
+        .w_full()
+        .child(crate::main_view::banner(
+            Notice::UpgradeHighlightsOptOutFailed,
+        ))
+        .into_any_element()
+}
+
 /// Repeated interruptions can show identical banners with separate Dismiss buttons. Include a blank title and a
 /// named session's waiting batch to pin both forms of the destination clause and the summary of extra files.
 pub(super) fn interrupted_upload_notices(

@@ -7994,7 +7994,9 @@ request. If newer highlights are due, it uses the updater's worker-side streamin
 website generates version 1 of this feed from finalized changelog sections. The reader requires the running release in
 the result, selects stable releases in range, and permits screenshot links to the official Release notes page. The
 window receives plain, bold and code text runs. A reset during the read or a change to either shared preference retires
-that answer. A failed check leaves the saved record available for a later launch.
+that answer. A focus-taking layer opened during the read retires an answer that would show highlights, even if the layer
+already closed. A failed check leaves the saved record available for a later launch. If the explicit opt-out save fails,
+the notice center posts the refusal after the dialog closes.
 
 The latest stable version is found with a plain GET of `https://get.farhelm.io/latest` (https only, at most 256 bytes,
 the probe's 30-second timeout): exactly one line, `v` and a stable release version, a final newline allowed. A

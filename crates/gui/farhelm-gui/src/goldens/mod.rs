@@ -654,6 +654,12 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "upgrade-highlights-opt-out-notice",
+        size: (760., 72.),
+        draw: upgrade_highlights_opt_out_notice,
+        setup: no_setup,
+    },
+    Scene {
         name: "approval-card",
         size: (684., 500.),
         draw: approval_card,

@@ -2583,6 +2583,11 @@
       "reference": null
     },
     {
+      "golden": "upgrade-highlights-opt-out-notice",
+      "title": "The notice after the helm refuses to turn off upgrade highlights",
+      "reference": null
+    },
+    {
       "golden": "approval-card",
       "title": "An agent approval card at its full width",
       "reference": "approval-card"

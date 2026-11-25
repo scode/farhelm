@@ -302,12 +302,6 @@ consequences.
 - [`feedback-external-link-cue-is-visual-only.md`](feedback-external-link-cue-is-visual-only.md) — The feedback dialog’s
   Discord link omits the browser-opening cue from its accessible description.
 
-- [`upgrade-highlights-can-open-after-sign-in.md`](upgrade-highlights-can-open-after-sign-in.md) — Upgrade highlights
-  can take focus after a startup SSH question has already opened and closed.
-
-- [`upgrade-highlights-opt-out-refusal-is-hidden.md`](upgrade-highlights-opt-out-refusal-is-hidden.md) — A refused Don’t
-  show again save can close the highlights dialog without telling the user.
-
 - [`settings-close-save-can-hide-notification-refusal.md`](settings-close-save-can-hide-notification-refusal.md) — Save
   and Close can take the user to Notifications while leaving the relevant error below the viewport.
 
