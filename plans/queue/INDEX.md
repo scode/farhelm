@@ -8,7 +8,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `welcome-empty-state.md` — Replace the startup Welcome card with a welcome in the empty main area, shown whenever there are no sessions (after `launcher-style-quick-dialogs.md`)
 - [complete] `tab-switch-shortcuts.md` — Add Cmd+Shift+[ / Cmd+Shift+] (Ctrl+Shift+[ / Ctrl+Shift+] on Linux) to switch between terminal tabs within a session
 - [in-flight 699c0b] `recipe-card-and-billed-size-fixes.md` — Hide removed failure-only container hosts on recipe cards and bind Tensorlake launch consent to the billed size shown
-- [pending] `drop-post-clone-claude-trust.md` — Move Claude workspace-trust editing from managed-checkout preparation to Claude launch while preserving archive-time removal
+- [in-flight 64820b] `drop-post-clone-claude-trust.md` — Move Claude workspace-trust editing from managed-checkout preparation to Claude launch while preserving archive-time removal
 - [pending] `launcher-consent-and-custom-agent-fixes.md` — Carry one-time YOLO consent through host wake, guard hook-setup continuation against late-arriving folders, distinguish unread custom agents from deleted ones, and show Custom approval flags on keyboard-highlighted recent setups
 - [pending] `hooks-restart-and-antigravity-fixes.md` — Place Antigravity Restart options before Custom `--`, isolate hook setup errors in Restart and recovery UI, and delay the missing-hook warning clock until agent handoff (after `drop-post-clone-claude-trust.md`)
 - [pending] `host-provisioning-action-fixes.md` — Pin a confirmed Tailscale Uninstall to the verified peer and give explicit host actions priority over automatic SSH sign-in
