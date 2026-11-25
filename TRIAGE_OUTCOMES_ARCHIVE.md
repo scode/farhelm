@@ -49216,3 +49216,28 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   visual fixture took the direct fix beyond this outcome’s size allowance. Change `nvuzzyrypstklumuzmwoxsvnuqsptpmm`,
   bookmark `plan/triage-settings-nov24/02c-hidden-credential-refusal-follow-up`,
   [#4976](https://github.com/scode/farhelm/pull/4976/changes).
+
+## hook-settings-close-hides-opt-out-failure.md
+
+- Outcome: `fix code`.
+- Assessment: Turning off "Set up conversation hooks on all hosts" saves at once. If you close Settings before that save
+  settles and the helm refuses it, nothing tells you; the setting stays on and later agent starts keep installing hooks.
+  Verified: confirmed by source. The close inventory lists forms and editors only (`editing.rs:251-286`) and closes at
+  once when it is empty (`:577-579`); the switch's failure lives in the dialog's own state (`hook_settings.rs:57-62`).
+  SPEC.md "Errors and diagnostics" (4944-4945): "Every failed operation surfaces a concrete, actionable error ... A
+  dialog must never close as though an operation succeeded when it failed", with named exceptions for some switches
+  (4963-4969) that do not include hook setup. Other switches without a named exception (trust switches) likely share the
+  gap; the fix shape (hold the close, or a surviving notice) is a design choice.
+- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
+  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
+  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
+  prompt contracts. Recommendation for reference: fix code — let close wait for or surface pending switch saves (or
+  decide a spec exception per switch); size M. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to TODO.md’s “Show a failed hook setup save after Settings closes”. The current receipt ends with
+  the dialog. Holding close needs coordination with other pending writes, and a notice needs an outliving receipt,
+  visible result, and verification beyond this outcome’s size allowance. Change `lrsvknvzkvyvzwwmxxtsmtqkotupxkvq`,
+  bookmark `plan/triage-settings-nov24/02d-hook-opt-out-refusal-follow-up`,
+  [#4979](https://github.com/scode/farhelm/pull/4979/changes).
