@@ -39,6 +39,12 @@ impl ApiKey {
     pub(crate) fn expose(&self) -> &str {
         &self.0
     }
+
+    /// Scope retained operations to the original credential without keeping a second copy of the key.
+    pub(super) fn cleanup_digest(&self) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(self.0.as_bytes()).into()
+    }
 }
 
 /// A sandbox's lifecycle state as Tensorlake reports it.

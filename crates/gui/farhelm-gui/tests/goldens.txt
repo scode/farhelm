@@ -426,6 +426,8 @@ linux/template-wrapper-help--dark.png 4ad4c470c32117083ec692ba38399f72857a20a3
 linux/template-wrapper-help--light.png 615f06f3fa19fbe0212898b6683059a76d42d90c
 linux/templates-dialog--dark.png 2b8b2b0d36b3fa64c9d5286bafb672e81dccf4bd
 linux/templates-dialog--light.png 6f8e4e685fad195985acde14a651c2557e3b5d18
+linux/tensorlake-cleanup-key-refusal--dark.png 35ac5b4005b61fc922b34a2ea709b284e0f91d6b
+linux/tensorlake-cleanup-key-refusal--light.png 18c6807d1e1fdfec8338f434b8299e13cc03fe97
 linux/terminal-covered-link--dark.png fcf05b0ca81076e7e2085ea46cf8b61ce4353cde
 linux/terminal-covered-link--light.png c98c2be37c8195c97f3cb50693e9b08fb1b50fbe
 linux/terminal-cursors--dark.png 3459e566da4c53c46bf870d97660f696ab9a150d

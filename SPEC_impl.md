@@ -7296,6 +7296,9 @@ a rejected key is never resent on unrelated notices. A successful Test reads not
 failed (decided 2026-11-15); a key saved elsewhere, or a failure fixed elsewhere, shows after Refresh or reopening
 Settings.
 
+The retained cleanup records a digest of its admitting API key. A retry with another key leaves the operation intact and
+returns a refusal before any provider mutation.
+
 The list keeps the last successful discovery, the current cleanup snapshot, and a "checked HH:MM" time in the viewer's
 local time. A saved key keeps it drawn when empty, with Refresh beside the heading, unavailable while a Delete is out.
 Each read is a round and only the newest round's answer is shown. Clear ends the round and empties both lists. Any ID in

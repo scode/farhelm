@@ -359,26 +359,6 @@
   protect against a hypothetical regression; size S if kept (one request-level test).
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## tensorlake-prepared-add-test-misses-pending-snapshot-guard.md
-
-- Outcome: `other`.
-- Assessment: When you add a Tensorlake host from a prepared snapshot, Farhelm keeps that snapshot from being retired
-  until the new sandbox is first seen running. The code does this correctly. The test only checks that the hold is
-  released by the later SSH wait. It never checks that the hold is still in place while the sandbox is starting, so
-  releasing it too early would go unnoticed. Verified: confirmed. The spec rule is `SPEC_impl.md:6971` ("One per-recipe
-  async mutex excludes source selection/create through the first observed Running state from snapshot publication and
-  deletion"). In production, `crates/farhelm-helm/src/tensorlake/hosts.rs:485-498` drops the guard only after
-  `SandboxStatus::Running`. The test at `crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:1876-1895`
-  acquires `lock_snapshot_use` only after `wait-tensorlake-ssh`. No test observes the Pending period (the other
-  `lock_snapshot_use` tests in `tensorlake/prepared_tests.rs` cover build and retirement exclusion, not Add).
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard — the production behavior matches the spec; size S if
-  kept (a Pending fixture step).
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
 ## trailing-masked-input-test-omits-a11y-value-checks.md
 
 - Outcome: `other`.
@@ -1755,28 +1735,6 @@
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
-## trailing-tensorlake-orphan-cleanup-retry-falsely-succeeds-after-key-change.md
-
-- Outcome: `fix code`.
-- Assessment: In Settings → Tensorlake, an unfinished cleanup of a leftover sandbox (for example, its snapshot deletion
-  failed) stays listed with Retry cleanup. If the user then switches to a different Tensorlake account's API key and
-  presses Retry, the new account answers "not found" for everything. Farhelm reports success and removes the row, but
-  the old account's snapshots were never deleted and may keep billing. Verified: confirmed. `Cleanups` is keyed by
-  sandbox ID only, and `delete_orphan` (`crates/farhelm-helm/src/tensorlake/orphans.rs:178-255`) reuses the retained row
-  under whatever key is current, so no lookup runs. `sweep_orphan` (`:259-283`) treats `NotFound` from terminate and
-  snapshot deletion as done, and lists only the new account's snapshots. The list returns retained cleanups whatever the
-  key. SPEC.md (`SPEC.md:609-611`) says this state "lasts until cleanup succeeds or the helm restarts" and says nothing
-  about which account it belongs to. The excluded consequence "success reported for an operation that failed" means no
-  filter can apply.
-- Decision: q-staleconf, "Confirmations and kept state whose subject is gone": the maintainer picked "Close or
-  invalidate them". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: A confirmation or kept state whose subject is gone (host removed, listing emptied, account key
-  changed) closes or is invalidated. Recommendation for reference: fix code — tie retained cleanups to the key that
-  admitted them, and refuse a retry under another key with an explanation; size M. Size gate: about 100 lines of diff
-  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-tensorlake-sandboxes-inline-delete-prompt-survives-key-change.md
 

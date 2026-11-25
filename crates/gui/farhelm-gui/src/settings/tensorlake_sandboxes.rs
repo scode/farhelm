@@ -584,6 +584,32 @@ impl Render for Sandboxes {
     }
 }
 
+/// Paint the retained row and the alert that follows a refused Retry cleanup in Settings.
+#[cfg(test)]
+pub(crate) fn cleanup_key_refusal_for_golden(cx: &mut App) -> gpui::AnyView {
+    use gpui::AppContext as _;
+
+    let account = cx.new(TensorlakeAccount::new);
+    cx.new(|cx| {
+        let mut list = Sandboxes::new(account, cx);
+        list.key = Some((true, 0));
+        list.cleanups.push(OrphanSandbox {
+            id: "sb-3".into(),
+            name: "farhelm-build-fixture-rust-dev".into(),
+            created_at: None,
+            state: "Cleanup unfinished".into(),
+            from_another_helm: false,
+            cleanup: Some(OrphanCleanup::Failed {
+                reason: "snapshot cleanup blocked".into(),
+            }),
+        });
+        list.delete_failure = Some(HostText::from_host(
+            "This cleanup belongs to a different Tensorlake API key. Restore the key that started it to retry.",
+        ));
+        list
+    }).into()
+}
+
 /// The fleet's Tensorlake hosts ([`Sandboxed`]), or `None` while the hosts collection is missing or not available,
 /// when what it lists proves nothing about what this helm owns.
 fn sandboxed(collections: &Collections) -> Option<Sandboxed> {

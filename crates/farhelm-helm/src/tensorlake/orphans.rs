@@ -39,7 +39,26 @@ const ADMISSION_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_
 /// This is operation state for one helm lifetime, not an ownership ledger
 /// or a queue that reclaims resources without another user request.
 #[derive(Default)]
-pub(super) struct Cleanups(Mutex<HashMap<String, OrphanSandbox>>);
+pub(super) struct Cleanups(Mutex<HashMap<String, AdmittedCleanup>>);
+
+/// Only the key that admitted cleanup can resume it. A missing sandbox under another key says nothing about
+/// whether the original account's snapshots are gone.
+#[derive(Clone)]
+struct AdmittedCleanup {
+    key_digest: [u8; 32],
+    row: OrphanSandbox,
+}
+
+impl AdmittedCleanup {
+    /// Check before using retained admission or replacing it after a lookup.
+    fn require_key(&self, digest: [u8; 32]) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.key_digest == digest,
+            "This cleanup belongs to a different Tensorlake API key. Restore the key that started it to retry."
+        );
+        Ok(())
+    }
+}
 
 impl Cleanups {
     /// Read without lending the operation mutex across any vendor call.
@@ -48,7 +67,7 @@ impl Cleanups {
             .lock()
             .expect("orphan cleanups poisoned")
             .values()
-            .cloned()
+            .map(|cleanup| cleanup.row.clone())
             .collect()
     }
 }
@@ -177,6 +196,7 @@ impl Tensorlake {
     /// not answer it ends the request with its own failure first.
     async fn delete_orphan(&self, id: &str) -> anyhow::Result<()> {
         let key = self.api_key().await.map_err(anyhow::Error::msg)?;
+        let key_digest = key.cleanup_digest();
         let previous = self
             .0
             .orphan_cleanups
@@ -186,7 +206,10 @@ impl Tensorlake {
             .get(id)
             .cloned();
         let mut row = match previous {
-            Some(row) => row,
+            Some(cleanup) => {
+                cleanup.require_key(key_digest)?;
+                cleanup.row
+            }
             None => {
                 let sandbox = super::api::bounded_by(
                     ADMISSION_LOOKUP_TIMEOUT,
@@ -222,15 +245,23 @@ impl Tensorlake {
                 .0
                 .lock()
                 .expect("orphan cleanups poisoned");
-            if operations
-                .get(&row.id)
-                .is_some_and(|row| row.cleanup == Some(OrphanCleanup::Running))
-            {
-                anyhow::bail!("Cleanup of this sandbox is already running");
+            // Another request could have recorded the canonical ID during the lookup.
+            if let Some(cleanup) = operations.get(&row.id) {
+                cleanup.require_key(key_digest)?;
+                anyhow::ensure!(
+                    cleanup.row.cleanup != Some(OrphanCleanup::Running),
+                    "Cleanup of this sandbox is already running"
+                );
             }
             row.cleanup = Some(OrphanCleanup::Running);
             row.state = "Cleanup in progress".into();
-            operations.insert(row.id.clone(), row.clone());
+            operations.insert(
+                row.id.clone(),
+                AdmittedCleanup {
+                    key_digest,
+                    row: row.clone(),
+                },
+            );
         }
         let result = self.sweep_orphan(&key, &row).await;
         let mut operations = self
@@ -248,7 +279,7 @@ impl Tensorlake {
                     reason: error.to_string(),
                 });
                 row.state = "Cleanup unfinished".into();
-                operations.insert(row.id.clone(), row);
+                operations.insert(row.id.clone(), AdmittedCleanup { key_digest, row });
             }
         }
         result
@@ -584,9 +615,10 @@ mod tests {
     /// A failed snapshot sweep must survive loss of the client and even
     /// the vendor's terminated sandbox record. The canonical ID retained by
     /// the helm is enough to finish exact-source cleanup on explicit retry.
+    /// A different API key cannot use that retained admission or finish the original key's retry.
     #[farhelm_testtrace::test]
     async fn unfinished_cleanup_is_listed_and_retried_after_the_sandbox_is_gone() {
-        let (dir, _store, service, fake) = fixture().await;
+        let (dir, store, service, fake) = fixture().await;
         let key = ApiKey::new("test-key".into());
         let id = create(&fake, "farhelm-host-untagged").await;
         fake.create_snapshot(&key, &id, SnapshotType::Filesystem)
@@ -622,6 +654,29 @@ mod tests {
         assert!(
             matches!(&listed.cleanups[0].cleanup, Some(OrphanCleanup::Failed { reason }) if reason.contains("sweep refused"))
         );
+        let events = dir.path().join("fake/events.jsonl");
+        let before = std::fs::read(&events).unwrap();
+        let save_key = |key: &str| {
+            store.save_tensorlake_config(SaveSettings {
+                api_key: Some(key.into()),
+                ..Default::default()
+            })
+        };
+        assert!(
+            save_key("second-test-key").await.is_ok(),
+            "switch fixture key"
+        );
+        let refusal = service.delete_orphan(&id).await.unwrap_err().to_string();
+        assert!(
+            refusal.contains("Restore the key that started it"),
+            "{refusal}"
+        );
+        assert_eq!(
+            std::fs::read(&events).unwrap(),
+            before,
+            "mismatch makes no provider calls"
+        );
+        assert!(save_key("test-key").await.is_ok(), "restore fixture key");
         std::fs::write(
             &config,
             r#"{"fail":{"list_sandboxes":{"status":503,"message":"discovery unavailable"}}}"#,

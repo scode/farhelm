@@ -195,10 +195,6 @@ consequences.
   — The launch-history regression test can pass if an agent-requested environment starts becoming the desktop’s default
   host again.
 
-- [`tensorlake-prepared-add-test-misses-pending-snapshot-guard.md`](tensorlake-prepared-add-test-misses-pending-snapshot-guard.md)
-  — The prepared Tensorlake Add test can pass if Farhelm releases the chosen snapshot for retirement while the new
-  sandbox is still starting.
-
 - [`shortcuts-chord-during-composition.md`](shortcuts-chord-during-composition.md) — The Keyboard shortcuts chord can
   interrupt an input method if native handling clears its mark first or the action cannot query the focused field.
 
@@ -417,12 +413,6 @@ consequences.
   list of sandboxes not on this helm keeps showing leftover sandboxes from the old key while the new check runs — and
   keeps showing them indefinitely with active Delete buttons if the new key fails to list sandboxes (for example, if the
   new key is invalid or Tensorlake is unreachable).
-
-- [`trailing-tensorlake-orphan-cleanup-retry-falsely-succeeds-after-key-change.md`](trailing-tensorlake-orphan-cleanup-retry-falsely-succeeds-after-key-change.md)
-  — If a leftover sandbox cleanup failed (for example, snapshot deletion failed) and you then switch Settings to a
-  different Tensorlake account's API key, the old account's unfinished cleanup stays in Settings; clicking Retry cleanup
-  appears to succeed and removes the row, even though the old account's snapshots were never deleted and may keep
-  billing.
 
 - [`trailing-tensorlake-sandboxes-inline-delete-prompt-survives-key-change.md`](trailing-tensorlake-sandboxes-inline-delete-prompt-survives-key-change.md)
   — If you open the inline Delete confirmation for a leftover sandbox in Settings → Tensorlake and then clear or replace

@@ -635,6 +635,8 @@ still updates the cleanup rows. A sandbox being cleaned up appears once, with it
 when cleanup finishes even if discovery is still unavailable. Farhelm never cleans it automatically. The repository's
 test-sandbox namespace `farhelm-sbx-` and sandboxes without Farhelm's reserved prefixes never appear.
 
+If the Tensorlake API key changes, retrying an unfinished cleanup requires restoring the key that started it.
+
 For Tensorlake, every recipe supplies a built snapshot and, on first use, a prepared snapshot for new hosts or sessions.
 The UI calls these artifacts snapshots, never templates, a word reserved for launch templates. Saving a recipe never
 builds one, because a build bills: the list offers **Build snapshot** while a recipe has none, **Rebuild snapshot** once
