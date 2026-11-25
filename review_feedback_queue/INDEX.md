@@ -239,12 +239,6 @@ consequences.
 - [`agent-settings-search-test-omits-focus-target.md`](agent-settings-search-test-omits-focus-target.md) — The Settings
   search test can pass with a trust result that names the right agent and focuses the wrong control.
 
-- [`hook-recovery-text-omits-direction-isolation.md`](hook-recovery-text-omits-direction-isolation.md) — Restart and
-  recovery text escape host-supplied hook errors without isolating their text direction.
-
-- [`uninstall-omits-persistent-hook-cleanup.md`](uninstall-omits-persistent-hook-cleanup.md) — Uninstall can leave Grok
-  and Antigravity callbacks pointing to the removed Farhelm executable, and the uninstall guidance omits cleanup.
-
 - [`launcher-keyboard-recents-hide-custom-flags.md`](launcher-keyboard-recents-hide-custom-flags.md) — Keyboard users
   can no longer reveal the custom permission flags that distinguish otherwise identical recent setups.
 

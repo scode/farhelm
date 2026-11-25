@@ -108,6 +108,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Isolate hook setup errors in Restart and recovery.** A failed persistent hook setup carries the host's error in
+  `PersistentHookSetup::Failed`. `restart_blocker` escapes and joins it into app prose before the desktop can isolate
+  its direction. Keep the raw error separate until drawing. Pass it through `HostText` and `HostSentence` for the
+  session header's Restart button tooltip and its Restart and Restart with menu entries, and for the interrupted
+  session's recovery card and Restart tooltip. Follow `SPEC_impl.md`'s Host-supplied text rule and keep the CLI's
+  terminal wording. Test a right-to-left reason and hidden characters against the surrounding app text in the drawn UI
+  and its accessible descriptions. The current helpers pass plain strings through the launcher and recovery card, so
+  this needs typed composition and tests across the surfaces. The triage plan deferred it under its size gate.
+
 - **Start the missing-hook warning clock after the agent starts.** In a fresh managed checkout's terminal, pressing
   Enter during the clone or post-clone command can start the missing conversation-hook timer. SPEC.md's Status section
   ties the warning to a submitted line the agent received. Keep sending input during preparation. In

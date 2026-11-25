@@ -5,6 +5,10 @@ sidebar:
   order: 5
 ---
 
+If Farhelm set up conversation hooks on a host, remove them before uninstalling there. Uninstall leaves those hooks in
+the agent's configuration, where they can still call the removed `farhelm` command. See the removal steps for
+[Grok](/docs/agents/grok/#setup) or [Antigravity](/docs/agents/antigravity/#set-up-restart).
+
 ## From your Mac
 
 If you use Tensorlake, decide what to keep before quitting Farhelm or uninstalling. To remove its cloud resources,

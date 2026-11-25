@@ -66,32 +66,6 @@
   feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## hook-recovery-text-omits-direction-isolation.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC_impl.md "Host-supplied text" (~~:1172-1197) says: "Host-supplied text is its own
-  type from the moment it is decoded. The only element that can draw it escapes hidden characters and isolates text
-  direction". It also says "Host text is never concatenated with the app's words in any other way", and "Hover help may
-  name a host value … only as a host sentence". SPEC.md "Confirmed 2026-10-10" (~~:5614) requires escaping wherever host
-  text appears. Current code: the host's install error reaches the GUI as a plain `String`
-  (`crates/farhelm-proto/src/lib.rs:939-946`). `restart_blocker` formats it into app prose after only `text::escaped`,
-  with no isolate (`lib.rs:973-976`). The GUI builds Restart's tooltip, header menu description, recovery card and
-  launcher entry from that `String`: `session_list/restart.rs:134-140` via `not_captured_clause`,
-  `session_pane/header.rs:242,374`, `session_pane/card.rs:293,305,463` and `launcher/entry.rs:411`. The launcher's save
-  refusal already does it right with `HostSentence::host` (`launcher/view/hook_question.rs:242-244`). The fix follows
-  directly: carry the reason as host text and draw it as a host sentence on these surfaces. The CLI wording, which is
-  terminal output, is out of scope. This is not a filter match, because direction isolation is part of the
-  untrusted-host-text boundary. Verified: confirmed by source. How a particular right-to-left error actually renders has
-  not been checked.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code.
-  Plumbing the reason through about five GUI surfaces plus tests is likely over ~100 lines, so execution will probably
-  hit the size gate. Size M.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
-  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
-  the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
 ## trailing-podman-settle-claim-refuses-third-host-duplicate-transfer.md
 
 - Outcome: `fix code`.
@@ -2100,27 +2074,6 @@
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## uninstall-omits-persistent-hook-cleanup.md
-
-- Outcome: `fix code`.
-- Assessment: Once Farhelm has set up Grok or Antigravity hooks, they stay in the agents' own configuration on every
-  machine where they were written, and they call the installed `farhelm` command. Uninstalling Farhelm removes that
-  command, but the uninstall guide never mentions the leftover hook files or how to remove them. Grok and Antigravity
-  then keep calling a missing program in every session, inside Farhelm or not. Verified: confirmed for the docs.
-  `website/src/content/docs/docs/get-started/uninstall.md` lists only state, the app and the command, and says "Your
-  projects, your agents … are not touched". The agent pages do give removal steps
-  (`website/src/content/docs/docs/agents/grok.md:24`, `antigravity.md:38-40`). Leaving vendor configuration alone is by
-  spec: SPEC.md "Uninstall scope and interaction" (~:966-968) says "agent harness installations and their own data … are
-  untouched". What the vendors do when the callback's program is missing (an error, a hang, nothing) is unverified.
-- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
-  Recommendation for reference: fix code (docs only). Add a paragraph with links to the uninstall page. Size S. Size
-  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
-  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
-  index entry.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## launcher-new-environment-folder-omits-repository-prompt.md
 
