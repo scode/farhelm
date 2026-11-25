@@ -27,6 +27,7 @@ use super::plan::{
     PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan, ProvisioningTarget,
     ResolvedPath, UninstallFacts,
 };
+use super::setup_sign_in::SignInIntent;
 use crate::manager::{
     ConnectionManager, ConnectionStage, HostState, ProvisionLockGuard, peer_text,
 };
@@ -89,6 +90,8 @@ pub(super) struct ProvisioningMemory {
     plan_order: VecDeque<String>,
     pub(super) runs: HashMap<HostId, ProvisioningView>,
     pub(super) busy: std::collections::HashSet<HostId>,
+    /// Give a host action time to replay planning and confirm after a shared sign-in.
+    manual_ssh_handoffs: HashMap<HostId, tokio::time::Instant>,
     tasks: HashMap<HostId, tokio::task::JoinHandle<()>>,
     /// Bind failure suppression to the automatic run, so a simultaneous manual
     /// run cannot accidentally claim or clear the automatic retry boundary.
@@ -109,6 +112,27 @@ pub(super) struct ProvisioningMemory {
 }
 
 impl ProvisioningMemory {
+    /// A running manual action already holds the admission fence through its busy claim.
+    pub(super) fn begin_manual_ssh_handoff(
+        &mut self,
+        host: HostId,
+        now: tokio::time::Instant,
+    ) -> Option<tokio::time::Instant> {
+        if self.busy.contains(&host) {
+            return None;
+        }
+        let deadline = now + Duration::from_secs(30);
+        self.manual_ssh_handoffs.insert(host, deadline);
+        Some(deadline)
+    }
+
+    /// Both planning and final admission consult the same deadline, even if the expiry wake is delayed.
+    pub(super) fn manual_ssh_handoff_active(&self, host: HostId) -> bool {
+        self.manual_ssh_handoffs
+            .get(&host)
+            .is_some_and(|deadline| tokio::time::Instant::now() < *deadline)
+    }
+
     /// New approvals of every kind share the existing pending-plan bound.
     /// Removing the oldest id must also drop its payload.
     fn remember_approval(&mut self, probe_id: &str) {
@@ -714,6 +738,35 @@ impl ProvisioningService {
         }
     }
 
+    /// Route edits take the host's route write guard after retiring its automatic-only preflight.
+    pub(crate) fn cancel_automatic_sign_in_on_host(&self, host: HostId) {
+        if let Some(setup) = &self.setup_sign_in {
+            setup.cancel_automatic_host(host);
+        }
+    }
+
+    /// Wake the ordinary fleet scan when priority expires. A manual admission or a later deadline can
+    /// retire this timer before it acts. The timer does not keep the helm alive.
+    pub(super) fn wake_after_manual_ssh_handoff(
+        self: &Arc<Self>,
+        host: HostId,
+        deadline: tokio::time::Instant,
+    ) {
+        let service = Arc::downgrade(self);
+        tokio::spawn(async move {
+            tokio::time::sleep_until(deadline).await;
+            let Some(service) = service.upgrade() else {
+                return;
+            };
+            let mut memory = service.memory.lock().await;
+            if memory.manual_ssh_handoffs.get(&host) == Some(&deadline) {
+                memory.manual_ssh_handoffs.remove(&host);
+                drop(memory);
+                service.manager.events().bump();
+            }
+        });
+    }
+
     /// Production composition uses real process/file operations and
     /// resolves `selection`/`release_build` (D13, D18) into a real payload
     /// source via [`production_payloads`] — see that function for what each
@@ -1029,7 +1082,9 @@ impl ProvisioningService {
             self.store.check_new_entry(destination, entry).await?;
         }
         if let Some(setup) = &self.setup_sign_in {
-            setup.prepare(&target.transport, stored.as_ref()).await?;
+            setup
+                .prepare(&target.transport, stored.as_ref(), SignInIntent::Discovery)
+                .await?;
         }
         // Discovery comes FIRST, on every transport including the local
         // one: a running supervisor answers the protocol hello and is
@@ -1658,7 +1713,7 @@ impl ProvisioningService {
         self: &Arc<Self>,
         host: HostId,
     ) -> anyhow::Result<HostPlanResponse> {
-        self.plan_update_guarded(host, false).await
+        self.plan_update_guarded(host, None).await
     }
 
     /// The desktop can receive a pending reply and resume planning after setup authentication.
@@ -1666,13 +1721,14 @@ impl ProvisioningService {
         self: &Arc<Self>,
         host: HostId,
     ) -> anyhow::Result<HostPlanResponse> {
-        self.plan_update_guarded(host, true).await
+        self.plan_update_guarded(host, Some(SignInIntent::ManualHostAction))
+            .await
     }
 
     async fn plan_update_guarded(
         self: &Arc<Self>,
         host: HostId,
-        interactive: bool,
+        interactive: Option<SignInIntent>,
     ) -> anyhow::Result<HostPlanResponse> {
         let row = self.host_row(host).await?;
         if !row.kind.panel_updates() {
@@ -1700,7 +1756,7 @@ impl ProvisioningService {
         self: &Arc<Self>,
         host: HostId,
     ) -> anyhow::Result<HostPlanResponse> {
-        self.plan_update_unguarded(host, false).await
+        self.plan_update_unguarded(host, None).await
     }
 
     /// Own UPDATE's bounded probe through its process-group cleanup.
@@ -1709,7 +1765,7 @@ impl ProvisioningService {
     async fn plan_update_unguarded(
         self: &Arc<Self>,
         host: HostId,
-        interactive: bool,
+        interactive: Option<SignInIntent>,
     ) -> anyhow::Result<HostPlanResponse> {
         let service = Arc::clone(self);
         crate::run_owned(async move { service.plan_update_owned(host, interactive).await }).await
@@ -1721,7 +1777,7 @@ impl ProvisioningService {
     async fn plan_update_owned(
         &self,
         host: HostId,
-        interactive: bool,
+        interactive: Option<SignInIntent>,
     ) -> anyhow::Result<HostPlanResponse> {
         let _slot = self
             .plan_slots
@@ -1750,9 +1806,9 @@ impl ProvisioningService {
         self.require_update_trusted(host)
             .map_err(anyhow::Error::new)?;
         let original_target = self.probe_target_for_row(&row).await?;
-        if interactive && let Some(setup) = &self.setup_sign_in {
+        if let (Some(intent), Some(setup)) = (interactive, &self.setup_sign_in) {
             setup
-                .prepare(&original_target.transport, Some(&row))
+                .prepare(&original_target.transport, Some(&row), intent)
                 .await?;
         }
         let observation = self
@@ -1974,9 +2030,9 @@ impl ProvisioningService {
 
     /// Admit an automatic plan in the same order as durable policy commits.
     /// A manual-only payload source declines before admission, leaving the
-    /// plan available for explicit confirmation. Otherwise, None means
-    /// opt-out or a changed connection consumed the plan without a run or
-    /// failed attempt. Admission waits belong to the cancellable listener.
+    /// plan available for explicit confirmation. Otherwise, None means the policy, connection or
+    /// manual sign-in priority consumed the plan without a run or failed attempt.
+    /// Admission waits belong to the cancellable listener.
     /// The gate ends at the busy/progress claim; only then does ordinary owned
     /// launch begin, with no suspension between claim and spawning that owner.
     pub(super) async fn start_automatic_update(
@@ -2015,11 +2071,13 @@ impl ProvisioningService {
             let mut memory = self.memory.lock().await;
             // A skewed host can move to SignInNeeded with the same token. Recheck the update
             // rule alongside entry and incarnation, with no await before the busy claim.
-            if !self.manager.status(host).is_some_and(|current| {
-                current.entry_uuid == entry_uuid
-                    && current.incarnation == incarnation
-                    && automatic::connection_needs_update(&current.state, &helm_build)
-            }) {
+            if memory.manual_ssh_handoff_active(host)
+                || !self.manager.status(host).is_some_and(|current| {
+                    current.entry_uuid == entry_uuid
+                        && current.incarnation == incarnation
+                        && automatic::connection_needs_update(&current.state, &helm_build)
+                })
+            {
                 return Ok(None);
             }
             Self::claim_run(&mut memory, host, &pending, false, true)?
@@ -2152,7 +2210,9 @@ impl ProvisioningService {
             if confirmed {
                 setup.establish_for_run(target, row.id).await?;
             } else {
-                setup.prepare(target, Some(row)).await?;
+                setup
+                    .prepare(target, Some(row), SignInIntent::ManualHostAction)
+                    .await?;
             }
         }
         Ok(())
@@ -2578,6 +2638,14 @@ impl ProvisioningService {
         if !claimed && !memory.busy.insert(host) {
             return Err(anyhow::Error::new(ProvisioningRequestError::Busy(host)));
         }
+        if !automatic
+            && matches!(
+                pending.confirmation,
+                PendingConfirmation::Update { .. } | PendingConfirmation::Uninstall { .. }
+            )
+        {
+            memory.manual_ssh_handoffs.remove(&host);
+        }
         let run_id = uuid::Uuid::new_v4().to_string();
         memory.runs.insert(
             host,
@@ -2806,6 +2874,7 @@ impl ProvisioningService {
         let task = memory.tasks.remove(&host);
         memory.runs.remove(&host);
         memory.automatic_runs.remove(&host);
+        memory.manual_ssh_handoffs.remove(&host);
         memory.busy.remove(&host);
         let removed: std::collections::HashSet<String> = memory
             .plans
@@ -3905,10 +3974,7 @@ impl ProvisioningService {
         let guard = self.manager.ssh_route_lock(row.id).read_owned().await;
         let current = self.host_row(row.id).await?;
         if row.entry_uuid != current.entry_uuid || DialedAs::of(row) != DialedAs::of(&current) {
-            return Err(ProvisioningRequestError::Refused(
-                "The SSH connection settings changed. Start the check again.".into(),
-            )
-            .into());
+            return Err(ProvisioningRequestError::SshRouteChanged.into());
         }
         Ok(Some(guard))
     }

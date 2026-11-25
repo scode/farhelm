@@ -27,7 +27,12 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 farhelm-proto.workspace = true
 farhelm-supervisor.workspace = true
 flate2.workspace = true
-futures-util.workspace = true
+# `async-await` provides `futures_util::poll!`. The Tailscale mode edit polls its route write lock once to queue
+# the writer before retiring an automatic sign-in check, and the SSH sign-in tests use it to observe an attachment
+# while a question is open. It has to be a normal dependency feature: Cargo builds the library for anything that is not
+# a test (the shipped binary, the musl payload for the Podman tests, clippy's library check) without the features that
+# only a dev-dependency enables.
+futures-util = { workspace = true, features = ["async-await"] }
 getrandom.workspace = true
 json5.workspace = true
 libc.workspace = true
@@ -57,9 +62,6 @@ uuid.workspace = true
 # runtime, including worker and blocking threads, without a subscriber shared
 # by concurrently running tests.
 farhelm-testtrace.workspace = true
-# The SSH sign-in tests use poll! to observe an attachment while a question is open.
-# A focused helm run must enable the macro without relying on other workspace members.
-futures-util = { workspace = true, features = ["async-await"] }
 # The child spec's terminal size, for the uninstall test that starts a real
 # terminal host through the supervisor's spawn and stops it with the stop step.
 terminal-host.workspace = true

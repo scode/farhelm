@@ -29,6 +29,9 @@ pub(super) enum ProvisioningRequestError {
     UnknownPlan,
     #[error("host {0} already has a provisioning operation in flight")]
     Busy(HostId),
+    /// A proposal waited behind a route edit. It never reached the replacement connection.
+    #[error("The SSH connection settings changed. Start the check again.")]
+    SshRouteChanged,
 }
 
 /// What the client wants discovery to inspect.
@@ -365,7 +368,8 @@ pub(crate) fn provisioning_error(error: anyhow::Error) -> Response {
             ProvisioningRequestError::Refused(_)
             | ProvisioningRequestError::RemoveInstead(_)
             | ProvisioningRequestError::UnknownPlan
-            | ProvisioningRequestError::Busy(_) => StatusCode::CONFLICT,
+            | ProvisioningRequestError::Busy(_)
+            | ProvisioningRequestError::SshRouteChanged => StatusCode::CONFLICT,
         };
         let mut response = (status, format!("{error:#}")).into_response();
         if matches!(request, ProvisioningRequestError::RemoveInstead(_)) {

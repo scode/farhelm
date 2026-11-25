@@ -1018,17 +1018,26 @@ pub(crate) async fn set_tailscale(
             return Err(HostStoreError::SshModeManaged.into());
         }
         if old.tailscale != spec.tailscale {
-            let _routing = state
-                .manager
-                .ssh_route_lock(host)
-                .try_write_owned()
-                .map_err(|_| crate::environment::lifecycle::HostBusy)?;
             if spec.tailscale
                 && let Some(destination) = &old.destination
             {
                 crate::ssh::tailscale::destination_host(destination)?;
             }
             state.store.check_ssh_tailscale_edit(host).await?;
+            let routing = state.manager.ssh_route_lock(host).write_owned();
+            tokio::pin!(routing);
+            // Queue the writer before retiring the old check. A fleet wake can otherwise
+            // start a fresh probe in the gap and give it the read lock ahead of the edit.
+            let queued = futures_util::poll!(&mut routing);
+            state.provisioning.cancel_automatic_sign_in_on_host(host);
+            let _routing = match queued {
+                std::task::Poll::Ready(guard) => guard,
+                std::task::Poll::Pending => {
+                    tokio::time::timeout(crate::sessions::HOST_REPLY_BOUND, routing)
+                        .await
+                        .map_err(|_| crate::environment::lifecycle::HostBusy)?
+                }
+            };
             let destination = state.provisioning.lock_tailscale_destination(&old).await?;
             state
                 .manager
@@ -2497,6 +2506,9 @@ mod tests {
 
         let route = format!("/api/hosts/{host}/tailscale");
         let held = harness.manager.ssh_route_lock(host).read_owned().await;
+        // The held reader has no sign-in to retire. Let the route wait expire on the virtual clock.
+        tokio::time::pause();
+        let before_wait = tokio::time::Instant::now();
         let (status, _, text) = call(
             &harness,
             "POST",
@@ -2504,6 +2516,8 @@ mod tests {
             Some(serde_json::json!({ "tailscale": false })),
         )
         .await;
+        assert!(before_wait.elapsed() >= crate::sessions::HOST_REPLY_BOUND);
+        tokio::time::resume();
         assert_eq!(status, StatusCode::CONFLICT, "{text}");
         assert!(registry_row(&harness.state, host).await.unwrap().tailscale);
         assert_eq!(harness.manager.status(host).unwrap().incarnation, previous);

@@ -1,7 +1,7 @@
 //! Drive automatic Update through the production listener, setup SSH relay and reply routes.
 //! Only the transport peers and remote provisioning actions are scripted.
 
-use super::super::setup_sign_in::Pending;
+use super::super::setup_sign_in::{Pending, SetupSettlement, SignInIntent};
 use super::*;
 use crate::askpass::Questions;
 use crate::transport::{HostTransport, TransportConnection};
@@ -314,6 +314,47 @@ master.touch()
         serde_json::from_slice(&body).unwrap()
     }
 
+    /// Exercise the same POST used by manual planning, confirmation and mode edits.
+    async fn host_post(
+        &self,
+        action: &str,
+        payload: Option<serde_json::Value>,
+    ) -> (StatusCode, String) {
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/hosts/{}/{action}", self.host))
+            .header("host", "127.0.0.1:7433");
+        let request = if let Some(payload) = payload {
+            request
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+        } else {
+            request.body(Body::empty())
+        };
+        send(&self.harness.router(), request.unwrap()).await
+    }
+
+    /// The pending reply and warning row must name the already-open question, whose SSH child stays alive.
+    async fn join_question(&self, action: &str, question: &SshQuestion) {
+        let (status, body) = self.host_post(action, None).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        let pending: PendingSshSignIn = serde_json::from_str(&body).unwrap();
+        assert_eq!(pending.attempt, question.attempt);
+        assert_eq!(self.question().await.id, question.id);
+        assert_eq!(self.launches(), 1);
+    }
+
+    /// Wait for a scan that began after this call's first wake. One scan could already be
+    /// in flight and report its completion without having seen that wake.
+    async fn scan_after_wake(&self) {
+        let mut scans = self.harness.state._automatic_updates.completed_scans();
+        let expected = *scans.borrow_and_update() + 1;
+        self.harness.manager.events().bump();
+        wait_for_automatic_scan(&mut scans, expected).await;
+        self.harness.manager.events().bump();
+        wait_for_automatic_scan(&mut scans, expected + 1).await;
+    }
+
     /// A successful fake installation must start reporting the new build on its own reconnect.
     fn update_build_on_restart(&self, host: HostId) {
         let fleet = Arc::clone(&self.harness.fleet);
@@ -490,6 +531,7 @@ async fn cancelling_an_automatic_setup_question_waits_for_a_new_incarnation() {
     let mut scans = fixture.harness.state._automatic_updates.completed_scans();
     fixture.enabled(true).await;
     let question = fixture.question().await;
+    fixture.join_question("update", &question).await;
     let before = fixture
         .harness
         .manager
@@ -553,6 +595,219 @@ async fn cancelling_an_automatic_setup_question_waits_for_a_new_incarnation() {
         fixture.completion(&resumed.attempt).await,
         SshSignInOutcome::Failed { .. }
     ));
+}
+
+/// An answer can arrive after Update finds the live question and before its 202 reaches the client.
+/// The planned handoff protects the replay and its confirmation. Once that run settles, automatic Update can try again.
+#[farhelm_testtrace::test]
+async fn manual_update_uses_a_shared_answer_before_automatic_update() {
+    let fixture = Fixture::new(false, false).await;
+    fixture.enabled(true).await;
+    let question = fixture.question().await;
+    let prepared = fixture.prepare().await;
+    assert_eq!(prepared.attempt.id, question.attempt);
+    fixture
+        .reply(
+            &question,
+            serde_json::json!({"action":"send","answer":"fixture-code"}),
+        )
+        .await;
+    assert_eq!(
+        fixture.completion(&question.attempt).await,
+        SshSignInOutcome::Ready
+    );
+    fixture.scan_after_wake().await;
+    assert_eq!(fixture.backend.probes.load(Ordering::Relaxed), 0);
+    assert_eq!(fixture.activate(prepared).await.attempt, question.attempt);
+
+    let (status, body) = fixture.host_post("update", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let probe_id = body["probe_id"].as_str().expect("manual Update plan id");
+    fixture.scan_after_wake().await;
+    assert!(
+        fixture
+            .service
+            .view(fixture.host)
+            .await
+            .unwrap()
+            .run_id
+            .is_none()
+    );
+    assert_eq!(fixture.backend.probes.load(Ordering::Relaxed), 1);
+
+    fixture.backend.block_first.store(true, Ordering::Relaxed);
+    *fixture.backend.fail.lock().unwrap() = Some("upload-farhelm".into());
+    let (status, body) = fixture
+        .host_post("update", Some(serde_json::json!({ "probe_id": probe_id })))
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    tokio::time::timeout(Duration::from_secs(5), fixture.backend.entered.notified())
+        .await
+        .expect("the manual run reached its first action");
+    let manual = fixture.service.view(fixture.host).await.unwrap();
+    assert_eq!(manual.status, RunStatus::Running);
+    let before = fixture.backend.probes.load(Ordering::Relaxed);
+    fixture.scan_after_wake().await;
+    assert_eq!(fixture.backend.probes.load(Ordering::Relaxed), before);
+
+    let gate = Arc::new(TestBoundaryGate {
+        reached: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    *fixture.service.automatic_admission_gate.lock().unwrap() = Some((Arc::clone(&gate), None));
+    fixture.backend.release.notify_one();
+    tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
+        .await
+        .expect("automatic admission is eligible again as soon as the manual run settles");
+    assert_eq!(
+        fixture.service.view(fixture.host).await.unwrap().status,
+        RunStatus::Failed
+    );
+    assert_eq!(fixture.launches(), 1);
+    gate.release.notify_one();
+}
+
+/// A shared answer can instead prepare an Uninstall confirmation. With no confirmation,
+/// the handoff timer must wake the regular automatic scan even when nothing else changes.
+#[farhelm_testtrace::test]
+async fn a_shared_uninstall_answer_defers_automatic_update_until_expiry() {
+    let fixture = Fixture::new(false, false).await;
+    fixture
+        .backend
+        .repeat_probe
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .dial_farhelm = fixture.root.path().join("lib/farhelm");
+    *fixture.backend.fail.lock().unwrap() = Some("create-directories".into());
+    fixture.enabled(true).await;
+    let question = fixture.question().await;
+    fixture.join_question("uninstall", &question).await;
+    fixture
+        .reply(
+            &question,
+            serde_json::json!({"action":"send","answer":"fixture-code"}),
+        )
+        .await;
+    assert_eq!(
+        fixture.completion(&question.attempt).await,
+        SshSignInOutcome::Ready
+    );
+    let (status, body) = fixture.host_post("uninstall", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    fixture.scan_after_wake().await;
+    assert!(
+        fixture
+            .service
+            .view(fixture.host)
+            .await
+            .unwrap()
+            .run_id
+            .is_none()
+    );
+    assert_eq!(fixture.launches(), 1);
+
+    tokio::time::pause();
+    // sleep-ok: cross the handoff deadline with no explicit confirmation or new fleet event.
+    tokio::time::advance(Duration::from_secs(30)).await;
+    tokio::time::resume();
+    assert_eq!(
+        wait_finished(&fixture.service, fixture.host).await.status,
+        RunStatus::Failed
+    );
+    assert_eq!(fixture.launches(), 1);
+}
+
+/// The editor retires an automatic-only question and awaits its reader. A question already
+/// shared with Update remains available to answer while the same edit waits its turn.
+#[farhelm_testtrace::test]
+async fn tailscale_route_edit_retires_automatic_only_checks_and_preserves_manual_questions() {
+    for manual in [false, true] {
+        let fixture = Fixture::new(false, false).await;
+        fixture.enabled(true).await;
+        let question = fixture.question().await;
+        if manual {
+            fixture.join_question("update", &question).await;
+        }
+        let routing = fixture.harness.manager.ssh_route_lock(fixture.host);
+        assert!(
+            Arc::clone(&routing).try_write_owned().is_err(),
+            "the question holds the read guard"
+        );
+
+        // Only the new dial sees the updated build, keeping automatic updates enabled without
+        // starting a real Tailscale lookup after the registry edit.
+        fixture
+            .harness
+            .fleet
+            .edit(fixture.host, |script| script.build = "2.0.0".into());
+        let previous = fixture
+            .harness
+            .manager
+            .status(fixture.host)
+            .unwrap()
+            .incarnation;
+        let toggle = fixture.host_post("tailscale", Some(serde_json::json!({"tailscale":true})));
+        tokio::pin!(toggle);
+        if manual {
+            tokio::select! {
+                reply = &mut toggle => panic!("the route edit overtook its manual question: {reply:?}"),
+                waited = tokio::time::timeout(Duration::from_secs(5), async {
+                    while Arc::clone(&routing).try_read_owned().is_ok() {
+                        tokio::task::yield_now().await;
+                    }
+                }) => { waited.expect("the route writer waits behind the manual question"); }
+            }
+            assert!(
+                !stored_row(&fixture.harness.store, fixture.host)
+                    .await
+                    .tailscale
+            );
+            fixture
+                .reply(
+                    &question,
+                    serde_json::json!({"action":"send","answer":"fixture-code"}),
+                )
+                .await;
+            assert_eq!(
+                fixture.completion(&question.attempt).await,
+                SshSignInOutcome::Ready
+            );
+        }
+        let (status, body) = tokio::time::timeout(Duration::from_secs(5), toggle)
+            .await
+            .expect("the route edit finishes within the reply bound after the reader retires");
+        assert_eq!(status, StatusCode::OK, "{body}");
+        if !manual {
+            assert!(matches!(
+                fixture.completion(&question.attempt).await,
+                SshSignInOutcome::Failed { .. }
+            ));
+        }
+        fixture
+            .harness
+            .await_refreshed_after(fixture.host, previous)
+            .await;
+        assert!(
+            stored_row(&fixture.harness.store, fixture.host)
+                .await
+                .tailscale
+        );
+        assert_eq!(
+            fixture
+                .harness
+                .store
+                .preferences()
+                .await
+                .unwrap()
+                .auto_update_remote_hosts,
+            Some(true)
+        );
+        assert!(fixture.questions.list().is_empty());
+        assert_eq!(fixture.launches(), 1);
+    }
 }
 
 /// Turning off automatic updates cancels only checks without a manual owner. The manual 202 must name
@@ -754,6 +1009,122 @@ async fn opt_out_preserves_a_failure_that_settled_before_the_scan() {
         attempts.get(&fixture.host),
         Some(AttemptState::Attempted(_))
     ));
+    assert_eq!(fixture.launches(), 1);
+}
+
+/// A manually owned check can fail after the listener has observed opt-out.
+/// Re-enabling on the same connection must retain the observed failure and keep the manual retry surface.
+#[farhelm_testtrace::test]
+async fn opt_out_keeps_observing_the_failure_of_a_manually_owned_check() {
+    let fixture = Fixture::new(false, false).await;
+    let listener = &fixture.harness.state._automatic_updates;
+    let mut scans = listener.completed_scans();
+    listener.stop();
+    wait_for_automatic_listener_end(&mut scans).await;
+    let mut attempts = HashMap::new();
+    fixture.enabled(true).await;
+    fixture
+        .service
+        .scan_automatic_updates(&mut attempts)
+        .await
+        .unwrap();
+    let question = fixture.question().await;
+    fixture.join_question("update", &question).await;
+    let incarnation = fixture
+        .harness
+        .manager
+        .status(fixture.host)
+        .unwrap()
+        .incarnation;
+
+    fixture.enabled(false).await;
+    fixture
+        .service
+        .scan_automatic_updates(&mut attempts)
+        .await
+        .unwrap();
+    assert!(matches!(
+        attempts.get(&fixture.host),
+        Some(AttemptState::PendingSignIn { .. })
+    ));
+    fixture
+        .reply(&question, serde_json::json!({"action":"cancel"}))
+        .await;
+    assert!(matches!(
+        fixture.completion(&question.attempt).await,
+        SshSignInOutcome::Failed { .. }
+    ));
+
+    fixture.enabled(true).await;
+    fixture
+        .service
+        .scan_automatic_updates(&mut attempts)
+        .await
+        .unwrap();
+    assert!(
+        matches!(attempts.get(&fixture.host), Some(AttemptState::Attempted(seen)) if *seen == incarnation)
+    );
+    assert_eq!(
+        fixture
+            .harness
+            .manager
+            .status(fixture.host)
+            .unwrap()
+            .incarnation,
+        incarnation
+    );
+    assert_eq!(fixture.launches(), 1);
+    assert!(fixture.questions.list().is_empty());
+}
+
+/// When automatic planning finds a manual question but has not registered its listener yet,
+/// an answer still belongs to the explicit action that was waiting for it.
+#[farhelm_testtrace::test]
+async fn automatic_planning_respects_a_manual_answer_that_arrives_before_activation() {
+    let fixture = Fixture::new(false, false).await;
+    let listener = &fixture.harness.state._automatic_updates;
+    let mut scans = listener.completed_scans();
+    listener.stop();
+    wait_for_automatic_listener_end(&mut scans).await;
+    fixture.enabled(true).await;
+    let manual = fixture.activate(fixture.prepare().await).await;
+    let question = fixture.question().await;
+    assert_eq!(question.attempt, manual.attempt);
+
+    let setup = fixture.service.setup_sign_in.as_ref().unwrap();
+    let target = ProvisioningTarget::ssh(AUTH_DESTINATION);
+    let row = stored_row(&fixture.harness.store, fixture.host).await;
+    let automatic = setup
+        .prepare(&target, Some(&row), SignInIntent::AutomaticUpdate)
+        .await
+        .unwrap_err()
+        .downcast::<Pending>()
+        .unwrap();
+    assert_eq!(automatic.attempt.id, manual.attempt);
+    fixture
+        .reply(
+            &question,
+            serde_json::json!({"action":"send","answer":"fixture-code"}),
+        )
+        .await;
+    assert_eq!(
+        fixture.completion(&manual.attempt).await,
+        SshSignInOutcome::Ready
+    );
+
+    let joined = setup.start_automatic(automatic, &fixture.service);
+    assert!(matches!(
+        joined.outcome(),
+        Some(SetupSettlement::ReadyForManualAction)
+    ));
+    assert!(
+        fixture
+            .service
+            .memory
+            .lock()
+            .await
+            .manual_ssh_handoff_active(fixture.host)
+    );
     assert_eq!(fixture.launches(), 1);
 }
 

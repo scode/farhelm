@@ -39,6 +39,8 @@ pub(super) struct Pending {
     route: SetupRoute,
     /// A check observed by prepare may settle before the caller accepts the pending result.
     existing: Option<SetupOutcome>,
+    /// Give this explicit host action priority if its reply joins a new check.
+    prefers_manual: bool,
 }
 
 /// The exact registered entry and SSH settings that may share a setup sign-in. Drafts are always independent.
@@ -53,7 +55,17 @@ struct SetupRoute {
 #[derive(Clone, Debug)]
 pub(super) enum SetupSettlement {
     Finished(SshSignInOutcome),
+    /// The UI receives Ready, but the listener must give up this continuation.
+    ReadyForManualAction,
     Released,
+}
+
+/// The planning caller determines whether an existing automatic check must reserve its Ready answer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SignInIntent {
+    Discovery,
+    AutomaticUpdate,
+    ManualHostAction,
 }
 
 type SetupOutcome = watch::Receiver<Option<SetupSettlement>>;
@@ -69,16 +81,28 @@ struct ActiveAttempt {
     route: SetupRoute,
     cancel: oneshot::Sender<()>,
     outcome: watch::Sender<Option<SetupSettlement>>,
+    /// Publishing the pending reply gives it manual ownership and keeps the question alive on opt-out.
     manual: bool,
+    automatic: bool,
+    /// Planning can reserve Ready before publication without keeping an unowned child alive.
+    prefers_manual: bool,
 }
 
 impl ActiveAttempt {
+    /// Keep both attachments until settlement. Discovery has no priority to reserve.
+    fn attach(&mut self, manual: bool, prefers_manual: bool) {
+        self.manual |= manual;
+        self.automatic |= !manual;
+        self.prefers_manual |= manual && prefers_manual;
+    }
+
     /// Reuse both the question id and the result even if settlement overtakes the caller's reply.
-    fn pending(&self) -> Pending {
+    fn pending(&self, prefers_manual: bool) -> Pending {
         Pending {
             attempt: self.attempt.clone(),
             route: self.route.clone(),
             existing: Some(self.outcome.subscribe()),
+            prefers_manual,
         }
     }
 
@@ -117,7 +141,7 @@ impl AutomaticSignIn {
     }
 
     /// Await the same result as the listener without borrowing or owning its check.
-    /// Only a successful authentication can dispatch an automatic continuation.
+    /// A successful authentication dispatches this continuation only when no explicit host action took priority.
     pub(super) fn wait_ready(&self) -> impl Future<Output = bool> + Send + 'static {
         let mut outcome = self.outcome.clone();
         async move {
@@ -131,6 +155,15 @@ impl AutomaticSignIn {
                     )
                 })
         }
+    }
+
+    /// While this host is ineligible, an owned manual check can still fail and consume the
+    /// automatic attempt. Decide whether to release it under the same lock that attaches the owner.
+    pub(super) fn retain_while_ineligible(&self) -> bool {
+        if let Some(setup) = self.setup.upgrade() {
+            setup.cancel_automatic(&self.attempt);
+        }
+        !matches!(&*self.outcome.borrow(), Some(SetupSettlement::Released))
     }
 }
 
@@ -186,6 +219,7 @@ impl SetupSignIn {
         &self,
         transport: &ProvisioningTarget,
         host: Option<&HostRow>,
+        intent: SignInIntent,
     ) -> anyhow::Result<()> {
         let Some((destination, access)) = Self::destination(transport) else {
             return Ok(());
@@ -195,15 +229,20 @@ impl SetupSignIn {
             access,
             entry: host.map(|row| (row.id, row.entry_uuid.clone())),
         };
+        let prefers_manual = intent == SignInIntent::ManualHostAction;
         if route.entry.is_some()
             && let Some(active) = self
                 .active
                 .lock()
                 .expect("SSH setup active mutex")
-                .values()
+                .values_mut()
                 .find(|active| active.route == route)
         {
-            return Err(active.pending().into());
+            // Ready can arrive before the command finalizes its 202. Reserve the handoff
+            // while finding the live check. Finalizing the reply still owns its lifetime.
+            active.prefers_manual |= prefers_manual;
+            active.automatic |= intent == SignInIntent::AutomaticUpdate;
+            return Err(active.pending(prefers_manual).into());
         }
         if self
             .relay
@@ -227,6 +266,7 @@ impl SetupSignIn {
             attempt,
             route,
             existing: None,
+            prefers_manual,
         }
         .into())
     }
@@ -267,11 +307,12 @@ impl SetupSignIn {
             mut attempt,
             route,
             existing,
+            prefers_manual,
         } = pending;
         let mut active = self.active.lock().expect("SSH setup active mutex");
         if let Some(outcome) = existing {
             if let Some(joined) = active.get_mut(&attempt.id) {
-                joined.manual |= manual;
+                joined.attach(manual, prefers_manual);
             }
             if !matches!(*outcome.borrow(), Some(SetupSettlement::Released)) {
                 return (attempt.id, outcome);
@@ -283,7 +324,7 @@ impl SetupSignIn {
         if route.entry.is_some()
             && let Some(joined) = active.values_mut().find(|active| active.route == route)
         {
-            joined.manual |= manual;
+            joined.attach(manual, prefers_manual);
             return (joined.attempt.id.clone(), joined.outcome.subscribe());
         }
 
@@ -300,6 +341,8 @@ impl SetupSignIn {
                 cancel: send,
                 outcome: settled.clone(),
                 manual,
+                automatic: !manual,
+                prefers_manual: manual && prefers_manual,
             },
         );
         drop(active);
@@ -350,11 +393,24 @@ impl SetupSignIn {
                     reason: error.rendered(),
                 },
             };
-            {
+            let handoff = {
                 // A caller must be able to join until the completion is already readable.
+                // Take memory first: an automatic scan can drop its interest while holding it.
+                let mut memory = service.memory.lock().await;
                 let mut active = setup.active.lock().expect("SSH setup active mutex");
                 let mut completed = setup.completed.lock().expect("SSH setup completion mutex");
                 let now = Instant::now();
+                let manual_host = active
+                    .get(&attempt.id)
+                    .filter(|active| active.automatic && active.prefers_manual)
+                    .and_then(ActiveAttempt::host)
+                    .filter(|_| matches!(&outcome, SshSignInOutcome::Ready));
+                // Record priority before either the UI or the automatic listener can observe settlement.
+                let handoff = manual_host.and_then(|host| {
+                    memory
+                        .begin_manual_ssh_handoff(host, now)
+                        .map(|deadline| (host, deadline))
+                });
                 completed.retain(|entry| now - entry.at < RETAIN);
                 if completed.len() == MAX_COMPLETIONS {
                     completed.pop_front();
@@ -370,10 +426,18 @@ impl SetupSignIn {
                     if state.is_some() {
                         return false;
                     }
-                    *state = Some(SetupSettlement::Finished(outcome));
+                    *state = Some(if manual_host.is_some() {
+                        SetupSettlement::ReadyForManualAction
+                    } else {
+                        SetupSettlement::Finished(outcome)
+                    });
                     true
                 });
                 active.remove(&attempt.id);
+                handoff
+            };
+            if let Some((host, deadline)) = handoff {
+                service.wake_after_manual_ssh_handoff(host, deadline);
             }
             service.manager.events().bump();
         });
@@ -394,13 +458,23 @@ impl SetupSignIn {
 
     /// Retire automatic-only preflights at the committed opt-out, even if fleet wakes coalesce.
     pub(super) fn cancel_automatic_checks(&self) {
+        self.release_automatic_checks(|_| true);
+    }
+
+    /// A route edit only retires checks without a manual owner on that same host.
+    pub(super) fn cancel_automatic_host(&self, host: HostId) {
+        self.release_automatic_checks(|attempt| attempt.host() == Some(host));
+    }
+
+    /// Detach the matching attempts while ownership is still protected from a racing manual reply.
+    fn release_automatic_checks(&self, applies: impl Fn(&ActiveAttempt) -> bool) {
         let mut active = self.active.lock().expect("SSH setup active mutex");
-        for (_, attempt) in active.extract_if(|_, attempt| !attempt.manual) {
+        for (_, attempt) in active.extract_if(|_, attempt| !attempt.manual && applies(attempt)) {
             attempt.release();
         }
     }
 
-    /// Cancellation and manual attachment use the same lock. A check already sponsored by a manual reply survives.
+    /// A manual owner keeps the check. A settled result still matters after leaving the active map.
     fn cancel_automatic(&self, attempt: &str) {
         let mut active = self.active.lock().expect("SSH setup active mutex");
         if active.get(attempt).is_some_and(|active| !active.manual)
