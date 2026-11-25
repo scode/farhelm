@@ -15,6 +15,7 @@ pub(super) async fn persistent_hook_files(
     use farhelm_proto::ReportVendor;
 
     let directory = home.join(".gemini/config/plugins/farhelm");
+    HookFile::check_path(&directory)?;
     // Consent covers Farhelm's plugin directory. A symlink here can redirect hooks.json onto the shared hooks file.
     match tokio::fs::symlink_metadata(&directory).await {
         Ok(metadata) if !metadata.is_dir() => {

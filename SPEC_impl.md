@@ -6002,6 +6002,9 @@ installation it is on, so it follows an open session the sidebar's filter hides
   cleared ones, and reports the read mark so the UI can tell unread from read. Clearing deletes nothing in the
   supervisor; the cap ages records out there. The UI renders each text as peer text, marks resolved entries grey with a
   "Resolved" word, and excludes them from unread counts and "new" styling without moving the helm's read mark.
+
+  `notify_hook_silent` requires a resume command in the launch snapshot. A launch with Resume off still takes part in
+  the tripwire's diagnostic log and can report a conversation.
 - Per-session "seen" state (the idle dot's grey/blue split and the read/unread toggle; SPEC.md, Status) lives in its own
   `session_seen` table keyed by `(host_id, session_id)`, not as a `session_cache` column: that cache is replaced
   WHOLESALE by each host's refresh, so a column there would need every refresh to carry forward a viewer fact the

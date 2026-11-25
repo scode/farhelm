@@ -21,7 +21,19 @@ pub(super) struct HookFile {
 }
 
 impl HookFile {
+    /// Reject unsupported destination names during planning, before any install
+    /// can write files. A vendor with an earlier path probe checks it there too.
+    pub(super) fn check_path(path: &Path) -> Result<()> {
+        anyhow::ensure!(
+            path.to_str().is_some(),
+            "hook path {} is not valid UTF-8",
+            path.display()
+        );
+        Ok(())
+    }
+
     pub(super) fn json(path: PathBuf, value: Value) -> Result<Self> {
+        Self::check_path(&path)?;
         let mut bytes = serde_json::to_vec_pretty(&value)?;
         bytes.push(b'\n');
         Ok(Self { path, bytes })
@@ -135,6 +147,32 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// An unsupported destination should surface as a setup refusal before the
+    /// installer or Antigravity's directory probe touches it.
+    #[farhelm_testtrace::test]
+    async fn persistent_hook_setup_refuses_non_utf8_paths() {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        let home = tempfile::tempdir().unwrap();
+        let invalid = home.path().join(std::ffi::OsStr::from_bytes(b"config\xff"));
+        assert!(invalid.to_str().is_none());
+        for (kind, root, override_root) in [
+            (AgentKind::Grok, home.path(), Some(invalid.as_path())),
+            (AgentKind::Antigravity, invalid.as_path(), None),
+        ] {
+            let error = install(kind, Some(root), override_root, "/stable/farhelm")
+                .await
+                .unwrap_err();
+            let reason = error.to_string();
+            assert!(reason.contains("not valid UTF-8"), "{reason}");
+            assert!(
+                reason.contains(invalid.to_string_lossy().as_ref()),
+                "{reason}"
+            );
+            assert!(!invalid.exists());
+        }
+    }
 
     /// Pin the configuration Grok reads from GROK_HOME. In an ordinary shell the command must invoke the stable
     /// executable as one word and omit the announcement, even though the hook also runs outside Farhelm sessions.

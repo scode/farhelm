@@ -127,17 +127,20 @@ impl Supervisor {
     /// A launch already told that its OMP reporter does not match is not told
     /// again that its hook never reported: it is the same cause, and that
     /// notification already says what the user loses.
+    /// A launch without a resume command can still report a conversation,
+    /// but silence cannot take away a Restart option it never had.
     ///
     /// An agent whose report is only due after its first reply (Pi, OMP;
     /// `RestartReadiness::due_by_first_prompt`) is not told at all: a first
     /// turn can outlast any wait, so the silence proves nothing. The log line
     /// the tripwire writes stays, as the diagnostic it always was.
     async fn notify_hook_silent(&self, entry: &SessionEntry) {
-        if !entry
-            .snapshot
-            .kind
-            .restart_readiness()
-            .is_some_and(farhelm_proto::RestartReadiness::due_by_first_prompt)
+        if entry.snapshot.resume_template.is_none()
+            || !entry
+                .snapshot
+                .kind
+                .restart_readiness()
+                .is_some_and(farhelm_proto::RestartReadiness::due_by_first_prompt)
         {
             return;
         }
@@ -521,8 +524,6 @@ mod tests {
     /// Seed `id`'s stored row the way a hooked Claude launch leaves it,
     /// with or without a captured conversation, and publish a matching entry
     /// whose submitted-line clock started past the tripwire's budget.
-    /// Its published snapshot omits a resume command to isolate the tripwire;
-    /// tests of recovery must add one before claiming Resume is available.
     async fn silent_hook_session(sup: &Supervisor, id: &str, captured: Option<&str>) {
         silent_hook_session_of(sup, id, captured, AgentKind::Claude).await;
     }
@@ -535,6 +536,27 @@ mod tests {
         captured: Option<&str>,
         kind: AgentKind,
     ) {
+        let launch = farhelm_proto::SessionLaunch::Legacy {
+            invocation: "claude".into(),
+            agent_kind: kind,
+            resume_template: Some(vec![
+                "claude".into(),
+                "--resume".into(),
+                "{conversation}".into(),
+            ]),
+        };
+        seed_silent_hook_session(sup, id, captured, launch).await;
+    }
+
+    /// Seed the line deadline and hook latch with the same launch in the
+    /// stored row and publishable snapshot, as a launched session would have.
+    async fn seed_silent_hook_session(
+        sup: &Supervisor,
+        id: &str,
+        captured: Option<&str>,
+        launch: farhelm_proto::SessionLaunch,
+    ) {
+        let snapshot = IntegrationSnapshot::of(&launch);
         sup.store
             .insert_session(
                 crate::store::StoredSession {
@@ -554,15 +576,7 @@ mod tests {
                     last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
-                    launch: farhelm_proto::SessionLaunch::Legacy {
-                        invocation: "claude".to_string(),
-                        agent_kind: AgentKind::Claude,
-                        resume_template: Some(vec![
-                            "claude".to_string(),
-                            "--resume".to_string(),
-                            "{conversation}".to_string(),
-                        ]),
-                    },
+                    launch,
                     terminal_address: String::new(),
                     terminal_kind: crate::store::TerminalKind::Host,
                     outcome: crate::store::LastOutcome::Running,
@@ -580,12 +594,7 @@ mod tests {
             .expect("a clock that has run for a minute");
         let mut published = entry_with(None, crate::store::LastOutcome::Running);
         published.info.id = id.to_string();
-        published.snapshot = IntegrationSnapshot {
-            custom_reporting: None,
-            kind,
-            wrapper_prefix_words: 0,
-            resume_template: None,
-        };
+        published.snapshot = snapshot;
         *published.run.first_input.lock().unwrap() = Some(started);
         published
             .run
@@ -598,22 +607,36 @@ mod tests {
     }
 
     /// Spec (SPEC.md, Status): a hooked launch that has not reported a
-    /// minute after the first submitted line gets exactly one notification,
-    /// carried on the session's replies; a launch whose identity is already
-    /// in the store gets none.
+    /// minute after the first submitted line gets exactly one notification
+    /// when it can resume. A launch with a stored identity or without a
+    /// resume command gets none.
     ///
-    /// Why: this is the tripwire turned user-facing, and the two ways it
-    /// could lie are both pinned here. Repeating it every pass would bury
-    /// the session's list in copies; and the in-memory check alone can miss
-    /// a report the store committed a moment ago (the plan's M10), which the
-    /// store re-read is there to catch, so the second session's mirror is
-    /// deliberately left without the identity its row holds.
+    /// Repeating the notice would fill the session's list with copies. The
+    /// capture pass refreshes the reported session's stale mirror before
+    /// checking for silence. With Resume off, the diagnostic still fires.
     #[farhelm_testtrace::test]
     async fn a_silent_hook_notifies_once_unless_the_store_holds_an_identity() {
         let state = StateDir::new();
         let sup = Supervisor::new(state.path()).await.expect("supervisor");
         silent_hook_session(&sup, "silent", None).await;
         silent_hook_session(&sup, "reported", Some("stored-conversation")).await;
+        let no_resume = farhelm_proto::SessionLaunch::Command(farhelm_proto::CommandLaunch {
+            command: "grok".into(),
+            yolo: false,
+            agent: Some(farhelm_proto::LaunchHarness::Grok),
+            custom_agent: None,
+            resume: None,
+        });
+        let snapshot = IntegrationSnapshot::of(&no_resume);
+        assert!(
+            snapshot.resume_template.is_none()
+                && snapshot
+                    .kind
+                    .restart_readiness()
+                    .is_some_and(farhelm_proto::RestartReadiness::due_by_first_prompt),
+            "the launch would be eligible for a warning if it had a resume command"
+        );
+        seed_silent_hook_session(&sup, "resume-off", None, no_resume).await;
 
         sup.capture_pass(true).await;
         sup.capture_pass(true).await;
@@ -648,6 +671,21 @@ mod tests {
                 .expect("list")
                 .is_empty(),
             "a stored identity suppresses the notification"
+        );
+        assert!(
+            sup.store
+                .session_notifications("resume-off")
+                .await
+                .expect("list")
+                .is_empty(),
+            "a command with Resume off has no missing-resume warning"
+        );
+        assert!(
+            sup.sessions.lock().await["resume-off"]
+                .run
+                .hook_warned
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "the supervisor still records the tripwire diagnostic with Resume off"
         );
     }
 
@@ -797,18 +835,6 @@ mod tests {
                 drop(sup);
                 sup = Supervisor::new(state.path()).await.unwrap();
             } else {
-                // The tripwire fixture does not normally need a resume command;
-                // this scenario must carry one to prove Resume really returns.
-                let mut published = sup.sessions.lock().await.remove("late").unwrap();
-                Arc::get_mut(&mut published)
-                    .unwrap()
-                    .snapshot
-                    .resume_template = Some(vec![
-                    "claude".into(),
-                    "--resume".into(),
-                    "{conversation}".into(),
-                ]);
-                sup.sessions.lock().await.insert("late".into(), published);
                 sup.capture_pass(true).await;
             }
             let published = sup.sessions.lock().await.get("late").cloned().unwrap();
@@ -878,11 +904,6 @@ mod tests {
             }
             let mut published = sup.sessions.lock().await.remove(id).unwrap();
             let entry = Arc::get_mut(&mut published).unwrap();
-            entry.snapshot.resume_template = Some(vec![
-                "claude".into(),
-                "--resume".into(),
-                "{conversation}".into(),
-            ]);
             if older {
                 sup.store
                     .conn

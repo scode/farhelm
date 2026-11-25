@@ -3266,6 +3266,9 @@ other session-tracking kinds and notifications from earlier launches stay as the
 the same launch, its existing notification reopens at the top as new and unread, even if the user had cleared it;
 repeated checks while it remains unresolved do not repeat it.
 
+Only a launch with a resume command can receive the silent conversation hook warning. A missing report cannot take away
+Restart for a launch that already has Resume off.
+
 Earlier releases gave a session in which something still ran in an old terminal the old-terminal warning: it asked for
 the session to be restarted, replaced, stopped or deleted as soon as possible, because an upcoming release would
 forcibly terminate its old terminals. That has happened (see Terminal experience), so no warning is recorded any more,
