@@ -47552,3 +47552,28 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Setup and Update use the existing lifecycle refusal while an environment is being deleted, including after
   failed destruction. Change `mtvznkovpzunpxtkzpqrsvuonkpvtptx`, bookmark
   `plan/triage-environments-nov24/07-other-fixes`. [Draft PR](https://github.com/scode/farhelm/pull/4942/changes).
+
+## trailing-tensorlake-sandboxes-inline-delete-prompt-survives-key-change.md
+
+- Outcome: `fix code`.
+- Assessment: In Settings → Tensorlake, if the inline Delete confirmation for a leftover sandbox is open and the user
+  clears or replaces the API key, the confirmation stays open. After Clear it keeps the leftover-sandboxes section on
+  screen, and after a replacement it lets the user confirm deleting the old account's sandbox under the new key. That
+  request normally fails as not found, unless it hits the false-success route in item 546. Verified: confirmed.
+  `Sandboxes::follow_account` (`crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs:153-175`) clears lists on
+  Clear but never `question`, `asked` or `delete_failure`, and `drawn` (`:374-381`) keeps the section drawn while the
+  question is open. The rule that bears on it is SPEC.md "Keyboard focus" (`SPEC.md:3853-3855`, a confirmation goes away
+  "when the thing it is about is gone"). Whether a sandbox in the previous account is "gone" after a key change is a
+  reading.
+- Decision: q-staleconf, "Confirmations and kept state whose subject is gone": the maintainer picked "Close or
+  invalidate them". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: A confirmation or kept state whose subject is gone (host removed, listing emptied, account key
+  changed) closes or is invalidated. Recommendation for reference: fix code — drop the question and the delete failure
+  whenever the saved key changes; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to “Bind leftover sandbox consent to the saved Tensorlake key” in TODO.md, “Plan follow-ups”. The
+  pending key-write and ambiguous-reply paths must retire the old consent too, and the complete fix exceeded the
+  outcome's size gate. Change `uxqmkrvrsxnrowsqwrqosxokptqnmylz`, bookmark
+  `plan/triage-environments-nov24/07b-tensorlake-consent-follow-up`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4947/changes).
