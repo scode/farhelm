@@ -94,3 +94,93 @@ All five PRs passed the Opus 5.5 source review gate at high effort. The Goose fo
 compile error, stale help and reused reply token. The final coverage fix lets the capability test run in a standalone
 supervisor suite and reports a fixture error if either launch expansion refuses its inputs. No source review findings
 remain open.
+
+### Landing
+
+#### What landed with it
+
+Three plans landed this round, in this order: the custom agents triage (28 PRs and the landing fix #4969), this one
+through its five PRs, and then private Tailscale SSH socket folders (#4957, #4962). This plan and the custom agents
+triage both touch the launcher catalog and the CLI; the landing's review read them against each other and against what
+main gained since this plan was written (the environment triage, the sandbox workspace trust plan and other launcher
+work) and found no interaction: retiring GPT-5.6 Terra leaves only deliberate mentions of it, and none of the plans
+changes the protocol or a database schema. Its rebase conflicted only where conflicts below it were carried up, in
+TODO.md and the custom agents plan's files, which were resolved there; every file of this plan's own change is exactly
+what the executor pushed.
+
+#### Fixes made while landing
+
+- None.
+
+#### Checks
+
+This round landed three plans in queue order: the custom agents triage, the agent catalog and drift test cleanups, and
+private Tailscale SSH socket folders. All the checks below ran once on the three plans' PRs stacked in that order on
+main as it stood at the start of the landing (`f6ec0f51`), with the conflict resolutions described in the Landing
+section of the custom agents triage report; the stack's top commit was `30ae8ef5`. Worker runs were on a separate arm64
+Linux test worker; the rest ran locally on x86_64 Linux. The only later change is the landing fix
+[#4969](https://github.com/scode/farhelm/pull/4969/changes), inserted after the custom agents plan's last PR, which adds
+24 screenshot scene list entries and reformats two triage ledgers and one call in the launcher's golden scene setup;
+after it I ran the screenshot batch tool's test (recorder run `18834801-a217-426a-aea5-61f735104753`),
+`cargo fmt --all -- --check`, `dprint check` and the changelog check again, and all passed. That final tree is what main
+now holds outside the plans queue, apart from what main gained while the custom agents plan was merging: two TODO.md
+entries, a SPEC_impl.md note and new review queue findings, none of which touches code the checks covered.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `40997676-1b25-42dd-a283-44987367a22e`): all 8701 tests passed, with no runtime skip. The plans changed the launcher,
+  Settings, templates, the quick switcher and Restart in the GUI, the helm's custom agent registry, templates and
+  launches, the CLI, the supervisor's Goose restart, the drift tests, and the helm's Tailscale SSH connections; the
+  whole suite was the narrowest run that covered them and their callers.
+- The desktop app's tests, `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run
+  `c1000071-3994-42e2-ad73-d85b8866e537`): all 184 passed.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings`, on the test worker: passed.
+- The desktop app's end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run
+  `9e8e8c24-edac-4e59-9429-c8ab9f3211cb`): 50 steps passed, one skipped by design on Linux (paste).
+- The desktop app's screenshot comparison, `python3 scripts/check-gui-goldens.py`, all scenes, locally (recorder run
+  `4fc1cb5d-72d7-4edd-870c-909f63840e93`): passed, including the custom agents plan's 24 new scenes and main's sandbox
+  scenes whose setup the landing merged with the custom agents plan's.
+- The screenshot batch tool's test, `python3 -B scripts/test-gui-screenshot-batch.py`, locally: failed on the stack
+  (recorder run `8e6013bf-03ee-48d3-9544-f2e4cb90d9eb`) because the 24 new scenes were not in its scene list, and passed
+  with the landing fix.
+- The docs website build, `bun install --frozen-lockfile && bun run build` in `website/`, locally: passed. Two docs
+  pages changed (Start a session, and Stop, restart and resume), both in the agent catalog plan.
+- `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; one warning, about an
+  old citation in the triage archive, already on main) and `python -B scripts/check-test-sleeps.py`, locally: passed.
+  `cargo fmt --all -- --check` and `dprint check`, locally: failed on the stack as described in the custom agents triage
+  report's Landing section, and passed with the landing fix.
+- `bash -n scripts/test-install-sh.sh` and `shellcheck scripts/install.sh scripts/test-install-sh.sh`, locally: passed.
+  The custom agents plan added cases to the installer test.
+
+Reused: the custom agents plan's run of the installer test,
+`bash scripts/test-install-sh.sh --farhelm target/debug/farhelm` (recorder run `242fd8fd`, at the executor's revision
+`cb9cef98`), which covers the cases the plan added for a custom conversation report while an update holds the installed
+version. Nothing it exercises changed since: main changed neither the installer nor the CLI since the custom agents
+plan's base; that plan's later CLI change is in template flags, and the agent catalog plan's only CLI change is how
+`--effort` reads its value, neither of which the installer test's conversation report path uses. Also reused: the agent
+catalog plan's live Goose named Create and Restart drift run at its executor's revision (recorder run `5e4a1a9a`), which
+spends vendor turns and was not repeated; nothing that landed since that plan's base touches Goose's support code. The
+executors' other runs were focused selections that the runs above cover again.
+
+Skipped: real agent and drift runs, which spend vendor turns and run only when asked; a real Tailscale network, which
+the tests replace with stand-ins; the workspace doctests, since no documentation example changed; a Mac run, so the
+macOS limit on socket path length (which the Tailscale plan's socket folder names are sized for) and the macOS installer
+are covered only by tests that run on Linux; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+- Nothing.
+
+#### Things you should know that the report does not say
+
+- **`--effort` now takes a following flag as its value.** For example, `--effort --yolo` launches a custom agent with
+  the literal effort `--yolo`, where it used to fail with a missing value. That is how `--model` already behaves and
+  what the specification accepts, so it is consistent, but for a custom agent a mistyped command now launches with the
+  wrong effort instead of failing; for a built-in agent the helm still refuses an effort it does not know. Say if you
+  want a TODO entry to refuse a value that looks like a flag.
+- **Reopening a Goose conversation Farhelm did not start loses plain Restart without notice.** When you use Restart with
+  to reopen, by ID, a Goose conversation Farhelm did not start, the launcher shows no warning now that the blanket
+  warning is gone. Farhelm still clears the session's previous Restart target, and the reopened conversation never
+  becomes eligible, so plain Restart becomes unavailable. The specification accepts this; whether to warn is a product
+  call. Say if you want a TODO entry.
