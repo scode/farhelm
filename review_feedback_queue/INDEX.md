@@ -115,12 +115,6 @@ consequences.
 - [`launcher-underlining-can-stall-search.md`](launcher-underlining-can-stall-search.md) — Underlining matches in a long
   saved wrapper can do enough work on the GUI thread to slow launcher search.
 
-- [`hook-save-launches-into-later-folder.md`](hook-save-launches-into-later-folder.md) — Set up and launch can start a
-  session in a default folder that resolves after the user answers.
-
-- [`launch-without-hook-choice-lost.md`](launch-without-hook-choice-lost.md) — A launch accepted with Launch without can
-  still install hooks after the user enables setup for future launches while provisioning continues.
-
 - [`hook-settings-close-hides-opt-out-failure.md`](hook-settings-close-hides-opt-out-failure.md) — Closing Settings
   while an opt-out saves can hide the refusal and leave automatic hook setup active.
 
