@@ -8,8 +8,8 @@
 //! (`containers_settings.rs`) and its reads in `api/environments.rs`, at reference commit `24bc0580`. Here's the TLDR:
 //!
 //! - **The lines are the pushed places.** The helm pushes the `recipe_places` collection, the entries
-//!   `GET /api/recipe-places` serves: for every recipe, each place where something is recorded or whose provider can
-//!   run its base, from the helm's local records and its cached checks. Its read starts no check, so the helm re-reads
+//!   `GET /api/recipe-places` serves. The helm uses local records and cached checks to hide unready places with no
+//!   recipe history or work when the base can run on more than one provider. Its read starts no check and the helm re-reads
 //!   it after every change it announces and after each command. Every row draws its lines from the store, so a place's
 //!   build moves on screen while the section stays shown. Before the push (decided by the migration's orchestrator on
 //!   2026-11-15) the section read the places whenever it was shown, after an accepted Rebuild, and when a pushed host's
@@ -38,12 +38,14 @@
 //! - **Rebuild is accepted work** on the recipe's own key, like the row's snapshot build ([`super`], "Builds are
 //!   accepted work"): `POST /api/recipes/<name>/rebuild` with the place, answered 202 once the provider admitted or
 //!   joined the work, by which time the helm has pushed the place building. Every Rebuild of the recipe is busy while
-//!   one is out, as the old row's were, and a place that reports a build running offers none. A refusal shows under the
+//!   one is out. A place that is building, unavailable or incompatible with the recipe's base disables its button.
+//!   The reason appears in the hover help even when the line has a stored build failure to show. A refusal shows under the
 //!   row, where the key's refusal shows. The words of each state are the place's provider's
 //!   ([`crate::environment_ui::ProviderUi::recipe_place`]).
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::RecipePlaceView;
+use farhelm_proto::recipes::{RecipeBase, RecipeView};
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::{
     App, Context, Div, ElementId, InteractiveElement as _, ParentElement as _, Role, Stateful,
@@ -153,19 +155,20 @@ impl Recipes {
         cx.notify();
     }
 
-    /// The per-place part of `name`'s row from the pushed `places`: "Reading per-place builds…" until the store has
+    /// The per-place part of `recipe`'s row from the pushed `places`: "Reading per-place builds…" until the store has
     /// them, the helm's reason while it cannot read them, or a line per place whose provider has per-place words, in
     /// the helm's order. `in_flight` says whether the recipe's key has work out, which makes every Rebuild of it busy;
     /// `zone` is the viewer's, for the times the lines give.
     pub(super) fn place_lines(
         &self,
-        name: &str,
+        recipe: &RecipeView,
         places: &Places,
         in_flight: bool,
         zone: Zone,
         cx: &Context<Self>,
     ) -> Vec<Stateful<Div>> {
         let palette = theme::palette(cx);
+        let name = recipe.name.as_str();
         match places {
             Places::Unknown => vec![
                 choices::outcome_line(
@@ -184,7 +187,7 @@ impl Recipes {
             Places::Listed(places) => places
                 .iter()
                 .filter(|place| place.recipe == name)
-                .filter_map(|place| self.place_line(place, in_flight, zone, cx))
+                .filter_map(|place| self.place_line(place, &recipe.base, in_flight, zone, cx))
                 .collect(),
         }
     }
@@ -196,12 +199,15 @@ impl Recipes {
     fn place_line(
         &self,
         place: &RecipePlaceView,
+        base: &RecipeBase,
         in_flight: bool,
         zone: Zone,
         cx: &Context<Self>,
     ) -> Option<Stateful<Div>> {
         let palette = theme::palette(cx);
-        let words = ProviderUi(place.place.provider()).recipe_place()?;
+        let kind = place.place.provider();
+        let provider = ProviderUi(kind);
+        let words = provider.recipe_place()?;
         // The host id names the line's elements: unique among a recipe's places, and stable across reads.
         let at = place.place.host()?;
         let id = format!("recipe-{}-place-{at}", place.recipe);
@@ -209,7 +215,7 @@ impl Recipes {
         let mut sentence = HostSentence::new(ElementId::Name(id.clone().into()))
             .host(&name)
             .text(" · ");
-        sentence = match &place.reason {
+        sentence = match place.reason.as_ref().or(place.unavailable_reason.as_ref()) {
             // The helm's reason (a host's Podman check, a failed build), which may quote a host.
             Some(reason) => sentence.host(&HostText::from_host(reason.clone())),
             None if place.building => sentence.text(words.building),
@@ -235,15 +241,33 @@ impl Recipes {
             .text(format!("Rebuild {} at ", place.recipe))
             .host(&name)
             .accessible_name();
+        // A stored place can outlive the base that built there. It still
+        // explains the old build, while Rebuild must use the current base.
+        let base_supported = base.supports(kind);
+        let rebuild_help = place.unavailable_reason.as_ref().map_or_else(
+            || {
+                HoverHelp::tooltip(if base_supported {
+                    words.rebuild_help
+                } else {
+                    provider.recipe_base_unsupported()
+                })
+            },
+            |reason| {
+                HoverHelp::sentence(
+                    HostSentence::new(ElementId::Name(format!("{id}-rebuild-help").into()))
+                        .host(&HostText::from_host(reason.clone())),
+                )
+            },
+        );
         let rebuild = Button::new(
             format!("recipe-rebuild-{}-{at}", place.recipe),
             "Rebuild",
-            HoverHelp::tooltip(words.rebuild_help).beside_list(false),
+            rebuild_help.beside_list(false),
             Role::Button,
         )
         .accessible_name(rebuild_name)
         .tier(Tier::Neutral)
-        .disabled(place.building)
+        .disabled(place.building || place.unavailable_reason.is_some() || !base_supported)
         .busy(in_flight)
         .on_click(move |_, _, cx| {
             let _ = weak.update(cx, |section, cx| section.rebuild(&recipe, target, cx));

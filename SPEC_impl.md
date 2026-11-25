@@ -6453,13 +6453,16 @@ whole-host Delete path with its actor hold and provisioning lock. Image removal 
 checking ownership labels, leaving an in-use image recorded for later cleanup. User-owned base images remain separate
 from Farhelm's committed layers.
 
-Settings → Recipes owns the shared catalog/editor and per-place readiness and Rebuild. Settings → Tensorlake retains
-account/key/create-confirmation settings and sandbox leftovers. Settings → Containers exposes cached probe results and
-container leftovers. Settings pages hold their own card bodies so a list's rows, pending questions and outcomes stay
-with the controls that own them. The recipe editor uses that layout only in Settings. The launcher and template editor
-share Existing host, New container and New sandbox placement, with a recipe/place pair for either environment segment.
-Provider UI differences remain exhaustive decisions in one module. Launch progress and errors reuse the existing
-operation surfaces, with no placeholder session.
+Settings → Recipes owns the shared catalog/editor and per-place readiness and Rebuild. The shared recipe-place
+projection qualifies provider availability with recipe state and active jobs. It keeps the refusal separate from build
+failure or artifact freshness so unavailable rows can still explain both. Work admission reads provider availability
+directly and cleanup uses its own ownership records. Settings → Tensorlake retains account/key/create-confirmation
+settings and sandbox leftovers. Settings → Containers exposes cached probe results and container leftovers. Settings
+pages hold their own card bodies so a list's rows, pending questions and outcomes stay with the controls that own them.
+The recipe editor uses that layout only in Settings. The launcher and template editor share Existing host, New container
+and New sandbox placement, with a recipe/place pair for either environment segment. Provider UI differences remain
+exhaustive decisions in one module. Launch progress and errors reuse the existing operation surfaces, with no
+placeholder session.
 
 ### Podman places, creation and images
 

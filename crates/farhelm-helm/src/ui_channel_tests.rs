@@ -2004,10 +2004,10 @@ fn snapshot_entries(collections: &[CollectionState], collection: Collection) -> 
 ///
 /// Specified, with the job started outside the channel through the shared
 /// build registry (so only feed bumps can bring its changes) and its work
-/// held between changes: the snapshot lists recipe `dev` at the local host,
-/// not building; admitting the job pushes that entry building with no step;
+/// held between changes: the snapshot hides the unchecked local place of
+/// shared recipe `dev`; admitting the job reveals it building with no step;
 /// the work's step (published as a real image build publishes it) pushes the
-/// step; the job's end pushes the entry neither building nor with a step.
+/// step; the job's end hides the place again since the fixture leaves no state.
 /// Each bump comes once the state it announces is in place: seen from inside
 /// each bump, the job is admitted at the first two and gone at the last. The
 /// channel cannot see that order (no await point separates removing the job
@@ -2017,13 +2017,11 @@ async fn a_place_jobs_admission_step_and_end_reach_the_connected_ui() {
     use farhelm_proto::{Place, RecipePlaceView};
     let (harness, _commands, local, mut ws, collections) = recipes_helm().await;
     let key = RecipePlaceView::key("dev", Place::PodmanHost(local));
-    let before: RecipePlaceView = entry_of(
-        snapshot_entries(&collections, Collection::RecipePlaces),
-        &key,
-    );
     assert!(
-        !before.building && before.step.is_none(),
-        "premise: {before:?}"
+        snapshot_entries(&collections, Collection::RecipePlaces)
+            .iter()
+            .all(|entry| entry.key != key),
+        "premise: the unchecked place starts hidden"
     );
 
     let builds = Arc::clone(harness.state.recipe_builds());
@@ -2052,7 +2050,10 @@ async fn a_place_jobs_admission_step_and_end_reach_the_connected_ui() {
         &changes_of(&mut ws, Collection::RecipePlaces).await.upsert,
         &key,
     );
-    assert!(admitted.building && admitted.step.is_none(), "{admitted:?}");
+    assert!(
+        admitted.building && admitted.step.is_none() && admitted.unavailable_reason.is_some(),
+        "{admitted:?}"
+    );
     step.notify_one();
     let stepped: RecipePlaceView = entry_of(
         &changes_of(&mut ws, Collection::RecipePlaces).await.upsert,
@@ -2061,15 +2062,96 @@ async fn a_place_jobs_admission_step_and_end_reach_the_connected_ui() {
     assert!(stepped.building, "{stepped:?}");
     assert_eq!(stepped.step.as_deref(), Some("Installing packages"));
     finish.notify_one();
-    let ended: RecipePlaceView = entry_of(
-        &changes_of(&mut ws, Collection::RecipePlaces).await.upsert,
-        &key,
-    );
-    assert!(!ended.building && ended.step.is_none(), "{ended:?}");
+    let ended = changes_of(&mut ws, Collection::RecipePlaces).await;
+    assert_eq!(ended.remove, [key]);
     assert_eq!(
         *at_bumps.lock().unwrap(),
         [true, true, false],
         "each bump shows the state it announces"
+    );
+}
+
+/// A shared recipe needs usable places and its own history. Confirm that a
+/// stored failure retains a removed place without giving it cleanup ownership,
+/// and a single-provider recipe can still explain its check prerequisite.
+#[farhelm_testtrace::test]
+async fn recipe_places_keep_usable_history_and_single_provider_places() {
+    use crate::environment::recipes::PodmanRecipeState;
+    use crate::tensorlake::recipes::tests_support::save;
+    use farhelm_proto::{Place, RecipePlaceView, recipes::RecipeBase};
+
+    let (harness, commands, local, _ws, _) = recipes_helm().await;
+    let absent = local + 1;
+    assert!(
+        harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .iter()
+            .all(|row| row.id != absent)
+    );
+    let mut image = save();
+    image.base = RecipeBase::ContainerImage {
+        reference: "ubuntu:24.04".into(),
+        user: "dev".into(),
+    };
+    assert!(
+        harness
+            .store
+            .create_tensorlake_recipe("container".into(), image)
+            .await
+            .unwrap()
+            .is_ok()
+    );
+    harness
+        .store
+        .update_tensorlake_recipe_state("dev", move |_, state| {
+            state.podman.insert(
+                absent,
+                PodmanRecipeState {
+                    last_failure: Some("package installation failed".into()),
+                    ..Default::default()
+                },
+            );
+            assert!(!state.needs_cleanup(), "fixture: no ownership remains");
+        })
+        .await
+        .unwrap()
+        .expect("the shared recipe exists");
+    assert!(
+        harness
+            .store
+            .save_tensorlake_config(farhelm_proto::tensorlake::SaveSettings {
+                api_key: Some("fixture-key".into()),
+                clear_api_key: false,
+                create_without_asking: None,
+            })
+            .await
+            .is_ok()
+    );
+
+    let views: Vec<RecipePlaceView> =
+        serde_json::from_value(served(&harness, "/api/recipe-places").await).unwrap();
+    let place = |recipe: &str, place| {
+        views
+            .iter()
+            .find(|view| view.recipe == recipe && view.place == place)
+    };
+    assert!(place("dev", Place::PodmanHost(local)).is_none());
+    let account = place("dev", Place::TensorlakeAccount).expect("usable account is shown");
+    assert!(account.unavailable_reason.is_none());
+    let history = place("dev", Place::PodmanHost(absent)).expect("failed place is shown");
+    assert_eq!(
+        history.reason.as_deref(),
+        Some("package installation failed")
+    );
+    assert!(history.unavailable_reason.is_some());
+    let single = place("container", Place::PodmanHost(local)).expect("sole provider is shown");
+    assert!(single.reason.is_none() && single.unavailable_reason.is_some());
+    assert!(
+        commands.seen.lock().unwrap().is_empty(),
+        "the list starts no checks"
     );
 }
 
@@ -3159,13 +3241,26 @@ async fn every_pushed_collection_round_trips_through_its_proto_type() {
     let run: farhelm_proto::provisioning::ProvisioningView = round_trip(&runs["runs"][0]);
     assert_eq!(run.host_id, host);
 
-    // This helm has only the Tensorlake provider, so `dev`'s one place is the
-    // Tensorlake account, unusable without a key: its reason is set.
-    crate::tensorlake::recipes::tests_support::create(&harness.store, "dev").await;
+    // A Tensorlake-only base keeps its account place visible without a key.
+    let mut save = crate::tensorlake::recipes::tests_support::save();
+    save.base = farhelm_proto::recipes::RecipeBase::TensorlakeImage {
+        image: "ubuntu:24.04".into(),
+    };
+    assert!(
+        harness
+            .store
+            .create_tensorlake_recipe("dev".into(), save)
+            .await
+            .unwrap()
+            .is_ok()
+    );
     let recipes = served(&harness, "/api/tensorlake/recipes").await;
     let recipe: farhelm_proto::recipes::RecipeView = round_trip(&recipes["recipes"][0]);
     assert_eq!(recipe.name, "dev");
     let places = served(&harness, "/api/recipe-places").await;
     let place: farhelm_proto::RecipePlaceView = round_trip(&places[0]);
-    assert!(place.reason.is_some(), "{place:?}");
+    assert!(
+        place.reason.is_none() && place.unavailable_reason.is_some(),
+        "{place:?}"
+    );
 }

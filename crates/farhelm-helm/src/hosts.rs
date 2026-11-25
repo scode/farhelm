@@ -4475,32 +4475,46 @@ impl HostKind {
     }
 }
 
-/// Secret-free per-place progress comes from the same recipe state and active
-/// job registry used by launch preparation. Recorded places remain visible even
-/// after their host disappears, so failed cleanup has a discoverable remedy.
+/// Recipe cards omit incidental unavailable places for a shared base. Keep
+/// the recipe's own history and work visible even when a place disappears.
+/// The providers' launch and cleanup paths own their separate admission.
 pub(crate) async fn recipe_places(State(state): State<Arc<AppState>>) -> axum::response::Response {
     let result = async {
         let places = state.manager.providers().places().await?;
         let recipes = state.store.tensorlake_recipe_rows().await?;
+        let builds = state.recipe_builds();
+        let active_places = builds.active_places();
         let mut views = Vec::new();
         for (name, recipe, build) in recipes {
-            let mut recorded = build.recorded_places();
+            let mut candidates = build.visible_places();
             for place in &places {
-                if recipe.base.supports(place.place.provider()) && !recorded.contains(&place.place)
+                if recipe.base.supports(place.place.provider())
+                    && !candidates.contains(&place.place)
                 {
-                    recorded.push(place.place);
+                    candidates.push(place.place);
                 }
             }
-            for place in recorded {
-                let availability = places.iter().find(|current| current.place == place);
-                let usable = availability.is_some_and(|current| current.reason.is_none());
-                let mut view = state
-                    .recipe_builds()
-                    .place_view(&name, &build, place, usable);
-                if view.reason.is_none() {
-                    view.reason = availability.and_then(|current| current.reason.clone());
+            for &place in active_places.get(&name).into_iter().flatten() {
+                if !candidates.contains(&place) {
+                    candidates.push(place);
                 }
-                views.push(view);
+            }
+            for place in candidates {
+                let unavailable_reason = places
+                    .iter()
+                    .find(|current| current.place == place)
+                    .map_or_else(
+                        || Some("This place is no longer available.".into()),
+                        |current| current.reason.clone(),
+                    );
+                let view = builds.place_view(&name, &build, place, unavailable_reason);
+                if view.unavailable_reason.is_none()
+                    || view.building
+                    || build.has_visible_state(place)
+                    || recipe.base.sole_provider() == Some(place.provider())
+                {
+                    views.push(view);
+                }
             }
         }
         Ok::<_, anyhow::Error>(views)

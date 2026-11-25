@@ -341,6 +341,7 @@ fn push_web_place(helm: &mut FakeHelm, cx: &mut gpui::VisualTestContext, ready: 
         ready,
         building: false,
         reason: None,
+        unavailable_reason: None,
         built_at: None,
         prepared_at: None,
         step: None,

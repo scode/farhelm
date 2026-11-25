@@ -573,6 +573,30 @@ fn storage(step: BuildStep, error: anyhow::Error) -> Stop {
 }
 
 impl RecipeBuilds {
+    /// A job can be admitted before the provider records its first step. Keep
+    /// its place visible even if the cached provider list loses that place.
+    pub(crate) fn active_places(&self) -> HashMap<String, Vec<farhelm_proto::Place>> {
+        use farhelm_proto::Place;
+
+        let registry = self.registry();
+        let mut places = HashMap::new();
+        for recipe in registry.active.keys().chain(registry.preparing.keys()) {
+            places
+                .entry(recipe.clone())
+                .or_insert_with(|| vec![Place::TensorlakeAccount]);
+        }
+        for (recipe, host) in registry.podman_jobs.keys() {
+            places
+                .entry(recipe.clone())
+                .or_default()
+                .push(Place::PodmanHost(*host));
+        }
+        for entries in places.values_mut() {
+            entries.sort_by_key(|place| place.host());
+        }
+        places
+    }
+
     /// Settings reads shared durable state and this registry synchronously.
     /// The Place match and recipe-state layout are exhaustive provider homes;
     /// image existence belongs to actual reuse, never a list's probe fan-out.
@@ -584,7 +608,7 @@ impl RecipeBuilds {
         name: &str,
         state: &RecipeState,
         place: farhelm_proto::Place,
-        place_usable: bool,
+        unavailable_reason: Option<String>,
     ) -> farhelm_proto::recipes::RecipePlaceView {
         let (built_at, prepared_at, stale, present, building, step, failure, cleanup_pending) =
             match place {
@@ -668,7 +692,7 @@ impl RecipeBuilds {
                         });
                     let failure = current.and_then(|state| {
                         state.last_failure.as_ref().map(|reason| {
-                            if place_usable
+                            if unavailable_reason.is_none()
                                 && state.last_failure_from_rebuild
                                 && state.image.is_some()
                                 && state.prepared.is_some()
@@ -716,6 +740,7 @@ impl RecipeBuilds {
             ready: built_at.is_some() && present && freshness.is_none(),
             building,
             reason: failure.or(freshness),
+            unavailable_reason,
             built_at,
             prepared_at,
             step,

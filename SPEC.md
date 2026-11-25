@@ -548,17 +548,22 @@ including a delivered Codex login, follow their own sign-out rules. Revoke a lea
 after removing it from Farhelm.
 
 The list shows each recipe's name, supported providers, base, package count, tunnel count and build status per place,
-with Rebuild per place. Size is labelled **Tensorlake sandboxes only**. The editor's Software block offers managed
-Ubuntu, Tensorlake image and snapshot bases, and a container image with its login user, each stating its supported
-providers, plus Ubuntu packages for every base. The custom-base note explains that the base must run systemd as its init
-system, allow passwordless sudo, be Ubuntu or Debian with apt, and include bash, curl and git. The build checks these
-requirements first and stops with the missing requirement. Help explains that Farhelm then installs Claude Code and
-Codex with their official installers and saves a snapshot or image at that place. The editor replaces the list in place.
-Leaving it with unsaved changes by its own Back or Cancel asks whether to save, discard or keep editing. Closing
-Settings includes the recipe draft in the dialog's unsaved-changes question. Delete asks for confirmation in the pinned
-footer. If Podman reports no image for an interrupted capture, the footer asks again and offers **Delete anyway**. The
-question warns that an image could still appear on the container host and need cleanup later. A list refresh that fails
-keeps the rows shown, says they may be out of date, and offers **Retry loading**.
+with Rebuild per place. On a base shared by multiple providers, a container host gets a line once it can build there,
+has artifacts or a recorded failure there, or has running or interrupted work there. Container-only bases also show
+unavailable container hosts. A container host's Rebuild is disabled when the place is unavailable or the current base
+cannot run there. Its hover help gives the reason. Tensorlake snapshot status is shown separately.
+
+Size is labelled **Tensorlake sandboxes only**. The editor's Software block offers managed Ubuntu, Tensorlake image and
+snapshot bases, and a container image with its login user, each stating its supported providers, plus Ubuntu packages
+for every base. The custom-base note explains that the base must run systemd as its init system, allow passwordless
+sudo, be Ubuntu or Debian with apt, and include bash, curl and git. The build checks these requirements first and stops
+with the missing requirement. Help explains that Farhelm then installs Claude Code and Codex with their official
+installers and saves a snapshot or image at that place. The editor replaces the list in place. Leaving it with unsaved
+changes by its own Back or Cancel asks whether to save, discard or keep editing. Closing Settings includes the recipe
+draft in the dialog's unsaved-changes question. Delete asks for confirmation in the pinned footer. If Podman reports no
+image for an interrupted capture, the footer asks again and offers **Delete anyway**. The question warns that an image
+could still appear on the container host and need cleanup later. A list refresh that fails keeps the rows shown, says
+they may be out of date, and offers **Retry loading**.
 
 Each agent's recipe choice is **None | API endpoint | Subscription**. API endpoint requires a base URL and offers named
 endpoint tokens; Subscription requires a named login for that agent from Credentials. Switching modes retains each draft
