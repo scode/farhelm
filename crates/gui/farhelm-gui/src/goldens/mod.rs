@@ -702,6 +702,12 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "approval-yolo-actions",
+        size: (1088., 590.),
+        draw: approval_yolo_actions,
+        setup: no_setup,
+    },
+    Scene {
         name: "approval-shell-template",
         size: (684., 570.),
         draw: shell_template_approval,

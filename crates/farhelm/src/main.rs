@@ -843,15 +843,14 @@ fn refuse_restart_mode(_value: &str) -> Result<String, String> {
 /// `--allow-yolo-on-sensitive-host`) on `farhelm spawn`, `farhelm agent
 /// create` and `farhelm agent clone`.
 ///
-/// The flag let an agent assert the user's YOLO approval itself. With the
-/// helm asking the user before any agent launch, an agent has no override at
-/// all (SPEC.md, Agent-spawned sessions), and the helm ignores the field even
-/// if a modified CLI sends it; this refusal is a courtesy that says why.
+/// The flag let an agent assert the user's YOLO approval itself. The host's
+/// YOLO setting decides what an agent may launch (SPEC.md, Agent-spawned
+/// sessions). The helm ignores the field even if a modified CLI sends it.
 fn refuse_confirm_yolo(_value: &str) -> Result<String, String> {
     Err(
         "--confirm-yolo is no longer accepted: an agent cannot confirm a YOLO launch for the \
-         user. Farhelm asks the user before any agent launch, and on a host that asks before \
-         YOLO launches an agent may not start a YOLO or command launch at all; the user can \
+         user. On a host that asks before YOLO launches, an agent may not start a YOLO or \
+         command launch at all. The user can \
          allow that by turning on \"Start YOLO sessions without asking\" in the host's \
          settings"
             .to_string(),
@@ -3490,10 +3489,13 @@ mod tests {
                 let Err(error) = Cli::try_parse_from(argv) else {
                     panic!("{argv:?}: the flag must be refused");
                 };
+                let words = error.to_string();
                 assert!(
-                    error.to_string().contains("cannot confirm a YOLO launch"),
+                    words.contains("cannot confirm a YOLO launch"),
                     "{argv:?}: {error}"
                 );
+                assert!(words.contains("On a host that asks before YOLO launches"));
+                assert!(!words.contains("before any agent launch"));
             }
         }
         let mut command = <Cli as clap::CommandFactory>::command();

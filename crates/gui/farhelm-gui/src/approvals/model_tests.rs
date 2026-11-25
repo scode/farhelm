@@ -700,7 +700,7 @@ fn an_environment_launch_card_names_the_new_machine_and_its_cost() {
 
 /// A restart card shows the resume command the restart runs, for a legacy launch too, and never the start command it
 /// does not run; a restart whose launch the helm does not know says so. Why: a plain restart skips the YOLO rule
-/// because it re-runs what the user approved, so the card is where the user sees what that is.
+/// because it re-runs what the user approved. The card shows the saved command and explains that exemption.
 #[test]
 fn a_restart_card_shows_the_resume_command_only() {
     let action = ApprovalAction::Restart {
@@ -729,6 +729,26 @@ fn a_restart_card_shows_the_resume_command_only() {
     assert!(rows.contains(&Fact::Words("resume command", "unknown to this helm")));
     assert!(rows.contains(&Fact::Words("if it is working", "refuse")));
     assert!(chips(&rows).is_empty());
+
+    let yolo_restart = ApprovalAction::Restart {
+        target: unknown("s"),
+        stop_if_running: false,
+        launch: Some(
+            serde_json::from_value(serde_json::json!({
+                "kind": "agent",
+                "selection": {"harness": "codex", "permissions": "yolo"},
+                "start": ["codex", "--yolo", "{farhelm_args}"],
+                "resume": ["codex", "--yolo", "resume", "{conversation}", "{farhelm_args}"],
+            }))
+            .unwrap(),
+        ),
+    };
+    let rows = facts(&yolo_restart);
+    assert_eq!(chips(&rows)[0].kind, ChipKind::Yolo);
+    assert_eq!(
+        chips(&rows)[0].description(),
+        "Plain Restart is exempt from the host's YOLO launch rule"
+    );
 }
 
 /// Stop names the program in the heading alone. Delete names the scope of
@@ -838,7 +858,12 @@ fn a_prompt_card_shows_the_message_the_targets_shield_and_its_caveats() {
             .any(|fact| matches!(fact, Fact::Box("command", _)))
     );
     // Claude has a status line that shows a mode without checks; seeing it makes the shield YOLO.
-    assert_eq!(chips(&facts(&action(true)))[0].kind, ChipKind::Yolo);
+    let rows = facts(&action(true));
+    assert_eq!(chips(&rows)[0].kind, ChipKind::Yolo);
+    assert_eq!(
+        chips(&rows)[0].description(),
+        "Sends a prompt to the existing session without starting an agent"
+    );
 }
 
 // ---- Template cards -------------------------------------------------------------------------------------------------

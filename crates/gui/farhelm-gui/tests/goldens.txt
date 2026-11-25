@@ -14,6 +14,8 @@ linux/approval-shell-template--dark.png e87bb2e40a19fab09c74fdb1bea82b8201bf2e4d
 linux/approval-shell-template--light.png 345b7882034e48cac47eaa20bd7c4372eb3fc32c
 linux/approval-template-unavailable-permission--dark.png 58635134d769d3a9a733bb81d3487d31ce0f03e7
 linux/approval-template-unavailable-permission--light.png 4e8cdaec8f39e82ec9736b38deebe446a4404a7d
+linux/approval-yolo-actions--dark.png 8a4d89523be705a4c7c2b96fd66b9192e17d3cb4
+linux/approval-yolo-actions--light.png 63e0d60510e2da091fa9746bc56e1e4c7db42646
 linux/attention-cue-flash--dark.png 2f4dc627b20f1f9378f6f55bc8ed3b216bb6c6d1
 linux/attention-cue-flash--light.png 535cf23653405c3303f423ef3d926779a52b75c0
 linux/attention-cue-flight--dark.png 60665294fa1a15be4aa4c921d4ab412f63d091dd

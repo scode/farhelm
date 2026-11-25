@@ -13,6 +13,50 @@ pub(super) fn approval_card(_: &SceneState, _: &mut Window, cx: &mut App) -> Any
     approval_scene(approval_spawn(), 660., cx)
 }
 
+/// The action beside a YOLO chip matters. Plain Restart uses the session's saved command, while a prompt goes to an
+/// already running agent. The prompt fixture deliberately shows a bypass observed on the agent's status line.
+pub(super) fn approval_yolo_actions(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    use farhelm_proto::approvals::ApprovalAction;
+    use serde_json::json;
+
+    let mut restart = approval_spawn();
+    let mut prompt = restart.clone();
+    let mut target = restart.session.clone();
+    target.id = "7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:review-notes".to_owned();
+    target.title = Some("Review notes".to_owned());
+    let launch = serde_json::from_value(json!({
+        "kind": "agent",
+        "selection": {"harness": "codex", "permissions": "yolo"},
+        "start": ["codex", "--yolo", "{farhelm_args}"],
+        "resume": ["codex", "--yolo", "resume", "{conversation}", "{farhelm_args}"],
+    }))
+    .expect("saved YOLO launch fixture");
+    restart.action = ApprovalAction::Restart {
+        target: target.clone(),
+        stop_if_running: true,
+        launch: Some(launch),
+    };
+    let ApprovalAction::Launch { launch, .. } = prompt.action else {
+        unreachable!("the approval scenes start from a launch");
+    };
+    prompt.id = "golden-prompt".to_owned();
+    prompt.own_host_session_action = false;
+    target.id = "7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:draft-update".to_owned();
+    target.title = Some("Draft update".to_owned());
+    prompt.action = ApprovalAction::Prompt {
+        target,
+        launch,
+        screen_yolo: true,
+        attached: false,
+        prompt: "Summarize the draft update.".to_owned(),
+    };
+    div()
+        .flex()
+        .child(approval_scene(restart, 520., cx))
+        .child(approval_scene(prompt, 520., cx))
+        .into_any_element()
+}
+
 /// A proposed shell template shows the incompatible mode and flag words that the write would store.
 pub(super) fn shell_template_approval(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let mut approval = approval_spawn();

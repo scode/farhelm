@@ -401,10 +401,6 @@ consequences.
 - [`trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md`](trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md)
   — Tests can keep passing if a replacement already queued for a host resumes under the wrong connection lifetime.
 
-- [`trailing-retired-yolo-flag-refusal-overstates-when-farhelm-asks.md`](trailing-retired-yolo-flag-refusal-overstates-when-farhelm-asks.md)
-  — The retired --confirm-yolo flag tells agents that every launch requires the user to answer even though host command
-  permissions can waive ordinary cards.
-
 - [`trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md`](trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md)
   — The new test would still pass if a future edit broke automatic Trash refresh after Replace removes its source.
 
@@ -801,12 +797,6 @@ consequences.
 - [`trailing-apply-template-custom-command-yolo-diverges-from-gui.md`](trailing-apply-template-custom-command-yolo-diverges-from-gui.md)
   — Applying launch templates that declare a custom agent on the Command tab behaves differently in the desktop app and
   the CLI.
-
-- [`trailing-approval-card-yolo-description-wrong-on-restart-and-prompt.md`](trailing-approval-card-yolo-description-wrong-on-restart-and-prompt.md)
-  — On an agent approval card for a plain Restart of a YOLO session (or a Prompt card whose target session was seen
-  bypassing checks on its status line), the Permissions row says "Farhelm applies the host's YOLO rules to this launch."
-  That is inaccurate in both cases: plain Restart is exempt from the host's YOLO launch rule even on hosts that ask
-  before YOLO launches, and status-line YOLO observation is display-only and never triggers host YOLO rules.
 
 - [`trailing-automatic-signin-tests-omit-shared-prompt-with-auto-updates-on.md`](trailing-automatic-signin-tests-omit-shared-prompt-with-auto-updates-on.md)
   — The automatic host-update sign-in test suite never tests what happens when a user clicks Update or Uninstall on a
