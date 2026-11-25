@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 2b20d7] `triage-custom-agents-nov24.md` — execute the 2026-11-24 triage outcomes for registered custom agents, in grouped PRs
 - [in-flight 03cb5b] `triage-launcher-nov24.md` — execute the 2026-11-24 triage outcomes for the session launcher and templates, in grouped PRs
 - [pending] `triage-settings-nov24.md` — execute the 2026-11-24 triage outcomes for the Settings dialog, in grouped PRs
-- [complete] `triage-sessions-ui-nov24.md` — execute the 2026-11-24 triage outcomes for the session list, notices and window chrome, in grouped PRs
+- [landing 0adef7] `triage-sessions-ui-nov24.md` — execute the 2026-11-24 triage outcomes for the session list, notices and window chrome, in grouped PRs
 - [in-flight 021290] `triage-terminal-nov24.md` — execute the 2026-11-24 triage outcomes for the terminal view and emulation, in grouped PRs
 - [pending] `triage-supervisor-nov24.md` — execute the 2026-11-24 triage outcomes for the supervisor's session lifecycle, in grouped PRs
 - [pending] `triage-hooks-trust-nov24.md` — execute the 2026-11-24 triage outcomes for agent hooks and workspace trust, in grouped PRs
