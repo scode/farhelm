@@ -3637,6 +3637,126 @@
       "golden": "tensorlake-cleanup-key-refusal",
       "title": "Tensorlake leftover cleanup refused under a different API key",
       "reference": null
+    },
+    {
+      "golden": "launcher-custom-effort-default",
+      "title": "Effort: Default for a custom agent clears the literal effort and keeps the agent and model",
+      "reference": null
+    },
+    {
+      "golden": "launcher-custom-escalation",
+      "title": "A custom agent picked in New, with the fixed YOLO pill outlined",
+      "reference": null
+    },
+    {
+      "golden": "launcher-custom-recents",
+      "title": "A Recent setup naming a custom agent as its launcher chip does",
+      "reference": null
+    },
+    {
+      "golden": "launcher-custom-recents-narrow",
+      "title": "The same custom agent's Recent setup in a narrow window with no side pane",
+      "reference": null
+    },
+    {
+      "golden": "launcher-custom-restart-blocked",
+      "title": "Restart with open after a custom agent's registration lost resumption, More options folded",
+      "reference": null
+    },
+    {
+      "golden": "launcher-custom-restart-menu",
+      "title": "The Restart menu explaining why a custom agent's resume variant is unavailable",
+      "reference": null
+    },
+    {
+      "golden": "launcher-custom-yolo-question",
+      "title": "The host's YOLO question for a custom agent whose launch always counts as YOLO",
+      "reference": null
+    },
+    {
+      "golden": "launcher-deleted-custom-quick-launch",
+      "title": "A suspended host's quick launch refused because its custom agent registration was deleted",
+      "reference": null
+    },
+    {
+      "golden": "launcher-incomplete-custom-quick-launch",
+      "title": "A quick launch whose custom agent choice outlived its registration, opening New with the partial template",
+      "reference": null
+    },
+    {
+      "golden": "launcher-renamed-custom-search",
+      "title": "Search keeping its highlight when a custom agent is renamed",
+      "reference": null
+    },
+    {
+      "golden": "launcher-unavailable-custom-agent",
+      "title": "A saved draft keeping a deleted custom agent and its repairable field values",
+      "reference": null
+    },
+    {
+      "golden": "quick-switcher-custom-agents",
+      "title": "The quick switcher with a registered custom agent and one whose registration was deleted",
+      "reference": null
+    },
+    {
+      "golden": "settings-custom-agent-catalog-unavailable",
+      "title": "Custom agents in Settings after the first failed read, with Add still available",
+      "reference": null
+    },
+    {
+      "golden": "settings-custom-agent-dirty",
+      "title": "A custom agent's Settings page with all five field markers",
+      "reference": null
+    },
+    {
+      "golden": "settings-custom-agent-empty",
+      "title": "The blank Add page after the last custom agent was deleted",
+      "reference": null
+    },
+    {
+      "golden": "settings-custom-agent-long-name",
+      "title": "A custom agent with a long name sharing its title row with the scope",
+      "reference": null
+    },
+    {
+      "golden": "settings-custom-agent-nav-tooltip",
+      "title": "A custom agent's Settings navigation tooltip",
+      "reference": null
+    },
+    {
+      "golden": "settings-custom-agent-save-refused",
+      "title": "A refused custom agent save, with the draft kept to retry",
+      "reference": null
+    },
+    {
+      "golden": "settings-search-custom-agents",
+      "title": "Settings search finding a custom agent and the Add form",
+      "reference": null
+    },
+    {
+      "golden": "template-custom-yolo-refusal",
+      "title": "A custom command template's stored safety answer offered for removal",
+      "reference": null
+    },
+    {
+      "golden": "template-generic-agent-refusal",
+      "title": "A template's incompatible agent choice shown without being erased",
+      "reference": null
+    },
+    {
+      "golden": "template-invalid-custom-model",
+      "title": "An older template with an invalid custom model, which Undo could not resave",
+      "reference": null
+    },
+    {
+      "golden": "template-literal-effort",
+      "title": "A literal effort valid without an agent and incompatible with an explicit built-in agent",
+      "reference": null
+    },
+    {
+      "golden": "template-literal-effort-refusal",
+      "title": "A template refused for its literal effort",
+      "reference": null
     }
   ],
   "reference_scenes": [
