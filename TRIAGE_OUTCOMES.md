@@ -737,26 +737,6 @@
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-settings-search-omits-registered-custom-agent-sections.md
-
-- Outcome: `fix code`.
-- Assessment: Searching Settings for a registered custom agent's name or ID finds nothing, and searching "custom" hides
-  every registered agent's section, although each is its own section in the sidebar. The result group for the add page
-  is also headed "+ Add custom agent", with the button's "+". A catalog-coverage test checks the sidebar button rather
-  than the page body. Verified: Confirmed. `crates/gui/farhelm-gui/src/settings/search.rs:441` has
-  `Section::CustomAgent(_) => {}`. SPEC.md:2585 says search "finds settings by section, label or help text". Matching
-  dynamic sections is a design extension, so this is not clearly settled.
-- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
-  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
-  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
-  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
-  Recommendation for reference: fix code — add dynamic entries, strip the "+" and point the test at a body element; size
-  M (likely under 100 lines). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
-  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
-  the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## trailing-template-apply-custom-to-custom-misses-switched-agent.md
 
 - Outcome: `fix code`.

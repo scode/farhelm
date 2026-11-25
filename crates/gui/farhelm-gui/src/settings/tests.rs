@@ -275,6 +275,7 @@ pub(super) fn heading(cx: &mut VisualTestContext) -> Option<String> {
 /// The retained draft also exposes the deletion and recovery instructions as a screen-reader status.
 /// A busy key refuses either write with the shared reason and leaves the draft available for retry.
 /// An unreadable catalog exposes the helm's reason on the first read and preserves the page on a failed refresh.
+/// Settings search finds the saved agent by its name, ID and command, and opens the editor without a read.
 #[gpui::test]
 fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppContext) {
     const DISPLAY_NAME: &str = "Example Code סוכן";
@@ -444,6 +445,28 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     helm.push(status(&["example-code"], Availability::Available));
     settle(cx);
     assert!(!drawn(cx, catalog_error));
+
+    click_section(cx, Section::Sessions);
+    assert_eq!(heading(cx).as_deref(), Some("Sessions"));
+    click(cx, "settings-search-field");
+    for query in ["custom agents", "example-code", "example-v2", DISPLAY_NAME] {
+        crate::test_support::select_all_text(cx);
+        cx.simulate_input(query);
+        settle(cx);
+        assert!(drawn(
+            cx,
+            "settings-result-custom-example-code-custom-agent-command"
+        ));
+        if query == "custom agents" {
+            assert!(drawn(
+                cx,
+                "settings-result-add-custom-agent-custom-agent-command"
+            ));
+        }
+    }
+    keys(cx, "enter");
+    assert_eq!(heading(cx).as_deref(), Some(DISPLAY_NAME));
+    assert!(drawn(cx, "custom-agent-command") && sent(&mut helm).is_empty());
 
     // Changes and Reply arrive together. A deliberate Delete abandons this edit instead of retaining it for recovery.
     fill(cx, "custom-agent-command", "~/bin/unsaved");

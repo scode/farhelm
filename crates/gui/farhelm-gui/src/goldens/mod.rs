@@ -1702,6 +1702,12 @@ static SCENES: &[Scene] = &[
         setup: settings_search_setup,
     },
     Scene {
+        name: "settings-search-custom-agents",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_search_custom_agents_setup,
+    },
+    Scene {
         name: "settings-search-empty",
         size: (800., 830.),
         draw: empty,

@@ -1286,6 +1286,27 @@ pub(super) fn settings_search_setup(state: &SceneState, window: &mut Window, cx:
     );
 }
 
+/// Find the registered agent and the Add form without loading either page.
+pub(super) fn settings_search_custom_agents_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let mut agents = super::custom_agent_state();
+    agents.entries[0].value["display_name"] = "Acme Custom Code".into();
+    settings_scene_with(
+        state,
+        crate::settings::Section::Sessions,
+        SettingsFixture {
+            search: Some("custom"),
+            custom_agents: Some(agents),
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+}
+
 /// The search field and result pane after a query that matches nothing.
 pub(super) fn settings_search_empty_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     keep_updater(cx);
