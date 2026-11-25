@@ -69,14 +69,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching
   indicators come later and should fit the layout. Plan: `plans/queue/welcome-empty-state.md`.
 
-- **Hide removed container hosts with only a failed build record on recipe cards.** After #4934, a container host that
-  was removed after a failed build or launch preparation (with no images or resources left) stays on the recipe card
-  permanently as "Unavailable place" with a disabled Rebuild button, and nothing removes it except deleting the recipe
-  (even re-adding the host gives it a new identity). In `recipe_places` (`crates/farhelm-helm/src/hosts.rs`), keep a
-  place the provider no longer lists only while the recipe still has resources (`has_resources`) or active build work
-  there, while continuing to show failure-only state for hosts that are still registered. Plan:
-  `plans/queue/recipe-card-and-billed-size-fixes.md`.
-
 - **Drop the post-clone Claude workspace-trust edit.** Update `SPEC.md` and the implementation so workspace trust for
   agents whose config files must be edited (rather than supporting per-invocation trust flags) happens on launch of that
   agent kind, not earlier at checkout preparation. Stop editing `~/.claude.json` during managed-checkout creation when a
