@@ -242,14 +242,8 @@ consequences.
 - [`unavailable-antigravity-trust-switch-announced-as-off.md`](unavailable-antigravity-trust-switch-announced-as-off.md)
   — Accessibility metadata reports an unread trust setting as off without marking its switch unavailable.
 
-- [`antigravity-trust-link-can-hide-read-failure.md`](antigravity-trust-link-can-hide-read-failure.md) — When the trust
-  setting cannot be read, the hint’s Settings link can leave the unavailable switch and its error below the fold.
-
 - [`antigravity-trust-dismissal-lost-during-recovery.md`](antigravity-trust-dismissal-lost-during-recovery.md) — A
   terminal recovery can bring back an Antigravity trust hint the user already dismissed for the same question.
-
-- [`feedback-external-link-cue-is-visual-only.md`](feedback-external-link-cue-is-visual-only.md) — The feedback dialog’s
-  Discord link omits the browser-opening cue from its accessible description.
 
 - [`settings-close-save-can-hide-notification-refusal.md`](settings-close-save-can-hide-notification-refusal.md) — Save
   and Close can take the user to Notifications while leaving the relevant error below the viewport.
@@ -447,10 +441,6 @@ consequences.
 - [`trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md`](trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md)
   — The existing assertions can miss a regression where Delete skips an inaccessible scope belonging to a terminal tab.
 
-- [`trailing-no-existing-assertion-covers-terminal-loss-between-publication-and.md`](trailing-no-existing-assertion-covers-terminal-loss-between-publication-and.md)
-  — An assertion can pass after this patch's late recovery-status sample is removed, despite a Restart acknowledgement
-  again being able to hide the recovery card.
-
 - [`trailing-agent-re-adoption-discard-cleanup-identities-without-confirming-host.md`](trailing-agent-re-adoption-discard-cleanup-identities-without-confirming-host.md)
   — Recovery can drop the main terminal's saved host and child identities while the recorded host may still run,
   weakening later Delete cleanup.
@@ -517,16 +507,8 @@ consequences.
   — The borrower test compares status across reload, but can pass without showing the origin terminal was released and
   successfully recovered.
 
-- [`trailing-omp-owner-exit-test-overstates-evidence-behind-resume-offer.md`](trailing-omp-owner-exit-test-overstates-evidence-behind-resume-offer.md)
-  — The strengthened test establishes that a saved Resume offer survives process exit and supervisor reload. Its
-  docstring additionally claims the offer stands on a verified file, which the test does not check.
-
 - [`trailing-borrower-classification-test-does-not-establish-checkout-membership.md`](trailing-borrower-classification-test-does-not-establish-checkout-membership.md)
   — This borrower classification case can pass if its second session never joins the managed checkout.
-
-- [`trailing-ready-and-borrower-cases-do-not-assert-vanished-terminal.md`](trailing-ready-and-borrower-cases-do-not-assert-vanished-terminal.md)
-  — The test documents ordinary exit for a stopped Ready or borrower session, but can pass if the observer proposes
-  nothing and reload keeps the old Running outcome.
 
 - [`trailing-running-seed-cancellation-checks-readability-without-observing-returned-screen.md`](trailing-running-seed-cancellation-checks-readability-without-observing-returned-screen.md)
   — The strengthened assertion detects a stranded or lost emulator after the seed caller cancels. It can still pass if
@@ -657,22 +639,6 @@ consequences.
 - [`trailing-replace-with-existing-env-checkout-promises-trash.md`](trailing-replace-with-existing-env-checkout-promises-trash.md)
   — In Replace with inside an existing sandbox or container, switching Destination to Managed checkout says the checkout
   moves to trash on Delete even though deleting in an environment discards or destroys it permanently.
-
-- [`trailing-shifted-wide-wrap-spacer-drops-background.md`](trailing-shifted-wide-wrap-spacer-drops-background.md) —
-  Deleting characters on a colored terminal row that ended in a wrapped wide character drops the shifted padding cell's
-  background color and leaves a one-column gap.
-
-- [`trailing-right-half-wide-erase-keeps-inverse-decoration-and-link.md`](trailing-right-half-wide-erase-keeps-inverse-decoration-and-link.md)
-  — When a program erases only the right half of an inverted, underlined, struck-through, or hyperlinked wide character
-  with the same raw background, Farhelm keeps painting those attributes and link hit area across the erased column.
-
-- [`trailing-deleting-wide-spacer-swallows-shifted-space.md`](trailing-deleting-wide-spacer-swallows-shifted-space.md) —
-  Deleting only the right half of a wide character shifts a following space into its column and absorbs it into the wide
-  glyph, losing the space in copy and link detection.
-
-- [`trailing-left-half-wide-erase-drops-orphaned-background.md`](trailing-left-half-wide-erase-drops-orphaned-background.md)
-  — Erasing or deleting only the left half of a colored wide character leaves its surviving right cell painted in the
-  default background instead of its colored background.
 
 - [`trailing-host-scoped-trash-confirmation-stays-open-invisibly.md`](trailing-host-scoped-trash-confirmation-stays-open-invisibly.md)
   — If a host leaves or empties while its 'Delete all on' confirmation is open in Trash, the invisible confirmation

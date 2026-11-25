@@ -593,7 +593,7 @@ fn heading(palette: &Palette) -> impl IntoElement {
         ),
         Role::Link,
     )
-    .accessible_name("Chat on Discord")
+    .accessible_name("Chat on Discord (opens in your browser)")
     .tier(Tier::Link)
     .on_click(|_, _, cx| cx.open_url(crate::help_menu::DISCORD_URL));
     div()

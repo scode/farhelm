@@ -16,8 +16,8 @@
 //!   a run of its own, as the format requires. Blank cells in the default
 //!   style are left out, which the format reads as blank. Wide-wrap padding
 //!   is marked separately and carries a space run only when it needs paint.
-//!   If erasing a wide character's right half changes its background, the
-//!   two columns get their own runs so the client can paint each cell.
+//!   An isolated spacer outside a wide run keeps its own background. If an erase changes the right half's color,
+//!   decorations or link, the two columns get their own runs so the client can paint and hit-test them separately.
 //! - **The screen** ([`Screen`], [`SentScreen`]): what the screen looks
 //!   like now, and what the client was last sent, from which
 //!   [`SentScreen::update`] makes the next `rows` and `frame` messages:
@@ -140,8 +140,8 @@ impl CellRow {
 /// `colors` saying which palette entries the program redefined.
 ///
 /// Tabs read as spaces (alacritty keeps a tab's first cell as `\t` for
-/// copying). A wide run covers its spacer or a plain blank that has the same
-/// background. A changed background gets its own cell. A wrap placeholder sets
+/// copying). A wide run covers its spacer, or a plain blank with the same
+/// background when there is no decoration or link to extend. A wrap placeholder sets
 /// the padding bit, so the receiver can distinguish it from a printed space.
 /// Its nondefault style travels in a separate unlinked space run. Default
 /// blank cells are omitted, including default spaces at either end of a run.
@@ -164,6 +164,32 @@ pub fn row_from_cells(row: &TermRow<Cell>, cols: usize, colors: &Colors) -> Cell
             .flags
             .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
         {
+            // An intact pair consumes its spacer with the preceding glyph. An edit can leave a spacer on its own
+            // or shift a wrap placeholder inward. Keep that cell's background without turning it into a link.
+            if !wide_wrap_padding || col + 1 != cols {
+                let style = if cell.flags.contains(Flags::INVERSE) {
+                    Style {
+                        flags: style_flags::INVERSE,
+                        fg: wire_color(cell.fg, colors),
+                        ..Style::PLAIN
+                    }
+                } else {
+                    Style {
+                        bg: wire_color(cell.bg, colors),
+                        ..Style::PLAIN
+                    }
+                };
+                if style != Style::PLAIN {
+                    runs.push(CellRun {
+                        col: col as u16,
+                        width: 1,
+                        text: " ".into(),
+                        style,
+                        link: None,
+                    });
+                    last_ascii = false;
+                }
+            }
             col += 1;
             continue;
         }
@@ -204,7 +230,7 @@ pub fn row_from_cells(row: &TermRow<Cell>, cols: usize, colors: &Colors) -> Cell
             text.extend(zerowidth);
             let width = if wide
                 && col + 1 < cols
-                && wide_glyph_owns_next_cell(&row[Column(col + 1)], style.bg, colors)
+                && wide_glyph_owns_next_cell(cell, &row[Column(col + 1)], style.bg, colors)
             {
                 2
             } else {
@@ -243,13 +269,19 @@ pub fn row_from_cells(row: &TermRow<Cell>, cols: usize, colors: &Colors) -> Cell
     }
 }
 
-/// A surviving spacer belongs to its wide glyph. Erasing that spacer leaves a blank with the erase color.
-/// Keep the glyph's full width when that color is already on its run. A shifted cell carrying text, a link,
-/// or a wrap placeholder needs its own column even when its background matches.
-fn wide_glyph_owns_next_cell(next: &Cell, bg: Color, colors: &Colors) -> bool {
+/// The emulator's adjacent spacer flag supplies the pairing. Cell moves can leave unrelated cells adjacent.
+/// Comparing styles would reject valid pairs when a variation selector widens a glyph under a new style.
+/// Erasing the spacer leaves a blank with the erase color.
+/// Keep the glyph's full width when that color is already on its run and the run would extend only its paint.
+/// Reverse video, lines and links have meaning in each column, so an erased half must stand on its own.
+fn wide_glyph_owns_next_cell(glyph: &Cell, next: &Cell, bg: Color, colors: &Colors) -> bool {
     (next.flags.contains(Flags::WIDE_CHAR_SPACER)
         && !next.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER))
         || (next.c == ' '
+            && !glyph
+                .flags
+                .intersects(Flags::INVERSE | Flags::ALL_UNDERLINES | Flags::STRIKEOUT)
+            && glyph.hyperlink().is_none()
             && next.zerowidth().unwrap_or(&[]).is_empty()
             && next.hyperlink().is_none()
             && next.flags.difference(Flags::WRAPLINE).is_empty()

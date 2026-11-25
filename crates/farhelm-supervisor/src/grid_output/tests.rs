@@ -261,17 +261,60 @@ fn shifted_wide_head_stops_before_the_wrap_padding() {
     assert_eq!((last.col, last.width, last.text.as_str()), (3, 1, "界"));
 }
 
-/// Erasing the right half of a wide glyph leaves a separate background when the erase changes the color.
-/// If both columns still have the same color, the full glyph remains visible, including in scrollback.
+/// A wide-character edit can leave a spacer with no glyph to paint it. Keep the background in that column, using a
+/// normal space run so a shifted wrap placeholder cannot make it count as the final padding on the new row.
 #[test]
-fn right_half_erase_splits_the_glyph_only_for_a_new_background() {
-    for (erase, bg, glyph_width) in [(b"\x1b[42m".as_slice(), 2, 2), (b"\x1b[41m", 1, 1)] {
-        let mut emulator = emulator(6, 3, 100, "\x1b[42ma界Z".as_bytes());
+fn an_edited_wide_spacer_keeps_its_background() {
+    for (input, flag) in [
+        (
+            "\x1b[42mabc界\x1b[1;1H\x1b[P",
+            Flags::LEADING_WIDE_CHAR_SPACER,
+        ),
+        ("\x1b[42ma界Z\x1b[1;2H\x1b[X", Flags::WIDE_CHAR_SPACER),
+    ] {
+        let emulator = emulator(4, 3, 100, input.as_bytes());
+        assert!(
+            emulator.term().grid()[Line(0)][Column(2)]
+                .flags
+                .contains(flag)
+        );
+        let view = screen(&emulator);
+        let row = &view.lines[0];
+        assert!(
+            !row.wide_wrap_padding,
+            "the remaining spacer is inside the row"
+        );
+        let spacer = row
+            .runs
+            .iter()
+            .find(|run| run.col == 2)
+            .expect("background run");
+        assert_eq!(
+            (spacer.width, spacer.text.as_str(), spacer.style.bg),
+            (1, " ", Color::Palette(2))
+        );
+        assert!(spacer.link.is_none());
+    }
+}
+
+/// An erased right half gets a separate cell when the full glyph would paint over it or extend a link into it.
+/// A plain glyph on matching backgrounds keeps its full width. History must carry the same column ownership.
+#[test]
+fn right_half_erase_respects_background_decoration_and_link() {
+    for (mode, bg, glyph_width) in [
+        ("", 2, 2),
+        ("", 1, 1),
+        ("\x1b[7m", 2, 1),
+        ("\x1b[4m", 2, 1),
+        ("\x1b[9m", 2, 1),
+        ("\x1b]8;;https://example.test\x1b\\", 2, 1),
+    ] {
+        let input = format!("\x1b[42m{mode}a界Z");
+        let mut emulator = emulator(6, 3, 100, input.as_bytes());
         let before = &emulator.term().grid()[Line(0)][Column(2)];
         assert!(before.flags.contains(Flags::WIDE_CHAR_SPACER));
         feed(&mut emulator, b"\x1b[1;3H");
-        feed(&mut emulator, erase);
-        feed(&mut emulator, b"\x1b[X");
+        feed(&mut emulator, format!("\x1b[4{bg}m\x1b[X").as_bytes());
         let after = &emulator.term().grid()[Line(0)][Column(2)];
         assert_eq!((after.c, after.flags), (' ', Flags::empty()));
 
@@ -280,7 +323,8 @@ fn right_half_erase_splits_the_glyph_only_for_a_new_background() {
         let glyph = &row.runs[1];
         assert_eq!(
             (glyph.col, glyph.width, glyph.text.as_str()),
-            (1, glyph_width, "界")
+            (1, glyph_width, "界"),
+            "{mode:?}, background {bg}"
         );
         assert_eq!(glyph.style.bg, Color::Palette(2));
         if glyph_width == 1 {
@@ -290,6 +334,8 @@ fn right_half_erase_splits_the_glyph_only_for_a_new_background() {
                 (2, 1, " ")
             );
             assert_eq!(erased.style.bg, Color::Palette(bg));
+            assert_eq!(erased.style.flags, 0);
+            assert!(erased.link.is_none());
         }
         assert_eq!(row.runs.len(), if glyph_width == 1 { 4 } else { 3 });
         let tail = row.runs.last().unwrap();

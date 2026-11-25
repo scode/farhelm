@@ -44063,3 +44063,172 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   [draft PR](https://github.com/scode/farhelm/pull/4851/changes). Fixed when marked text remains in the focused terminal
   at dispatch. Native compose cancellation and the text-field case remain in
   [the narrowed finding](review_feedback_queue/shortcuts-chord-during-composition.md).
+
+## antigravity-trust-link-can-hide-read-failure.md
+
+- Outcome: `other`.
+- Assessment: The "workspace not trusted" hint has a Settings button that opens the agent's page at its trust switch. If
+  Farhelm cannot read the current trust setting, the switch stays unavailable and its error sits beside it. On
+  Antigravity's page, both can be left below the fold, because the page is only scrolled by focusing an available
+  switch. Verified: Confirmed by source. `finish_handover` only focuses (and so reveals) an available switch
+  (crates/gui/farhelm-gui/src/settings.rs:1087-1100, :1112-1115), and nothing else scrolls on a failed read
+  (:1074-1083). The code is unchanged since 470e9e6c. SPEC.md:2567-2568 promises focus only "when it is available" and
+  says nothing about revealing a failure. Not filtered: the scroll filter needs unusually large content or a small
+  window, and here the page is ordinary.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: discard. Rare read failure, the error is reachable by scrolling, no spec promise. Size S if fixed.
+- Execution: `ktstszyoymsmwpywoxtrttoontrkzuvy`, `plan/triage-terminal-nov24/06-cheap-fixes-1`,
+  [draft PR](https://github.com/scode/farhelm/pull/4855/changes). No change. The unavailable switch has no focus
+  handover target. Revealing the failed read needs a separate scroll target and an error fixture beyond the polish
+  limit.
+
+## feedback-external-link-cue-is-visual-only.md
+
+- Outcome: `other`.
+- Assessment: In the Send feedback dialog, the Chat on Discord link shows a ↗ arrow meaning "opens in your browser", but
+  screen readers hear only "Chat on Discord", with no mention of the browser. Verified: Confirmed.
+  `.accessible_name("Chat on Discord")` with the arrow only in the painted label
+  (crates/gui/farhelm-gui/src/feedback.rs:588-598). SPEC.md:5076-5077 requires only that the link opens the invite and
+  keeps the draft. Nothing in the spec asks for an accessible browser cue. Speech output not checked.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: discard. No spec requirement, and the link's behavior is correct. Size XS if fixed (one accessible
+  description).
+- Execution: `ktstszyoymsmwpywoxtrttoontrkzuvy`, `plan/triage-terminal-nov24/06-cheap-fixes-1`,
+  [draft PR](https://github.com/scode/farhelm/pull/4855/changes). Fixed. The Discord link's accessible name now includes
+  the browser cue.
+
+## trailing-deleting-wide-spacer-swallows-shifted-space.md
+
+- Outcome: `other`.
+- Assessment: A program deletes just the right half of a wide character, and a following space with the same background
+  shifts into that cell. Farhelm then treats the space as part of the wide character, so copying and link detection lose
+  the space ("a界Z" instead of "a界 Z"). Verified: Confirmed by source. `wide_glyph_owns_next_cell` absorbs a plain
+  same-background space (`crates/farhelm-supervisor/src/grid_output.rs:246-257`). As the reviewer notes, the emulator's
+  cells cannot tell a shifted space from an erased right half, so a fix trades against #4598's behavior (keeping the
+  glyph full-width after a same-background half-erase) or needs a vendor patch. That is a design choice, so it is not
+  clearly settled.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix spec (add this DCH-on-wide-spacer case to the accepted wide-character edge cases). Size S.
+- Execution: `ktstszyoymsmwpywoxtrttoontrkzuvy`, `plan/triage-terminal-nov24/06-cheap-fixes-1`,
+  [draft PR](https://github.com/scode/farhelm/pull/4855/changes). No change. The emulator's plain blank represents both
+  a shifted space and an erased half. Distinguishing their origins requires changes beyond the polish limit.
+
+## trailing-left-half-wide-erase-drops-orphaned-background.md
+
+- Outcome: `other`.
+- Assessment: When a terminal program erases or deletes only the left half of a wide character (CJK, emoji) that has a
+  colored background, the leftover right cell is drawn in the default background instead of its color. The wrong cell
+  stays wrong until the program redraws it. Verified: confirmed. The vendored `erase_chars`
+  (`vendor/alacritty_terminal/src/term/mod.rs:2002-2017`) replaces only the erased cells and leaves the orphaned spacer
+  with its old background. `grid_output.rs:163-169` skips every `WIDE_CHAR_SPACER` cell without emitting styled paint,
+  while paired spacers are consumed earlier by `col += 2` (`:204-221`). No change since `a4c7c4d5`. The sibling
+  `trailing-shifted-wide-wrap-spacer-drops-background.md` is already queued for the same branch.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code together with the shifted-spacer sibling, emitting a styled one-column blank for an orphaned
+  spacer; size S.
+- Execution: `ktstszyoymsmwpywoxtrttoontrkzuvy`, `plan/triage-terminal-nov24/06-cheap-fixes-1`,
+  [draft PR](https://github.com/scode/farhelm/pull/4855/changes). Fixed for an isolated orphan spacer, which retains its
+  background as a one-column blank. Deleting the adjoining halves of two wide glyphs can still move an unrelated spacer
+  next to a wide glyph. Genuine and shifted pairs share the same adjacency flags.
+
+## trailing-no-existing-assertion-covers-terminal-loss-between-publication-and.md
+
+- Outcome: `other`.
+- Assessment: Restart's reply re-checks, at the last moment, whether the new terminal still exists, so a host lost
+  during Restart is not hidden from the recovery card. No test covers that re-check, so removing it would go unnoticed.
+  Verified: Confirmed test gap. The re-sample is at `crates/farhelm-supervisor/src/service/core.rs:13278-13285`, and the
+  reviewer found no assertion that exercises it. No production defect.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard. Size S-M if a test is added (it needs a seam to lose
+  the host mid-reply).
+- Execution: `ktstszyoymsmwpywoxtrttoontrkzuvy`, `plan/triage-terminal-nov24/06-cheap-fixes-1`,
+  [draft PR](https://github.com/scode/farhelm/pull/4855/changes). Fixed. The existing Restart fixture ends its
+  replacement host and checks that the final reply corrects the earlier row.
+
+## trailing-omp-owner-exit-test-overstates-evidence-behind-resume-offer.md
+
+- Outcome: `other`.
+- Assessment: For OMP sessions (an agent harness without first-class support), a test's docstring says the saved Resume
+  offer "stands on the durable binding and the verified file alone". The test never reads the conversation file, and by
+  design the file is checked at Restart, not when the offer is shown. Verified: Confirmed. The docstring is at
+  `crates/farhelm-supervisor/src/service/core.rs:24503-24506`. The offer is built from the stored row only.
+  Documentation-only. The "Rare edge cases in harnesses without first-class support" filter does not fit: its
+  consequences are about integration features, and this is a test docstring.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code (reword the docstring) or discard. Size S.
+- Execution: `ktstszyoymsmwpywoxtrttoontrkzuvy`, `plan/triage-terminal-nov24/06-cheap-fixes-1`,
+  [draft PR](https://github.com/scode/farhelm/pull/4855/changes). Fixed. The test's scope is the durable Resume offer.
+  Restart checks the conversation file when the offer is used.
+
+## trailing-ready-and-borrower-cases-do-not-assert-vanished-terminal.md
+
+- Outcome: `other`.
+- Assessment: A supervisor test covers sessions whose terminal vanished during checkout preparation. In two of its cases
+  it checks only that no launch error was recorded, not that the session became an ordinary exit, so a regression that
+  left the session "running" would pass. Verified: Confirmed.
+  `crates/farhelm-supervisor/src/service/core.rs:37518-37545` asserts only the sentinel's absence and that the outcome
+  is not an Error. Production reconciliation is believed correct (the reviewer agrees).
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code (assert the ObservedExit proposal and the reloaded
+  Exited outcome) or discard. Size S.
+- Execution: `ktstszyoymsmwpywoxtrttoontrkzuvy`, `plan/triage-terminal-nov24/06-cheap-fixes-1`,
+  [draft PR](https://github.com/scode/farhelm/pull/4855/changes). Fixed. The Ready and borrower cases require an
+  ordinary exit with an unknown exit code, from runtime observation through reload.
+
+## trailing-right-half-wide-erase-keeps-inverse-decoration-and-link.md
+
+- Outcome: `other`.
+- Assessment: When a program erases just the right half of a wide character that is reverse-video, underlined, struck
+  through or part of a hyperlink, Farhelm keeps drawing the old inverted background or the underline across the erased
+  column. That column also stays clickable as part of the hyperlink. Verified: Confirmed. `wide_glyph_owns_next_cell`
+  compares only the background and ignores the wide cell's inverse, decoration and link
+  (crates/farhelm-supervisor/src/grid_output.rs:249-257). The code is unchanged since a4c7c4d5. For a hyperlink, the
+  hover display is still required before a click opens anything. The effect is one cell's rendering and hit area.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code. Refuse the absorption when the wide cell is inverted, decorated or linked, and add the three
+  unit tests. Size S–M.
+- Execution: `ktstszyoymsmwpywoxtrttoontrkzuvy`, `plan/triage-terminal-nov24/06-cheap-fixes-1`,
+  [draft PR](https://github.com/scode/farhelm/pull/4855/changes). Fixed. An erased cell does not inherit reverse video,
+  decoration or a link from the glyph next to it.
+
+## trailing-shifted-wide-wrap-spacer-drops-background.md
+
+- Outcome: `other`.
+- Assessment: A program deletes characters (CSI P) on a colored row that ended in a wrapped wide character. The shifted
+  padding cell then loses its background, which leaves a one-column uncolored gap until the program redraws the row.
+  Verified: Confirmed by source. The main loop skips `LEADING_WIDE_CHAR_SPACER` at any column, while the padding paint
+  is emitted only for the last column (`crates/farhelm-supervisor/src/grid_output.rs:154, 163-169, 225-238`). This is a
+  rare edit sequence. It is not in SPEC.md's 2026-11-21 "only" list, so not covered. Not filterable: the gap persists
+  until the program redraws the row.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code (skip the leading spacer only at the padded last column, as the reviewer suggests). Size S.
+- Execution: `ktstszyoymsmwpywoxtrttoontrkzuvy`, `plan/triage-terminal-nov24/06-cheap-fixes-1`,
+  [draft PR](https://github.com/scode/farhelm/pull/4855/changes). Fixed. A shifted wrap spacer keeps its background in
+  its new column.
