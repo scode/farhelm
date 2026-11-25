@@ -171,9 +171,6 @@ consequences.
 - [`agent-settings-search-test-omits-focus-target.md`](agent-settings-search-test-omits-focus-target.md) — The Settings
   search test can pass with a trust result that names the right agent and focuses the wrong control.
 
-- [`launcher-keyboard-recents-hide-custom-flags.md`](launcher-keyboard-recents-hide-custom-flags.md) — Keyboard users
-  can no longer reveal the custom permission flags that distinguish otherwise identical recent setups.
-
 - [`shortcuts-chord-during-composition.md`](shortcuts-chord-during-composition.md) — The Keyboard shortcuts chord can
   interrupt an input method if native handling clears its mark first or the action cannot query the focused field.
 

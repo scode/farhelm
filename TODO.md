@@ -200,6 +200,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   replaced by a clipped frame before presentation, and a successful continuation after a wait. Update the documented
   Enter behavior and key hint if the fill now needs another press.
 
+- **Show Custom approval flags in keyboard-highlighted Recent setups.** Two Recent setups in the launcher can show the
+  same agent and Custom approval mode while saving different flags. Pointer hover and the screen-reader label give the
+  full choice. When the command field keeps keyboard focus, show the saved flag words on the highlighted row in both the
+  command pane and narrow search results, before Enter. Keep the compact wrapper summary and avoid adding a Tab stop. A
+  prototype that wrapped the flags in place still clipped the last words when a highlighted row was taller than the
+  results area. Give keyboard users a way to read those words without changing the highlight, and test two setups with a
+  long shared flag prefix and different final arguments. The complete fix exceeds the triage size gate.
+
 - **Isolate hook setup errors in Restart and recovery.** A failed persistent hook setup carries the host's error in
   `PersistentHookSetup::Failed`. `restart_blocker` escapes and joins it into app prose before the desktop can isolate
   its direction. Keep the raw error separate until drawing. Pass it through `HostText` and `HostSentence` for the
