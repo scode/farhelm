@@ -42,8 +42,9 @@ button or Cmd+Q.
 Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on the same host as the agent, in the
 session's directory. In a [container session](/docs/agents/containerized-sessions/), it opens inside the session's
 container. It belongs to the session: it keeps running when you switch to another session or restart the agent.
-When you come back to a session, Farhelm shows the tab you last chose there until you quit the app; if that tab has
-closed, it shows the agent.
+When the tab you're viewing closes, Farhelm shows the nearest open tab to its left, or the session's main terminal if
+there is none. Farhelm remembers what you were viewing when you switch sessions. If that tab closes while you're away,
+the session opens on its main terminal.
 Stopping or deleting the session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
 to confirm, or **Cancel** to keep it open. You can skip that question with
 [Skip session confirmations](/docs/using/stop-restart-resume/#stop-or-delete) under **Sessions** in settings.

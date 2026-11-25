@@ -41,6 +41,12 @@ use crate::test_support::{self, click, keys, settle, started};
 /// Tab t1's element id, as [`tab_element_id`] names it (the click helper takes a static id).
 const T1_TAB: &str = "session-terminal-tab-t1";
 
+/// Tab t2's element id, as the strip names it.
+const T2_TAB: &str = "session-terminal-tab-t2";
+
+/// Tab t3's element id, as the strip names it.
+const T3_TAB: &str = "session-terminal-tab-t3";
+
 /// Every fake terminal the connection handed out, in the order they were opened, with the attach each was for.
 type Opened = Rc<RefCell<Vec<(FakeTerminal, TerminalAttach)>>>;
 
@@ -240,6 +246,15 @@ impl Window<'_> {
         let set = self.set();
         self.cx
             .update(|_, cx| set.read(cx).chosen().map(str::to_owned))
+    }
+
+    /// The shell tab a new pane would try to restore for session a.
+    fn remembered(&mut self) -> Option<String> {
+        self.cx.update(|_, cx| {
+            cx.try_global::<super::ShownTerminals>()
+                .and_then(|shown| shown.0.get("a"))
+                .cloned()
+        })
     }
 
     /// The words the strip's tabs paint, in order.
@@ -552,22 +567,25 @@ fn session_shortcuts_ignore_a_focused_terminal_composition(cx: &mut TestAppConte
     }
 }
 
-/// SPEC.md, "Session view": "A tab whose process exits on its own is reaped automatically and silently", and the
-/// settled focus case: "A shell tab exits on its own while the user types in it. The session's agent tab takes focus."
-/// The helm detaches a reaped tab's viewer before its row stops listing the tab, so the terminal must not flash a
-/// Detached line in between. Specified: with t1 chosen, live and focused, t1's stream detaching as a closed tab draws
-/// no status line; once the row lists no tabs, the agent terminal is chosen and a typed key reaches it.
+/// A reaped tab goes quietly and the preceding shell takes over typing. The
+/// helm detaches the reaped tab before updating the roster. That interval
+/// keeps the existing screen without drawing a Detached line.
 #[gpui::test]
-fn a_reaped_tab_goes_silently_and_the_agent_terminal_takes_focus(cx: &mut TestAppContext) {
-    let mut window = open(cx, snapshot(&["t1"]));
-    let (agent, t1) = (window.stream_of(None), window.stream_of(Some("t1")));
+fn a_reaped_tab_goes_silently_and_its_predecessor_takes_focus(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    let (agent, t1, t2) = (
+        window.stream_of(None),
+        window.stream_of(Some("t1")),
+        window.stream_of(Some("t2")),
+    );
     window.go_live(agent, "agent");
-    window.go_live(t1, "shell");
-    click(window.cx, T1_TAB);
+    window.go_live(t1, "first shell");
+    window.go_live(t2, "second shell");
+    click(window.cx, T2_TAB);
     keys(window.cx, "x");
-    assert!(window.typed_into(t1), "the premise: t1 has focus");
+    assert!(window.typed_into(t2), "the premise: t2 has focus");
 
-    window.opened.borrow_mut()[t1]
+    window.opened.borrow_mut()[t2]
         .0
         .detach(Some(DetachCode::TabClosed), "the tab was closed");
     settle(window.cx);
@@ -577,31 +595,28 @@ fn a_reaped_tab_goes_silently_and_the_agent_terminal_takes_focus(cx: &mut TestAp
         "no Detached line: {painted:?}"
     );
 
-    window.push_tabs(&[]);
-    assert_eq!(window.chosen(), None);
-    assert_eq!(window.strip_labels(), ["Agent"]);
+    window.push_tabs(&["t1"]);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    assert_eq!(window.remembered().as_deref(), Some("t1"));
+    assert_eq!(window.strip_labels(), ["Agent", "Terminal 1"]);
     keys(window.cx, "y");
-    assert!(window.typed_into(agent), "focus is on the agent terminal");
+    assert!(window.typed_into(t1), "focus is on the preceding shell");
+    assert!(!window.typed_into(agent), "the agent received no input");
 }
 
-/// The old app's settled focus case with a header question open (old `terminal-replay-rename.spec.ts`, "selected tab
-/// removal preserves a header delete question's keyboard ownership"). SPEC.md, "Where focus rests": the terminal is
-/// home and "never takes focus from a control that holds it", and an open question owns the keyboard, so a reaped tab
-/// falling back to the agent terminal must not pull focus out from under the question. If it did, the user's next
-/// Enter, meant for the question, would go to the agent. Specified: with t1 chosen and live and the header's Delete
-/// question open with focus on its confirm button, t1's stream detaching as a closed tab and a row listing no tabs
-/// choose the agent terminal and leave focus on the confirm button; Escape then puts focus on the agent terminal, and a
-/// typed key reaches it.
+/// A reaped tab makes its predecessor home while the header question holds
+/// focus. The next key belongs to the question. Dismissing the question
+/// restores focus to the shell that now shows.
 #[gpui::test]
 fn a_reaped_tab_leaves_focus_on_an_open_header_question(cx: &mut TestAppContext) {
-    let mut window = open(cx, snapshot(&["t1"]));
-    let (agent, t1) = (window.stream_of(None), window.stream_of(Some("t1")));
-    window.go_live(agent, "agent");
-    window.go_live(t1, "shell");
-    click(window.cx, T1_TAB);
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    let (t1, t2) = (window.stream_of(Some("t1")), window.stream_of(Some("t2")));
+    window.go_live(t1, "first shell");
+    window.go_live(t2, "second shell");
+    click(window.cx, T2_TAB);
     assert_eq!(
         window.chosen().as_deref(),
-        Some("t1"),
+        Some("t2"),
         "the premise: the tab is chosen"
     );
     click(window.cx, "session-header-delete");
@@ -611,12 +626,12 @@ fn a_reaped_tab_leaves_focus_on_an_open_header_question(cx: &mut TestAppContext)
         "the premise: the question has focus"
     );
 
-    window.opened.borrow_mut()[t1]
+    window.opened.borrow_mut()[t2]
         .0
         .detach(Some(DetachCode::TabClosed), "the tab was closed");
     settle(window.cx);
-    window.push_tabs(&[]);
-    assert_eq!(window.chosen(), None, "the agent terminal is chosen");
+    window.push_tabs(&["t1"]);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
     assert_eq!(
         test_support::focused_id(window.cx).as_deref(),
         Some("prompt-confirm"),
@@ -629,7 +644,7 @@ fn a_reaped_tab_leaves_focus_on_an_open_header_question(cx: &mut TestAppContext)
         "the question closed"
     );
     keys(window.cx, "y");
-    assert!(window.typed_into(agent), "focus is on the agent terminal");
+    assert!(window.typed_into(t1), "focus is on the preceding shell");
 }
 
 /// The old app's settled focus case with Rename open (old `modal-focus.spec.ts`, "rename keeps focus in its field when
@@ -1836,6 +1851,7 @@ fn closing_a_tab_asks_first_then_sends_one_delete(cx: &mut TestAppContext) {
         Some("t1"),
         "the premise: t1 is shown"
     );
+    assert_eq!(window.remembered().as_deref(), Some("t1"));
     click(window.cx, "session-terminal-close-t1");
     let painted = painted(&test_support::frame(window.cx));
     assert!(
@@ -1872,6 +1888,119 @@ fn closing_a_tab_asks_first_then_sends_one_delete(cx: &mut TestAppContext) {
     window.helm.reply(sent[0].0, 200, Some(json!({})));
     settle(window.cx);
     assert_eq!(window.chosen(), None, "the agent terminal shows");
+    assert_eq!(window.remembered(), None);
+}
+
+/// Closing the second of three tabs chooses the first in strip order, even
+/// when the third was the user's previous choice. A pane remount must
+/// restore that fallback so the next keystroke reaches the first shell.
+#[gpui::test]
+fn closing_the_second_tab_remembers_its_predecessor_after_remount(cx: &mut TestAppContext) {
+    let mut window = open(cx, skipping(&["t1", "t2", "t3"]));
+    tab_requests(&mut window.helm);
+    click(window.cx, T3_TAB);
+    click(window.cx, T2_TAB);
+    assert_eq!(window.chosen().as_deref(), Some("t2"));
+    click(window.cx, "session-terminal-close-t2");
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1, farhelm_helm_client::Method::Delete);
+    assert_eq!(sent[0].2, "/api/sessions/a/tabs/t2");
+    window.helm.reply(sent[0].0, 200, Some(json!({})));
+    settle(window.cx);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    assert_eq!(
+        window.strip_labels(),
+        ["Agent", "Terminal 1", "Terminal 2", "Terminal 3"]
+    );
+
+    window.push_tabs(&["t1", "t3"]);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    assert_eq!(window.strip_labels(), ["Agent", "Terminal 1", "Terminal 2"]);
+    click(window.cx, "session-row-b");
+    let first_new_stream = window.opened.borrow().len();
+    click(window.cx, "session-row-a");
+    let remounted = window.opened.borrow()[first_new_stream..]
+        .iter()
+        .position(|(_, attach)| attach.session == "a" && attach.tab.as_deref() == Some("t1"))
+        .expect("t1 has a freshly attached stream")
+        + first_new_stream;
+    window.go_live(remounted, "first shell after remount");
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    keys(window.cx, "x");
+    assert!(window.typed_into(remounted));
+}
+
+/// A roster push can complete the visible close before its reply. The push saves the fallback, and the later reply
+/// leaves the user's newer selection in place.
+#[gpui::test]
+fn an_explicit_close_can_reach_the_roster_before_its_reply(cx: &mut TestAppContext) {
+    let mut window = open(cx, skipping(&["t1", "t2", "t3"]));
+    tab_requests(&mut window.helm);
+    click(window.cx, T2_TAB);
+    assert_eq!(window.chosen().as_deref(), Some("t2"));
+    click(window.cx, "session-terminal-close-t2");
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1, farhelm_helm_client::Method::Delete);
+    assert_eq!(sent[0].2, "/api/sessions/a/tabs/t2");
+
+    window.push_tabs(&["t1", "t3"]);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    assert_eq!(window.remembered().as_deref(), Some("t1"));
+    click(window.cx, T3_TAB);
+    assert_eq!(window.chosen().as_deref(), Some("t3"));
+    window.helm.reply(sent[0].0, 200, Some(json!({})));
+    settle(window.cx);
+    assert_eq!(window.chosen().as_deref(), Some("t3"));
+    assert_eq!(window.remembered().as_deref(), Some("t3"));
+}
+
+/// Sibling closes have independent replies. A completed background close
+/// keeps the active tab and rules out that sibling as a fallback even while
+/// the pushed strip still lists it.
+#[gpui::test]
+fn concurrent_closes_skip_an_acknowledged_predecessor(cx: &mut TestAppContext) {
+    let mut window = open(cx, skipping(&["t1", "t2", "t3"]));
+    tab_requests(&mut window.helm);
+    click(window.cx, T3_TAB);
+    assert_eq!(window.chosen().as_deref(), Some("t3"));
+    click(window.cx, "session-terminal-close-t2");
+    click(window.cx, "session-terminal-close-t3");
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(
+        sent.iter()
+            .map(|(_, method, path)| (*method, path.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                farhelm_helm_client::Method::Delete,
+                "/api/sessions/a/tabs/t2"
+            ),
+            (
+                farhelm_helm_client::Method::Delete,
+                "/api/sessions/a/tabs/t3"
+            ),
+        ],
+    );
+    window.helm.reply(sent[0].0, 200, Some(json!({})));
+    settle(window.cx);
+    assert_eq!(window.chosen().as_deref(), Some("t3"));
+    assert_eq!(
+        window.strip_labels(),
+        ["Agent", "Terminal 1", "Terminal 2", "Terminal 3"]
+    );
+    click(window.cx, T2_TAB);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t3"),
+        "a completed close cannot be selected"
+    );
+    window.helm.reply(sent[1].0, 200, Some(json!({})));
+    settle(window.cx);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    window.push_tabs(&["t1"]);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
 }
 
 /// The DELETE requests for session a's tabs among [`tab_requests`], as the closed tabs' ids, in the order sent.

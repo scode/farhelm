@@ -25,9 +25,9 @@
 //!   them is on screen does focus rest on the window's root view, which is not a tab stop, so a key press still starts
 //!   inside Farhelm's key context. "On screen" is literal: a home the frame on screen does not draw counts as none
 //!   ([`drawn_home`]), since focus on an undrawn handle takes no keys at all, and after every frame a window resting on
-//!   its root goes home once that frame draws it ([`settle_home`]). SPEC.md's rule for a shell tab that exits (the
-//!   agent tab takes focus at once) needs no move of its own: the terminal set falls back to the agent terminal and the
-//!   session pane makes it home, so the home move covers it.
+//!   its root goes home once that frame draws it ([`settle_home`]). When the focused shell tab closes, the terminal
+//!   set chooses the nearest earlier surviving tab or the main terminal. The session pane makes that terminal home,
+//!   so the ordinary home move transfers focus.
 //! - **The dialog stack's trap and restore**, together with the layer manager, which records who opened each layer and
 //!   what was focused at the time. Tab and Shift+Tab stay inside the topmost layer; closing a layer returns focus to
 //!   where it was before it opened, or home or a control its opener named instead ([`ReturnTo`]); when the focused

@@ -27,9 +27,9 @@
 //!   app's `MAX_MOUNTED_TAB_ISLANDS`), not a feature limit: the strip lists every tab, and a tab past the bound shows
 //!   that it is not attached instead of a terminal. The agent terminal does not count.
 //! - **Focus.** Choosing a tab focuses its terminal through the focus coordinator, with the mark of the click; the
-//!   chosen terminal is home (the session pane makes it so whenever the set changes). When the chosen tab goes, the
-//!   agent terminal is chosen and becomes home, so a reaped tab that held focus leaves it on the agent terminal (SPEC.md,
-//!   "A shell tab exits on its own while the user types in it. The session's agent tab takes focus").
+//!   chosen terminal is home (the session pane makes it so whenever the set changes). Closing or reaping the chosen
+//!   tab makes its nearest earlier surviving tab home, or the agent terminal when there is none. A dialog or question
+//!   that holds focus keeps it.
 //!
 //! - **New terminal and Close.** New terminal (`POST /api/sessions/{id}/tabs`) runs on the session's own operation key,
 //!   so a pending lifecycle request refuses it (SPEC.md, "Lifecycle operations"), and it is unavailable while a question,
@@ -42,10 +42,10 @@
 //!   switch skips "terminal-tab Close"). A refused close shows under the strip on that tab alone ("Close tab: " and the
 //!   helm's words) until its next close.
 //!
-//! - **The choice survives a new view.** Reopening a session or reconnecting to the helm shows the last shell tab the
-//!   user chose if that tab still has a terminal in the set. Choosing Agent clears the choice. Falling back to Agent
-//!   while a tab is absent or its first attach is refused leaves the choice intact. A temporary reconnect keeps
-//!   trying the remembered tab.
+//! - **The choice survives a new view.** Reopening a session or reconnecting to the helm shows the remembered shell
+//!   tab if it has a terminal in the set. A deliberate selection or a close fallback updates the choice, and either
+//!   can clear it by choosing Agent. A missing tab or a refused initial attach during restore leaves the choice
+//!   intact for another opening. A temporary reconnect keeps trying the remembered tab.
 //!   Opening a session the sidebar filters hid can precede its first row. If the user is still waiting when that row
 //!   comes in, it supplies the initial tab list. The terminal shown after restoration receives upload notices left by
 //!   the old view.
@@ -54,7 +54,7 @@
 //! closed). It acts on the tab's id either way.
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use farhelm_helm_client::terminal::AttachmentLease;
@@ -278,9 +278,9 @@ enum StripControl {
     Add,
 }
 
-/// The last shell tab explicitly chosen in each session. The app owns these choices so they survive both pane
-/// remounts and helm resets. Tab ids are never reused, so an absent tab can stay remembered without selecting a
-/// different tab later.
+/// The last chosen shell tab in each session, including the fallback after
+/// a close. The app owns the choice across pane remounts and helm resets.
+/// Tab ids are never reused, so a missing restore target can stay remembered.
 #[derive(Default)]
 struct ShownTerminals(HashMap<String, String>);
 
@@ -307,6 +307,9 @@ pub struct TerminalSet {
     tabs: Vec<Tab>,
     /// The chosen tab's id, `None` for the agent terminal. Only ever a listed tab's.
     chosen: Option<String>,
+    /// Successful sibling closes can arrive before the roster changes. These
+    /// ids are ineligible for selection until the roster drops them.
+    confirmed_closed: HashSet<String>,
     /// The pending restore for this opening. An explicit choice takes precedence even if it chooses this same tab.
     restore: Option<Restore>,
     /// The hold every terminal's notices answer to.
@@ -358,6 +361,7 @@ impl TerminalSet {
             agent,
             tabs: Vec::new(),
             chosen: None,
+            confirmed_closed: HashSet::new(),
             restore,
             hold,
             agent_focus: cx.focus_handle().tab_stop(true),
@@ -478,7 +482,7 @@ impl TerminalSet {
     }
 
     /// Show tab `id`'s terminal (`None` for the agent's) and focus it, with `mark` taken at the press that chose it,
-    /// through the focus coordinator, which also makes it home. A tab that is not listed changes nothing.
+    /// through the focus coordinator, which also makes it home. Only live entries in the current strip can be chosen.
     /// An explicit Agent choice clears the memory even when Agent is already shown as a fallback.
     pub fn choose(
         &mut self,
@@ -488,10 +492,24 @@ impl TerminalSet {
         cx: &mut Context<Self>,
     ) {
         if let Some(wanted) = &id
-            && !self.tabs.iter().any(|tab| &tab.id == wanted)
+            && (self.confirmed_closed.contains(wanted)
+                || !self.tabs.iter().any(|tab| &tab.id == wanted))
         {
             return;
         }
+        if self.set_choice(id, cx) {
+            cx.notify();
+        }
+        self.take_carried(cx);
+        match self.home(cx) {
+            Some(home) => focus::choose_terminal(&home, mark, window, cx),
+            None => focus::set_home(None, window, cx),
+        }
+    }
+
+    /// A deliberate choice or close fallback replaces the restore target and
+    /// its saved selection together. Initial-attach refusals use their own path.
+    fn set_choice(&mut self, id: Option<String>, cx: &mut Context<Self>) -> bool {
         self.restore = None;
         let shown = cx.default_global::<ShownTerminals>();
         match &id {
@@ -502,15 +520,24 @@ impl TerminalSet {
                 shown.0.remove(&self.key);
             }
         }
-        if self.chosen != id {
-            self.chosen = id;
-            cx.notify();
-        }
-        self.take_carried(cx);
-        match self.home(cx) {
-            Some(home) => focus::choose_terminal(&home, mark, window, cx),
-            None => focus::set_home(None, window, cx),
-        }
+        let changed = self.chosen != id;
+        self.chosen = id;
+        changed
+    }
+
+    /// Return the nearest earlier tab in the old strip that still appears in the roster and has no confirmed close.
+    /// The old strip supplies the closing tab's position. `None` shows the main terminal.
+    fn previous_surviving_tab(
+        &self,
+        closed: &str,
+        still_listed: impl Fn(&str) -> bool,
+    ) -> Option<String> {
+        let index = self.tabs.iter().position(|tab| tab.id == closed)?;
+        self.tabs[..index]
+            .iter()
+            .rev()
+            .find(|tab| !self.confirmed_closed.contains(&tab.id) && still_listed(&tab.id))
+            .map(|tab| tab.id.clone())
     }
 
     /// Make every terminal inert, or not ([`AttachedTerminal::set_inert`]), tabs the set learns about later included;
@@ -531,7 +558,7 @@ impl TerminalSet {
     }
 
     /// Bring the tabs in line with the pushed row: keep the terminals of tabs still listed, make terminals for new
-    /// ones, drop those no longer listed, and fall back to the agent terminal when the chosen tab went.
+    /// ones, and choose a predecessor from the old order when the selected tab disappears.
     fn follow_tabs(&mut self, cx: &mut Context<Self>) {
         let listed: Option<Vec<String>> = session::current_store(cx).and_then(|store| {
             store
@@ -561,6 +588,15 @@ impl TerminalSet {
         let Some(session) = self.session.upgrade() else {
             return;
         };
+        let listed_ids: HashSet<&str> = listed.iter().map(String::as_str).collect();
+        self.confirmed_closed
+            .retain(|id| listed_ids.contains(id.as_str()));
+        if let Some(chosen) = &self.chosen
+            && !listed_ids.contains(chosen.as_str())
+        {
+            let fallback = self.previous_surviving_tab(chosen, |id| listed_ids.contains(id));
+            self.set_choice(fallback, cx);
+        }
         // By id, so a long list from the supervisor costs one lookup per tab.
         let mut old: HashMap<String, Tab> = std::mem::take(&mut self.tabs)
             .into_iter()
@@ -601,12 +637,6 @@ impl TerminalSet {
         }
         // What is left in `old` was not listed: its terminals go now, and their streams with them.
         drop(old);
-        if let Some(chosen) = &self.chosen
-            && !self.tabs.iter().any(|tab| &tab.id == chosen)
-        {
-            self.chosen = None;
-            self.restore = None;
-        }
         if let Some(Restore::WaitingForRow(mark)) = waiting_for_row
             && !focus::has_moved_on(&mark, cx)
         {
@@ -964,8 +994,8 @@ impl TerminalSet {
     }
 
     /// Close shell tab `id` (its × and, unless skipped, its question), under the tab's own key, so siblings close side by
-    /// side. Its terminal goes when the pushed row stops listing it. A successful close settles restoration before
-    /// that push, so the main terminal can show pending upload notices as soon as it becomes visible.
+    /// side. Its terminal goes when the pushed row stops listing it. A successful close remembers the fallback
+    /// immediately so that terminal receives carried notices and another close can use the surviving strip.
     /// A refusal shows under the strip until the tab's next close.
     fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         let (Some(operations), Ok(path)) = (
@@ -991,9 +1021,12 @@ impl TerminalSet {
                 move |settled, cx| {
                     if matches!(settled.outcome, Outcome::Done(_)) {
                         let _ = set.update(cx, |set, cx| {
+                            if set.tabs.iter().any(|tab| tab.id == closed) {
+                                set.confirmed_closed.insert(closed.clone());
+                            }
                             if set.chosen.as_deref() == Some(closed.as_str()) {
-                                set.chosen = None;
-                                set.restore = None;
+                                let fallback = set.previous_surviving_tab(&closed, |_| true);
+                                set.set_choice(fallback, cx);
                                 set.take_carried(cx);
                                 cx.notify();
                             }

@@ -21,8 +21,8 @@
 //!   the pane reaches it, drawing included, so a terminal made for an earlier connection is never drawn or focused. The
 //!   session that a reset rebuilds gets a new terminal set for the selection that survived.
 //! - **Focus.** The shown terminal is home (SPEC.md, "Where focus rests"). When the pane makes the set, home is the
-//!   remembered tab if it can be shown, or the agent terminal. It follows each choice in the strip and returns to
-//!   the agent terminal when a chosen tab goes.
+//!   remembered tab if it can be shown, or the agent terminal. It follows each choice in the strip. When a chosen
+//!   tab goes, home follows the nearest earlier surviving tab, or the main terminal when there is none.
 //!   Each time, the pane tells the focus coordinator, which gives it focus only if nothing else holds it. That covers
 //!   the automatic choices: the session opened at startup, and the next session after the open one went away, from
 //!   the command line or an agent included. When the user chooses a session ([`chosen`]), its terminal also takes
@@ -472,8 +472,8 @@ impl SessionPane {
         if !card {
             card::drop_question(cx);
         }
-        // Home follows the shown terminal: a tab the user chooses (the set has already focused it) or the agent
-        // terminal when the chosen tab goes, which takes focus if the tab held it. Only while the set is still the one
+        // Home follows the shown terminal: a tab the user chooses (the set has already focused it) or the fallback
+        // when the chosen tab goes. The fallback takes focus if the closed tab held it, while the set is still the one
         // mounted under the current UI session: a set a reset left behind must not pull home back to its retired
         // terminals.
         if let Some(mounted) = mounted.as_mut()
