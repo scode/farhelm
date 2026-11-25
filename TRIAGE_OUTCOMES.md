@@ -132,25 +132,6 @@
   file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-custom-agent-settings-dirty-close-prompt-collapses-multiple-agents.md
-
-- Outcome: `fix code`.
-- Assessment: With unsaved edits on two custom-agent pages, or on Add custom agent and one agent, the close prompt lists
-  a single "Custom agent". It also switches Settings to whichever draft sorts first rather than leaving the user on
-  their page. Verified: Confirmed. `Edit::name` returns "Custom agent" for every custom-agent edit
-  (`settings/editing.rs:141`), and `ask_to_close` deduplicates by name, then reveals `edits[0]` when one name remains
-  (`editing.rs:585-593`). SPEC.md 2573 says "asks once with the affected forms named". Whether one name per form kind
-  satisfies that is a reading. Save and Discard still cover every draft.
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code. Reveal a page only when one section is affected, and name
-  each custom-agent draft through a host sentence. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
-  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
-  to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## agent-settings-search-omits-agent-name.md
 
 - Outcome: `other`.

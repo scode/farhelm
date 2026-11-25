@@ -60,6 +60,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Name each custom-agent draft when closing Settings.** With unsaved changes on two custom-agent pages, or on Add
+  custom agent and a registered agent, the Close question in `crates/gui/farhelm-gui/src/settings/editing.rs` says
+  “Custom agent” once and can jump to a different page. Name every affected form. Give each registration a separate
+  accessible row with its escaped display name and stable ID, and give Add and any other named forms accessible labels
+  too, including when Add is the only draft. Use the question’s keyboard scroll stop for long lists. Stay on the current
+  page when more than one section is affected, and preserve the existing behavior for distinct forms sharing
+  Credentials. Save and Discard still apply to the versions of the drafts the question approved. Save waits for pending
+  saves and leaves Settings open on the first refusal, with that form and its error visible. Test real changes to Add
+  and a registered agent, the accessible labels, and the page retained behind the question. Capture and review the new
+  prompt in light and dark, publish the accepted references, and include their manifest entries in the fix. See the
+  Settings close contract in `SPEC.md`. The separate form names, keyboard access and their required evidence exceed this
+  item’s size allowance.
+
 - **Keep credential delivery reports visible when Settings closes.** A replacement saved through Save and Close can
   reach storage while some hosts miss delivery. `crates/gui/farhelm-gui/src/settings/credentials/editor.rs` sends the
   committed receipt and clears the editor. `settings/credentials.rs` puts the host names and reasons on the overview,
