@@ -523,7 +523,7 @@ pub fn facts(action: &ApprovalAction) -> Vec<Fact> {
             session_facts(Role::Target, target, &mut facts);
             // The target's shield as the session list draws it, observed bypass included; display evidence only, never
             // a launch this request would run.
-            facts.extend(Chips::of(launch, *screen_yolo, Detail::Plain).map(Fact::Permission));
+            facts.extend(Chips::of(launch, *screen_yolo, Detail::Prompt).map(Fact::Permission));
             // SPEC.md: the card "says when the target session is open in the window", the one client a helm accepts
             // (One GUI at a time).
             if *attached {
@@ -744,7 +744,7 @@ enum Runs {
 /// command, which is all a restart runs. On a named start, the card's start command includes the one-time selector.
 /// Settings changes never reinterpret the argv the card already showed.
 fn launch_facts(launch: &SessionLaunch, runs: Runs, facts: &mut Vec<Fact>) {
-    facts.extend(Chips::of(launch, false, Detail::Launch).map(Fact::Permission));
+    facts.extend(Chips::of(launch, false, Detail::Launch(runs)).map(Fact::Permission));
     match launch {
         SessionLaunch::Agent { selection, .. } if selection.harness.is_shell() => {
             facts.push(value("shell", crate::harness::name(selection.harness)));
@@ -939,6 +939,8 @@ pub struct Chips {
     shield: Shield,
     /// Which of the shield's meanings the chip names.
     pub kind: ChipKind,
+    /// The wording for a YOLO chip on an approval that resumes or sends input to an existing agent.
+    action_description: Option<&'static str>,
     /// The agent's own name for its guarded mode ("Guarded · Claude auto mode"), on a launch or restart card whose
     /// stored permission is Guarded.
     pub guarded: Option<&'static str>,
@@ -961,12 +963,12 @@ pub enum ChipKind {
     AssertedNotYolo,
 }
 
-/// How much a Permissions row says: a launch or restart card adds the guarded mode's name and the workspace trust; a
-/// prompt card shows only the target's chip.
+/// The action the user is approving. Start and Restart add stored permission and trust details. Prompt shows only
+/// the target's chip. The same YOLO shield can accompany any of the three actions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Detail {
-    Launch,
-    Plain,
+    Launch(Runs),
+    Prompt,
 }
 
 /// The chip explains what the recorded trust choice allows. Directory scope depends on the harness.
@@ -979,10 +981,20 @@ impl Chips {
         let kind = ChipKind::of(shield, launch);
         let selection = launch
             .agent_selection()
-            .filter(|_| detail == Detail::Launch);
+            .filter(|_| matches!(detail, Detail::Launch(_)));
+        let action_description = match (kind, detail) {
+            (ChipKind::Yolo, Detail::Launch(Runs::Resume)) => {
+                Some("Plain Restart is exempt from the host's YOLO launch rule")
+            }
+            (ChipKind::Yolo, Detail::Prompt) => {
+                Some("Sends a prompt to the existing session without starting an agent")
+            }
+            _ => None,
+        };
         Some(Chips {
             shield,
             kind,
+            action_description,
             guarded: selection
                 .filter(|_| kind == ChipKind::Guarded)
                 .and_then(|selection| words::guarded_mode_name(selection.harness)),
@@ -1011,9 +1023,12 @@ impl Chips {
         self.shield() == Shield::Yolo
     }
 
-    /// The words beside the chip: the guarded mode's own name when the card has it, else the meaning's description.
+    /// The words beside the chip. Describe what the approval does when a YOLO session is restarted or receives a
+    /// prompt, since the usual YOLO explanation is about starting a session.
     pub fn description(&self) -> &str {
-        self.guarded.unwrap_or(self.kind.description())
+        self.action_description
+            .or(self.guarded)
+            .unwrap_or(self.kind.description())
     }
 }
 

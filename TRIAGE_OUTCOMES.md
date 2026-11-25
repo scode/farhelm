@@ -239,24 +239,6 @@
   Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
-## trailing-retired-yolo-flag-refusal-overstates-when-farhelm-asks.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md "Agent-spawned sessions" (4539-4540): "A request from a host whose 'run farhelm
-  commands from this host without asking' setting is on (see Topology) is not asked about for commands." The "Manage
-  sessions on this host without asking" permission waives the card too (4550-4553). The code contradicts this:
-  `crates/farhelm/src/main.rs:853` says "Farhelm asks the user before any agent launch". The fix is mechanical: drop the
-  blanket claim and keep the obsolete-flag and YOLO-guard explanation. No other copy of the text exists. Diff about 5-10
-  lines, well under 100. Borderline: the required wording of the message is not itself specified, only the facts it
-  misstates.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes. Size gate: about 100 lines of
-  diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
-  part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## trailing-completed-setup-save-steal-focus-from-newer-input.md
 
 - Outcome: `fix code`.
@@ -3962,23 +3944,6 @@
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
 - Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
-## trailing-approval-card-yolo-description-wrong-on-restart-and-prompt.md
-
-- Outcome: `fix code`.
-- Assessment: Agent approval cards for a plain Restart of a YOLO session, and the currently disabled Prompt cards, say
-  "Farhelm applies the host's YOLO rules to this launch". The host's YOLO rule does not apply to plain Restart or to
-  Prompt. Verified: confirmed. The string is at `approvals/model.rs:1065`. SPEC.md 4555-4556 ("Plain restart is exempt
-  from that YOLO rule, including a restart of a YOLO session") and 4502 ("The YOLO launch rule does not apply because
-  this starts no agent"). The fix needs wording per card kind, which is a choice. The Prompt part is dormant.
-- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
-  Recommendation for reference: fix code by rewording to describe the bypass, not enforcement, or by varying it per
-  action. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
-  or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
-  file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-gone-terminal-ended-confirmation.md
 
