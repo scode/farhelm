@@ -47147,3 +47147,31 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   TODO.md. The launcher can still see the original Stopped row after a slow provider check fails. Change
   `nozstsuxuxluyxlquuuwzsqususstqky`, bookmark `plan/triage-environments-nov24/01d-wake-failure-follow-up`.
   [Draft PR](https://github.com/scode/farhelm/pull/4901/changes).
+
+## trailing-wake-drops-one-time-yolo-confirmation.md
+
+- Outcome: `fix code`.
+- Assessment: When a launch needs the one-time "Start YOLO session anyway" confirmation, and the target sandbox or
+  container gets suspended or stopped while that question is open, answering it wakes the host. The yes is then thrown
+  away, so once the host is back the helm refuses the launch and the same YOLO question appears again. The user has to
+  confirm a second time. Nothing launches without confirmation. Verified: confirmed. `Launcher::submit`
+  (`crates/gui/farhelm-gui/src/launcher/view.rs:1416-1435`) clears `self.yolo` and returns into `begin_host_wake` before
+  `self.request(confirm_yolo, …)`. Nothing passes `confirm_yolo` on, and `continue_after_wake` (`view.rs:2994-3005`)
+  ends in `submit(false, …)`. SPEC_impl.md "Questions" (`SPEC_impl.md:1004-1005`) says the answer "carries its
+  permission through a wait for a host setting or checkout preview". A host wake is not named there, so carrying it is a
+  reading of that rule, not its words.
+- Decision: q-wake, "What waking a host at launch must guarantee": the maintainer picked "Never wedge, fail fast, word
+  per provider". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "Wait, another
+  complexity gate. If this turns complicated, the executor must stop and turn it into a follow-up to the item explaining
+  what's complicated and why."
+- Completion criteria: Launch-time waking never wedges, fails fast and words failures per provider. Recommendation for
+  reference: fix code — carry the confirmation through the wake for the same frozen installation, and extend the
+  SPEC_impl sentence to name the wake; size S–M. Complexity gate (maintainer): if the fix turns very complicated during
+  execution, the executor stops and turns it into a follow-up TODO.md entry that explains what is complicated and why,
+  instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Deferred to **Keep one-time YOLO confirmation through a host wake** in TODO.md. The full fix must preserve
+  the original installation across a delayed refusal, wake, and checkout preview. Change
+  `uxvzxqovvpvytstwnskoxynksvuqnnrr`, bookmark `plan/triage-environments-nov24/01e-wake-confirmation-follow-up`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4910/changes).
