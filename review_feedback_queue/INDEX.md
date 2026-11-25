@@ -78,6 +78,16 @@ consequences.
   whenever the place is occupied — the exact case the restoration promise was written for; can destroy a foreign app
   (double-swap trigger rare; single-swap variant deletes the user's reinstallable prior install).
 
+- [`trailing-legacy-claude-settings-v036-hosts-never-cleaned.md`](trailing-legacy-claude-settings-v036-hosts-never-cleaned.md)
+  — A Tensorlake host set up by 0.36.0 and not connected under 0.37-0.43 keeps Farhelm's old Claude endpoint URL and
+  token in Claude's settings for good; per SPEC_impl.md they can take precedence and receive a new token (Claude Code
+  precedence unverified).
+
+- [`trailing-legacy-codex-config-v036-hosts-never-cleaned.md`](trailing-legacy-codex-config-v036-hosts-never-cleaned.md)
+  — The same 0.36.0-era Tensorlake hosts keep Farhelm's old Codex endpoint and token in Codex's config, so a newly
+  selected login or endpoint may not take effect, and per SPEC_impl.md the old token can reach a new tokenless endpoint
+  (Codex merge behavior unverified).
+
 ## High priority: material UX degradation
 
 - [`antigravity-trust-warning-omitted-from-accessibility.md`](antigravity-trust-warning-omitted-from-accessibility.md) —
@@ -204,6 +214,10 @@ consequences.
   — In the Templates editor, adding Approvals to a Command template that declares a custom agent (or opening a stored
   one whose Approvals was set to 'Keeps safety checks') displays only the static message 'Custom agents always run in
   YOLO mode.' with no toggle and lets the user save, yet actually saves YOLO as off ('Not YOLO').
+
+- [`trailing-replace-with-recent-named-fill-enter-replaces.md`](trailing-replace-with-recent-named-fill-enter-replaces.md)
+  — In Replace with, a screen reader announces a highlighted recent setup as "Fill from recent setup" while Enter on it
+  replaces and deletes the source session; highest if the "⏎ Replace" key cap is not announced with it.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -770,3 +784,114 @@ consequences.
 - [`reconcile-archive-moves-creation-time-unconfirmed-checkout.md`](reconcile-archive-moves-creation-time-unconfirmed-checkout.md)
   — reconcile_archive lacks the creation-time-unconfirmed refusal archive_move has, so recovering a legacy interrupted
   archive can move an unconfirmed checkout to trash (displaced/recoverable, not destroyed; legacy-journal premise).
+
+- [`trailing-drift-copyback-runs-while-agent-may-live.md`](trailing-drift-copyback-runs-while-agent-may-live.md) — A
+  Grok or Antigravity drift case copies refreshed vendor files back once its terminal hosts end, even when the agent may
+  still be running (failed Delete sweep, failed create, detached process), so a later vendor save such as a refreshed
+  login can be lost without a note.
+
+- [`trailing-drift-runner-drops-requested-harness.md`](trailing-drift-runner-drops-requested-harness.md) — The drift
+  runner silently skips an explicitly requested agent that has no case in the chosen category and can exit successfully
+  without checking it.
+
+- [`trailing-drift-panic-skips-copyback.md`](trailing-drift-panic-skips-copyback.md) — A panic inside a Grok or
+  Antigravity drift case skips copying a refreshed vendor login back to the maintainer's real config, with no note
+  (pre-existing).
+
+- [`trailing-drift-failed-copyback-passes-case.md`](trailing-drift-failed-copyback-passes-case.md) — A failed copy-back
+  of a refreshed vendor login is only a console note and the drift case still reports passed, so the maintainer may be
+  signed out unnoticed.
+
+- [`trailing-antigravity-restart-selector-after-custom-dashdash.md`](trailing-antigravity-restart-selector-after-custom-dashdash.md)
+  — With Custom permission flags ending in `--`, Antigravity Restart places the conversation choice after `--`, so
+  Restart cannot resume and the new drift case always fails (pre-existing product defect).
+
+- [`trailing-drift-cursor-initial-prompt-never-passes.md`](trailing-drift-cursor-initial-prompt-never-passes.md) —
+  Cursor's launch-prompt drift case always ends "could not run" even when Cursor accepts the prompt, so the check can
+  never pass.
+
+- [`trailing-goose-named-start-reports-contrary-to-spec.md`](trailing-goose-named-start-reports-contrary-to-spec.md) — A
+  named Goose start into a conversation Farhelm created appears to capture it and regain plain Restart, contrary to the
+  launcher text and SPEC.md (pre-existing; admission premise unverified).
+
+- [`trailing-drift-capture-timing-check-too-coarse.md`](trailing-drift-capture-timing-check-too-coarse.md) — The
+  capture-timing drift check treats prompt-timed and reply-timed agents alike, so a vendor drift between "at the first
+  prompt" and "after the first reply" would go unnoticed.
+
+- [`trailing-release-notes-recapture-parks-on-tooltip-field.md`](trailing-release-notes-recapture-parks-on-tooltip-field.md)
+  — Recapturing the v0.42.0 Antigravity release-notes picture parks the pointer on the Conversation field, so its
+  tooltip would be drawn into the picture (from source; not seen in a capture).
+
+- [`trailing-brick-cleanup-refuses-untested-remote-mac-pair.md`](trailing-brick-cleanup-refuses-untested-remote-mac-pair.md)
+  — After a stop-after-P0 request, brick-test cleanup refuses a prepared but untested remote Mac pair and demands a
+  retention decision for machines with no evidence.
+
+- [`trailing-file-disclosure-holdback-silent-click.md`](trailing-file-disclosure-holdback-silent-click.md) — When a
+  terminal file's details card would cover the pointer, it flashes and vanishes and a click on the path does nothing,
+  with no "not visible" explanation (pre-existing).
+
+- [`trailing-file-prepaint-click-test-gap.md`](trailing-file-prepaint-click-test-gap.md) — The test for clicking a
+  terminal file before its card paints misses the placed-but-unpainted window, so dropping that guard would go unnoticed
+  (likely; premise on GPUI event timing).
+
+- [`trailing-spec-file-click-release-wording.md`](trailing-spec-file-click-release-wording.md) — SPEC.md says a file
+  click must be pressed and released over the painted card, but the press closes the card and the release is accepted
+  without it; SPEC_impl.md has it right.
+
+- [`trailing-grid-wide-glyph-absorbs-foreign-spacer.md`](trailing-grid-wide-glyph-absorbs-foreign-spacer.md) — After a
+  program deletes characters from the middle of a wide character, one cell can show the wrong background color
+  (pre-existing; cosmetic).
+
+- [`trailing-tab-shell-hangup-delete-wiring-untested.md`](trailing-tab-shell-hangup-delete-wiring-untested.md) — No test
+  would notice if Delete stopped giving macOS tab shells their hangup, which would again lose their shell history.
+
+- [`trailing-agent-create-connection-binding-untested.md`](trailing-agent-create-connection-binding-untested.md) — No
+  test covers binding an agent-requested session to the host connection the user approved, so the fix could regress
+  silently.
+
+- [`trailing-reposted-notice-not-revealed.md`](trailing-reposted-notice-not-revealed.md) — In an overflowing notice
+  stack, a repeated connection-lost or opt-out-refused notice stays scrolled out of view instead of being revealed
+  (pre-existing).
+
+- [`trailing-drift-claude-trust-real-config-byte-check.md`](trailing-drift-claude-trust-real-config-byte-check.md) — The
+  Claude trust drift case fails whenever another Claude session rewrites the real ~/.claude.json during the case,
+  reading as if Farhelm wrote it (frequency unmeasured).
+
+- [`trailing-drift-claude-trust-ancestor-vacuous-pass.md`](trailing-drift-claude-trust-ancestor-vacuous-pass.md) — The
+  Claude trust drift case can pass without proving Claude honours Farhelm's entry if the maintainer's config already
+  trusts /tmp or /.
+
+- [`trailing-launcher-new-clone-enter-after-vanished-pick.md`](trailing-launcher-new-clone-enter-after-vanished-pick.md)
+  — In New and Clone, Return on a highlighted template or folder row can launch instead of picking when the highlight
+  vanished before the redraw; only Replace with is guarded.
+
+- [`trailing-spec-impl-hook-answer-preview-wait.md`](trailing-spec-impl-hook-answer-preview-wait.md) — SPEC_impl.md says
+  a hook-setup answer waits for a checkout preview, but the launch is refused instead and the user has to press Launch
+  again.
+
+- [`trailing-launcher-held-escape-discards-draft.md`](trailing-launcher-held-escape-discards-draft.md) — Holding Escape
+  with typed results or the Save as template panel open can close the whole launcher and discard its draft; the fix
+  covered only the highlight case.
+
+- [`trailing-launcher-stale-permanent-yolo-answer-silent.md`](trailing-launcher-stale-permanent-yolo-answer-silent.md) —
+  A stale "Start, and don't ask again on this host" answer closes the YOLO question with nothing started and no reason,
+  sometimes after the host setting was already saved.
+
+- [`trailing-templates-stale-save-duplicate-footer.md`](trailing-templates-stale-save-duplicate-footer.md) — Save or
+  Duplicate clicked just after switching templates can act on the newly opened template, writing automatic updates into
+  an older template the user never saw (pre-existing).
+
+- [`trailing-host-setup-frozen-skip-ignores-later-restore.md`](trailing-host-setup-frozen-skip-ignores-later-restore.md)
+  — Turning "Set up new hosts without asking" off while a host check is running no longer brings back the setup
+  confirmation for that attempt.
+
+- [`trailing-tensorlake-rerun-reads-skip-setting-late.md`](trailing-tensorlake-rerun-reads-skip-setting-late.md) —
+  Tensorlake Re-run reads "Create Tensorlake sandboxes without asking" after the plan arrives, so turning it on during
+  the check skips the billed-creation confirmation.
+
+- [`trailing-host-refusal-remove-reads-live-skip.md`](trailing-host-refusal-remove-reads-live-skip.md) — Remove in the
+  host refusal dialog reads "Remove hosts without asking" at the press, so a just-changed setting can forget the host
+  without the confirmation the dialog implied.
+
+- [`trailing-spec-impl-custom-agent-id-letter.md`](trailing-spec-impl-custom-agent-id-letter.md) — SPEC_impl.md says
+  registered custom agent IDs start with a letter, but they may start with a digit.
