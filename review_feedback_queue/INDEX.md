@@ -242,17 +242,11 @@ consequences.
 - [`hook-recovery-text-omits-direction-isolation.md`](hook-recovery-text-omits-direction-isolation.md) — Restart and
   recovery text escape host-supplied hook errors without isolating their text direction.
 
-- [`resume-off-command-gets-hook-warning.md`](resume-off-command-gets-hook-warning.md) — A command launch with Resume
-  off can get a misleading silent-hook warning that an arriving report does not clear.
-
 - [`uninstall-omits-persistent-hook-cleanup.md`](uninstall-omits-persistent-hook-cleanup.md) — Uninstall can leave Grok
   and Antigravity callbacks pointing to the removed Farhelm executable, and the uninstall guidance omits cleanup.
 
 - [`launcher-keyboard-recents-hide-custom-flags.md`](launcher-keyboard-recents-hide-custom-flags.md) — Keyboard users
   can no longer reveal the custom permission flags that distinguish otherwise identical recent setups.
-
-- [`hook-setup-accepts-nonutf8-config-path.md`](hook-setup-accepts-nonutf8-config-path.md) — Persistent hook setup can
-  write to a non-UTF-8 configuration path and report success even though the path contract calls for refusing it.
 
 - [`environment-delete-title-unreachable-by-keyboard.md`](environment-delete-title-unreachable-by-keyboard.md) — A long
   target title can clip in an environment Delete confirmation where keyboard paging reaches the warning but cannot

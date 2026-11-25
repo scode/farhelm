@@ -46221,3 +46221,47 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   feedback file and its index entry.
 - Execution: `zkwsxwrnpplzqkluplonkmkvvysymlmy`, `plan/triage-hooks-trust-nov24/05d-trust-accessibility`,
   [draft PR](https://github.com/scode/farhelm/pull/4905/changes). Fixed under the desktop accessibility parity rule. An unread workspace trust switch is presented to assistive technology as an unavailable label. It reports a toggle value once the saved choice is known.
+
+## hook-setup-accepts-nonutf8-config-path.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC.md "Paths that are not valid UTF-8" (~:5366-5370) says: "Farhelm does not support
+  paths that are not valid UTF-8 … Every surface that meets one refuses it with a clear message naming the path as well
+  as it can be shown". Current code reads `GROK_HOME` and `HOME` as raw `OsString`s and checks only that they are not
+  empty (`crates/farhelm-supervisor/src/service/core.rs:6280-6296`). It then installs to the derived paths with no UTF-8
+  check (`agent_kind/persistent_hooks.rs:43-58,64-75`). The fix follows directly: refuse a non-UTF-8 destination before
+  writing, through the existing optional-setup failure (`setup_vendor_hooks`'s `Failed { reason }`,
+  `core.rs:14913-14923`). The launch still continues. No comment explains the current choice, so this overturns no
+  deliberate decision. Verified: confirmed by source. Today the files go to the right bytes and setup reports Installed.
+  The gap is the missing refusal, not any harm, so the maintainer may simply prefer to drop it.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code. Under
+  ~100 lines with a test. Size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
+  the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
+  Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
+- Execution: `vqnmznxwtprkqzrzqrzktyvruwqmpxyp`, `plan/triage-hooks-trust-nov24/05e-hook-setup-and-warning`,
+  [draft PR](https://github.com/scode/farhelm/pull/4908/changes). Fixed. The optional Grok and Antigravity hook installation reports an unsupported path before writing files. The session can still start.
+
+## resume-off-command-gets-hook-warning.md
+
+- Outcome: `fix code`.
+- Assessment: A Command-tab launch that declares Grok or Antigravity, with Resume left off and hook setup on, gets hooks
+  installed and the silent-report clock armed. If the agent has not reported a minute after the first Enter, the session
+  gets a warning: "Until it does, Restart cannot resume this conversation". Restart can never resume this launch,
+  because it has no resume command. If the report does arrive, the warning never resolves. Verified: confirmed. The helm
+  requests setup by agent kind only (`crates/farhelm-helm/src/sessions.rs:2199-2202`). A successful install marks the
+  launch as hooked regardless of its resume template (`crates/farhelm-supervisor/src/service/core.rs:14810-14814`).
+  Neither the tripwire (`service/capture.rs:355-385`) nor `notify_hook_silent` (:135-165) checks for a resume command.
+  The text is at `service/notifications.rs:247-264`. The trigger needs the vendor's report to be missing, which nobody
+  has observed. The non-first-class harness filter is still not clearly met. The missing resume-command check is generic
+  and looks like it applies to any hooked command launch with Resume off, Claude's `{farhelm_args}` launches included.
+  That Claude path was not traced to the end.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code. Skip the
+  warning, or reword it, when the launch has no resume command. Size S. Size gate: about 100 lines of diff (code, tests
+  and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings
+  the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: `vqnmznxwtprkqzrzqrzktyvruwqmpxyp`, `plan/triage-hooks-trust-nov24/05e-hook-setup-and-warning`,
+  [draft PR](https://github.com/scode/farhelm/pull/4908/changes). Fixed. The missing conversation-hook notification requires a resume command. Hook setup, reports and the supervisor diagnostic are available with Resume off.
