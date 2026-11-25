@@ -2501,22 +2501,6 @@
   feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
-## update-accessible-names-can-collide-across-host-kinds.md
-
-- Outcome: `other`.
-- Assessment: In the attention list, each host's Update button is named after the host. An SSH host whose plain address
-  equals a container's name would give two Update buttons the same spoken name, so a screen-reader user could not tell
-  them apart. Verified: Confirmed by the reviewer's source trace. Not re-traced end to end; the label paths
-  (`hosts/update.rs`, `session_list/attention.rs`) were last touched by refactors only. It needs an unaliased SSH
-  destination equal to an existing container's display name, with both needing updates. Each button still acts on its
-  own host id.
-- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
-  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard (very rare coincidence, nothing acts on the wrong host).
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## agent-settings-search-omits-agent-name.md
 
 - Outcome: `other`.
@@ -2593,23 +2577,6 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (page the title line, or every host-value line). Size S-M.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## trailing-add-host-tailscale-checkbox-evicts-focus.md
-
-- Outcome: `other`.
-- Assessment: In Add host, the Tailscale host checkbox turns disabled while Farhelm checks the destination, and during
-  the short pause after approval cards arrive while reviewing an agent's add-host request. If keyboard focus was on the
-  checkbox it is lost, and Tab skips it, while the text fields stay usable. Verified: Confirmed. `hosts/add.rs:915-917`:
-  `busy` includes `request.paused(cx)`. `add.rs:1589-1600`: `.disabled(busy)`. Disabled checkboxes stop focus tracking,
-  per the reviewer's reference to `components/checkbox.rs`. SPEC.md "Things changing underneath" protects focus in what
-  the user is typing, and the agent-dialog pause is something the user did not start. The fix shape is a choice
-  (read-only vs disabled, gate on probing only).
-- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
-  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  fix code S.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md
 

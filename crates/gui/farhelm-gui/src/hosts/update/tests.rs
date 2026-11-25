@@ -439,9 +439,22 @@ fn mixed_hosts() -> Vec<HostView> {
     listed
 }
 
+/// A shared display name or a host alias ending in an environment kind must sound distinct from the container.
+#[test]
+fn update_names_distinguish_a_container_from_an_ssh_host() {
+    let ssh = reference_hosts().remove(1);
+    let mut container = ssh.clone();
+    container.kind = "podman".into();
+    let alias = aliased(ssh.clone(), "build-box (Container)", "build-box");
+    let container_name = super::accessible_name(&container);
+    assert_eq!(container_name.as_ref(), "Update container build-box");
+    assert_ne!(super::accessible_name(&ssh), container_name);
+    assert_ne!(super::accessible_name(&alias), container_name);
+}
+
 /// SPEC.md, "Session list": a remote host with an older build shows "an outlined `↑ Update` button" beside its words, and
 /// "inline progress replaces it"; the old button moved focus to the row's menu toggle, since the progress takes its
-/// place. Specified: `build-box` (old build) and `gpu-1` (older protocol) draw "Update build-box" and "Update gpu-1";
+/// place. Specified: `build-box` (old build) and `gpu-1` (older protocol) draw Update buttons that name their hosts;
 /// the local host, a current host and a newer one draw none; pressing `build-box`'s sends its plan request, the button
 /// gives way to "Updating…", and focus is on its row's toggle.
 #[gpui::test]
@@ -449,9 +462,12 @@ fn the_inline_update_shows_on_an_older_remote_host_and_starts_the_update(cx: &mu
     let (mut helm, cx) = panel(cx, vec![hosts(&mixed_hosts())]);
     assert_eq!(
         label(cx, "host-update-2").as_deref(),
-        Some("Update build-box")
+        Some("Update host build-box")
     );
-    assert_eq!(label(cx, "host-update-3").as_deref(), Some("Update gpu-1"));
+    assert_eq!(
+        label(cx, "host-update-3").as_deref(),
+        Some("Update host gpu-1")
+    );
     for id in [1, 4, 5] {
         assert_eq!(label(cx, &format!("host-update-{id}")), None, "host {id}");
     }

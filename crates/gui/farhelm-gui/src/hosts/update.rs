@@ -63,6 +63,7 @@ use super::offers::{self, Update};
 use super::refusal;
 use super::setup_sign_in;
 use crate::components::{Button, HoverHelp, Role, Tier};
+use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{self, Command, OpKey, Outcome, Work};
@@ -357,17 +358,19 @@ pub(crate) fn hover(state: &HostStateView) -> Option<HostSentence> {
     }
 }
 
-/// The shared Update name for a single host. Keyboard and screen-reader users can tell which host a button
-/// affects in either list, with the same escaping as the host name shown on its row.
+/// Put the kind before the escaped Update target so a host name cannot mimic another kind's label.
 pub(crate) fn accessible_name(host: &HostView) -> SharedString {
+    let kind = offers::HostKind::of(host)
+        .provider()
+        .map_or("host", |provider| ProviderUi(provider).noun());
     HostSentence::new("host-update-name")
-        .text("Update ")
+        .text(format!("Update {kind} "))
         .host(&display_name(host))
         .accessible_name()
 }
 
 /// Host `host`'s inline `↑ Update` (`.host-update-button`), or `None` where the row draws none: its Update is not
-/// available (`available`, from the panel's frame) or its phase establishes no urgency. Named "Update <name>", with
+/// available (`available`, from the panel's frame) or its phase establishes no urgency. Names the kind and host, with
 /// [`hover`] as its hover help. Pressing it starts the Update and moves focus to `toggle`, the row's menu toggle, as
 /// the old button did: the row's progress takes the button's place, which would leave focus nowhere.
 pub(crate) fn button(
