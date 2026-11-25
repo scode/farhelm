@@ -17,8 +17,9 @@
 //!
 //! One gap needs care: a vendor that saves a file by renaming a new copy over it replaces the mirror's symlink and
 //! leaves the real file as it was. A refreshed login token would then be lost with the mirror. [`PrivateConfig::finish`]
-//! copies such a replaced file back when the real one has not changed meanwhile, and reports it otherwise. Entries
-//! the vendor creates inside the private directories themselves are dropped with the mirror.
+//! copies such a replaced file back when the real one has not changed meanwhile and the case's terminal hosts are
+//! confirmed ended, and names it in a note otherwise, including when its copy-back fails. Entries the vendor creates
+//! inside the private directories themselves are dropped with the mirror.
 //!
 //! Adding a kind with persistent hooks needs nothing here as long as its paths lie under the home or Grok's home;
 //! the guard test below fails for one that does not, and for one without a drift profile.
@@ -213,8 +214,10 @@ impl Mirror {
     }
 
     /// Copy back regular files the vendor replaced in the mirror, when the real file is unchanged since the mirror
-    /// was built. Returns a note for each replaced file it could not copy back.
-    fn copy_back(&self) -> anyhow::Result<Vec<String>> {
+    /// was built. Returns a note for each replaced file it could not copy back. A failed copy of one file becomes its
+    /// note rather than an early return, so it cannot cost the files after it (a refreshed login among them) or the
+    /// caller's hook check.
+    fn copy_back(&self) -> Vec<String> {
         let mut notes = Vec::new();
         for (relative, stamp) in &self.links {
             let private = self.private.join(relative);
@@ -233,23 +236,70 @@ impl Mirror {
                 ));
                 continue;
             }
-            // Resolve the maintainer's own symlinks (dotfiles, say) so the rename replaces the file, not the link.
-            let target =
-                fs::canonicalize(&real).with_context(|| format!("resolving {}", real.display()))?;
-            let staged = target.with_file_name(format!(
-                ".{}.farhelm-drift-{}",
-                target
-                    .file_name()
-                    .map(|name| name.to_string_lossy())
-                    .unwrap_or_default(),
-                std::process::id()
-            ));
-            fs::copy(&private, &staged).with_context(|| format!("staging {}", staged.display()))?;
-            fs::set_permissions(&staged, fs::metadata(&target)?.permissions())?;
-            fs::rename(&staged, &target)
-                .with_context(|| format!("replacing {}", target.display()))?;
+            if let Err(error) = Self::replace_real(&private, &real) {
+                notes.push(format!(
+                    "{} was rewritten during the case, but copying it back failed: {error:#}; the case's copy was \
+                     dropped",
+                    relative.display()
+                ));
+            }
         }
-        Ok(notes)
+        notes
+    }
+
+    /// Atomically replace the real file with the vendor's copy from the mirror, keeping the real file's permissions.
+    fn replace_real(private: &Path, real: &Path) -> anyhow::Result<()> {
+        // Resolve the maintainer's own symlinks (dotfiles, say) so the rename replaces the file, not the link.
+        let target =
+            fs::canonicalize(real).with_context(|| format!("resolving {}", real.display()))?;
+        let staged = target.with_file_name(format!(
+            ".{}.farhelm-drift-{}",
+            target
+                .file_name()
+                .map(|name| name.to_string_lossy())
+                .unwrap_or_default(),
+            std::process::id()
+        ));
+        // `fs::copy` creates the staged file before writing it, so every step from the copy on shares the cleanup:
+        // a copy cut short (a full disk, say) must not leave part of a login token beside the real file.
+        let copied = fs::copy(private, &staged)
+            .with_context(|| format!("staging {}", staged.display()))
+            .and_then(|_| {
+                let permissions = fs::metadata(&target)
+                    .with_context(|| format!("reading {}", target.display()))?
+                    .permissions();
+                fs::set_permissions(&staged, permissions)
+                    .with_context(|| format!("setting permissions on {}", staged.display()))
+            })
+            .and_then(|()| {
+                fs::rename(&staged, &target)
+                    .with_context(|| format!("replacing {}", target.display()))
+            });
+        if copied.is_err() {
+            let _ = fs::remove_file(&staged);
+        }
+        copied
+    }
+
+    /// Name every file the vendor replaced in the mirror, for a case whose terminal hosts were not confirmed ended
+    /// and whose copies are therefore not copied back. The mirror is deleted with the case, so these notes are the
+    /// only record that the vendor's write was lost.
+    fn dropped_without_shutdown(&self) -> Vec<String> {
+        self.links
+            .iter()
+            .filter(|(relative, _)| {
+                fs::symlink_metadata(self.private.join(relative))
+                    .is_ok_and(|metadata| metadata.is_file())
+            })
+            .map(|(relative, _)| {
+                format!(
+                    "{} was rewritten during the case, but its terminal hosts were not confirmed ended; the case's \
+                     copy was dropped and the real {} was not touched",
+                    relative.display(),
+                    self.real.join(relative).display()
+                )
+            })
+            .collect()
     }
 }
 
@@ -307,17 +357,30 @@ impl PrivateConfig {
         Ok(())
     }
 
-    /// Re-check the real hook files after every case. Copy back replaced files only after host shutdown is confirmed,
-    /// so a still-running vendor cannot race the copy-back. Notes name files that could not be copied back.
+    /// Run after every case: copy back what the vendor replaced, then re-check the real hook files. Copy-back waits
+    /// for confirmed host shutdown, so a still-running vendor cannot race it. When shutdown was not confirmed, each
+    /// replaced file is named instead of silently dropped with the mirror: it may be a refreshed login whose loss
+    /// signs the user out of that vendor. Copy-back runs before the hook check, so a changed hook file does not cost the
+    /// vendor's other writes. The check's error keeps its own message first, since the runner's summary shows only the
+    /// first line, and carries the notes after it.
     pub(super) fn finish(&self, stopped: bool) -> anyhow::Result<Vec<String>> {
         let mut notes = Vec::new();
         for mirror in &self.mirrors {
-            mirror.real_leaves_unchanged()?;
             if stopped {
-                notes.extend(mirror.copy_back()?);
+                notes.extend(mirror.copy_back());
+            } else {
+                notes.extend(mirror.dropped_without_shutdown());
             }
         }
-        Ok(notes)
+        let unchanged = self
+            .mirrors
+            .iter()
+            .try_for_each(|mirror| mirror.real_leaves_unchanged());
+        match unchanged {
+            Ok(()) => Ok(notes),
+            Err(error) if notes.is_empty() => Err(error),
+            Err(error) => Err(anyhow::anyhow!("{error:#}\n{}", notes.join("\n"))),
+        }
     }
 }
 
@@ -445,7 +508,8 @@ mod tests {
     }
 
     /// A vendor that saves by rename replaces the link. Wait for confirmed shutdown before copying the new file
-    /// over its unchanged original. A concurrent change to the real file wins and is reported.
+    /// over its unchanged original, and name every replaced file when shutdown was not confirmed, since a dropped
+    /// copy can be a refreshed login. A concurrent change to the real file wins and is reported.
     #[farhelm_testtrace::test]
     fn a_file_the_vendor_replaced_is_copied_back_only_over_an_unchanged_original() {
         let scratch = farhelm_teststate::tempdir().unwrap();
@@ -467,7 +531,14 @@ mod tests {
         let config = PrivateConfig {
             mirrors: vec![mirror],
         };
-        assert!(config.finish(false).unwrap().is_empty());
+        let unconfirmed = config.finish(false).unwrap();
+        assert_eq!(unconfirmed.len(), 2, "{unconfirmed:?}");
+        for name in ["auth.json", "state.json"] {
+            assert!(
+                unconfirmed.iter().any(|note| note.starts_with(name)),
+                "{unconfirmed:?}"
+            );
+        }
         assert_eq!(
             fs::read_to_string(real.join("auth.json")).unwrap(),
             "token-1"
@@ -489,6 +560,45 @@ mod tests {
             fs::read_to_string(real.join("config/hooks.json")).unwrap(),
             "user hooks"
         );
+    }
+
+    /// A changed real hook file fails the case, but only after the vendor's replaced files were copied back: the
+    /// check once ran first and its early return dropped a refreshed login with the mirror. The failure's first line
+    /// names the hook file, since the runner's summary shows only that line, and the copy-back notes follow it.
+    #[farhelm_testtrace::test]
+    fn a_changed_real_hook_file_fails_only_after_the_copy_back() {
+        let scratch = farhelm_teststate::tempdir().unwrap();
+        let (real, private) = (scratch.path().join("real"), scratch.path().join("private"));
+        real_tree(&real);
+        fs::write(real.join("state.json"), "state-1").unwrap();
+        let leaf = PathBuf::from("config/plugins/farhelm/hooks.json");
+        let mirror =
+            Mirror::build(Root::GrokHome, &real, &private, std::slice::from_ref(&leaf)).unwrap();
+
+        for (name, content) in [("auth.json", "token-2"), ("state.json", "state-2")] {
+            let staged = private.join(format!("{name}.new"));
+            fs::write(&staged, content).unwrap();
+            fs::rename(&staged, private.join(name)).unwrap();
+        }
+        // state.json changed for real too, so its copy is dropped with a note; the hook file changed for real.
+        fs::remove_file(real.join("state.json")).unwrap();
+        fs::write(real.join("state.json"), "state-from-elsewhere").unwrap();
+        fs::write(real.join(&leaf), "rewritten by someone").unwrap();
+
+        let config = PrivateConfig {
+            mirrors: vec![mirror],
+        };
+        let error = format!("{:#}", config.finish(true).unwrap_err());
+        assert_eq!(
+            fs::read_to_string(real.join("auth.json")).unwrap(),
+            "token-2"
+        );
+        let mut lines = error.lines();
+        assert!(
+            lines.next().is_some_and(|line| line.contains("hooks.json")),
+            "{error}"
+        );
+        assert!(lines.any(|line| line.starts_with("state.json")), "{error}");
     }
 
     /// A vendor directory that does not exist yet mirrors as an empty private tree with the ancestors in place.

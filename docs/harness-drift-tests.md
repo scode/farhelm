@@ -35,7 +35,8 @@ prompt opens. Every category has up to 720 seconds per harness, including startu
 
 The `model_selection` category launches the current catalog models and checks which model the agent shows as active.
 Goose, Pi and OMP also start without provider or model flags and check that the agent shows an active model. Their
-explicit OpenRouter models need `OPENROUTER_API_KEY`. The no-flag check still runs without it.
+explicit OpenRouter models need `OPENROUTER_API_KEY`. The no-flag check still runs without it, but the case is then
+reported as COULD NOT RUN.
 
 A Codex retirement prompt can appear before the composer opens. The affected model is reported as unavailable when the
 prompt asks the user to choose between keeping it and switching to its replacement.
@@ -73,8 +74,10 @@ Antigravity). Every entry in it is a symlink to your real one, except the files 
 directories above them. The agent keeps its login, settings and sessions. Farhelm's real setup writes its files into the
 copy, and the agent is started with the copy's variable set, also on Restart. The case fails if any of your real hook
 files changed. A vendor that saves a file by renaming a new copy over it (a refreshed login, say) replaces the copy's
-symlink rather than writing your file; the case copies such a file back afterwards when your real one is unchanged, and
-prints a `drift:` note naming any it could not.
+symlink rather than writing your file; the case copies such a file back afterwards, once its terminal hosts are
+confirmed ended and when your real one is unchanged, and prints a `drift:` note naming any it could not, so a replaced
+file (a refreshed login, say) is never dropped without a note. Files the vendor creates new inside the copy's private
+directories are dropped with it.
 
 Which files to keep private comes from Farhelm's setup itself, so an agent that gains persistent hooks is covered
 without listing its paths again, as long as they lie under the home directory or Grok's. A guard test
@@ -91,8 +94,10 @@ COULD NOT RUN and reports an UPGRADE FAILED line with the agent and the updater'
 ## Reading the result
 
 - **PASSED** means all of that case's live checks ran and succeeded.
-- **COULD NOT RUN** means a prerequisite was missing. The table gives the reason, such as a missing binary or a login
-  screen.
+- **COULD NOT RUN** means a prerequisite was missing, or a vendor prompt the test leaves for the vendor's user to answer
+  stood in the way, such as Codex's model retirement notice. The table gives the reason, such as a missing binary or a
+  login screen. A model selection case reports it when any of its models could not run, even when the others were
+  confirmed; the retained run names each model's outcome.
 - **UPGRADE FAILED** means the agent's updater (and its fallback installer, if it has one) failed. The case still ran,
   against the version shown.
 - **FAILED** means the CLI or test failed after starting. The retained run contains its output, source identity and

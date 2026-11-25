@@ -1186,9 +1186,10 @@ systemd or SSH substrate ran.
   runner records each case and reports PASSED, COULD NOT RUN or FAILED. See `docs/harness-drift-tests.md` for
   credentials, and for the private copy of the vendor configuration that Grok's and Antigravity's cases set their hooks
   up in. The ignored cases stay out of default nextest, deflake, CI and release gates.
-- `python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection` — verify the installed agents' model
-  selection against the current launcher catalog. Goose, Pi and OMP also check that an active model is shown when they
-  start without a model or provider flag. Their named OpenRouter cases require OpenRouter credentials.
+- `python3 -B scripts/run-harness-drift.py --category model_selection` — verify the agents' model selection against the
+  current launcher catalog, after the same upgrade as the base category (`--no-upgrade` only to reproduce a result on
+  the installed versions). Goose, Pi and OMP also check that an active model is shown when they start without a model or
+  provider flag. Their named OpenRouter cases require OpenRouter credentials.
 - `deno test -A scripts/serve-page.ts` — the legacy standalone static server (agent pages use the `interactive-artifact`
   skill): that it answers with `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the
   same file, when the script changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
