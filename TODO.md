@@ -53,7 +53,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Remember the order tabs were opened in.** Remember order of tabs being open. So if you have an agent open, then you
   open a terminal, then you open a second terminal, then you close the second terminal, the first terminal should be
-  made active - not the agent.
+  made active - not the agent. Plan: `plans/queue/tab-close-activation-order.md`.
 
 - **Give Cmd+K, Cmd+J and Cmd+L the session launcher's look.** The quick switcher, the template list and Rename are
   plain and untuned; Cmd+L in particular wraps one short field in a tall header and a lot of empty space. Restyle them
@@ -64,22 +64,25 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Remove GPT-5.6 models from the catalog.** OpenAI is retiring the GPT-5.6 models (Codex 0.172.0 already interrupts
   `gpt-5.6-terra` with a retirement prompt). Remove the `gpt-5.6-*` entries from Farhelm's model catalog across Codex,
-  OpenRouter (Goose, Pi, OMP), and OpenCode, along with SPEC.md and tests.
+  OpenRouter (Goose, Pi, OMP), and OpenCode, along with SPEC.md and tests. Plan:
+  `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
 
 - **Deduplicate OpenCode's conversation lookup in the drift tests.** `initial_prompt` and `named_conversation` each look
   up the test conversation in OpenCode's session list by folder path, and the two copies disagree on symlink resolution
-  and verdict (`COULD NOT RUN` vs `FAILED`). Share one helper so both categories behave the same way.
+  and verdict (`COULD NOT RUN` vs `FAILED`). Share one helper so both categories behave the same way. Plan:
+  `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
 
 - **Derive `instructions_delivery` drift coverage from agent capabilities.** The `instructions_delivery` drift category
   hardcodes its six agent names instead of deriving them from agent capabilities like the other categories, so a future
-  agent that gains the `$farhelm` hint would not fail coverage checks until added by hand.
+  agent that gains the `$farhelm` hint would not fail coverage checks until added by hand. Plan:
+  `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
 
 - **Keep cached repository cleanup moving past one repo's error.** At supervisor startup, if cleaning up an old cache
   generation for one repository fails (for example because a leftover git process is still writing in it), the sweep
   stops early and skips every remaining repository until the next restart
   (`crates/farhelm-supervisor/src/repo_cache.rs`). Log and continue across repositories while still stopping cleanup of
   an affected repository on selector or directory-sync failures, and add a test proving later repositories are still
-  cleaned while selected caches stay intact.
+  cleaned while selected caches stay intact. Plan: `plans/queue/tensorlake-setup-and-repo-cache-fixes.md`.
 
 - **Allow Goose named launches to capture and offer plain Restart.** When reopening a Goose conversation that Farhelm
   originally created, Goose runs its persisted `farhelm-reporter` MCP server, so Farhelm captures the destination
@@ -89,19 +92,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`python3 -B scripts/run-harness-drift.py --no-upgrade --category named_conversation --harness goose`). Update
   `SPEC.md`, the launcher/UI note, and the drift test so Restart is allowed and expected to work when a named Goose
   conversation carries Farhelm's reporter, while noting that Goose conversations created outside Farhelm are not
-  captured. Check both named Create and named Restart.
+  captured. Check both named Create and named Restart. Plan: `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
 
 - **Accept leading-hyphen custom `--effort` values as a separate argument.** `farhelm agent create --effort -fast` (with
   a space) is rejected by clap as an unknown flag even though custom agents allow `[a-z0-9_-]` effort values and
   `--model` already sets `allow_hyphen_values = true` (`crates/farhelm/src/main.rs`). Add `allow_hyphen_values = true`
   to `--effort` (matching `--model` and the `SPEC_impl.md` free-text option rule), add a parse test, and update
-  `SPEC_impl.md` to drop the `--effort=-fast` workaround.
+  `SPEC_impl.md` to drop the `--effort=-fast` workaround. Plan: `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
 
 - **Assert that Tensorlake host setup never reads agent settings.** In
   `crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs`,
   `codex_subscription_and_none_enter_setup_without_an_endpoint` checks that no Codex settings cleanup was recorded
   during setup, but never asserts against the stand-in backend that setup made no `read-agent-settings` call. Add that
-  negative assertion.
+  negative assertion. Plan: `plans/queue/tensorlake-setup-and-repo-cache-fixes.md`.
 
 ## Plan follow-ups
 
@@ -118,14 +121,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   lose access to a Tailscale host if its shared SSH socket folder is already occupied. Use a short, private temporary
   directory allocated by the OS. A helm restart can leave earlier SSH masters alive, so retain a trusted way to find
   each route's masters when the host is changed or removed, including those opened before an upgrade. A new directory on
-  every start would lose that lookup. Keep the existing short socket paths and verify retirement after a restart.
+  every start would lose that lookup. Keep the existing short socket paths and verify retirement after a restart. Plan:
+  `plans/queue/tailscale-private-socket-dirs.md`.
 
 - **Refuse setup reruns on suspended or deleting Tensorlake sandboxes.** In `provisioning/tensorlake_add.rs`,
   `TensorlakeHost` can offer setup even when it should tell the user to resume the sandbox or finish its deletion.
   Refuse before ensuring a host key or keeping a plan. Check again under the provisioning lock when confirming an older
   offer, before taking a connection hold or publishing replacement progress. Keep the sandbox's lifecycle state and
   earlier failure so the user can run setup again once eligible. Cover both refusal points, retained progress and the
-  reason shown in Hosts.
+  reason shown in Hosts. Plan: `plans/queue/tensorlake-setup-and-repo-cache-fixes.md`.
 
 - **Bind a confirmed Tailscale Uninstall to the verified peer.** Uninstall checks the machine again at confirmation,
   then resolves the Tailscale destination separately for each removal step. Keep the peer address, verified SSH keys,
@@ -303,7 +307,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   “Use existing model” before it showed the composer. Reproduce with
   `python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection --harness codex`. Check the resulting
   model in an isolated CLI configuration if Farhelm still offers GPT-5.6 Terra. The live drift case leaves the account's
-  choice alone.
+  choice alone. Plan: `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
 
 - **Finish OpenRouter and saved-default model verification.** Goose 1.60.2, Pi 1.6.0 and OMP 19.1.1 opened with an
   active model when started without `--provider` or `--model`. Compare the active choice with the saved provider and
