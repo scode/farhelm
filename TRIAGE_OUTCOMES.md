@@ -420,24 +420,6 @@
   part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-mac-reach-omits-date-for-bootout.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md, "Topology": "There is no macOS version floor: inspection refuses a Mac missing a
-  command the path needs, naming that command." The code contradicts it. `MACOS_REACH_SH`'s tool list
-  (`provisioning/backend.rs:4080`) omits `date`, which the Update and uninstall bootout wait calls
-  (`provisioning/macos.rs:343,349`; the doc at :336 notes `date` and `sleep` are called by name, and `sleep` is in the
-  list). The fix follows directly: add `date` to the list, with a reach test. Optional, not required by the spec text:
-  read `date +%s` before `launchctl bootout` so a broken `date` fails before unloading. Estimated size ~5-30 lines.
-  Verified: Confirmed by reading code.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code —
-  follows the quoted rule; size XS.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
-  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## trailing-settings-custom-agent-nav-tooltip-omits-bidi-isolation.md
 
 - Outcome: `fix code`.
@@ -621,20 +603,6 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
-## trailing-busy-claim-retry-test-bypasses-fleet-wake-it-depends.md
-
-- Outcome: `other`.
-- Assessment: Maintainer test gap only. A test for automatic updates retrying a host that was briefly busy calls the
-  retry by hand. It would not catch a regression where the host is never woken for a retry. Verified: Confirmed. The
-  test is unchanged (`provisioning.rs:1713-1775`; it stops the listener and calls `scan_automatic_updates` twice).
-  Whether another listener-level test covers the wake is unverified.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md
 
@@ -2937,23 +2905,6 @@
   overturning the commented port choice. Size S.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
-## trailing-resolve-remote-status-clears-local-transport-signal.md
-
-- Outcome: `other`.
-- Assessment: When Farhelm runs a command on a host over ssh or podman, the host's exit status comes back on a separate
-  channel. If the local ssh or podman process is killed by a signal just after that status arrives but before all output
-  has, Farhelm reports success and uses the truncated output (for example a cut-off home path). Verified: Confirmed in
-  code: `provisioning/backend.rs:1763-1790` keeps transport failure only for ssh exit 255 and otherwise takes the exit
-  code from the status record, discarding `signal`. The trigger needs an outside signal (not the helm's own deadline)
-  inside a narrow window; nobody has observed it. The consequence would include reporting success for a command that
-  failed, which keeps it out of the filters.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code. Keep a signal termination as a failure in `resolve_remote_status` and in `probe`. Size S.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## trailing-container-host-unanswered-embeds-raw-stderr.md
 
 - Outcome: `other`.
@@ -3223,24 +3174,6 @@
   index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-tailscale-setup-probe-exit-255-blames-socket-length.md
-
-- Outcome: `fix code`.
-- Assessment: When an SSH connection to a Tailscale host fails during setup or update checks, on a Mac with a long user
-  name or a long custom state folder, Farhelm can blame the state folder's path length and say it cannot ask sign-in
-  questions. Neither is true for Tailscale hosts. Verified: Confirmed. `provisioning/backend.rs:2882-2894` gates on
-  `access.asks_user()`, which includes Tailscale (`ssh.rs:219-224`). `transport.rs:294-305` gates the same check on
-  `UserConfig` only, and Tailscale sockets live under the short `/tmp/fhs-…` directory. The trigger (exit 255 on an
-  unreachable peer) is not rare in FILTER.md's sense, so the diagnostic filter does not apply.
-- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
-  Recommendation for reference: fix code XS (narrow the gate to UserConfig, as in transport.rs, plus a unit test). Size
-  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
-  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
-  index entry.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## trailing-tailscale-destination-format-guidance-discarded.md
 
 - Outcome: `fix code`.
@@ -3393,35 +3326,6 @@
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
-## tailscale-uninstall-does-not-bind-verified-host.md
-
-- Outcome: `fix code`.
-- Assessment: Uninstalling Farhelm from a Tailscale host checks that the machine is the one Farhelm knows, then runs the
-  removal steps. Each step looks up the Tailscale name again. If that name starts pointing to a different machine during
-  the run, the remaining steps could stop that machine's supervisor, end its terminals and delete its Farhelm folder.
-  Verified: Partly correct. Confirmation re-plans and re-verifies identity under the run's lock
-  (`provisioning/service.rs:3094-3112`). Each step then rebuilds its SSH command through `RemoteRoute::command` →
-  `SshAccess::prepare` (`access.rs:262-278`), which for Tailscale re-resolves the peer and snapshots that peer's
-  advertised keys, so nothing ties later steps to the verified machine. The registry destination itself cannot change
-  mid-run: a retarget waits on the provisioning lock (`hosts.rs:928`). The live route is therefore Tailscale
-  re-resolving the same name, for example after a node is renamed or removed and another device takes the name.
-  Unverified: whether Tailscale actually reassigns a name within the seconds to minutes a run takes, and whether the
-  other machine would pass the later steps (same login, Farhelm paths, unit). SPEC.md's 2026-10-10 decision ("a
-  confirmed uninstall may be carried out against the entry's new machine, and Farhelm adds no check of the installation
-  identity") covers registry destination and identity changes, not name re-resolution. SPEC_impl ("uninstall must not
-  act on a machine it has not verified") only covers confirmation time.
-- Decision: q-bound, "Approved and confirmed operations bound to the machine they were checked against": the maintainer
-  picked "Bind them all". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If this
-  turns very complicated, the executor must abort and turn it into a follow-up to-do item explaining the complexity."
-- Completion criteria: An approved or confirmed operation refuses once the host connection, machine or build it was
-  checked against has changed. Recommendation for reference: fix code. Freeze the resolved Tailscale peer (address and
-  keys) at confirmation and use it for every step, refusing on a mismatch. Size M. Complexity gate (maintainer): if the
-  fix turns very complicated during execution, the executor stops and turns it into a follow-up TODO.md entry that
-  explains what is complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs,
-  not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
-  back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-agent-create-drops-target-incarnation-after-approval.md
 
@@ -4016,44 +3920,6 @@
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
-## trailing-shared-signin-triggers-auto-update-concurrently-with-manual-action.md
-
-- Outcome: `fix code`.
-- Assessment: With automatic updates on, an outdated SSH host that needs a sign-in waits in the attention row. If you
-  choose Update or Uninstall on it, your action shares that waiting sign-in. When you answer, the background automatic
-  Update starts at once. Your Update can then fail as busy with a warning badge, and your Uninstall's plan races an
-  update you did not ask for at that moment. Verified: Confirmed by source. Sharing: `provisioning/setup_sign_in.rs`
-  start_manual/start_automatic join one attempt. On Ready, the automatic resume task replans and admits (`automatic.rs`
-  begin_sign_in/resume; `service.rs:1962-2017`). Manual planning holds no busy claim. SPEC_impl.md (SSH sign-in, around
-  2771-2781) says "A successful check starts batch replanning through the listener's per-host attempt" and "Checks on
-  the same registered entry and SSH route share one attempt", so the automatic resume itself follows the spec. The spec
-  does not say which caller wins after a shared answer. Uninstall still changes nothing until confirmed, and the
-  automatic Update is authorized by the preference, so the uninstall-rule violation is arguable. The spurious Busy
-  failure on manual Update is the clearest harm.
-- Decision: q-autoupd, "Automatic host updates against what the user explicitly asked for": the maintainer picked "The
-  user's action wins". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: A pending automatic-update sign-in yields to any user action on that host; SPEC.md's
-  contradiction about when the automatic sign-in popover opens is resolved to match. Recommendation for reference: fix
-  code M (a manual join supersedes the automatic continuation), and fold 452's test into it. Size gate: about 100 lines
-  of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
-## trailing-automatic-signin-tests-omit-shared-prompt-with-auto-updates-on.md
-
-- Outcome: `fix code`.
-- Assessment: Maintainer test gap. No test answers a sign-in shared between an automatic update and a manual Update or
-  Uninstall while automatic updates stay on, which is the case where 90's race happens. Verified: Confirmed by the
-  reviewer. The test file was touched only by d26b59f31 (docs) since.
-- Decision: q-autoupd, "Automatic host updates against what the user explicitly asked for": the maintainer picked "The
-  user's action wins". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: A pending automatic-update sign-in yields to any user action on that host; SPEC.md's
-  contradiction about when the automatic sign-in popover opens is resolved to match. Recommendation for reference:
-  other. Fold into 90's fix as its regression test if 90 is fixed, otherwise discard. Size gate: about 100 lines of diff
-  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## trailing-spec-md-contradicts-send-handoff-auto-opening-auto-update-popover.md
 
 - Outcome: `fix spec`.
@@ -4068,24 +3934,6 @@
 - Completion criteria: A pending automatic-update sign-in yields to any user action on that host; SPEC.md's
   contradiction about when the automatic sign-in popover opens is resolved to match. Recommendation for reference: fix
   spec XS (qualify 5997 to allow the already-waiting Send handoff). Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
-## trailing-unanswered-auto-update-signin-blocks-set-tailscale-hostbusy.md
-
-- Outcome: `fix code`.
-- Assessment: While an automatic update's SSH sign-in question waits unanswered (up to two minutes per prompt), turning
-  Tailscale host on or off for that host fails with "This host is busy", though nothing the user started is running.
-  Verified: Confirmed. `provisioning/setup_sign_in.rs:318` holds `ssh_route_lock` read for the wait, and
-  `hosts.rs:993-997` uses `try_write_owned` → HostBusy. Removal and the preference opt-out cancel automatic checks
-  first; `set_tailscale` does not. It recovers when the prompt is answered, expires or is cancelled.
-- Decision: q-autoupd, "Automatic host updates against what the user explicitly asked for": the maintainer picked "The
-  user's action wins". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: A pending automatic-update sign-in yields to any user action on that host; SPEC.md's
-  contradiction about when the automatic sign-in popover opens is resolved to match. Recommendation for reference: fix
-  code S (cancel auto-only checks for that host before taking the route lock, preserving the retry opportunity), or
-  discard. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
 - Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-host-scoped-trash-confirmation-stays-open-invisibly.md

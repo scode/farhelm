@@ -3241,6 +3241,18 @@
       "reference": "host-add-dialog"
     },
     {
+      "golden": "host-add-interrupted-probe",
+      "title": "Add host after the connection client was interrupted, showing the signal and retained diagnostic"
+    },
+    {
+      "golden": "host-add-mac-missing-date",
+      "title": "Add host explaining that setup on the remote Mac requires the date command"
+    },
+    {
+      "golden": "host-add-tailscale-refusal",
+      "title": "Add host showing a failed Tailscale connection with the peer's reason"
+    },
+    {
       "golden": "host-add-ssh-sign-in",
       "title": "Add host showing the SSH verification question inline, with the answer field focused while Farhelm checks the destination"
     },
@@ -3400,9 +3412,17 @@
       "reference": null
     },
     {
+      "golden": "host-update-mac-missing-date",
+      "title": "Update host refused because the remote Mac lacks the date command"
+    },
+    {
       "golden": "host-uninstall-refusal",
       "title": "The host refusal dialog for an uninstall refused while a session still runs on the host, in the helm's words, with Close and no Remove",
       "reference": "host-uninstall-refusal"
+    },
+    {
+      "golden": "host-uninstall-mac-missing-date",
+      "title": "Uninstall Farhelm refused because the remote Mac lacks the date command"
     },
     {
       "golden": "host-uninstall-confirmation",

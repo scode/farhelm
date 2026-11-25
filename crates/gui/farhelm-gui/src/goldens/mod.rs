@@ -1638,6 +1638,24 @@ static SCENES: &[Scene] = &[
         setup: host_add_dialog_setup,
     },
     Scene {
+        name: "host-add-mac-missing-date",
+        size: (600., 840.),
+        draw: empty,
+        setup: host_add_mac_clock,
+    },
+    Scene {
+        name: "host-add-tailscale-refusal",
+        size: (600., 840.),
+        draw: empty,
+        setup: host_add_tailscale_error,
+    },
+    Scene {
+        name: "host-add-interrupted-probe",
+        size: (600., 840.),
+        draw: empty,
+        setup: host_add_stopped_probe,
+    },
+    Scene {
         name: "host-add-ssh-sign-in",
         size: (970., 760.),
         draw: empty,
@@ -1830,6 +1848,12 @@ static SCENES: &[Scene] = &[
         setup: host_update_refusal_setup,
     },
     Scene {
+        name: "host-update-mac-missing-date",
+        size: (640., 600.),
+        draw: empty,
+        setup: host_update_mac_clock,
+    },
+    Scene {
         name: "scroll-box",
         size: (520., 136.),
         draw: scroll_boxes,
@@ -1846,6 +1870,12 @@ static SCENES: &[Scene] = &[
         size: (640., 600.),
         draw: empty,
         setup: host_uninstall_refusal_setup,
+    },
+    Scene {
+        name: "host-uninstall-mac-missing-date",
+        size: (640., 600.),
+        draw: empty,
+        setup: host_uninstall_mac_clock,
     },
     Scene {
         name: "host-uninstall-confirmation",
