@@ -61,11 +61,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   banner and status, so its terminal can confirm the launch and reply. Verifying the effective provider effort for Goose
   needs other evidence.
 
-- **Finish live Cursor model verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” with
-  both `--model auto` and `--model composer-2.5`. Reproduce with
+- **Finish live Cursor model and permission verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log
+  in...” with both `--model auto` and `--model composer-2.5`. Reproduce with
   `python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection --harness cursor`. Run with an
   existing Cursor login and identify the active model field. The older authenticated screen fixture displays a bare
-  label such as `GPT-5.6 Luna 272K Low` beside the composer.
+  label such as `GPT-5.6 Luna 272K Low` beside the composer. With the same login, run
+  `python3 -B scripts/run-harness-drift.py --no-upgrade --category permission_modes --harness cursor` to confirm YOLO
+  and Custom launches. Both of those starts also reached the login screen.
+
+- **Keep Antigravity's Restart selector before a Custom `--`.** With Antigravity 1.5.16, a launch with
+  `--mode auto --settings '{}' --` reaches the composer, completes a turn and captures a conversation. The saved command
+  places `--conversation` after `--`, where it is a positional argument. Keep the settings and conversation options
+  before the delimiter, preserving stored Custom words and workspace-trust edits. The `permission_modes` drift case
+  reports this boundary before it would start the wrong conversation.
 
 - **Check Codex's GPT-5.6 Terra retirement path.** With `-m gpt-5.6-terra`, Codex 0.172.0 showed “Try new model” and
   “Use existing model” before it showed the composer. Reproduce with
@@ -175,12 +183,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   disabled, verify Cursor's default launch without a permission flag ("Agent's own setting"), and send a real prompt to
   Cursor and OpenCode to confirm interactive turns work under Farhelm's terminal host (today both stop at the initial
   TUI or trust screen).
-
-- **Drift tests: permission modes and custom permission flags.** Cover YOLO launch flags on Claude, Codex, Antigravity,
-  Grok, Muse, and OMP (currently only Guarded is exercised for those six); Goose's `approve`, `smart_approve`, and
-  `chat` modes (`GOOSE_MODE`); OMP's `Approve` mode (`--approval-mode always-ask`); Cursor's "Agent's own setting"; and
-  custom permission flags surviving Restart (including Antigravity's `--settings` and `--` argument ordering). Plan:
-  `plans/queue/drift-permission-modes.md`.
 
 - **Drift tests: initial prompt delivery via launch arguments.** Cover all eight agents that accept a launch-time prompt
   (Claude, Codex, Cursor, Muse, OMP, and Grok via `-- <prompt>`; OpenCode via `--prompt=<prompt>`; Antigravity via
