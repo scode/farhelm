@@ -456,6 +456,7 @@ enum LauncherScene {
     Replace,
     Narrow,
     Yolo,
+    CustomYolo,
     HookSetup,
 }
 
@@ -664,6 +665,11 @@ pub(super) fn launcher_yolo_setup(state: &SceneState, window: &mut Window, cx: &
     setup(state, LauncherScene::Yolo, window, cx);
 }
 
+/// The host confirmation for a registered agent whose launch always counts as YOLO.
+pub(super) fn launcher_custom_yolo_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    setup(state, LauncherScene::CustomYolo, window, cx);
+}
+
 /// Show the first-pick consent question with an off switch and no suppressed hint.
 pub(super) fn launcher_hook_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::HookSetup, window, cx);
@@ -727,6 +733,7 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
         scene,
         LauncherScene::CustomAgent
             | LauncherScene::CustomEscalation
+            | LauncherScene::CustomYolo
             | LauncherScene::CustomEffortDefault
             | LauncherScene::RenamedCustomSearch
             | LauncherScene::IncompleteCustomQuickLaunch
@@ -873,6 +880,7 @@ fn open_new_with_claude(
     if matches!(
         scene,
         LauncherScene::CustomAgent
+            | LauncherScene::CustomYolo
             | LauncherScene::CustomEffortDefault
             | LauncherScene::UnavailableCustomAgent
     ) {
@@ -935,6 +943,7 @@ fn open_new_with_claude(
         LauncherScene::RememberedWrapper => pick_claude,
         LauncherScene::CustomAgent => open_shell_wrapper,
         LauncherScene::CustomEscalation => pick_custom_for_escalation,
+        LauncherScene::CustomYolo => press_launch_for_yolo,
         LauncherScene::ShellWrapper | LauncherScene::ShellWrapperNote => open_shell_wrapper,
         _ => answer_new_reads,
     }));
@@ -1785,6 +1794,7 @@ fn press_launch_for_yolo(
 /// The launcher hides while the create is pending. The fake must give the refusal the real helm sends to
 /// bring it back with its confirmation, and to let the operation release its handle to the launcher.
 fn answer_yolo_launch(_: &Entity<SessionList>, state: &SceneState, _: &mut Window, _: &mut App) {
+    let scene = launcher_scene(state);
     let mut keep = state.keep.borrow_mut();
     let helm = keep
         .iter_mut()
@@ -1794,7 +1804,11 @@ fn answer_yolo_launch(_: &Entity<SessionList>, state: &SceneState, _: &mut Windo
     for command in helm.commands() {
         if command.path == "/api/sessions" {
             let body = command.body.expect("the create sent its launch choices");
-            assert_eq!(body["launch"]["permissions"], json!("yolo"));
+            if scene == LauncherScene::CustomYolo {
+                assert_eq!(body["launch"]["custom_agent"], json!("acme-code"));
+            } else {
+                assert_eq!(body["launch"]["permissions"], json!("yolo"));
+            }
             assert_eq!(body["confirm_yolo"], json!(false));
             helm.reply_marked(
                 command.id,

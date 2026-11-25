@@ -499,7 +499,7 @@ pub(crate) fn ask_yolo_for_replace(
     window: &mut Window,
     cx: &mut App,
 ) -> prompt::Inline<YoloAsk> {
-    let ask = YoloAsk::for_stored_launch(host, host_name, launch);
+    let ask = YoloAsk::for_stored_launch(host, host_name, launch, cx);
     let retry = Rc::new(retry);
     let guarded = ask.guarded.then(|| {
         let retry = Rc::clone(&retry);

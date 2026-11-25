@@ -191,11 +191,6 @@ consequences.
   single 'Custom agent' and jumps Settings to whichever custom-agent draft sorts first rather than staying on the page
   the user was viewing.
 
-- [`trailing-launcher-target-names-command-custom-agent-outside-restart-with.md`](trailing-launcher-target-names-command-custom-agent-outside-restart-with.md)
-  — When creating, cloning, or replacing a session on the Command tab with a registered custom agent declared, the main
-  action's accessible name includes the custom agent's name ("Launch Command · <name> · <host> · <folder>"), whereas
-  declaring any built-in agent or generic Custom omits the agent name ("Launch Command · <host> · <folder>").
-
 - [`trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md`](trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md)
   — In Restart with for a custom-agent session that has no captured conversation, if the custom agent's registration has
   resumption disabled (or is deleted), the More options disclosure is locked open with "A setting here is required or
@@ -222,12 +217,6 @@ consequences.
   list of sandboxes not on this helm keeps showing leftover sandboxes from the old key while the new check runs — and
   keeps showing them indefinitely with active Delete buttons if the new key fails to list sandboxes (for example, if the
   new key is invalid or Tensorlake is unreachable).
-
-- [`trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md`](trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md)
-  — When you launch or plain-replace a registered custom agent on a host that asks before YOLO launches, the
-  confirmation dialog explains the YOLO classification as "Farhelm treats every Custom permission choice as YOLO."
-  Because "Custom" is also the name of the Custom permission flags mode, this reads as if the launch used custom
-  permission flags rather than a registered custom agent.
 
 - [`ui-channel-displaced-notice-lost-to-reader-race.md`](ui-channel-displaced-notice-lost-to-reader-race.md) — A
   displaced UI channel's Displaced notice can be dropped by a reader/writer drain race, so the displaced window

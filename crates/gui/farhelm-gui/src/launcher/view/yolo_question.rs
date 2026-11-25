@@ -29,7 +29,7 @@
 //! change something ([`crate::launcher::draft::LaunchDraft::guarded_still_changes`]).
 
 use farhelm_proto::ui_channel::HostView;
-use farhelm_proto::{LaunchPermission, LaunchSelection, SessionLaunch};
+use farhelm_proto::{LaunchHarness, LaunchPermission, SessionLaunch};
 use std::rc::Rc;
 
 use gpui::{App, AppContext as _, Context, WeakEntity, Window};
@@ -53,7 +53,7 @@ pub struct YoloAsk {
     host: i64,
     /// The host's name as the launcher shows it.
     host_name: HostText,
-    reason: YoloReason,
+    reason: HostSentence,
     /// Whether the guarded alternative is offered.
     pub(in crate::launcher) guarded: bool,
     /// The source warning beside this question. A lifecycle launcher sets it when drawing both together.
@@ -70,12 +70,18 @@ impl YoloAsk {
         host: i64,
         host_name: HostText,
         launch: &SessionLaunch,
+        cx: &App,
     ) -> Self {
         let selection = launch.agent_selection();
         YoloAsk {
             host,
             host_name,
-            reason: YoloReason::of_launch(selection),
+            reason: yolo_reason(
+                YoloReason::of_launch(selection),
+                launch.agent_type(),
+                launch.custom_agent(),
+                cx,
+            ),
             guarded: selection.is_some_and(|choice| {
                 choice.harness.stored_permission(choice.permissions) == Some(LaunchPermission::Yolo)
                     && choice.harness.offers_permission(LaunchPermission::Guarded)
@@ -84,6 +90,29 @@ impl YoloAsk {
             request: None,
         }
     }
+}
+
+/// A custom declaration supplies its classification on either tab. Isolate its name and keep the ID as fallback.
+fn yolo_reason(
+    reason: YoloReason,
+    agent: Option<LaunchHarness>,
+    id: Option<&str>,
+    cx: &App,
+) -> HostSentence {
+    let line = HostSentence::new("yolo-reason");
+    if !agent.is_some_and(LaunchHarness::uses_custom_catalog) {
+        return line.text(reason.sentence());
+    }
+    let Some(id) = id else {
+        return line.text("Farhelm treats custom agent launches as YOLO.");
+    };
+    let name = session::current_store(cx).map_or_else(
+        || HostText::from_host(id),
+        |store| crate::harness::custom_name(id, store.read(cx).collections()),
+    );
+    line.text("Farhelm treats launches of ")
+        .host(&name)
+        .text(" as YOLO.")
 }
 
 /// The question's state in the launcher: what it asks about, and the question once asked (`None` until the launcher
@@ -139,9 +168,17 @@ impl Launcher {
         let Some(host) = self.draft.host else {
             return;
         };
-        let selection: Option<LaunchSelection> = match self.draft.tab {
-            Tab::Agent => self.draft.agent_selection(),
-            Tab::Command => None,
+        let (selection, agent, id) = match self.draft.tab {
+            Tab::Agent => (
+                self.draft.agent_selection(),
+                self.draft.agent.harness,
+                self.draft.agent.custom_agent.as_deref(),
+            ),
+            Tab::Command => (
+                None,
+                self.draft.command.agent,
+                self.draft.command.custom_agent.as_deref(),
+            ),
         };
         let reason = YoloReason::of_launch(selection.as_ref());
         let host_name = self
@@ -152,7 +189,7 @@ impl Launcher {
             ask: YoloAsk {
                 host,
                 host_name,
-                reason,
+                reason: yolo_reason(reason, agent, id, cx),
                 guarded: reason.offers_guarded(selection.as_ref())
                     && self.draft.guarded_still_changes(),
                 source: None,
@@ -341,7 +378,7 @@ fn question(ask: &YoloAsk, guarded: Option<GuardedAction>, owner: Owner) -> Ques
             .text(" without asking you."),
     )
     // Its own element, so the reason can be found by its id (the question's plain lines carry none).
-    .line(HostSentence::new("yolo-reason").text(ask.reason.sentence()))
+    .line(ask.reason.clone())
     .line(
         HostSentence::new("yolo-asks")
             .host(&ask.host_name)

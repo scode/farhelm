@@ -1842,9 +1842,8 @@ impl Launcher {
             .is_some_and(|row| row.info.status == SessionStatus::Running)
     }
 
-    /// The target named by the main action: "Command" on the Command tab, the agent type (on the Agent
-    /// tab, or a Restart with command's declared one), the host's display name and the folder. The host and folder are
-    /// host-supplied text (a Clone's folder comes from its source), so they are only shown escaped.
+    /// The target named by the main action: "Command" on that tab, the selected or declared agent, the host and the
+    /// folder. Use the registration's name when available. Names and folders from the host are shown escaped.
     ///
     /// Restart with names the source session's own host name, as the old footer did. Otherwise a host that is not
     /// chosen, or that the store no longer lists, is "Unavailable host", the old footer's words.
@@ -1852,17 +1851,16 @@ impl Launcher {
     /// A registered host that is not connected carries its phase in parentheses ("host1 (Unreachable, retrying)"), as
     /// the old footer and host list did.
     fn target(&self, cx: &App) -> TargetWords {
-        let harness = match self.draft.tab {
-            Tab::Agent => self.draft.agent.harness,
-            Tab::Command if matches!(self.draft.mode, Mode::RestartWith(_)) => {
-                self.draft.command.agent
-            }
-            Tab::Command => None,
-        };
         let collections = self.store.read(cx).collections();
-        let custom_agent = match self.draft.tab {
-            Tab::Agent => self.draft.agent.custom_agent.as_deref(),
-            Tab::Command => self.draft.command.custom_agent.as_deref(),
+        let (harness, custom_agent) = match self.draft.tab {
+            Tab::Agent => (
+                self.draft.agent.harness,
+                self.draft.agent.custom_agent.as_deref(),
+            ),
+            Tab::Command => (
+                self.draft.command.agent,
+                self.draft.command.custom_agent.as_deref(),
+            ),
         };
         let source = match &self.draft.mode {
             Mode::RestartWith(restart) => collections
