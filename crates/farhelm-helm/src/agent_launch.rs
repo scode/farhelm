@@ -27,7 +27,9 @@ use farhelm_proto::launcher::{
     LaunchTemplate, LauncherKind, LauncherState, TemplateContext, TemplateDestination,
     TemplateFields, TemplateNameKind, TemplateRefusal, apply_template, apply_templates,
 };
-use farhelm_proto::{CommandLaunch, ErrorKind, LaunchRequest, LaunchSelection, SessionLaunch};
+use farhelm_proto::{
+    CommandLaunch, ErrorKind, LaunchHarness, LaunchRequest, LaunchSelection, SessionLaunch,
+};
 
 use crate::hosts::{HostStateView, HostView};
 
@@ -242,6 +244,26 @@ fn resolve_with(
                 invalid(refusal.to_string())
             }
         })?;
+    // A mistyped agent name can parse as a custom ID. Resolve it before the
+    // flags can produce a validation error meant for a registered agent.
+    if let Some(Some(id)) = &edits.custom_agent {
+        let inherited = match edits.kind.or(state.kind).unwrap_or(LauncherKind::Agent) {
+            LauncherKind::Agent => state.harness,
+            LauncherKind::Command => state.command_agent,
+        };
+        if edits
+            .agent
+            .or(inherited)
+            .is_some_and(LaunchHarness::uses_custom_catalog)
+            && farhelm_proto::custom_agents::validate_id(id).is_ok()
+            && !placement.custom_agents.iter().any(|agent| agent.id == *id)
+        {
+            return Err(crate::custom_agents::unknown_agent(
+                id,
+                placement.custom_agents,
+            ));
+        }
+    }
     // Flag edits have no saved name. The same catalog matches apply whether
     // the model came from a template or directly from an argument.
     let mut flags = LaunchTemplate {
@@ -536,6 +558,43 @@ mod tests {
         assert!(resolve(&[], &[], &command, &[], &[], false, false).is_err());
     }
     use farhelm_proto::{LaunchEffort, LaunchHarness};
+
+    /// A syntactically valid ID can be a typo. The refusal must help the caller find a real agent
+    /// even if its other flags would be invalid for a registered custom agent.
+    #[farhelm_testtrace::test]
+    fn an_unknown_explicit_agent_is_refused_before_its_other_flags() {
+        let catalog = [CustomAgent {
+            id: "acme-code".into(),
+            display_name: "Acme Code".into(),
+            command: "acme-code".into(),
+            supports_resumption: false,
+            supports_reporting: false,
+        }];
+        for flags in [
+            serde_json::json!({"prompt": "hello"}),
+            serde_json::json!({"permissions": "guarded"}),
+            serde_json::json!({"model": "gpt-6.2-sol"}),
+        ] {
+            let mut edits: TemplateFields = serde_json::from_value(flags).unwrap();
+            edits.agent = Some(LaunchHarness::Custom);
+            edits.custom_agent = Some(Some("cluade".into()));
+            edits.destination = folder("/work");
+            let error = resolve(&[], &[], &edits, &[], &catalog, false, false).unwrap_err();
+            let refusal = error.downcast_ref::<crate::SupervisorError>().unwrap();
+            assert_eq!(refusal.kind(), ErrorKind::NotFound);
+            assert!(refusal.message().contains("\"cluade\""), "{refusal}");
+            assert!(
+                refusal.message().contains("built-in types are"),
+                "{refusal}"
+            );
+            assert!(
+                refusal
+                    .message()
+                    .contains("registered custom agents are acme-code"),
+                "{refusal}"
+            );
+        }
+    }
 
     fn template(name: &str, fields: TemplateFields) -> LaunchTemplate {
         LaunchTemplate {
