@@ -1254,6 +1254,11 @@ at its end. Colors come only from theme tokens, which are copied from the old st
 scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The window's minimum
 size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds it).
 
+Command dialogs share the field's icon tile and key cap, the chips beside their instructions, the uppercase result
+labels and the contents of their option rows. The caller supplies text and actions while the existing input handles
+focus and `OptionRow` handles selection. A short list can let text take the space next to the badges. A long list
+supplies a computed text width to avoid shaping every label during layout probes.
+
 Enter on a choice control is one rule of the component layer (`components::enter_choice`), the old launcher's
 `enter_choice`. A control takes it only when its owner hands it the dialog's main action, through an `on_enter` builder
 on the radio group, the checkbox and the select. The launcher draws its own Agent and Command tab strip and gives its
