@@ -18,3 +18,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`triage-bookkeeping-nov24`](reports/triage-bookkeeping-nov24.report.md) landed 2026-11-25 in #4798: execute the 50 discard outcomes from the 2026-11-24 triage
 - [`drift-instructions-delivery`](reports/drift-instructions-delivery.report.md) landed 2026-11-25 in #4804: Add live `$farhelm` instructions pointer delivery drift tests across supporting agents
 - [`triage-spec-text-nov24`](reports/triage-spec-text-nov24.report.md) landed 2026-11-25 in #4799, #4800, #4802, #4805: write the 2026-11-24 triage's text corrections and new spec principles into SPEC.md, SPEC_impl.md, docs and comments
+- [`triage-tooling-nov24`](reports/triage-tooling-nov24.report.md) landed 2026-11-25 in #4801, #4809, #4818, #4821, #4825, #4828, #4833: execute the 2026-11-24 triage outcomes for maintainer tooling and test infrastructure, in grouped PRs

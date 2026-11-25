@@ -287,3 +287,97 @@ message. Review corrections covered the real CentOS evidence path, release-test 
 wait, test worker exit attribution, and launcher screenshot selectors. The last review preserved access to the worker's
 records after a local checkout disappears and corrected shard counting when earlier output looks like a summary. The
 dropped suggestions and their scope decisions are in `farhelm-plan-triage-tooling-nov24-log.md` beside the checkouts.
+
+### Landing
+
+#### What landed with it
+
+Two plans landed this round: this one first, through [#4801](https://github.com/scode/farhelm/pull/4801/changes),
+[#4809](https://github.com/scode/farhelm/pull/4809/changes),
+[#4818](https://github.com/scode/farhelm/pull/4818/changes),
+[#4821](https://github.com/scode/farhelm/pull/4821/changes),
+[#4825](https://github.com/scode/farhelm/pull/4825/changes), [#4828](https://github.com/scode/farhelm/pull/4828/changes)
+and the landing fix [#4833](https://github.com/scode/farhelm/pull/4833/changes), then triage-sessions-ui-nov24, which
+fixes the desktop app's notices, Upgrade highlights, bell panel and session list. Since this plan's base (`dfae22dc`),
+main gained only plans queue commits. The two plans share no code. Both add scenes to the app's screenshot tests; the
+landing's review checked by script that every scene in the combined tree has a published light and dark reference
+picture and that the screenshot catalog names only scenes that exist. Their only textual conflicts were in the triage
+ledgers and the review queue's index, which the landing resolved by keeping both sides.
+
+#### Fixes made while landing
+
+- **A formatting failure.** #4828 wrote the new macOS frame height of the session toolbar's screenshot scene on a line
+  that rustfmt reformats, so `cargo fmt --all -- --check` failed on this plan's final tree. #4833 formats it. Main
+  carried the failure only for the minutes between the two merges. The same PR removes a blank line #4801 left in the
+  middle of the drift runner's entry in `.agents/validation.md`, which had split one inventory entry into two
+  paragraphs.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. This round landed two
+plans, triage-tooling-nov24 and triage-sessions-ui-nov24. Neither report's checks covered the two stacked together, so
+the landing ran its checks on both plans stacked on main, with the conflict resolutions in the triage ledgers and the
+review queue's index (`40fe32d9`). The only later change is the landing fix
+[#4833](https://github.com/scode/farhelm/pull/4833/changes), which reformats one line of a test scene and removes a
+blank line from one instruction paragraph; the formatters and the instruction check passed on the final tree
+(`901f58bb`), which is what main now holds outside the plans queue.
+
+- `cargo nextest run --locked -p farhelm-gui -p farhelm-desktop -p farhelm --lib --bins --test e2e` with
+  `-E 'package(farhelm-gui) | package(farhelm-desktop) | test(/^real_agent_capture::drift::/)'`, on the test worker
+  (recorder run `c3af473f-7286-4297-9ff6-25b444186cb7`): all 3593 selected tests passed, with no runtime skip. That is
+  the desktop app's interface crate, the desktop app itself, and the drift tests that use stand-in agents.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and the desktop app's
+  two clippy runs (`-p farhelm-desktop --all-targets`, with and without `--features agent`), on the test worker: passed.
+- The desktop app's end-to-end smoke (`scripts/gui-e2e-smoke.py`, recorder run `659d1f71-c182-4ccd-ba94-df81cff63e54`:
+  50 steps, one skipped, the paste step that headless Linux cannot run) and its Linux lifecycle run
+  (`scripts/gui-lifecycle.py`, `38181353-2c50-412c-9e62-f4f4c6d1067d`), on the test worker: passed. Both plans changed
+  what these drive: the script that drives the app, and the notices and Upgrade highlights shown when a window starts.
+- `python3 scripts/check-gui-goldens.py`, the full comparison of the app's screenshot tests against their published
+  reference pictures, locally (recorder run `af16a877-369e-409b-a4e3-e6c747a1ae82`): every scene matched, the new ones
+  included.
+- The changed scripts' own tests, locally, through the recorder: `scripts/test-run-harness-drift.py`
+  (`ae3bb7ae-1b00-4552-8410-01eda68ccbb1`, 21 passed), `scripts/test-capture-agent-screens.py`
+  (`d43cf8c2-d6c3-45a2-ad2b-ac98b584e370`, 13 passed), `scripts/test-worker/test-test-worker.py`
+  (`673b2ef9-3173-4948-b02d-0ec625a2708b`, 18 passed) and the brick test's portable suite
+  (`python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py'`, `25f16a81-0bf6-42f3-92e8-4b7dd9a57f98`,
+  324 passed).
+- More of the changed scripts' own tests, locally, run directly rather than through the recorder, so they have no run
+  id: `python3 -B scripts/test-docs-shots.py` (31 passed), `python3 -B scripts/test-check-gui-goldens.py` (21),
+  `python3 -B scripts/test-gui-agent.py` (95), `python3 -B scripts/test-gui-screenshot-batch.py` (47),
+  `python3 -B deflake/test-deflake.py` (20), and `deno check` and `deno test -A` on `scripts/boat/boat-tests.ts` (6) and
+  `scripts/tensorlake/rust-tests.ts` (3).
+- `shellcheck` and `py_compile` on the test worker harness's changed files, `bash -n` and `shellcheck` on
+  `scripts/test-provision-centos.sh`, `python3 releasing/check-changelog.py --self-test` and `format`,
+  `python3 scripts/check-agents-md.py` (no errors; one warning, about an old citation in the triage archive, already on
+  main), `cargo fmt --all -- --check`, `dprint check` and `python -B scripts/check-test-sleeps.py`, locally: passed,
+  `cargo fmt` only after the landing fix.
+
+Reused, from triage-tooling-nov24's report: the CentOS provision and update check
+(`4f766a39-8b03-4d47-a7e4-9d7ee18cf376`), which needs a container runtime the landing did not use, and the visual
+inspection of the recaptured docs screenshots (`2fa76b78-a99b-4743-abee-66a1c4dbbb1b`). The landing changed neither
+path.
+
+Skipped: the rest of the workspace Rust suite, since no other crate changed; the live drift cases, which are opt-in and
+spend real vendor turns; a live brick test, which needs a Mac VM; native macOS checks of the desktop app's reopen and
+the taller macOS toolbar picture, which need a Mac and which the tooling report already lists as unverified; and CI,
+which runs only on demand.
+
+#### What the report says that is no longer true
+
+- The report lists Rustfmt among the formatting checks that passed. The line in #4828 fails it, and #4828 is unchanged
+  since the executor's last push, so that check cannot have run on the final revision.
+
+#### Things you should know that the report does not say
+
+- **The CentOS provisioning check now always builds Farhelm from scratch in its own build directory inside the
+  checkout.** Before, it could pick up a Farhelm binary that another build had left in a shared build directory, which
+  is what this plan fixed. The cost is that every run of the check, the x86_64 Linux release gate's included, starts
+  that build cold and needs the disk for a second build directory. I did not measure how much.
+- **Fetching a test worker run's results after a dropped connection now exits with the test run's own status.** That is
+  what lets a landing or a plan's checks see a failed run as failed. The catch is that a fetch whose copy failed and a
+  test run that exited 1 now give the same exit code; the record written beside the fetched results still tells them
+  apart.
+- **The landing's review read the script changes in detail and found no correctness bug.** Two small remarks were left
+  as they are, since neither changes behavior: the comment on the macOS toolbar height adds up to 132 points while the
+  frame uses 140, and the validation inventory's Tensorlake entry does not mention that its dispatcher now reads the
+  test count from the full console log.
