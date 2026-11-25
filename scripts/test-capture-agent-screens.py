@@ -209,7 +209,7 @@ class HostRunTests(unittest.TestCase):
 
 
 class CaptureHarnessTests(unittest.TestCase):
-    """What one harness's capture leaves behind when its terminal host cannot be confirmed stopped."""
+    """Keep scrubbed frames when the terminal host fails during a capture or during shutdown."""
 
     def test_unconfirmed_stop_still_writes_the_captured_screens_and_fails_the_harness(self):
         """A capture spends real vendor turns, so a stop the host cannot confirm must not discard what it captured.
@@ -242,6 +242,40 @@ class CaptureHarnessTests(unittest.TestCase):
         self.assertEqual((fixtures / "stub" / "1.2.3" / "idle-fresh-prompt.txt").read_text(), "screen text")
         self.assertTrue(rec.stop_failed)
         self.assertTrue(any("kept /tmp/fh-run for retry" in miss for miss in rec.missed), rec.missed)
+
+    def test_drive_failure_keeps_frames_and_continues_with_the_next_harness(self):
+        """A transport error after the first saved frame fails the command and still publishes both harnesses."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        fixtures = root / "fixtures"
+        farhelm = root / "farhelm"
+        farhelm.touch()
+        scrubber = mock.Mock(scrub=lambda text: text, check=lambda _text: None)
+
+        def interrupted(_term, rec, _work):
+            rec.save("idle", "fresh-prompt", "first screen", "first title")
+            self.assertEqual((rec.staging / "idle-fresh-prompt.txt").read_text(), "first screen")
+            raise backend.HostError("controller disconnected")
+
+        def complete(_term, rec, _work):
+            rec.save("idle", "fresh-prompt", "second screen", "second title")
+
+        harnesses = {"first": ([], interrupted), "second": ([], complete)}
+        self.enterContext(mock.patch.object(capture, "HARNESSES", harnesses))
+        self.enterContext(mock.patch.object(capture, "harness_version", return_value="1.2.3"))
+        terminal = self.enterContext(mock.patch.object(capture, "Terminal"))
+        self.enterContext(mock.patch.object(capture, "FIXTURES_ROOT", fixtures))
+        self.enterContext(mock.patch.object(capture.Scrubber, "for_host", return_value=scrubber))
+        self.enterContext(mock.patch.object(capture.sys, "stderr", io.StringIO()))
+        stdout = self.enterContext(mock.patch.object(capture.sys, "stdout", io.StringIO()))
+
+        self.assertEqual(capture.main(["--farhelm", str(farhelm), "--no-test"]), 1)
+
+        self.assertEqual(terminal.return_value.close.call_count, 2)
+        self.assertIn("terminal host drive failed: controller disconnected", stdout.getvalue())
+        for harness in harnesses:
+            pair = fixtures / harness / "1.2.3"
+            self.assertEqual((pair / "idle-fresh-prompt.txt").read_text(), f"{harness} screen")
+            self.assertEqual((pair / "idle-fresh-prompt.title").read_text(), f"{harness} title\n")
 
 
 if __name__ == "__main__":

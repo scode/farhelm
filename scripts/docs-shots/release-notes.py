@@ -9,6 +9,8 @@ that preserves the existing shots. If the engine cannot stage that state yet, ex
 private fleet before adding the shot. The capture skips images that are already published.
 """
 
+import json
+
 from docs_shots import Callout, Shot
 
 LAUNCHER_PARK = "id:launcher-destination-heading"
@@ -332,15 +334,35 @@ def custom_agent_draft(bridge):
     bridge.scroll_into_view("id:settings-section-add-custom-agent")
     bridge.click("id:settings-section-add-custom-agent")
     bridge.wait("id:custom-agent-name")
-    bridge.fill("id:custom-agent-name", "Review Agent")
-    bridge.fill("id:custom-agent-command", "review-agent")
 
     def discard_draft():
-        """Close Settings via Discard so the next shot starts on the staged fleet."""
+        """Close Settings even when the input failed before making a draft."""
+        question = "Save changes before closing?"
+
+        def closing_state():
+            """After Escape, identify the discard question or confirm Settings closed cleanly."""
+            entries = json.loads(bridge._call("snapshot", "-a", "--json", "--no-source"))["entries"]
+            if any(entry.get("name") == question for entry in entries):
+                return "dirty", None
+            if not any(entry["key"]["path"].endswith("/settings-heading") for entry in entries):
+                return "closed", None
+            return None, "Settings is open and its close question has not appeared"
+
         bridge.press("escape")
-        bridge.wait_text("Save changes before closing?")
-        bridge.click("id:prompt-alternative-0")
-        bridge.wait_gone_text("Save changes before closing?")
+        if bridge.gui.poll("Settings to close or offer Discard", closing_state, 5, 0.25) == "dirty":
+            bridge.click("id:prompt-alternative-0")
+            bridge.wait_gone_text(question)
+
+    try:
+        bridge.fill("id:custom-agent-name", "Review Agent")
+        bridge.fill("id:custom-agent-command", "review-agent")
+    except Exception as error:
+        # Once the name is filled, Escape opens a question that the next shot's reset cannot dismiss.
+        try:
+            discard_draft()
+        except Exception as cleanup_error:
+            raise RuntimeError(f"{error}\nCould not discard the custom-agent draft: {cleanup_error}") from error
+        raise
 
     return discard_draft
 
@@ -367,14 +389,25 @@ def guarded_replace_offer(bridge):
     bridge.click(f"text:Session actions for {YOLO_SESSION}")
     bridge.click("id:session-menu-replace")
     bridge.wait_text("Confirm replace")
-    bridge.click("text:Confirm replace")
-    bridge.wait("id:prompt-alternative-0")
-    bridge.wait_text("Replace as guarded instead")
 
     def cancel_offer():
-        """Dismiss the unanswered prompt so it cannot carry into another shot."""
+        """Cancel the question left by Replace, including if Confirm did not reach the app."""
+        bridge.wait("id:prompt-cancel")
         bridge.click("id:prompt-cancel")
-        bridge.wait_gone_text("Replace as guarded instead")
+        bridge.wait_gone_text("Replace confirmation")
+        bridge.wait_gone_text("Confirm YOLO launch")
+
+    try:
+        bridge.click("text:Confirm replace")
+        bridge.wait("id:prompt-alternative-0")
+        bridge.wait_text("Replace as guarded instead")
+    except Exception as error:
+        # The question is inline, so resetting dialog layers will leave it on the row.
+        try:
+            cancel_offer()
+        except Exception as cleanup_error:
+            raise RuntimeError(f"{error}\nCould not cancel the guarded Replace offer: {cleanup_error}") from error
+        raise
 
     return cancel_offer
 

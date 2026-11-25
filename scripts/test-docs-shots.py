@@ -134,6 +134,56 @@ class DocsShots(unittest.TestCase):
         self.assertEqual(antigravity.park, "id:launcher-conversation-row")
         self.assertEqual(shots["v0-43-0-shell-sessions"].park, "id:launcher-destination-heading")
 
+    def test_failed_custom_agent_shot_discards_the_dirty_settings_draft(self):
+        """A fill can fail after typing. Close Settings even when the first reply fails or the draft is clean."""
+        pages = dict(engine.load_pages(engine.HERE / "docs-shots", ["release-notes"]))
+        shot = next(shot for shot in pages["release-notes"] if shot.name == "v0-45-0-custom-agent")
+        question = "Save changes before closing?"
+        for first_fill, dirty in [(False, True), (True, True), (True, False)]:
+            with self.subTest(first_fill=first_fill, dirty=dirty):
+                bridge = Mock(spec=engine.Bridge)
+                bridge.gui = Mock()
+                bridge.gui.poll.side_effect = lambda _what, probe, _timeout, _interval: probe()[0]
+                error = RuntimeError("fill reply refused")
+                bridge.fill.side_effect = [error] if first_fill else [None, error]
+                entries = [{"name": question, "key": {"path": "root/prompt"}}] if dirty else []
+                bridge._call.return_value = json.dumps({"entries": entries})
+
+                with self.assertRaisesRegex(RuntimeError, "fill reply refused"):
+                    shot.steps(bridge)
+
+                expected = [call.press("escape"), call._call("snapshot", "-a", "--json", "--no-source")]
+                if dirty:
+                    expected += [call.click("id:prompt-alternative-0"), call.wait_gone_text(question)]
+                observed = [event for event in bridge.mock_calls if event[0] != "gui.poll"]
+                self.assertEqual(observed[-len(expected):], expected)
+
+    def test_failed_guarded_replace_shot_cancels_the_inline_question(self):
+        """After Replace is confirmed the shot must cancel the question even if the illustrated choice is absent."""
+        pages = dict(engine.load_pages(engine.HERE / "docs-shots", ["release-notes"]))
+        shot = next(shot for shot in pages["release-notes"] if shot.name == "v0-45-0-guarded-replace")
+        for confirm_failed in (False, True):
+            with self.subTest(confirm_failed=confirm_failed):
+                bridge = Mock()
+                bridge.plan = {"sessions": [{"title": "bench tokenizer", "host": "stub", "yolo": True}]}
+                bridge.host_id.return_value = "stub"
+                bridge.gui.helm_request.return_value = {"hosts": [{"id": "stub", "yolo_without_asking": False}]}
+                error = RuntimeError("Replace screenshot step failed")
+                if confirm_failed:
+                    bridge.click.side_effect = [None, None, error, None]
+                else:
+                    bridge.wait_text.side_effect = [None, error]
+
+                with self.assertRaisesRegex(RuntimeError, "Replace screenshot step failed"):
+                    shot.steps(bridge)
+
+                self.assertEqual(bridge.mock_calls[-4:], [
+                    call.wait("id:prompt-cancel"),
+                    call.click("id:prompt-cancel"),
+                    call.wait_gone_text("Replace confirmation"),
+                    call.wait_gone_text("Confirm YOLO launch"),
+                ])
+
     def test_mixed_selectors_capture_once_in_declaration_order(self):
         """A page and its shot may overlap. Preserve capture order without starting the app for each selector."""
         for page in ("a", "b"):

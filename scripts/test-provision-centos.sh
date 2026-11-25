@@ -58,11 +58,10 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 target_triple=x86_64-unknown-linux-musl
-# Respect an external CARGO_TARGET_DIR: CI and local runs both override it,
-# and guessing `$repo/target` would look for a payload that was built
-# somewhere else.
-cargo_target_dir=${CARGO_TARGET_DIR:-$repo/target}
-farhelm_payload="$cargo_target_dir/$target_triple/debug/farhelm"
+# Cargo releases its build lock before the gate reads the payload. Keep its
+# musl output and intermediates per checkout so a sibling using the same
+# external target cannot replace the payload before it is staged.
+payload_target_dir="$repo/target/centos-provision-payload"
 
 # The image is derived rather than used bare: `quay.io/centos/centos:stream9`
 # ships no systemd at all (no `/sbin/init`), and PID 1 cannot be changed after
@@ -79,6 +78,10 @@ test_filter=provisioning::tests::provisioning_and_update_over_ssh_preserve_an_op
 ssh_config="$HOME/.ssh/config"
 
 run_dir=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-centos-ci.XXXXXX")
+# mktemp preserves a relative TMPDIR. The fixture opens the staged path
+# after changing to the repository, and SSH needs absolute key paths too.
+run_dir=$(cd "$run_dir" && pwd -P)
+farhelm_payload="$run_dir/farhelm"
 container=""
 # This run's liveness lock, which later runs read to tell a live run's
 # container from one a killed run left behind (see reap_dead_runs below). A
@@ -266,8 +269,12 @@ echo "== building the musl-static farhelm payload"
   if ! rustup target list --installed 2>/dev/null | grep -qx "$target_triple"; then
     rustup target add "$target_triple" || exit 1
   fi
-  cargo build -p farhelm --target "$target_triple" --locked
+  CARGO_BUILD_BUILD_DIR="$payload_target_dir" \
+    cargo build -p farhelm --target "$target_triple" --locked --target-dir "$payload_target_dir"
 )
+# Both the ELF check and the provisioning test (including its update) must
+# read these same bytes, even if another run builds in this checkout later.
+install -m 0755 "$payload_target_dir/$target_triple/debug/farhelm" "$farhelm_payload"
 "$repo/scripts/check-static-elf.sh" "$farhelm_payload" "$target_triple"
 
 # --------------------------------------------------------------------------

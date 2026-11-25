@@ -135,7 +135,7 @@ second clippy run on floating stable is needed.
   tooling, including the Python module import before checking the round safeguards)
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
 - `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy, terminal host ownership and cleanup when the
-  control socket cannot be created, using stand-ins with zero vendor turns)
+  control socket cannot be created, and frame retention on drive failure, using stand-ins with zero vendor turns)
 - `python3 -B scripts/test-run-harness-drift.py` (runner stand-ins verify category selection, one upgrade per harness,
   HTTPS installer downloads, per-case timeouts, cancellation and verdict retention with zero vendor turns)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
@@ -182,8 +182,9 @@ second clippy run on floating stable is needed.
   `snapshot` and a `screenshot`, then `stop`), which needs `mutter` and lavapipe
 - `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot batch page)
 - `python3 -B scripts/test-docs-shots.py` (repeatable page and shot selection, draft output boundaries, frozen release
-  shots and launcher recapture controls, crop geometry and capture failures against a stand-in harness); one live
-  `scripts/docs-screenshots.sh --local` run on Linux, checking the images at 2x and the full capture record
+  shots and launcher recapture controls, crop geometry, and cleanup after a release shot's steps fail against a stand-in
+  harness); one live `scripts/docs-screenshots.sh --local` run on Linux, checking the images at 2x and the full capture
+  record
 - The recorded demo-video checks from `.agents/validation.md`: recorder unit tests, the capture-build overlay test, and
   a live `scripts/readme-video.sh` run on Linux with its marked stills checked.
 - `python3 -B scripts/test-gui-e2e-smoke.py` (the end-to-end smoke's check that every step is in its `Smoke` class,

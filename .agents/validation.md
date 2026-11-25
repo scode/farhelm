@@ -844,7 +844,8 @@ systemd or SSH substrate ran.
   browser overlay did, `{session:}` and `{host:}` targets resolved from the run, and a drawn callout kept whole inside
   the crop with the uncovered pixels left as captured (with `rsvg-convert`; without it that test prints `SKIPPED`, which
   is missing coverage). Seconds, no app or network. Run it when the engine, `scripts/docs_callouts.py` or its page
-  modules change. The shell checks listed with the README hero also cover its capture command. Run
+  modules change. The release recipes' stand-ins also check that failed steps clear the custom-agent draft and the
+  inline Replace question. The shell checks listed with the README hero also cover the capture command. Run
   `scripts/docs-screenshots.sh --local` on Linux to check the staged app at 2x and the complete capture record. For a
   GUI change, pass `--only <page>` or `--only <page>/<shot>` for every affected page or shot in one invocation and
   inspect the images it prints.
@@ -1035,7 +1036,8 @@ systemd or SSH substrate ran.
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
   own. Needs docker and `musl-tools`: the payload it pushes is the release's musl-static `farhelm`, because the
   workspace's glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the container image
-  is cached after the first run.
+  is cached after the first run. The musl build uses a checkout-local target, then the ELF check and the SSH fixture
+  both use the run's staged payload.
 - `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh` and
   `shellcheck scripts/devbuild-mac.sh scripts/test-provision-centos.sh` — syntax and shell checks for the build scripts
   that add purpose-specific Rust targets. CentOS setup installs a missing checkout pin before querying targets on older
@@ -1169,7 +1171,7 @@ systemd or SSH substrate ran.
   pass. Stand-ins also exercise the resolved executable, cleanup after startup metadata fails, shutdown after control
   socket creation fails and retaining the run directory until stop is confirmed. Run it when the scrubber or its host
   backend changes. Seconds, no network or vendor turns. The recorded agent screen fixtures selection independently
-  checks the Rust guard.
+  checks the Rust guard. A drive-failure stand-in also verifies that both harnesses' captured frames are kept.
 - `python3 -B scripts/test-run-harness-drift.py` — the drift runner's build and category discovery, default base
   selection, harness filters, child environment, per-case timeout, category verdicts and evidence retention against
   stand-ins, including cancellation without a failing drift verdict. It also checks the once-per-harness upgrade step
