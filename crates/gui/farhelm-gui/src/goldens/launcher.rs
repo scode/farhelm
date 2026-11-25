@@ -3,7 +3,9 @@
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
 use farhelm_proto::tensorlake::SshKeyStatus;
-use farhelm_proto::ui_channel::{Collection, CollectionState, HelmMarker, KeyedEntry, Preferences};
+use farhelm_proto::ui_channel::{
+    Collection, CollectionChanges, CollectionState, HelmMarker, KeyedEntry, Preferences,
+};
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchTarget, Place};
 use gpui::{App, AppContext as _, Entity, Window, point, px};
 use serde_json::json;
@@ -33,6 +35,15 @@ pub(super) fn launcher_waking_checkout_setup(
     cx: &mut App,
 ) {
     suspended_launcher_setup(state, window, cx, listing(&[], &[]), open_waking_checkout);
+}
+
+/// Show the immediate refusal a suspended-host shortcut returns for a deleted registration.
+pub(super) fn launcher_deleted_quick_launch_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    suspended_launcher_setup(state, window, cx, listing(&[], &[]), prepare_deleted_shortcut);
 }
 
 /// Show why the same suspended sandbox cannot allocate a checkout when its identity is missing.
@@ -148,7 +159,16 @@ fn setup_sandbox(
     crate::ticker::set_reduced_motion(true, cx);
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = crate::session::start(handle, events, None, cx);
-    helm.connect(vec![rows, preferences(&[], None), hosts]);
+    helm.connect(vec![
+        rows,
+        preferences(&[], None),
+        hosts,
+        CollectionState {
+            collection: Collection::CustomAgents,
+            meta: meta(&[]),
+            entries: Vec::new(),
+        },
+    ]);
     state.lists.borrow_mut().push(cx.new(SessionList::new));
     let mut keep = state.keep.borrow_mut();
     keep.push(Box::new(helm));
@@ -350,6 +370,61 @@ fn press_wake_launcher(
     }
 }
 
+/// Begin the normal hidden preparation with a saved registration absent from the live catalog.
+fn prepare_deleted_shortcut(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(mut draft) = suspended_launch_draft(cx) else {
+        state.after.set(Some(prepare_deleted_shortcut));
+        return;
+    };
+    draft.edit_folder("/home/user/work".into());
+    assert!(crate::launcher::view::prepare_unseen(
+        draft,
+        crate::focus::Mark::take(cx),
+        |draft, catalog, _| {
+            draft.choose_custom_agent(&super::custom_agent(), catalog, None);
+            crate::launcher::view::Prepared::Launch { notice: None }
+        },
+        window,
+        cx,
+    ));
+    state.after.set(Some(wait_for_deleted_shortcut_refusal));
+}
+
+/// A refusal is ready only when New paints the reason. The fake must never receive a Resume or create.
+fn wait_for_deleted_shortcut_refusal(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    let mut keep = state.keep.borrow_mut();
+    let helm = keep
+        .iter_mut()
+        .find_map(|kept| kept.downcast_mut::<FakeHelm>())
+        .expect("the suspended launch keeps its fake helm");
+    for command in helm.commands() {
+        assert!(!matches!(
+            command.path.as_str(),
+            "/api/hosts/12/resume" | "/api/sessions"
+        ));
+        let body = (command.path == "/api/launch-catalog").then(|| json!([]));
+        helm.reply(command.id, 200, body);
+    }
+    if !window.driver_nodes().iter().any(|node| {
+        node.element_id.as_deref() == Some("launcher-refusal")
+            && node.label.as_deref()
+                == Some("Not launched. The selected custom agent is no longer registered")
+            && !node.visible_bounds.is_empty()
+    }) {
+        state.after.set(Some(wait_for_deleted_shortcut_refusal));
+    }
+}
+
 /// Which launcher interaction must settle before capture.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LauncherScene {
@@ -363,6 +438,7 @@ enum LauncherScene {
     CustomAgent,
     CustomEffortDefault,
     UnavailableCustomAgent,
+    RenamedCustomSearch,
     CustomRecents,
     NarrowCustomRecents,
     ShellWrapper,
@@ -460,6 +536,15 @@ pub(super) fn launcher_unavailable_custom_agent_setup(
     cx: &mut App,
 ) {
     setup(state, LauncherScene::UnavailableCustomAgent, window, cx);
+}
+
+/// The explicit highlight survives a registry push with a new display name for the same ID.
+pub(super) fn launcher_renamed_custom_search_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::RenamedCustomSearch, window, cx);
 }
 
 /// Show a saved custom agent by the same name as its launcher chip.
@@ -602,7 +687,9 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
     let mut extra = vec![launcher_templates(scene)];
     if matches!(
         scene,
-        LauncherScene::CustomAgent | LauncherScene::CustomEffortDefault
+        LauncherScene::CustomAgent
+            | LauncherScene::CustomEffortDefault
+            | LauncherScene::RenamedCustomSearch
     ) || scene.custom_recents()
     {
         extra.push(super::custom_agent_state());
@@ -982,6 +1069,10 @@ fn answer_new_reads(
         {
             state.after.set(Some(answer_new_reads));
         }
+        return;
+    }
+    if scene == LauncherScene::RenamedCustomSearch {
+        state.after.set(Some(type_launcher_query));
         return;
     }
     if scene.custom_recents() {
@@ -1380,6 +1471,7 @@ fn type_launcher_query(
     );
     let (query, stage): (&str, super::AfterDrawn) = match launcher_scene(state) {
         LauncherScene::Narrow => ("tl:", wait_for_launcher_results),
+        LauncherScene::RenamedCustomSearch => ("acme-code", rename_highlighted_custom_agent),
         LauncherScene::StaleChoice => ("tl:Bench", click_withdrawn_template),
         LauncherScene::RecentFill => ("recent:permission-check", wait_for_recent_fill),
         _ => ("build", wait_for_launcher_results),
@@ -1388,6 +1480,78 @@ fn type_launcher_query(
         field.edit_for_golden(query, window, cx);
     }
     state.after.set(Some(stage));
+}
+
+/// Set an explicit choice before the rename, since the query's default would highlight a sole result anyway.
+fn rename_highlighted_custom_agent(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    const ROW: &str = "launcher-search-option-0";
+    let Some(row) = window
+        .driver_nodes()
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(ROW))
+    else {
+        state.after.set(Some(rename_highlighted_custom_agent));
+        return;
+    };
+    assert!(
+        row.label
+            .as_deref()
+            .is_some_and(|label| label.starts_with("Acme Code"))
+    );
+    let launcher = entry::open_launcher(window, cx).expect("the search result belongs to New");
+    assert!(!launcher.read(cx).has_explicit_search_choice());
+    window.dispatch_event(
+        gpui::PlatformInput::KeyDown(gpui::KeyDownEvent {
+            native_key: None,
+            keystroke: gpui::Keystroke::parse("down").expect("valid key"),
+            is_held: false,
+            prefer_character_input: false,
+        }),
+        cx,
+    );
+    assert!(launcher.read(cx).has_explicit_search_choice());
+    let mut agent = super::custom_agent();
+    agent.display_name = "New Acme".into();
+    let mut keep = state.keep.borrow_mut();
+    let helm = keep
+        .iter_mut()
+        .find_map(|kept| kept.downcast_mut::<FakeHelm>())
+        .expect("the launcher keeps its fake helm");
+    helm.push(CollectionChanges {
+        collection: Collection::CustomAgents,
+        meta: meta(&[&agent.id]),
+        upsert: vec![KeyedEntry {
+            key: agent.id.clone(),
+            value: serde_json::to_value(agent).expect("the renamed fixture serializes"),
+        }],
+        remove: Vec::new(),
+    });
+    state.after.set(Some(wait_for_renamed_custom_agent));
+}
+
+/// Capture after the new name arrives, with the existing highlight still attached to that result.
+fn wait_for_renamed_custom_agent(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    if !window.driver_nodes().iter().any(|node| {
+        node.element_id.as_deref() == Some("launcher-search-option-0")
+            && node
+                .label
+                .as_deref()
+                .is_some_and(|label| label.starts_with("New Acme"))
+            && node.selected == Some(true)
+            && !node.visible_bounds.is_empty()
+    }) {
+        state.after.set(Some(wait_for_renamed_custom_agent));
+    }
 }
 
 /// Dispatch the click against the template's last frame after its removal has reached the store.

@@ -396,6 +396,8 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        // A hidden draft has no render to resolve the registration before the first host wake.
+        self.refresh_custom_capabilities(cx);
         if self.begin_host_wake(SourceConsent::default(), mark, window, cx) {
             return true;
         }
