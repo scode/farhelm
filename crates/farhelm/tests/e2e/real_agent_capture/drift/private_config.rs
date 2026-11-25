@@ -38,8 +38,9 @@ use farhelm_supervisor::service::SupervisorSeams;
 
 /// A directory the supervisor resolves hook paths against, and the agent variable that redirects the agent to it.
 ///
-/// Exhaustive on purpose: a vendor whose hook files live under a third directory needs a supervisor seam for it
-/// first, and then a variant here, or its real configuration would be the one written.
+/// Exhaustive on purpose: a vendor whose hook files live under another directory needs a supervisor seam for it
+/// first, and then a variant here, or its real configuration would be the one written. `ClaudeConfigDir` holds no
+/// hook files and has no seam; it only carries the copies of Claude's config for the workspace trust check.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Root {
     /// The user's home: `user_home` in the supervisor, `HOME` for the agent.
@@ -157,20 +158,24 @@ impl Mirror {
     /// directory, so the setup's writes cannot pass through a link into the real tree; every other entry in those
     /// directories is a symlink to the real entry. A real directory that does not exist yet mirrors as empty.
     fn build(root: Root, real: &Path, private: &Path, leaves: &[PathBuf]) -> anyhow::Result<Self> {
-        Self::build_with_copies(root, real, private, leaves, &[], &BTreeSet::new())
+        Self::build_with_copies(root, real, private, leaves, &[], &[], &BTreeSet::new())
     }
 
     /// Build directories above both kinds of protected leaf. Copy a vendor config's bytes into a distinct inode,
-    /// even when its real name is a symlink, so the launch's canonicalization stays in the mirror.
+    /// even when its real name is a symlink, so the launch's canonicalization stays in the mirror. `fresh` names
+    /// entries the vendor writes during the case that must start empty in the mirror and be discarded with it
+    /// rather than reach the real tree through a link.
     fn build_with_copies(
         root: Root,
         real: &Path,
         private: &Path,
         leaves: &[PathBuf],
         copies: &[PathBuf],
+        fresh: &[PathBuf],
         protected: &BTreeSet<(u64, u64)>,
     ) -> anyhow::Result<Self> {
-        let mut leaf_set: BTreeSet<PathBuf> = leaves.iter().chain(copies).cloned().collect();
+        let mut leaf_set: BTreeSet<PathBuf> =
+            leaves.iter().chain(copies).chain(fresh).cloned().collect();
         for copy in copies {
             // Claude creates this directory to serialize config updates. A real lock held by another
             // session must not block the private launch. Leave the name available in the mirror.
@@ -484,12 +489,15 @@ impl PrivateConfig {
             }))
             .collect();
         let private_home = scratch.join("private-home");
+        // Claude snapshots its config into a backups directory beside it, and prunes old snapshots there. A link
+        // would put the private config's snapshots, with the test workspace's trust, into the real directory.
         let mut mirrors = vec![Mirror::build_with_copies(
             Root::Home,
             home,
             &private_home,
             &[],
             &home_copies,
+            &[PathBuf::from(".claude/backups")],
             &protected,
         )?];
         let private_override = scratch.join("private-claude-config");
@@ -500,6 +508,7 @@ impl PrivateConfig {
                 &private_override,
                 &[],
                 &override_copies,
+                &[PathBuf::from("backups")],
                 &protected,
             )?);
         }
@@ -863,6 +872,47 @@ mod tests {
             "{error}"
         );
         assert!(lines.any(|line| line.starts_with("state.json")), "{error}");
+    }
+
+    /// Claude snapshots its configuration into `backups` beside it and prunes old snapshots there. The private
+    /// copies' snapshots carry the test workspace's trust, so the directory must start absent in the mirror, never as
+    /// a link that would let them, or the pruning, reach the user's real backups.
+    #[farhelm_testtrace::test]
+    fn claude_trust_keeps_the_backups_directory_out_of_the_real_tree() {
+        let scratch = farhelm_teststate::tempdir().unwrap();
+        let home = scratch.path().join("home");
+        let override_dir = scratch.path().join("vendor-config");
+        let isolated = scratch.path().join("case");
+        fs::create_dir_all(home.join(".claude/backups")).unwrap();
+        fs::write(home.join(".claude/backups/.claude.json.backup.1"), b"real").unwrap();
+        fs::create_dir_all(override_dir.join("backups")).unwrap();
+        fs::create_dir(&isolated).unwrap();
+        let config =
+            PrivateConfig::claude_trust_mirrors(&isolated, &home, Some(&override_dir)).unwrap();
+        for private in [
+            isolated.join("private-home/.claude/backups"),
+            isolated.join("private-claude-config/backups"),
+        ] {
+            assert!(
+                fs::symlink_metadata(&private).is_err(),
+                "{} must start absent",
+                private.display()
+            );
+            fs::create_dir(&private).unwrap();
+            fs::write(private.join("snapshot"), b"private trust").unwrap();
+        }
+        assert!(config.finish(true).unwrap().is_empty());
+        let real: Vec<_> = fs::read_dir(home.join(".claude/backups"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(real, [std::ffi::OsString::from(".claude.json.backup.1")]);
+        assert!(
+            fs::read_dir(override_dir.join("backups"))
+                .unwrap()
+                .next()
+                .is_none()
+        );
     }
 
     /// A vendor directory that does not exist yet mirrors as an empty private tree with the ancestors in place.

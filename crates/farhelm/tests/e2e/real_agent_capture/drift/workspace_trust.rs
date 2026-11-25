@@ -12,7 +12,7 @@ const PI_TRUST_QUESTION: &str = "trust project folder?";
 async fn execute(harness: LaunchHarness) -> DriftResult {
     let profile = profile(harness).expect("a trust case has a drift profile");
     let trusted = check_launch(harness, &profile, true).await;
-    if matches!(harness, LaunchHarness::Codex | LaunchHarness::Pi)
+    if trust_evidence(harness).has_untrusted_launch()
         && !matches!(trusted, Err(DriftError::CouldNotRun(_)))
     {
         let untrusted = check_launch(harness, &profile, false).await;
@@ -39,17 +39,18 @@ async fn check_launch(harness: LaunchHarness, profile: &Harness, trusted: bool) 
         container: None,
         workspace_trust: Some(trusted),
     };
-    let private = (harness == LaunchHarness::Claude).then_some(
+    let evidence = trust_evidence(harness);
+    let private = (evidence == TrustEvidence::ClaudeConfig).then_some(
         private_config::PrivateConfig::prepare_claude_trust
             as fn(&Path) -> anyhow::Result<private_config::PrivateConfig>,
     );
     with_drift_supervisor(profile, selection, private, async |env, launch| {
-        if harness == LaunchHarness::Pi {
+        if evidence == TrustEvidence::PiExtension {
             write_pi_extension(env.work)?;
         }
         env.with_session(launch, farhelm_helm::CreateExtras::default(), async |id| {
             let mut terminal = Terminal::attach(env.sup, env.client, id, false).await?;
-            if harness == LaunchHarness::Codex && !trusted {
+            if evidence == TrustEvidence::CodexArgument && !trusted {
                 codex_stayed_untrusted(&mut terminal).await?;
                 check_codex_trust_argument(&terminal, env.work, false)?;
                 return Ok(());
@@ -65,16 +66,19 @@ async fn check_launch(harness: LaunchHarness, profile: &Harness, trusted: bool) 
                 )
                 .await?;
             check_startup_through_composer(&mut terminal, harness).await?;
-            if harness == LaunchHarness::Codex {
-                check_codex_trust_argument(&terminal, env.work, true)?;
-            }
-            if harness == LaunchHarness::Pi {
-                check_pi_extension(&mut terminal, env.work, trusted).await?;
-            }
-            if harness == LaunchHarness::Claude {
-                env.private
-                    .expect("Claude must have a private config")
-                    .check_claude_trust(env.work)?;
+            match evidence {
+                TrustEvidence::CodexArgument => {
+                    check_codex_trust_argument(&terminal, env.work, true)?;
+                }
+                TrustEvidence::PiExtension => {
+                    check_pi_extension(&mut terminal, env.work, trusted).await?;
+                }
+                TrustEvidence::ClaudeConfig => {
+                    env.private
+                        .expect("Claude must have a private config")
+                        .check_claude_trust(env.work)?;
+                }
+                TrustEvidence::ComposerOnly => {}
             }
             println!(
                 "workspace trust {} verified",
@@ -85,6 +89,44 @@ async fn check_launch(harness: LaunchHarness, profile: &Harness, trusted: bool) 
         .await
     })
     .await
+}
+
+/// What shows a harness's trust choice took effect, beyond reaching the composer without a trust question.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TrustEvidence {
+    /// Reaching the composer without a question is all the case checks.
+    ComposerOnly,
+    /// Codex's process carries the trust argument; an explicit untrusted launch is checked too.
+    CodexArgument,
+    /// A project extension in the workspace loads only when the workspace is trusted; an explicit untrusted launch is
+    /// checked too.
+    PiExtension,
+    /// Farhelm records the trust in Claude's config at launch, which the case reads from a private copy.
+    ClaudeConfig,
+}
+
+impl TrustEvidence {
+    /// Whether the harness also offers an explicit untrusted launch that the case checks in a second workspace.
+    fn has_untrusted_launch(self) -> bool {
+        match self {
+            Self::CodexArgument | Self::PiExtension => true,
+            Self::ComposerOnly | Self::ClaudeConfig => false,
+        }
+    }
+}
+
+/// Each harness states its trust evidence, so a newly added one cannot skip a check by default.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn trust_evidence(harness: LaunchHarness) -> TrustEvidence {
+    use LaunchHarness::*;
+    match harness {
+        Codex => TrustEvidence::CodexArgument,
+        Pi => TrustEvidence::PiExtension,
+        Claude => TrustEvidence::ClaudeConfig,
+        Antigravity | Muse | Goose | Omp | Grok | Cursor | OpenCode | Bash | Zsh | Custom => {
+            TrustEvidence::ComposerOnly
+        }
+    }
 }
 
 /// These cues are from the interactive editor, after trust has been decided. Startup banners can appear first.
