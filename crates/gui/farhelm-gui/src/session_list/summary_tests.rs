@@ -445,8 +445,8 @@ fn one_note() -> Value {
     json!([{ "seq": 5, "at": ACTIVE, "text": "Look at this" }])
 }
 
-/// Two pinned running sessions with unread notifications, one selected, and a stale session on an unreachable
-/// host. Both tests hover the same row layout to distinguish pressable controls from the status marks beside them.
+/// Two pinned sessions with unread notifications, a timed muted wait and a stale session. Both tests hover the same
+/// row layout to distinguish pressable controls from status marks.
 fn open_rows_with_marks(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
     let unreachable = json!({
         "phase": "unreachable-reprobing",
@@ -457,8 +457,11 @@ fn open_rows_with_marks(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestCo
         local_session("a").pinned(1).notifications(one_note(), 0),
         local_session("b").pinned(2).notifications(one_note(), 0),
         local_session("s").host(3).stale(),
+        local_session("w")
+            .status(json!({"state": "waiting"}))
+            .muted(Some((TEST_NOW + 120) * 1_000)),
     ];
-    let order = ["a", "b", "s"];
+    let order = ["a", "b", "s", "w"];
     let preferences = Preferences {
         visit_history: vec!["a".to_owned()],
         welcome_seen: Some(true),
@@ -480,16 +483,23 @@ fn open_rows_with_marks(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestCo
 
 /// A mark's own help covers the neighboring rows if beside placement is lost. Its words distinguish it from
 /// the summary card, and the notch shows which mark they describe.
-fn assert_status_help(cx: &mut VisualTestContext, row: &str, target: &str, words: &str) {
+fn assert_status_help(
+    cx: &mut VisualTestContext,
+    row: &str,
+    target: &str,
+    words: &str,
+) -> ShownTooltip {
     let shown = shown_over(cx, row, target);
     assert_eq!(shown.side(), TooltipSide::Beside, "{target}");
     assert!(shown.text.starts_with(words), "{target}: {:?}", shown.text);
     assert!(cx.debug_bounds("tooltip-notch").is_some(), "{target}");
     assert!(shown.ring().is_none(), "{target} is a status mark");
+    shown
 }
 
 /// Status marks sit among controls in both selected and unselected rows. Each mark keeps its own help and
-/// notch beside the sidebar. The absence of a ring makes the mark read as information.
+/// notch beside the sidebar. The muted waiting mark names the deadline in the viewer's time zone, without
+/// the action wording of the separate Unmute control.
 #[gpui::test]
 fn status_marks_show_help_beside_the_sidebar_without_a_ring(cx: &mut TestAppContext) {
     let (_fake, cx) = open_rows_with_marks(cx);
@@ -511,6 +521,15 @@ fn status_marks_show_help_beside_the_sidebar_without_a_ring(cx: &mut TestAppCont
         "session-row-s",
         "session-row-s-cause",
         "Waiting for supervisor: this is the session's last-known state",
+    );
+    cx.update(|_, cx| local_time::pin(-5 * 3_600, cx));
+    test_support::redraw(cx);
+    let muted = "Waiting — Muted until 19:01";
+    let shown = assert_status_help(cx, "session-row-w", "session-seen-w", muted);
+    assert_eq!(shown.text, muted);
+    assert_eq!(
+        test_support::label(cx, "session-seen-w").as_deref(),
+        Some(muted)
     );
 }
 

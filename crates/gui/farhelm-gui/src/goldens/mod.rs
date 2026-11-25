@@ -866,6 +866,12 @@ static SCENES: &[Scene] = &[
         setup: session_row_hover_setup,
     },
     Scene {
+        name: "muted-waiting-dot-hover",
+        size: (800., 418.),
+        draw: session_lists_beside,
+        setup: muted_waiting_dot_hover_setup,
+    },
+    Scene {
         name: "host-rail-hover-beside",
         size: (800., 560.),
         draw: session_lists_beside,

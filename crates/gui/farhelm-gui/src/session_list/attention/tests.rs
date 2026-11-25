@@ -854,7 +854,7 @@ fn the_list_is_absent_when_nothing_needs_attention_and_while_hosts_shows(cx: &mu
 /// Why this matters: a working row stands for a run the sidebar is too narrow to show (SPEC.md: "followed by the current
 /// step's name when known", and the bar "filled as steps complete"), so its step and bar must follow the pushed run.
 /// Specified: a setup three steps long, one done, names its running step and fills a third of its bar; pushed on to
-/// two done, it names the next step and fills two thirds.
+/// two done, it names the next step and fills two thirds. A retry also names the unresolved setup warning.
 #[gpui::test]
 fn a_working_row_names_its_step_and_fills_its_bar(cx: &mut TestAppContext) {
     let (mut fake, cx) = open(
@@ -886,6 +886,17 @@ fn a_working_row_names_its_step_and_fills_its_bar(cx: &mut TestAppContext) {
         filled(cx)
     );
     assert!(label(&frame(cx), "host-attention-open-5").contains("Setting up · Connect"));
+    push_run(&mut fake, run(5, Add, RunStatus::Failed), cx);
+    let mut retry = setup_run(5, 2);
+    retry.run_id = Some("retry-5".into());
+    push_run(&mut fake, retry, cx);
+    assert!(
+        cx.update(|_, cx| crate::hosts::status::warned(5, cx)),
+        "the warning survives the start of a new run"
+    );
+    assert!(label(&frame(cx), "host-attention-open-5").ends_with(
+        "Setting up · Connect; open Hosts for details; Setup or update needs attention"
+    ));
 }
 
 /// Why this matters: a working row's hover is the host progress card (SPEC.md: "Hovering anywhere on a working row opens

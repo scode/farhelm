@@ -42488,3 +42488,36 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   index entry.
 - Execution: Fixed in jj change `wnnkzsqvuxrutstrpmxkylpsqnukwmnp`, bookmark
   `plan/triage-sessions-ui-nov24/02-whats-new` ([#4813](https://github.com/scode/farhelm/pull/4813/changes)).
+
+## sidebar-retry-warning-missing-accessible-name.md
+
+- Outcome: `other`.
+- Assessment: In the sidebar's attention area, a host that is retrying setup or update after an earlier failure shows an
+  amber edge for the unacknowledged warning. A screen reader hears the progress wording but not that a warning is
+  pending; the host rail's own status text does mention it. Verified: Confirmed. `session_list/attention.rs:253-254`
+  lets live progress own the row's text, with the warning kept only for the edge, as a commented choice. SPEC.md
+  2991-2992 requires the amber edge and names no accessible phrase for it.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code. Append "setup or update needs attention" to the working row's accessible description. Size S.
+- Execution: Fixed in jj change `qwkovuurovqztsxvqwxwktxquknvmoqq`, bookmark
+  `plan/triage-sessions-ui-nov24/03-session-list` ([#4816](https://github.com/scode/farhelm/pull/4816/changes)).
+
+## trailing-muted-waiting-dots-bypass-ringless-status-tooltip-path.md
+
+- Outcome: `other`.
+- Assessment: On a muted session waiting on a connected host, hovering the red waiting dot shows the row's general hover
+  card, with its notch pointing at the row, instead of help for the dot itself. Verified: Confirmed.
+  `session_list/seen.rs:139-142` returns the bare mark with no help owner when the session is muted. SPEC.md 2926 says
+  "Hovering a live status dot ... explains that mark", and 3121 requires the mark's tooltip to give the status and say
+  Muted. I did not check whether the row's card already says "Waiting" and "Muted"; if it does, only the pointer target
+  differs.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code. Give the dot a status-mark help owner with the status and mute wording. Size S.
+- Execution: Fixed in jj change `qwkovuurovqztsxvqwxwktxquknvmoqq`, bookmark
+  `plan/triage-sessions-ui-nov24/03-session-list` ([#4816](https://github.com/scode/farhelm/pull/4816/changes)).

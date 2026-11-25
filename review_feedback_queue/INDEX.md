@@ -401,9 +401,6 @@ consequences.
 - [`launcher-announces-two-selected-setups.md`](launcher-announces-two-selected-setups.md) — The launcher can report
   both the setup that filled the form and the current keyboard target as selected.
 
-- [`sidebar-retry-warning-missing-accessible-name.md`](sidebar-retry-warning-missing-accessible-name.md) — A retrying
-  host's warning appears as an amber edge without an equivalent in the session row's accessible description.
-
 - [`exited-shell-suspend-confirmation-wording.md`](exited-shell-suspend-confirmation-wording.md) — Stop and suspend can
   still tell users it will stop a shell that has already exited.
 
@@ -578,11 +575,6 @@ consequences.
 - [`trailing-status-mark-tests-lost-their-per-target-geometry-check.md`](trailing-status-mark-tests-lost-their-per-target-geometry-check.md)
   — The row status tests verify that each mark's help appears with a notch and no ring. They can pass if placement uses
   the bounds of a different element in the same sidebar.
-
-- [`trailing-muted-waiting-dots-bypass-ringless-status-tooltip-path.md`](trailing-muted-waiting-dots-bypass-ringless-status-tooltip-path.md)
-  — On a muted session waiting on a connected host, hovering the waiting dot shows the row summary. If the summary fits
-  beside the sidebar, its notch and ring identify the row's open control. The separate Unmute bell still has its own
-  action help.
 
 - [`trailing-maximized-relaunch-contract-has-no-first-frame-or-subsequent.md`](trailing-maximized-relaunch-contract-has-no-first-frame-or-subsequent.md)
   — The checked cases could pass if a maximized Mac relaunch still flashed the ordinary frame or if the next Zoom
