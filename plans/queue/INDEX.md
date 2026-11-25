@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [in-flight 8d5123] `drift-reasoning-effort.md` — Add live reasoning effort selection drift tests across supporting agents (after `drift-model-selection.md`)
+- [complete] `drift-reasoning-effort.md` — Add live reasoning effort selection drift tests across supporting agents (after `drift-model-selection.md`)
 - [complete] `drift-permission-modes.md` — Add live permission mode and custom permission flag drift tests across supporting agents (after `drift-model-selection.md`)
 - [in-flight 88d576] `drift-initial-prompt-launch.md` — Add live launch-time initial prompt delivery drift tests across supporting agents (after `drift-model-selection.md`)
 - [in-flight 4ebb5f] `drift-named-conversation-starts.md` — Add live one-time named conversation start drift tests across all built-in agents (after `drift-model-selection.md`)
