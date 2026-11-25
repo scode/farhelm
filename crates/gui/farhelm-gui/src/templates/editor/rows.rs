@@ -352,10 +352,14 @@ impl Rows<'_> {
                 controls
             }
             Field::Permissions => self.permissions(),
-            Field::Yolo if fields.agent.is_some_and(LaunchHarness::uses_custom_catalog) => vec![
-                hint("templates-fixed-yolo", "Custom agents always run in YOLO mode.", palette)
-                    .into_any_element(),
-            ],
+            Field::Yolo if fields.declares_custom_agent() => {
+                let words = if fields.yolo == Some(false) {
+                    "Keeps safety checks (not offered). Remove this answer to save the template."
+                } else {
+                    "Custom agents always run in YOLO mode."
+                };
+                vec![self.labelled(field.label(), hint("templates-fixed-yolo", words, palette)).into_any_element()]
+            }
             Field::Yolo => vec![
                 self.choice(
                     field,
@@ -434,10 +438,6 @@ impl Rows<'_> {
                         let fields = &mut editor.draft.fields;
                         fields.agent = Some(agent);
                         fields.custom_agent = agent.uses_custom_catalog().then_some(id);
-                        if agent.uses_custom_catalog() && fields.kind == Some(LauncherKind::Command)
-                        {
-                            fields.yolo = Some(true);
-                        }
                     });
                 });
             });

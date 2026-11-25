@@ -26,6 +26,7 @@ use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::launcher::{
     LaunchTemplate, LauncherKind, LauncherState, TemplateContext, TemplateDestination,
     TemplateFields, TemplateNameKind, TemplateRefusal, apply_template, apply_templates,
+    effective_command_yolo,
 };
 use farhelm_proto::{
     CommandLaunch, ErrorKind, LaunchHarness, LaunchRequest, LaunchSelection, SessionLaunch,
@@ -326,7 +327,7 @@ fn resolve_with(
                         .to_string(),
                 ));
             }
-            let Some(yolo) = state.yolo else {
+            let Some(yolo) = effective_command_yolo(state.command_agent, state.yolo) else {
                 return Err(invalid(
                     "a command launch needs --yolo or --no-yolo unless a template sets its YOLO \
                      answer"
@@ -540,12 +541,26 @@ mod tests {
         assert_eq!(resolved.launch.custom_reporting(), Some(false));
 
         let command = serde_json::from_value(serde_json::json!({
-            "kind":"command", "agent":"custom", "custom_agent":"acme-code", "yolo":true,
+            "kind":"command", "agent":"custom", "custom_agent":"acme-code",
             "command":"exec alternate {farhelm_args}", "destination":{"folder":"/work"},
         }))
         .unwrap();
-        let resolved = resolve(&[], &[], &command, &[], &catalog, false, false).unwrap();
+        let command_template = LaunchTemplate {
+            name: "acme-command".into(),
+            fields: command,
+        };
+        let resolved = resolve(
+            std::slice::from_ref(&command_template),
+            &["acme-command".into()],
+            &TemplateFields::default(),
+            &[],
+            &catalog,
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(resolved.launch.custom_agent(), Some("acme-code"));
+        assert_eq!(resolved.launch.yolo(), Some(true));
         assert_eq!(
             resolved.launch.display_command(),
             "exec alternate {farhelm_args}"
@@ -555,7 +570,7 @@ mod tests {
             None,
             "the Command declaration supplies its own report contract"
         );
-        assert!(resolve(&[], &[], &command, &[], &[], false, false).is_err());
+        assert!(resolve(&[], &[], &command_template.fields, &[], &[], false, false).is_err());
     }
     use farhelm_proto::{LaunchEffort, LaunchHarness};
 

@@ -145,7 +145,7 @@ impl Field {
             Field::Wrapper => fields.wrapper_prefix = Some(None),
             Field::Container => fields.container = Some(None),
             Field::Command => fields.command = Some(String::new()),
-            Field::Yolo => fields.yolo = Some(false),
+            Field::Yolo => fields.yolo = Some(fields.declares_custom_agent()),
             Field::Resume => fields.resume_command = Some(None),
             Field::Host => fields.host = Some(String::new()),
             Field::Destination => {
@@ -241,6 +241,9 @@ impl Field {
             );
         }
         let custom = fields.agent.is_some_and(LaunchHarness::uses_custom_catalog);
+        if self == Field::Yolo && fields.declares_custom_agent() && fields.yolo == Some(false) {
+            return Some(farhelm_proto::launcher::CUSTOM_COMMAND_YOLO_REQUIRED.into());
+        }
         // Switching tabs keeps the selected agent visible. Generic Custom only describes a Command launch.
         if self == Field::Agent
             && custom

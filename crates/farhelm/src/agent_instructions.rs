@@ -170,8 +170,9 @@ fn render(agent: &Command) -> String {
          OMP's guarded choice approves workspace edits and asks about other actions. Your\n\
          own rules and in-session mode switches can loosen these modes. Older saved agent launches without a\n\
          recorded permission mode count as YOLO. Cursor defaults to YOLO. A command\n\
-         launch is --command with the command line to run and --yolo or --no-yolo: your\n\
-         statement of whether it bypasses human, classifier and sandbox safety checks. Farhelm believes it and never\n\
+         launch uses --command. Declaring a custom agent supplies YOLO. Otherwise supply\n\
+         --yolo or --no-yolo to state whether it bypasses human, classifier and sandbox\n\
+         safety checks. Farhelm believes the statement and never\n\
          checks the command, so say it truthfully. On a command launch --agent TYPE declares\n\
          the agent type the command runs. Bash and Zsh are shell types and cannot be\n\
          declared there. The command must then contain {farhelm_args} as one\n\

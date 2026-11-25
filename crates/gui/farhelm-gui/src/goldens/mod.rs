@@ -1163,6 +1163,12 @@ static SCENES: &[Scene] = &[
         setup: template_generic_agent_refusal_setup,
     },
     Scene {
+        name: "template-custom-yolo-refusal",
+        size: (1010., 940.),
+        draw: empty,
+        setup: template_custom_yolo_refusal_setup,
+    },
+    Scene {
         name: "template-literal-effort",
         size: (1010., 940.),
         draw: empty,

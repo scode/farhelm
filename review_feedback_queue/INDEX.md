@@ -105,11 +105,6 @@ consequences.
   conversation ID reported right after the restarted agent starts is judged against the previous launch's reporting
   setting, and the Restart reply (and listings before launch update completes) report a stale restart offer.
 
-- [`trailing-templates-editor-hides-custom-yolo-control-and-saves-false.md`](trailing-templates-editor-hides-custom-yolo-control-and-saves-false.md)
-  — In the Templates editor, adding Approvals to a Command template that declares a custom agent (or opening a stored
-  one whose Approvals was set to 'Keeps safety checks') displays only the static message 'Custom agents always run in
-  YOLO mode.' with no toggle and lets the user save, yet actually saves YOLO as off ('Not YOLO').
-
 - [`trailing-replace-with-recent-named-fill-enter-replaces.md`](trailing-replace-with-recent-named-fill-enter-replaces.md)
   — In Replace with, a screen reader announces a highlighted recent setup as "Fill from recent setup" while Enter on it
   replaces and deletes the source session; highest if the "⏎ Replace" key cap is not announced with it.
@@ -173,16 +168,6 @@ consequences.
 - [`trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md`](trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md)
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
   failure above it, and leaves the launch refusal stuck even after an in-flight toggle succeeds.
-
-- [`trailing-apply-template-custom-command-yolo-diverges-from-gui.md`](trailing-apply-template-custom-command-yolo-diverges-from-gui.md)
-  — Applying launch templates that declare a custom agent on the Command tab behaves differently in the desktop app and
-  the CLI.
-
-- [`trailing-check-template-shape-allows-custom-agent-yolo-false.md`](trailing-check-template-shape-allows-custom-agent-yolo-false.md)
-  — Both the CLI and the desktop Templates editor allow saving a Command launch template that declares a custom agent
-  with YOLO turned off, creating a saved template that Farhelm always refuses when you try to apply it (and in the
-  desktop editor the Approvals toggle is hidden behind a static YOLO message, so the user cannot even see or fix the
-  saved non-YOLO flag without removing the field).
 
 - [`trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md`](trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md)
   — For a registered custom agent session created without session resumption enabled, the disabled Restart with menu

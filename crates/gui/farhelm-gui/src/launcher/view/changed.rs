@@ -87,7 +87,7 @@ impl Launcher {
                 (self.draft.command.command != stored.command).then_some(words)?
             }
             (RestartBaseline::Command(stored), Changed::Yolo) => {
-                (self.draft.command.yolo != Some(stored.yolo)).then_some(words)?
+                (self.draft.command.effective_yolo() != Some(stored.yolo)).then_some(words)?
             }
             (RestartBaseline::Command(stored), Changed::Resume) => {
                 let resume = self

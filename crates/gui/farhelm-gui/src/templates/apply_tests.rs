@@ -234,8 +234,15 @@ fn generic_custom_command_template_clears_an_old_registration() {
     generic(&mut source);
     let candidate = super::save::Candidate::from_draft(&source, &fixture.hosts);
     assert_eq!(candidate.fields.custom_agent, Some(None));
+    assert_eq!(
+        candidate.fields.yolo, None,
+        "a declaration supplies an effective answer only"
+    );
     let mut draft = new_draft();
+    draft.choose_command_yolo(false);
     generic(&mut draft);
+    let captured = super::save::Candidate::from_draft(&draft, &fixture.hosts);
+    assert_eq!(captured.fields.yolo, None, "the earlier No is dormant");
     draft.command.custom_agent = Some("old-id".into());
     let non_yolo = template(
         "guarded",
@@ -250,7 +257,21 @@ fn generic_custom_command_template_clears_an_old_registration() {
         .apply(&mut draft, &[template("generic", candidate.fields)])
         .unwrap();
     assert_eq!(draft.command.custom_agent, None);
-    assert_eq!(draft.command.yolo, Some(true));
+    assert_eq!(draft.command.effective_yolo(), Some(true));
+    let codex = template(
+        "codex",
+        TemplateFields {
+            kind: Some(LauncherKind::Command),
+            agent: Some(LaunchHarness::Codex),
+            ..TemplateFields::default()
+        },
+    );
+    fixture.apply(&mut draft, &[codex]).unwrap();
+    assert_eq!(
+        draft.command.effective_yolo(),
+        Some(false),
+        "the built-in keeps its explicit answer"
+    );
 }
 
 /// A session as the helm serves it (its pinned list fixture), in `/src/project`, titled `source`, with `launch` as its

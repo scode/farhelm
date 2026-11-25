@@ -561,6 +561,53 @@ fn a_generic_custom_command_template_cannot_be_saved_on_the_agent_tab(cx: &mut T
     assert!(saves(&mut helm).is_empty());
 }
 
+/// An old No must stay visible until repaired. Adding Approvals to the repaired template offers the valid answer.
+#[gpui::test]
+fn a_custom_command_template_can_repair_its_old_yolo_answer(cx: &mut TestAppContext) {
+    let custom = template(
+        "custom-command",
+        TemplateFields {
+            kind: Some(LauncherKind::Command),
+            agent: Some(LaunchHarness::Custom),
+            command: Some("my-agent {farhelm_args}".into()),
+            yolo: Some(false),
+            ..TemplateFields::default()
+        },
+    );
+    let (mut helm, cx) = open_header(cx, &[custom], None);
+    open_editor(&mut helm, "template-open-custom-command", cx);
+    assert!(painted(cx).contains("Keeps safety checks (not offered)"));
+    click(cx, "templates-add");
+    click(cx, "templates-add-resume");
+    assert!(painted(cx).contains("Unsaved changes"));
+    click(cx, "templates-save");
+    assert!(saves(&mut helm).is_empty(), "the old No cannot be saved");
+    click(cx, "templates-remove-yolo");
+    assert_eq!(draft(cx).fields.yolo, None);
+    click(cx, "templates-agent");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("templates-agent-option-Custom")
+    );
+    keys(cx, "up enter");
+    assert_ne!(draft(cx).fields.agent, Some(LaunchHarness::Custom));
+    click(cx, "templates-agent");
+    keys(cx, "down enter");
+    assert_eq!(draft(cx).fields.agent, Some(LaunchHarness::Custom));
+    assert_eq!(
+        draft(cx).fields.yolo,
+        None,
+        "selecting Custom leaves Approvals absent"
+    );
+    click(cx, "templates-add");
+    click(cx, "templates-add-yolo");
+    assert_eq!(draft(cx).fields.yolo, Some(true));
+    click(cx, "templates-save");
+    let saved = saves(&mut helm);
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].1["yolo"], true);
+}
+
 /// A literal effort can stack onto a custom agent. On a built-in template it stays visible until the user resets it.
 #[gpui::test]
 fn a_literal_effort_can_be_saved_without_an_agent_or_cleared_on_a_built_in(

@@ -3317,11 +3317,10 @@ destination may be spelled the same), and guessing between them would put a sess
 registered name carrying a control character can never be typed back at all, since the relay refuses one in `--host`;
 the not-found refusal says so by count, because the fix is a rename and an agent has no rename verb for hosts.
 
-An agent's create sends a `LaunchRequest`: a command launch (`--command`, the required `--yolo`/`--no-yolo` assertion,
-an optional declared `--agent` and `--resume-command`), which the relay's doorway checks by the command-launch rules
-before forwarding. The type also has an agent variant (an agent type and its choices, composed by the helm exactly as
-for the launcher) for the agent CLI's launch flags; it never carries composed commands, so an agent cannot hand the helm
-arbitrary start and resume commands under an agent launch's YOLO verdict. A clone copies its source's stored launch
+An agent's create sends the template names and launcher edits described under [Agent launches from the CLI](#agent-launches-from-the-cli).
+The helm resolves them to either a command launch, whose YOLO answer comes from the declaration or an explicit answer,
+or an agent launch, whose commands it composes from the agent type and its choices exactly as for the launcher. An agent
+cannot hand the helm arbitrary start and resume commands under an agent launch's YOLO verdict. A clone copies its source's stored launch
 exactly; a legacy source is refused with a remedy, because SPEC.md has agent clone refuse a session from before launch
 kinds.
 
@@ -9501,7 +9500,9 @@ the flags to an empty launcher with the same `apply_templates` the GUI uses, so 
 what a template means; a refusal of the flags names the flag (`--model applies to an agent launch ...`) rather than an
 unnamed template. The result must have a folder or, for agent create, a managed checkout (`--gh`, aliased as `--github`,
 sets `TemplateDestination::Github` and conflicts with `--cwd`). Spawn still refuses a managed destination. Either
-requires an agent type or a command and a YOLO answer; the launch is then validated by the same
+requires an agent type or a command and a YOLO answer. The desktop and CLI use `effective_command_yolo` for the answer
+that goes into a launch. A custom declaration supplies YOLO for its command and leaves the draft's explicit answer
+available to a later built-in command. The launch is then validated by the same
 `sessions::resolve_launch_request` a REST create goes through. Only `--command` sets the launch kind: the agent-launch
 flags leave it alone, so on a command template they are refused naming the flag, as the same edit is refused in the
 launcher. `--model`, `--effort` and `--permissions` accept `default`, sent as `null`, which resets a choice a template

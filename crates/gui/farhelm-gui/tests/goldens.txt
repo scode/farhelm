@@ -440,6 +440,8 @@ linux/tab-only-stop-confirmation--dark.png e2acf7e40ac1022a52a8da97683e4275c8b45
 linux/tab-only-stop-confirmation--light.png 27d08e4f2c384648d64cd308ceea25144c7b43c3
 linux/tab-strip--dark.png 96bdfde8dfff295c92ec1f824c750bcaf058a13c
 linux/tab-strip--light.png 9f909e41b6604fa2551fdad6a8c3d28da18d6b38
+linux/template-custom-yolo-refusal--dark.png b4007778199d38ba4b1aa50d2eec7a3cb319c4d9
+linux/template-custom-yolo-refusal--light.png 31cac53b13b85d7b40b982497d07a0f9ec860fee
 linux/template-destination-editor--dark.png af17d5ca6cd38fbaab037fb5b63995235799fd28
 linux/template-destination-editor--light.png f17aa2e5a4ff16de41f7e1cd6ffe2922e0a03c09
 linux/template-editor--dark.png 1c92b06304dc9733d4d849b49c7c42e819051337

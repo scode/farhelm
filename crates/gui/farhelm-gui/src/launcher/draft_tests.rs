@@ -817,6 +817,14 @@ fn clone_seeds_command_and_legacy_launches_on_the_command_tab() {
     assert!(draft.command.resume_on);
     assert_eq!(draft.command.resume, "resume {conversation}");
 
+    // The stored Custom bit records the declaration's classification. A different agent needs its own answer.
+    let mut custom = command(Some(LaunchHarness::Custom), None);
+    custom.yolo = true;
+    let mut clone = LaunchDraft::clone_of(&session(SessionLaunch::Command(custom)), Some(1));
+    assert!(clone.command_launch().unwrap().yolo);
+    clone.choose_command_agent(Some(LaunchHarness::Codex));
+    assert!(clone.command_launch().is_none());
+
     let legacy = LaunchDraft::clone_of(
         &session(SessionLaunch::Legacy {
             invocation: "old-agent --flag".into(),

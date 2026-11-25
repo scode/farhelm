@@ -2125,7 +2125,7 @@ impl Launcher {
                     ),
                     false,
                 ).disabled(self.draft.command.agent.is_some_and(LaunchHarness::uses_custom_catalog)))
-                .chosen(self.draft.command.yolo)
+                .chosen(self.draft.command.effective_yolo())
                 .on_change(move |yolo, _, cx| {
                     let _ = on_yolo.update(cx, |launcher, cx| {
                         launcher.draft.choose_command_yolo(*yolo);
