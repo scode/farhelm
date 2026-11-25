@@ -1168,6 +1168,10 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
 /// unset during setup because reconciliation waits for a compatible
 /// supervisor connection (protocol 87) that can receive the extended
 /// launch-credential snapshot with Codex endpoint settings.
+///
+/// A new host has no prior settings stamp to trigger a legacy read. The
+/// event assertion catches an unconditional legacy settings read on this
+/// path, where setup still reads the separate Claude onboarding file.
 #[farhelm_testtrace::test]
 async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
     use farhelm_proto::credentials::{CreateCredential, CredentialKind};
@@ -1197,9 +1201,20 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
             .await
             .unwrap()
             .unwrap();
-        let accepted = f.add().await;
-        let view = f.finish(accepted.host_id).await;
+        // Setup's fake attachment can complete while the manager is already
+        // dialing this new host. Keep it offline from registration onward
+        // so post-connection reconciliation cannot change the setup record.
+        f.harness.fleet.take_down_next_host();
+        let host = f.add().await.host_id;
+        let view = f.finish(host).await;
         assert_eq!(view.status, RunStatus::Completed);
+        assert!(
+            f.harness
+                .manager
+                .status(host)
+                .is_some_and(|status| status.client.is_none()),
+            "the registered host must still be offline"
+        );
         let step = view
             .steps
             .iter()
@@ -1214,15 +1229,21 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
             );
         }
         let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
-        f.assert_host_delivery(accepted.host_id, "remove-agent-credentials")
+        f.assert_host_delivery(host, "remove-agent-credentials")
             .await;
-        f.assert_host_delivery(accepted.host_id, "write-claude-onboarding")
+        f.assert_host_delivery(host, "read-claude-onboarding").await;
+        f.assert_host_delivery(host, "write-claude-onboarding")
             .await;
+        assert!(
+            !f.backend_events()
+                .iter()
+                .any(|event| event["event"] == "read-agent-settings"),
+            "legacy agent settings were read during Codex setup (subscription={subscription})"
+        );
         assert!(
             !events.contains("fictional-setup-codex-secret")
                 && !events.contains("fictional-private-diagnostic")
         );
-        let host = accepted.host_id;
         let json: String = f
             .harness
             .store

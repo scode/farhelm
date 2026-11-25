@@ -69,12 +69,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching
   indicators come later and should fit the layout. Plan: `plans/queue/welcome-empty-state.md`.
 
-- **Assert that Tensorlake host setup never reads agent settings.** In
-  `crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs`,
-  `codex_subscription_and_none_enter_setup_without_an_endpoint` checks that no Codex settings cleanup was recorded
-  during setup, but never asserts against the stand-in backend that setup made no `read-agent-settings` call. Add that
-  negative assertion. Plan: `plans/queue/tensorlake-setup-and-repo-cache-fixes.md`.
-
 - **Cmd-Shift-[ and ] to switch tabs.** Add cmd-shift-[ and ] to switch between terminal tabs/agents within a session.
   Plan: `plans/queue/tab-switch-shortcuts.md`.
 
