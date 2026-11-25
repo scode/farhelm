@@ -1786,34 +1786,6 @@
   index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md
-
-- Outcome: `fix code`.
-- Assessment: Launching on a stopped container or a suspended sandbox wakes it first. When the wake fails after its
-  20-second reply bound, and the failure has the same text as an earlier one, the launcher either waits a full minute
-  and then says the host "resumed but did not connect", or says the host was "suspended again while it was waking". A
-  stopped container is also told "Resuming the host failed" and "suspended again", although stopped containers are never
-  supposed to be called suspended. Verified: confirmed by source (unchanged since the reviewed commit). `Watch::observe`
-  classifies a provider failure only when the failure text differs from the starting state's, and treats Stopped as
-  `Waiting` until a connection is seen (`launcher/launch/wake_state.rs:55-117`). The failure words are fixed: "The host
-  was suspended again while it was waking" (`wake_state.rs:228-233`) and "Resuming the host failed:"
-  (`launch/wake.rs:149-151`). This contradicts SPEC.md, "Container sessions" (`SPEC.md:5502`: "Stopped has its own state
-  and is never labelled Suspended"; the pill says **Starting**). The 60 s path needs a start over 20 s that then fails
-  with an unchanged error. The wording defect has a common trigger: any container start refused within the bound. That
-  keeps it out of the rare-glitch filter.
-- Decision: q-wake, "What waking a host at launch must guarantee": the maintainer picked "Never wedge, fail fast, word
-  per provider". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "Wait, another
-  complexity gate. If this turns complicated, the executor must stop and turn it into a follow-up to the item explaining
-  what's complicated and why."
-- Completion criteria: Launch-time waking never wedges, fails fast and words failures per provider. Recommendation for
-  reference: fix code (track a seen Resuming/Starting phase, and use provider-specific failure words). Size M; with
-  tests it likely exceeds 100 lines. Complexity gate (maintainer): if the fix turns very complicated during execution,
-  the executor stops and turns it into a follow-up TODO.md entry that explains what is complicated and why, instead of
-  landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
 ## trailing-wake-drops-one-time-yolo-confirmation.md
 
 - Outcome: `fix code`.

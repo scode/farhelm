@@ -81,10 +81,6 @@ consequences.
   — A Tensorlake checkout launch can admit a newer recipe size than the one shown when the user confirms, if the same
   named recipe is edited before admission.
 
-- [`trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md`](trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md)
-  — When waking a stopped container or previously failed sandbox fails past 20 seconds or repeats the same error, the
-  launcher either hangs for 60 seconds or reports that the host was suspended again.
-
 - [`trailing-settings-trust-help-omits-agent-requested-launches.md`](trailing-settings-trust-help-omits-agent-requested-launches.md)
   — The Settings pages for Codex, Muse, Pi, and Antigravity omit that their workspace-trust switch also applies to
   agent-requested launches, which run without an approval card on Always-allow hosts.
