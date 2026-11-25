@@ -989,7 +989,7 @@ async fn launch_joins_rebuild_and_only_success_replaces_the_working_pair() {
             );
 
             let (_, saved) = f.store.tensorlake_recipe_row("dev").await.unwrap().unwrap();
-            let view = builds.place_view("dev", &saved, Place::PodmanHost(place), true);
+            let view = builds.place_view("dev", &saved, Place::PodmanHost(place), None);
             assert!(view.ready);
             assert_eq!(
                 view.reason.as_deref(),
@@ -998,7 +998,12 @@ async fn launch_joins_rebuild_and_only_success_replaces_the_working_pair() {
                         .as_str()
                 )
             );
-            let unavailable = builds.place_view("dev", &saved, Place::PodmanHost(place), false);
+            let unavailable = builds.place_view(
+                "dev",
+                &saved,
+                Place::PodmanHost(place),
+                Some("the host is unavailable".into()),
+            );
             assert_eq!(unavailable.reason.as_deref(), Some(outcome.as_str()));
             let runs = f.commands.run_count();
             let retry = f.prepare(&Progress::default()).await.unwrap();

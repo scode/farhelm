@@ -581,10 +581,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   settings and the normal agent home, and check it with a valid subscription login. Plan:
   `plans/queue/sandbox-auto-trust-and-claude-onboarding.md`.
 
-- **Hide unrelated Podman status noise on Tensorlake recipe cards.** Because Managed Ubuntu is shared with Podman,
-  recipe cards show a local Podman check/error line and a `Rebuild` button right above the Tensorlake status lines even
-  when the user is only using Tensorlake. Plan: `plans/queue/hide-unconfigured-podman-recipe-status.md`.
-
 - **Investigate Tensorlake's ssh gateway leaving forwarded channels open, and report it if it is a bug.** Through the
   gateway, an ssh client holding a remote-forwarded connection never learned that the sandbox side was gone: the sandbox
   side was torn down within half a second, but the local ssh and its connection to the local service were still up 185

@@ -905,7 +905,7 @@ impl Recipes {
                             .text_color(theme::color(palette.fg_1))
                             .child(summary(view)),
                     )
-                    .children(self.place_lines(&name, places, in_flight, zone, cx))
+                    .children(self.place_lines(view, places, in_flight, zone, cx))
                     .child(snapshot)
                     .child(prepared)
                     .children(actions)

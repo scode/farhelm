@@ -310,14 +310,46 @@ impl RecipeState {
     /// unusable. This shared layout is an exhaustive provider decision home.
     #[warn(clippy::wildcard_enum_match_arm)]
     pub(crate) fn recorded_places(&self) -> Vec<farhelm_proto::Place> {
-        let mut places = vec![farhelm_proto::Place::TensorlakeAccount];
-        places.extend(
+        self.state_places()
+            .filter(|place| self.has_resources(*place))
+            .collect()
+    }
+
+    /// Failures still explain a recipe's history after its place disappears.
+    /// Only resources and interrupted work make the place a cleanup target.
+    pub(crate) fn visible_places(&self) -> Vec<farhelm_proto::Place> {
+        let mut places = self.recorded_places();
+        for place in self.state_places() {
+            if !places.contains(&place) && self.has_visible_state(place) {
+                places.push(place);
+            }
+        }
+        places
+    }
+
+    /// The flat account fields and each host entry may carry recipe state.
+    fn state_places(&self) -> impl Iterator<Item = farhelm_proto::Place> + '_ {
+        std::iter::once(farhelm_proto::Place::TensorlakeAccount).chain(
             self.podman
                 .keys()
-                .map(|host| farhelm_proto::Place::PodmanHost(*host)),
-        );
-        places.retain(|place| self.has_resources(*place));
-        places
+                .copied()
+                .map(farhelm_proto::Place::PodmanHost),
+        )
+    }
+
+    /// Presentation includes failures even when they left nothing to retire.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub(crate) fn has_visible_state(&self, place: farhelm_proto::Place) -> bool {
+        self.has_resources(place)
+            || match place {
+                farhelm_proto::Place::TensorlakeAccount => {
+                    self.last_failure.is_some() || self.last_prepare_failure.is_some()
+                }
+                farhelm_proto::Place::PodmanHost(host) => self
+                    .podman
+                    .get(&host)
+                    .is_some_and(|state| state.last_failure.is_some()),
+            }
     }
 
     /// The shared state layout is exhaustive: a new place must decide how

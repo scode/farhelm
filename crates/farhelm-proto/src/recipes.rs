@@ -94,6 +94,18 @@ pub enum RecipeBase {
 
 #[warn(clippy::wildcard_enum_match_arm)]
 impl RecipeBase {
+    /// An unavailable place can still explain the prerequisite for a base that
+    /// has only one provider. Managed Ubuntu can use either provider.
+    pub fn sole_provider(&self) -> Option<ProviderKind> {
+        match self {
+            Self::ManagedUbuntu => None,
+            Self::TensorlakeImage { .. } | Self::TensorlakeSnapshot { .. } => {
+                Some(ProviderKind::Tensorlake)
+            }
+            Self::ContainerImage { .. } => Some(ProviderKind::Podman),
+        }
+    }
+
     /// Compatibility is a static base/provider fact. Every added provider and
     /// base must make this choice explicitly before launch or build can use it.
     pub fn supports(&self, provider: ProviderKind) -> bool {

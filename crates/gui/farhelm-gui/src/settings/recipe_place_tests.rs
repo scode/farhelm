@@ -33,7 +33,7 @@ use crate::layers;
 use crate::local_time::{self, Zone};
 use crate::operations::{OpKey, Work};
 use crate::session;
-use crate::test_support::{advance, click, meta, settle};
+use crate::test_support::{advance, center, click, meta, settle};
 
 // ---- The prepared line, from a view alone --------------------------------------------------------------------------
 
@@ -441,6 +441,79 @@ fn the_pushed_places_draw_a_line_per_container_place_with_its_hosts_name(cx: &mu
     assert_eq!(sent(&mut helm), [], "a push is not answered with a read");
 }
 
+/// A previous build failure stays on the line while the place's current
+/// refusal explains the disabled Rebuild. The user can retry that same
+/// failure as soon as the helm clears the refusal.
+#[gpui::test]
+fn an_unavailable_place_explains_its_disabled_rebuild(cx: &mut TestAppContext) {
+    const REBUILD: &str = "recipe-rebuild-rust-dev-7";
+    let (mut helm, cx) = show_recipes_with_places(
+        cx,
+        vec![entry("rust-dev", idle(), Value::Null)],
+        vec![place(
+            "rust-dev",
+            Some(7),
+            json!({
+                "reason": "package installation failed",
+                "unavailable_reason": "Podman is not installed"
+            }),
+        )],
+    );
+    assert_eq!(
+        label_of(cx, "recipe-rust-dev-place-7").as_deref(),
+        Some("build-box · package installation failed")
+    );
+    assert_eq!(available(cx, REBUILD), Some(false));
+    let at = center(cx, REBUILD);
+    cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+    advance(cx, layers::HOVER_DELAY);
+    assert_eq!(
+        cx.update(|window, cx| layers::shown_tooltip(window, cx))
+            .map(|tooltip| tooltip.text)
+            .as_deref(),
+        Some("Podman is not installed")
+    );
+    click(cx, REBUILD);
+    assert_eq!(sent(&mut helm), []);
+
+    // The host recovers after the recipe moves to a different provider. The
+    // historical error still has a row, and the current base blocks Rebuild.
+    let mut recipe = entry("rust-dev", idle(), Value::Null);
+    recipe["base"] = json!({"kind": "image", "image": "ubuntu:24.04"});
+    push(&mut helm, vec![recipe]);
+    push_places(
+        &mut helm,
+        vec![place(
+            "rust-dev",
+            Some(7),
+            json!({"reason": "package installation failed"}),
+        )],
+    );
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "recipe-rust-dev-place-7").as_deref(),
+        Some("build-box · package installation failed")
+    );
+    assert_eq!(available(cx, REBUILD), Some(false));
+    let at = center(cx, REBUILD);
+    cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+    advance(cx, layers::HOVER_DELAY);
+    assert_eq!(
+        cx.update(|window, cx| layers::shown_tooltip(window, cx))
+            .map(|tooltip| tooltip.text)
+            .as_deref(),
+        Some("This recipe's base cannot run in a container")
+    );
+    click(cx, REBUILD);
+    assert_eq!(sent(&mut helm), []);
+
+    push(&mut helm, vec![entry("rust-dev", idle(), Value::Null)]);
+    settle(cx);
+    assert_eq!(available(cx, REBUILD), Some(true));
+    click(cx, REBUILD);
+    one_rebuild(&mut helm, "rust-dev", 7);
+}
+
 /// Until the store has the places there is nothing to draw, and drawing no line would claim the recipe has no places.
 /// The helm pushes them with its first snapshot, so this shows only against a snapshot without them. Specified: with
 /// a catalog but no places in the snapshot, the row says "Reading per-place builds…".
@@ -834,14 +907,16 @@ fn a_running_preparation_pulses_until_the_section_is_hidden(cx: &mut TestAppCont
 /// Settings opened; a section that never asked would say "this host needs a Podman check" for good. The check's
 /// outcome reaches the place through the helm's push of the places, which it re-reads when the check ends, so the
 /// section must neither read the places nor ask again when a host's check moves. Specified: with `build-box` able to
-/// hold containers and never checked, showing Recipes asks `POST /api/hosts/7/podman-probe` once beside the account
-/// read; showing it again in the same opening reads and asks nothing; pushes of the hosts with the check running and
-/// then finished send nothing; and the helm's push of the place with the finished check's reason draws that reason.
+/// hold containers and never checked, a container-image recipe shows the place and Recipes asks
+/// `POST /api/hosts/7/podman-probe` once beside the account
+/// read. Showing it again in the same opening reads and asks nothing. An unready place stays hidden on the other,
+/// shared recipe. The provider-only recipe shows the failure when the helm pushes it. When a usable check reaches the
+/// shared recipe through a later push, Rebuild becomes available there without another probe.
 #[gpui::test]
 fn container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome(
     cx: &mut TestAppContext,
 ) {
-    let with_check = |checked_at: Option<u64>, refreshing: bool| {
+    let with_check = |checked_at: Option<u64>, refreshing: bool, usable: bool| {
         let mut build_box = aliased(
             host(7, "ssh", connected()),
             "build-box",
@@ -850,27 +925,37 @@ fn container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome(
         build_box.container_check = Some(ContainerCheckView {
             checked_at,
             refreshing,
-            usable: false,
-            reason: checked_at.map(|_| "Podman is not installed".to_owned()),
+            usable,
+            reason: checked_at
+                .filter(|_| !usable)
+                .map(|_| "Podman is not installed".to_owned()),
         });
         hosts(&[build_box])
     };
     let needs_check = place(
         "rust-dev",
         Some(7),
-        json!({ "reason": "this host needs a Podman check" }),
+        json!({ "unavailable_reason": "this host needs a Podman check" }),
     );
+    let mut recipe = entry("rust-dev", idle(), Value::Null);
+    recipe["base"] =
+        json!({ "kind": "container_image", "reference": "ubuntu:24.04", "user": "dev" });
     let (mut helm, cx, _gear) = open_rail_with(
         cx,
         &Preferences::default(),
         vec![
-            with_check(None, false),
-            catalog(vec![entry("rust-dev", idle(), Value::Null)]),
+            with_check(None, false, false),
+            catalog(vec![recipe, entry("shared", idle(), Value::Null)]),
             places_state(vec![needs_check]),
         ],
     );
     open_settings(cx);
     click(cx, section_button(Section::Recipes));
+    assert!(
+        drawn(cx, "recipe-shared-snapshot"),
+        "the shared recipe is visible"
+    );
+    assert!(!drawn(cx, "recipe-shared-place-7"));
     let (checks, reads): (Vec<FakeCommand>, Vec<FakeCommand>) = sent(&mut helm)
         .into_iter()
         .partition(|command| command.method == Method::Post);
@@ -925,12 +1010,12 @@ fn container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome(
             })
         })
     };
-    push_hosts(&mut helm, cx, with_check(None, true));
+    push_hosts(&mut helm, cx, with_check(None, true, false));
     assert!(
         stored_check(cx).is_some_and(|check| check.refreshing),
         "the premise: the push of the running check landed"
     );
-    push_hosts(&mut helm, cx, with_check(Some(1_793_714_525), false));
+    push_hosts(&mut helm, cx, with_check(Some(1_793_714_525), false, false));
     assert!(
         stored_check(cx).is_some_and(|check| check.checked_at.is_some() && !check.refreshing),
         "the premise: the push of the finished check landed"
@@ -947,7 +1032,7 @@ fn container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome(
         vec![place(
             "rust-dev",
             Some(7),
-            json!({ "reason": "Podman is not installed" }),
+            json!({ "unavailable_reason": "Podman is not installed" }),
         )],
     );
     settle(cx);
@@ -955,5 +1040,22 @@ fn container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome(
         label_of(cx, "recipe-rust-dev-place-7").as_deref(),
         Some("build-box · Podman is not installed")
     );
+    assert!(!drawn(cx, "recipe-shared-place-7"));
+
+    push_hosts(&mut helm, cx, with_check(Some(1_793_714_526), false, true));
+    assert!(stored_check(cx).is_some_and(|check| check.usable));
+    assert!(
+        !drawn(cx, "recipe-shared-place-7"),
+        "a host event alone sends no recipe status"
+    );
+    push_places(
+        &mut helm,
+        vec![
+            place("rust-dev", Some(7), json!({})),
+            place("shared", Some(7), json!({})),
+        ],
+    );
+    settle(cx);
+    assert_eq!(available(cx, "recipe-rebuild-shared-7"), Some(true));
     assert_eq!(sent(&mut helm), []);
 }

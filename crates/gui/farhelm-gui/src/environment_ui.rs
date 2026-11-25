@@ -72,9 +72,8 @@ impl ProviderUi {
     /// of the provider's build action. Tensorlake's is the old row's (`snapshot_status` in `tensorlake/recipes.rs` at
     /// the reference commit). Podman's follows the helm's own refusal of a container rebuild for such a base ("this
     /// recipe's base cannot run in a container"), since the old app drew no such line for a container place: its
-    /// per-place rows listed only the places a base supports. Nothing asks for Podman's words yet: the row asks only
-    /// for the Tensorlake account's, and its per-place container lines ([`ProviderUi::recipe_place`]) show the helm's
-    /// own reason for a place whose base it cannot run, as the old lines did.
+    /// per-place rows listed only the places a base supports. A historical container place can still show its build
+    /// status after a base change. Its disabled Rebuild uses these words to explain why it cannot run again there.
     pub(crate) fn recipe_base_unsupported(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => "This recipe's base cannot run on Tensorlake",

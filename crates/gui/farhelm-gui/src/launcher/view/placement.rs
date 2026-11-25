@@ -243,7 +243,11 @@ impl Launcher {
         let sentence = match (place_reason, build) {
             (Some(reason), _) => sentence.host(&HostText::from_host(reason)),
             (None, None) => sentence.text(note.checking),
-            (None, Some(build)) => match (&build.reason, build.building, build.ready) {
+            (None, Some(build)) => match (
+                build.reason.as_ref().or(build.unavailable_reason.as_ref()),
+                build.building,
+                build.ready,
+            ) {
                 (Some(reason), _, _) => sentence.host(&HostText::from_host(reason.as_str())),
                 (None, true, _) => sentence.text(note.building),
                 (None, false, true) => match &host_view {

@@ -141,7 +141,12 @@ pub struct RecipePlaceView {
     pub place: Place,
     pub ready: bool,
     pub building: bool,
+    /// Build failure or artifact freshness. Neither expresses place availability.
     pub reason: Option<String>,
+    /// The provider reports this place unavailable. This can coexist with a
+    /// recorded build failure or freshness message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
     pub built_at: Option<i64>,
     pub prepared_at: Option<i64>,
     pub step: Option<String>,
