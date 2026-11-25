@@ -498,6 +498,30 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "solid-button-primary-hover",
+        size: (560., 152.),
+        draw: buttons,
+        setup: |_, window, cx| solid_button_pointer_at("primary", false, window, cx),
+    },
+    Scene {
+        name: "solid-button-primary-held",
+        size: (560., 152.),
+        draw: buttons,
+        setup: |_, window, cx| solid_button_pointer_at("primary", true, window, cx),
+    },
+    Scene {
+        name: "solid-button-danger-hover",
+        size: (560., 152.),
+        draw: buttons,
+        setup: |_, window, cx| solid_button_pointer_at("danger", false, window, cx),
+    },
+    Scene {
+        name: "solid-button-danger-held",
+        size: (560., 152.),
+        draw: buttons,
+        setup: |_, window, cx| solid_button_pointer_at("danger", true, window, cx),
+    },
+    Scene {
         name: "text-input",
         size: (320., 64.),
         draw: text_input,
@@ -651,6 +675,12 @@ static SCENES: &[Scene] = &[
         name: "interrupted-upload-notices",
         size: (920., 176.),
         draw: interrupted_upload_notices,
+        setup: no_setup,
+    },
+    Scene {
+        name: "restored-notice-stack",
+        size: (704., 424.),
+        draw: restored_notice_stack,
         setup: no_setup,
     },
     Scene {

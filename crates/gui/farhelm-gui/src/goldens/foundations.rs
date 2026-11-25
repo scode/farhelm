@@ -264,6 +264,31 @@ pub(super) fn buttons(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElemen
         .into_any_element()
 }
 
+/// Hold the real button before releasing the press. The renderer's test clock keeps delayed help out of the picture.
+pub(super) fn solid_button_pointer_at(id: &str, held: bool, window: &mut Window, cx: &mut App) {
+    window.set_driver_enabled(true);
+    window.draw(cx).clear(cx);
+    let position = window
+        .driver_nodes()
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .expect("the button for this pointer state was drawn")
+        .bounds
+        .center();
+    window.dispatch_event(
+        gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers: gpui::Modifiers::none(),
+        }),
+        cx,
+    );
+    if held {
+        let [down, _] = crate::test_support::click_at(position);
+        window.dispatch_event(down, cx);
+    }
+}
+
 /// Put a value in the text input, so the golden pins the font and size Kit's input draws with, not only its box.
 pub(super) fn text_input_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     state.input.set_text("api-refactor", window, cx);
@@ -1011,6 +1036,32 @@ pub(super) fn interrupted_upload_notices(
                 "trace.json",
             ],
         ))
+        .into_any_element()
+}
+
+/// The restored notice region is short enough to scroll. Its newest connection notice fits above the workspace.
+pub(super) fn restored_notice_stack(
+    _: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let posted = (1..=8)
+        .map(|index| {
+            Notice::InterruptedUpload(Rc::new(InterruptedUploads::new(
+                Some(HostText::from_host("Build artifacts")),
+                vec![HostText::from_host(format!("report-{index}.txt"))],
+                true,
+            )))
+        })
+        .chain([Notice::ConnectionLost])
+        .collect();
+    div()
+        .w(px(680.))
+        .h(px(400.))
+        .flex()
+        .flex_col()
+        .child(crate::main_view::notice_banners(posted, true, window, cx))
+        .child(div().flex_1().bg(theme::color(theme::palette(cx).bg_1)))
         .into_any_element()
 }
 

@@ -492,9 +492,16 @@ fn assert_status_help(
     let shown = shown_over(cx, row, target);
     assert_eq!(shown.side(), TooltipSide::Beside, "{target}");
     assert!(shown.text.starts_with(words), "{target}: {:?}", shown.text);
-    assert!(cx.debug_bounds("tooltip-notch").is_some(), "{target}");
+    assert_status_notch(cx, target, &shown);
     assert!(shown.ring().is_none(), "{target} is a status mark");
     shown
+}
+
+/// Ringless help must track its own mark, including among neighbors that would give the same notch height.
+pub(super) fn assert_status_notch(cx: &mut VisualTestContext, target: &str, shown: &ShownTooltip) {
+    let bounds = node(&frame(cx), target).expect("drawn status mark").bounds;
+    assert_eq!(shown.target_bounds(), Some(bounds), "{target}");
+    assert!(cx.debug_bounds("tooltip-notch").is_some(), "{target}");
 }
 
 /// Status marks sit among controls in both selected and unselected rows. Each mark keeps its own help and

@@ -449,6 +449,12 @@ impl ShownTooltip {
     pub fn ring(&self) -> Option<DrawnRing> {
         self.ring.get()
     }
+
+    /// The tracked target of ringless help, where no painted ring can witness the owning control's bounds.
+    #[cfg(test)]
+    pub(crate) fn target_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.target.drawn().map(|drawn| drawn.bounds)
+    }
 }
 
 /// The ring a frame painted around the control of help beside the sidebar ([`ShownTooltip::ring`]).

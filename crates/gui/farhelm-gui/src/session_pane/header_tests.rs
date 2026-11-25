@@ -2675,6 +2675,17 @@ fn a_pill_at_650_pixels_condenses_the_actions_beside_it() {
             "the strip takes all the room the pill's floor leaves ({name}): strip {strip:?}, pill {pill:?}"
         );
         let stop = only_node(&nodes, Action::Stop.id()).bounds;
+        assert_eq!(
+            stop.size.height,
+            px(21.),
+            "the pill forces condensed actions"
+        );
+        if environment {
+            assert_eq!(
+                only_node(&nodes, ENVIRONMENT_ID).bounds.size.height,
+                px(23.)
+            );
+        }
         assert!(
             stop.size.width + px(16.) < ordinary_stop.size.width,
             "Stop is condensed ({name}): {stop:?}, ordinary {ordinary_stop:?}"
@@ -2953,7 +2964,7 @@ fn a_running_delete_in_a_narrow_pane_keeps_the_pill_whole_beside_many_tabs() {
 /// 2026-11-16 measured Delete 52 of 72 pixels visible while suspending). Specified: in a 650-pixel pane with an idle
 /// session on a container host, the environment control, each of the five actions and both carets are drawn whole
 /// inside the pane on one line while the host is connected (Suspend), suspending, suspended (Resume) and resuming.
-/// The condensed environment button keeps its 23-pixel height, vertically centered with the 21-pixel actions.
+/// Its height matches the toolbar's layout on every frame. The tunnel-pill case pins both condensed heights.
 /// Starting a request keeps the width of the control that started it.
 #[test]
 fn an_environment_sessions_actions_stay_whole_in_a_650_pixel_pane() {
@@ -3043,10 +3054,10 @@ fn an_environment_sessions_actions_stay_whole_in_a_650_pixel_pane() {
             stop.center().y,
             "centered on the actions' line ({name})"
         );
-        let expected_height = if stop.size.height == px(21.) {
-            px(23.)
-        } else {
-            px(26.)
+        let expected_height = match f32::from(stop.size.height) {
+            21. => px(23.),
+            26. => px(26.),
+            height => panic!("unexpected Stop height {height} ({name})"),
         };
         assert_eq!(
             bounds.size.height, expected_height,
