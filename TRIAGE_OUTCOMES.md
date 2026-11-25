@@ -584,42 +584,6 @@
   record which way it went. Recommendation for reference: discard — coverage only, no observed clipping; size S if kept.
 - Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
-## shift-enter-test-assumes-one-program-read.md
-
-- Outcome: `other`.
-- Assessment: A terminal-host integration test checks that the two bytes of Shift+Enter reach a raw-mode program in one
-  read. The reviewer argues that one read depends on the PTY rather than on Farhelm's write contract, so the test could
-  in principle fail falsely. Verified: Mostly incorrect as a risk.
-  `crates/farhelm/tests/terminal_host_client.rs:683-707` is unchanged since the reviewed commit. Its docstring already
-  says that a separate host test checks the write boundary. With `stty raw` (VMIN 1), bytes written together, or queued
-  before `dd` reads, come back in one read, so nobody has shown a split. The 200 ms sleep is unproven but harmless. The
-  remaining observation (the test exercises neither write atomicity nor GUI chord encoding) is accurate but already
-  disclosed.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard. No established false failure, and the docstring
-  already scopes the claim. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## terminal-prehello-test-misses-output-loss.md
-
-- Outcome: `other`.
-- Assessment: A terminal-host test promises that output written before any client connects is read in full, followed by
-  the exit record. It checks only that one substring appears, and skips other records before the exit, so losing a
-  trailing fragment would go unnoticed. The production host is believed correct. Verified: Confirmed test gap. The
-  docstring says "yields all its output and then an exit record", while the test checks `output_until("early output")`
-  and then skips to `Exited` (`crates/terminal-host/tests/host_lifecycle.rs:17-58`). It is unchanged since aecc8f8ec. No
-  production defect is claimed.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard, or fix code with an exact-output assertion through
-  the exit record. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
 ## pi-settings-tests-miss-trust-route.md
 
 - Outcome: `other`.
@@ -867,21 +831,6 @@
   record which way it went. Recommendation for reference: fix code — restore the one assertion near
   host_creates.rs:1456; size S.
 - Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
-## trailing-alternate-screen-stop-diagnostics-overstate-replay-oracle.md
-
-- Outcome: `other`.
-- Assessment: An end-to-end test checks that Stop leaves no stale full-screen frame in the replay. Its failure message
-  says only a separate screen capture could cause a failure, but replaying the wrong emulator buffer could too, so a
-  failure would point a maintainer at the wrong cause. Verified: Confirmed. The message at
-  `crates/farhelm/tests/e2e/session_lifecycle.rs:3775-3780` ("only a capture taken before the kill could produce it") is
-  narrower than the docstring's own explanation at :3728-3736. Test diagnostics only.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard, or fix code (reword the assertion messages). Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-tab-cleanup-test-leave-first-two-fixture-jobs-running.md
 
@@ -1470,19 +1419,6 @@
   size M.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-ticker-live-motion-resume-test-misses-blink-resume.md
-
-- Outcome: `other`.
-- Assessment: Test-only. The test that turning Reduce Motion off resumes the cursor blink would still pass if the blink
-  never resumed. Verified: Confirmed. crates/gui/farhelm-gui/src/ticker_tests.rs:619-629 asserts `(true, …)` both during
-  the pause and after resuming, with no `false` in between. The test is unchanged since 681a3909.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. Assert the intermediate `(false, 2)`. Size XS.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
 ## trailing-credential-test-name-says-setup-refuses.md
 
 - Outcome: `other`.
@@ -1497,25 +1433,6 @@
   record which way it went. Recommendation for reference: fix code XS (rename the test). A rename is cheaper than
   discussing it.
 - Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
-## trailing-link-scanner-comparison-leeways-untested.md
-
-- Outcome: `other`.
-- Assessment: When terminal link text differs from where the link actually goes, the terminal warns. The spec lists
-  small differences that must not trigger a warning: one trailing slash, upper- versus lower-case percent escapes, an
-  empty `?` or `#`. Since the old reference-answers test stopped checking its "no warning" cases, nothing tests most of
-  these allowances, so a regression would make honest links warn without any test failing. Verified: Confirmed.
-  SPEC.md:3606 lists the leeways. `link_disclosure.rs:719-723` now asserts only cases the old client warned on and names
-  `link_claims/tests.rs` as the quiet-side specification. A grep of `link_claims/tests.rs` finds only the empty-`#` case
-  (`tests.rs:722-725`) and `%7e` versus `~` (line 1053, a mismatch), with no trailing-slash, escape-case or `?#` quiet
-  rows. The current behavior in `compare.rs:90-122` was not exercised.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. Add the 4-5 quiet rows the finding lists. They
-  cheaply guard a spec rule in a user-facing security warning. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## settings-footer-can-save-the-wrong-page.md
 
@@ -2939,39 +2856,6 @@
   for reference: fix code. Clear the error when the dismissal preference changes or the session or run changes,
   mirroring the trust band. Size S.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## hook-diagnostic-path-can-render-doc-link.md
-
-- Outcome: `other`.
-- Assessment: The session notifications bell makes Farhelm docs addresses clickable. A hook setup error that quotes a
-  file path containing `https://farhelm.io/docs/…` would show part of that path as a docs link. The link can only go to
-  Farhelm's docs. Verified: Confirmed as described. The bell searches the whole text for `DOCS_LINK_PREFIX`
-  (crates/gui/farhelm-gui/src/notices_bell.rs:97, :778-789). SPEC.md:3268-3271 makes any address starting with that
-  prefix clickable, whoever wrote it. The trigger (such a path) is contrived, and the only harm is a misleading but
-  harmless docs link. Arguably a filter match, but the filter's "trigger is rare" list doesn't fit cleanly, so I left it
-  here.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: discard. The destination is restricted to Farhelm's docs, as the spec allows. Size S if fixed.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-late-replay-history-displace-already-browsed-final-screen.md
-
-- Outcome: `other`.
-- Assessment: A replay that stalls can show the exit frame before the scrollback arrives. If the user scrolls or selects
-  in that window and the scrollback then arrives, the view can jump into old history, and an existing selection can end
-  up naming different rows, without any scroll request. Verified: Confirmed by static reading only (the reviewer's model
-  trace). Nobody has observed a stall. It needs the idle-reveal path, user navigation during it, and a late first
-  history chunk. No data is lost. A later Cmd+C could copy different text. It does not fit the self-correcting filter:
-  the displaced view stays until the user scrolls.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: discard (rare, compound trigger, no loss). Size M if fixed (re-base provisional anchors).
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-trust-hint-save-errors-use-live-selection-instead-of.md
 

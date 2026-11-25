@@ -176,7 +176,7 @@ impl Render for Blinker {
 /// otherwise redraws its window ten times a second for a cursor that changes twice. The handle starts on its shown
 /// half and says which half it is in, half a second each (the old cursor's one-second blink) for a blink started on a
 /// multiple of `BLINK_HALF_TICKS`, as one on a fresh ticker is; under reduced motion it stays shown and nothing wakes
-/// the view.
+/// the view. Turning motion back on restores the original blink's redraw cadence even when the window has no pulse.
 #[gpui::test]
 fn a_blink_wakes_its_view_only_when_it_changes_half(cx: &mut TestAppContext) {
     test_support::install(cx);
@@ -213,11 +213,21 @@ fn a_blink_wakes_its_view_only_when_it_changes_half(cx: &mut TestAppContext) {
         "woken once per change of half"
     );
 
-    cx.update(|_, cx| ticker::set_reduced_motion(true, cx));
+    cx.update(|_, cx| cx.set_reduce_motion(true));
+    cx.run_until_parked();
     assert!(
         on(cx),
         "shown under reduced motion, whichever half it was in"
     );
+    cx.update(|_, cx| cx.set_reduce_motion(false));
+    cx.run_until_parked();
+    // The preference change refreshes windows on its own. Count only the redraw from the retained blink handle.
+    cx.update(|_, cx| render_count::reset(cx));
+    cx.executor()
+        .advance_clock(ticker::TICK * ticker::BLINK_HALF_TICKS as u32);
+    cx.run_until_parked();
+    assert!(!on(cx), "the cursor reaches the hidden half again");
+    assert_eq!(cx.update(|_, cx| render_count::count("blinker", cx)), 1);
 }
 
 /// A window that blinks a cursor and pulses a running dot draws a frame on every tick either one changes, so a blink
@@ -638,6 +648,11 @@ fn a_live_motion_change_pauses_drawing_without_pausing_time(cx: &mut TestAppCont
 
     cx.update(|_, cx| cx.set_reduce_motion(false));
     cx.run_until_parked();
+    assert_eq!(
+        drawn.get(),
+        (false, 2),
+        "redraw the retained hidden cursor phase"
+    );
     advance(cx, Duration::from_millis(500));
     assert_eq!(cx.update(|_, cx| ticker::ticks(cx)), paused + 5);
     assert_eq!(

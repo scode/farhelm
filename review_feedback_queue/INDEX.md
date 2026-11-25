@@ -290,13 +290,6 @@ consequences.
 - [`exited-shell-suspend-confirmation-wording.md`](exited-shell-suspend-confirmation-wording.md) — Stop and suspend can
   still tell users it will stop a shell that has already exited.
 
-- [`shift-enter-test-assumes-one-program-read.md`](shift-enter-test-assumes-one-program-read.md) — The Shift+Enter
-  integration check assumes the program receives the key in one read, which the terminal host contract leaves to the PTY
-  and program.
-
-- [`terminal-prehello-test-misses-output-loss.md`](terminal-prehello-test-misses-output-loss.md) — The terminal
-  lifecycle test checks a substring and can pass when other expected output is missing at exit.
-
 - [`agent-settings-search-omits-agent-name.md`](agent-settings-search-omits-agent-name.md) — Settings search can give
   different agents' pages or hook controls the same accessible name.
 
@@ -332,9 +325,6 @@ consequences.
 
 - [`uninstall-omits-persistent-hook-cleanup.md`](uninstall-omits-persistent-hook-cleanup.md) — Uninstall can leave Grok
   and Antigravity callbacks pointing to the removed Farhelm executable, and the uninstall guidance omits cleanup.
-
-- [`hook-diagnostic-path-can-render-doc-link.md`](hook-diagnostic-path-can-render-doc-link.md) — A path inside a hook
-  setup error can be shown as a Farhelm documentation link even though Farhelm supplied only diagnostic text.
 
 - [`hook-removal-help-missing-from-accessibility.md`](hook-removal-help-missing-from-accessibility.md) — The Grok and
   Antigravity Settings pages can expose their setup switches without the persistence and removal guidance.
@@ -411,10 +401,6 @@ consequences.
   — Existing assertions would miss a regression where prompt absence on a first Delete results in an ordinary error
   instead of opening Delete anyway.
 
-- [`trailing-late-replay-history-displace-already-browsed-final-screen.md`](trailing-late-replay-history-displace-already-browsed-final-screen.md)
-  — If a replay reveals the exit frame before its history is delivered, the viewer can browse that frame and then jump
-  to old history without a scroll request. An already stored selection may be dropped or name different rows.
-
 - [`trailing-one-create-test-skip-already-readable-duplicate.md`](trailing-one-create-test-skip-already-readable-duplicate.md)
   — The test can pass with a duplicate request already waiting on the scripted supervisor stream when the successful
   launch returns.
@@ -466,10 +452,6 @@ consequences.
 - [`trailing-landing-removed-ambiguous-create-refusal-marker-assertion.md`](trailing-landing-removed-ambiguous-create-refusal-marker-assertion.md)
   — The regression still checks that the session and its retry key are retained, but it stopped checking whether the
   client is wrongly told to discard that key.
-
-- [`trailing-alternate-screen-stop-diagnostics-overstate-replay-oracle.md`](trailing-alternate-screen-stop-diagnostics-overstate-replay-oracle.md)
-  — If the Stop replay test fails, it can point a maintainer at a screen capture even when replay selected the wrong
-  emulator buffer.
 
 - [`trailing-tab-cleanup-test-leave-first-two-fixture-jobs-running.md`](trailing-tab-cleanup-test-leave-first-two-fixture-jobs-running.md)
   — A failure in the regression can leave the test's own background work running for the fixture's remaining sleep
@@ -930,10 +912,6 @@ consequences.
   sandbox stays open — keeping the Sandboxes section visible even after Clear, or letting you confirm deleting an
   old-key sandbox under the new key.
 
-- [`trailing-ticker-live-motion-resume-test-misses-blink-resume.md`](trailing-ticker-live-motion-resume-test-misses-blink-resume.md)
-  — The test checking that live Reduce Motion changes pause and then resume both the terminal cursor blink and the
-  running-session pulse does not actually verify that the cursor blink resumes blinking after motion is turned back on.
-
 - [`trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md`](trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md)
   — Changes to registered custom agents are wired to push over the UI channel, but the helm test suite never exercises a
   live create, edit, or delete of a custom agent end-to-end over the UI channel to verify that the served payload
@@ -968,7 +946,3 @@ consequences.
 - [`trailing-codex-login-save-reports-later-github-failure.md`](trailing-codex-login-save-reports-later-github-failure.md)
   — Saving a new Codex login can install it on the host and still report "not delivered", naming a later GitHub token
   failure as the reason.
-
-- [`trailing-link-scanner-comparison-leeways-untested.md`](trailing-link-scanner-comparison-leeways-untested.md) — No
-  test covers the comparison leeways (trailing slash, escape case, empty `?`) since the oracle's quiet side was dropped,
-  so a change could make honest links warn unnoticed.

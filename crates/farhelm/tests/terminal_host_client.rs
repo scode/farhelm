@@ -680,29 +680,24 @@ async fn inputs_are_acknowledged_in_order() {
     assert!(positions.is_sorted(), "{text:?}");
 }
 
-/// Shift+Enter's two bytes reach a raw-mode program in one block.
-///
-/// Why: programs tell Shift+Enter from Escape-then-Enter by whether the two
-/// bytes arrive together; the client sends them as one `Input` so that the
-/// host can write them together. This checks what reaches the program's
-/// first block (ESC and CR, as `od -c` prints them). The host's atomic-input
-/// test checks the write boundary itself.
+/// Shift+Enter reaches a raw-mode program as ESC followed by CR.
+/// The fixture collects both bytes independently of how the PTY divides its
+/// reads. The host's atomic-input test pins the first-write boundary.
 #[farhelm_testtrace::test]
-async fn shift_enter_reaches_the_program_in_one_read() {
+async fn shift_enter_bytes_reach_the_raw_program_in_order() {
     let host = Host::start(shell(
-        "stty raw -echo; echo ready; dd bs=64 count=1 2>/dev/null | od -An -c; exec /bin/sleep 600",
+        "stty raw -echo && echo ready && dd bs=1 count=2 2>/dev/null | od -An -tx1; \
+         echo input-end; exec /bin/sleep 600",
     ))
     .await;
     let mut connection = host.connect().await;
     connection.start_read(Position::default()).await.unwrap();
-    output_until(&mut connection, "ready").await;
-    // sleep-ok: give the pipeline time to enter its read before sending input.
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    output_until(&mut connection, "ready\n").await;
     connection.send_input(b"\x1b\r").await.unwrap();
-    let text = output_until(&mut connection, "\\r").await;
-    assert!(
-        text.contains("033  \\r") || text.contains("033 \\r"),
-        "{text:?}"
+    let text = output_until(&mut connection, "input-end").await;
+    assert_eq!(
+        text.split_whitespace().collect::<Vec<_>>(),
+        ["1b", "0d", "input-end"]
     );
 }
 
