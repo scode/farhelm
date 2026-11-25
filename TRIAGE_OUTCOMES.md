@@ -543,29 +543,6 @@
   to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-custom-agent-settings-save-delete-collapses-retired-and-missing-store.md
-
-- Outcome: `fix code`.
-- Assessment: When a custom agent's save or delete cannot start, Settings always says "Another change to this custom
-  agent is in progress". That includes the case where the connection to the helm is being reset, and the busy case does
-  not use Farhelm's shared wording. With no connection at all, Save or Delete silently does nothing. Verified:
-  Confirmed. Both paths turn any `Err` into that message (`settings/custom_agents.rs:378-388`, `425-435`) and return
-  silently when there are no operations (`custom_agents.rs:338-340`, `401-403`). The busy wording is settled in so many
-  words by SPEC_impl.md "Work that finishes later: the operation stores": "it gives one shared reason
-  (`NotStarted::BUSY_REASON`) after a lead-in of its own that names what did not happen ("Not saved:", "Not started:")".
-  The reset and no-connection cases rest only on SPEC.md "Errors and diagnostics" in general, and need a wording choice.
-  The reset case can occur only briefly, while the window is inert.
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code. Use "Not saved:" or "Not deleted:" plus `BUSY_REASON` for
-  Busy, and give the other two cases a plain reason. Size S. The busy half alone would qualify as clearly settled. Size
-  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
-  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
-  index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## trailing-custom-agents-share-one-remembered-wrapper-prefix.md
 
 - Outcome: `fix spec+code`.

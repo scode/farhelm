@@ -16,7 +16,7 @@ use crate::components::{
     Button, Checkbox, HoverHelp, TextInput, TextInputEvent, TextInputState, Tier,
 };
 use crate::host_text::{HostSentence, HostText, Line};
-use crate::operations::{Command, OpKey, Outcome, Work};
+use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
 use crate::{session, store::HelmStore, theme};
 
 pub(super) const COMMAND_HELP: &str = "Program name on PATH (e.g. my-agent), absolute path (/opt/bin/my-agent), or ~/path. Used as-is on every host and environment.";
@@ -355,6 +355,7 @@ impl Editor {
         let method = if existing { Method::Put } else { Method::Post };
         let command = Command::new(Work::Save, method, path, Some(body), "Save custom agent");
         let Some(operations) = session::current_operations(cx) else {
+            self.fail_start("Not saved:", None, cx);
             return false;
         };
         let key = OpKey::custom_agent(&draft.id);
@@ -396,13 +397,12 @@ impl Editor {
                     });
                 })
             })
+            .inspect_err(|reason| self.fail_start("Not saved:", Some(reason), cx))
             .is_ok();
         if sent {
             self.saving = true;
             self.set_read_only(cx);
             self.edited(cx);
-        } else {
-            self.fail("Another change to this custom agent is in progress", cx);
         }
         sent
     }
@@ -419,6 +419,8 @@ impl Editor {
             return;
         };
         let Some(operations) = session::current_operations(cx) else {
+            self.confirm_delete = false;
+            self.fail_start("Not deleted:", None, cx);
             return;
         };
         let key = OpKey::custom_agent(&saved.id);
@@ -468,13 +470,15 @@ impl Editor {
                     });
                 })
             })
+            .inspect_err(|reason| {
+                self.confirm_delete = false;
+                self.fail_start("Not deleted:", Some(reason), cx);
+            })
             .is_ok();
         if sent {
             self.deleting = true;
             self.set_read_only(cx);
             self.edited(cx);
-        } else {
-            self.fail("Another change to this custom agent is in progress", cx);
         }
     }
 
@@ -485,7 +489,18 @@ impl Editor {
             .set_read_only(self.stored.is_some() || self.busy(), cx);
     }
 
-    fn fail(&mut self, reason: &'static str, cx: &mut Context<Self>) {
+    /// The editor still owns its draft when a write sends nothing. Name the refused action and say what prevented it.
+    fn fail_start(&mut self, lead: &str, reason: Option<&NotStarted>, cx: &mut Context<Self>) {
+        let detail = match reason {
+            Some(NotStarted::Busy(_)) => NotStarted::BUSY_REASON,
+            Some(NotStarted::Retired) => "the connection to the helm was reset. Try again.",
+            Some(NotStarted::Path(_)) => "Farhelm could not build the request.",
+            None => "Farhelm is disconnected from the helm. Try again after it reconnects.",
+        };
+        self.fail(format!("{lead} {detail}"), cx);
+    }
+
+    fn fail(&mut self, reason: impl Into<std::sync::Arc<str>>, cx: &mut Context<Self>) {
         self.error = Some(HostText::from_host(reason));
         cx.notify();
     }
@@ -637,6 +652,24 @@ impl Editor {
         }));
         (row.into_any_element(), notice, confirming)
     }
+}
+
+/// Give the golden a refused Save through the same key admission the Settings button uses.
+#[cfg(test)]
+pub(crate) fn stage_custom_agent_save_refusal(window: &mut Window, cx: &mut App) {
+    let editor = crate::layers::last_opened::<SettingsDialog>(cx)
+        .and_then(|dialog| dialog.read(cx).custom_editor().cloned())
+        .expect("the golden opens a saved custom agent");
+    editor.update(cx, |editor, cx| {
+        editor.reporting = !editor.reporting;
+        assert!(editor.dirty(cx));
+        let key = OpKey::custom_agent(&editor.draft(cx).id);
+        let operations = session::current_operations(cx).expect("connected");
+        operations
+            .update(cx, |store, cx| store.hold(&key, Work::Save, cx))
+            .expect("hold the saved registration's key");
+        assert!(!editor.save(window, cx));
+    });
 }
 
 fn button(id: &'static str, label: &'static str, help: &'static str, tier: Tier) -> Button {
