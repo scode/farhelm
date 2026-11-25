@@ -109,6 +109,14 @@ consequences.
   — In Replace with, a screen reader announces a highlighted recent setup as "Fill from recent setup" while Enter on it
   replaces and deletes the source session; highest if the "⏎ Replace" key cap is not announced with it.
 
+- [`trailing-sandbox-agent-plants-repository-suggestions.md`](trailing-sandbox-agent-plants-repository-suggestions.md) —
+  A sandbox-confined agent's fresh checkout puts a repository of its choosing at the top of the checkout suggestions on
+  every host, past its environment boundary (highest if a suggestion can be taken without the user reading it).
+
+- [`trailing-auto-trust-overrides-custom-flag-refusal.md`](trailing-auto-trust-overrides-custom-flag-refusal.md) — In a
+  session's own sandbox, Farhelm's automatic trust flag follows a user's Custom Pi `--no-approve` or Codex untrusted
+  override and may win (vendor flag precedence unverified; highest if it does).
+
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`settings-close-save-can-hide-notification-refusal.md`](settings-close-save-can-hide-notification-refusal.md) — Save
@@ -387,3 +395,68 @@ consequences.
 
 - [`trailing-spec-impl-custom-agent-id-letter.md`](trailing-spec-impl-custom-agent-id-letter.md) — SPEC_impl.md says
   registered custom agent IDs start with a letter, but they may start with a digit.
+
+- [`trailing-hook-hint-keeps-stale-save-error.md`](trailing-hook-hint-keeps-stale-save-error.md) — The hook setup hint
+  brings back an old Don't show again error after a later dismissal and re-enable (previously triaged as no change under
+  the cheap-fix rule).
+
+- [`trailing-trust-hint-hide-survives-reconnect.md`](trailing-trust-hint-hide-survives-reconnect.md) — A trust hint
+  hidden with × can stay hidden for a new trust question that began while the app was disconnected (premise unverified).
+
+- [`trailing-trust-hint-late-refusal-untested.md`](trailing-trust-hint-late-refusal-untested.md) — No test covers a
+  trust hint save refusal that lands while the hint is already dismissed.
+
+- [`trailing-unread-hook-and-spare-switches-read-as-off.md`](trailing-unread-hook-and-spare-switches-read-as-off.md) —
+  The hook setup and spare-checkout switches read as a saved "off" to screen readers while their setting is unread.
+
+- [`trailing-stored-trust-chip-credits-settings-switch.md`](trailing-stored-trust-chip-credits-settings-switch.md) —
+  Restart and prompt approval cards explain a session's stored trust by a Settings switch that may now be off.
+
+- [`trailing-switch-warning-description-untested.md`](trailing-switch-warning-description-untested.md) — No test checks
+  that the trust and hook switches carry their warning for screen readers.
+
+- [`trailing-relative-claude-lock-in-old-cleanup-records.md`](trailing-relative-claude-lock-in-old-cleanup-records.md) —
+  Claude trust cleanup records written with a relative `CLAUDE_CONFIG_DIR` before the fix keep a relative lock path
+  (likely unpopulated).
+
+- [`trailing-settings-trust-help-misdescribes-persistent-hosts.md`](trailing-settings-trust-help-misdescribes-persistent-hosts.md)
+  — Settings trust help says sandbox and container sessions trust automatically, but persistent recipe hosts follow the
+  switch.
+
+- [`trailing-disposable-trust-hint-says-off-by-default.md`](trailing-disposable-trust-hint-says-off-by-default.md) — In
+  a session's own sandbox, the trust hint says trust is off by default and points to a switch that does not apply there.
+
+- [`trailing-podman-image-inspect-hits-output-cap.md`](trailing-podman-image-inspect-hits-output-cap.md) — Recipe image
+  retirement still reads Podman's full image report, which can exceed the output cap and block cleanup (size
+  unverified).
+
+- [`trailing-podman-leftover-listing-hits-output-cap.md`](trailing-podman-leftover-listing-hits-output-cap.md) — The
+  leftover container listing still reads Podman's full ps report, so one oversized host hides leftovers on every host
+  (size unverified).
+
+- [`trailing-recipe-home-launch-skips-early-title-check.md`](trailing-recipe-home-launch-skips-early-title-check.md) — A
+  recipe launch into the new home folder creates the environment before refusing an invalid session name.
+
+- [`trailing-stale-references-to-removed-repository-search.md`](trailing-stale-references-to-removed-repository-search.md)
+  — SPEC.md, code comments and a test docstring still describe the removed repository search.
+
+- [`trailing-replace-in-environment-history-check-vacuous.md`](trailing-replace-in-environment-history-check-vacuous.md)
+  — The replace-in-environment test's check that host history is unchanged can no longer fail.
+
+- [`trailing-session-owned-setup-flag-untested.md`](trailing-session-owned-setup-flag-untested.md) — No helm test still
+  checks that sandboxes and containers are never offered checkout-folder setup.
+
+- [`trailing-repository-history-failure-shown-as-no-matches.md`](trailing-repository-history-failure-shown-as-no-matches.md)
+  — A failed repository-history read shows "No repository matches" and is not retried while the launcher is open.
+
+- [`trailing-restart-wake-failure-keeps-launch-remedies.md`](trailing-restart-wake-failure-keeps-launch-remedies.md) —
+  Restart with wake failures tell the user to choose the host again, which Restart with does not allow.
+
+- [`trailing-claude-json-over-1mib-never-settles.md`](trailing-claude-json-over-1mib-never-settles.md) — A recipe host
+  whose `~/.claude.json` exceeds 1 MiB shows a first-run-pending warning on every connection forever.
+
+- [`trailing-symlinked-claude-json-permanent-warning.md`](trailing-symlinked-claude-json-permanent-warning.md) — A
+  symlinked `~/.claude.json` leaves a permanent amber warning that misnames the cause.
+
+- [`trailing-menu-stop-and-suspend-exited-shell-wording.md`](trailing-menu-stop-and-suspend-exited-shell-wording.md) —
+  The row menu's Stop and suspend still offers to stop a shell that has already exited.
