@@ -3597,6 +3597,46 @@
       "golden": "settings-recipe-editor-delete-anyway",
       "title": "Recipe Delete after an unconfirmed image save, asking to delete anyway",
       "reference": null
+    },
+    {
+      "golden": "launcher-new-sandbox-checkout",
+      "title": "New sandbox with Managed checkout, asking for a repository before it promises a clone",
+      "reference": null
+    },
+    {
+      "golden": "launcher-checkout-on-unverified-host",
+      "title": "Managed checkout on a suspended sandbox whose identity is missing, explaining why it cannot allocate a checkout",
+      "reference": null
+    },
+    {
+      "golden": "launcher-checkout-preview-wake-refusal",
+      "title": "The launcher restored with the checkout preview refusal from a sandbox's fresh connection after it woke",
+      "reference": null
+    },
+    {
+      "golden": "launcher-restart-wake-refusal",
+      "title": "Restart with after the sandbox refused to resume, reporting the failure as a restart refusal",
+      "reference": null
+    },
+    {
+      "golden": "launcher-replace-checkout-in-sandbox",
+      "title": "Replace with a Managed checkout inside an owned sandbox, explaining what happens to the source checkout and the new one",
+      "reference": null
+    },
+    {
+      "golden": "environment-tab-only-stop-confirmation",
+      "title": "Stop and suspend after the main shell exited, naming the tabs still open and the remaining environment processes",
+      "reference": null
+    },
+    {
+      "golden": "checkout-trash-after-host-leaves",
+      "title": "Trash dialog kept open after its host goes away, with the remaining archive controls",
+      "reference": null
+    },
+    {
+      "golden": "tensorlake-cleanup-key-refusal",
+      "title": "Tensorlake leftover cleanup refused under a different API key",
+      "reference": null
     }
   ],
   "reference_scenes": [
