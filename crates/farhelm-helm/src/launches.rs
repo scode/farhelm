@@ -154,13 +154,6 @@ const CATALOG: &[CatalogModel] = &[
         efforts: CODEX_EFFORTS,
     },
     CatalogModel {
-        id: "gpt-5.6-terra",
-        family: "terra",
-        latest: true,
-        harness: LaunchHarness::Codex,
-        efforts: CODEX_EFFORTS,
-    },
-    CatalogModel {
         id: "gpt-6.2-sol",
         family: "sol",
         latest: true,
@@ -224,13 +217,6 @@ const CATALOG: &[CatalogModel] = &[
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-5.6-terra",
-        family: "terra",
-        latest: true,
-        harness: LaunchHarness::Goose,
-        efforts: GOOSE_EFFORTS,
-    },
-    CatalogModel {
         id: "openai/gpt-6.2-sol",
         family: "sol",
         latest: true,
@@ -280,13 +266,6 @@ const CATALOG: &[CatalogModel] = &[
         efforts: PI_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-5.6-terra",
-        family: "terra",
-        latest: true,
-        harness: LaunchHarness::Pi,
-        efforts: PI_EFFORTS,
-    },
-    CatalogModel {
         id: "openai/gpt-6.2-sol",
         family: "sol",
         latest: true,
@@ -331,13 +310,6 @@ const CATALOG: &[CatalogModel] = &[
     CatalogModel {
         id: "openai/gpt-6-luna",
         family: "luna",
-        latest: true,
-        harness: LaunchHarness::Omp,
-        efforts: OMP_EFFORTS,
-    },
-    CatalogModel {
-        id: "openai/gpt-5.6-terra",
-        family: "terra",
         latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
@@ -387,13 +359,6 @@ const CATALOG: &[CatalogModel] = &[
     CatalogModel {
         id: "opencode/gpt-6-luna",
         family: "luna",
-        latest: true,
-        harness: LaunchHarness::OpenCode,
-        efforts: OPENCODE_EFFORTS,
-    },
-    CatalogModel {
-        id: "opencode/gpt-5.6-terra",
-        family: "terra",
         latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
@@ -1939,6 +1904,49 @@ mod tests {
         assert_eq!(launch.invocation, "cursor-agent --force");
     }
 
+    /// A retired model no longer implies a harness. An old template can still pass the literal model ID once it
+    /// names the harness explicitly.
+    #[test]
+    fn a_retired_catalog_model_requires_an_explicit_agent() {
+        use farhelm_proto::launcher::{
+            LaunchTemplate, LauncherState, TemplateContext, apply_template,
+        };
+
+        let model = "gpt-5.6-terra";
+        let catalog = super::launcher_catalog();
+        assert!(catalog.iter().all(|entry| !entry.id.ends_with(model)));
+        let mut template: LaunchTemplate = serde_json::from_value(serde_json::json!({
+            "name": "old-codex",
+            "fields": { "model": model },
+        }))
+        .expect("read the saved template");
+        let context = TemplateContext {
+            catalog: &catalog,
+            known_hosts: &[],
+            known_recipes: &[],
+            known_places: &[],
+            host_fixed: false,
+        };
+        let empty = LauncherState::default();
+        let refusal = apply_template(&empty, &template, &context)
+            .expect_err("the retired model no longer supplies the agent");
+        assert_eq!(refusal.field, "model");
+        assert_eq!(refusal.reason, "needs an agent type, and none is chosen");
+
+        template.fields.agent = Some(LaunchHarness::Codex);
+        let draft = apply_template(&empty, &template, &context)
+            .expect("apply a deliberately chosen retired model");
+        assert_eq!(draft.harness, Some(LaunchHarness::Codex));
+        assert_eq!(draft.model.as_deref(), Some(model));
+        let launch = compile(LaunchSelection {
+            model: draft.model,
+            ..selection(draft.harness.unwrap())
+        })
+        .expect("compile the model as a custom choice");
+        let argv = shell_words::split(&launch.invocation).unwrap();
+        assert!(argv.windows(2).any(|words| words == ["-m", model]));
+    }
+
     /// Cursor defaults to the same argv as an explicit YOLO choice. Its
     /// permissions and model do not grant conversation reporting or Restart.
     #[test]
@@ -2090,7 +2098,7 @@ mod tests {
             custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Codex,
-            model: Some("gpt-5.6-terra".to_string()),
+            model: Some("gpt-6.2-sol".to_string()),
             effort: Some(LaunchEffort::High.into()),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
@@ -2102,7 +2110,7 @@ mod tests {
             [
                 "codex",
                 "-m",
-                "gpt-5.6-terra",
+                "gpt-6.2-sol",
                 "-c",
                 "model_reasoning_effort=high",
                 "--yolo"
@@ -2412,7 +2420,7 @@ mod tests {
     #[test]
     fn incompatible_and_malformed_models_are_refused() {
         let mut wrong_harness = selection(LaunchHarness::Claude);
-        wrong_harness.model = Some("gpt-5.6-terra".to_string());
+        wrong_harness.model = Some("gpt-6.2-sol".to_string());
         assert!(compile(wrong_harness).unwrap_err().contains("belongs"));
 
         for model in ["", "--model", "two words", "line\nbreak"]

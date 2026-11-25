@@ -746,27 +746,26 @@ it off, YOLO or Muse's own configuration can still grant trust. Muse follows the
 
 OpenCode is an agent type. Its model is optional and uses OpenCode's configured default when omitted. For an explicit
 choice, Farhelm suggests `opencode/glm-5.3-flash`, `opencode/grok-4.5`, `opencode/grok-4.6`, `opencode/glm-5.3`,
-`opencode/gpt-6-luna`, `opencode/gpt-5.6-terra`, `opencode/gpt-6.2-sol`, and `opencode/gpt-6.2-astra`. The custom-model
-field also accepts a bare Zen model name or an `opencode/<model>` value. A bare value is passed as `opencode/<model>`,
-and either spelling of a suggested model is that OpenCode model even where another harness offers the same bare name;
-another provider prefix is refused. OpenCode has no offered effort choices. Its only offered permission is YOLO,
-including when omitted, and compiles to `--auto`, which auto-approves permissions not explicitly denied. OpenCode uses
-generic activity status with no hooks, conversation capture/resume, or waiting-state recognition.
+`opencode/gpt-6-luna`, `opencode/gpt-6.2-sol`, and `opencode/gpt-6.2-astra`. The custom-model field also accepts a bare
+Zen model name or an `opencode/<model>` value. A bare value is passed as `opencode/<model>`, and either spelling of a
+suggested model is that OpenCode model even where another harness offers the same bare name; another provider prefix is
+refused. OpenCode has no offered effort choices. Its only offered permission is YOLO, including when omitted, and
+compiles to `--auto`, which auto-approves permissions not explicitly denied. OpenCode uses generic activity status with
+no hooks, conversation capture/resume, or waiting-state recognition.
 
 Goose, Pi, and OMP are agent types. Each uses its configured model when none is chosen. For an explicit OpenRouter
 choice, Farhelm suggests `z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`, `z-ai/glm-5.3`, `openai/gpt-6-luna`,
-`openai/gpt-5.6-terra`, `openai/gpt-6.2-sol`, and `openai/gpt-6.2-astra`; a literal custom OpenRouter id remains
-available after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or `max` thinking and offers `yolo`
-(preselected), `approve`, `smart approve`, and `chat` modes. An omitted Goose permission means YOLO and explicitly sets
-`GOOSE_MODE=auto`. Pi requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` thinking and has only the
-visibly labelled YOLO mode; this describes the absence of Pi's built-in tool gate, not its project-resource `--approve`
-flag. Pi stores that mode as `yolo`; an older snapshot that omitted the formerly optional permission field reads and
-displays as YOLO too. OMP requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` thinking (OMP's `auto`
-level is not offered) and offers `yolo` (`--approval-mode yolo`), `guarded` (preselected, `--approval-mode write`,
-workspace edits approved automatically and other actions asking), and `approve` (`--approval-mode always-ask`);
-`smart approve`/`chat` are refused. OMP gets no waiting-state recognition: an OMP approval prompt shows the generic
-running/idle status, a settled scope decision rather than a detection gap. Provider capabilities may clamp or reject a
-requested effort.
+`openai/gpt-6.2-sol`, and `openai/gpt-6.2-astra`; a literal custom OpenRouter id remains available after selecting a
+harness. Goose requests `off`, `low`, `medium`, `high`, or `max` thinking and offers `yolo` (preselected), `approve`,
+`smart approve`, and `chat` modes. An omitted Goose permission means YOLO and explicitly sets `GOOSE_MODE=auto`. Pi
+requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` thinking and has only the visibly labelled YOLO
+mode; this describes the absence of Pi's built-in tool gate, not its project-resource `--approve` flag. Pi stores that
+mode as `yolo`; an older snapshot that omitted the formerly optional permission field reads and displays as YOLO too.
+OMP requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` thinking (OMP's `auto` level is not offered)
+and offers `yolo` (`--approval-mode yolo`), `guarded` (preselected, `--approval-mode write`, workspace edits approved
+automatically and other actions asking), and `approve` (`--approval-mode always-ask`); `smart approve`/`chat` are
+refused. OMP gets no waiting-state recognition: an OMP approval prompt shows the generic running/idle status, a settled
+scope decision rather than a detection gap. Provider capabilities may clamp or reject a requested effort.
 
 Standard operation must never require falling back to SSH or a separate command line, with three v1 carve-outs:
 transport, bringing up the helm's own machine, and recovery from a release below the upgrade floor. Bringing up the
