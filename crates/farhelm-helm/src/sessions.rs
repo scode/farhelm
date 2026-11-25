@@ -2349,6 +2349,7 @@ async fn record_created_history(
         let manager = Arc::clone(&state.manager);
         let captured = claim.clone();
         let environment = environment_target.is_some();
+        let has_repository = github_repo.is_some();
         match store::CachedRow::new(claim.host, session.clone()) {
             Ok(checked) => {
                 state
@@ -2372,16 +2373,22 @@ async fn record_created_history(
                             // Db::call owns SQLite before this check. Adoption
                             // cannot commit between it and the transaction;
                             // SQL identity still catches commit before publication.
-                            let current = manager.status(captured.host).is_some_and(|status| {
+                            let status = manager.status(captured.host).filter(|status| {
                                 status.entry_uuid == captured.entry_uuid
                                     && status.incarnation == captured.incarnation
                                     && status.client.is_some()
-                                    && (environment || !status.is_session_owned)
-                                    && matches!(status.state,
+                                    && matches!(&status.state,
                                         manager::HostState::Connected { identity, .. }
-                                            if identity == captured.identity)
-                            });
-                            current.then_some(registry_guard)
+                                            if identity == &captured.identity)
+                            })?;
+                            let scope = if environment || !status.is_session_owned {
+                                store::HistoryScope::All
+                            } else if has_repository {
+                                store::HistoryScope::RepositoryOnly
+                            } else {
+                                return None;
+                            };
+                            Some((registry_guard, scope))
                         },
                     )
                     .await

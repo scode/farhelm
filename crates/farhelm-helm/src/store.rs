@@ -126,6 +126,14 @@ pub struct HistoryPaths<'a> {
     pub display_cwd: &'a str,
 }
 
+/// An existing session-owned environment can supply a global checkout suggestion without teaching the
+/// launcher a new ordinary setup. Its replay fence is independent of the ordinary history window.
+#[derive(PartialEq, Eq)]
+pub(crate) enum HistoryScope {
+    All,
+    RepositoryOnly,
+}
+
 /// The facts one admitted create writes into each history table.
 struct AdmittedCreate<'a> {
     host: HostId,
@@ -338,7 +346,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 101;
+pub(crate) const SCHEMA_VERSION: i64 = 102;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -368,6 +376,7 @@ fn add_missing_host_columns(
 
 mod environment_history;
 mod podman;
+mod repository_history;
 pub use podman::{NewPodmanHost, PodmanBinding, PodmanLogin};
 pub(crate) use podman::{
     PlaceClaim, PodmanInstallGuard, PodmanPlaceIdentity, has_podman_place_claim,
@@ -2882,6 +2891,7 @@ pub struct HelmStore {
 /// - 92: permit the desktop login PATH notice while preserving notice IDs and history.
 /// - 93: the Antigravity workspace trust setting and hint dismissal.
 /// - 94: upgrade highlights follow one shared choice and release record. Upgraded databases start unset.
+/// - 102: bounded repository history shared by all hosts, seeded from retained launch intent.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -3234,7 +3244,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 101;",
+              PRAGMA user_version = 102;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
             custom_agents_schema = crate::custom_agents::SCHEMA,
@@ -3249,6 +3259,8 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         podman::migrate_container_place_identity(&tx)?;
         add_missing_host_columns(&tx, &[TAILSCALE_MODE_COLUMN])
             .context("adding the Tailscale SSH mode")?;
+        tx.execute_batch(repository_history::SCHEMA)
+            .context("creating global repository history")?;
         tx.execute(
             "INSERT INTO helm_creation_build (singleton, build) VALUES (1, ?1)",
             [creation_build],
@@ -5278,6 +5290,12 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 101;")
             .context("migrating helm.db to schema version 101")?;
         version = 101;
+    }
+    if version == 101 {
+        repository_history::migrate(&tx).context("backfilling global repository history")?;
+        tx.execute_batch("PRAGMA user_version = 102;")
+            .context("migrating helm.db to schema version 102")?;
+        version = 102;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -8980,6 +8998,7 @@ impl HelmStore {
                         "create_history_sessions",
                         "create_history_cutoffs",
                         "create_history_partitions",
+                        "github_repository_replacement_admissions",
                     ] {
                         tx.execute(
                             &format!(
@@ -9533,7 +9552,7 @@ impl HelmStore {
             github_repo,
             explicit_selection,
             environment_target,
-            || Some(()),
+            || Some(((), HistoryScope::All)),
         )
         .await
     }
@@ -9542,7 +9561,7 @@ impl HelmStore {
     /// The returned guard stays alive through the existing history transaction,
     /// even if the async waiter is cancelled while the blocking task is queued.
     /// Returning `None` skips every admission, projection and preference write.
-    /// The caller defines current authority; storage knows no connection manager.
+    /// The caller defines current authority and allowed history projections. Storage knows no connection manager.
     /// Its transactional identity check still closes an adoption committed
     /// before the caller's live authority was republished.
     #[allow(
@@ -9558,7 +9577,7 @@ impl HelmStore {
         github_repo: Option<&farhelm_proto::GithubRepo>,
         explicit_selection: Option<&LaunchSelection>,
         environment_target: Option<&farhelm_proto::LaunchTarget>,
-        current: impl FnOnce() -> Option<G> + Send + 'static,
+        current: impl FnOnce() -> Option<(G, HistoryScope)> + Send + 'static,
     ) -> anyhow::Result<bool> {
         let github_repo = github_repo
             .map(|repo| {
@@ -9578,7 +9597,7 @@ impl HelmStore {
         let canonical_cwd = canonical_cwd.to_string();
         let display_cwd = display_cwd.to_string();
         self.conn.call("record create history task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
-            let Some(_guard) = current() else { return Ok(false); };
+            let Some((_guard, scope)) = current() else { return Ok(false); };
             let tx = conn
                 .transaction()
                 .context("beginning create-history transaction")?;
@@ -9606,6 +9625,12 @@ impl HelmStore {
                 .map(i64::try_from)
                 .transpose()
                 .context("creation sequence exceeds SQLite's signed integer range")?;
+            if scope == HistoryScope::RepositoryOnly {
+                let Some(repo) = github_repo.as_deref() else { return Ok(false); };
+                let changed = repository_history::record_replacement(&tx, host, &identity, &entry, sequence, repo)?;
+                tx.commit().context("committing repository history for a replacement")?;
+                return Ok(changed);
+            }
             let prior_fallback: bool = tx
                 .query_row(
                     "SELECT fallback_order FROM create_history_partitions
@@ -9739,6 +9764,11 @@ impl HelmStore {
             // keys have gone; storage identity alone cannot recognize A-to-B-to-A.
             let launch_changed = (environment_target.is_none() || environment_changed)
                 && record_launch_history(&tx, &create, explicit_selection.as_ref())?;
+            // An environment's independent replay key can outlive the original installation. Use the same
+            // novelty boundary as its other launcher history so a retained replay cannot promote a repository.
+            if let Some(repo) = github_repo.as_deref().filter(|_| environment_target.is_none() || environment_changed) {
+                repository_history::record(&tx, repo)?;
+            }
 
             // Find the newest row that will be evicted before deleting it.
             // Persisting this lower watermark is what keeps a delayed replay
@@ -10653,6 +10683,204 @@ mod tests {
             "helper assumes a freshly added host with no prior identity"
         );
         host
+    }
+
+    /// Exercise the accepted-create transaction for both an ordinary destination and a new environment.
+    /// Both can carry repository intent even when a plain command supplies no structured agent selection.
+    async fn admit_repository(
+        store: &HelmStore,
+        (host, identity): (HostId, &str),
+        session_id: &str,
+        created_at: i64,
+        repo: &str,
+        target: Option<&farhelm_proto::LaunchTarget>,
+    ) -> bool {
+        store
+            .record_create_history_with_environment(
+                host,
+                identity,
+                &admitted_row(host, &session(session_id, created_at)),
+                HistoryPaths {
+                    canonical_cwd: "/transient-checkout",
+                    display_cwd: "/transient-checkout",
+                },
+                Some(&farhelm_proto::parse_github_repo(repo).unwrap()),
+                None,
+                target,
+            )
+            .await
+            .unwrap()
+    }
+
+    /// Compare the public repository identity and order without involving the legacy per-host reader.
+    async fn global_repository_names(store: &HelmStore) -> Vec<String> {
+        store
+            .global_github_repository_history()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|repo| format!("{}/{}", repo.owner, repo.name))
+            .collect()
+    }
+
+    /// A repository remembered across hosts can move up only on a new admission. Deleting the originating hosts
+    /// clears the ordinary rows while leaving their repositories available after a restart.
+    #[farhelm_testtrace::test]
+    async fn global_checkout_repository_history_uses_new_admissions_and_survives_host_removal() {
+        let (dir, store) = fresh_store().await;
+        let ordinary = (
+            host_with_identity(&store, "ordinary.example", "identity-a").await,
+            "identity-a",
+        );
+        let disposable = (
+            host_with_identity(&store, "disposable.example", "identity-b").await,
+            "identity-b",
+        );
+        let target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "dev".into(),
+            place: farhelm_proto::Place::TensorlakeAccount,
+        };
+        assert!(admit_repository(&store, ordinary, "first", 100, "org/one", None).await);
+        assert!(admit_repository(&store, disposable, "second", 1, "org/two", Some(&target)).await);
+        assert_eq!(
+            global_repository_names(&store).await,
+            ["org/two", "org/one"]
+        );
+        assert!(!admit_repository(&store, ordinary, "first", 100, "org/one", None).await);
+        assert_eq!(
+            global_repository_names(&store).await,
+            ["org/two", "org/one"]
+        );
+        assert!(admit_repository(&store, ordinary, "third", 101, "ORG/One", None).await);
+        store.remove_ssh_host(disposable.0).await.unwrap();
+        store.remove_ssh_host(ordinary.0).await.unwrap();
+        drop(store);
+        let reopened = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(
+            global_repository_names(&reopened).await,
+            ["org/one", "org/two"]
+        );
+    }
+
+    /// A disposable host can keep its original structured setup even after enough fresh replacements to
+    /// fill a whole replay window. Replaying an evicted replacement must not make its repository recent.
+    #[farhelm_testtrace::test]
+    async fn replacement_checkout_history_has_its_own_admission_window() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "replacement.example", "identity-a").await;
+        let paths = HistoryPaths {
+            canonical_cwd: "/environment",
+            display_cwd: "/environment",
+        };
+        let mut initial = session("original", 51);
+        initial.creation_seq = Some(1);
+        let selection = environment_history_selection();
+        assert!(
+            store
+                .record_create_history_with_destination(
+                    host,
+                    "identity-a",
+                    &admitted_row(host, &initial),
+                    paths,
+                    None,
+                    Some(&selection),
+                )
+                .await
+                .unwrap()
+        );
+        let original = store.launch_history(host, "identity-a").await.unwrap();
+        assert_eq!(original.len(), 1);
+        let preferences = store.preferences().await.unwrap();
+        for (attempt, created_at) in (0..=MAX_LAUNCH_HISTORY).chain([0]).enumerate() {
+            let entry = session(&format!("replacement-{created_at}"), created_at);
+            let repo = farhelm_proto::parse_github_repo(&format!("org/repo-{created_at}")).unwrap();
+            let admitted = store
+                .record_create_history_with_environment_if_current(
+                    host,
+                    "identity-a",
+                    &admitted_row(host, &entry),
+                    paths,
+                    Some(&repo),
+                    Some(&selection),
+                    None,
+                    || Some(((), HistoryScope::RepositoryOnly)),
+                )
+                .await
+                .unwrap();
+            assert_eq!(admitted, attempt <= MAX_LAUNCH_HISTORY as usize);
+        }
+        assert_eq!(
+            store.launch_history(host, "identity-a").await.unwrap(),
+            original
+        );
+        assert_eq!(store.preferences().await.unwrap(), preferences);
+        let repos = global_repository_names(&store).await;
+        assert_eq!(repos[0], format!("org/repo-{MAX_LAUNCH_HISTORY}"));
+        assert!(!repos.iter().any(|repo| repo == "org/repo-0"));
+    }
+
+    /// Seed an upgrade from both source tables. A deleted sandbox's repo comes from its independent history.
+    /// A surviving sandbox's fast clock must not supersede its own helm admission. The newest valid ordinary
+    /// launch uses legacy mixed case, so dropping it or treating it as a separate suggestion changes the result.
+    #[farhelm_testtrace::test]
+    async fn migration_backfills_global_checkout_repository_history() {
+        let (dir, store) = fresh_store().await;
+        let ordinary = (
+            host_with_identity(&store, "previous.example", "identity-a").await,
+            "identity-a",
+        );
+        let disposable = (
+            host_with_identity(&store, "previous-sandbox.example", "identity-b").await,
+            "identity-b",
+        );
+        let surviving = (
+            host_with_identity(&store, "surviving-sandbox.example", "identity-c").await,
+            "identity-c",
+        );
+        let target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "dev".into(),
+            place: farhelm_proto::Place::TensorlakeAccount,
+        };
+        assert!(admit_repository(&store, ordinary, "old", 10, "org/one", None).await);
+        assert!(admit_repository(&store, ordinary, "duplicate", 40, "org/one", None).await);
+        assert!(admit_repository(&store, ordinary, "invalid", 50, "org/stale", None).await);
+        assert!(
+            admit_repository(&store, surviving, "skewed", 900, "org/three", Some(&target)).await
+        );
+        assert!(admit_repository(&store, disposable, "env", 15, "org/two", Some(&target)).await);
+        store.remove_ssh_host(disposable.0).await.unwrap();
+        {
+            let conn = store.conn.lock();
+            conn.execute_batch(
+                "UPDATE create_history_sessions SET github_repo = 'ORG/One' WHERE session_id = 'duplicate';
+                 UPDATE create_history_sessions SET github_repo = 'not a repository' WHERE session_id = 'invalid';
+                 UPDATE environment_launch_history SET admitted_at = 30 WHERE session_id = 'env';
+                 UPDATE environment_launch_history SET admitted_at = 20 WHERE session_id = 'skewed';
+                 DROP TABLE github_repository_replacement_admissions;
+                 DROP TABLE github_repository_history;
+                 PRAGMA user_version = 101;",
+            )
+            .unwrap();
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM create_history_sessions", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+                4,
+                "only the deleted host's mirrored row is missing",
+            );
+        }
+        drop(store);
+        let migrated = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(
+            global_repository_names(&migrated).await,
+            ["org/one", "org/two", "org/three"]
+        );
+        let fresh = HelmStore::open(&dir.path().join("fresh.db")).await.unwrap();
+        assert_eq!(
+            schema_objects(&migrated.conn.lock()),
+            schema_objects(&fresh.conn.lock())
+        );
     }
 
     /// Fresh repo intent survives fallback ordering and repeated launches
