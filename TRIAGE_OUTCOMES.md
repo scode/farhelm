@@ -1,26 +1,5 @@
 # Triage outcomes
 
-## settings-close-save-can-hide-credential-error.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md Settings paragraph (2575): "The first failure keeps Settings open and shows the
-  affected page with its error." SPEC.md Credentials (2599): "A failed save keeps the draft and shows its reason." Code:
-  a key conflict sets the Credentials overview in front of an open credential editor (`editing.rs:408-412` →
-  `credentials.rs:305-307`, `key_revealed`); nothing clears that flag when the conflict is later resolved through the
-  overview's footer. The next Save and Close still saves the hidden credential (`editing.rs:267-270`); on refusal
-  `reveal_edit_failure` only selects Credentials for a `Credential` target (`editing.rs:544-549`), so the overview with
-  "Resume editing credential" is shown (`credentials.rs:296-303,570-590`) while the refusal is stored in the unmounted
-  editor (`credentials/editor.rs:321`). Fix follows directly: on a credential-editor failure, clear `key_revealed` so
-  the editor and its error show, mirroring the key-failure branch. No comment defends the current behavior. Verified:
-  confirmed by inspection. Size estimate ~30-60 lines with a regression test; under 100.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code —
-  direct; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
-  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
-  feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## tensorlake-key-discard-lacks-preservation-test.md
 
 - Outcome: `other`.

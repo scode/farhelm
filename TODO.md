@@ -60,6 +60,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Reveal the credential editor when Save and Close fails.** Resolving a Tensorlake key conflict from the Credentials
+  overview footer can leave that overview in front of a retained credential draft. Save and Close still submits the
+  draft, but if the helm refuses the write, the overview offers only Resume editing credential. The reason stays in the
+  hidden editor. In `crates/gui/farhelm-gui/src/settings/editing.rs`, use the failed editor's identity in
+  `reveal_edit_failure` to clear `key_revealed` in `settings/credentials.rs` only for that editor. Keep its replacement
+  secret and error in view as required by `SPEC.md` under “Settings” and “Credentials”. Confirm Save and Close while
+  Resume editing credential is still shown in the overview. Check the exact credential PUT, refuse it, and assert that
+  the same editor shows both the error and the retained draft. Capture the mounted error and staged draft in both
+  appearances. The tested reveal, interaction test, and dedicated golden fixture together exceeded this triage item's
+  size allowance. The separate independent-save follow-up covers a refusal that arrives while the close question is
+  still open.
+
 - **Stop Settings Save and Close when an independent save fails.** An editor can save on its own while a page Save waits
   for another write. If the editor fails before the page finishes, Save and Close must show its reason and stop before
   sending the remaining drafts. The frozen draft list prevents replaying the failed write, but does not show the refusal
