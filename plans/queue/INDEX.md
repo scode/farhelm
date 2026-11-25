@@ -10,7 +10,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `global-checkout-repo-history.md` — Replace per-host Managed checkout repository suggestions and host directory scanning with one helm-global repository history
 - [complete] `hide-unconfigured-podman-recipe-status.md` — Hide unrelated unready Podman status noise on multi-provider recipe cards and disable Rebuild on unusable shown places
 - [pending] `launcher-style-quick-dialogs.md` — Give the quick switcher (Cmd+K), the template list (Cmd+J) and Rename (Cmd+L) the session launcher's look, with its pieces shared as components
-- [in-flight 36cd8d] `tab-close-activation-order.md` — Activate the previous terminal tab in open order when closing an active shell tab
+- [complete] `tab-close-activation-order.md` — Activate the previous terminal tab in open order when closing an active shell tab
 - [pending] `agent-catalog-cli-and-drift-cleanups.md` — Remove GPT-5.6 from the model catalog, allow Goose named Restart capture, accept leading-hyphen `--effort`, and clean up OpenCode and instructions drift checks
 - [pending] `tensorlake-setup-and-repo-cache-fixes.md` — Isolate repository-cache startup sweep errors, refuse Tensorlake setup reruns on suspended or deleting sandboxes, and assert setup never reads agent settings
 - [pending] `tailscale-private-socket-dirs.md` — Allocate private OS-chosen Tailscale SSH socket directories persisted across helm restarts and retire host masters on retarget and Remove without globbing `/tmp`
