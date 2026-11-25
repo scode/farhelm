@@ -33,14 +33,6 @@ consequences.
   — In Replace with on a suspended managed-checkout host, pressing Down then Enter on a retained recent checkout setup
   immediately wakes, clones fresh, and deletes the source without showing the fresh-clone warning.
 
-- [`trailing-podman-verify-place-nonce-in-argv-forgeable.md`](trailing-podman-verify-place-nonce-in-argv-forgeable.md) —
-  Because the place-identity guard passes its expected proof nonce in the SSH command line, a compromised host reached
-  after an SSH alias move can echo the nonce to spoof container absence on Delete or accept a pending create.
-
-- [`trailing-podman-setup-scripts-and-creation-proxy-skip-place-verification.md`](trailing-podman-setup-scripts-and-creation-proxy-skip-place-verification.md)
-  — During a container build or setup, an external SSH alias or User change can open a fresh SSH connection and stream
-  cached proxy credentials on stdin without checking the host identity, or read proxies from the moved host.
-
 - [`trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md`](trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md)
   — Expanding a custom agent's ~/ command only during launch preparation kills a live agent on Restart (and allocates
   checkouts on Create) before failing if HOME is missing or the expanded path cannot be resolved (borderline
@@ -373,10 +365,6 @@ consequences.
 - [`trailing-claim-podman-place-retains-unused-claim-after-twin.md`](trailing-claim-podman-place-retains-unused-claim-after-twin.md)
   — When an unused SSH host moves externally to a machine claimed by another host, Refresh refuses it as a twin but
   keeps its old claim on disk, blocking a third entry for the vacated machine.
-
-- [`trailing-podman-leftovers-skip-place-identity-verification.md`](trailing-podman-leftovers-skip-place-identity-verification.md)
-  — If a claimed container host's SSH alias moves externally, deleting an unregistered leftover in Settings ->
-  Containers can falsely report success while leaving it running, and refreshing can hide all leftovers.
 
 - [`trailing-suspend-read-activity-still-uses-ordered-lane.md`](trailing-suspend-read-activity-still-uses-ordered-lane.md)
   — Primary Suspend and Stop and suspend actions still wait up to 20 seconds behind any slow host on the ordered channel

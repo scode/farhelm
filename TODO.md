@@ -166,6 +166,23 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   again and preserve a question that a manual action owns. Cover both shared authentication and route edits in tests
   with automatic updates still on. Cancelling the prompt alone cannot arbitrate the admission race after the answer.
 
+- **Verify container hosts before trusting results or sending private input.** Each provider command for a claimed
+  container host must verify the recorded machine and account on the connection that will run it, before executing or
+  accepting an engine result. Use a proof tied to that authenticated endpoint. A token sent with the command does not
+  establish who answered. Accept capabilities and claims only from the verified machine and account. The probe collects
+  capabilities over several commands, so verifying its last reply alone cannot establish where the earlier replies came
+  from. Apply the same check to recipe scripts, the creation-time proxy read and delivery of the container's proxy file.
+  Hold private input until verification succeeds on the connection that will receive it. A separate preflight can
+  succeed while a later connection reaches a different account. The existing command runner sends private input
+  immediately and exposes the final output after the process finishes. The full fix needs a transport boundary that
+  verifies before sending bytes while preserving cleanup on timeout and cancellation. Leftover discovery and Delete must
+  carry any existing claim across every command, including absence checks. When the runtime has no cached host
+  observation, its probe can replace the claim before cleanup reads it because a leftover has no registry row. Preserve
+  the cleanup identity across that refresh and retry, while keeping explicit route changes and adoption consistent. Use
+  a claim established by the first probe if one becomes available, and preserve the existing ownership checks for legacy
+  rows without a claim. Update the container-session contract and cover withheld private input, a cold-cache refusal, a
+  refused retry and successful discovery or cleanup after the original destination is restored.
+
 - **Keep host proxy settings out of Podman recipe images.** Recipe build and preparation helpers write
   `90-farhelm-proxy.conf` for their systemd user managers. A captured image can carry that file, including passwords, in
   the host account's Podman storage. A new container can then keep a proxy the host removed, because systemd read the

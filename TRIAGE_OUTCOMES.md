@@ -2092,72 +2092,6 @@
   index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-podman-verify-place-nonce-in-argv-forgeable.md
-
-- Outcome: `fix code`.
-- Assessment: When Farhelm checks, before a container status check, Delete or recovered create, that a container host's
-  SSH destination still reaches the recorded machine and account, the "check passed" proof is a random token that
-  Farhelm itself sends in the remote command line. A different host reached through a moved SSH alias can see that
-  command line. If that host is hostile, it can print the token without running the check. Farhelm then trusts its
-  answer, for example "container absent", which makes the helm forget a container that is still running on the original
-  host, or let a recovered create go ahead on the wrong host. Verified: Confirmed as a property of the code.
-  `crates/farhelm-helm/src/environment/podman_probe.rs:42-51` passes the nonce as `$2` and prints it only after the
-  digest matches. `run_verified` (`:155-190`) accepts any stdout that starts with `nonce\n` (`:174`). Nothing in the
-  reply depends on the machine ID, so an endpoint that does not run the script honestly can forge the proof. An honest
-  different machine still fails closed. SPEC_impl.md, "Podman places, creation and images": "The shell compares a
-  command-specific SHA-256 digest so the recorded machine ID stays at the helm. Its marker proves the check ran and
-  matched before the exit status is used." SPEC.md, "Local authority and trust between hosts", says the
-  deliberate/accidental line "never relaxes the remote-host boundary, removes a protection this specification states for
-  a specific case (such as a container host's SSH destination moving…)". Not established: any real hostile host that
-  does this. Note that a compromised endpoint already receives build scripts unverified (item 28), so fixing only this
-  one does not close the hostile-endpoint case.
-- Decision: q-podid, "How far the container-host identity check reaches": the maintainer picked "Every command and
-  cached result". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If it turns very
-  complicated, the executor must abort and turn this into a to-do item for a follow-up. Explaining what is complicated."
-- Completion criteria: Apply the container-host identity check to every command sent to a container host, including
-  against a hostile endpoint (the nonce must not be echoable), and drop capabilities and claims learned from an
-  unverified machine. Recommendation for reference: fix spec — say whether the guard defends against a hostile endpoint.
-  If it should, make it a challenge and response (the reply is a digest of a fresh nonce plus the machine ID and uid,
-  which only the right machine can compute). If not, narrow SPEC_impl to honest drift. Size S for the spec only, M with
-  code. Complexity gate (maintainer): if the fix turns very complicated during execution, the executor stops and turns
-  it into a follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about
-  100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over
-  that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
-## trailing-podman-setup-scripts-and-creation-proxy-skip-place-verification.md
-
-- Outcome: `fix spec+code`.
-- Assessment: While a recipe image builds or a new container is set up, Farhelm sends each setup step to the container
-  host as a script over SSH. The script starts with the host's proxy settings, which can include proxy passwords. These
-  sends skip the machine and account check. If the host's SSH configuration is edited outside Farhelm mid-build (for
-  example the `User` changed to another account on the same machine, which raises no host-key warning), the next step's
-  script, proxy passwords included, goes to the new account. That account receives the bytes even though the container
-  command then fails. Two smaller parts: the proxy read at container creation is also unverified, and later build stages
-  re-read cached settings instead of the ones that passed the check. Verified: Confirmed by reading. `Podman::script`
-  and `script_with_proxy` (`podman.rs:433-497`) take a bare host, prepend `build::proxy_exports(proxy)` and call
-  `command_with_input` (`podman_probe.rs` "command_with_input"). That runs `SystemPlaceCommands::execute`
-  (`podman_probe.rs:288-350`), which writes stdin as soon as `ssh` is spawned, with no `VERIFY_PLACE_AND_EXEC`.
-  `creation_proxy` (`podman_probe.rs`, "creation_proxy") reads proxies over the current route without checking the
-  identity. The claim that `%C` defeats ControlMaster reuse on a `User`/`HostName` edit is how OpenSSH documents it, but
-  it was not run here. Whether the receiving account actually captures the bytes depends on that endpoint. Stock
-  `podman exec` with a missing ID exits without reading stdin, but the bytes have already crossed the SSH channel into
-  that account's process. SPEC.md "Container sessions" names only create, status and cleanup as verified operations, so
-  whether build scripts are covered is a matter of reading the spec. Part 3 overlaps item 77.
-- Decision: q-podid, "How far the container-host identity check reaches": the maintainer picked "Every command and
-  cached result". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If it turns very
-  complicated, the executor must abort and turn this into a to-do item for a follow-up. Explaining what is complicated."
-- Completion criteria: Apply the container-host identity check to every command sent to a container host, including
-  against a hostile endpoint (the nonce must not be echoable), and drop capabilities and claims learned from an
-  unverified machine. Recommendation for reference: fix spec+code — state that secret-bearing sends to a container host
-  are verified first. Have the remote shell print the verified proof before Farhelm writes any private stdin, and verify
-  the creation proxy read. Size M, likely over 100 lines. Complexity gate (maintainer): if the fix turns very
-  complicated during execution, the executor stops and turns it into a follow-up TODO.md entry that explains what is
-  complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
 ## trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md
 
 - Outcome: `fix code`.
@@ -2283,30 +2217,6 @@
   instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
-## trailing-podman-leftovers-skip-place-identity-verification.md
-
-- Outcome: `fix code`.
-- Assessment: In Settings → Containers, if a container host's SSH destination now reaches a different machine or
-  account, the "Containers not on this helm" list can show none of the original host's leftovers. Deleting a leftover
-  shown earlier can report success while the container still exists on the original host. It shows up again after the
-  destination is restored. Verified: Confirmed. `delete_leftover` and `list_owned` use `PlaceTarget::from(HostId)` (no
-  identity, `podman.rs:832-865`). `delete_leftover` returns `Ok` when the container is absent at the moved endpoint. A
-  container registered to any host is still refused (`podman.rs:847-862`), so another host's live container cannot be
-  deleted through this path. This is "success reported for an operation that failed", which keeps it out of the filters.
-  SPEC.md requires verification only for containers with a recorded machine and account. Leftovers have no row, but
-  their host does have a durable claim.
-- Decision: q-podid, "How far the container-host identity check reaches": the maintainer picked "Every command and
-  cached result". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If it turns very
-  complicated, the executor must abort and turn this into a to-do item for a follow-up. Explaining what is complicated."
-- Completion criteria: Apply the container-host identity check to every command sent to a container host, including
-  against a hostile endpoint (the nonce must not be echoable), and drop capabilities and claims learned from an
-  unverified machine. Recommendation for reference: fix code — use the host's durable claim when one exists. Size S-M.
-  Complexity gate (maintainer): if the fix turns very complicated during execution, the executor stops and turns it into
-  a follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100 lines
-  of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md
