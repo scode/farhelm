@@ -534,10 +534,6 @@ consequences.
   — Suspending a container briefly flashes Connecting before Suspended, and a transient post-Suspend check failure on a
   sandbox or container runs the full active reconnect ladder instead of one quiet check.
 
-- [`trailing-tensorlake-setup-rerun-omits-suspended-and-sealed-refusal.md`](trailing-tensorlake-setup-rerun-omits-suspended-and-sealed-refusal.md)
-  — Rerunning setup on a suspended or sealed Tensorlake host still offers the setup confirmation instead of refusing up
-  front, and confirming on a suspended host temporarily overwrites Suspended with a failed setup run.
-
 - [`trailing-provisioning-service-omits-sealed-host-refusal.md`](trailing-provisioning-service-omits-sealed-host-refusal.md)
   — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
   admitted instead of being refused.

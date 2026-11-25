@@ -64,6 +64,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Refuse setup reruns on suspended or deleting Tensorlake sandboxes.** In `provisioning/tensorlake_add.rs`,
+  `TensorlakeHost` can offer setup even when it should tell the user to resume the sandbox or finish its deletion.
+  Refuse before ensuring a host key or keeping a plan. Check again under the provisioning lock when confirming an older
+  offer, before taking a connection hold or publishing replacement progress. Keep the sandbox's lifecycle state and
+  earlier failure so the user can run setup again once eligible. Cover both refusal points, retained progress and the
+  reason shown in Hosts.
+
 - **Bind a confirmed Tailscale Uninstall to the verified peer.** Uninstall checks the machine again at confirmation,
   then resolves the Tailscale destination separately for each removal step. Keep the peer address, verified SSH keys,
   and connection policy for the entire run, including the confirmation's checks and every destructive step. Reuse the

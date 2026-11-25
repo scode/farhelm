@@ -4275,27 +4275,6 @@
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
-## trailing-tensorlake-setup-rerun-omits-suspended-and-sealed-refusal.md
-
-- Outcome: `fix code`.
-- Assessment: Re-running setup on a suspended Tensorlake sandbox is not refused up front with "resume it first". Farhelm
-  shows the setup confirmation, briefly replaces the Suspended status, then fails the run. A sandbox already being
-  deleted likewise gets a confirmation that is only refused when confirmed. Verified: Confirmed.
-  `provisioning/tensorlake_add.rs:745-777` (the `TensorlakeHost` arm) checks busy and owner but not `suspended_refusal`
-  or `is_sealed`. The sealed check exists only at confirmation (`tensorlake_add.rs:984`). Suspended half: SPEC_impl.md
-  (around 7096-7098) says "Update and setting a host up again are refused for a host the manager shows suspended, before
-  anything is probed and again before a confirmed run's preflight probe, with a resume-first message". The code
-  contradicts it in so many words, and the fix (call `self.suspended_refusal(&row)` in the probe arm and in
-  `start_tensorlake_add`) follows directly, XS. Sealed half: no spec text requires a probe-time refusal.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code XS for both
-  halves. The orchestrator may record the suspended half as fix code without asking and present only the sealed half.
-  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
-  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
-  index entry.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## trailing-provisioning-service-omits-sealed-host-refusal.md
 
 - Outcome: `fix code`.
