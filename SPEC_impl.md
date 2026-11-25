@@ -641,12 +641,11 @@ them.
 A home counts only while the frame on screen draws it. GPUI gives focus to a handle whether or not anything draws it,
 and key dispatch for a focused handle missing from the frame starts above the root's key context, so Tab, Escape and
 every binding stop working. GPUI's own focus-lost report does not catch this when the frame before drew nothing focused
-either. Homes go undrawn in ordinary use: one made home before its first frame (the interrupted card), and New as home,
-once the sidebar makes it one, while it is disabled during a launch or a host change, or hidden behind the Hosts panel.
-So the coordinator gives such a home no focus, leaves focus on the window's root (a dialog that returns focus home
-included), and after every frame sends a window resting on its root home once that frame draws it. The per-step focus
-invariant also fails a test whose focus rests on anything the frame does not draw. Desktop-integration found the dead
-keys with New as home.
+either. Homes go undrawn in ordinary use when the interrupted card is made home before its first frame or when Welcome's
+Start a session is disabled during a launch or a host change. So the coordinator gives such a home no focus, leaves
+focus on the window's root (a dialog that returns focus home included), and after every frame sends a window resting on
+its root home once that frame draws it. The per-step focus invariant also fails a test whose focus rests on anything the
+frame does not draw. Desktop-integration found the dead keys with New as home.
 
 GPUI also focuses any element that tracks a focus handle when it is pressed, with any mouse button, so tracking focus
 goes through the coordinator too (`focus::track`), which applies its own press rule in place of GPUI's to a press of

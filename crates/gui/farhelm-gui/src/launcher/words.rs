@@ -11,7 +11,7 @@ use crate::permission::words::permission_help;
 
 /// The order the launcher's harness chips appear in, as the old launcher drew them. Checked at compile time to name
 /// every agent type exactly once, so a new agent type fails the build here until someone decides where its chip goes.
-pub(super) const HARNESS_PICKER_ORDER: [LaunchHarness; 12] = [
+pub(crate) const HARNESS_PICKER_ORDER: [LaunchHarness; 12] = [
     LaunchHarness::Codex,
     LaunchHarness::Claude,
     LaunchHarness::Antigravity,

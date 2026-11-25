@@ -347,8 +347,7 @@ pub struct SessionList {
     /// as where closing returns focus (on macOS a click leaves the button unfocused, so what held focus before the
     /// click is not where SPEC.md returns it).
     templates_focus: FocusHandle,
-    /// The heading's New button's focus handle, owned here so the session pane can name New as where focus rests when
-    /// there are no sessions ([`SessionList::new_focus`]).
+    /// The heading's New button's focus handle, kept across redraws for keyboard tabbing.
     new_focus: FocusHandle,
     /// The list's width when its rows were last given their height estimate; see [`SessionList::sync_rows`].
     hinted_width: Option<Pixels>,
@@ -458,13 +457,6 @@ struct Current {
 }
 
 impl SessionList {
-    /// The heading's New button's focus handle. The session pane makes it home when there are no sessions (SPEC.md,
-    /// "Where focus rests": "focus rests on New when there are no sessions"), since with no session open there is no
-    /// terminal or card for focus to rest on. Nothing else should move focus to it.
-    pub(crate) fn new_focus(&self) -> &FocusHandle {
-        &self.new_focus
-    }
-
     /// The rail foot's `?` button, for the screenshot goldens, which open its menu without a click.
     #[cfg(test)]
     pub(crate) fn help_button(&self) -> &Entity<HelpButton> {

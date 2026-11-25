@@ -951,7 +951,7 @@ fn a_reset_forgets_the_choice(cx: &mut TestAppContext) {
 /// choice already made, focuses it and sends nothing; Tab then focuses the local host's avatar, Shift+Tab All again
 /// and Tab the avatar again, and Space sends exactly one query, `{"host": 1}`, and presses it, with focus staying on
 /// it; Tab on to the next avatar and Enter send exactly one query, `{"host": 3}`. The walk starts from a click because
-/// over an empty fleet focus rests on New, not on nothing (SPEC.md, "Where focus rests").
+/// over an empty fleet focus starts on the pane's Start a session (SPEC.md, "Where focus rests").
 ///
 /// NOTE: A second run of the same choice sends nothing (a repeated choice is not sent), so "exactly one" here pins the
 /// keys' wiring rather than catching a key press that ran the handler twice; the button's own tests cover that.

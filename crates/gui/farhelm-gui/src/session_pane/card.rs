@@ -131,11 +131,9 @@ pub(crate) fn reachable(key: &str, cx: &App) -> bool {
 }
 
 /// Whether the current UI session's store shows that there are no sessions at all ([`session_list::empty_fleet`]: an
-/// available, complete, unfiltered listing with no rows). The pane makes New home then (SPEC.md, "Where focus rests":
-/// "With no terminal on screen, focus rests on New when there are no sessions"). An unread or failed listing claims
-/// nothing, so focus does not settle on New before the helm has said the fleet is empty. It has nothing to do with the
-/// interrupted card; it is here beside [`Follow`], which has to notice the change, so the pane and its follower read
-/// the same fact.
+/// available, complete, unfiltered listing with no rows). That is also the proof the pane needs to make Start a
+/// session home (SPEC.md, "Where focus rests"). Keep it beside [`Follow`] so the pane and its follower use the same
+/// evidence.
 pub(super) fn empty_fleet(cx: &App) -> bool {
     session::current_store(cx)
         .is_some_and(|store| session_list::empty_fleet(store.read(cx).collections()))

@@ -258,8 +258,8 @@ each session's helm key by title, and the open one's, in `run.json` under `scena
 The open session is created first, alone, and `start` waits until the window has opened it (the window writes its choice
 to the helm's `last_selected`) before it creates the rest. The old staging set that preference before the page loaded;
 here the window is up before the helm has any session, and it opens the first session it lists and keeps it, so creating
-the open one first is what makes the window's own choice the scenario's. The window does not give that terminal focus (a
-fresh window's focus is on New session), so `terminal-text` needs a click or Tab into the terminal first.
+the open one first is what makes the window's own choice the scenario's. The terminal can take focus when the pane
+replaces Welcome. Before sending terminal input, check the focused control and click or Tab into the terminal if needed.
 
 Pinned ages and folders: a session's `age` and `cwd` cannot be real, since it was created moments ago in its scratch
 directory under the run, so `start` writes them, with each session's title, to `session-pins.json` in the run directory

@@ -69,13 +69,10 @@
 //! matters only to frames. A terminal made in a hidden window opens its stream only once it is drawn and measured, as
 //! any terminal does.
 //!
-//! With no session open, the pane shows what the old app showed then (its `.main-empty`), with the old rule for it:
-//! three honest states, not one claim. It says "No sessions — create one" only once the helm has shown that there are
-//! none ([`crate::session_list::empty_fleet`]); before the session list has been read it says "Loading sessions…"; and
-//! when there are sessions it is blank, because the session list is about to open one. On the same proof, and only
-//! then, the session list's New button is home (SPEC.md, "Where focus rests": "focus rests on New when there are no
-//! sessions"): the pane holds New's focus handle for that, and names it home whenever that proof holds and it has
-//! nothing mounted.
+//! With no session open, the pane shows Welcome only once the helm has shown that there are no sessions
+//! ([`crate::session_list::empty_fleet`]). Before the session list has been read it says "Loading sessions…". It stays
+//! blank if the list cannot prove the fleet empty or if a session still needs to open. The same proof makes Welcome's
+//! Start a session button home (SPEC.md, "Where focus rests").
 //!
 //! - **The interrupted card.** A session whose agent a host reboot or a Farhelm update ended has no terminal left, so
 //!   the pane mounts none for it and draws the interrupted card ([`card`]) where the terminals would be, between the
@@ -141,7 +138,7 @@ use farhelm_proto::ui_channel::{Collection, SessionRow};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Global,
     InteractiveElement as _, IntoElement, ParentElement, Render, Role, ScrollHandle, Stateful,
-    StatefulInteractiveElement as _, Styled, Subscription, Window, div,
+    StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
 };
 
 use crate::components::{Spinner, status_card, status_heading};
@@ -156,6 +153,7 @@ use std::rc::Rc;
 use crate::terminal::CellMetrics;
 use crate::terminal::attached::Hold;
 use crate::terminal::set::{SharedHold, TabStep, TerminalSet};
+use crate::welcome::{PANE_PREFIX, WelcomeContent};
 use crate::{session_list, theme, ticker};
 
 /// The user's latest choice of a session, kept until the pane has acted on it.
@@ -216,17 +214,13 @@ pub struct SessionPane {
     /// Tells the pane when the open session's recovery card changes or its host comes into or out of reach,
     /// and when the fleet becomes empty or stops being so ([`card::Follow`]).
     _card: Entity<card::Follow>,
-    /// The session list's New button's focus handle ([`crate::session_list::SessionList::new_focus`]), home while no
-    /// session is open and there are no sessions (SPEC.md, "Where focus rests"). It is safe as home while New is not
-    /// drawn (disabled, or hidden by the Hosts panel): the focus coordinator counts an undrawn home as none
-    /// (`focus::drawn_home`).
+    /// Start a session is home over a proven empty fleet. When that button is disabled, its handle is absent from the
+    /// frame and the focus coordinator counts home as none (`focus::drawn_home`).
     ///
     /// NOTE: A first launch over an empty fleet ends on the new session's terminal only because the helm pushes a
-    /// create's new session before its reply: that push opens the session while New is still disabled, so New is never
-    /// a drawn home in between. A create that replies "accepted" and pushes its outcome later (the coming sandbox and
-    /// container creates) must open its session from that push. Otherwise the reply re-enables New while the fleet
-    /// still reads empty, focus rests on New, and the session's later automatic open does not take it from there.
-    new: FocusHandle,
+    /// create's new session before its reply. Start a session is therefore never a drawn home between launch and
+    /// selection. An accepted environment create keeps the button disabled until its run ends for the same reason.
+    welcome: WelcomeContent,
     /// The trust hint band's state ([`trust_band`]), drawn above the open session's terminal while it applies.
     trust_band: Entity<trust_band::TrustBand>,
     hook_band: Entity<hook_band::HookBand>,
@@ -370,9 +364,8 @@ impl SessionPane {
     }
 
     /// The pane in `window`, which follows the selection, the user's choices and the connection from here on, and
-    /// mounts the selected session's terminal once the window's first frame exists. `new` is the session list's New
-    /// button's focus handle, home when there are no sessions.
-    pub fn new(new: FocusHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// mounts the selected session's terminal once the window's first frame exists.
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut observing = vec![
             cx.observe_global_in::<LocalState>(window, Self::sync),
             cx.observe_global_in::<Chosen>(window, Self::sync),
@@ -383,8 +376,8 @@ impl SessionPane {
         // The pane follows the connection, not the store: what it mounts depends on the UI session and the selection,
         // and on the store only for the open session's recovery card and reason, whether its row's host is
         // reached (a stale row shows the unavailable card), whether the session is retired (the retired card, and never
-        // a terminal) and whether the fleet is empty (New as home), which the card's follower reports when any of them
-        // changes. So it does not use `session::observe_current` itself, which would add a sync on every pushed
+        // a terminal) and whether the fleet is empty (Start a session as home). The card's follower reports when any
+        // of them changes. So it does not use `session::observe_current` itself, which would add a sync on every pushed
         // change, and whose callback gets no window, which every focus move of `sync` needs.
         if let Some(connection) = session::connection(cx) {
             observing.push(cx.observe_in(&connection, window, |pane, _, window, cx| {
@@ -412,7 +405,7 @@ impl SessionPane {
             pulse: None,
             clock: None,
             _card: follow,
-            new,
+            welcome: WelcomeContent::new(PANE_PREFIX, cx),
             trust_band,
             hook_band,
             _observing: observing,
@@ -422,8 +415,8 @@ impl SessionPane {
     /// Bring the pane up to date: terminals for the selected session under the current UI session (none when nothing is
     /// selected, while the window is inert, while the session shows its interrupted card, when it opened on a host the
     /// helm cannot reach, or ever for a retired session), inert exactly while the unavailable card shows over them, the
-    /// shown terminal or the card made home every time (New when nothing is mounted and there are no sessions), and the
-    /// user's latest choice acted on.
+    /// shown terminal or the card made home every time (Welcome's Start a session over an empty fleet), and the user's
+    /// latest choice acted on.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let session =
             session::connection(cx).and_then(|connection| connection.read(cx).session().cloned());
@@ -521,12 +514,12 @@ impl SessionPane {
         // naming a terminal that is gone.
         //
         // A mounted session's home always wins (its terminal, its interrupted card or its unavailable card). With
-        // nothing mounted, New is home when the store shows there are no sessions, and nothing is otherwise: focus then
-        // rests on the root, where keys still reach Farhelm's bindings.
+        // nothing mounted, Welcome's Start a session is home over a proven empty fleet. Otherwise focus rests on the
+        // root, where keys still reach Farhelm's bindings.
         let home = match mounted.as_ref() {
             Some(mounted) => mounted.home(card || retired_card, unavailable, cx),
             // `card::empty_fleet`, beside `card::Follow`, which notifies when it changes.
-            None => card::empty_fleet(cx).then(|| self.new.clone()),
+            None => card::empty_fleet(cx).then(|| self.welcome.start.clone()),
         };
         focus::set_home(home.as_ref(), window, cx);
         self.act_on_choice(window, cx);
@@ -639,7 +632,7 @@ impl Render for SessionPane {
             self.clock = None;
             self.trust_band
                 .update(cx, |band, cx| band.tick_while(false, cx));
-            return empty(cx);
+            return empty(&self.welcome, cx);
         };
         // Read from the store, not from whether terminals are mounted, so a frame drawn before `sync` has caught up
         // with a push already shows what the session is now.
@@ -864,17 +857,26 @@ pub(crate) fn delete_scrim(label: &'static str, step: u8, cx: &App) -> Stateful<
 /// The pane with no session open. In the macOS window a strip of the window's title band lies over its top, standing in
 /// for the session's top row (the old `.main-empty-titlebar`), so the band still spans the whole window (SPEC.md,
 /// "Desktop window chrome": "With no session open, the main pane's half of the band is empty background too").
-fn empty(cx: &App) -> AnyElement {
+fn empty(welcome: &WelcomeContent, cx: &mut App) -> AnyElement {
     let store = session::current_store(cx);
-    let text = placeholder(store.as_ref().map(|store| store.read(cx).collections()));
+    let body = match empty_state(store.as_ref().map(|store| store.read(cx).collections())) {
+        EmptyState::Welcome => Some(welcome.render(cx).into_any_element()),
+        EmptyState::Loading => Some(
+            div()
+                .text_color(theme::color(theme::palette(cx).fg_2))
+                .child("Loading sessions…")
+                .into_any_element(),
+        ),
+        EmptyState::Blank => None,
+    };
     div()
         .relative()
         .size_full()
         .flex()
         .items_center()
         .justify_center()
-        .text_color(theme::color(theme::palette(cx).fg_2))
-        .child(text)
+        .px(px(16.))
+        .children(body)
         .children(
             title_band::strip("main-empty-titlebar", Row::EmptyPane)
                 .map(|strip| div().absolute().top_0().left_0().right_0().child(strip)),
@@ -882,15 +884,26 @@ fn empty(cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// What the pane says over `collections` with no session open (`None` while the window is inert, when the window shows
-/// its connection state instead and the pane is not drawn).
-pub(crate) fn placeholder(collections: Option<&Collections>) -> &'static str {
+/// What the pane can tell the user with no session open. Welcome requires proof that the entire fleet is empty.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum EmptyState {
+    /// The connection is ready, but the listing has yet to arrive.
+    Loading,
+    /// The helm listed the whole fleet and there are no sessions.
+    Welcome,
+    /// There is no proof of an empty fleet, or the window is inert.
+    Blank,
+}
+
+/// Classify the pane before any session is open. An inert window has no collections and shows its connection state
+/// in place of the pane.
+pub(crate) fn empty_state(collections: Option<&Collections>) -> EmptyState {
     match collections {
-        None => "",
+        None => EmptyState::Blank,
         Some(collections) if collections.meta(Collection::Sessions).is_none() => {
-            "Loading sessions…"
+            EmptyState::Loading
         }
-        Some(collections) if session_list::empty_fleet(collections) => "No sessions — create one",
-        Some(_) => "",
+        Some(collections) if session_list::empty_fleet(collections) => EmptyState::Welcome,
+        Some(_) => EmptyState::Blank,
     }
 }

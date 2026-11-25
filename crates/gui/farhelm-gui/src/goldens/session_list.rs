@@ -835,8 +835,7 @@ pub(super) fn stop_and_suspend_outcomes_setup(
         registry(&environment_host(Provider::Sandbox, connected())),
     ]);
     let list = cx.new(SessionList::new);
-    let new = list.read(cx).new_focus().clone();
-    let pane = cx.new(|cx| SessionPane::new(new, window, cx));
+    let pane = cx.new(|cx| SessionPane::new(window, cx));
     state.lists.borrow_mut().push(list);
     state.keep.borrow_mut().push(Box::new(pane));
     state.after.set(Some(await_stop_and_suspend_outcomes));
