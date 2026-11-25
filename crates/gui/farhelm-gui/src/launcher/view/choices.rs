@@ -321,9 +321,15 @@ impl Launcher {
         let option = |harness| {
             let label = harness_label(harness);
             let glyph = harness::glyph(harness);
+            // The option's help is also its accessible description. The divider itself carries no words.
+            let help = if harness.is_shell() {
+                format!("Use {label} as the session shell")
+            } else {
+                format!("Use {label} for the session")
+            };
             RadioOption::new(
                 label,
-                HoverHelp::tooltip(format!("Use {label} for the session")),
+                HoverHelp::tooltip(help),
                 HarnessChoice::BuiltIn(harness),
             )
             .mark(

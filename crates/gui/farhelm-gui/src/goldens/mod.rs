@@ -1250,6 +1250,18 @@ static SCENES: &[Scene] = &[
         setup: launcher_restart_setup,
     },
     Scene {
+        name: "launcher-held-host-help",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_held_host_help_setup,
+    },
+    Scene {
+        name: "launcher-shell-help",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_shell_help_setup,
+    },
+    Scene {
         name: "launcher-replace-with",
         size: (1080., 1160.),
         draw: session_lists_then,

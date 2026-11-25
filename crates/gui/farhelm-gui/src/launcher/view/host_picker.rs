@@ -13,7 +13,8 @@
 //!   host whose name starts with what was typed in the last second (the same letter again cycles among them), Enter or
 //!   Space picks the highlighted host, and a click picks the one clicked. Escape, a press outside and focus leaving the
 //!   button close it without a choice.
-//! - **Held** (Restart with and Replace with keep the source's host), the row shows the host as text instead.
+//! - **Held** (Restart with and Replace with keep the source's host), the row shows the host as text. Hover help
+//!   has room for the name when the address clips it.
 //!
 //! Browsing never changes the draft. A pick of an existing host re-seeds an untouched folder through
 //! [`LaunchDraft::choose_host`]. New environments use the draft's placement choice and start in the environment home.
@@ -36,7 +37,9 @@ use gpui::{
 
 use super::Launcher;
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, OptionRow, Role, Tier, option_heading};
+use crate::components::{
+    Button, HoverHelp, OptionRow, Role, Tier, option_heading, with_hover_help,
+};
 use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::HostSentence;
@@ -384,9 +387,13 @@ impl Launcher {
             .as_ref()
             .map(|host| host_mark(host.icon, host.color, px(MARK), palette).into_any_element());
         if self.draft.holds(Field::Host) {
-            // The footer's words: the registry's name with its phase, else the source session's own host name.
-            let words = HostSentence::new("launcher-host-name").host(&self.target(cx).host);
-            return div()
+            // Use the same host name in the address, the tooltip and the launch action.
+            let host = self.target(cx).host;
+            let words = HostSentence::new("launcher-host-name").host(&host);
+            let id = SharedString::from("launcher-host-held");
+            let segment = div()
+                .id(id.clone())
+                .debug_selector(|| "launcher-host-held".into())
                 .flex()
                 .items_center()
                 .gap(px(MARK_GAP))
@@ -394,7 +401,11 @@ impl Launcher {
                 .min_w_0()
                 .text_size(metrics::TEXT_MD)
                 .children(mark)
-                .child(div().flex_1().min_w_0().truncate().child(words))
+                .child(div().flex_1().min_w_0().truncate().child(words));
+            // Escaped host text can need more lines than the short tooltip allows.
+            let help =
+                HoverHelp::paragraphs([HostSentence::new("launcher-host-held-help").host(&host)]);
+            return with_hover_help(segment, &id, &help, false, None, window, cx)
                 .into_any_element();
         }
         if self.host_picker.layer.is_some() {

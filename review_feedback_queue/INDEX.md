@@ -327,12 +327,6 @@ consequences.
 - [`podman-launch-lifetime-notice-hidden.md`](podman-launch-lifetime-notice-hidden.md) — The launcher only explains in
   Host help that deleting the last session removes a new container and its files.
 
-- [`launcher-held-host-name-clipped.md`](launcher-held-host-name-clipped.md) — Replace with and Restart with can clip
-  the source host's name with no visual way to reveal its full spelling.
-
-- [`launcher-shell-group-unlabelled.md`](launcher-shell-group-unlabelled.md) — The launcher separates Bash and Zsh from
-  agent choices with a divider that exposes no accessible Shells label.
-
 - [`launcher-host-picker-omits-expanded-state.md`](launcher-host-picker-omits-expanded-state.md) — The Host picker gives
   assistive technology no way to tell whether Enter selects a destination or tries to launch.
 
