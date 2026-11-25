@@ -162,8 +162,8 @@ linux/launcher-command-results--dark.png 965a5d43af4b19d2779d487585376a242d06208
 linux/launcher-command-results--light.png dade16fe9dabf49d7ce14f393e305601e35a6441
 linux/launcher-container-checkout-refusal--dark.png 78cbc4f5c96d1600931a32262aec8f98338462ce
 linux/launcher-container-checkout-refusal--light.png 0a61f1481bf80a50f5dc844d34ed95de50967555
-linux/launcher-custom-agent--dark.png 9bbf7bac08c2fb6dfe24916badb28f9f9cf7d49c
-linux/launcher-custom-agent--light.png fe0bdd62e33fabca11a9556d0c431351749fbcbe
+linux/launcher-custom-agent--dark.png 072735c49bd1888c09aecae30810c8a0b18c4434
+linux/launcher-custom-agent--light.png 64e15778b9ace73b10902793d709ea8df72a64f6
 linux/launcher-custom-effort-default--dark.png 15309b88a217803f1a64f1f602e97db865206afe
 linux/launcher-custom-effort-default--light.png 37a3b12d77f377f7bbd21197ce94ffd8c5013d2e
 linux/launcher-custom-escalation--dark.png 4dac674f9a4be83c17ca8209e9d97fd71985b8f1
@@ -246,8 +246,8 @@ linux/notices-bell-loud--dark.png 5b6cfcd4318496dc113b08bfc6ba5ed0647c77b8
 linux/notices-bell-loud--light.png 1e817cc1b7b57316e718b7c2136404dec2f17d3f
 linux/notices-empty--dark.png b1913b4b726053c28ac2f30d6003297e28e6f9ad
 linux/notices-empty--light.png 7eab901cf6a583d52c4b31781d5329e5e50d2da2
-linux/open-session-row-menu--dark.png c155b094a75dabcf19156c976755c81cb4c3f705
-linux/open-session-row-menu--light.png 22f9930b4873c4bb12e90315d8b6e86c65c2bde8
+linux/open-session-row-menu--dark.png 06c2d9176786e8bdfc46115e63548bc0b72bfcc0
+linux/open-session-row-menu--light.png 48771669724482400e78ea1923d21aeb40eaf8a0
 linux/open-source-notices--dark.png fd1d6cfe323e289524c7bbe526cd2aeb81c0a0dd
 linux/open-source-notices--light.png a0e4ea27130025bf7057a9ad6d826260dfc1cd09
 linux/popover--dark.png d0c76ce0e151b968d86a48dbd8d778d16dbe1fcf
@@ -258,6 +258,8 @@ linux/prompt-body--dark.png f62fada9e6b95bd203e451d5e09885742145843e
 linux/prompt-body--light.png bd17d62049dd822b9516914564e2619010fdabce
 linux/prompt-host-text--dark.png 3dcc1456b50bb913b7827957ada8790820e54dd6
 linux/prompt-host-text--light.png a452e214c69698deb5d18ddfce4876e2a28c08a9
+linux/quick-switcher-custom-agents--dark.png 9862c11ce7b8acbe116bc843b2f8fc269cae1f64
+linux/quick-switcher-custom-agents--light.png 85bb44581e5146cdf0b2ff6be9f784ab9989152e
 linux/radio-group--dark.png 3adb6fb7f2e805c3ce864c425514cd4393733d07
 linux/radio-group--light.png cc098c74f133370656d43591659defac9665f8b5
 linux/radio-group-variants--dark.png 3d9306e39a6f212cbb23034b363cc691245988d5

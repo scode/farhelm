@@ -550,26 +550,6 @@
   and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md
-
-- Outcome: `fix code`.
-- Assessment: For sessions running a registered custom agent, the session row's actions-menu header and the quick
-  switcher's agent column say only "Custom agent". They show neither the agent's current display name nor, after
-  deletion, its saved ID. The row's hover card and agent-mark tooltip do show the name. Verified: Confirmed.
-  `crates/gui/farhelm-gui/src/session_list/menu.rs:1439-1444` uses `agent_kind.display_name()` only, and the quick
-  switcher reuses it (`quick_switcher.rs:1478`). The `harness::custom_name` helper exists (`harness.rs:23-31`).
-  SPEC.md:497-498 says "The session list uses the current display name and falls back to the saved ID when the
-  registration is deleted". Whether the actions menu and the quick switcher count as "the session list" is a reading.
-- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
-  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
-  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
-  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
-  Recommendation for reference: fix code — pass collections into `agent_name` and use `custom_name`; size S. Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## agent-settings-search-omits-agent-name.md
 
 - Outcome: `other`.
@@ -644,21 +624,6 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — prefix, suppress the old error, clear on settle; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
-## trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md
-
-- Outcome: `other`.
-- Assessment: In the session launcher's Custom group, a registered agent with a very long display name gets a chip that
-  can neither shrink nor shorten its label with an ellipsis, so it runs past the dialog's right edge and is clipped.
-  Verified: Confirmed by reading the code. The chip is `.flex_none()` with no `min_w_0`, `max_w_full` or truncation
-  (`crates/gui/farhelm-gui/src/components/radio_group.rs:1017-1048`). `CustomAgent::validate` sets no length cap
-  (`crates/farhelm-proto/src/custom_agents.rs:25-33`). I did not check how it renders. No spec rule covers it.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code — truncate chip labels; size S.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-settings-trust-help-omits-agent-requested-launches.md
 

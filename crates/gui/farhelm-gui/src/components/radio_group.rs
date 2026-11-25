@@ -836,7 +836,9 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                             .text_color(theme::color(palette.fg_1))
                             .child(label)
                     }))
-                    .when(tail.label.is_some(), |group| group.flex_wrap().min_w_0())
+                    .when(tail.label.is_some(), |group| {
+                        group.flex_wrap().min_w_0().max_w_full()
+                    })
                     .children(options.split_off(tail.start)),
             );
         }
@@ -991,6 +993,7 @@ impl OptionState {
     /// One compact chip of the launcher's harness row. Its neutral tint follows the surface underneath in the same
     /// states as a button. The chosen chip keeps its solid selection fill and uses the inverse ink for its ring.
     /// The edge stays transparent so the chip and its existing keyboard ring keep their geometry.
+    /// Catalog labels can be arbitrarily long, so they fit within a single row with an ellipsis.
     fn chip<V>(
         self,
         id: &SharedString,
@@ -1020,6 +1023,9 @@ impl OptionState {
             .relative()
             .flex()
             .flex_none()
+            .when(option.host_label.is_some(), |chip| {
+                chip.min_w_0().max_w_full()
+            })
             .items_center()
             .gap(px(GLYPH_GAP))
             .min_h(px(CHIP_MIN_HEIGHT))
@@ -1211,6 +1217,13 @@ fn contents<V>(
         );
     }
     match &option.description {
+        None if words && option.host_label.is_some() => children.push(
+            div()
+                .min_w_0()
+                .truncate()
+                .child(option.label_element())
+                .into_any_element(),
+        ),
         None if words => children.push(option.label_element()),
         None => {}
         Some(description) => children.push(

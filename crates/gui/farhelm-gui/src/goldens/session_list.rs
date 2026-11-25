@@ -470,14 +470,47 @@ pub(super) fn session_row_menu_setup(state: &SceneState, _: &mut Window, cx: &mu
 /// The open running session's menu fits both hints at the standard panel width, with Rename highlighted and Delete
 /// in danger ink. On Linux this pictures the full Ctrl+Shift+Backspace label.
 pub(super) fn open_session_row_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
-    session_list_then(
+    custom_named_list(state, cx);
+    state.after.set(Some(|list, _, window, cx| {
+        assert_eq!(local_state::selected(cx).as_deref(), Some("a"));
+        list.update(cx, |list, cx| list.toggle_menu("a", window, cx));
+    }));
+}
+
+fn custom_named_rows() -> [super::Fixture; 2] {
+    [
+        ("a", "Update the API", "acme-code"),
+        ("b", "Review the build", "past-code"),
+    ]
+    .map(|(key, title, id)| session(key).title(title).agent_kind("custom").status(serde_json::json!({"state": "running"})).launch(serde_json::json!({
+        "kind": "agent", "selection": {"harness": "custom", "custom_agent": id, "permissions": "yolo"},
+        "start": ["agent", "{farhelm_args}"], "custom_reporting": true,
+    })))
+}
+
+/// Keep the catalog entry for the first row only. Both sessions keep their saved IDs.
+fn custom_named_list(state: &SceneState, cx: &mut App) {
+    super::session_list_scene_holding(
         state,
-        |list, _, window, cx| {
-            assert_eq!(local_state::selected(cx).as_deref(), Some("a"));
-            list.update(cx, |list, cx| list.toggle_menu("a", window, cx));
-        },
+        &custom_named_rows(),
+        Some("a"),
+        vec![super::custom_agent_state()],
         cx,
     );
+}
+
+/// Open the real switcher with one registered row and one whose registration was deleted.
+pub(super) fn custom_agent_switcher_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    custom_named_list(state, cx);
+    state.after.set(Some(|list, _, window, cx| {
+        use crate::session_list::quick_switcher::{self, Mode};
+        quick_switcher::open(list.downgrade(), Mode::Sessions, window, cx);
+        let sessions = custom_named_rows().map(|row| row.entry().value);
+        quick_switcher::seed_golden_listing(
+            serde_json::json!({"sessions": sessions, "total": 2, "truncated": false}),
+            cx,
+        );
+    }));
 }
 
 /// The list's order menu, open below its title as a click opens it (reference `sort-menu`): the title in its open look,

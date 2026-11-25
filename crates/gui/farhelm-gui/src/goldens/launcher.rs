@@ -778,7 +778,13 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
             | LauncherScene::IncompleteCustomQuickLaunch
     ) || scene.custom_recents()
     {
-        extra.push(super::custom_agent_state());
+        let mut catalog = super::custom_agent_state();
+        if scene == LauncherScene::CustomAgent {
+            catalog.entries[0].value["display_name"] = json!(
+                "Acme Code for build and test automation across the engineering organization with extended context and local project tools"
+            );
+        }
+        extra.push(catalog);
     } else if scene == LauncherScene::UnavailableCustomAgent {
         extra.push(CollectionState {
             collection: Collection::CustomAgents,
@@ -1113,6 +1119,12 @@ fn reveal_custom_wrapper(
         state.after.set(Some(reveal_custom_wrapper));
         return;
     };
+    let name = texts_within(nodes, "launcher-custom-name-acme-code");
+    assert!(
+        name.iter()
+            .any(|line| line.text.ends_with('…') && line.bounds.right() <= body.right()),
+        "the catalog name must fit inside the launcher with an ellipsis: {name:?}"
+    );
     let beyond = wrapper.bottom() + px(12.) - body.bottom();
     if beyond > px(1.) {
         window.dispatch_event(

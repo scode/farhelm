@@ -490,6 +490,15 @@ enum Read {
     Loaded(SessionList),
 }
 
+/// The golden pictures start at the loaded view. Opening and replying through
+/// the channel are covered by the switcher's interaction tests.
+#[cfg(test)]
+pub(crate) fn seed_golden_listing(list: serde_json::Value, cx: &mut App) {
+    let switcher = layers::last_opened::<QuickSwitcher>(cx).expect("golden switcher opened");
+    let list = serde_json::from_value(list).expect("golden listing decodes");
+    switcher.update(cx, |switcher, cx| switcher.answered(Read::Loaded(list), cx));
+}
+
 /// The open switcher: its field, its read, which row is selected, and its layer.
 ///
 /// Its rows, in arrow-key order, are the matches and then the New row (something typed) or the Quick launch row
@@ -963,20 +972,15 @@ impl Render for QuickSwitcher {
                     // The host marks come from the registry as the store holds it when the frame is drawn, as the
                     // templates do, not from the switcher's read, which names each host only by id.
                     let store = session::current_store(cx);
-                    let collections = store.as_ref().map(|store| store.read(cx).collections());
+                    let catalog = store.as_ref().map(|store| store.read(cx).collections());
+                    let term = query.trim();
                     let rows = matches
                         .iter()
                         .map(|&index| {
                             let row = &list.sessions[index];
                             let weak = weak.clone();
                             let selected = selected == Some(Selected::Session(index));
-                            // The sidebar row's own decision, so the two never disagree about where a session
-                            // runs or how its host looks. The selected row's mark takes the fill's ink in place of
-                            // the host's tint, as the old sheet's one `!important` rule had it for both rows.
-                            let ink = selected.then_some(palette.on_fill);
-                            let mark = collections
-                                .and_then(|collections| HostMark::of(row, collections, ink));
-                            result_row(row, query.trim(), selected, mark, step, columns, palette)
+                            result_row(row, term, selected, catalog, step, columns, palette)
                                 .on_click(move |_, window, cx| {
                                     let _ = weak.update(cx, |switcher, cx| {
                                         switcher.pick(index, window, cx)
@@ -1438,7 +1442,7 @@ fn result_row(
     row: &SessionRow,
     query: &str,
     selected: bool,
-    host: Option<HostMark>,
+    collections: Option<&farhelm_helm_client::Collections>,
     step: u64,
     columns: Columns,
     palette: &Palette,
@@ -1475,9 +1479,11 @@ fn result_row(
             .text_color(theme::color(quiet))
             .child(content)
     };
-    let agent = match menu::agent_name(row) {
+    let agent = match menu::agent_name(row, collections) {
         AgentName::Known(agent) => div().child(agent).into_any_element(),
-        AgentName::Program(program) => host_text::element(&program).into_any_element(),
+        AgentName::Registered(name) | AgentName::Program(name) => {
+            host_text::element(&name).into_any_element()
+        }
     };
     // The old `mark`: the accent at weight 600, or the fill's ink on the selected row's accent fill.
     let style = HighlightStyle {
@@ -1495,6 +1501,8 @@ fn result_row(
     let host_name = row.host_name.as_str();
     // `.quick-switcher-host`: the mark at the row slot's size, which never shrinks, then the name, which the column
     // cuts with an ellipsis.
+    let ink = selected.then_some(palette.on_fill);
+    let host = collections.and_then(|collections| HostMark::of(row, collections, ink));
     let mark_id = format!("{HOST_MARK_ID_PREFIX}{key}");
     let host = div()
         .flex()

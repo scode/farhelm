@@ -984,6 +984,12 @@ static SCENES: &[Scene] = &[
         setup: open_session_row_menu_setup,
     },
     Scene {
+        name: "quick-switcher-custom-agents",
+        size: (920., 560.),
+        draw: session_lists_then,
+        setup: custom_agent_switcher_setup,
+    },
+    Scene {
         name: "notices-empty",
         size: (820., 560.),
         draw: session_lists_then,

@@ -176,15 +176,6 @@ consequences.
   single 'Custom agent' and jumps Settings to whichever custom-agent draft sorts first rather than staying on the page
   the user was viewing.
 
-- [`trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md`](trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md)
-  — A registered custom agent with a long display name produces a chip in the session launcher's Custom group that
-  cannot shrink or ellipsize to the dialog width, overflowing and getting clipped at the right edge of the launcher.
-
-- [`trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md`](trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md)
-  — Sessions launched with a registered custom agent show the generic label "Custom agent" in both the session row's
-  actions menu header and the quick switcher's agent column, instead of the custom agent's current display name (or its
-  saved ID after the registration is deleted).
-
 - [`trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md`](trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md)
   — When you replace your saved Tensorlake API key with a different key in Settings without clicking Clear first, the
   list of sandboxes not on this helm keeps showing leftover sandboxes from the old key while the new check runs — and

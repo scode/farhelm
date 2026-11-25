@@ -892,7 +892,8 @@ impl RowMenu {
         };
         // A session gone from the store takes its row, and so the menu's anchor, with it; until that frame there is
         // nothing to show.
-        let Some(row) = store.read(cx).collections().get::<SessionRow>(&self.key) else {
+        let collections = store.read(cx).collections();
+        let Some(row) = collections.get::<SessionRow>(&self.key) else {
             self.environment_frame.clear();
             return panel;
         };
@@ -909,7 +910,7 @@ impl RowMenu {
         let panel = panel.on_key_down(home_end_keys(first.clone(), self.delete_focus.clone()));
         let open = local_state::selected(cx).as_deref() == Some(self.key.as_str());
         // An environment session's own commands and freeze (the module docs), read from the registry now.
-        let environment = Environment::of(row, store.read(cx).collections());
+        let environment = Environment::of(row, collections);
         let frozen = environment.is_some_and(|environment| environment.frozen());
         let launch_wait = launch_wait(cx);
         let Some(target) = Actionable::drawn(&self.key, row.clone(), cx) else {
@@ -1108,9 +1109,10 @@ impl RowMenu {
         // A retired session's menu holds Delete alone (the module docs), the same item every row's menu ends with.
         let pinned = super::pins::menu_items(&self.list, &self.key, row, busy, cx);
         let muted = (!retired).then_some(status::muted(row));
+        let agent = agent_name(row, Some(collections));
         let header = MenuHeader::new(
             &title,
-            summary(&self.key, row, environment.map(Environment::label)),
+            summary(&self.key, row, environment.map(Environment::label), agent),
         );
         let actions = actions_label(&row.info.title);
         let mute = muted.map(|muted| self.mute_item(muted, busy, window, cx));
@@ -1399,10 +1401,16 @@ impl RowMenu {
 ///
 /// The program is drawn in the monospace face and everything else in the interface face, as the old menu set the
 /// command's bytes in `.font-mono` beside its status words: of the line, only the command is a technical value.
-fn summary(key: &str, row: &SessionRow, environment: Option<String>) -> HostSentence {
+fn summary(
+    key: &str,
+    row: &SessionRow,
+    environment: Option<String>,
+    agent: AgentName,
+) -> HostSentence {
     let mut summary = HostSentence::new(SharedString::from(format!("session-menu-summary-{key}")));
-    summary = match agent_name(row) {
+    summary = match agent {
         AgentName::Known(agent) => summary.text(agent),
+        AgentName::Registered(agent) => summary.host(&agent),
         AgentName::Program(program) => summary.mono(&program),
     };
     if let Some(word) = status::Badge::word(
@@ -1431,12 +1439,20 @@ fn summary(key: &str, row: &SessionRow, environment: Option<String>) -> HostSent
 pub(super) enum AgentName {
     /// An agent Farhelm knows, by its display name (the app's own words).
     Known(&'static str),
+    /// A user-chosen registration name or its saved ID, isolated as host text.
+    Registered(HostText),
     /// Anything else, by the program its command line runs ([`program_name`]), which the host supplied.
     Program(HostText),
 }
 
 /// The name `row` runs under ([`AgentName`]).
-pub(super) fn agent_name(row: &SessionRow) -> AgentName {
+pub(super) fn agent_name(row: &SessionRow, collections: Option<&Collections>) -> AgentName {
+    if let Some(id) = row.info.launch.custom_agent() {
+        return AgentName::Registered(collections.map_or_else(
+            || HostText::from_host(id),
+            |collections| crate::harness::custom_name(id, collections),
+        ));
+    }
     match row.info.agent_kind.display_name() {
         Some(agent) => AgentName::Known(agent),
         None => AgentName::Program(HostText::from_host(program_name(&row.info.invocation))),
