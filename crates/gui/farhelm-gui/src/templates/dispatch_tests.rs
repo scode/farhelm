@@ -154,7 +154,7 @@ fn the_incomplete_banner_follows_the_origin() {
             host.clone(),
             Part::Words(format!(
                 " cannot launch on its own. Use {} to combine template keys, then Enter to launch, or complete this \
-                 setup below.",
+                 setup above.",
                 super::SEQUENCE_PREFIX_NAME
             )),
         ]
@@ -164,7 +164,7 @@ fn the_incomplete_banner_follows_the_origin() {
             incomplete_banner(origin, &templates),
             vec![
                 host.clone(),
-                Part::Words(" needs more choices before it can launch; complete it below.".into()),
+                Part::Words(" needs more choices before it can launch. Complete it above.".into()),
             ],
             "{origin:?}"
         );
@@ -175,7 +175,7 @@ fn the_incomplete_banner_follows_the_origin() {
             &[templates[0].clone(), templates[0].clone()]
         ),
         vec![Part::Words(
-            "This sequence doesn't make a complete setup; complete it below.".into()
+            "This sequence doesn't make a complete setup. Complete it above.".into()
         )]
     );
 }
@@ -475,9 +475,8 @@ fn a_revealed_quick_launch_is_no_longer_unseen(cx: &mut TestAppContext) {
 /// SPEC.md: "An edited marked template that no longer supplies what its active launch kind needs opens New with it
 /// applied and a prominent banner saying it needs more choices", and the banner is the launcher's to clear once the user
 /// starts editing. Launching it would only be refused. Specified: with `partial` marked, the chord sends no create and
-/// opens New with the template's folder and the banner "partial needs more choices before it can launch; complete it
-/// below."; typing into a field (the folder; focus starts in the search box, whose query is not an edit) takes the
-/// banner away.
+/// opens New with the template's folder and a banner below the actions asking the user to complete the setup above.
+/// Editing the folder takes the banner away, so move focus out of the command field before typing.
 #[gpui::test]
 fn an_incomplete_mark_opens_new_with_its_choices_and_banner(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx, Some("partial"));
@@ -489,9 +488,23 @@ fn an_incomplete_mark_opens_new_with_its_choices_and_banner(cx: &mut TestAppCont
     );
     assert_eq!(
         banner(cx).as_deref(),
-        Some("partial needs more choices before it can launch; complete it below.")
+        Some("partial needs more choices before it can launch. Complete it above.")
+    );
+    assert!(
+        test_support::bounds(cx, "launcher-launch").bottom()
+            <= test_support::bounds(cx, "launcher-banner").top(),
+        "the banner was shown below the actions and fields it refers to"
     );
     test_support::click(cx, "launcher-folder-row");
+    assert!(
+        within(&frame(cx), "launcher-folder")
+            .iter()
+            .any(|node| node.flags.focused)
+    );
+    assert!(
+        banner(cx).is_some(),
+        "focus alone leaves the banner in view"
+    );
     keys(cx, "x");
     assert_eq!(banner(cx), None, "an edit took the banner away");
 }
@@ -508,7 +521,7 @@ fn a_model_only_template_picks_its_agent_type_from_the_catalog(cx: &mut TestAppC
     assert_eq!(note(cx), None, "the model applied");
     assert_eq!(
         banner(cx).as_deref(),
-        Some("model-only needs more choices before it can launch; complete it below.")
+        Some("model-only needs more choices before it can launch. Complete it above.")
     );
     let shown = text(cx);
     assert!(
@@ -1113,7 +1126,7 @@ fn a_sequences_enter_launches_unseen(cx: &mut TestAppContext) {
 }
 
 /// Outside the launcher, an incomplete sequence opens New "with a prominent banner saying 'This sequence doesn't make
-/// a complete setup; complete it below'", which "follows the number-key banner's expiry", and a refused one "opens New
+/// a complete setup. Complete it above.'", which "follows the number-key banner's expiry", and a refused one "opens New
 /// with that error" (SPEC.md); neither may launch. Specified: the prefix, `partial` and Enter opens New with the
 /// template's folder and the sequence banner, which is gone six seconds later, New still open; once that
 /// New is closed, `zzz` and Enter opens New with "Not launched." and "No template matches"; neither sends a create.
@@ -1131,7 +1144,7 @@ fn a_sequence_that_cannot_launch_opens_new(cx: &mut TestAppContext) {
     );
     assert_eq!(
         banner(cx).as_deref(),
-        Some("This sequence doesn't make a complete setup; complete it below.")
+        Some("This sequence doesn't make a complete setup. Complete it above.")
     );
     test_support::advance(cx, BANNER_SHOWS_FOR);
     assert_eq!(banner(cx), None, "the banner went on its own");
@@ -2140,8 +2153,8 @@ fn an_unbound_number_key_opens_templates_with_its_hint(cx: &mut TestAppContext) 
 }
 
 /// SPEC.md: "Any template can hold a number key, including one that cannot launch alone", and "Pressing such a key alone
-/// opens New with the template applied and a prominent alert banner at the top explaining that it cannot launch on its
-/// own and how to combine it with the sequence prefix. The banner expires about six seconds after application
+/// opens New with the template applied and a prominent alert banner below the launcher actions explaining that it
+/// cannot launch on its own and how to combine it with the sequence prefix. The banner expires about six seconds after application
 /// finishes". Counting from the press instead would let a slow catalog read spend the time the banner is there to be
 /// read in. Specified: with 1 on `partial` and the catalog read left unanswered for longer than the banner lasts,
 /// nothing is drawn; once it answers, New shows the folder and the banner naming `partial` and the prefix, sends no
@@ -2161,7 +2174,7 @@ fn a_partial_number_key_opens_new_with_the_prefix_banner_for_six_seconds(cx: &mu
     );
     let expected = format!(
         "partial cannot launch on its own. Use {SEQUENCE_PREFIX_NAME} to combine template keys, then Enter to \
-         launch, or complete this setup below."
+         launch, or complete this setup above."
     );
     assert_eq!(banner(cx), Some(expected));
     test_support::advance(cx, BANNER_SHOWS_FOR - Duration::from_millis(100));

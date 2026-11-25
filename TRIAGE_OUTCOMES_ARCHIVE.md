@@ -43202,3 +43202,108 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: `ypxrxqmvpzlousklnpkmwrrwoypylolp`, `plan/triage-launcher-nov24/03-search`,
   [draft PR](https://github.com/scode/farhelm/pull/4829/changes). Fixed. The typed recent result's Enter shortcut says
   Fill.
+
+## template-delete-can-target-unshown-editor.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC.md:5787-5792 ("One GUI at a time", Confirmed 2026-10-10): "A pointer or keyboard
+  action uses the target, consent and preconditions from the frame the user was shown, or is ignored when that frame has
+  not yet been shown or its target is no longer in view." The code contradicts this: - The footer's Delete handler
+  captures only the drawn `DeleteKind` (`crates/gui/farhelm-gui/src/templates/editor.rs:1305-1326`). -
+  `TemplatesDialog::delete_editor` then deletes whatever editor is live (`templates/dialog.rs:482-495`), and
+  `Editor::delete` takes the live name and stored copy (`editor.rs:790-822`). - Opening another row from a clean editor
+  replaces the editor synchronously inside that click (`dialog.rs:448-462` -> `leave` :532-547 -> `depart` :610-653 ->
+  `show_editor` :773-790). - GPUI dispatches mouse events against the last drawn frame without redrawing first
+  (`vendor/gpui-pre/src/window.rs:6429-6463`). Key events do redraw a dirty frame first (:6510-6512), so only the
+  pointer route exists. So a row click followed by a Delete click before the next frame deletes the newly opened
+  template B. It uses A's delete kind, so B goes without Undo when A's label read "Delete permanently". No commented
+  choice protects the live lookup: the comment at :1305-1306 deliberately binds the kind only. Fix: capture the drawn
+  name with the kind, and ignore the press when `editor.previous()` no longer matches. That is the "ignored ... target
+  is no longer in view" branch of the rule. The other branch, deleting A by its captured name, also conforms, but A's
+  stored copy would then have to be re-read for Undo. The ignore shape is the direct one. Size about 30-60 lines with a
+  test, well under 100. Note for the maintainer: the trigger needs two clicks on different controls before a redraw,
+  which a human can only manage while the main thread is stalled. The bucket stays `highest` because the route is
+  established and the spec itself contemplates such input. Verified: confirmed by code reading. The real-world
+  likelihood of two clicks inside one frame is unmeasured.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code — the
+  spec rule is explicit and the guard is tiny; size S.). Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
+- Execution: `pswwmupvmponxvzmxsrymxupuslqppvm`, `plan/triage-launcher-nov24/04-templates`,
+  [draft PR](https://github.com/scode/farhelm/pull/4832/changes). Fixed. Delete carries the stored name and Undo promise
+  from the footer the user saw.
+
+## quick-launch-loses-template-source-mark.md
+
+- Outcome: `other`.
+- Assessment: When a ⚡ quick launch or a number-key launch cannot start on its own, New opens with the template applied
+  and a banner, but the form does not name the template as its source and its row is not marked. When the same shortcut
+  is pressed inside an open launcher, the source is marked. Verified: confirmed. `on_the_page`
+  (`templates/dispatch.rs:407-443`) receives the applied template's name in `Applied::template`
+  (`templates/apply.rs:179-180`) but drops it. `Prepared` (`launcher/view.rs:304-312`) has nowhere to carry it, while
+  the in-launcher path sets it (`view.rs:1089-1091`). Whether the spec demands it rests on reading SPEC.md:1499-1500
+  ("The row that filled the form remains marked, and the form names its source"). That sentence is in the list-column
+  paragraph, and a shortcut fill is not a row press. This is a display gap only.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code — carry the marker through `Prepared::Show`/`Launch` for consistency with the in-launcher
+  path; size S.
+- Execution: `pswwmupvmponxvzmxsrymxupuslqppvm`, `plan/triage-launcher-nov24/04-templates`,
+  [draft PR](https://github.com/scode/farhelm/pull/4832/changes). No change under the cheap polish rule. Retaining the
+  source across both prepared-launch outcomes needs changes to their shared result and its existing callers, with
+  coverage of the incomplete and refused launch paths.
+
+## launcher-incomplete-template-banner-misplaced.md
+
+- Outcome: `fix code`.
+- Assessment: When a template shortcut, the ⚡ quick launch, a sequence or a list pick leaves the launch incomplete, New
+  opens with a banner explaining what is missing. The banner is drawn under the Launch and Cancel buttons and tells the
+  user to "complete it below", but the form is above it. SPEC.md promises this banner "at the top". Verified:
+  confirmed. - The banner text says "below" (`templates/dispatch.rs:370-394`). - The banner is part of the notices
+  region (`launcher/view.rs:2767-2780`), and that region is drawn under the actions row (`view.rs:2885-2887`,
+  `components/dialog.rs:311-319`). - SPEC.md:1404-1406 says "a prominent alert banner at the top explaining that it
+  cannot launch on its own". SPEC_impl.md:9222 says "the banner at the top of its notices region", which matches the
+  code's placement but not SPEC.md's apparent meaning. Either the "below" wording or the placement is wrong in every
+  layout. - Fixing it means choosing between rewording and moving the banner.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code — reword
+  "below" to "above", or move the banner into the top band (the escalation banner already uses it, `view.rs:2890-2892`).
+  Fix spec as well if the footer placement is kept. Size S. Size gate: about 100 lines of diff (code, tests and docs,
+  not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
+  back to the maintainer. Remove the feedback file and its index entry.
+- Execution: `pswwmupvmponxvzmxsrymxupuslqppvm`, `plan/triage-launcher-nov24/04-templates`,
+  [draft PR](https://github.com/scode/farhelm/pull/4832/changes). Fixed with copy and spec corrections. The message
+  stays below the actions and points to the form above it.
+
+## trailing-template-summary-misstates-unsupported-permissions.md
+
+- Outcome: `fix code`.
+- Assessment: When an agent proposes a template whose approval mode the chosen agent does not offer, the approval card
+  and the Templates list show a different mode from the one the template stores. For example, Approve on Claude reads as
+  Claude's guarded mode, and Custom on Pi reads as YOLO. The user approves a description that is not what gets saved.
+  Launching that template would be refused anyway. Verified: confirmed. - `permission_label`
+  (`templates/summary.rs:177-199`) resolves explicit values through `request_permission`, which swaps any unoffered
+  value for the agent's default (`farhelm-proto/src/launch.rs:443-451`). - Agent template writes never check whether the
+  agent offers the mode: the CLI `fields()` at `main.rs:649-664` does not, and only template application checks it
+  (`farhelm-proto/src/launcher.rs:1059-1066`). So the route goes through the shipped CLI, for example
+  `farhelm agent template create --agent claude --permissions approve`. - SPEC.md:4648-4649 says "Template cards show
+  the permission field when present, resolving a reset to the agent's default when the template names one." That is
+  close to clearly-settled. - I classed it needs-decision because the function's doc comment deliberately says it "names
+  what the launch would request" (`summary.rs:172-175`), and because the fix has more than one shape: show "Approve" as
+  it is, or "Approve (not offered)" as the editor does (`rows.rs:365`). - It cannot make a YOLO or Custom template read
+  as safer. Every non-shell agent offers YOLO, and Custom falls back to YOLO.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code — resolve only
+  a reset (None) and show explicit values as stored, ideally with the editor's "(not offered)" suffix. Size S. Size
+  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: `pswwmupvmponxvzmxsrymxupuslqppvm`, `plan/triage-launcher-nov24/04-templates`,
+  [draft PR](https://github.com/scode/farhelm/pull/4832/changes). Fixed. The list and approval card show the stored mode
+  and mark it as not offered when the named agent cannot use it.

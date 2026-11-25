@@ -1,8 +1,8 @@
 //! A template's one-line summary: what it sets, in a fixed order, as the Templates list shows it under each name.
 //!
-//! Ported from the old app's `template_summary_parts` (`list/templates.rs` at reference commit `24bc0580`), word for
-//! word. The quick switcher's template section and the Cmd+J list show the same summary, so it is one function here
-//! rather than something each list words for itself.
+//! Based on the old app's `template_summary_parts` (`list/templates.rs` at reference commit `24bc0580`). The quick
+//! switcher's template section and Cmd+J list show the same summary. An unavailable permission leads the summary
+//! because the list can run out of space before it reaches the usual permissions field.
 //!
 //! The summary names the fields a template sets and says as little as it can about their values: a command or resume
 //! command is named, never shown, because it can be long; a model, a session name, custom permission words and a
@@ -60,10 +60,14 @@ pub(crate) fn line(id: impl Into<ElementId>, parts: &[Part]) -> Div {
 
 /// The summary of `fields`, in the old app's order: initial prompt, launch kind, agent type, model, effort,
 /// permissions, custom words, wrapper prefix, command, retired container, YOLO, resume command, placement, destination,
-/// session name. A template that sets nothing says "Sets nothing yet". The retired workspace-trust field is never
-/// mentioned, since applying a template ignores it.
+/// session name. An unavailable permission comes first so the row can show it even when the rest is clipped. A
+/// template that sets nothing says "Sets nothing yet". Applying a template ignores retired workspace trust.
 pub fn parts(fields: &TemplateFields) -> Vec<Part> {
     let mut summary = Summary::default();
+    let unavailable = unavailable_permission_label(fields.agent, fields.permissions.flatten());
+    if let Some(label) = &unavailable {
+        summary.words(label);
+    }
     if fields.prompt.is_some() {
         summary.words("Initial prompt");
     }
@@ -94,7 +98,9 @@ pub fn parts(fields: &TemplateFields) -> Vec<Part> {
         Some(None) => summary.words("Effort default"),
         None => {}
     }
-    if let Some(permissions) = fields.permissions {
+    if let Some(permissions) = fields.permissions
+        && unavailable.is_none()
+    {
         summary.words(&format!(
             "Approvals {}",
             permission_label(fields.agent, permissions)
@@ -170,10 +176,9 @@ pub fn plain(fields: &TemplateFields) -> String {
         .collect()
 }
 
-/// A permission choice as a summary names it (the old app's `permission_label`). With no agent type the choice cannot
-/// be resolved yet, so a reset says only that it depends on the agent. With one, it names what the launch would
-/// request, including the name of that agent's guarded mode. A stored shell permission
-/// still needs its own label, so an approval can describe exactly what the template saves.
+/// Describe the permission the template stores so a list or approval card can identify the actual choice. An
+/// explicit mode the agent cannot take keeps its name and says it is unavailable. Only a reset resolves to the
+/// agent's default. With no agent type a reset stays agent-dependent, and a shell has no default permission.
 pub(crate) fn permission_label(
     agent: Option<LaunchHarness>,
     permission: Option<LaunchPermission>,
@@ -189,13 +194,26 @@ pub(crate) fn permission_label(
             .map_or("None (shell)", |mode| permission_display(Some(mode)))
             .to_owned();
     }
-    match harness.request_permission(permission) {
+    if let Some(label) = unavailable_permission_label(agent, permission) {
+        return label;
+    }
+    match permission.or_else(|| harness.omitted_permission()) {
         Some(LaunchPermission::Guarded) => guarded_mode_name(harness)
             .unwrap_or_else(|| permission_display(Some(LaunchPermission::Guarded)))
             .to_owned(),
         Some(chosen) => permission_display(Some(chosen)).to_owned(),
         None => permission_display(None).to_owned(),
     }
+}
+
+/// A named non-shell agent can reject an explicit mode. Use one label for the list and the approval card.
+fn unavailable_permission_label(
+    agent: Option<LaunchHarness>,
+    permission: Option<LaunchPermission>,
+) -> Option<String> {
+    let (agent, mode) = (agent?, permission?);
+    (!agent.is_shell() && !agent.offers_permission(mode))
+        .then(|| format!("{} (not offered)", permission_display(Some(mode))))
 }
 
 /// The parts collected so far, with the separator put in between fields.

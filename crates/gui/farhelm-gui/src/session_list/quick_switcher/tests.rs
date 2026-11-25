@@ -1833,7 +1833,7 @@ fn a_failed_template_read_shows_its_reason_in_place_of_the_rows(cx: &mut TestApp
 /// closing what the user opened returns focus to where it was. New refuses while any dialog is open, so the switcher
 /// must close first. Specified: from a's focused terminal, `tl:` and Down select partial; Enter closes the switcher and
 /// opens New with focus inside it, its folder `/srv/partial` and the banner "partial needs more choices before it can
-/// launch; complete it below.", sending no create; Escape closes New with focus back in a's terminal.
+/// launch. Complete it above.", sending no create. Escape closes New with focus back in a's terminal.
 #[gpui::test]
 fn enter_on_a_template_opens_new_with_it_applied_and_closing_returns_focus(
     cx: &mut TestAppContext,
@@ -1863,7 +1863,7 @@ fn enter_on_a_template_opens_new_with_it_applied_and_closing_returns_focus(
     );
     assert_eq!(
         test_support::label(main.cx, "launcher-banner").as_deref(),
-        Some("partial needs more choices before it can launch; complete it below.")
+        Some("partial needs more choices before it can launch. Complete it above.")
     );
 
     keys(main.cx, "escape");

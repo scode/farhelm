@@ -9234,8 +9234,8 @@ passes a number-key banner to New for a prominent alert explaining the prefix. D
 number key, bolt chord, template list, quick switcher, or sequence. Incomplete bolt/list/switcher choices instead say
 the template needs more choices; any incomplete sequence says its combined setup is incomplete
 (`templates::dispatch::incomplete_banner`). New opens with it, or with a quick launch's refusal, as a field the launcher
-draws until the draft is next edited (`launcher::view::Note`): the banner at the top of its notices region in the old
-banner's look, the refusal ("Not launched." first) below the command field as one plain line in the warning ink, as
+draws until the draft is next edited (`launcher::view::Note`): the banner below the launcher actions points back to the
+form above it. The refusal ("Not launched." first) is below the command field as one plain line in the warning ink, as
 every template refusal in the launcher is. A banner also goes on its own six seconds after its batch applied, whatever
 the origin, as the old launcher's did (SPEC.md names the number-key and sequence banners and is silent on the others):
 one deadline the launcher keeps beside the note, started only once application has finished so that a slow catalog read

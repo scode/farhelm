@@ -134,6 +134,7 @@ enum LauncherScene {
     RepositoryRefusal,
     StaleChoice,
     Results,
+    IncompleteTemplate,
     RecentFill,
     TemplateSaveAfterUndo,
     Restart,
@@ -209,6 +210,15 @@ pub(super) fn launcher_repository_refusal_setup(
 /// Capture a typed query against the open host catalog and file history, with a source already applied to the form.
 pub(super) fn launcher_results_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Results, window, cx);
+}
+
+/// A partial shortcut opens New and points back to the form above the banner.
+pub(super) fn launcher_incomplete_template_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::IncompleteTemplate, window, cx);
 }
 
 /// The typed recent in Replace with fills the draft. Its permission stays visible on the selected row.
@@ -329,7 +339,7 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
 fn launcher_templates(scene: LauncherScene) -> CollectionState {
     let undo = scene == LauncherScene::TemplateSaveAfterUndo;
     let names = ["Review a PR", "Bench run", "Scratch shell"];
-    let fields = [
+    let mut fields = [
         TemplateFields {
             agent: Some(LaunchHarness::Claude),
             effort: Some(Some(LaunchEffort::High.into())),
@@ -350,6 +360,12 @@ fn launcher_templates(scene: LauncherScene) -> CollectionState {
             ..Default::default()
         },
     ];
+    if scene == LauncherScene::IncompleteTemplate {
+        fields[0] = TemplateFields {
+            name: Some("Review the API".into()),
+            ..Default::default()
+        };
+    }
     CollectionState {
         collection: Collection::Templates,
         meta: meta(&names),
@@ -389,6 +405,12 @@ fn open_new_with_claude(
         return;
     };
     let scene = launcher_scene(state);
+    if scene == LauncherScene::IncompleteTemplate {
+        use crate::templates::dispatch::{Origin, Reference, dispatch};
+        dispatch(Origin::NumberKey, &[Reference::Key("1".into())], window, cx);
+        state.after.set(Some(answer_new_reads));
+        return;
+    }
     if matches!(
         scene,
         LauncherScene::Restart
@@ -566,6 +588,14 @@ fn answer_new_reads(
             None
         };
         helm.reply(command.id, 200, body);
+    }
+    if scene == LauncherScene::IncompleteTemplate {
+        if !window.driver_nodes().iter().any(|node| {
+            node.element_id.as_deref() == Some("launcher-banner") && !node.visible_bounds.is_empty()
+        }) {
+            state.after.set(Some(answer_new_reads));
+        }
+        return;
     }
     let catalog_drawn = window.driver_nodes().iter().any(|node| {
         node.element_id.as_deref() == Some("launcher-model-hint")

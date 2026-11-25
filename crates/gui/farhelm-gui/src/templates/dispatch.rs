@@ -371,18 +371,18 @@ pub fn incomplete_banner(origin: Origin, templates: &[LaunchTemplate]) -> Vec<Pa
     };
     match origin {
         Origin::Sequence => vec![Part::Words(
-            "This sequence doesn't make a complete setup; complete it below.".to_owned(),
+            "This sequence doesn't make a complete setup. Complete it above.".to_owned(),
         )],
         Origin::NumberKey => vec![
             name(),
             Part::Words(format!(
                 " cannot launch on its own. Use {SEQUENCE_PREFIX_NAME} to combine template keys, then Enter to \
-                 launch, or complete this setup below."
+                 launch, or complete this setup above."
             )),
         ],
         Origin::Mark | Origin::TemplateList | Origin::Switcher => vec![
             name(),
-            Part::Words(" needs more choices before it can launch; complete it below.".to_owned()),
+            Part::Words(" needs more choices before it can launch. Complete it above.".to_owned()),
         ],
     }
 }
