@@ -6386,11 +6386,15 @@ OpenSSH still reads its config for credentials and ports. In userspace networkin
 `tailscale nc`. A missing peer or key stops the attempt before SSH runs.
 
 Tailscale supervisor and provisioning ControlMasters use distinct names incorporating the address, advertised keys, and
-network path. A short private socket directory keeps those names within both platforms' Unix socket limits. This allows
-a prepared command to keep its exact trust snapshot through a refresh, and prevents a key or route change from joining
-an earlier master. An explicit mode edit parks the host actor and releases the masters for its old route before
-committing. The write invalidates any unused Podman place claim and in-flight probe for that route. Turning the mode off
-or forgetting the host clears its private key snapshots on a best-effort basis.
+network path. A short private, OS-allocated socket directory keeps those names within both platforms' Unix socket
+limits. The helm atomically records its basename with the destination's key snapshots so a restarted helm can find the
+masters. Each reuse checks the basename and the directory's type, ownership and mode. A missing or invalid directory
+gets a new allocation. A prepared command keeps its exact trust snapshot through a refresh, and a key or route change
+gets a different master name. Retirement checks only the recorded directory and the exact legacy directory for that
+destination. It asks published masters to exit and removes a checked directory only when it is empty. An explicit mode
+edit parks the host actor and releases the masters for its old route before committing. The write invalidates any unused
+Podman place claim and in-flight probe for that route. Turning the mode off or forgetting the host clears its private
+key snapshots on a best-effort basis.
 
 The constructor builds argv layers with quoting once per parsing shell. Podman exec uses `-i`, the recorded login user,
 home working directory, explicit HOME/USER/LOGNAME and `XDG_RUNTIME_DIR=/run/user/<uid>`, then `sh -c` for the script. A
