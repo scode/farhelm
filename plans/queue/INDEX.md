@@ -5,7 +5,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 8d5123] `drift-reasoning-effort.md` — Add live reasoning effort selection drift tests across supporting agents (after `drift-model-selection.md`)
 - [in-flight a2eac0] `drift-permission-modes.md` — Add live permission mode and custom permission flag drift tests across supporting agents (after `drift-model-selection.md`)
 - [in-flight 88d576] `drift-initial-prompt-launch.md` — Add live launch-time initial prompt delivery drift tests across supporting agents (after `drift-model-selection.md`)
-- [pending] `drift-named-conversation-starts.md` — Add live one-time named conversation start drift tests across all built-in agents (after `drift-model-selection.md`)
+- [in-flight 4ebb5f] `drift-named-conversation-starts.md` — Add live one-time named conversation start drift tests across all built-in agents (after `drift-model-selection.md`)
 - [pending] `drift-capture-timing-hooks.md` — Add live conversation capture timing, hook payload, and hooks-disabled drift tests (after `drift-model-selection.md`)
 - [pending] `drift-workspace-trust.md` — Add live workspace trust pre-trust drift tests across supporting agents (after `drift-model-selection.md`)
 - [pending] `drift-instructions-delivery.md` — Add live `$farhelm` instructions pointer delivery drift tests across supporting agents (after `drift-model-selection.md`)
