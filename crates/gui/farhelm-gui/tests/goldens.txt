@@ -236,6 +236,8 @@ linux/linux-title-bar--dark.png 46842af44551445cbb6fba4a4be0b6d321874947
 linux/linux-title-bar--light.png bf63e2f218b51f882bc6a66258bbf7a1c8a187e5
 linux/muted-waiting-dot-hover--dark.png 66d644e8cab0c915c618a0b3564347d3e7ead925
 linux/muted-waiting-dot-hover--light.png 94f7dca34523a1cfbc3c8710182d4c9dece29a2a
+linux/new-group-dialog--dark.png 0b62064216b7eb2c7a7e37f9da5814802fa25039
+linux/new-group-dialog--light.png 800c9e94fc98d76f84595dd0d3062c7cf7ef94a4
 linux/notice-banner--dark.png 9212f1193c905cec2c8ab32435f9e48b944203d6
 linux/notice-banner--light.png b99436e21877a4dc761854893b5504c733af133a
 linux/notices-alerting--dark.png 8196609dfb6dfe58d63d929e33e0c9297be89660
@@ -270,8 +272,10 @@ linux/radio-group--dark.png 3adb6fb7f2e805c3ce864c425514cd4393733d07
 linux/radio-group--light.png cc098c74f133370656d43591659defac9665f8b5
 linux/radio-group-variants--dark.png 3d9306e39a6f212cbb23034b363cc691245988d5
 linux/radio-group-variants--light.png d753970cbf9e5aaa7f613564607f74ab896ca385
-linux/rename-dialog--dark.png bb6d0cdf4bf36aa1c034c0dcf6689054a824dbf7
-linux/rename-dialog--light.png 3bbab6a1f23f828a90bee379742ae204d92c22dc
+linux/rename-dialog--dark.png 89937c735edf5a25ae4f56dd7f18eb15d05dbf5f
+linux/rename-dialog--light.png 1d98a219c28569dc5d49aeb10fa0d8a18f05b635
+linux/rename-group-dialog--dark.png 336a7a9b8df3e230d170cabb50f0c503eb88e4f3
+linux/rename-group-dialog--light.png 1d1787c1573a354629c3c3cff732b5428be9e717
 linux/restored-notice-stack--dark.png a10a3739c34fa6066a6479e0443552fc488ec80b
 linux/restored-notice-stack--light.png 54a4e12dc4f44ec0890247cd77b68e39c6e58373
 linux/row-delete-confirmation--dark.png 9ee7ca4d19b0e01eb23fe2c832ddcbe929195e8a

@@ -30,7 +30,7 @@ pub(crate) fn command_icon_tile(icon: Icon, palette: &Palette) -> Div {
         )
 }
 
-/// Dress an existing single-line input. The caller still owns its label, key handlers and the meaning of the cap.
+/// Dress an existing one-row input. The caller still owns its label, key handlers and the meaning of the cap.
 pub(crate) fn command_field(
     field: TextInput,
     tile: Div,

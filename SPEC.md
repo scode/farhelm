@@ -2183,10 +2183,11 @@ A list rename opens in a modal editor owned by the list rather than by the row-a
 reorder, filter, or temporarily fail without moving its textarea, so its draft, selection, composition, and source
 session identity stay intact. A successful rename closes that editor; a refusal leaves its draft and error visible for
 correction. A complete, authoritative listing that no longer contains the source disables submission without discarding
-the draft, because a filtered, truncated, failed, or stale listing is not proof that the session disappeared. The editor
-has a shared title and Close header, a scrolling body containing the current title, draft and refusal, and a Cancel/Save
-footer. Tab follows Close, the title field, Cancel, Save; initial focus remains on the title field. Close uses the same
-cancellation and busy-state rules as Cancel.
+the draft, because a filtered, truncated, failed, or stale listing is not proof that the session disappeared. The title
+field is in the header with Close (×) on its right. When the session's row is available, a line below the field shows
+its agent, host, directory and status with their marks. A body appears for unavailability or a refusal. The footer shows
+“Rename session”, Cancel and Save. Tab follows Close, the title field, Cancel, Save. Initial focus remains on the title
+field, and Close uses the same cancellation and busy-state rules as Cancel.
 
 Quick launch uses the same editor in naming mode after creation, without holding up agent startup. Only that mode
 selects the whole initial name and treats an unchanged submission as keeping the default without a request. Saving,
@@ -2791,13 +2792,14 @@ stores group names, order, membership, collapse and pin positions so every clien
 its existing order and does not arrange rows by pins or groups.
 
 The session row menu and the marked-rows metadata menu share a **Move to group** submenu. **New group…** opens a naming
-dialog and creates one group containing the targeted sessions. When creating or renaming a group, the helm trims the
-name and refuses an empty name or one another group already has, ignoring case. The dialog shows the refusal. New groups
-go at the end of the group order. A session belongs to at most one group. Every existing group is a destination, even if
-a filter hides its header. The submenu also offers **Remove from group** and skips marked rows that are already where
-they would go. In a grouped pin's row menu, **Global pins** names the action that removes its membership. A pin moved
-through the menu stays pinned and goes last among its new area's pins. Retired containerized sessions retain their
-Delete-only actions and are ineligible for a group move.
+dialog and creates one group containing the targeted sessions. Group creation and rename use the same header field and
+footer as session rename, with their own labels and without a session context line. The helm trims the name and refuses
+an empty name or one another group already has, ignoring case. The dialog shows the refusal. New groups go at the end of
+the group order. A session belongs to at most one group. Every existing group is a destination, even if a filter hides
+its header. The submenu also offers **Remove from group** and skips marked rows that are already where they would go. In
+a grouped pin's row menu, **Global pins** names the action that removes its membership. A pin moved through the menu
+stays pinned and goes last among its new area's pins. Retired containerized sessions retain their Delete-only actions
+and are ineligible for a group move.
 
 **Pin to top** adds a pin at the bottom of its group's pins, or at the bottom of the global pins for an ungrouped
 session. Unpin keeps the session in its group, if any, and pinning it again appends it in that same area. **Move up**

@@ -116,6 +116,7 @@ use crate::actions::{self, THIS_PLATFORM};
 use gpui_component::input::{
     self, Cut, Enter, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
 };
+use gpui_component::{Sizable as _, Size, ThemeStyled as _};
 
 use super::HoverHelp;
 use crate::theme::{self, metrics};
@@ -493,9 +494,9 @@ pub struct TextInput {
     height: Option<Pixels>,
     /// The primary command field uses a larger type size than ordinary form inputs.
     line_text_size: Option<Pixels>,
-    /// A decorative icon before a single-line field's text, such as the Settings search magnifier.
+    /// A decorative icon before a one-row field's text, such as the Settings search magnifier.
     line_prefix: Option<AnyElement>,
-    /// A decoration outside the single-line input's text area, such as the key cap on Settings search.
+    /// A decoration after a one-row field's text, such as the key cap on Settings search.
     line_suffix: Option<AnyElement>,
     /// Whether the surrounding address field owns the well and its border.
     embedded: bool,
@@ -513,15 +514,20 @@ pub struct TextInput {
 fn line_adornment(element: AnyElement, editor: FocusHandle) -> gpui::Div {
     div()
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-            window.prevent_default();
-            let mark = crate::focus::Mark::take(cx);
-            if crate::layers::focus_layer_open(window, cx) {
-                crate::focus::focus_in_layer(&editor, &mark, window, cx);
-            } else {
-                crate::focus::focus_control(&editor, &mark, window, cx);
-            }
+            focus_editor_on_press(&editor, window, cx);
         })
         .child(element)
+}
+
+/// A press on the well or its decorations belongs to the editor. The layer must not treat it as empty space.
+fn focus_editor_on_press(editor: &FocusHandle, window: &mut Window, cx: &mut App) {
+    window.prevent_default();
+    let mark = crate::focus::Mark::take(cx);
+    if crate::layers::focus_layer_open(window, cx) {
+        crate::focus::focus_in_layer(editor, &mark, window, cx);
+    } else {
+        crate::focus::focus_control(editor, &mark, window, cx);
+    }
 }
 
 /// What a field runs for the sequence prefix with nothing selected ([`TextInput::on_unselected_prefix`]).
@@ -621,13 +627,13 @@ impl TextInput {
         }
     }
 
-    /// Place a decoration before a single-line field's text. Kit reserves space for it outside the caret area.
+    /// Place a decoration before a one-row field's text, outside the caret area.
     pub(crate) fn line_prefix(mut self, prefix: impl IntoElement) -> Self {
         self.line_prefix = Some(prefix.into_any_element());
         self
     }
 
-    /// Place a decoration after a single-line field's text. Kit reserves its width even when the text scrolls.
+    /// Place a decoration after a one-row field's text. Its width stays reserved while the text scrolls.
     pub(crate) fn line_suffix(mut self, suffix: impl IntoElement) -> Self {
         self.line_suffix = Some(suffix.into_any_element());
         self
@@ -644,14 +650,13 @@ impl TextInput {
     }
 
     /// Make the field `height` tall in place of Kit's 32 pixels, its text centered in it, for a form whose old fields
-    /// had a height of their own (the old Add host form's `min-height: 36px`). Only the single-line field takes it, as
-    /// with [`TextInput::monospace`].
+    /// had a height of their own. The single-line input and decorated one-row textarea take it.
     pub fn height(mut self, height: Pixels) -> Self {
         self.height = Some(height);
         self
     }
 
-    /// Let a prominent single-line field set its type size while ordinary inputs keep the shared form size.
+    /// Let a prominently placed one-row field set its type size while ordinary inputs keep the shared form size.
     pub(crate) fn line_text_size(mut self, text_size: Pixels) -> Self {
         self.line_text_size = Some(text_size);
         self
@@ -853,40 +858,95 @@ impl RenderOnce for TextInput {
                     // multi-line fields only, which a single-line field ignores.
                     .when_some(self.height, Styled::h),
             ),
-            Field::Row(area) => wrapper
-                // Kit's text area breaks the line on Shift+Enter even when Enter submits. Caught on the way down,
-                // before Kit's own handler on the field sees it, it is sent on as a plain Enter, which Kit submits.
-                .capture_action(move |action: &Enter, window, cx| {
-                    if action.shift {
-                        // Stopped at the action, so no key-down is recorded: reported as not held, rather than as
-                        // whatever an earlier Enter left (the module docs, "A held Enter").
-                        unheld.set(None);
-                        let plain = Enter {
-                            secondary: action.secondary,
-                            shift: false,
-                        };
-                        handle.dispatch_action(&plain, window, cx);
-                        cx.stop_propagation();
-                    }
-                })
-                // Kit submits Enter and lets the key go on, as its single-line field does, and GPUI then types the
-                // key's character, a line feed where the platform gives Enter one (the simulated test platform
-                // does), which this field would keep. Stopping every Enter here, after the field's own handling,
-                // keeps typing from making a line break whatever the modifiers.
-                .on_key_down(|event, _, cx| {
-                    if event.keystroke.key == "enter" {
-                        cx.stop_propagation();
-                    }
-                })
-                .child(
-                    Textarea::new(&area)
-                        .readonly(self.state.2.get())
-                        .aria_label(self.label)
+            Field::Row(area) => {
+                let input = Textarea::new(&area)
+                    .readonly(self.state.2.get())
+                    .aria_label(self.label)
+                    .text_size(self.line_text_size.unwrap_or(metrics::TEXT_MD))
+                    .line_height(metrics::RENAME_LINE_HEIGHT);
+                let input = if self.line_prefix.is_some() || self.line_suffix.is_some() {
+                    // Kit's Textarea does not expose the input's adornment slots. Put them in one well around
+                    // the existing editor so it still receives the original pasted value and owns its focus.
+                    let editor = handle.clone();
+                    let focused = editor.is_focused(window);
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(gpui::px(2.))
+                        .px(gpui::px(10.))
+                        .when_some(self.height, Styled::h)
                         .bg(theme::color(palette.well))
                         .rounded(metrics::RADIUS_SM)
-                        .text_size(metrics::TEXT_MD)
-                        .line_height(metrics::RENAME_LINE_HEIGHT),
-                ),
+                        .border_1()
+                        .border_color(theme::color(if focused {
+                            palette.accent
+                        } else {
+                            palette.border
+                        }))
+                        .when(focused, |field| field.focus_ring_style(window, cx))
+                        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                            // This runs after the editor's own handler, which owns caret placement.
+                            if editor.is_focused(window) {
+                                window.prevent_default();
+                            } else {
+                                focus_editor_on_press(&editor, window, cx);
+                            }
+                        })
+                        .children(
+                            self.line_prefix
+                                .map(|prefix| line_adornment(prefix, handle.clone()).flex_none()),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                // Kit keeps 4px of internal editor padding at this size. The wrapper's 2px
+                                // gap joins it to the tile at the command field's usual spacing.
+                                .child(
+                                    input
+                                        .with_size(Size::XSmall)
+                                        .appearance(false)
+                                        .bordered(false),
+                                ),
+                        )
+                        .children(
+                            self.line_suffix
+                                .map(|suffix| line_adornment(suffix, handle.clone()).flex_none()),
+                        )
+                        .into_any_element()
+                } else {
+                    input
+                        .bg(theme::color(palette.well))
+                        .rounded(metrics::RADIUS_SM)
+                        .into_any_element()
+                };
+                wrapper
+                    // Kit's text area breaks the line on Shift+Enter even when Enter submits. Caught on the way down,
+                    // before Kit's own handler on the field sees it, it is sent on as a plain Enter, which Kit submits.
+                    .capture_action(move |action: &Enter, window, cx| {
+                        if action.shift {
+                            // Stopped at the action, so no key-down is recorded: reported as not held, rather than as
+                            // whatever an earlier Enter left (the module docs, "A held Enter").
+                            unheld.set(None);
+                            let plain = Enter {
+                                secondary: action.secondary,
+                                shift: false,
+                            };
+                            handle.dispatch_action(&plain, window, cx);
+                            cx.stop_propagation();
+                        }
+                    })
+                    // Kit submits Enter and lets the key go on, as its single-line field does, and GPUI then types the
+                    // key's character, a line feed where the platform gives Enter one (the simulated test platform
+                    // does), which this field would keep. Stopping every Enter here, after the field's own handling,
+                    // keeps typing from making a line break whatever the modifiers.
+                    .on_key_down(|event, _, cx| {
+                        if event.keystroke.key == "enter" {
+                            cx.stop_propagation();
+                        }
+                    })
+                    .child(input)
+            }
             // The old multi-line boxes' look (`.templates-field textarea`: the well, the small radius, 13-pixel text at
             // a line height of 1.45); Kit sizes the box from its rows and that line height. Each old box had its own
             // padding and minimum height (the launcher's first message: 8 by 12 pixels, at least 80 high); this kind

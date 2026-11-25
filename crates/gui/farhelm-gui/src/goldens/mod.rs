@@ -1122,6 +1122,18 @@ static SCENES: &[Scene] = &[
         setup: rename_dialog_setup,
     },
     Scene {
+        name: "rename-group-dialog",
+        size: (560., 320.),
+        draw: empty,
+        setup: rename_group_dialog_setup,
+    },
+    Scene {
+        name: "new-group-dialog",
+        size: (560., 320.),
+        draw: empty,
+        setup: new_group_dialog_setup,
+    },
+    Scene {
         name: "feedback-dialog",
         size: (600., 580.),
         draw: empty,

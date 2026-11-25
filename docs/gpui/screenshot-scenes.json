@@ -2842,8 +2842,18 @@
     },
     {
       "golden": "rename-dialog",
-      "title": "The Rename editor as it opens: the current title, the field holding it with focus, Cancel and Save",
+      "title": "The Rename editor with its field focused and the session identified by agent, host, directory and status",
       "reference": "rename-dialog"
+    },
+    {
+      "golden": "rename-group-dialog",
+      "title": "The Rename group editor with the group's current name in the field",
+      "reference": null
+    },
+    {
+      "golden": "new-group-dialog",
+      "title": "The New group editor with an empty name field and Create",
+      "reference": null
     },
     {
       "golden": "feedback-dialog",
