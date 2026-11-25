@@ -402,12 +402,6 @@ consequences.
   keeps showing them indefinitely with active Delete buttons if the new key fails to list sandboxes (for example, if the
   new key is invalid or Tensorlake is unreachable).
 
-- [`trailing-tensorlake-sandboxes-inline-delete-prompt-survives-key-change.md`](trailing-tensorlake-sandboxes-inline-delete-prompt-survives-key-change.md)
-  — If you open the inline Delete confirmation for a leftover sandbox in Settings → Tensorlake and then clear or replace
-  your Tensorlake API key (either on that page or in Settings → Credentials), the confirmation prompt for the old key's
-  sandbox stays open — keeping the Sandboxes section visible even after Clear, or letting you confirm deleting an
-  old-key sandbox under the new key.
-
 - [`trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md`](trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md)
   — Changes to registered custom agents are wired to push over the UI channel, but the helm test suite never exercises a
   live create, edit, or delete of a custom agent end-to-end over the UI channel to verify that the served payload

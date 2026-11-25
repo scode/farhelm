@@ -106,6 +106,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Bind leftover sandbox consent to the saved Tensorlake key.** In Settings → Tensorlake, an open leftover sandbox
+  Delete confirmation can survive clearing or replacing the API key in either key form. It can keep the old list on
+  screen or send a Delete using a different key. Apply [Keyboard focus](SPEC.md#keyboard-focus)'s rule that a question
+  closes when its subject is gone. In `settings/tensorlake_sandboxes.rs`, retire the question, old rows, and the refusal
+  on key change. Reuse the account generation in `settings/tensorlake_key.rs` to reject consent from a previous key.
+  Confirm must not queue a Delete behind a pending key write. A successful write without account data, or a server error
+  after the helm may have stored the key, invalidates prior consent immediately. Re-read the account and require a fresh
+  list before offering Delete again. Keep the draft and error on refusal, and show unfinished cleanup reported by the
+  helm's next list. Test both key forms, a held write, a re-read after an ambiguous reply, and stale discovery. Verify
+  the replacement view in light and dark. The ordering, refusal, test, and capture changes together exceeded the triage
+  size gate.
+
 - **Keep one-time YOLO confirmation through a host wake.** When a sandbox suspends or a container stops while “Start
   YOLO session anyway” is open, answering can wake the host and then ask the same question again. Capture the selected
   installation when New, Clone, Replace with, or Restart with sends the original launch request. Check that the question
