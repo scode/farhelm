@@ -244,9 +244,8 @@ Earlier snapshots have no proxy classification and compare every PID.
 def require_remote_host_start(before, pass_id=None):
     """Prove that the observed starting installation can test the menu effect.
 
-The peer must have a running supervisor in the process scan and a readable
-database. The Mac fixture starts its own session, so its baseline must
-contain at least one session ID before Uninstall is attempted.
+The peer must have a running supervisor in the process scan and saved session
+IDs in its readable database. An empty baseline cannot prove data retention.
 """
     service = before['service']
     if pass_id == REMOTE_MAC_PASS:
@@ -254,12 +253,10 @@ contain at least one session ID before Uninstall is attempted.
             raise RuntimeError('the remote Mac check requires launchd observations')
         pid = service['pid']
         running = service['loaded'] is True and service['state'] == 'running' and type(pid) is int and pid > 0
-        retained_sample = bool(before['session_ids'])
     else:
         pid = int(service['MainPID']) if service['MainPID'].isdigit() else 0
         running = service['ActiveState'] == 'active' and service['SubState'] == 'running' and pid > 0
-        retained_sample = before['session_ids'] is not None
-    if (not running or pid not in before['farhelm_pids'] or not retained_sample
+    if (not running or pid not in before['farhelm_pids'] or not before['session_ids']
             or not all(before[key] for key in ('lib_present', 'unit_present', 'binary_sha256',
                                               'unit_sha256', 'data_present', 'database_present'))):
         raise RuntimeError('remote menu check did not start from a provisioned running host with readable data')

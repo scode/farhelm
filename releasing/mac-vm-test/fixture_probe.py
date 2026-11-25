@@ -215,18 +215,20 @@ def merge_peer(remote, peer_role='linux'):
     return peer['observations']
 
 
-def peer_probe(alias):
+def peer_probe(alias, mac_python=None):
     """Use only a run-specific strict-pinning alias, with Python suited to that peer.
 
 The helper is piped over SSH and has no checkout imports on the other side.
-Both Macs use the same prepared Python installation, even when their paths
-need quoting in the peer login shell.
+Both Macs use the configured pathname. The GUI Mac's resolved executable
+can name a private interpreter or a different Homebrew version.
 """
     match = re.fullmatch(r'fh-(linux|mac)-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', alias)
     if not match:
         raise ProbeError('peer inspection requires a prepared run-specific alias')
     peer_role = PEER_ROLES[match[1]]
-    interpreter = sys.executable if peer_role == 'remote-mac' else '/usr/bin/python3'
+    if peer_role == 'remote-mac' and (not mac_python or not Path(mac_python).is_absolute()):
+        raise ProbeError('Mac peer inspection requires its absolute configured Python path')
+    interpreter = mac_python if peer_role == 'remote-mac' else '/usr/bin/python3'
     command = shlex.join([interpreter, '-', '--role', peer_role])
     return peer_role, ['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', alias, command]
 
@@ -236,6 +238,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--role', choices=('mac', 'linux', 'remote-mac'), required=True)
     parser.add_argument('--ssh-alias')
+    parser.add_argument('--mac-peer-python')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     expected = 'Linux' if args.role == 'linux' else 'Darwin'
@@ -251,7 +254,7 @@ def main():
         if args.ssh_alias:
             if args.role != 'mac':
                 raise ProbeError('peer inspection must start from the GUI Mac')
-            peer_role, argv = peer_probe(args.ssh_alias)
+            peer_role, argv = peer_probe(args.ssh_alias, args.mac_peer_python)
             remote = subprocess.run(argv,
                                     input=Path(__file__).read_bytes(), capture_output=True, timeout=180)
             value['observations'].extend(merge_peer(remote, peer_role))

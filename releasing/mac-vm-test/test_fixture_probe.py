@@ -90,11 +90,15 @@ class FixtureProbeTests(unittest.TestCase):
     def test_remote_mac_peer_uses_owned_alias_and_the_prepared_python(self):
         """The shipped probe runs through the pinned Mac alias and labels the background peer separately."""
         alias = 'fh-mac-30a194a9-75fc-408a-94ee-fb6cd394cad9'
-        role, argv = peer_probe(alias)
+        prepared = '/opt/Prepared Tools/bin/python3'
+        role, argv = peer_probe(alias, prepared)
         self.assertEqual(role, 'remote-mac')
         self.assertEqual(argv[:-1], ['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o',
                                     'StrictHostKeyChecking=yes', alias])
-        self.assertEqual(shlex.split(argv[-1]), [sys.executable, '-', '--role', 'remote-mac'])
+        self.assertNotEqual(prepared, sys.executable)
+        self.assertEqual(shlex.split(argv[-1]), [prepared, '-', '--role', 'remote-mac'])
+        with self.assertRaisesRegex(ProbeError, 'configured Python'):
+            peer_probe(alias)
         with self.assertRaises(ProbeError):
             peer_probe(alias + ' -o StrictHostKeyChecking=no')
 

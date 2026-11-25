@@ -888,6 +888,8 @@ actions or failed cleanup.
                 raise Refused('historical host-GUI workflow cannot acquire guest-native test results')
             if entry.get('automation_failure'):
                 raise Refused('failed automation is retained; fix the fixture and use a new run')
+            if entry.get('tester', {}).get('phase') == 'failed':
+                raise Refused('failed checkpoint is retained. Use a supported retry transition or a new run.')
             self.require_priority(pass_id)
             # Resolve read-only source inputs before claiming the test. Once the
             # claim is saved, every mutation failure must leave a terminal state.
@@ -1042,7 +1044,9 @@ actions or failed cleanup.
                 identity = {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
                 if observation is not None and observation.get('identity') != identity:
                     raise Refused('guest observation identity differs from the claimed attempt')
-                if priority == 'P1' and check_id != 'native-preflight' and execution.get('status') == 'automation-failure':
+                permission_block = (observation or {}).get('status') == 'permission-block'
+                if (priority == 'P1' and check_id != 'native-preflight'
+                        and execution.get('status') == 'automation-failure' and not permission_block):
                     # A harness failure at an optional P1 check makes that check
                     # unavailable and stops the P1 chain like any P1 nonpass; it
                     # must not keep the pair's P0 checks (after `old-sessions`)
@@ -1055,6 +1059,7 @@ actions or failed cleanup.
                         if (observation or {}).get('status') == 'fail' and check_id != 'old-sessions':
                             entry.setdefault('unverified_failures', []).append(
                                 {key: observation[key] for key in ('identity', 'status', 'detail')})
+                            self.save()
                         self.record(pass_id, check_id, 'could-not-run', [],
                                     ('Guest automation failed at this P1 check: '
                                      + str(execution.get('error') or (observation or {}).get('detail', '')))[:4000],
@@ -1064,7 +1069,7 @@ actions or failed cleanup.
                 if execution.get('status') not in ('pass', 'fail', 'could-not-run'):
                     with self.locked():
                         claim = self.selected(pass_id)['tester']
-                        claim['guest_status'] = execution.get('status')
+                        claim['guest_status'] = 'permission-block' if permission_block else execution.get('status')
                         claim['observation'] = execution.get('result') or execution.get('unverified_result')
                         self.save()
                     raise Refused('guest-native automation failed; retained attempt ' + task['attempt'] + ': '
@@ -1528,6 +1533,9 @@ the send instead (`chain_block`), since it calls for the maintainer.
                 return f'a P0 check of {key} did not pass'
             if pair['phase'] == 'deleted' and set(part['results']) != set(part['required']):
                 return f'{key} was released before its P0 checks finished'
+            if pair['phase'] == 'deleted' and (pair.get('preparation_error')
+                    or pair.get('automation_failure', {}).get('check_id') in {*part['required'], 'native-preflight'}):
+                return f'{key} was released after a P0 fixture or automation failure'
         return None
 
     def chain_block(self, pass_id, check_id, status):
@@ -1650,44 +1658,46 @@ including the larger bound for the guest-native event stream.
             return False
         return True
 
+    def retry_evidence_retained(self, entry, checks):
+        """Verify the retry archives for these checkpoints and the pass-wide preflight."""
+        judged = set(checks) | {'native-preflight'}
+        if any(not self.result_evidence_retained(row) for row in entry.get('provider_retries', [])
+               if row.get('check_id') in judged):
+            return False
+        if any(not self.result_evidence_retained(row) for row in entry.get('readiness_retries', [])
+               if row.get('tester', {}).get('check_id') in judged):
+            return False
+        if any(not self.result_evidence_retained(row['result']) for row in entry.get('checkpoint_retries', [])
+               if row.get('tester', {}).get('check_id') in judged):
+            return False
+        return True
+
+    def native_preflight_retained(self, entry):
+        """A native fixture keeps the readiness receipts even if its product checks could not run."""
+        if self.data.get('gui_backend') == 'guest-native':
+            preflight = entry.get('native_preflight', {})
+            return bool(preflight.get('sha256')) and self.result_evidence_retained(preflight)
+        return True
+
     def verdict(self, entry):
         """Missing, invalidated or skipped checks cannot become a release pass.
 
 A recorded product failure decides first: a later harness failure or lost
 retry evidence must not turn a confirmed break into could not run. Retry
-history counts only for the checks being judged (and the pass-wide native
-preflight), so a projection is not invalidated by another tier's lost retry.
+history counts only for the checks being judged and for the pass-wide preflight.
 """
         results = entry['results']
         if any(v['status'] == 'fail' for v in results.values()):
             return 'fail'
-        judged = set(entry['required']) | {'native-preflight'}
-        if any(not self.result_evidence_retained(row) for row in entry.get('provider_retries', [])
-               if row.get('check_id') in judged):
-            return 'could not run'
-        if any(not self.result_evidence_retained(row) for row in entry.get('readiness_retries', [])
-               if row.get('tester', {}).get('check_id') in judged):
-            return 'could not run'
-        if any(not self.result_evidence_retained(row['result']) for row in entry.get('checkpoint_retries', [])
-               if row.get('tester', {}).get('check_id') in judged):
+        if not self.retry_evidence_retained(entry, entry['required']):
             return 'could not run'
         failure = entry.get('automation_failure', {})
         if failure.get('check_id') == 'native-preflight' or failure.get('check_id') in entry['required']:
             return 'could not run' if failure.get('status') == 'could-not-run' else 'fail'
         if entry.get('preparation_error') or set(results) != set(entry['required']):
             return 'could not run'
-        if self.data.get('gui_backend') == 'guest-native':
-            preflight = entry.get('native_preflight', {})
-            if not preflight.get('sha256'):
-                return 'could not run'
-            try:
-                if any(hashlib.sha256(artifact(self.directory, ref, limit=96 * 1024 * 1024)
-                                      if ref == preflight.get('native', {}).get('events')
-                                      else artifact(self.directory, ref)).hexdigest() != digest
-                       for ref, digest in preflight['sha256'].items()):
-                    return 'could not run'
-            except (OSError, ValueError, RuntimeError, tarfile.TarError):
-                return 'could not run'
+        if not self.native_preflight_retained(entry):
+            return 'could not run'
         for check_id, result in results.items():
             if result['status'] != 'pass':
                 return 'could not run'
@@ -1874,8 +1884,13 @@ approval as before; none of these paths delete retained evidence.
             later = [(key, tier(entry, key)) for key in entry['required'] if tier(entry, key) in ('P1', 'P2')]
             results = [entry['results'][key] for key, _ in later if key in entry['results']]
             p0 = priority_entry(entry, 'P0')
-            complete = ((not p0['required'] or self.verdict(p0) == 'pass') and not entry.get('automation_failure')
-                        and all(key in entry['results'] for key, priority in later if priority in self.scope_tiers())
+            in_scope = [key for key, priority in later if priority in self.scope_tiers()]
+            complete = (entry['phase'] == 'ready' and not entry.get('preparation_error')
+                        and not entry.get('automation_failure')
+                        and (not p0['required'] or self.verdict(p0) == 'pass')
+                        and all(key in entry['results'] for key in in_scope)
+                        and self.native_preflight_retained(entry)
+                        and self.retry_evidence_retained(entry, set(in_scope) | entry['results'].keys())
                         and all(self.result_evidence_retained(result) for result in results)
                         and all(result['status'] in ('pass', 'skipped')
                                 or any(digest != empty for digest in result['sha256'].values()) for result in results))

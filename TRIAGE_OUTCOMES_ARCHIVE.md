@@ -41563,3 +41563,277 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. A failed Confirm reply or missing guarded choice cancels the outstanding question and waits for its
   title to disappear. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark `plan/triage-tooling-nov24/03-cheap-fixes-2`,
   [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## release-verifier-does-not-bind-relaunch-samples.md
+
+- Outcome: `other`.
+- Assessment: The optional ("bonus") upgrade check "reopen" proves that a session process survives the app being quit
+  and reopened by comparing a before sample with an after sample. The harness never checks that the before sample was
+  taken before the reopen. If the model takes both samples after the reopen, the check can still pass. Verified:
+  Confirmed as a missing invariant. `releasing/mac-vm-test/guest_operations.py:1062-1075`: `continuity_reopen_after`
+  takes a fresh sample when `reopen_before` is absent and does not check launch order. The prompt asks for the right
+  order. This affects bonus passes only. Unverified: whether a model ever deviates.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. A false pass would need the model to deviate, and it is limited to bonus coverage. Size S-M if
+  fixed.
+- Execution: Deferred to “Bind the brick test's reopen samples to an app relaunch” in TODO.md. Proving the transition
+  needs ordered receipts across guest operations and host import. Change `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark
+  `plan/triage-tooling-nov24/04-cheap-fixes-3`, [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-indented-blank-lines-defeat-release-note-pr-coverage-checks.md
+
+- Outcome: `other`.
+- Assessment: The release-notes checker verifies that every PR cited in a release's highlights also appears in its
+  folded "All changes" list. A blank-looking line made only of spaces, placed after an entry, makes the checker lose
+  that entry's PR citation. The gate can then miss a highlighted PR that is absent from All changes, or reject a list
+  that does cite it. Verified: Confirmed. `releasing/check-changelog.py:430-431`: `_cited_prs` appends `" " + ""` for a
+  two-space line, and `PR_REFERENCE_RE` at line 209 is anchored at the end (`...\)$`), so the citation stops matching.
+  `_check_bullets` at lines 569-571 skips whitespace-only lines, so the two readers disagree. `CHANGELOG.md` is excluded
+  from dprint (`dprint.json:15`), so such lines can persist. No occurrence has been observed.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. A release gate can pass wrongly (misattributed release evidence). Skip whitespace-only lines in
+  `_cited_prs` and add a test. Size S.
+- Execution: Fixed. The coverage check and bullet validation both ignore whitespace-only lines. Change
+  `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark `plan/triage-tooling-nov24/04-cheap-fixes-3`,
+  [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-cleanup-skips-p1-retry-and-preflight-evidence.md
+
+- Outcome: `other`.
+- Assessment: Brick-test cleanup deletes a pair of test VMs only when its evidence checks out. Otherwise the operator
+  must explicitly approve the discard. Cleanup skips some of the checks the P1 verdict applies: lost P1 retry archives,
+  and, for the remote-Mac P1 pair, the native readiness evidence and a failed preparation. So VMs can be deleted without
+  approval while the report says the P1 check could not run. One route deletes a failed-preparation pair: narrow the run
+  to "stop after P0", then run cleanup. Verified: Confirmed. `releasing/mac-vm-test/brick_test.py:1871-1879`:
+  `(not p0['required'] or self.verdict(p0) == 'pass')` short-circuits for `p1-remote-mac`, and the later conditions
+  never look at `provider_retries`, `native_preflight` or `preparation_error`. `Run.verdict` (1653-1700) does check
+  them. Cleanup never deletes retained host-side evidence. What is lost is the live VMs, which may be the only evidence
+  of a failed preparation. Not run.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. It deletes the only evidence of a failed preparation without the required approval. In the tiered
+  branch, require `phase == 'ready'`, no `preparation_error`, intact retry archives for checks in scope and intact
+  native readiness evidence, then add tests. Size S-M.
+- Execution: Fixed. Ordinary cleanup requires ready preparation, intact native preflight and preserved retry archives
+  for in-scope and already recorded checkpoints. Change `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark
+  `plan/triage-tooling-nov24/04-cheap-fixes-3`, [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-dead-end-misses-deleted-p0-automation-failure.md
+
+- Outcome: `other`.
+- Assessment: Suppose the coordinator is interrupted right after recording a P0 pair's last check, and the operator
+  releases that pair. The installer pair then reaches the P2 feedback check, is not told that P2 can never run, and is
+  refused. The coordinator records a spurious harness failure on the installer pair instead of a clean skip, which then
+  needs a discard approval to clean up. Verified: Confirmed. `releasing/mac-vm-test/brick_test.py:1525-1531`: `dead_end`
+  checks only statuses and missing results for deleted P0 pairs, while `p0_executable_complete` (1580-1583) uses
+  `verdict()`, which treats `automation_failure` as could not run. `chain_block` then refuses (1538-1540), and the
+  `except BaseException` handler records `automation_failure` (1121-1131). The trigger is an interruption in a narrow
+  window.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. It turns a real verdict (P2 could not run) into a harness failure. Treat a P0-affecting
+  `automation_failure` or `preparation_error` on a deleted pair as a dead end. Size S.
+- Execution: Fixed. A released pair carrying a P0 fixture or automation failure makes the pending P2 checks unavailable,
+  even with all product results present. Change `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark
+  `plan/triage-tooling-nov24/04-cheap-fixes-3`, [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-fixture-probe-forwards-sys-executable.md
+
+- Outcome: `other`.
+- Assessment: When the brick test's headless remote Mac uses a different base image from the GUI Mac, which the docs
+  allow, the clean-fixture probe runs the peer's Python by the GUI Mac's own resolved interpreter path instead of the
+  configured `/opt/homebrew/bin/python3`. If Homebrew resolves that path to a version-specific location that differs
+  between the images, the fixture check fails before testing starts. Verified: The code is confirmed; the macOS behavior
+  is not verified. `releasing/mac-vm-test/fixture_probe.py:229` uses `sys.executable` for `remote-mac`, while
+  `guest_operations.py:490` uses `settings['python']`. The docstring at fixture_probe.py:221-223 assumes "Both Macs use
+  the same prepared Python installation", which contradicts BRICK-TEST.md:287-290 (a separate `remote_mac_base` needs
+  Python at the configured paths). Unverified: that Homebrew Python on macOS reports a resolved, versioned
+  `sys.executable`.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. It would crash a documented setup. Pass the configured interpreter path to the peer. Size S.
+- Execution: Fixed. The clean-fixture probe uses the absolute Python path configured for the Mac peer. Change
+  `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark `plan/triage-tooling-nov24/04-cheap-fixes-3`,
+  [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-linux-remote-start-accepts-empty-sessions.md
+
+- Outcome: `other`.
+- Assessment: The brick test's Linux "Remove host" and "Uninstall" checks must prove that the remote host's saved
+  sessions survive. They accept a starting state with zero sessions. In that case "the same sessions after Uninstall" is
+  trivially true, even if Uninstall emptied or recreated the database, so a data-loss bug in Uninstall could pass. The
+  remote-Mac version of the check already requires at least one session. Verified: Confirmed.
+  `releasing/mac-vm-test/checkpoint_contract.py:261`: on Linux, `retained_sample = before['session_ids'] is not None`,
+  against `bool(...)` for `REMOTE_MAC_PASS` (257). The Linux path also never calls `require_remote_host_start` at
+  `remote_host_before` (only `guest_operations.py:810` does, for the Mac). On `p0-installer-upgrade` the earlier checks
+  should leave real sessions, so an empty start needs a tester mistake or a broken fixture.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. It weakens a release gate's retained-data proof (misattributed evidence). Require a non-empty
+  start on Linux and add the `[]` subtest. Size S.
+- Execution: Fixed. The Linux starting snapshot must prove that the database already contains a saved session before the
+  menu action can run. Change `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark `plan/triage-tooling-nov24/04-cheap-fixes-3`,
+  [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-machine-profile-conflicting-mac-address.md
+
+- Outcome: `other`.
+- Assessment: A brick-test machine profile can name the same base VM for both Macs but give two different hardware
+  addresses, which is impossible. Loading the profile accepts it, so the typo is caught only hours later, when the
+  remote-Mac pass prepares. Verified: Confirmed. `releasing/mac-vm-test/machine_profile.py:156-159` compares only
+  against `linux_base`. The run refuses later at preparation, which fails safely.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. The configuration error is caught late but safely. Size S if fixed.
+- Execution: No change. Existing identity checks refuse the mismatched base before it can provide test evidence. Change
+  `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark `plan/triage-tooling-nov24/04-cheap-fixes-3`,
+  [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-old-sessions-nonexistent-unavailable-status.md
+
+- Outcome: `other`.
+- Assessment: The brick-test prompt for the "old sessions" check tells the tester to report could-not-run if two
+  operations return "status unavailable". Neither operation ever returns that. A mismatched fixture instead fails the
+  operation, which the coordinator records as a guest automation failure, and at P1 that becomes could-not-run with an
+  "automation failed" label. Verified: Confirmed. `releasing/mac-vm-test/guest_workflow.py:147-148` has the sentence. No
+  operation returns `status: 'unavailable'`. The final verdict is could-not-run either way, so only the label and
+  wording differ.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. The verdict is the same; the difference is diagnostic wording. Size S if fixed (delete the
+  sentence).
+- Execution: No change. The conflicting wording can trigger a diagnostic error but the saved run still reports the
+  previous-release observation as unavailable. Change `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark
+  `plan/triage-tooling-nov24/04-cheap-fixes-3`, [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-old-sessions-stdout-prints-fail.md
+
+- Outcome: `other`.
+- Assessment: While a brick test runs, the coordinator prints a progress line per check, and supervising agents relay
+  these to the maintainer. When the tester reports "fail" on the "old sessions" check, the coordinator correctly saves
+  could-not-run (that check runs on the previous release), but the progress line still says "fail". Verified: Confirmed.
+  `releasing/mac-vm-test/brick_test.py:1117` prints `result['status']` after `record()` rewrote the stored status
+  (725-729). The saved state and the report are correct.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. Only the live progress line is wrong, and the final report is correct. A fix is about 3 lines if
+  the maintainer prefers.
+- Execution: No change. The live progress line can disagree with the durable previous-release verdict. The recorded
+  verdict is already unavailable. Change `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark
+  `plan/triage-tooling-nov24/04-cheap-fixes-3`, [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-p1-automation-failure-drops-unverified-fail.md
+
+- Outcome: `other`.
+- Assessment: If the tester reports a product failure at a P1 check but the turn ends in an automation failure, the
+  coordinator is meant to keep that claim so the report blocks promotion until someone reviews it. If importing the
+  attempt then also fails (for example, an oversized event log left out of the archive), the claim is discarded before
+  it is saved, and the report says nothing needs review. Verified: Confirmed.
+  `releasing/mac-vm-test/brick_test.py:1054-1061` appends to `unverified_failures` and calls `record()` without
+  `save()`. The `except` handler re-enters `locked()`, which reloads from disk (line 599). This contradicts
+  BRICK-TEST.md:502-504 ("`unverified_product_failures` surfaces that observation"). The completed-fail path saves first
+  (1098-1103).
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. It loses release evidence that should block promotion. Save before `record()` and add a test.
+  Size S.
+- Execution: Fixed. The host saves the unverified product failure before attempting to import the result's evidence.
+  Change `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark `plan/triage-tooling-nov24/04-cheap-fixes-3`,
+  [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-p1-permission-block-swallowed.md
+
+- Outcome: `other`.
+- Assessment: The brick test must stop a test pair as soon as it hits an operating-system, computer-use or sign-in
+  permission prompt, so the maintainer can handle it. At P1 checks, a permission block reported before any fixed command
+  ran, or one that surfaced as a refused tool call, is turned into an "automation failure". The coordinator then records
+  that as "could not run" and keeps testing the blocked guest. Verified: Confirmed on both sides.
+  `releasing/mac-vm-test/guest_tester.py:295` accepts a missing receipts file only for `fail` or `could-not-run`, and
+  lines 864-868 keep only `fail` as a claimed status. `brick_test.py:1043` downgrades any P1 `automation-failure`
+  without checking whether the observation is a `permission-block`, despite its own comment "A permission block still
+  stops the pair below" (1049-1050). BRICK-TEST.md:118 says "a permission block still stops it". Not run.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. It misattributes a permission block and breaks a documented stop. Accept `permission-block`
+  without receipts, preserve it on `TesterError`, and exclude it from the P1 downgrade. Size S-M.
+- Execution: Fixed. A native permission refusal can be retained before any fixed operation and still stops host dispatch
+  even when the native child exits unsuccessfully or evidence import fails. Change `vsupmskuvosvsqtoqsotmzrsvokzuqyk`,
+  bookmark `plan/triage-tooling-nov24/04-cheap-fixes-3`, [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-record-settle-breaks-retry-unavailable.md
+
+- Outcome: `other`.
+- Assessment: When a P0 check on the installer pair cannot run because of a fixture problem, the documented recovery is
+  to repair the fixture and run `retry-unavailable`. Under the default full scope (or stop after P1 or P2), that command
+  always refuses on the installer pair. Recording the unavailable result immediately marks the later P1 and P2 checks
+  "skipped", and the retry counts those skips as later observations, so the operator has to discard the pair and start
+  over. Verified: Confirmed. `releasing/mac-vm-test/brick_test.py:1156-1157` uses `key in entry['results']`, which
+  counts skips; `order_block` (1504-1505) ignores them. `settle()` (1463-1487) skips P1 and P2 on any P0 non-pass
+  through `order_block` and `dead_end`. Even with the retry check fixed, the persisted skips would keep P1 and P2 from
+  running after a successful retry, so the fix needs a design choice: defer the skips, or clear them on retry.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. A documented recovery command always fails on the most important pair. Size M (two coupled
+  changes plus tests).
+- Execution: Deferred to “Keep the brick test's installer pair retryable after an unavailable P0 check” in TODO.md.
+  Derived skips need attribution and replay rules that preserve independent checkpoint history. Change
+  `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark `plan/triage-tooling-nov24/04-cheap-fixes-3`,
+  [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-require-no-failure-allows-rerun-on-failed-p0.md
+
+- Outcome: `other`.
+- Assessment: After a P0 check fails or cannot run, the operator should either retry it with `retry-unavailable` or
+  discard the pair. Running `test` on that pair again by mistake is not refused. Depending on which check stopped, it
+  either quietly marks the tester complete and erases what `retry-unavailable` needs, or records a spurious harness
+  failure that permanently blocks the retry. Verified: Confirmed. `releasing/mac-vm-test/brick_test.py:885-886` refuses
+  only `running` or `reconciliation-required` testers. `require_no_failure` (1427-1446) ignores P0 results on unreleased
+  pairs. A rerun overwrites `entry['tester']` (897). Recorded verdicts stay non-passing; recoverability is what is lost.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. It turns a retriable result into a harness failure. Refuse `test` while the tester phase is
+  `failed`. Size S.
+- Execution: Fixed. A failed attempt refuses direct rerun before writing a new tester claim and leaves the supported
+  recovery transition available. Change `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark
+  `plan/triage-tooling-nov24/04-cheap-fixes-3`, [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).

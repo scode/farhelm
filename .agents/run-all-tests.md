@@ -118,7 +118,7 @@ second clippy run on floating stable is needed.
 - `python3 -B scripts/dependency-notices.py --check` and `python3 -B scripts/test-dependency-notices.py` (the generated
   dependency license notices are current)
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` (release-note
-  format, including the v0.40.0 policy section, and fragment and announcement checks)
+  format, including the v0.40.0 policy section and folded PR coverage, and fragment and announcement checks)
 - `python3 releasing/finalize-release-notes.py --self-test`
 - `python3 releasing/notes-review-page.py --self-test` (legacy standalone page; includes link attribute escaping and
   HTTP(S)/relative-only targets)
@@ -211,8 +211,9 @@ second clippy run on floating stable is needed.
   Remove/re-add and Uninstall with independent effect receipts, old-session survival and Restart onto a new terminal
   host, calibrated window-trace and bonus gesture-readiness gates, RC and dev discovery skip continuation, stable
   discovery failure, consent-checked scope restoration, signed-announcement launch isolation and missing-feed reporting,
-  and remote launcher visibility. The guest-only Swift helper separately needs SDK type-check and read-only runtime
-  validation in an owned disposable guest. None establishes live release product checks. Report platform skips.
+  remote launcher visibility, retained permission blocks and scoped cleanup evidence. The guest-only Swift helper
+  separately needs SDK type-check and read-only runtime validation in an owned disposable guest. None establishes live
+  release product checks. Report platform skips.
 - Terminal host coverage and mutation testing from `.agents/validation.md`
   (`cargo +nightly llvm-cov -p terminal-host --branch -- --test-threads=1`, and
   `RUST_TEST_THREADS=1 cargo mutants -p terminal-host` run the contained way that entry gives; both on one test thread,

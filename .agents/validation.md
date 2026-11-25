@@ -1249,12 +1249,13 @@ systemd or SSH substrate ran.
   Use a substrate that permits process-group inspection; Linux continuity cases skip on macOS. These tests prove harness
   contracts, not native GUI behavior or a release pass. Actual native fixture probes and release checks retain their own
   private evidence. The guest-only Swift geometry helper needs separate SDK type-check and read-only runtime validation
-  in an owned disposable guest; the portable suite does not exercise that OS API.
+  in an owned disposable guest; the portable suite does not exercise that OS API. It also checks retained permission
+  blocks and failure claims, release of fixtures with intact scoped evidence, and a seeded Linux menu-test baseline.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, including v0.40.0's
-  one-time notes policy section and the folded full list's frame, synthetic git histories for the fragment sweep and for
-  reading landed plans' release notes, and synthetic dist manifests for the announcement comparison). Run the lint when
-  `CHANGELOG.md` or a fragment changes, the self-test when the checker does.
+  one-time notes policy section and the folded full list's PR coverage, synthetic git histories for the fragment sweep
+  and for reading landed plans' release notes, and synthetic dist manifests for the announcement comparison). Run the
+  lint when `CHANGELOG.md` or a fragment changes, the self-test when the checker does.
 - `python3 releasing/finalize-release-notes.py --self-test` — the body swap that replaces a stable release's draft notes
   on its GitHub release with the approved text, against bodies shaped like dist's, and the refusals that need no
   repository or release. Run it when that script or the checker's parser changes; seconds, no network.

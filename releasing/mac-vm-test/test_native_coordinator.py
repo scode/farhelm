@@ -483,6 +483,21 @@ follow every P0 turn. The long-turn floors apply to the agent conversations.
             self.assertEqual(report['p1']['verdict'], 'pass')
             self.assertEqual(report['requested_verdict'], 'pass')
             self.assertEqual(report['p2']['verdict'], 'could not run')
+            entry = self.run.selected(REMOTE_MAC_PASS)
+            preflight = entry.pop('native_preflight')
+            with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                self.run.cleanup(REMOTE_MAC_PASS)
+            self.assertEqual(entry['phase'], 'ready')
+            entry['native_preflight'] = preflight
+            # Narrowed scope leaves this pair with no required P0 results to guard preparation.
+            entry['preparation_error'] = 'fictional incomplete setup'
+            self.run.data['scope'] = 'p0-only'
+            calls_before = len(f.model.calls)
+            with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                self.run.cleanup(REMOTE_MAC_PASS)
+            self.assertEqual(len(f.model.calls), calls_before)
+            del entry['preparation_error']
+            self.run.data['scope'] = 'p1-only'
             self.run.cleanup(REMOTE_MAC_PASS)
 
     def test_a_failed_p1_turn_skips_the_later_p1_turns_and_still_sends_feedback(self):
@@ -881,7 +896,7 @@ setup, the agent reply or a different menu check.
                     case.drive_pair('p0-installer-upgrade', one_capture)
                 self.assertEqual(case.seen[-1]['check_id'], check)
 
-    def harness_failure_archive(self, controller, envelope):
+    def harness_failure_archive(self, controller, envelope, observation=None):
         """Retain a stopped automation-failure attempt whose one tool call completed with an error."""
         call = {'id': 'read', 'type': 'mcp_tool_call', 'server': 'cua_repl', 'tool': 'brick_action',
                 'arguments': {'operation': 'remote_inspect_state'}, 'status': 'failed'}
@@ -890,6 +905,10 @@ setup, the agent reply or a different menu check.
                 {'type': 'turn.failed', 'error': {'message': 'managed action failed: fixture read error'}}]
         execution = {'format': 1, 'status': 'automation-failure', 'exit_code': 1, 'cleanup_error': None,
                      'error': 'managed action failed: OperationalError: database is locked'}
+        if observation is not None:
+            execution['unverified_result'] = {
+                'identity': {key: envelope[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')},
+                'status': observation, 'detail': 'Retained native observation.', 'evidence': [], 'continuity': None}
         label = 'tester-' + envelope['attempt']
         with tarfile.open(controller.directory / (label + '.tar'), 'w') as archive:
             for name, value in {'task.json': json.dumps(envelope), 'execution.json': json.dumps(execution),
@@ -937,6 +956,51 @@ skipped) while the P0 checks after it and P2 still run.
             report = self.run.report()
             self.assertEqual((report['p0']['verdict'], report['p1']['verdict']), ('pass', 'could not run'))
 
+    def test_p1_permission_refusal_survives_an_automation_failure(self):
+        """A denied OS permission stops dispatch even if the executor could only save its observation."""
+        self.finish_preceding_pairs()
+        self.widen('p1-only')
+
+        def execute(controller, envelope, files):
+            """Finish the earlier fixture checkpoints before the baseline encounters the refusal."""
+            self.seen.append(envelope)
+            if envelope['check_id'] == 'old-sessions':
+                return self.harness_failure_archive(controller, envelope, 'permission-block')
+            return self.archive(controller, envelope)
+
+        with self.assertRaisesRegex(Refused, 'guest-native automation failed'):
+            self.drive_pair('p0-installer-upgrade', execute)
+        self.assertEqual(self.seen[-1]['check_id'], 'old-sessions')
+        with self.run.locked():
+            entry = self.run.selected('p0-installer-upgrade')
+            self.assertNotIn('old-sessions', entry['results'])
+            self.assertEqual(entry['tester']['guest_status'], 'permission-block')
+            self.assertEqual(entry['tester']['phase'], 'failed')
+
+    def test_p1_failure_claim_is_saved_before_importing_its_evidence(self):
+        """A failure to import the archive must leave the guest's product claim available for review."""
+        self.finish_preceding_pairs()
+        self.widen('p1-only')
+        record = self.run.record
+
+        def execute(controller, envelope, files):
+            self.seen.append(envelope)
+            if envelope['check_id'] == 'local-old-session':
+                return self.harness_failure_archive(controller, envelope, 'fail')
+            return self.archive(controller, envelope)
+
+        def reject_import(pass_id, check_id, *args, **kwargs):
+            if check_id == 'local-old-session':
+                entry = json.loads(self.run.path.read_text())['passes'][pass_id]
+                self.assertEqual(entry['unverified_failures'][0]['identity']['check_id'], check_id)
+                raise Refused('fictional evidence import failure')
+            return record(pass_id, check_id, *args, **kwargs)
+
+        with mock.patch.object(self.run, 'record', side_effect=reject_import):
+            with self.assertRaisesRegex(Refused, 'fictional evidence import failure'):
+                self.drive_pair('p0-installer-upgrade', execute)
+        self.assertTrue(self.run.report()['promotion_blocked_pending_review'])
+
     def test_a_stop_during_bonus_work_fences_the_remaining_bonus_turns(self):
         """Bonus checkpoints obey a mid-run stop like every tier: only the in-flight one finishes."""
         self.finish_preceding_pairs()
@@ -982,6 +1046,12 @@ skipped) while the P0 checks after it and P2 still run.
     def test_unavailable_observation_stays_could_not_run(self):
         """Missing product prerequisites retain their observation without becoming a failure."""
         self.assert_stopped_outcome('could-not-run', 'could not run')
+        with self.assertRaisesRegex(Refused, 'supported retry transition'):
+            self.run.test('p0-fresh', source=self.source)
+        with self.run.locked():
+            entry = self.run.selected('p0-fresh')
+            self.assertEqual(entry['tester']['phase'], 'failed')
+            self.assertNotIn('automation_failure', entry)
 
     def test_failed_observation_stays_failure(self):
         """An actual product failure stops without a later successful check erasing it."""
