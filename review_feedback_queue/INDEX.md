@@ -2252,3 +2252,11 @@ consequences.
 - [`trailing-link-disclosure-module-doc-soft-seam.md`](trailing-link-disclosure-module-doc-soft-seam.md) — The
   link-disclosure module docs say a soft seam is a terminal wrap, but the code and spec also treat a program's
   edge-filling line break as one.
+
+- [`trailing-release-shot-custom-agent-failure-strands-settings-draft.md`](trailing-release-shot-custom-agent-failure-strands-settings-draft.md)
+  — If the v0.45.0 custom-agent release screenshot fails partway, it leaves an unsaved Settings draft that makes every
+  later screenshot in the capture fail.
+
+- [`trailing-release-shot-guarded-replace-failure-leaves-yolo-question.md`](trailing-release-shot-guarded-replace-failure-leaves-yolo-question.md)
+  — If the v0.45.0 guarded-Replace release screenshot fails partway, its YOLO question stays open under a session row
+  that later session-list screenshots show.
