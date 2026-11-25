@@ -4509,9 +4509,8 @@ fn a_cancelled_seed_of_an_ended_runtime_leaves_the_emulator_readable() {
 /// the emulator must come back and later reads and seeds work. Spec: with
 /// the runtime's encodes held at an encode gate, a seed is asked for; once
 /// the encode reaches the gate, its caller must finish cancelling before
-/// the encoder is released.
-/// a `read` answers within the bound, a second seed is given, and output
-/// still reaches the screen.
+/// the encoder is released. The next read must find the original screen
+/// within the bound. A later seed and new output must still work.
 #[farhelm_testtrace::test(flavor = "multi_thread")]
 async fn a_cancelled_seed_of_a_running_runtime_gives_the_emulator_back() {
     let gate = crate::hosts::terminal::EncodeGate::closed();
@@ -4557,10 +4556,11 @@ async fn a_cancelled_seed_of_a_running_runtime_gives_the_emulator_back() {
         encoder_held,
         "the encoder passed the gate before cancellation"
     );
-    tokio::time::timeout(WAIT, host.read(|_| ()))
+    let screen = tokio::time::timeout(WAIT, host.read(|emu| emu.screen_tail(4096)))
         .await
         .expect("the read finishes")
         .expect("the emulator came back");
+    assert!(screen.contains("seed line 01"), "retained screen: {screen}");
     assert!(
         host.history_seed(terminal_host::protocol::MAX_SNAPSHOT)
             .await

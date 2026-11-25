@@ -12220,11 +12220,9 @@ mod tests {
             assert!(sup.store.is_sealed().await.unwrap());
         }
 
-        /// An unanswered agent request can hold the fence for longer than
-        /// Delete's admission budget. With the session's agent fence held
-        /// past that bound, the Delete answers a
-        /// `Conflict` saying nothing was deleted, and the session and the
-        /// supervisor are as they were.
+        /// Delete refuses before sealing when its agent-request fence or directory admission stays held.
+        /// Holding each lock on its own proves that the budget covers both, even when an unrecorded create
+        /// holds directory admission and there is still only one stored session to count.
         #[farhelm_testtrace::test]
         async fn a_delete_that_cannot_get_its_locks_in_time_refuses_and_changes_nothing() {
             let state = StateDir::new();
@@ -12239,17 +12237,19 @@ mod tests {
             .await
             .unwrap();
             plant(&sup, "s1").await;
-            let _fence = sup.agent_request_locks.claim("s1").await;
+            let refused = |reply| {
+                assert!(
+                    matches!(&reply, ControlMsg::Error { kind: ErrorKind::Conflict, message, .. }
+                        if message.contains("nothing was deleted")),
+                    "{reply:?}"
+                );
+            };
+            let fence = sup.agent_request_locks.claim("s1").await;
+            refused(ask(&sup, seal_delete(1, "s1")).await);
+            drop(fence);
 
-            let reply = ask(&sup, seal_delete(1, "s1")).await;
-            assert!(
-                matches!(
-                    &reply,
-                    ControlMsg::Error { kind: ErrorKind::Conflict, message, .. }
-                        if message.contains("nothing was deleted")
-                ),
-                "{reply:?}"
-            );
+            let _directory = sup.working_copy_operations.lock().await;
+            refused(ask(&sup, seal_delete(2, "s1")).await);
             assert!(sup.store.session("s1").await.unwrap().is_some(), "s1 stays");
             assert!(!sup.store.is_sealed().await.unwrap(), "nothing was sealed");
         }

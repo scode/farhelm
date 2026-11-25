@@ -413,27 +413,13 @@ consequences.
   — The test can accept a failed fixture PID read as evidence that the previous agent tree had already stopped before
   the replacement host ran.
 
-- [`trailing-list-admission-test-observes-reply-timing-instead-of-list.md`](trailing-list-admission-test-observes-reply-timing-instead-of-list.md)
-  — A regression could let a busy supervisor build lists outside its concurrency limit while this test still passes.
 
-- [`trailing-seal-delete-test-cannot-show-delete-reached-directory-admission.md`](trailing-seal-delete-test-cannot-show-delete-reached-directory-admission.md)
-  — A regression could let Delete decide to destroy an environment during a concurrent launch without reliably failing
-  the existing regression test.
 
-- [`trailing-borrower-reload-lacks-completed-origin-runtime-handoff-witness.md`](trailing-borrower-reload-lacks-completed-origin-runtime-handoff-witness.md)
-  — The borrower test compares status across reload, but can pass without showing the origin terminal was released and
-  successfully recovered.
 
 - [`trailing-borrower-classification-test-does-not-establish-checkout-membership.md`](trailing-borrower-classification-test-does-not-establish-checkout-membership.md)
   — This borrower classification case can pass if its second session never joins the managed checkout.
 
-- [`trailing-running-seed-cancellation-checks-readability-without-observing-returned-screen.md`](trailing-running-seed-cancellation-checks-readability-without-observing-returned-screen.md)
-  — The strengthened assertion detects a stranded or lost emulator after the seed caller cancels. It can still pass if
-  an empty emulator takes the old one's place and loses the screen.
 
-- [`trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md`](trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md)
-  — The fixture checks publication after first-stage entry. Its coverage of the ordering relied on by startup recovery
-  remains unverified.
 
 - [`trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md`](trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md)
   — The product requires restricted sessions to be denied this operation. The independent inspection did not establish
@@ -529,13 +515,7 @@ consequences.
   — After a failed or busy Don't show again click, dismissing the trust hint in Settings (or having the first click
   succeed after a rapid second click) leaves a red Not saved alert stuck with no Close button.
 
-- [`trailing-unwind-failed-host-relaunch-drops-pending-scope-cleanup.md`](trailing-unwind-failed-host-relaunch-drops-pending-scope-cleanup.md)
-  — If a session row disappears during a failing restart whose replacement host started a scoped process, failing to
-  confirm scope teardown drops the pending cleanup obligation on the next supervisor start.
 
-- [`trailing-pending-scope-cleanups-logs-invalid-session-id-unescaped.md`](trailing-pending-scope-cleanups-logs-invalid-session-id-unescaped.md)
-  — When discarding a malformed session ID from startup scope cleanup, the supervisor logs it with raw Display (%id)
-  instead of escaped Debug (?id), violating the session-ID logging rule.
 
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
