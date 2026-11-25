@@ -350,6 +350,8 @@ linux/settings-cursor--dark.png d8ad012ada154d51db4d1e36ffa9f51f47ac2699
 linux/settings-cursor--light.png bd600c900b660a3430b614521425ba1303d71d40
 linux/settings-custom-agent--dark.png 680aa6ca74f88420b802bfa95f33ad588f734783
 linux/settings-custom-agent--light.png bbeb3a9a3d792d00d6c3a5b5cf7734d1cc30be9f
+linux/settings-custom-agent-catalog-unavailable--dark.png eb1f4c1dcb5c085d49efb215291648f517427a31
+linux/settings-custom-agent-catalog-unavailable--light.png 90e320552af9a251db21da06eb20fe4e527910d1
 linux/settings-custom-agent-dirty--dark.png d451e223835f78efc619e46535281a135b401f58
 linux/settings-custom-agent-dirty--light.png d56ef0fbf007f4b6eef4db7aab8fe7e38d2f0eab
 linux/settings-custom-agent-empty--dark.png 2cd9f25869a65c7c8950dc1c420e32726936e2e2

@@ -75,6 +75,31 @@ fn registration_name(id: &str, cx: &App) -> HostText {
     HostText::from_host(name)
 }
 
+/// Say why the list may be incomplete even while the editor can show a registration from the last successful read.
+pub(super) fn catalog_notice(cx: &App) -> Option<AnyElement> {
+    let store = session::current_store(cx)?;
+    let meta = store
+        .read(cx)
+        .collections()
+        .meta(Collection::CustomAgents)?;
+    let Availability::Unavailable { error } = &meta.availability else {
+        return None;
+    };
+    let sentence = HostSentence::new("custom-agent-catalog-reason")
+        .text("Could not load custom agents: ")
+        .host(&HostText::from_host(error.as_str()));
+    Some(
+        choices::outcome_line(
+            "custom-agent-catalog-error",
+            Role::Alert,
+            theme::color(theme::palette(cx).danger),
+        )
+        .aria_label(sentence.accessible_name())
+        .child(sentence)
+        .into_any_element(),
+    )
+}
+
 impl SettingsDialog {
     /// A removed registration keeps a navigation row only while this dialog still holds a draft for it.
     pub(super) fn custom_sections(&self, cx: &App) -> Vec<Section> {

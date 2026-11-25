@@ -5,7 +5,9 @@ use crate::focus::Mark;
 use crate::settings::SavedRecipeQuestion;
 use crate::{session, test_support};
 use farhelm_helm_client::fake::FakeHelm;
-use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry, PREFERENCES_KEY};
+use farhelm_proto::ui_channel::{
+    Availability, Collection, CollectionState, KeyedEntry, PREFERENCES_KEY,
+};
 use gpui::{AnyElement, App, IntoElement as _, Window, div, point, px};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -205,13 +207,41 @@ pub(super) fn settings_custom_agent_empty_setup(
     window: &mut Window,
     cx: &mut App,
 ) {
+    open_add_custom_agent(state, Availability::Available, window, cx);
+}
+
+/// On the first failed read, Add remains visible alongside the reason the existing registrations could not load.
+pub(super) fn settings_custom_agent_catalog_unavailable_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open_add_custom_agent(
+        state,
+        Availability::Unavailable {
+            error: "The registration database is locked. Try again.".into(),
+        },
+        window,
+        cx,
+    );
+}
+
+/// Keep the Add scene's row count at zero whether the helm read an empty list or the first read failed.
+fn open_add_custom_agent(
+    state: &SceneState,
+    availability: Availability,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let mut meta = test_support::meta(&[]);
+    meta.availability = availability;
     settings_scene_with(
         state,
         crate::settings::Section::AddCustomAgent,
         SettingsFixture {
             custom_agents: Some(CollectionState {
                 collection: Collection::CustomAgents,
-                meta: test_support::meta(&[]),
+                meta,
                 entries: Vec::new(),
             }),
             ..SettingsFixture::default()

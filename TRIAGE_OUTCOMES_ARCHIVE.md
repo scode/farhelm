@@ -48345,3 +48345,23 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   for reference: fix code — add `min_w_0` and `truncate`; size S.
 - Execution: Fixed within the polish budget, with single-line truncation and a golden that exercises a long registration. Change `qymwnnlpmvzyqxkzvwpkvrtpzqxlksys`, bookmark `plan/triage-custom-agents-nov24/03f-settings-field-markers`,
   https://github.com/scode/farhelm/pull/4912/changes.
+
+## trailing-settings-custom-agents-unavailable-collection-silently-appears-empty.md
+
+- Outcome: `fix code`.
+- Assessment: If the helm cannot read the custom-agents catalog (a database error, or a corrupt saved entry), Settings →
+  Custom agents shows no error. On a first load it looks empty, with only "+ Add custom agent", and re-adding an
+  existing ID then fails as taken. After a later failed read it silently shows the last list it had. Verified:
+  Confirmed. `settings/custom_agents.rs:61-78` and `:114-121` ignore `Availability::Unavailable`, while Recipes and
+  Containers show the error (`settings/recipes.rs:492-495`). Calling SPEC.md:4944 ("Every failed operation surfaces a
+  concrete, actionable error in the client") binding on a background catalog read is a reading.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code — show the helm's error as a failure line, as Recipes does; size S. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed with an accessible error while preserving the last catalog and open editor. Change `nrvwmxqmrvsmtoktpyznzrsqvrvkqlop`, bookmark `plan/triage-custom-agents-nov24/03g-settings-catalog-error`,
+  https://github.com/scode/farhelm/pull/4915/changes.
