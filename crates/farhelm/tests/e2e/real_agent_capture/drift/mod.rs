@@ -56,6 +56,8 @@ type DriftResult = Result<(), DriftError>;
 /// Keep the installed CLI version under test through both Start and Restart.
 #[derive(Clone, Copy)]
 enum UpdateOverride {
+    /// Claude once installed an update between two launches of one case.
+    Claude,
     Muse,
     Omp,
 }
@@ -95,7 +97,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
             &["claude code v", "❯"][..],
             Some(HookWitness::MatchingIdentity),
             false,
-            None,
+            Some(UpdateOverride::Claude),
         ),
         Codex => (
             "codex",
@@ -733,6 +735,10 @@ impl DriftEnv<'_> {
 /// Keep the installed CLI version under test through both Start and Restart.
 fn update_override_prefix(profile: &Harness, state: &Path) -> anyhow::Result<Option<Vec<String>>> {
     match profile.update_override {
+        // Documented at https://code.claude.com/docs/en/env-vars; it leaves the user's own settings alone.
+        Some(UpdateOverride::Claude) => {
+            Ok(Some(vec!["env".into(), "DISABLE_AUTOUPDATER=1".into()]))
+        }
         Some(UpdateOverride::Muse) => Ok(Some(vec!["env".into(), "MUSE_NO_AUTO_UPDATE=1".into()])),
         Some(UpdateOverride::Omp) => omp_update_override(state).map(Some),
         None => Ok(None),

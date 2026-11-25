@@ -41,9 +41,15 @@ reported as COULD NOT RUN.
 A Codex retirement prompt can appear before the composer opens. The affected model is reported as unavailable when the
 prompt asks the user to choose between keeping it and switching to its replacement.
 
-An agent may save a trust choice for the temporary directory. The Muse launcher and OMP can update themselves during
-startup, so these cases disable their updaters for the test invocations using a launcher variable and a temporary OMP
-configuration overlay.
+The `reasoning_effort` category launches each harness at the boundary efforts its current catalog models accept (Off,
+Minimal, Xhigh and Max, or High where none of those is offered) and checks the effort the agent shows as active. One
+enabled effort per harness also completes a real turn. Goose shows no effort, so its case checks only that Farhelm
+passes the effort to Goose and that Goose reaches its prompt and answers; a pass does not confirm the effort the
+provider applied. Goose, Pi and OMP need `OPENROUTER_API_KEY` for the whole case and report COULD NOT RUN without it.
+
+An agent may save a trust choice for the temporary directory. Claude, the Muse launcher and OMP can update themselves
+during startup, so these cases disable their updaters for the test invocations using an environment variable for Claude
+and Muse and a temporary OMP configuration overlay.
 
 ## Upgrading the agents first
 
