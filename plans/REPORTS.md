@@ -3,4 +3,3 @@
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
 - [`triage-hooks-trust-nov24`](reports/triage-hooks-trust-nov24.report.md) landed 2026-11-25 in #4857, #4859, #4863, #4864, #4866, #4871, #4872, #4877, #4895, #4900, #4902, #4905, #4908, #4911, #4914, #4926: execute the 2026-11-24 triage outcomes for agent hooks and workspace trust, in grouped PRs
-- [`sandbox-auto-trust-and-claude-onboarding`](reports/sandbox-auto-trust-and-claude-onboarding.report.md) landed 2026-11-25 in #4943, #4955, #4958: Automatically suppress workspace trust prompts in per-session sandboxes/containers and skip Claude Code first-run setup on new recipe hosts
