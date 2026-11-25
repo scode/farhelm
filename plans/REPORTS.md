@@ -13,3 +13,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`drift-permission-modes`](reports/drift-permission-modes.report.md) landed 2026-11-25 in #4784, #4792: Add live permission mode and custom permission flag drift tests across supporting agents
 - [`drift-initial-prompt-launch`](reports/drift-initial-prompt-launch.report.md) landed 2026-11-25 in #4787, #4795: Add live launch-time initial prompt delivery drift tests across supporting agents
 - [`drift-named-conversation-starts`](reports/drift-named-conversation-starts.report.md) landed 2026-11-25 in #4786, #4796: Add live one-time named conversation start drift tests across all built-in agents
+- [`drift-capture-timing-hooks`](reports/drift-capture-timing-hooks.report.md) landed 2026-11-25 in #4797, #4806: Add live conversation capture timing, hook payload, and hooks-disabled drift tests

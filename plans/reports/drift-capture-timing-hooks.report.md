@@ -66,3 +66,88 @@ One independent `gpt-6.2-sol` high-effort source review. Its findings were addre
 to the captured conversation, retained terminal text checks, a Goose Restart check against the actual process, a settled
 hooks-off turn, and a width check on the same OMP bytes sent to the parser. The commit and PR wording passed a separate
 cold read.
+
+### Landing
+
+#### What landed with it
+
+Three plans landed this round, in this order: this one, through
+[#4797](https://github.com/scode/farhelm/pull/4797/changes) and the landing fix
+[#4806](https://github.com/scode/farhelm/pull/4806/changes); then drift-workspace-trust; then triage-bookkeeping-nov24,
+which only moves review queue records. The two drift plans were written before the previous rounds' drift plans landed
+and were rebased onto them; they overlapped only in TODO.md, where each plan's planned entry was removed and the rest
+kept. This plan renamed a helper of the drift tests' private configuration copy that the workspace trust plan's new
+tests still called by its old name, so the stacked tests did not compile; that was fixed in the workspace trust plan's
+own change while landing.
+
+#### Fixes made while landing
+
+#4806 changes the drift tests, their docs, a comment and the hook's code without changing what the hook does:
+
+- **The hook log change was undocumented.** This plan made the agent hook add a tab, `event=` and the name of the
+  callback that wrote the report to its `written` lines in a session's hook log, when the agent named it (`Stop` at the
+  end of a turn, Grok's `UserPromptSubmit`, Antigravity's `SessionStart`). It is the plan's only change to what Farhelm
+  ships. The website's "Agent hook injection" page, which documents that log line by line, still gave the old shape; it
+  now describes the field. A changelog fragment records the change, and the supervisor's comment that the line's shape
+  has one definition now mentions the field.
+- **Per-agent choices now name every agent.** The hook decided which agent's session start gets the field by naming
+  Antigravity beside a catch-all branch, and the category picked its agent-specific checks by comparing names. The
+  repository's code rules forbid both, because an agent added later silently gets the default. Each now lists every
+  agent, with the same answer as before for each.
+- **The drift docs paragraph moved.** In the drift tests' docs, this category's paragraph sat between the model
+  selection paragraph and the Codex note that belongs to model selection, so that note read as part of capture timing.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. This round landed three
+plans: drift-capture-timing-hooks, drift-workspace-trust and triage-bookkeeping-nov24. The two drift plans change the
+opt-in live drift tests, and the first also changes one shipped thing, the line the agent hook writes to a session's
+hook log. The third changes only the review queue's records. So the landing ran the hook's tests and every test that
+reads the hook log, the drift tests that need no vendor CLI, and the checks that inspect the changed files, on the three
+plans stacked together with their landing fixes.
+
+On that stack after the first round of landing fixes:
+
+- `cargo nextest run --locked -p farhelm --bin farhelm --test e2e` filtered to the hook's own tests (`hook::`) and every
+  end-to-end module that reads a hook log (`real_agent_capture::`, `restart_with_resume::`, `session_rename::`,
+  `codex_identity::`, `wrapper_launch::` and `hook_identity::`), on the test worker (recorder run
+  `b46ee0ca-5eaf-4047-bf2a-906a29c4f60f`): all 151 passed, with no runtime skip.
+- `cargo nextest run --locked -p farhelm-supervisor --lib -E 'test(/^hook_report::/) | test(/report_files::/)'`, on the
+  test worker (recorder run `fecd7225-24e2-463e-b784-ae1654b6106c`): all 13 passed.
+- `python3 -B scripts/run-harness-drift.py --list --category all`, on the test worker: it listed every category's cases,
+  the two new ones included, starting no agent.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings` (the shipped binary's
+  configuration), on the test worker: passed.
+- `python3 -B scripts/test-run-harness-drift.py`, locally (recorder run `142456f4-bd75-4627-86da-551e939ee1a0`): all 18
+  passed.
+- The website build (`bun run build` in `website`, for the hook page), `python3 releasing/check-changelog.py format`,
+  `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its pinned interpreter), `dprint check` and
+  `python3 scripts/check-agents-md.py` (no errors; one warning, about an old citation in the triage archive, already on
+  main), locally: passed.
+
+A second and third round of landing fixes then changed doc comments, the hook log paragraph on the website, the
+changelog fragment and the drift docs, and added one drift unit test (the Claude backups exclusion). On the final stack:
+`cargo nextest run --locked -p farhelm --test e2e -E 'test(/^real_agent_capture::drift::/)'` on the test worker
+(recorder run `cca8783c-f6fd-4b61-82a7-aaedc25ea883`, all 30 passed, the new test included), both clippy runs on the
+test worker, and locally the formatter, the sleep check, `dprint check`, `check-agents-md`, the changelog check and the
+website build: passed. The hook's tests and hook-log readers above are reused from the first stack, since these passes
+did not change what the hook does.
+
+Reused: the executors' live runs of the two new categories against the installed agents, recorded in the reports. Both
+plans were rebased onto a main that already turned off Claude's background updater, and both re-ran their Claude cases
+live after that. The landing fixes change how the per-agent checks are written, not what any agent is launched with,
+except that Claude's backups directory in the trust case's private copy now starts empty, which has not run live.
+
+Skipped: the live drift cases themselves, since they spend vendor turns, need the vendor logins and are opt-in by
+design; the rest of the workspace Rust suite and the desktop checks, since the only shipped change is the hook log line,
+which the hook's tests and every hook-log reader above cover; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+Nothing. The landing's own review found the report accurate.
+
+#### Things you should know that the report does not say
+
+- **The hook log line changed for anyone who reads it.** A `written` line can now end with a tab and an `event=` field.
+  Nothing in Farhelm reads that part of the line, but a script that splits the line by position sees one more field. The
+  changelog fragment says so.
