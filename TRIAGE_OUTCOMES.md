@@ -2707,27 +2707,6 @@
   the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-claude-trust-relative-config-dir-persists-relative-lock.md
-
-- Outcome: `fix code`.
-- Assessment: Suppose the user's login shell sets a relative `CLAUDE_CONFIG_DIR` and Claude trust is on. Farhelm's
-  automatic Claude trust then looks for Claude's settings inside the session folder, following any symlink there. For a
-  managed checkout, it also saves a relative lock path, which the later cleanup resolves against the supervisor's own
-  working directory. Verified: confirmed. `agent_kind/claude/trust.rs:47-60` rejects a relative `HOME` but accepts a
-  relative config directory. `resolve` (`:96-125`) canonicalizes the config path but builds `lock_path` from the
-  uncanonicalized relative path. The trigger is a shell setting the user made on purpose. SPEC.md "Local authority and
-  trust between hosts" names "their shell environment" as user intent, and Claude itself would read the same relative
-  path. The relative lock path in the supervisor's cleanup is Farhelm's own mistake and does not follow from what the
-  setting means.
-- Decision: q-intent, "Does a setup the user made on purpose count as the user's intent?": the maintainer picked "Yes,
-  it is the user's intent". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Refuse a relative CLAUDE_CONFIG_DIR from the login shell, as the Recommend line describes.
-  Recommendation for reference: fix code. Reject a relative config directory the same way as a relative `HOME`, so the
-  trust edit is skipped with the existing notice. Size S (about 5 lines plus a unit test). Size gate: about 100 lines of
-  diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
 ## trailing-host-scoped-trash-confirmation-stays-open-invisibly.md
 
 - Outcome: `fix code`.

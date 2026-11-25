@@ -43,8 +43,9 @@ impl Environment {
         )
     }
 
+    /// Automatic trust uses absolute paths from the login shell so the config
+    /// selection and its lock do not depend on either process's working directory.
     /// An explicit config directory still needs a usable home for the trust boundary.
-    /// An empty or relative home could also select a config in the session's working directory.
     fn from_vars(
         home: Option<OsString>,
         config_dir: Option<OsString>,
@@ -52,9 +53,14 @@ impl Environment {
     ) -> anyhow::Result<Self> {
         let home = PathBuf::from(home.context("HOME is unset")?);
         ensure!(home.is_absolute(), "HOME is empty or relative");
+        let config_dir = config_dir.filter(|v| !v.is_empty()).map(PathBuf::from);
+        ensure!(
+            config_dir.as_ref().is_none_or(|path| path.is_absolute()),
+            "CLAUDE_CONFIG_DIR is relative"
+        );
         Ok(Self {
             home,
-            config_dir: config_dir.filter(|v| !v.is_empty()).map(Into::into),
+            config_dir,
             custom_oauth: custom_oauth_url.is_some_and(|v| !v.is_empty()),
         })
     }
@@ -585,6 +591,23 @@ mod tests {
                 fs::canonicalize(project).unwrap()
             );
         }
+    }
+
+    /// A configured directory must locate the same config and lock during
+    /// launch and cleanup. An empty override still selects the home default.
+    #[farhelm_testtrace::test]
+    fn trust_environment_requires_an_absolute_config_override() {
+        let parse = |value: &str| {
+            Environment::from_vars(Some("/home/fixture".into()), Some(value.into()), None)
+        };
+        assert!(
+            matches!(parse("config"), Err(error) if error.to_string() == "CLAUDE_CONFIG_DIR is relative")
+        );
+        assert!(parse("").unwrap().config_dir.is_none());
+        assert_eq!(
+            parse("/fixture/config").unwrap().config_dir.as_deref(),
+            Some(Path::new("/fixture/config"))
+        );
     }
 
     /// Invalid shell input cannot make the config path relative to the session folder, even with an override.
