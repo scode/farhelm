@@ -136,25 +136,6 @@
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC_impl.md, "What is pushed, and how changes are found" (line 444): "Enforced by a
-  round-trip contract test per collection". The per-collection contract test,
-  `every_pushed_collection_round_trips_through_its_proto_type` (`crates/farhelm-helm/src/ui_channel_tests.rs:3042`
-  onward), decodes and re-encodes each served collection but not custom agents. `Collection::CustomAgents` appears only
-  in the empty-snapshot assertions (:1433, :1474). The fix follows directly: register one agent, serve
-  `/api/custom-agents`, and `round_trip` it into `CustomAgent`. The spec does not require the finding's wider proposal
-  (a live create, edit and delete push test over the UI channel), so execution should stop at the round-trip entry
-  unless the maintainer wants more. Verified: Confirmed by reading the tests. No runtime bug is claimed.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code — add
-  custom agents to the round-trip test; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## tensorlake-key-discard-lacks-preservation-test.md
 
 - Outcome: `other`.

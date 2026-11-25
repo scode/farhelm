@@ -318,11 +318,6 @@ consequences.
   keeps showing them indefinitely with active Delete buttons if the new key fails to list sandboxes (for example, if the
   new key is invalid or Tensorlake is unreachable).
 
-- [`trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md`](trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md)
-  — Changes to registered custom agents are wired to push over the UI channel, but the helm test suite never exercises a
-  live create, edit, or delete of a custom agent end-to-end over the UI channel to verify that the served payload
-  projects and decodes cleanly.
-
 - [`trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md`](trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md)
   — When you launch or plain-replace a registered custom agent on a host that asks before YOLO launches, the
   confirmation dialog explains the YOLO classification as "Farhelm treats every Custom permission choice as YOLO."

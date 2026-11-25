@@ -3183,6 +3183,26 @@ async fn every_pushed_collection_round_trips_through_its_proto_type() {
     let templates = served(&harness, "/api/templates").await;
     let _: farhelm_proto::launcher::LaunchTemplate = round_trip(&templates["templates"][0]);
 
+    // Distinct values catch field swaps in an entry that still decodes.
+    let catalog = "/api/custom-agents";
+    let registration = serde_json::json!({
+        "id": "acme-code", "display_name": "Acme Code", "command": "~/bin/acme-code",
+        "supports_resumption": true, "supports_reporting": false,
+    });
+    let post = Request::builder()
+        .method("POST")
+        .uri(catalog)
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(Body::from(registration.to_string()))
+        .unwrap();
+    let created = harness.router().oneshot(post).await.unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let agents = served(&harness, catalog).await;
+    let entry = &agents["custom_agents"][0];
+    let _: farhelm_proto::custom_agents::CustomAgent = round_trip(entry);
+    assert_eq!(entry, &registration);
+
     let claim = local_trash_claim(&harness).await;
     assert!(crate::notices::tests::record(
         &harness.store,
