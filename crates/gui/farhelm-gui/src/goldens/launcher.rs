@@ -14,12 +14,12 @@ use crate::launcher::entry;
 use crate::launcher::environment_tests::{account, built_json, ready_key, recipe_json};
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::texts_within;
-use crate::session_list::tests::{preferences_state, session};
+use crate::session_list::tests::{listing, preferences_state, session, within};
 use crate::test_support::{click_before_redraw, meta, withdraw_presented_choice};
 
 /// Show the temporary capsule with the launcher hidden and the fake's Resume still outstanding.
 pub(super) fn launcher_wake_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    suspended_launcher_setup(state, window, cx, open_wake_launcher);
+    suspended_launcher_setup(state, window, cx, listing(&[], &[]), open_wake_launcher);
     state
         .after_capture
         .set(Some(super::session_list::disconnect_pending_launch));
@@ -31,29 +31,100 @@ pub(super) fn launcher_waking_checkout_setup(
     window: &mut Window,
     cx: &mut App,
 ) {
-    suspended_launcher_setup(state, window, cx, open_waking_checkout);
+    suspended_launcher_setup(state, window, cx, listing(&[], &[]), open_waking_checkout);
 }
 
-/// The same pinned registry and drawing setup for the two launcher scenes that target the suspended sandbox.
+/// Capture Restart with after the registered sandbox refuses the launcher’s Resume request.
+pub(super) fn launcher_restart_wake_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let mut rows = listing(&["a"], &[session("a").host(12).cwd("/home/user/src/api")]);
+    rows.entries[0].value["host_identity"] = json!("identity12");
+    suspended_launcher_setup(state, window, cx, rows, open_restart);
+}
+
+/// The same pinned installation and registry for every launcher scene targeting the suspended sandbox.
 fn suspended_launcher_setup(
     state: &SceneState,
     window: &mut Window,
     cx: &mut App,
+    rows: CollectionState,
     open: super::AfterDrawn,
 ) {
     use crate::launcher::view_tests::fixture_hosts;
-    use crate::session_list::tests::{listing, preferences};
+    use crate::session_list::tests::preferences;
     window.set_driver_enabled(true);
     crate::ticker::set_reduced_motion(true, cx);
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = crate::session::start(handle, events, None, cx);
     let hosts = fixture_hosts(&[0, 11]);
-    helm.connect(vec![listing(&[], &[]), preferences(&[], None), hosts]);
+    helm.connect(vec![rows, preferences(&[], None), hosts]);
     state.lists.borrow_mut().push(cx.new(SessionList::new));
     let mut keep = state.keep.borrow_mut();
     keep.push(Box::new(helm));
     keep.push(Box::new(connection));
     state.after.set(Some(open));
+}
+
+/// Refuse the real Resume, then wait for the launcher to announce its failure beside Restart.
+fn refuse_wake(_: &Entity<SessionList>, state: &SceneState, window: &mut Window, _: &mut App) {
+    let mut keep = state.keep.borrow_mut();
+    let helm = keep
+        .iter_mut()
+        .find_map(|item| item.downcast_mut::<FakeHelm>())
+        .unwrap();
+    for command in helm.commands() {
+        assert!(!command.path.ends_with("/restart"));
+        let wake = command.path == "/api/hosts/12/resume";
+        helm.reply(
+            command.id,
+            if wake { 409 } else { 200 },
+            wake.then(|| json!("Sandbox is unavailable")),
+        );
+    }
+    let nodes = window.driver_nodes();
+    if !nodes
+        .iter()
+        .any(|node| node.element_id.as_deref() == Some("launcher-refusal"))
+    {
+        state.after.set(Some(refuse_wake));
+        return;
+    }
+    let alert = within(nodes, "launcher-notices")
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-refusal"))
+        .unwrap();
+    assert_eq!(alert.role, Some(gpui::Role::Alert));
+    assert_eq!(
+        alert.label.as_deref(),
+        Some("Restart error. Resuming the host failed: Sandbox is unavailable")
+    );
+    let lines = texts_within(nodes, "launcher-wake-refusal");
+    assert!(!lines.is_empty() && lines.iter().all(|line| line.visible_bounds == line.bounds));
+}
+
+/// Click only after the Restart button's source consent has been presented.
+fn open_restart(_: &Entity<SessionList>, state: &SceneState, window: &mut Window, cx: &mut App) {
+    use farhelm_proto::ui_channel::SessionRow;
+    let Some(store) = crate::session::current_store(cx) else {
+        state.after.set(Some(open_restart));
+        return;
+    };
+    let row = store
+        .read(cx)
+        .collections()
+        .get::<SessionRow>("a")
+        .expect("the Restart fixture lists its source");
+    let mut draft =
+        crate::launcher::draft::LaunchDraft::restart_with("a", &row.info, Some(row.host)).unwrap();
+    draft.choose_permissions(Some(LaunchPermission::Guarded));
+    assert!(
+        crate::launcher::view::open(draft, &crate::focus::Mark::take(cx), window, cx).is_some()
+    );
+    state.after.set(Some(|_, state, window, cx| {
+        window.simulate_next_frame(cx);
+        assert!(click_control(window, cx, "launcher-launch"));
+        assert!(crate::launcher::launch::wake_owns_source("a", cx));
+        state.after.set(Some(refuse_wake));
+    }));
 }
 
 /// Use the same visible launcher press that hides the form and starts Resume.

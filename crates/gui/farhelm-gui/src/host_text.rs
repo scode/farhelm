@@ -364,6 +364,12 @@ impl HostSentence {
         self
     }
 
+    /// Add the enclosing alert's introduction while retaining the body’s host-text parts and their isolation.
+    pub(crate) fn prepend_text(mut self, words: impl Into<SharedString>) -> Self {
+        self.parts.insert(0, Part::App(words.into()));
+        self
+    }
+
     /// Append a host's value, drawn in the sentence's own face. For names and host-written prose.
     pub fn host(mut self, text: &HostText) -> Self {
         self.parts.push(Part::Host(text.clone()));

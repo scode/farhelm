@@ -1786,29 +1786,6 @@
   index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-restart-with-wake-refusal-hardcodes-not-launched.md
-
-- Outcome: `fix code`.
-- Assessment: In Restart with…, if waking the suspended or stopped host fails, the alert beside the Restart button
-  starts "Not launched." where Restart's other refusals start "Restart error.". Verified: confirmed.
-  `crates/gui/farhelm-gui/src/launcher/launch/wake.rs:150` and `:278` hard-code "Not launched. ", and
-  `view.rs:2737-2740` shows `Note::WakeRefusal` verbatim, which bypasses the mode-aware `lead` (`view.rs:2708-2712`).
-  Restart with does wake (`wake.rs:89`). The spec gives two readings: `SPEC.md:1610-1613` says "Restart mode uses the
-  same alert beside Restart, with 'Restart error.' before the refusal's words", while `SPEC.md:407-408` says "A failed
-  preparation says the session was not launched." Because a wake failure is a "failed preparation", the fix depends on
-  which sentence governs, so this is not clearly settled.
-- Decision: q-wake, "What waking a host at launch must guarantee": the maintainer picked "Never wedge, fail fast, word
-  per provider". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "Wait, another
-  complexity gate. If this turns complicated, the executor must stop and turn it into a follow-up to the item explaining
-  what's complicated and why."
-- Completion criteria: Launch-time waking never wedges, fails fast and words failures per provider. Recommendation for
-  reference: fix code — take the lead from the mode when drawing `WakeRefusal` (and say so next to `SPEC.md:408`); size
-  S. Complexity gate (maintainer): if the fix turns very complicated during execution, the executor stops and turns it
-  into a follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
 ## trailing-unverified-resumable-host-shows-checkout-allocation-notice.md
 
 - Outcome: `fix code`.

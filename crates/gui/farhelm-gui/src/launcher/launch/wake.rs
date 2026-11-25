@@ -147,7 +147,7 @@ fn reply(key: &OpKey, settled: &Settled, cx: &mut App) {
             Ok(false)
         }
         Outcome::Refused(reason) => Err(HostSentence::new("launcher-wake-refusal")
-            .text("Not launched. Resuming the host failed: ")
+            .text("Resuming the host failed: ")
             .host(&reason.words)),
     };
     update(key, cx, |slot, cx| {
@@ -274,9 +274,7 @@ pub(super) fn follow(slot: &mut LaunchSlot, cx: &mut Context<LaunchSlot>) {
 }
 
 fn failure_words(reason: &'static str) -> HostSentence {
-    HostSentence::new("launcher-wake-refusal")
-        .text("Not launched. ")
-        .text(reason)
+    HostSentence::new("launcher-wake-refusal").text(reason)
 }
 
 /// Take the source and destination holds down on a failed preparation before showing the launcher's usual refusal.

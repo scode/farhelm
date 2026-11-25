@@ -182,6 +182,8 @@ linux/launcher-replace-typed-recent--dark.png 3d2bea617746751dfc87fc0265406f387c
 linux/launcher-replace-typed-recent--light.png bd0041c6fb7087614d158b8ad384b475869450dd
 linux/launcher-replace-with--dark.png 6963005db3c2776b2617eacec108dd5f5bfae107
 linux/launcher-replace-with--light.png b64174e881096575f60fe13b765af72c74b1923e
+linux/launcher-restart-wake-refusal--dark.png 85dfef428c4f8c8fffcfd9c80f89124a8dfcf1fc
+linux/launcher-restart-wake-refusal--light.png 06f69c02ed4f96bd99d3bd31937d62709c36d011
 linux/launcher-restart-with--dark.png 372d3a1de95bd15ca063397546331e03ec78a39a
 linux/launcher-restart-with--light.png 077860ed2e1b328482534617f1b2752e1b3e8e12
 linux/launcher-resuming-host--dark.png 899bc088087e9ffa021d7dc4d23f523015872e7d

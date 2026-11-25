@@ -2797,7 +2797,9 @@ impl Render for Launcher {
                 _ => None,
             };
         let alert = match &self.note {
-            Some(Note::WakeRefusal(reason)) => Some(reason.clone()),
+            Some(Note::WakeRefusal(reason)) => {
+                Some(reason.clone().prepend_text(format!("{lead} ")))
+            }
             _ => alert,
         }
         .map(|sentence| refusal_alert("launcher-refusal", sentence, palette));
@@ -3090,8 +3092,8 @@ impl Launcher {
         self.submit_or_wait_for_preview(source, mark, window, cx)
     }
 
-    /// An unsuccessful preparation has sent no create. Use the complete refusal wording and the normal notice or
-    /// frame restoration, keyed to the original press.
+    /// An unsuccessful preparation has sent no create or restart. Keep its reason for the mode's usual alert when
+    /// restoring the form for the original press.
     pub(in crate::launcher) fn wake_refused(
         &mut self,
         reason: HostSentence,

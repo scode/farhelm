@@ -225,10 +225,6 @@ consequences.
   — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
   admitted instead of being refused.
 
-- [`trailing-restart-with-wake-refusal-hardcodes-not-launched.md`](trailing-restart-with-wake-refusal-hardcodes-not-launched.md)
-  — When Restart with fails while waking a suspended or stopped host, the alert says Not launched instead of Restart
-  error, and Restart with wake is untested across launcher tests.
-
 - [`trailing-unverified-resumable-host-shows-checkout-allocation-notice.md`](trailing-unverified-resumable-host-shows-checkout-allocation-notice.md)
   — On a suspended or stopped host without a verified identity, the managed-checkout Folder line promises automatic
   folder allocation on wake even though Launch is refused as unverified.
