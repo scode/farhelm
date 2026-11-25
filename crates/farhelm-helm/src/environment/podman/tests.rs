@@ -203,13 +203,16 @@ impl Commands {
         }
         let mut model = self.model.lock().unwrap();
         let args = &argv[1..];
+        let projected = args
+            .get(2..4)
+            .is_some_and(|flags| flags == ["--format", CONTAINER_INSPECTION]);
         Ok(match (args[0].as_str(), args.get(1).map(String::as_str)) {
             ("container", Some("exists")) =>
                 output(if model.place_identity.is_none() && model.exists { 0 } else { 1 }, ""),
-            ("container", Some("inspect")) => output(0, &serde_json::json!([{
-                "Id": ID, "Name": model.name, "State": {"Status": model.status},
-                "Config": {"Labels":{"farhelm.helm":model.helm,"farhelm.role":model.role,"farhelm.recipe":"dev"}}
-            }]).to_string()),
+            ("container", Some("inspect")) if projected => output(0, &serde_json::json!({
+                "Id": ID, "Name": model.name, "Status": model.status,
+                "Labels":{"farhelm.helm":model.helm,"farhelm.role":model.role,"farhelm.recipe":"dev"}
+            }).to_string()),
             ("rm", _) => { model.exists = false; output(0, ID) },
             ("image", Some("exists")) =>
                 output(if model.place_identity.is_none() && model.image_exists { 0 } else { 1 }, ""),

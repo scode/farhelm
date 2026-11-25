@@ -46349,3 +46349,22 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   [draft PR](https://github.com/scode/farhelm/pull/4914/changes). Added the cheap Antigravity Settings independence
   case. The Antigravity approval-folder draft covers the normal dispatch contract with trust on and off. Extended the
   existing Claude launch fixture to verify the agent starts and its config is unchanged when launched in HOME.
+
+## trailing-full-podman-inspection-strand-container-farhelm-needs-to-remove.md
+
+- Outcome: `fix code`.
+- Assessment: Before it deletes a container or helper, Farhelm reads Podman's full description of it. If that
+  description is over 64 KiB (an image with very many environment variables, labels or mounts), the read fails and
+  Farhelm can never delete that container itself. The user has to remove it by hand. Verified: Confirmed by reading.
+  `inspect` (`podman.rs:303-350`) runs a plain `container inspect` and uses only ID, name, state and labels. Output goes
+  through `capture_child`, which caps a stream at `MAX_CHILD_STREAM_BYTES = 64 KiB` (`provisioning/backend.rs:106`) and
+  fails over the cap. Not established: real images that produce over 64 KiB. Typical output is a few to about 20 KB.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code — use
+  `--format` to project only the needed fields. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. A container's environment, mounts and unrelated labels no longer fill the ownership check's output
+  before cleanup. Change `xypzsluotzxrpnlrqtrokmxqqmnkzqvp`, bookmark `plan/triage-podman-nov24/01-podman-inspection`,
+  [PR #4880](https://github.com/scode/farhelm/pull/4880/changes).

@@ -2738,23 +2738,6 @@
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-full-podman-inspection-strand-container-farhelm-needs-to-remove.md
-
-- Outcome: `fix code`.
-- Assessment: Before it deletes a container or helper, Farhelm reads Podman's full description of it. If that
-  description is over 64 KiB (an image with very many environment variables, labels or mounts), the read fails and
-  Farhelm can never delete that container itself. The user has to remove it by hand. Verified: Confirmed by reading.
-  `inspect` (`podman.rs:303-350`) runs a plain `container inspect` and uses only ID, name, state and labels. Output goes
-  through `capture_child`, which caps a stream at `MAX_CHILD_STREAM_BYTES = 64 KiB` (`provisioning/backend.rs:106`) and
-  fails over the cap. Not established: real images that produce over 64 KiB. Typical output is a few to about 20 KB.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code — use
-  `--format` to project only the needed fields. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
-  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
-  to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
 ## trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md
 
 - Outcome: `fix code`.
