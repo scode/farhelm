@@ -128,7 +128,10 @@
 //!   report vocabularies, executable names), and one file per kind
 //!   (`antigravity.rs`, `claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `muse.rs`, `omp.rs`, `pi.rs`) for
 //!   that kind's own helpers: argv grammar, record and locator parsing, and
-//!   the vendor-file verification some locators need. Screen readers:
+//!   the vendor-file verification some locators need. The
+//!   `delivers_instructions` test seam reads the start expansion to
+//!   determine which integrations need a live instructions-delivery case.
+//!   Screen readers:
 //!   `screen_reader.rs`, including exhaustive launch-harness permission-footer
 //!   and workspace-trust readers (separate from activity kinds so Muse and
 //!   Cursor remain distinguishable).
@@ -891,6 +894,40 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
         AgentKind::Custom => Some(&CustomIntegration),
         AgentKind::Generic => None,
     }
+}
+
+/// Test seam that detects an instructions pointer in a supported start's argv or environment.
+///
+/// Both expansions use the same hook inputs so the drift inventory
+/// follows the launcher's behavior. Goose carries the setting in its
+/// environment. A skipped expansion fails the check because these inputs
+/// no longer describe a valid launch for that kind.
+#[cfg(any(test, feature = "test-seams"))]
+pub fn delivers_instructions(kind: AgentKind) -> bool {
+    let Some(integration) = integration_for(kind) else {
+        return false;
+    };
+    let start = |instructions| {
+        let expansion = integration.farhelm_args(
+            LaunchPhase::Start,
+            &HookPolicy {
+                hooks: &AgentHooks::All,
+                instructions,
+                exe: Some("/opt/farhelm"),
+                vendor_extension: Some("/state/reporter.ts"),
+                codex_endpoint: None,
+                session_id: "session-1",
+                supervisor_socket: Some("/state/supervisor.sock"),
+            },
+        );
+        if let HookLog::Skipped(reason) = &expansion.log {
+            panic!("{kind:?} refused the instructions fixture with {instructions:?}: {reason}");
+        }
+        expansion
+    };
+    let enabled = start(AgentInstructions::On);
+    let disabled = start(AgentInstructions::Off);
+    (enabled.args, enabled.env) != (disabled.args, disabled.env)
 }
 
 /// Whether `kind`'s screen reader reads `screen` (one visible grid, bottom
@@ -2921,6 +2958,26 @@ pub fn executable_basename(kind: AgentKind) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pin the launch capability independently of the drift suite's inventory so lost delivery also fails a test.
+    #[test]
+    fn instruction_delivery_follows_the_start_expansion() {
+        let current = [
+            AgentKind::Claude,
+            AgentKind::Codex,
+            AgentKind::Goose,
+            AgentKind::Muse,
+            AgentKind::Pi,
+            AgentKind::Omp,
+        ];
+        for &kind in AgentKind::ALL {
+            assert_eq!(
+                delivers_instructions(kind),
+                current.contains(&kind),
+                "{kind:?}"
+            );
+        }
+    }
 
     /// A snapshot with exactly this kind and resume command, for tests of
     /// capture and restart that need no launch around them. Production
