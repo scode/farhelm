@@ -35,8 +35,12 @@ const RECALL_PROMPT: &str = "Join R E C A L L, a hyphen, and my test label on on
 enum TrustPolicy<'a> {
     AutoAnswer,
     StopAtPrompt,
-    #[allow(dead_code, reason = "used by the queued workspace-trust category")]
-    FailOnPrompt(&'a [&'a str]),
+    /// A trusted launch must produce its post-trust composer without rendering any known question.
+    FailOnPrompt {
+        composer: &'a [&'a str],
+        /// A category can recognize a current vendor screen that ordinary starts would not answer.
+        extra_prompt: Option<fn(&str) -> bool>,
+    },
 }
 
 /// An unavailable prerequisite gives no verdict. Once a turn succeeds, a startup or resume refusal is a failure.
@@ -446,9 +450,12 @@ impl<'a> Terminal<'a> {
         turned: bool,
     ) -> DriftResult {
         // A trust check needs evidence of the composer beyond the dialog. A CLI's startup banner can draw earlier.
-        let composer = match trust {
-            TrustPolicy::FailOnPrompt(cues) => cues,
-            TrustPolicy::AutoAnswer | TrustPolicy::StopAtPrompt => profile.composer,
+        let (composer, extra_prompt) = match trust {
+            TrustPolicy::FailOnPrompt {
+                composer,
+                extra_prompt,
+            } => (composer, extra_prompt),
+            TrustPolicy::AutoAnswer | TrustPolicy::StopAtPrompt => (profile.composer, None),
         };
         let deadline = tokio::time::Instant::now() + START_LIMIT;
         let mut answered: Option<(String, tokio::time::Instant)> = None;
@@ -456,10 +463,10 @@ impl<'a> Terminal<'a> {
             let rendered = self.host.screen_tail(SCREEN_BYTES);
             let text = rendered.to_lowercase();
             self.check(&text, turned).await?;
-            if trust_prompt(&text) {
+            if trust_prompt(&text) || extra_prompt.is_some_and(|is_prompt| is_prompt(&text)) {
                 match trust {
                     TrustPolicy::StopAtPrompt => return Ok(()),
-                    TrustPolicy::FailOnPrompt(_) => {
+                    TrustPolicy::FailOnPrompt { .. } => {
                         return Err(anyhow::anyhow!(
                             "unexpected workspace trust prompt\n{}",
                             self.diagnostics()
@@ -897,6 +904,7 @@ mod model_selection;
 mod named_conversation;
 mod permission_modes;
 mod reasoning_effort;
+mod workspace_trust;
 
 #[cfg(test)]
 mod tests {

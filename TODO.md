@@ -224,12 +224,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   foreground-ownership harnesses (Claude, Codex, Muse, OMP, Grok, Antigravity), proving child invocations cannot replace
   or corrupt the foreground session's conversation ID.
 
-- **Drift tests: workspace trust pre-trust settings.** Assert that enabling workspace trust actually prevents the trust
-  prompt from appearing on Codex, Muse, and Antigravity (instead of silently answering a prompt that still appeared),
-  and add live coverage for Antigravity's per-launch `--settings '{"trustedWorkspaces":[...]}'`, Pi's `--approve` and
-  `--no-approve` with a project-local config or extension, Claude's `.claude.json` pre-trust edit in an isolated config
-  directory, and Codex's explicit untrusted setting. Plan: `plans/queue/drift-workspace-trust.md`.
-
 - **Drift tests: terminal screen status and dialog detection.** Verify live anchored `Running` and `Idle` readings on
   Claude, Codex, and Muse (catching silent fallback to generic change-counting when vendor TUI layout drifts), live
   workspace-trust prompt detection on an untrusted directory for Claude, Codex, Muse, and Antigravity, and live
