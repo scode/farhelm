@@ -27,8 +27,8 @@
 //!   stopped matching.
 //! - [`NotificationKind::ReporterMismatch`]: OMP admission, when the launch's
 //!   recorded reporter does not match this build.
-//! - [`NotificationKind::CodexPinCorrected`]: Codex admission, after a recorded
-//!   ancestor's verified record corrects a child-first conversation choice.
+//! - [`NotificationKind::CodexPinCorrected`]: Codex admission, when the hook's
+//!   emitter is a recorded ancestor of the pinned process and corrects its conversation.
 //! - [`NotificationKind::GrokPinCorrected`]: Grok admission, when an ancestor's
 //!   selection corrects the conversation reported by its child.
 //! - [`NotificationKind::ClaudePinCorrected`]: Claude admission, when a recorded
@@ -81,8 +81,9 @@ pub(crate) enum NotificationKind {
     /// A launch whose conversation reporter does not match this build, so
     /// its reports cannot be accepted.
     ReporterMismatch,
-    /// A verified Codex ancestor corrected a conversation selected by its child.
-    /// The warning preserves what a Restart before correction would have used.
+    /// The Codex hook came from a recorded ancestor of the pinned reporter and
+    /// selected the ancestor's verified conversation.
+    /// The warning records that Restart before correction could have resumed the earlier conversation.
     CodexPinCorrected,
     /// A recorded Grok ancestor corrected the selected conversation on SessionStart.
     GrokPinCorrected,

@@ -3343,26 +3343,6 @@
   reference: fix code with 577 (the same try/cleanup pattern, clicking `id:prompt-cancel`). Size S.
 - Execution: ``planned in `plans/queue/triage-tooling-nov24.md` ``.
 
-## template-leave-spec-still-inline.md
-
-- Outcome: `fix spec`.
-- Assessment: The implementation spec's Templates dialog paragraph still calls the "Save these changes before leaving?"
-  question an inline prompt. The app centers it over the dialog, which is what the product spec says. Readers of the
-  implementation spec get the wrong picture. Nothing the user sees is affected. Verified: confirmed.
-  SPEC_impl.md:9391-9392 says "share a pending departure and the same inline save/discard/keep-editing prompt". The code
-  asks through the centered `prompt::ask` (`dialog.rs:588`). SPEC.md:1343-1346 says "The question is centered over the
-  dialog and starts with focus on Save. An inferred switch or removed legacy workspace-trust field enables Save but
-  never makes leaving ask." The paragraph also omits the narrower leave rule (`editor.rs:410-417`). The rule is stated
-  in SPEC.md, so its absence from SPEC_impl is an omission, not a contradiction. No code fix is involved, so the case
-  does not fit clearly-settled.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec — replace
-  "inline" with "centered", and optionally point to SPEC.md's leave rule. Size S, a few lines. Remove the feedback file
-  and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## sealed-container-delete-spec-conflicts.md
 
 - Outcome: `fix spec`.
@@ -3467,25 +3447,6 @@
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
-## custom-command-spec-misstates-hook-arguments.md
-
-- Outcome: `fix code`.
-- Assessment: The docs page on how Farhelm adds its conversation reporters says a custom command that declares its agent
-  "gets the declared agent's reporter where `{farhelm_args}` stands". Grok and Antigravity get theirs from saved
-  configuration, which the next bullet on the same page says. Verified: Partly correct, and minor. The sentence is still
-  there (`website/src/content/docs/docs/how-it-works/agent-hook-injection.md:116-121`), and the following bullet (lines
-  124-126) covers Grok and Antigravity. SPEC.md 1260-1263 is accurate ("replaced by nothing for an agent type that takes
-  no such arguments"). `custom-commands.md:49-62` already names Grok's and Antigravity's hook switch. This is about
-  custom commands, not custom agents.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: discard. The adjacent
-  bullet already corrects it. A one-line narrowing is the alternative. Size S. Size gate: about 100 lines of diff (code,
-  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
-  brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## trailing-environment-delete-implementation-spec-still-describes-desktop-port-as.md
 
 - Outcome: `fix spec`.
@@ -3498,23 +3459,6 @@
 - Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec (replace the
   sentence with the shipped request and its late-notice handling). Size S. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## trailing-osc-52-copy-rule-omits-primary-selection-distinction.md
-
-- Outcome: `fix spec`.
-- Assessment: SPEC.md says a program's OSC 52 write "also copies to the clipboard", and a few lines later calls a
-  primary-selection write a kind of "program clipboard write". Together these suggest that a primary-selection write
-  replaces the system clipboard. It does not: it only counts toward the drag guidance. Verified: Confirmed wording
-  issue. SPEC.md "Terminal experience", around lines 3552-3565, says: "A terminal program's own OSC 52 WRITE also copies
-  to the clipboard" and "Any completed program clipboard write, including a primary-selection write, suppresses it".
-  SPEC_impl.md "Primary-selection notices" says that the viewer "leaves the system clipboard alone". The code and its
-  tests agree with SPEC_impl.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Qualify the
-  copy sentence, and keep the notice rule. Size S. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-registered-all-numeric-ssh-names-bypass-first-label-shortening.md
@@ -3595,70 +3539,6 @@
   comment). Size S. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
-## trailing-interrupted-card-guide-still-names-only-host-restart.md
-
-- Outcome: `fix spec`.
-- Assessment: The implementation guide describes the card shown on an interrupted session as saying "a host restart
-  paused the session". The product spec and the shipped card both say a host reboot or a Farhelm update ended the
-  session. Only the guide is wrong. Verified: confirmed. SPEC_impl.md:4119-4120 ("it explains that a host restart paused
-  the session"). SPEC.md ("Session view": "An Interrupted session keeps its explanation about the reboot or update") and
-  `crates/gui/farhelm-gui/src/session_pane/card.rs:280-286` ("A host reboot or a Farhelm update ended …") agree with
-  each other. This is not clearly settled, because the fix edits SPEC_impl.md itself.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Align the
-  SPEC_impl.md card sentence with SPEC.md, in one edit together with 356. Size S. Remove the feedback file and its index
-  entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## trailing-work-start-spec-still-says-rename-replaces-sampling-state.md
-
-- Outcome: `fix spec`.
-- Assessment: The implementation spec contradicts itself on whether renaming a session keeps the current screen-activity
-  reading. Code keeps it on Rename and replaces it only on Restart. Verified: confirmed. SPEC_impl.md 4249-4254 still
-  groups Rename with Restart ("fresh transition evidence ... without inheriting old screen evidence"). SPEC_impl.md 3692
-  says the activity cell is shared "across renames". The code follows the latter, per the reviewer; not re-traced beyond
-  the spec text.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec by correcting
-  the 4249-4254 paragraph. Size S. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## trailing-interrupted-recovery-guide-still-assumes-no-prior-process-remains.md
-
-- Outcome: `fix spec`.
-- Assessment: The same guide sentence says Restart on an interrupted session needs no confirmation "because no process
-  remains". That is not always true. When Farhelm ends a terminal left over from an older release and that cleanup
-  fails, the old agent may still be running. The product spec explicitly accepts that a Restart could then start a
-  second agent beside it. Verified: confirmed as a documentation mismatch. SPEC_impl.md:4121 states "because no process
-  remains". SPEC.md (Durability and resume, the "Old terminals" bullet): "those sessions are treated as ended all the
-  same, accepting that a Restart could then start a second agent beside one still running." There is no runtime defect
-  beyond that accepted residual.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Qualify the
-  rationale with the accepted old-terminal exception, in the same edit as 354. Size S. Remove the feedback file and its
-  index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## trailing-clone-cli-reference-still-omits-environment-exception.md
-
-- Outcome: `fix spec`.
-- Assessment: The implementation spec's command reference shows `farhelm agent clone` with a required `--host`. For a
-  sandbox or container source, the command takes no `--host` or `--cwd`. Verified: confirmed. SPEC_impl.md:7512 shows
-  `--host <name>` as required. SPEC.md:4921-4922 says "`farhelm agent clone` of a sandbox or container session takes no
-  `--host` or `--cwd`". Documentation only.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Size S.
-  Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## trailing-migration-comments-reboot-classification-remains-disputed.md
 
 - Outcome: `fix code`.
@@ -3701,45 +3581,6 @@
   index entry.
 - Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
-## trailing-work-start-guide-omits-deferral-while-lifecycle-claim-is.md
-
-- Outcome: `fix spec`.
-- Assessment: The session list orders sessions by when each one last started working, and each row shows a status badge.
-  The implementation guide says the two cannot drift apart and that a work start is written immediately. The ticker
-  deliberately does not wait while a Stop, Restart or Delete holds the session: the badge updates at once, the ordering
-  update is postponed to a later pass, and a postponed start is dropped if the run is replaced meanwhile. Verified:
-  confirmed. In `service/ticker.rs:1396-1404` the status hint comes before `persist_work_started`. When the claim is
-  busy, :1435-1446 parks the start as `deferred_work_start`, and the field's docs (:440-451) say it is deliberately
-  run-scoped. SPEC_impl.md:4243 ("cannot drift apart") and :4251 ("A start writes immediately") omit this. The behavior
-  is deliberate and commented, and SPEC.md "Waiting between operations on one host" motivates it.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Describe the
-  deferral and why the ticker cannot wait. Size S. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## trailing-recent-activity-product-spec-still-promises-retired-capture-recovery.md
-
-- Outcome: `fix spec`.
-- Assessment: The session list's "most recent activity" sort only moves a session when the supervisor sees a new burst
-  of work. The product spec says the first look after a "recovery from failed screen captures" only sets a baseline.
-  Screen reads can no longer fail that way, and the code that reset the baseline was removed, so the sentence describes
-  behavior that no longer exists. It is a documentation error only. Verified: Confirmed. SPEC.md:2788-2790 still lists
-  "a recovery from failed screen captures". #4529 (44137d065) removed the matching reset from SPEC_impl.md and the
-  ticker under the archived outcome for `trailing-sampler-docs-promise-deleted-capture-failure-reset.md`, which reads:
-  Assessment "Host screen reads can't fail, and the reset code is gone", Decision "Correct the text". That entry is in
-  TRIAGE_OUTCOMES_ARCHIVE.md, not TRIAGE_OUTCOMES.md, and fixing this means editing SPEC.md, so it does not meet the
-  clearly-settled bar. The reviewer's runtime reasoning (skipped samples keep the prior reading) was not re-traced
-  beyond that decision.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Drop the
-  clause, or say that a skipped sample keeps the prior reading, consistent with the 2026-11-21 "Correct the text"
-  decision. Size S (one sentence). Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## trailing-interrupted-be-superseded-by-inferred-preparation-failure.md
 
 - Outcome: `fix code`.
@@ -3776,45 +3617,6 @@
   maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
-## trailing-cli-effort-hyphen-and-spec-drift.md
-
-- Outcome: `fix spec+code`.
-- Assessment: For a custom agent, `farhelm agent create --effort -fast` (with a space) is rejected by the command line
-  as an unknown flag. `--effort=-fast` and `--model -fast` work, and the custom-agent rules allow a value that starts
-  with a hyphen. Separately, SPEC_impl.md still explains that `--agent` and `--effort` don't accept leading hyphens
-  because each takes a word from a closed list, which is no longer true for either. Verified: Confirmed.
-  `crates/farhelm/src/main.rs:1063` gives `--effort` no `allow_hyphen_values`, while `--model` at line 1060 has it.
-  `parse_effort` (lines 963-975) and `validate_model_or_effort` (`custom_agents.rs:74-84`) accept a leading `-`, as
-  SPEC.md:494 does (`[a-z0-9_-]`). SPEC_impl.md:7539-7542 states the rule "Every free-text value option on both verbs
-  carries `allow_hyphen_values`" but excludes `--agent` and `--effort` as closed sets. `--agent` now accepts any
-  well-formed custom ID, which SPEC.md:488 says cannot start with a hyphen, so it does not need the flag. The guidance
-  part of the finding was fixed by #4752. This is not clearly settled: the fix edits SPEC_impl, and the finding offers a
-  second shape (forbid a leading hyphen in custom values).
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec+code. Add
-  `allow_hyphen_values = true` to `--effort` (as the SPEC_impl principle says) and reword the parenthetical so only
-  `--permissions` is a closed set. Size S (about 10 lines plus one parse test). Size gate: about 100 lines of diff
-  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## trailing-codex-fixture-and-notifications-stale-corridor-comments.md
-
-- Outcome: `fix code`.
-- Assessment: Comments in the Codex test fixture and in the supervisor's notification kinds still describe the
-  attribution rule #4728 removed. Verified: Confirmed. `farhelm-fixtures/src/fake_agent/codex_conversation.rs:28,462`
-  and `farhelm-supervisor/src/service/notifications.rs:84` still have the old wording.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code (comments
-  only), following the Q12 precedent. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## trailing-custom-pin-corrected-text-omits-prior-restart-consequence.md
 
 - Outcome: `fix spec+code`.
@@ -3836,25 +3638,6 @@
   that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
-## trailing-docs-github-checkouts-stale-single-dir-cache-path.md
-
-- Outcome: `fix code`.
-- Assessment: The managed-checkouts guide in `docs/` still gives the old repository-cache path
-  (`repo-cache/<owner>/<name>.git`). Caches now live in generation directories chosen by a `:current` selector, so
-  anyone following the guide to inspect or remove a cache by hand will not find it. Verified: confirmed.
-  `docs/github-checkouts.md:93-97` still has the old path. SPEC_impl.md describes the layout (`SPEC_impl.md:3706-3707`:
-  "`<name>.git:current` holds the UUID of the selected bare cache directory, `<name>.git:gen-<uuid>`"). The website page
-  was updated in `1d711f95`, and this file was last touched in `8e109e11f`. This would be clearly settled except that
-  the contradiction is in docs prose rather than code, and the "remove by hand" advice needs new wording.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code (docs) —
-  mirror the website's wording; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this
-  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
 ## trailing-spec-impl-contradiction-orphan-discovery-local-read-bounds.md
 
 - Outcome: `fix spec`.
@@ -3873,21 +3656,6 @@
   Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec — scope the
   unbounded-read clause to `POST /api/tensorlake/test` and keep the ordering rationale; size S. Remove the feedback file
   and its index entry.
-- Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
-
-## trailing-spec-md-security-still-describes-ongoing-codex-merges.md
-
-- Outcome: `fix spec`.
-- Assessment: SPEC.md's Security section still describes an ongoing Codex settings merge that can grow the config file
-  past 1 MiB. Elsewhere SPEC.md (557-566) now says delivery makes a one-time legacy cleanup and leaves
-  `~/.codex/config.toml` alone after it. Verified: Confirmed. SPEC.md 5107-5109 still has "A Codex merge can grow a file
-  near that size past it. Later merges then refuse the file..." The spec contradicts itself; the code does not merge.
-- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
-  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
-  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Reword to say
-  the one-time Claude and Codex cleanups read files of at most 1 MiB. Size S. Remove the feedback file and its index
-  entry.
 - Execution: ``planned in `plans/queue/triage-spec-text-nov24.md` ``.
 
 ## trailing-spec-md-status-contradicts-codex-pin-corrected-text.md

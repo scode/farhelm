@@ -23,9 +23,8 @@ const CHILD_FLAG: &str = "--codex-child";
 ///
 /// The hook binary is supplied as a trailing argument because the real
 /// `farhelm-fixtures fake-agent` parser intentionally accepts vendor flags it
-/// does not understand. The fixture must not default to its own executable:
-/// its executable is named `codex` to mirror a stock install, while a hook
-/// launched through it would add a second Codex process to the ancestry.
+/// does not understand. Pass the real hook executable so the hook edge belongs
+/// to the fixture process whose conversation the test is reporting.
 pub(super) fn run(record_home: Option<PathBuf>) -> anyhow::Result<()> {
     let root = record_home.context("codex-conversation needs --record-home")?;
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
@@ -459,9 +458,9 @@ fn run_shell_dash_c(root: &Path, hook_binary: &Path, payload: &str) -> anyhow::R
 /// Perform one nested native-Codex report launched THROUGH a shell: the
 /// real shell-to-harness-to-hook chain, all three processes live — the
 /// shell script runs the nested image as its child, and the nested image
-/// runs its hook as its own. Two Codex images refuse this regardless of
-/// the shell between them, pinning that wrapping a nested runtime in a
-/// shell does not smuggle it past the corridor.
+/// runs its hook as its own. Attribution identifies the nested process as
+/// the emitter. The existing foreground report pin still refuses its
+/// conversation.
 fn nested_shell_native(
     root: &Path,
     hook_binary: &Path,
