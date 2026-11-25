@@ -406,6 +406,8 @@ linux/trash-button-emptying--dark.png 8a71c7c8915af35e0bfdf0d94500388faf095859
 linux/trash-button-emptying--light.png 2eec751a966a76927656ba9c270d7987ec75374f
 linux/trash-button-full--dark.png 5b81e77ae319b5d30d0665069e8c4dace5c6e863
 linux/trash-button-full--light.png f8186f9eb9631b5026ca00a34af3e1aba5cf4757
+linux/upgrade-highlights-opt-out-notice--dark.png eff5e8dfa657da27b93a764629b4a7bc33c49cb8
+linux/upgrade-highlights-opt-out-notice--light.png da7fd8b277c2e7c9060308c23edb97dd67c57c46
 linux/version-readout-check--dark.png 100edff58b53f5616ff87c20230ddbf495fad8ae
 linux/version-readout-check--light.png 168827d3bb2413b6bce3a8f821eef69b52fe99dd
 linux/version-readout-menu--dark.png 88666cec21d220a7784bde3410498dabc758d329

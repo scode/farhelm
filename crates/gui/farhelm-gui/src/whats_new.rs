@@ -19,6 +19,7 @@ use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::desktop::updates::{self, notes};
 use crate::focus::{self, Mark, ReturnTo};
 use crate::layers::{self, Dialog, Dismissal, LayerId, MainAction};
+use crate::notices::{self, Notice};
 use crate::{assets, session, theme};
 
 #[cfg(test)]
@@ -28,7 +29,8 @@ const TITLE: &str = "What's new in Farhelm";
 const RELEASE_NOTES_URL: &str = crate::update_readout::view::RELEASE_NOTES_URL;
 
 /// Start after Welcome and Announcements. The caller keeps the lookup for the lifetime of its UI session.
-/// A response may only act on the connection and choices it read.
+/// A response may only act on the connection and choices it read. A startup prompt taking focus during the
+/// read retires a Show answer even if the prompt has already closed.
 pub(crate) fn check(mark: Mark, window: &Window, cx: &App) -> Option<Task<()>> {
     let host = updates::upgrade_notes(cx)?;
     let store = session::current_store(cx)?;
@@ -44,6 +46,7 @@ pub(crate) fn check(mark: Mark, window: &Window, cx: &App) -> Option<Task<()>> {
     let previous = preferences.last_whats_new_release.clone();
     let show = preferences.show_whats_new != Some(false);
     let running = host.running.clone();
+    let last_focus_layer = layers::last_focus_layer(window, cx);
     let answer = (host.check)(previous.clone(), show);
     Some(window.spawn(cx, async move |cx| {
         let outcome = match answer.await {
@@ -73,9 +76,10 @@ pub(crate) fn check(mark: Mark, window: &Window, cx: &App) -> Option<Task<()>> {
             match outcome {
                 notes::UpgradeNotes::Current => {}
                 notes::UpgradeNotes::Skipped => record(&running, false, cx),
-                // An automatic sign-in prompt can have taken focus while the website was answering,
-                // without any user input to invalidate the mark.
-                notes::UpgradeNotes::Show(releases) if !layers::focus_layer_open(window, cx) => {
+                notes::UpgradeNotes::Show(releases)
+                    if !layers::focus_layer_open(window, cx)
+                        && layers::last_focus_layer(window, cx) == last_focus_layer =>
+                {
                     open(running, releases, &mark, window, cx);
                 }
                 notes::UpgradeNotes::Show(_) => {}
@@ -85,7 +89,8 @@ pub(crate) fn check(mark: Mark, window: &Window, cx: &App) -> Option<Task<()>> {
 }
 
 /// Save the running release and, for Don't show again, the opt-out in the same sparse write.
-/// A refused write keeps the old baseline so a later launch can retry.
+/// A refused write keeps the old baseline so a later launch can retry. The user needs a notice when the
+/// explicit opt-out fails because the dialog has already closed.
 fn record(running: &str, opt_out: bool, cx: &mut App) {
     let Ok(path) = ApiPath::api(&["preferences"]) else {
         return;
@@ -97,9 +102,12 @@ fn record(running: &str, opt_out: bool, cx: &mut App) {
         Some(patch),
         "PUT /api/preferences",
         cx,
-        |answer, _| {
+        move |answer, cx| {
             if let Err(words) = answer {
                 tracing::warn!(reason = %words.raw(), "could not record upgrade highlights");
+                if opt_out {
+                    notices::post(Notice::UpgradeHighlightsOptOutFailed, cx);
+                }
             }
         },
     );

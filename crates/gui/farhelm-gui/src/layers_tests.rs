@@ -1404,7 +1404,8 @@ fn a_popover_matching_its_anchor_is_as_wide_as_it_in_the_same_frame(cx: &mut Tes
 /// the popover leaves focus in the field and the popover open; Escape in the field closes it, as the topmost layer,
 /// with focus still in the field; reopened, Tab goes on from the field to the next control on the page, as with nothing
 /// open, and the popover stays open. The harness's invariants, including that such a popover never holds focus, are
-/// checked after every step.
+/// checked after every step. This popover also leaves the focus history alone, so a pending startup dialog sees
+/// the same history it read before the popover opened.
 #[gpui::test]
 fn a_popover_that_never_takes_focus_leaves_focus_and_tab_with_the_field(cx: &mut TestAppContext) {
     let field: Rc<RefCell<Option<TextInputState>>> = Rc::new(RefCell::new(None));
@@ -1450,8 +1451,14 @@ fn a_popover_that_never_takes_focus_leaves_focus_and_tab_with_the_field(cx: &mut
     click(cx, "field-box");
     assert!(in_field(cx), "the premise: the field holds focus");
 
+    let last_focus_layer = cx.update(|window, cx| layers::last_focus_layer(window, cx));
     let list = open_floating_list(cx, anchor());
     assert!(in_field(cx), "opening the list left focus in the field");
+    assert_eq!(
+        cx.update(|window, cx| layers::last_focus_layer(window, cx)),
+        last_focus_layer,
+        "opening a focusless list must not invalidate a pending focus move"
+    );
     click(cx, "list");
     assert!(is_open(cx, list), "a press on the list is not outside it");
     assert!(in_field(cx), "a press on the list left focus in the field");

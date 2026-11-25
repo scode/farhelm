@@ -49,6 +49,8 @@ pub enum Notice {
     /// Files whose upload was cut off and whose session is no longer open. The banner outlives the terminal and
     /// connection that held the upload, so the user sees the result without returning to that session.
     InterruptedUpload(Rc<InterruptedUploads>),
+    /// The helm refused an explicit Don't show again after the highlights dialog closed.
+    UpgradeHighlightsOptOutFailed,
 }
 
 impl Notice {
@@ -84,6 +86,9 @@ impl Notice {
                     .into()
             }
             Notice::InterruptedUpload(upload) => upload.sentence().accessible_name(),
+            Notice::UpgradeHighlightsOptOutFailed => {
+                "Could not turn off upgrade highlights. Try again under App in Settings.".into()
+            }
         }
     }
 }

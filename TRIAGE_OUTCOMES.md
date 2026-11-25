@@ -5928,46 +5928,6 @@
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## upgrade-highlights-can-open-after-sign-in.md
-
-- Outcome: `fix code`.
-- Assessment: After an upgrade, the Mac app fetches "What's new" from the website. If a startup sign-in prompt (for
-  example a security-key touch notice) opens and closes by itself while that fetch is in flight, the highlights dialog
-  still opens and takes focus. Verified: Confirmed. `crates/gui/farhelm-gui/src/whats_new.rs:73-79` checks only whether
-  a layer is open when the answer arrives, and the user-input mark does not move when a layer opens.
-  `sign_in.rs:172-184` closes the popover by itself when its question goes away. SPEC.md 902-903 says in so many words:
-  "If the user starts working or another prompt takes focus before the release highlights arrive, the app leaves focus
-  and the record alone." So the code contradicts the spec. It is not marked settled because the natural fix (a
-  layer-open generation counter) changes the layer manager, which `docs/gpui/foundation-ownership.md` lists as a refused
-  path with no extension points, and a fix confined to What's new or the sign-in prompt is also possible.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code. Refuse a Show
-  answer when any focus layer opened during the lookup. Size S to M (about 40-80 lines including a fixture). Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
-
-## upgrade-highlights-opt-out-refusal-is-hidden.md
-
-- Outcome: `fix spec+code`.
-- Assessment: Pressing "Don't show again" in What's new closes the dialog right away. If the helm refuses to save the
-  opt-out, the only trace is a log line: the user believes highlights are off, and the next upgrade shows them again.
-  Verified: Confirmed. `whats_new.rs:86-104` logs the refusal and does nothing else, and the dialog has already closed.
-  SPEC.md "Errors and diagnostics" (4944-4945): "Every failed operation surfaces a concrete, actionable error in the
-  client. A dialog must never close as though an operation succeeded when it failed." Its best-effort exceptions list
-  the welcome card and the announcement dismissals, but neither the highlights record nor its opt-out. The fix has more
-  than one reasonable shape (a notice after closing, or holding the dialog open until the save settles), and a refused
-  Got it is arguably like the welcome card's best-effort save.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix spec+code. Add Got
-  it to the best-effort exceptions next to the welcome card, and show a notice when the opt-out is refused. Size S. Size
-  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
-  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
-  index entry.
-- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
-
 ## launcher-escape-discards-template-edits.md
 
 - Outcome: `fix code`.

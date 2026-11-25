@@ -14,6 +14,7 @@ use serde_json::json;
 use crate::announcements::tests::{announcement, queue};
 use crate::desktop::updates::{self, notes::*};
 use crate::focus::Mark;
+use crate::notices::{self, Notice};
 use crate::session_list::tests::preferences_state;
 use crate::test_support::{any_open, click, focused_id, keys, label, one_command, settle};
 use crate::welcome::tests::{open_start, reset, seen, shows};
@@ -162,6 +163,19 @@ fn welcome_and_announcements_precede_upgrade_highlights(cx: &mut TestAppContext)
 /// directly with no key or pointer event and only then releases the lookup. Highlights must leave it in front.
 #[gpui::test]
 fn a_late_highlights_answer_leaves_a_newly_focused_prompt_alone(cx: &mut TestAppContext) {
+    late_answer_after_prompt(cx, false);
+}
+
+/// A startup security-key prompt can take focus and close without any Farhelm input. The lookup must
+/// leave the restored focus and saved release alone even though there is no active prompt when it answers.
+#[gpui::test]
+fn a_late_highlights_answer_stays_hidden_after_the_prompt_closes(cx: &mut TestAppContext) {
+    late_answer_after_prompt(cx, true);
+}
+
+/// Hold the website's answer across an automatic dialog. Run the same oracle with the dialog still open
+/// and after it closes to distinguish current layer presence from a change in keyboard ownership.
+fn late_answer_after_prompt(cx: &mut TestAppContext, close_before_answer: bool) {
     let answer_ready = Rc::new(Cell::new(false));
     let waiting = Rc::new(Cell::new(None));
     let finished = Rc::new(Cell::new(false));
@@ -194,24 +208,37 @@ fn a_late_highlights_answer_leaves_a_newly_focused_prompt_alone(cx: &mut TestApp
     let wake = waiting
         .take()
         .expect("the lookup reached the held response");
-    cx.update(|window, cx| crate::welcome::open(&opener, &Mark::take(cx), window, cx));
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    let prompt = cx
+        .update(|window, cx| crate::welcome::open(&opener, &mark, window, cx))
+        .expect("the intervening prompt opened");
     settle(cx);
     assert_eq!(focused_id(cx).as_deref(), Some("welcome-got-it"));
+    if close_before_answer {
+        cx.update(|window, cx| crate::layers::close(prompt, window, cx));
+        settle(cx);
+        assert!(!any_open(cx), "the automatic prompt has closed");
+        assert!(
+            !cx.update(|_, cx| crate::focus::has_moved_on(&mark, cx)),
+            "the prompt opened and closed without user input"
+        );
+    }
+    let focused_before_answer = focused_id(cx);
 
     answer_ready.set(true);
     wake.wake();
     settle(cx);
     assert!(finished.get(), "the highlights answer ran");
     assert!(!shows(cx, "whats-new"));
-    assert_eq!(focused_id(cx).as_deref(), Some("welcome-got-it"));
+    assert_eq!(focused_id(cx), focused_before_answer);
     assert!(
         helm.commands().is_empty(),
         "no highlights were shown or skipped"
     );
 }
 
-/// A failed lookup leaves the baseline intact. On a later connection the same check succeeds. Escape, the header
-/// Close and Don't show again each close and record, with only the last also changing the setting.
+/// A failed lookup leaves the baseline intact so a later connection can retry. Closing records the release on
+/// a best-effort basis. When the helm refuses an explicit Don't show again, the user gets a notice.
 #[gpui::test]
 fn a_failed_check_can_retry_and_all_dismissals_record_the_release(cx: &mut TestAppContext) {
     let checks = Cell::new(0);
@@ -244,7 +271,13 @@ fn a_failed_check_can_retry_and_all_dismissals_record_the_release(cx: &mut TestA
         "a failed read cannot advance the record"
     );
 
-    for way in ["escape", "whats-new-close", "whats-new-opt-out"] {
+    for (way, refused) in [
+        ("escape", false),
+        ("whats-new-close", false),
+        ("whats-new-opt-out", false),
+        ("whats-new-got-it", true),
+        ("whats-new-opt-out", true),
+    ] {
         reset(&mut helm, cx, snapshot.clone());
         assert!(shows(cx, "whats-new"));
         assert_eq!(focused_id(cx).as_deref(), Some("whats-new-got-it"));
@@ -260,7 +293,16 @@ fn a_failed_check_can_retry_and_all_dismissals_record_the_release(cx: &mut TestA
             expected["show_whats_new"] = json!(false);
         }
         assert_eq!(body, expected, "{way}");
-        helm.reply(id, 200, None);
+        if refused {
+            helm.reply(id, 500, Some(json!("Could not save preferences")));
+        } else {
+            helm.reply(id, 200, None);
+        }
         settle(cx);
+        assert_eq!(
+            cx.update(|_, cx| notices::posted(cx).contains(&Notice::UpgradeHighlightsOptOutFailed)),
+            refused && way == "whats-new-opt-out",
+            "notice after {way}, refused={refused}"
+        );
     }
 }

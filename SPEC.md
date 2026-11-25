@@ -910,8 +910,9 @@ the record for a later launch. If the user starts working or another prompt take
 arrive, the app leaves focus and the record alone.
 
 **Got it**, the ×, and Escape close the dialog and record the running release. **Don't show again** also turns off
-upgrade highlights. While off, newer releases are skipped and recorded. Turning highlights on in Settings resumes them
-from the next upgrade. The highlights check works with automatic updates turned off.
+upgrade highlights. If the helm refuses the opt-out, a window notice tells the user how to try again in Settings. While
+off, newer releases are skipped and recorded. Turning highlights on in Settings resumes them from the next upgrade. The
+highlights check works with automatic updates turned off.
 
 The installer, run by hand, intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from
 get.farhelm.io, downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no
@@ -4994,6 +4995,8 @@ environment.
   choice alive or inherit the closed dialog's alert. A failed corrective read leaves trust settings unavailable rather
   than treating unknown trust as off. An ntfy save refused during the Settings close question leaves the form open with
   its reason. The first visit to Notifications in the reopened dialog reads the saved ntfy settings from the helm.
+- Recording an ordinary dismissal of upgrade highlights (**Got it**, ×, or Escape) is best effort, like marking the
+  welcome card seen. If the save fails, the highlights can appear again at a later window start or reset.
 - Connection state per host is always visible on its rail avatar, with name and phase on hover and to screen readers;
   reconnection uses bounded retries followed by periodic low-frequency re-probing, so a host that comes back overnight
   resurfaces by itself. Hosts swaps session content for the complete management surface. Each row and its rail avatar
