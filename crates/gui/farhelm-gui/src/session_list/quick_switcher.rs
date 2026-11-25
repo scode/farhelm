@@ -1348,8 +1348,13 @@ fn footer_hints(mode: Mode, palette: &Palette) -> AnyElement {
         Mode::Sessions => "open",
         Mode::Templates => "start",
     };
+    // The key caps alone read as fragments to a screen reader; give the strip one sentence, as the launcher's hint has.
+    let label: SharedString =
+        format!("Up and Down to move, Enter to {enter}, Escape to close").into();
     div()
         .id("quick-switcher-footer-keys")
+        .role(Role::Label)
+        .aria_label(label)
         .flex()
         .flex_wrap()
         .gap(px(12.))
