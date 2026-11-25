@@ -1,4 +1,4 @@
-//! A private copy of a vendor's configuration for agents whose Farhelm hooks are global files.
+//! Private vendor configuration for tests that exercise Farhelm's on-disk hook setup or Claude workspace trust.
 //!
 //! Grok and Antigravity (every kind for which `AgentKind::offers_persistent_hooks` is true) discover Farhelm's
 //! conversation hooks from files in the user's own configuration, `~/.grok/hooks/farhelm.json` and
@@ -23,6 +23,9 @@
 //!
 //! Adding a kind with persistent hooks needs nothing here as long as its paths lie under the home or Grok's home;
 //! the guard test below fails for one that does not, and for one without a drift profile.
+//!
+//! Claude's trust test has an explicit mirror. Farhelm canonicalizes the selected config before editing it, so each
+//! of Claude's possible trust files needs its own regular-file copy. Those copies are discarded with the test.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -43,6 +46,8 @@ pub(super) enum Root {
     Home,
     /// Grok's configuration root: `grok_home` in the supervisor, `GROK_HOME` for the agent.
     GrokHome,
+    /// Claude's explicitly selected config directory. The supervisor's launch environment supplies this override.
+    ClaudeConfigDir,
 }
 
 impl Root {
@@ -53,6 +58,7 @@ impl Root {
         match self {
             Root::Home => "HOME",
             Root::GrokHome => "GROK_HOME",
+            Root::ClaudeConfigDir => "CLAUDE_CONFIG_DIR",
         }
     }
 
@@ -71,6 +77,10 @@ impl Root {
                 Some(root) => Ok(PathBuf::from(root)),
                 None => Ok(home()?.join(".grok")),
             },
+            Root::ClaudeConfigDir => std::env::var_os(self.variable())
+                .filter(|root| !root.is_empty())
+                .map(PathBuf::from)
+                .context("CLAUDE_CONFIG_DIR is not set"),
         }
     }
 
@@ -79,6 +89,7 @@ impl Root {
         match self {
             Root::Home => scratch.join("plan-home"),
             Root::GrokHome => scratch.join("plan-grok-home"),
+            Root::ClaudeConfigDir => scratch.join("plan-claude-config"),
         }
     }
 }
@@ -135,6 +146,8 @@ struct Mirror {
     private: PathBuf,
     /// Hook files relative to the root, with the real file's bytes before the case (`None` when absent).
     leaves: Vec<(PathBuf, Option<Vec<u8>>)>,
+    /// Vendor config files that can be edited after canonicalization. They never enter the copy-back list.
+    copied: Vec<(PathBuf, Option<Vec<u8>>)>,
     /// Every symlink the mirror made, relative to the root, with the stamp of a regular-file target.
     links: Vec<(PathBuf, Option<Stamp>)>,
 }
@@ -144,9 +157,29 @@ impl Mirror {
     /// directory, so the setup's writes cannot pass through a link into the real tree; every other entry in those
     /// directories is a symlink to the real entry. A real directory that does not exist yet mirrors as empty.
     fn build(root: Root, real: &Path, private: &Path, leaves: &[PathBuf]) -> anyhow::Result<Self> {
-        let leaf_set: BTreeSet<&Path> = leaves.iter().map(PathBuf::as_path).collect();
+        Self::build_with_copies(root, real, private, leaves, &[], &BTreeSet::new())
+    }
+
+    /// Build directories above both kinds of protected leaf. Copy a vendor config's bytes into a distinct inode,
+    /// even when its real name is a symlink, so the launch's canonicalization stays in the mirror.
+    fn build_with_copies(
+        root: Root,
+        real: &Path,
+        private: &Path,
+        leaves: &[PathBuf],
+        copies: &[PathBuf],
+        protected: &BTreeSet<(u64, u64)>,
+    ) -> anyhow::Result<Self> {
+        let mut leaf_set: BTreeSet<PathBuf> = leaves.iter().chain(copies).cloned().collect();
+        for copy in copies {
+            // Claude creates this directory to serialize config updates. A real lock held by another
+            // session must not block the private launch. Leave the name available in the mirror.
+            let mut lock = copy.as_os_str().to_owned();
+            lock.push(".lock");
+            leaf_set.insert(lock.into());
+        }
         let mut dirs = BTreeSet::from([PathBuf::new()]);
-        for leaf in leaves {
+        for leaf in &leaf_set {
             dirs.extend(leaf.ancestors().skip(1).map(Path::to_path_buf));
         }
         let mut links = Vec::new();
@@ -167,20 +200,48 @@ impl Mirror {
                 if dirs.contains(&relative) || leaf_set.contains(relative.as_path()) {
                     continue;
                 }
-                std::os::unix::fs::symlink(real.join(&relative), private.join(&relative))
-                    .with_context(|| format!("linking {}", private.join(&relative).display()))?;
-                links.push((relative.clone(), Stamp::of(&real.join(&relative))));
+                let source = real.join(&relative);
+                let target = private.join(&relative);
+                if !protected.is_empty()
+                    && regular_file_identity(&source).is_some_and(|file| protected.contains(&file))
+                {
+                    // Linking an alias would let a vendor write reach a known protected config through another name.
+                    fs::copy(&source, &target).with_context(|| {
+                        format!("copying vendor config alias into {}", target.display())
+                    })?;
+                    continue;
+                }
+                std::os::unix::fs::symlink(&source, &target)
+                    .with_context(|| format!("linking {}", target.display()))?;
+                links.push((relative, Stamp::of(&source)));
             }
         }
         let leaves = leaves
             .iter()
             .map(|leaf| (leaf.clone(), fs::read(real.join(leaf)).ok()))
             .collect();
+        let mut copied = Vec::new();
+        for leaf in copies {
+            let source = real.join(leaf);
+            let before = read_optional(&source)?;
+            if before.is_some() {
+                let target = private.join(leaf);
+                fs::copy(&source, &target)
+                    .with_context(|| format!("copying vendor config into {}", target.display()))?;
+                ensure!(
+                    fs::canonicalize(&target)? == fs::canonicalize(private)?.join(leaf),
+                    "private config {} resolves outside its mirror",
+                    target.display(),
+                );
+            }
+            copied.push((leaf.clone(), before));
+        }
         Ok(Self {
             root,
             real: real.to_path_buf(),
             private: private.to_path_buf(),
             leaves,
+            copied,
             links,
         })
     }
@@ -188,11 +249,19 @@ impl Mirror {
     /// The maintainer's hook files must be exactly as they were. Checked after setup and again at the end.
     fn real_leaves_unchanged(&self) -> anyhow::Result<()> {
         for (leaf, before) in &self.leaves {
-            let now = fs::read(self.real.join(leaf)).ok();
+            let path = self.real.join(leaf);
             ensure!(
-                now == *before,
+                fs::read(&path).ok() == *before,
                 "the real {} changed while a drift case ran",
-                self.real.join(leaf).display()
+                path.display()
+            );
+        }
+        for (leaf, before) in &self.copied {
+            let path = self.real.join(leaf);
+            ensure!(
+                read_optional(&path)? == *before,
+                "the real {} changed while a drift case ran",
+                path.display()
             );
         }
         Ok(())
@@ -200,7 +269,11 @@ impl Mirror {
 
     /// Farhelm's setup wrote every planned file into the mirror as a regular file of its own.
     fn private_leaves_installed(&self) -> anyhow::Result<()> {
-        for (leaf, _) in &self.leaves {
+        for (leaf, _) in self
+            .leaves
+            .iter()
+            .chain(self.copied.iter().filter(|(_, before)| before.is_some()))
+        {
             let path = self.private.join(leaf);
             let metadata = fs::symlink_metadata(&path)
                 .with_context(|| format!("Farhelm's setup did not write {}", path.display()))?;
@@ -217,7 +290,7 @@ impl Mirror {
     /// was built. Returns a note for each replaced file it could not copy back. A failed copy of one file becomes its
     /// note rather than an early return, so it cannot cost the files after it (a refreshed login among them) or the
     /// caller's hook check.
-    fn copy_back(&self) -> Vec<String> {
+    fn copy_back(&self, protected: &BTreeSet<(u64, u64)>) -> Vec<String> {
         let mut notes = Vec::new();
         for (relative, stamp) in &self.links {
             let private = self.private.join(relative);
@@ -236,7 +309,7 @@ impl Mirror {
                 ));
                 continue;
             }
-            if let Err(error) = Self::replace_real(&private, &real) {
+            if let Err(error) = Self::replace_real(&private, &real, protected) {
                 notes.push(format!(
                     "{} was rewritten during the case, but copying it back failed: {error:#}; the case's copy was \
                      dropped",
@@ -248,10 +321,18 @@ impl Mirror {
     }
 
     /// Atomically replace the real file with the vendor's copy from the mirror, keeping the real file's permissions.
-    fn replace_real(private: &Path, real: &Path) -> anyhow::Result<()> {
+    fn replace_real(
+        private: &Path,
+        real: &Path,
+        protected: &BTreeSet<(u64, u64)>,
+    ) -> anyhow::Result<()> {
         // Resolve the maintainer's own symlinks (dotfiles, say) so the rename replaces the file, not the link.
         let target =
             fs::canonicalize(real).with_context(|| format!("resolving {}", real.display()))?;
+        ensure!(
+            !regular_file_identity(&target).is_some_and(|file| protected.contains(&file)),
+            "copy-back destination is a protected vendor config"
+        );
         let staged = target.with_file_name(format!(
             ".{}.farhelm-drift-{}",
             target
@@ -303,10 +384,38 @@ impl Mirror {
     }
 }
 
-/// The private configuration of one drift case, for an agent whose Farhelm hooks are global files.
+/// An absent config is valid. Other read failures would hide whether a real file changed during the case.
+fn read_optional(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("checking vendor config {}", path.display()));
+        }
+    };
+    ensure!(
+        metadata.is_file(),
+        "{} is not a regular file",
+        path.display()
+    );
+    fs::read(path)
+        .map(Some)
+        .with_context(|| format!("reading vendor config {}", path.display()))
+}
+
+/// Match file aliases across both mirrors, including separate symlinks and hard links to one config.
+fn regular_file_identity(path: &Path) -> Option<(u64, u64)> {
+    let metadata = fs::metadata(path).ok().filter(fs::Metadata::is_file)?;
+    Some((metadata.dev(), metadata.ino()))
+}
+
+/// Private vendor files for one drift case. Ordinary cases use this only for persistent hook setup.
 #[derive(Debug)]
 pub(super) struct PrivateConfig {
     mirrors: Vec<Mirror>,
+    /// The Claude trust case replaces the login shell because rc files could undo its path redirects.
+    launch_shell: Option<PathBuf>,
 }
 
 impl PrivateConfig {
@@ -330,15 +439,114 @@ impl PrivateConfig {
             let private = scratch.join(format!("private-{}", root.variable().to_ascii_lowercase()));
             mirrors.push(Mirror::build(root, &root.real()?, &private, &leaves)?);
         }
-        Ok(Some(Self { mirrors }))
+        Ok(Some(Self {
+            mirrors,
+            launch_shell: None,
+        }))
+    }
+
+    /// Opt in separately from hook setup. A typical base launch of Claude uses its ordinary configuration.
+    pub(super) fn prepare_claude_trust(scratch: &Path) -> anyhow::Result<Self> {
+        let home = Root::Home.real()?;
+        let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
+        Self::claude_trust_mirrors(scratch, &home, config_dir.as_deref())
+    }
+
+    /// Protect the normal, custom OAuth and legacy names so the test uses the production resolver's
+    /// precedence. The isolated files keep their original lengths and permissions, including empty read-only
+    /// legacy files. An explicit config directory is mirrored separately and overrides the vendor's path.
+    fn claude_trust_mirrors(
+        scratch: &Path,
+        home: &Path,
+        config_dir: Option<&Path>,
+    ) -> anyhow::Result<Self> {
+        ensure!(
+            home.is_absolute(),
+            "Claude trust test requires an absolute HOME"
+        );
+        ensure!(
+            config_dir.is_none_or(Path::is_absolute),
+            "Claude trust test requires an absolute CLAUDE_CONFIG_DIR"
+        );
+        let names =
+            |legacy: &str| [".claude.json", ".claude-custom-oauth.json", legacy].map(PathBuf::from);
+        let home_copies = names(".claude/.config.json");
+        let override_copies = names(".config.json");
+        let protected = home_copies
+            .iter()
+            .filter_map(|name| regular_file_identity(&home.join(name)))
+            .chain(config_dir.into_iter().flat_map(|config_dir| {
+                override_copies
+                    .iter()
+                    .filter_map(move |name| regular_file_identity(&config_dir.join(name)))
+            }))
+            .collect();
+        let private_home = scratch.join("private-home");
+        let mut mirrors = vec![Mirror::build_with_copies(
+            Root::Home,
+            home,
+            &private_home,
+            &[],
+            &home_copies,
+            &protected,
+        )?];
+        let private_override = scratch.join("private-claude-config");
+        if let Some(config_dir) = config_dir {
+            mirrors.push(Mirror::build_with_copies(
+                Root::ClaudeConfigDir,
+                config_dir,
+                &private_override,
+                &[],
+                &override_copies,
+                &protected,
+            )?);
+        }
+        let shell = claude_trust_shell(
+            scratch,
+            &private_home,
+            config_dir.map(|_| private_override.as_path()),
+        );
+        Ok(Self {
+            mirrors,
+            launch_shell: Some(shell),
+        })
+    }
+
+    /// After the composer opens without a trust answer, show that Farhelm wrote the fresh project's key in a
+    /// private config instead of relying on a trust decision the vendor already knew.
+    pub(super) fn check_claude_trust(&self, work: &Path) -> anyhow::Result<()> {
+        let work = fs::canonicalize(work)?;
+        let key = work.to_str().context("Claude workspace is not UTF-8")?;
+        for mirror in &self.mirrors {
+            for (relative, before) in &mirror.copied {
+                if let Some(bytes) = read_optional(&mirror.private.join(relative))?
+                    && claude_project_is_trusted(&bytes, key)
+                {
+                    ensure!(
+                        before
+                            .as_ref()
+                            .is_none_or(|bytes| !claude_project_is_trusted(bytes, key)),
+                        "Claude's scratch workspace was already trusted before this test"
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        bail!("Claude's private configuration did not acquire trust for the scratch workspace")
     }
 
     /// Point the supervisor's setup and the agent's environment at the mirrors.
     pub(super) fn apply(&self, seams: &mut SupervisorSeams) {
+        if let Some(shell) = &self.launch_shell {
+            seams.launch_shell = Some(shell.to_string_lossy().into_owned());
+        }
         for mirror in &self.mirrors {
             match mirror.root {
                 Root::Home => seams.user_home = Some(mirror.private.clone()),
                 Root::GrokHome => seams.grok_home = Some(mirror.private.clone()),
+                Root::ClaudeConfigDir => {}
             }
             seams.launch_env.push((
                 mirror.root.variable().into(),
@@ -377,9 +585,19 @@ impl PrivateConfig {
     /// first line, and carries the notes after it.
     pub(super) fn finish(&self, stopped: bool) -> anyhow::Result<Vec<String>> {
         let mut notes = Vec::new();
+        let protected = self
+            .mirrors
+            .iter()
+            .flat_map(|mirror| {
+                mirror
+                    .copied
+                    .iter()
+                    .filter_map(|(file, _)| regular_file_identity(&mirror.real.join(file)))
+            })
+            .collect();
         for mirror in &self.mirrors {
             if stopped {
-                notes.extend(mirror.copy_back());
+                notes.extend(mirror.copy_back(&protected));
             } else {
                 notes.extend(mirror.dropped_without_shutdown());
             }
@@ -394,6 +612,38 @@ impl PrivateConfig {
             Err(error) => Err(anyhow::anyhow!("{error:#}\n{}", notes.join("\n"))),
         }
     }
+}
+
+/// The real launch shim resolves trust after its login shell. Use an owned shell that pins the mirror paths and
+/// starts the shim without sourcing rc files that could restore either original path.
+fn claude_trust_shell(scratch: &Path, home: &Path, config_dir: Option<&Path>) -> PathBuf {
+    let home = shell_words::quote(home.to_str().expect("private home is UTF-8"));
+    let config = config_dir.map_or_else(
+        || "unset CLAUDE_CONFIG_DIR".to_owned(),
+        |path| {
+            format!(
+                "export CLAUDE_CONFIG_DIR={}",
+                shell_words::quote(path.to_str().expect("private config is UTF-8"))
+            )
+        },
+    );
+    crate::host_creates::script(
+        &scratch.join("claude-trust-shell"),
+        &format!(
+            r#"[ "$#" = 4 ] && [ "$1" = -l ] && [ "$2" = -i ] && [ "$3" = -c ] || exit 64
+export HOME={home}
+{config}
+unset ENV BASH_ENV
+exec /bin/sh -c "$4""#
+        ),
+    )
+}
+
+/// The one workspace trust field Farhelm sets in Claude's document.
+fn claude_project_is_trusted(bytes: &[u8], work: &str) -> bool {
+    serde_json::from_slice::<serde_json::Value>(bytes).is_ok_and(|document| {
+        document["projects"][work]["hasTrustDialogAccepted"].as_bool() == Some(true)
+    })
 }
 
 /// Ask the supervisor which files its setup writes for `kind`, with both roots in fresh scratch directories.
@@ -542,6 +792,7 @@ mod tests {
 
         let config = PrivateConfig {
             mirrors: vec![mirror],
+            launch_shell: None,
         };
         let unconfirmed = config.finish(false).unwrap();
         assert_eq!(unconfirmed.len(), 2, "{unconfirmed:?}");
@@ -599,6 +850,7 @@ mod tests {
 
         let config = PrivateConfig {
             mirrors: vec![mirror],
+            launch_shell: None,
         };
         let error = format!("{:#}", config.finish(true).unwrap_err());
         assert_eq!(
@@ -627,5 +879,102 @@ mod tests {
         assert!(private.join("hooks").is_dir());
         assert!(mirror.links.is_empty());
         mirror.real_leaves_unchanged().unwrap();
+    }
+
+    /// Claude canonicalizes the chosen alias. The private copy must resolve to its own inode and its lock
+    /// must be available even when the user's real config is locked. Neither trust nor lock state goes back.
+    #[farhelm_testtrace::test]
+    fn claude_trust_copies_an_explicit_symlinked_config_and_keeps_its_lock_private() {
+        let scratch = farhelm_teststate::tempdir().unwrap();
+        let home = scratch.path().join("home");
+        let override_dir = scratch.path().join("vendor-config");
+        let isolated = scratch.path().join("case");
+        fs::create_dir(&home).unwrap();
+        fs::create_dir(&override_dir).unwrap();
+        fs::create_dir(&isolated).unwrap();
+        let real_target = override_dir.join("settings.json");
+        fs::write(&real_target, b"{}").unwrap();
+        let real_file = override_dir.join(".claude-custom-oauth.json");
+        std::os::unix::fs::symlink(&real_target, &real_file).unwrap();
+        std::os::unix::fs::symlink(&real_target, home.join("config-alias")).unwrap();
+        let real_lock = override_dir.join(".claude-custom-oauth.json.lock");
+        fs::create_dir(&real_lock).unwrap();
+        let config =
+            PrivateConfig::claude_trust_mirrors(&isolated, &home, Some(&override_dir)).unwrap();
+        let mut seams = SupervisorSeams::default();
+        config.apply(&mut seams);
+        let (_, private_override) = seams
+            .launch_env
+            .iter()
+            .find(|(name, _)| name == "CLAUDE_CONFIG_DIR")
+            .unwrap();
+        let private_file = Path::new(private_override).join(".claude-custom-oauth.json");
+        let canonical_private = fs::canonicalize(private_override).unwrap();
+        assert_eq!(
+            fs::canonicalize(&private_file).unwrap(),
+            canonical_private.join(".claude-custom-oauth.json")
+        );
+        assert_ne!(
+            fs::metadata(&real_target).unwrap().ino(),
+            fs::metadata(&private_file).unwrap().ino()
+        );
+        let private_lock = Path::new(private_override).join(".claude-custom-oauth.json.lock");
+        assert!(!private_lock.exists());
+        let home_mirror = isolated.join("private-home");
+        for alias in [
+            Path::new(private_override).join("settings.json"),
+            home_mirror.join("config-alias"),
+        ] {
+            assert!(fs::symlink_metadata(&alias).unwrap().is_file());
+            fs::write(alias, b"changed in the fixture").unwrap();
+        }
+        let probe = std::process::Command::new(seams.launch_shell.unwrap())
+            .args([
+                "-l",
+                "-i",
+                "-c",
+                r#"printf '%s\n%s\n' "$HOME" "$CLAUDE_CONFIG_DIR""#,
+            ])
+            .env("HOME", &home)
+            .env("CLAUDE_CONFIG_DIR", &override_dir)
+            .output()
+            .unwrap();
+        assert!(probe.status.success());
+        assert_eq!(
+            String::from_utf8(probe.stdout).unwrap(),
+            format!("{}\n{private_override}\n", home_mirror.display())
+        );
+        let project = fs::canonicalize(scratch.path()).unwrap();
+        let value = serde_json::json!({"projects": {project.to_str().unwrap(): {"hasTrustDialogAccepted": true}}});
+        fs::write(private_file, serde_json::to_vec(&value).unwrap()).unwrap();
+        config.check_hook_setup(true).unwrap();
+        config.check_claude_trust(&project).unwrap();
+        assert!(config.finish(true).unwrap().is_empty());
+        assert_eq!(fs::read(real_file).unwrap(), b"{}");
+        assert!(real_lock.is_dir());
+    }
+
+    /// Even an empty legacy file can outrank the modern file when read-only. Keep its length and permissions
+    /// and preserve absence for the alternate names so the real resolver sees the same candidates.
+    #[farhelm_testtrace::test]
+    fn claude_trust_preserves_the_default_legacy_file_shape() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let scratch = farhelm_teststate::tempdir().unwrap();
+        let home = scratch.path().join("home");
+        let isolated = scratch.path().join("case");
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::create_dir(&isolated).unwrap();
+        let legacy = home.join(".claude/.config.json");
+        fs::write(&legacy, b"").unwrap();
+        fs::set_permissions(&legacy, fs::Permissions::from_mode(0o400)).unwrap();
+        let config = PrivateConfig::claude_trust_mirrors(&isolated, &home, None).unwrap();
+        let private_home = isolated.join("private-home");
+        let metadata = fs::metadata(private_home.join(".claude/.config.json")).unwrap();
+        assert_eq!(metadata.mode() & 0o777, 0o400);
+        assert_eq!(metadata.len(), 0);
+        assert!(!private_home.join(".claude.json").exists());
+        config.check_hook_setup(true).unwrap();
+        assert!(config.finish(true).unwrap().is_empty());
     }
 }
