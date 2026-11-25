@@ -3629,12 +3629,14 @@ agent's kind and launch metadata remain its actual values, rather than identifyi
 
 Protocol 51 added a `claude_trust` bool beside `post_clone` in `ResolvedGithubCheckout`. Retained requests still
 serialize it as before because the value is part of their create fingerprints. New requests omit it, and the supervisor
-takes the trust choice from the launch. Helm schema 53 adds `checkout_config.claude_trust` (false by default) and
-nullable `preferences.claude_trust_hint_dismissed`. The protected `GET /api/checkout-claude-trust` returns `enabled` and
-`hint_dismissed`; PUT requires only an `enabled` bool. This setting changes no destination, so it does not bump the
-checkout preview revision. Its write and the sparse dismissal patch publish ordinary invalidation hints. UI saves use
-the configuration ordering funnel; dismissal uses the per-field preference queue and overlays a still-pending dismissal
-on fresh reads.
+takes the trust choice from the launch. A supervisor older than that reads the missing field as no post-clone trust and
+still applies a structured Claude launch's trust, but without recording it for removal, so until it updates, a Claude
+launch into a fresh checkout on it leaves a trust entry that archiving the checkout does not remove. Helm schema 53 adds
+`checkout_config.claude_trust` (false by default) and nullable `preferences.claude_trust_hint_dismissed`. The protected
+`GET /api/checkout-claude-trust` returns `enabled` and `hint_dismissed`; PUT requires only an `enabled` bool. This
+setting changes no destination, so it does not bump the checkout preview revision. Its write and the sparse dismissal
+patch publish ordinary invalidation hints. UI saves use the configuration ordering funnel; dismissal uses the per-field
+preference queue and overlays a still-pending dismissal on fresh reads.
 
 Claude-specific file work lives in `agent_kind/claude/trust.rs`. A structured Claude launch freezes its trust choice in
 `LaunchSelection.workspace_trust`. The supervisor derives a default-off `LaunchSpec.claude_workspace_trust` for the
