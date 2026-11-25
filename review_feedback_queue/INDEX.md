@@ -227,14 +227,6 @@ consequences.
   — A non-final environment Delete can complete on its host and explain why it left a checkout behind, yet the warning
   never reaches the rail if the reply arrives after the inner supervisor deadline.
 
-- [`trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md`](trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md)
-  — A regression could again hide the cause of an early container connection failure while the route-specific diagnostic
-  checks pass.
-
-- [`trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md`](trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md)
-  — The no-default fixture checks numbering after a preview conflict and a successful create, leaving the specific
-  create-time lost-race cleanup unasserted.
-
 - [`trailing-borrower-classification-test-does-not-establish-checkout-membership.md`](trailing-borrower-classification-test-does-not-establish-checkout-membership.md)
   — This borrower classification case can pass if its second session never joins the managed checkout.
 
@@ -245,10 +237,6 @@ consequences.
 - [`launcher-new-environment-folder-omits-repository-prompt.md`](launcher-new-environment-folder-omits-repository-prompt.md)
   — When no repository has been selected for a new environment, the Folder row says cloning will happen and omits its
   invitation to select a repository.
-
-- [`remote-probe-absence-test-does-not-witness-proxy.md`](remote-probe-absence-test-does-not-witness-proxy.md) — The
-  remote probe regression test can pass through the missing-program path both times, without checking how it handles the
-  stand-in's exit.
 
 - [`environment-launch-history-test-bypasses-origin-handoff.md`](environment-launch-history-test-bypasses-origin-handoff.md)
   — The launch-history regression test can pass if an agent-requested environment starts becoming the desktop’s default

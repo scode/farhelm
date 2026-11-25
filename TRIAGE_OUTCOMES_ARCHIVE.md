@@ -46721,3 +46721,54 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. The New container form visibly says that deleting the last session also removes its container and
   files. The Folder golden checks the note is present. Change `xywsnynpzpupowlvozrytxzpxymxvqlv`, bookmark
   `plan/triage-podman-nov24/07-checkout-name`, [PR #4907](https://github.com/scode/farhelm/pull/4907/changes).
+
+## remote-probe-absence-test-does-not-witness-proxy.md
+
+- Outcome: `other`.
+- Assessment: A setup-probe test expects the same "not installed" result before and after installing its stand-in
+  program, so it cannot tell whether the stand-in actually ran. Verified: Confirmed. `provisioning/backend.rs:4331-4364`
+  (`remote_probe_reads_absence_from_the_record_when_ssh_reports_zero`) asserts `Absent` both times and never shows that
+  the stand-in ran.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
+- Execution: Fixed the test. Its installed stand-in writes a private witness before returning absence. The test checks
+  the missing-program probe leaves no witness and the second probe ran the installed stand-in. Change
+  `wlkmnxztmzqzxtsoykzklqxvyswzsynl`, bookmark `plan/triage-podman-nov24/08-remaining-test-gaps`,
+  [PR #4909](https://github.com/scode/farhelm/pull/4909/changes).
+
+## trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md
+
+- Outcome: `other`.
+- Assessment: No test covers a new-environment managed checkout whose folder is taken after its preview, which should
+  clean up the new environment and show "Not launched." with the conflict. Verified: Confirmed as a test gap. The
+  behavior is specified (SPEC.md about line 1899) and no production failure is claimed.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — coverage only; size S-M if kept.
+- Execution: No change under the approximately 20-line test limit. The existing checkout preview fixture starts after
+  attachment. The provisioning fixture would need a checkout preview peer, a refusal after one create and assertions for
+  the settled run, cleanup and absence of another create. Change `wlkmnxztmzqzxtsoykzklqxvyswzsynl`, bookmark
+  `plan/triage-podman-nov24/08-remaining-test-gaps`, [PR #4909](https://github.com/scode/farhelm/pull/4909/changes).
+
+## trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md
+
+- Outcome: `other`.
+- Assessment: The tests for early container connection failures feed the diagnostic function directly, so a regression
+  in how the connection stage is picked for a container's connection would not be caught. Verified: Confirmed as a test
+  gap by the reviewer's citations. Current line numbers in `manager.rs` have moved and I did not re-locate each test. No
+  product bug is claimed.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
+- Execution: No change under the approximately 20-line test limit. The existing manager fixture drives an ordinary SSH
+  process. A container check needs an admitted Podman place and an actual container stream which fails before reaching
+  its marker. Feeding a stage directly would duplicate the diagnostic-only coverage. Change
+  `wlkmnxztmzqzxtsoykzklqxvyswzsynl`, bookmark `plan/triage-podman-nov24/08-remaining-test-gaps`,
+  [PR #4909](https://github.com/scode/farhelm/pull/4909/changes).
