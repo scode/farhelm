@@ -106,6 +106,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Report late wake failures when launching on a suspended sandbox or stopped container.** When Resume takes longer
+  than the reply deadline, a later failure can leave the session launcher waiting for a minute before it gives the wrong
+  reason. A slow Podman check can fail before Starting appears. The next host row can still say Stopped and carry the
+  error from an earlier automatic start. Watching for a new phase or comparing error text cannot establish the outcome
+  of the current request. Give the launcher the terminal result of the wake it is waiting on, including failure before
+  the provider takes its connection hold. Start with the bounded reply in
+  `crates/farhelm-helm/src/tensorlake/lifecycle.rs` and the existing launch wait in `launcher/launch/wake_state.rs`.
+  Keep the 20-second reply deadline, the shared minute for a busy host and a fresh connection, and allow a successful
+  Resume elsewhere to satisfy the wait. Restore the held launch draft on failure. Report a repeated diagnosis promptly
+  if it belongs to this wake. Update SPEC.md's launcher wake contract and SPEC_impl.md under “The UI channel” for this
+  launcher-specific result. A failed start or a container that stops again should use Starting or Stopped wording, per
+  [Container sessions](SPEC.md#container-sessions). Exercise a late failure before Starting, repeated failures for both
+  providers, and a direct start refusal. Verify the launcher alert in both appearances. The fix needs a result the helm
+  can attribute to the bounded request, beyond the launcher-only triage budget.
+
 - **Require the fresh-clone warning before Replace with can act.** In Replace with, a recent setup can switch the
   destination from the source's managed checkout to a fresh clone. On a suspended host, the same Enter can start waking
   the host. On a connected host, a second press can launch once the preview returns while the old frame still shows the
