@@ -442,30 +442,6 @@
   to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-custom-agent-settings-delete-confirmation-bypasses-ask-inline.md
-
-- Outcome: `fix code`.
-- Assessment: Deleting a custom agent in Settings asks for confirmation with two plain footer buttons rather than
-  Farhelm's question control. Focus does not move to Cancel. Escape closes Settings, or asks to save, instead of
-  cancelling the delete. A failure to start the delete replaces the question text while the buttons stay. The question
-  does not name the agent. Verified: Confirmed. `Editor::footer` renders raw `custom-agent-keep` and
-  `custom-agent-confirm-delete` buttons (`custom_agents.rs:500-595`), and Delete reads live `self.stored`
-  (`custom_agents.rs:391-392`). SPEC_impl.md "Questions: the prompt" says "Owner: the prompt, the one way to ask the
-  user a question", and that an inline question "takes focus on its starting answer" and "Escape on it is Cancel and
-  does not reach the owner's dialog". The recipe editor's delete uses `prompt::ask_inline(...).starts_on_cancel()`
-  (`settings/recipes/editor/leaving.rs:270-287`). There is no established wrong-target route, because each editor is
-  keyed by an immutable ID. This is nearly clearly settled. It is held back because the fix still needs choices: the
-  question's wording, whether to start on Cancel, and how it interacts with 79.
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code. Port the delete question to `prompt::ask_inline` as the
-  recipe editor does, which also settles 79. Size M (about 60-120 lines with tests, so it may exceed 100). Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## settings-close-save-can-hide-notification-refusal.md
 
 - Outcome: `fix code`.
