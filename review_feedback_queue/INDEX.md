@@ -25,14 +25,6 @@ consequences.
 - [`hook-settings-toggle-uses-unshown-state.md`](hook-settings-toggle-uses-unshown-state.md) — Space can save the
   all-hosts hook opt-in while the switch still shows the on state the user intended to turn off.
 
-- [`replace-can-submit-before-checkout-warning.md`](replace-can-submit-before-checkout-warning.md) — Replace with can
-  submit a fresh checkout before its updated warning is shown, allowing the previous checkout to move to trash without
-  the displayed disclosure.
-
-- [`trailing-replace-with-suspended-checkout-recent-skips-warning.md`](trailing-replace-with-suspended-checkout-recent-skips-warning.md)
-  — In Replace with on a suspended managed-checkout host, pressing Down then Enter on a retained recent checkout setup
-  immediately wakes, clones fresh, and deletes the source without showing the fresh-clone warning.
-
 - [`trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md`](trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md)
   — Expanding a custom agent's ~/ command only during launch preparation kills a live agent on Restart (and allocates
   checkouts on Create) before failing if HOME is missing or the expanded path cannot be resolved (borderline
