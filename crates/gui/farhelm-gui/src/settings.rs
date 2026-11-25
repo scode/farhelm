@@ -106,6 +106,8 @@ mod tensorlake_key;
 #[cfg(test)]
 mod tensorlake_sandbox_tests;
 mod tensorlake_sandboxes;
+#[cfg(test)]
+pub(crate) use tensorlake_sandboxes::cleanup_key_refusal_for_golden;
 mod tensorlake_ssh_key;
 #[cfg(test)]
 mod tensorlake_tests;

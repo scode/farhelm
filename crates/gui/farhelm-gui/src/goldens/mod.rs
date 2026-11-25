@@ -1451,6 +1451,28 @@ static SCENES: &[Scene] = &[
         setup: settings_tensorlake_sandboxes_setup,
     },
     Scene {
+        name: "tensorlake-cleanup-key-refusal",
+        size: (580., 330.),
+        draw: |state, _, cx| {
+            let keep = state.keep.borrow();
+            let list = keep
+                .first()
+                .and_then(|view| view.downcast_ref::<gpui::AnyView>());
+            let palette = theme::palette(cx);
+            div()
+                .w_full()
+                .p(px(8.))
+                .bg(theme::color(palette.settings_page))
+                .text_color(theme::color(palette.fg_0))
+                .children(list.cloned())
+                .into_any_element()
+        },
+        setup: |state, _, cx| {
+            let list = crate::settings::cleanup_key_refusal_for_golden(cx);
+            state.keep.borrow_mut().push(Box::new(list));
+        },
+    },
+    Scene {
         name: "settings-tensorlake-keys",
         size: (800., 830.),
         draw: settings_tensorlake_sandboxes,
