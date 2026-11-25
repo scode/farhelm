@@ -26,8 +26,9 @@ use gpui::{
 
 use super::{
     AfterDrawn, SceneState, defer_after, fleet, rest_pointer_at, session_at_age,
-    session_list_scene, session_list_scene_opening, session_list_scene_preferring,
-    session_list_scene_with_listing, session_list_then, session_lists_at,
+    session_list_scene, session_list_scene_holding, session_list_scene_opening,
+    session_list_scene_preferring, session_list_scene_with_listing, session_list_then,
+    session_lists_at,
 };
 
 /// A fleet with every mark and line a row draws differently: running (selected, so its inverse colors are pinned),
@@ -500,8 +501,11 @@ fn custom_named_list(state: &SceneState, cx: &mut App) {
 }
 
 /// Open the real switcher with one registered row and one whose registration was deleted.
-pub(super) fn custom_agent_switcher_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+pub(super) fn custom_agent_switcher_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    window.set_driver_enabled(true);
     custom_named_list(state, cx);
+    // The shared settler waits for a visible row, with a frame budget if it never appears.
+    state.hover.set(Some("quick-switcher-row-a"));
     state.after.set(Some(|list, _, window, cx| {
         use crate::session_list::quick_switcher::{self, Mode};
         quick_switcher::open(list.downgrade(), Mode::Sessions, window, cx);
@@ -511,6 +515,89 @@ pub(super) fn custom_agent_switcher_setup(state: &SceneState, _: &mut Window, cx
             cx,
         );
     }));
+}
+
+/// Leave the opening step pending until the fake snapshot contains the preferences the real shortcut requires.
+/// The shared golden settler fails after its staging budget if the prerequisite never arrives.
+pub(super) fn quick_switcher_scene(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    if session::current_store(cx).is_some_and(|store| {
+        crate::session_list::selection::preferences(store.read(cx).collections()).is_some()
+    }) {
+        defer_after(state, window, cx);
+    }
+    super::session_lists(state, window, cx)
+}
+
+/// Empty search, with mixed live and ended statuses, relative ages and the pinned Quick launch row.
+pub(super) fn quick_switcher_recent_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    switcher_setup(state, cx);
+    state.after.set(Some(|list, _, window, cx| {
+        open_switcher_fixture(list, "", window, cx);
+    }));
+}
+
+/// A title and a folder both match `api`. The typed field hides the hint row and offers a pinned New action.
+pub(super) fn quick_switcher_query_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    switcher_setup(state, cx);
+    state.after.set(Some(|list, _, window, cx| {
+        open_switcher_fixture(list, "api", window, cx);
+    }));
+}
+
+/// The prefix changes the result collection while the session reply is still pending.
+pub(super) fn quick_switcher_templates_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    switcher_setup(state, cx);
+    state.after.set(Some(|list, _, window, cx| {
+        open_switcher_fixture(list, "tl:", window, cx);
+    }));
+}
+
+/// Use the sidebar fleet, with a folder that matches the query independently of any title.
+fn switcher_rows() -> [super::Fixture; 6] {
+    let [a, b, c, d, f, e] = fleet();
+    [
+        a.host_name("Local"),
+        b.cwd("/home/user/src/api/docs"),
+        c,
+        d.host_name("Local"),
+        f.host_name("bench"),
+        e,
+    ]
+}
+
+fn switcher_setup(state: &SceneState, cx: &mut App) {
+    session_list_scene_holding(
+        state,
+        &switcher_rows(),
+        Some("a"),
+        vec![super::templates::editor_scene_templates()],
+        cx,
+    );
+}
+
+/// For the template search the session read stays pending, so the snapshot also pins which list owns the state line.
+fn open_switcher_fixture(
+    list: &Entity<SessionList>,
+    query: &str,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::session_list::quick_switcher::{self, Mode};
+    quick_switcher::open(list.downgrade(), Mode::Sessions, window, cx);
+    if query != "tl:" {
+        let sessions = switcher_rows().map(|row| row.entry().value);
+        quick_switcher::seed_golden_listing(
+            serde_json::json!({"sessions": sessions, "total": sessions.len(), "truncated": false}),
+            cx,
+        );
+    }
+    if !query.is_empty() {
+        quick_switcher::seed_golden_query(query, window, cx);
+    }
 }
 
 /// The list's order menu, open below its title as a click opens it (reference `sort-menu`): the title in its open look,

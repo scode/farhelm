@@ -253,7 +253,8 @@ fn the_quick_launch_row_names_the_mark_and_launches_or_opens_templates(cx: &mut 
     let (mut helm, cx) = window(cx, None);
     let label = |cx: &mut VisualTestContext| {
         cx.update(|_, cx| {
-            rows::quick_launch_row_label(cx)
+            rows::quick_launch_row_target(cx)
+                .prepend_text("Quick launch: ")
                 .accessible_name()
                 .to_string()
         })
@@ -306,7 +307,8 @@ fn the_quick_launch_row_before_the_preferences_arrive_says_mark_a_template_and_r
 /// The Quick launch row's label, as the switcher will draw it.
 fn label(cx: &mut VisualTestContext) -> String {
     cx.update(|_, cx| {
-        rows::quick_launch_row_label(cx)
+        rows::quick_launch_row_target(cx)
+            .prepend_text("Quick launch: ")
             .accessible_name()
             .to_string()
     })

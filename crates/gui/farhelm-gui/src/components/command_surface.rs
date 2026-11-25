@@ -54,6 +54,16 @@ pub(crate) fn command_heading(
     label: &str,
     palette: &Palette,
 ) -> AnyElement {
+    command_heading_with_count(id, label, None, palette)
+}
+
+/// Keep the count quiet and out of the uppercase label's typography. It follows the label in reading order.
+pub(crate) fn command_heading_with_count(
+    id: impl Into<SharedString>,
+    label: &str,
+    count: Option<String>,
+    palette: &Palette,
+) -> AnyElement {
     let id = id.into();
     div()
         .id(id.clone())
@@ -67,6 +77,13 @@ pub(crate) fn command_heading(
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::color(palette.fg_1))
         .child(label.to_uppercase())
+        .when_some(count, |heading, count| {
+            heading
+                .flex()
+                .justify_between()
+                .items_center()
+                .child(div().font_weight(FontWeight::NORMAL).child(count))
+        })
         .into_any_element()
 }
 

@@ -28,7 +28,7 @@
 //! view, [`quick_launch`] for the ⚡ chord, and [`begin_sequence`] for the sequence prefix with
 //! [`watch_sequence_presses`] for the press that cancels it; and [`open_at`] for the launcher's Save as template, which
 //! opens Templates on the template it saved. The quick switcher calls [`rows::template_query`] and [`rows::rows`] for
-//! its templates section, [`rows::pick_from_switcher`] for a pick there, [`rows::quick_launch_row_label`] and
+//! its templates section, [`rows::pick_from_switcher`] for a pick there, [`rows::quick_launch_row_target`] and
 //! [`rows::quick_launch_from_switcher`] for its Quick launch row, and [`rows::launch_from_list`] for a pick in its
 //! templates-only mode, the Cmd+J list.
 //!

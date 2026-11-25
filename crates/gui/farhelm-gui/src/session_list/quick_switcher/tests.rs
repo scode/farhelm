@@ -33,8 +33,8 @@ use serde_json::{Value, json};
 
 use super::{
     CAP_NOTICE, NEW_ROW_HELP, NEW_ROW_ID, QUICK_ROW_HELP, QUICK_ROW_ID, QuickSwitcher, Read,
-    Selected, TEMPLATE_ROW_HELP, TEMPLATE_ROW_ID, Tier, best_match, mark_positions,
-    matching_positions, ranked,
+    Selected, TEMPLATE_ROW_HELP, TEMPLATE_ROW_ID, Tier, abbreviated_path_marks, best_match,
+    mark_positions, matching_positions, ranked,
 };
 use crate::actions::{QUICK_SWITCHER_CHORD, TEMPLATE_LIST_CHORD};
 use crate::agent_startup::StagedValues;
@@ -311,6 +311,24 @@ fn marks_show_the_occurrence_that_earned_the_tier() {
     assert_eq!(mark_positions(raw, &shown, "2"), [1]);
 }
 
+/// A hidden match in the home prefix must not impersonate a later visible match. For a scattered match the remaining
+/// visible letters still explain why the directory was found.
+#[test]
+fn abbreviating_home_keeps_the_selected_path_occurrence() {
+    assert_eq!(
+        abbreviated_path_marks("/home/acct/src/acct", "~/src/acct", "acct"),
+        Vec::<usize>::new(),
+    );
+    assert_eq!(
+        abbreviated_path_marks("/home/acct/src/work", "~/src/work", "tw"),
+        [6],
+    );
+    assert_eq!(
+        abbreviated_path_marks("~/work", "~/work", "work"),
+        [2, 3, 4, 5]
+    );
+}
+
 // ---- The window ----------------------------------------------------------------------------------------------------
 
 /// The real main view over the fake helm ([`test_support::MainWindow`]), with this module's steps.
@@ -449,7 +467,7 @@ fn the_chord_from_a_terminal_opens_the_switcher_and_never_reaches_the_program(
     );
     let text = painted(&frame(main.cx));
     assert!(
-        text.iter().any(|line| line == "Recent sessions"),
+        text.iter().any(|line| line == "RECENT SESSIONS"),
         "{text:?}"
     );
     assert!(
@@ -701,13 +719,13 @@ fn a_reply_is_listed_in_ranking_order_and_a_cut_reply_says_so(cx: &mut TestAppCo
     settle(main.cx);
     let nodes = frame(main.cx);
     assert_eq!(drawn_rows(&nodes), ["a", "b", "c"]);
-    assert!(painted(&nodes).iter().any(|line| line == "Recent sessions"));
+    assert!(painted(&nodes).iter().any(|line| line == "RECENT SESSIONS"));
     assert!(!painted(&nodes).iter().any(|line| line == CAP_NOTICE));
 
     type_query(main.cx, "api");
     let nodes = frame(main.cx);
     assert_eq!(drawn_rows(&nodes), ["c", "b"], "the title match first");
-    assert!(painted(&nodes).iter().any(|line| line == "Sessions"));
+    assert!(painted(&nodes).iter().any(|line| line == "SESSIONS"));
 
     type_query(main.cx, "zzz");
     assert!(
@@ -842,7 +860,7 @@ fn the_arrows_move_the_selection_and_stop_at_both_ends(cx: &mut TestAppContext) 
 /// Every match is reachable from the keyboard (SPEC.md: "Every match is reachable by scrolling"), and the selected row
 /// must stay in view while the arrows walk past the visible part of the list, or the user picks blind. The old case
 /// used 41 matches. Specified: with 41 sessions, 40 presses of Down select the last, and that row is drawn inside the
-/// results list's visible area.
+/// results list's visible area, with the field, Quick launch and key strip still in view.
 #[gpui::test]
 fn the_selected_row_stays_in_view(cx: &mut TestAppContext) {
     const KEYS: [&str; 41] = [
@@ -855,6 +873,20 @@ fn the_selected_row_stays_in_view(cx: &mut TestAppContext) {
     let read = main.open_switcher();
     let rows: Vec<Fixture> = KEYS.iter().map(|key| session(key)).collect();
     main.answer(read, &rows, false);
+    let before = frame(main.cx);
+    let fixed_bounds = |nodes: &[DriverNode]| {
+        [
+            "quick-switcher-close",
+            QUICK_ROW_ID,
+            "quick-switcher-footer-keys",
+        ]
+        .map(|id| {
+            let part = node(nodes, id).unwrap_or_else(|| panic!("{id} is drawn"));
+            assert_eq!(part.visible_bounds, part.bounds, "{id} is fully visible");
+            part.bounds
+        })
+    };
+    let fixed = fixed_bounds(&before);
     keys(main.cx, &["down"; 40].join(" "));
     assert_eq!(listed(main.cx).1.as_deref(), Some("s40"));
     let nodes = frame(main.cx);
@@ -881,6 +913,7 @@ fn the_selected_row_stays_in_view(cx: &mut TestAppContext) {
         first.bottom() <= results.top(),
         "the premise: the list scrolled, so the first row is above its visible area"
     );
+    assert_eq!(fixed_bounds(&nodes), fixed, "only the results scrolled");
 }
 
 /// Picking is the switcher's whole point, and it must open the session exactly as a click on its row does: selected,
@@ -1760,12 +1793,7 @@ fn a_tl_query_lists_templates_in_the_helms_order_without_waiting_for_the_read(
     );
     let nodes = frame(main.cx);
     let shown = painted(&nodes);
-    for words in [
-        "Templates",
-        "Destination",
-        "Sets nothing yet",
-        "Picking a template opens New with it applied; nothing launches yet.",
-    ] {
+    for words in ["TEMPLATES", "Destination", "Sets nothing yet"] {
         assert!(
             shown.iter().any(|line| line == words),
             "{words:?} in {shown:?}"
@@ -1775,6 +1803,7 @@ fn a_tl_query_lists_templates_in_the_helms_order_without_waiting_for_the_read(
         !shown.iter().any(|line| line == "Loading sessions…"),
         "the read's state gives way to the section"
     );
+    assert!(node(&nodes, "quick-switcher-hints").is_none());
     assert_eq!(
         node(&nodes, "quick-switcher-template-partial").and_then(|row| row.label.as_deref()),
         Some("partial")
@@ -1910,9 +1939,8 @@ fn a_click_on_a_template_opens_new_and_returns_from_the_hosts_panel(cx: &mut Tes
 /// Specified: while the read is loading the row is drawn, labelled "Quick launch: Mark a template" with the ⚡ chord
 /// and helped "Quick launch: start the marked template directly, or open Templates to mark one", but not selected;
 /// once a, b and c arrive, a is selected and the row is drawn below the matches, with the empty field named "Search
-/// sessions or templates" and showing "Jump to a session · tl: for templates", and the hint "Templates" over "Type tl:
-/// to search templates. Picking one opens New with it applied." above the footer; typing `a` takes the row away for
-/// the New row; with ⚡ pushed onto go and the query cleared, it reads "Quick launch: go".
+/// sessions or templates". An empty field shows example commands and the fleet count. Typing `a` hides the examples
+/// and trades the row for the New row. With ⚡ pushed onto go and the query cleared, it reads "Quick launch: go".
 #[gpui::test]
 fn the_quick_launch_row_follows_the_matches_and_names_the_mark(cx: &mut TestAppContext) {
     let mut main = open_main(cx, template_fleet(None));
@@ -1963,9 +1991,12 @@ fn the_quick_launch_row_follows_the_matches_and_names_the_mark(cx: &mut TestAppC
     );
     let shown = painted(&nodes);
     for words in [
-        "Jump to a session · tl: for templates",
-        "Templates",
-        "Type tl: to search templates. Picking one opens New with it applied.",
+        "Jump to a session, or type a name to start one…",
+        "RECENT SESSIONS",
+        "3 · every host",
+        "tl:",
+        "search templates",
+        "fix login bug",
     ] {
         assert!(
             shown.iter().any(|line| line == words),
@@ -1976,6 +2007,7 @@ fn the_quick_launch_row_follows_the_matches_and_names_the_mark(cx: &mut TestAppC
     type_query(main.cx, "a");
     let nodes = frame(main.cx);
     assert!(node(&nodes, QUICK_ROW_ID).is_none() && node(&nodes, NEW_ROW_ID).is_some());
+    assert!(node(&nodes, "quick-switcher-hints").is_none());
 
     push_mark(&mut main, "go");
     set_query(main.cx, "");
@@ -2089,10 +2121,9 @@ fn marked_hosts() -> CollectionState {
 /// record carries no colors, so this pins what it can show; the inks (the host's tint, and the selected row's
 /// `--on-fill`) are the shared mark decision's, pinned in `row_marks_tests.rs`. Specified: over the local host and host
 /// 3's teal rocket, a reply of a on the local host and b on host 3 (named `builder-east`) draws a's mark as the laptop
-/// and b's as the rocket, b's an image named `Remote`, painted before `builder-east` with the old 6-pixel gap and level
-/// with it.
+/// and b's as the rocket. Its accessible name is `Remote`, and the mark is drawn to the right of the host name.
 #[gpui::test]
-fn a_row_draws_its_hosts_chosen_mark_before_the_hosts_name(cx: &mut TestAppContext) {
+fn a_row_draws_its_hosts_chosen_mark_to_the_right_of_the_destination(cx: &mut TestAppContext) {
     let mut fleet = fleet();
     fleet.push(marked_hosts());
     let mut main = open_main(cx, fleet);
@@ -2125,21 +2156,16 @@ fn a_row_draws_its_hosts_chosen_mark_before_the_hosts_name(cx: &mut TestAppConte
         .find(|text| text.text.as_ref() == "builder-east")
         .expect("b's row paints its host's name")
         .bounds;
-    let gap = f32::from(name.left()) - f32::from(mark.right());
     assert!(
-        (gap - 6.).abs() < 0.5,
-        "the mark {mark:?} sits 6 pixels before the name {name:?}"
-    );
-    assert!(
-        mark.center().y >= name.top() && mark.center().y <= name.bottom(),
-        "the mark {mark:?} is level with the name {name:?}"
+        mark.left() > name.right(),
+        "the mark {mark:?} sits to the right of the destination {name:?}"
     );
 }
 
 /// The switcher draws a session's host mark even for a session in a container, and the old switcher named that mark
 /// `Remote`, though a container is not reached over SSH; it now names the provider, as the Hosts row and the session
 /// row do (decided by the GPUI migration's orchestrator on 2026-11-16). `Remote` stays for an SSH host, which
-/// [`a_row_draws_its_hosts_chosen_mark_before_the_hosts_name`] pins. Specified: over the local host and host 2
+/// [`a_row_draws_its_hosts_chosen_mark_to_the_right_of_the_destination`] pins. Specified: over the local host and host 2
 /// described as a container, a reply of c on host 2 draws c's host mark as an image named `Container`.
 #[gpui::test]
 fn an_environment_sessions_host_mark_names_its_provider(cx: &mut TestAppContext) {

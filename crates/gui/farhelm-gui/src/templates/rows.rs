@@ -157,15 +157,14 @@ pub fn launch_from_list(name: &str, window: &mut Window, cx: &mut App) {
     );
 }
 
-/// The Quick launch row's label: "Quick launch: " and the marked template's name (host text, as stored, whether or not
-/// a template still has it), or "Mark a template" when none is marked, in the old words. The row draws the ⚡ chord
-/// beside it (`super::QUICK_LAUNCH_SHORTCUT_NAME`). Read from the store each time the row draws.
+/// The Quick launch row's target, following its "Quick launch" label. Use the stored host text for the marked name
+/// even if that name has left the template catalog. Without a mark, the same row offers "Mark a template".
 ///
 /// While the bindings cannot be known it says what the old row said: whatever the store last held, which is the last
 /// mark the helm pushed while its preferences are unavailable and "Mark a template" before they have arrived, as the
 /// old row showed its own copy of the preferences. Only the row's action refuses then ([`quick_launch_from_switcher`]).
-pub fn quick_launch_row_label(cx: &App) -> HostSentence {
-    let sentence = HostSentence::new("quick-switcher-quick-launch").text("Quick launch: ");
+pub fn quick_launch_row_target(cx: &App) -> HostSentence {
+    let sentence = HostSentence::new("quick-switcher-quick-launch-target");
     match Bindings::current(cx).marked {
         Some(name) => sentence.host(&HostText::from_host(name)),
         None => sentence.text("Mark a template"),

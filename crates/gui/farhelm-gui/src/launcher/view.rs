@@ -2969,7 +2969,7 @@ impl Render for Launcher {
         // Across the top of the launcher, pinned while the body scrolls, as the old sticky banner was.
         let escalation = self.escalation_band(holding, palette, window, cx);
         let mut frame = DialogFrame::new("launcher", title, body, answers)
-            .heading_control(command, guidance, command_anchor)
+            .heading_control(command, guidance, Some(command_anchor))
             .width(px(WIDTH))
             .flat_margin_when_wide()
             .close(

@@ -199,6 +199,13 @@ pub(crate) const QUICK_SWITCHER_CHORD: &str = if cfg!(target_os = "macos") {
     QUICK_SWITCHER_LINUX
 };
 
+/// The quick switcher's key cap uses the same platform chord as its binding.
+pub(crate) const QUICK_SWITCHER_SHORTCUT_NAME: &str = if cfg!(target_os = "macos") {
+    "⌘K"
+} else {
+    "Ctrl+Shift+K"
+};
+
 /// The template list's chords (SPEC.md, "Desktop window chrome": Cmd+J on macOS, Ctrl+Shift+J on Linux). Spelled once
 /// here, for its binding, its row in [`TERMINAL_KEYS`] and the tests.
 const TEMPLATE_LIST_MAC: &str = "cmd-j";
@@ -209,6 +216,13 @@ pub(crate) const TEMPLATE_LIST_CHORD: &str = if cfg!(target_os = "macos") {
     TEMPLATE_LIST_MAC
 } else {
     TEMPLATE_LIST_LINUX
+};
+
+/// The template list's key cap uses the same platform chord as its binding.
+pub(crate) const TEMPLATE_LIST_SHORTCUT_NAME: &str = if cfg!(target_os = "macos") {
+    "⌘J"
+} else {
+    "Ctrl+Shift+J"
 };
 
 /// New's chord in the Mac app (SPEC.md, "Desktop window chrome"); the Linux app has none. Spelled once here, for its
