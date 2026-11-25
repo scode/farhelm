@@ -972,7 +972,7 @@ enum Detail {
 }
 
 /// The chip explains what the recorded trust choice allows. Directory scope depends on the harness.
-pub const TRUSTED_WORKSPACE: &str = "Enabled on the agent's Settings page. Repository hooks, settings and commands can run without asking.";
+pub const TRUSTED_WORKSPACE: &str = "Enabled on the agent's Settings page, or automatically in a session's own sandbox or container. Repository hooks, settings and commands can run without asking.";
 
 impl Chips {
     /// The card has a Permissions row only for launches with a shield.

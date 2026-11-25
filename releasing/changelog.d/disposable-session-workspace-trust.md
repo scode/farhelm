@@ -1,5 +1,5 @@
 ---
-kind: fixed
+kind: changed
 ---
 
 Farhelm applies workspace trust automatically to supported agent launches in sandbox and container sessions. On hosts

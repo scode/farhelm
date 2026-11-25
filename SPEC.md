@@ -4698,11 +4698,12 @@ Launch and restart cards show one Permissions row using the session list's class
 shell and show the command with no Permissions row. For the other launch types, the row shows a warning YOLO chip for
 YOLO (including Custom), the vendor's guarded mode name, Approve, Smart approve, Chat, or Unknown for a launch predating
 classification. A command launch's Asserted YOLO or Asserted not YOLO is explicitly the agent's unchecked claim, never
-Farhelm's verdict. Stored workspace trust has its own Trusted workspace or Not trusted chip. The trusted chip names
-Settings as the source. Permission flags remain a separate, fully wrapped fact. Prompt cards use the same chip
-presentation. Template cards show the permission field when present, resolving a reset to the agent's default when the
-template names one. An explicit mode keeps its stored name, and the card marks a mode the named agent does not offer.
-Template cards retain any explicit command YOLO assertion.
+Farhelm's verdict. Stored workspace trust has its own Trusted workspace or Not trusted chip. The trusted chip names both
+sources: the agent's Settings switch, or Farhelm automatically in a session's own sandbox or container. Permission flags
+remain a separate, fully wrapped fact. Prompt cards use the same chip presentation. Template cards show the permission
+field when present, resolving a reset to the agent's default when the template names one. An explicit mode keeps its
+stored name, and the card marks a mode the named agent does not offer. Template cards retain any explicit command YOLO
+assertion.
 
 A qualifying session card offers Allow, **Always allow on <host> only**, **Always allow from <host>**, and Deny. The new
 button grants only **Manage sessions on this host without asking** to the requesting install and approves that request.

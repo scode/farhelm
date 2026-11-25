@@ -6672,9 +6672,11 @@ enum TrustFixtureHost {
     DisposableSandbox,
 }
 
-/// Exercise the real routes with an ordinary directory. The peer expects the
-/// mutation first to catch a reintroduced ownership lookup. Both the reusable
-/// launch and named start carry the trust choice from Settings.
+/// Exercise the real routes on a local host, a persistent sandbox and a
+/// session's own disposable sandbox. The peer expects the mutation first to
+/// catch a reintroduced ownership lookup. Both the reusable launch and named
+/// start carry the trust choice: from Settings on the first two, and
+/// automatically on the disposable one.
 async fn assert_workspace_trust_dispatch(
     surface: TrustComposeSurface,
     harness_kind: farhelm_proto::LaunchHarness,
