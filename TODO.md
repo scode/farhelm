@@ -55,6 +55,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   open a terminal, then you open a second terminal, then you close the second terminal, the first terminal should be
   made active - not the agent.
 
+- **Give Cmd+K, Cmd+J and Cmd+L the session launcher's look.** The quick switcher, the template list and Rename are
+  plain and untuned; Cmd+L in particular wraps one short field in a tall header and a lot of empty space. Restyle them
+  as direction 1, "Launcher sibling", in
+  [the dialog directions mockup](https://snippets.scode.org/s/farhelm-dialog-directions/), so they read as one family
+  with the launcher. Settings and the other dialogs come after this, once the look is settled. Plan:
+  `plans/queue/launcher-style-quick-dialogs.md`.
+
 ## Plan follow-ups
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
@@ -642,6 +649,12 @@ problem a refactor targets (making drifted copies consistent, say) is allowed in
 are not.
 
 ## Maybe later
+
+- **Reconsider terminal-native as a style for the app.** Direction 8 in
+  [the dialog directions mockup](https://snippets.scode.org/s/farhelm-dialog-directions/) (everything in the terminal
+  font, a prompt and block caret, fzf-style counts, dashed rules) was well liked, but the launcher's look won for the
+  Cmd+K, Cmd+J and Cmd+L dialogs because it is consistent with what the launcher and Settings already have. Reconsider
+  it as a general style.
 
 - **Park the docs-shot pointer on a quiet point when no element qualifies.** Before each docs screenshot, the pointer is
   parked on an element with an id that nothing reacts to. A redesign that removes the last such element (as the
