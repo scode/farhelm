@@ -47795,3 +47795,46 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   for reference: fix code. Use distinct model and effort error IDs. Size S.
 - Execution: Fixed as a small accessibility change with separate Model and Effort status IDs. Change `tvluvktsqvtnsvulpptvyypzpymlowxv`, bookmark `plan/triage-custom-agents-nov24/01-launcher-1`,
   https://github.com/scode/farhelm/pull/4810/changes.
+
+## trailing-launcher-recents-display-literal-custom-instead-of-agent-name.md
+
+- Outcome: `fix code`.
+- Assessment: The launcher's Recent rows and typed search results label every recent setup of a registered custom agent
+  "Custom". Several custom agents' setups therefore look alike. Enter on a highlighted Recent row launches it. Hover
+  help and the accessible name do carry the ID. Verified: Confirmed. `harness_label(selection.harness)` is used in
+  `crates/gui/farhelm-gui/src/launcher/view/search/start.rs:500` and `launcher/view/search.rs:1098`. The summary used
+  for hover and accessible names uses the custom ID (`launcher/recents.rs:355-366`). Other launcher text resolves the
+  current display name (`crate::harness::custom_name`). No spec sentence requires the row label, but SPEC.md 494-495
+  says "The session list uses the current display name and falls back to the saved ID", and the launcher does the same
+  elsewhere.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code. Show `custom_name` in both row renderers and underline matches. Size S. Size
+  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Fixed the visible and accessible name in the command pane and narrow search. Change `rzotlqtwnowmkpmpmpnlklnmqyzwptlz`, bookmark `plan/triage-custom-agents-nov24/02-launcher-2`,
+  https://github.com/scode/farhelm/pull/4817/changes.
+
+## trailing-launcher-search-recents-omits-custom-agent-id-and-name.md
+
+- Outcome: `fix code`.
+- Assessment: In launcher search, recent setups are matched by where they started, the agent type and the model. For a
+  custom agent the agent type is always the word "Custom", so typing the agent's ID or display name (including
+  `recent:<name>`) never finds its recent setups. Verified: Confirmed.
+  `crates/gui/farhelm-gui/src/launcher/search.rs:716-729` matches `harness_label(entry...harness)` only. The spec's
+  "searchable by display name and ID" (SPEC.md:492) is about the agents themselves in the Custom group, not recent
+  setups, so this is a reading.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code — add the ID and current display name to the matched words; size S. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed search by saved registration ID and current display name. Change `rzotlqtwnowmkpmpmpnlklnmqyzwptlz`, bookmark `plan/triage-custom-agents-nov24/02-launcher-2`,
+  https://github.com/scode/farhelm/pull/4817/changes.

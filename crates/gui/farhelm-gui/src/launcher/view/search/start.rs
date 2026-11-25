@@ -284,12 +284,16 @@ impl Launcher {
             let (id, label, help, contents) = match row {
                 StartRow::Recent(entry, placement) => {
                     let id = format!("launcher-recent-{index}");
+                    let collections = self.store.read(cx).collections();
                     let whole = HostSentence::new(format!("{id}-whole"))
                         .host(&HostText::from_host(destination_label(entry)))
                         .text(" · ")
                         .host(placement)
                         .text(" · ")
-                        .host(&HostText::from_host(selection_summary(&entry.selection)));
+                        .host(&HostText::from_host(selection_summary(
+                            &entry.selection,
+                            collections,
+                        )));
                     let label = if !disabled
                         && entry.selection.container.is_none()
                         && matches!(self.draft.mode, super::Mode::ReplaceWith { .. })
@@ -316,6 +320,7 @@ impl Launcher {
                             selected,
                             recent_enter_cap(&self.draft.mode),
                             palette,
+                            collections,
                         ),
                     )
                 }
@@ -454,6 +459,7 @@ fn recent_choice(
     selected: bool,
     enter_cap: SharedString,
     palette: &Palette,
+    collections: &farhelm_helm_client::Collections,
 ) -> AnyElement {
     let selection = &entry.selection;
     let mark = harness::glyph(selection.harness);
@@ -504,11 +510,12 @@ fn recent_choice(
                         .flex()
                         .items_center()
                         .gap(px(6.))
-                        .child(
-                            HostSentence::new("launcher-recent-agent")
-                                .text(harness_label(selection.harness))
-                                .underline_matches(query),
-                        )
+                        .child(super::recent_agent_words(
+                            HostSentence::new("launcher-recent-agent"),
+                            selection,
+                            query,
+                            collections,
+                        ))
                         .when(yolo, |line| {
                             // Give red its own background on the accent fill so the selected row keeps the warning.
                             line.child(
@@ -577,6 +584,7 @@ pub(super) fn typed_choice(
             selected,
             format!("{RETURN_KEY} Fill").into(),
             palette,
+            launcher.store.read(cx).collections(),
         );
     }
     let (ink, quiet) = row_inks(selected, palette);

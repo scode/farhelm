@@ -1073,6 +1073,29 @@ fn recent_setups_match_their_place_agent_and_model() {
     );
 }
 
+/// A saved setup follows a registration through renames. The ID still finds the setup when the registration is gone.
+#[test]
+fn custom_recent_search_matches_the_saved_id_and_current_name() {
+    let mut entry = launch("/work", LaunchHarness::Custom, None);
+    entry.selection.custom_agent = Some("checkout-helper".into());
+    let mut draft = with_history(None, vec![entry.clone()], &[]);
+    draft
+        .custom_agents
+        .push(farhelm_proto::custom_agents::CustomAgent {
+            id: "checkout-helper".into(),
+            display_name: "Équipe Code".into(),
+            command: "helper".into(),
+            supports_resumption: false,
+            supports_reporting: false,
+        });
+    for query in ["recent:checkout-helper", "recent:équipe code"] {
+        assert_eq!(draft.rows(query), vec![recent(entry.clone())]);
+    }
+    draft.custom_agents.clear();
+    assert!(draft.rows("recent:équipe code").is_empty());
+    assert_eq!(draft.rows("recent:checkout-helper"), vec![recent(entry)]);
+}
+
 /// Recent setups in search are every setup the history holds, in the strip's order (most launched, then newest),
 /// neither capped at the strip's three nor narrowed by the draft's choices. Why: the strip shows the likely few, and
 /// search is how to reach the rest (old `search_and_ordinary_recents_share_complete_ranking_before_the_cap`).
@@ -1233,28 +1256,29 @@ fn no_history_offers_no_history_rows() {
 /// end-to-end tests found it by (old `.launch-composer-search-recent` `aria-label` and `search_result_tooltip`).
 #[test]
 fn history_row_words() {
+    let collections = Default::default();
     let mut codex = launch("/w\u{202e}", LaunchHarness::Codex, Some("model\u{202e}one"));
     codex.selection.effort = Some(LaunchEffort::High.into());
     codex.selection.permissions = Some(LaunchPermission::Yolo);
     let row = recent(codex);
     assert_eq!(
-        row.words("w").accessible_name().as_ref(),
+        row.words("w", &collections).accessible_name().as_ref(),
         "Recent setup: /w<U+202E> · Local (this machine) · Codex · Model: model<U+202E>one · Effort: High · Permissions: YOLO"
     );
     assert_eq!(
-        row.help(None, "h").accessible_name().as_ref(),
+        row.help(None, "h", &collections).accessible_name().as_ref(),
         "/w<U+202E> · Local (this machine) · Codex · Model: model<U+202E>one · Effort: High · Permissions: YOLO"
     );
     assert_eq!(
         Row::Folder("/srv".to_owned())
-            .words("w")
+            .words("w", &collections)
             .accessible_name()
             .as_ref(),
         "Use this path: /srv"
     );
     assert_eq!(
         history_model("custom", LaunchHarness::Claude)
-            .words("w")
+            .words("w", &collections)
             .accessible_name()
             .as_ref(),
         "Model: custom (Claude, past launch)"
@@ -1268,32 +1292,36 @@ fn history_row_words() {
 /// `search_result_tooltips_escape_names`).
 #[test]
 fn row_words_and_help_escape_host_values() {
+    let collections = Default::default();
     let hidden = "a\u{202e}b";
     let row = Row::Name(hidden.to_owned());
     assert_eq!(
-        row.words("w").accessible_name().as_ref(),
+        row.words("w", &collections).accessible_name().as_ref(),
         "Set session name: a<U+202E>b"
     );
     assert_eq!(
-        row.help(None, "h").accessible_name().as_ref(),
+        row.help(None, "h", &collections).accessible_name().as_ref(),
         "Use \"a<U+202E>b\" as the session's name"
     );
     assert_eq!(
         model("m", LaunchHarness::Codex)
-            .words("w")
+            .words("w", &collections)
             .accessible_name()
             .as_ref(),
         "Model: m (Codex)"
     );
     assert_eq!(
         Row::Permission(SearchPermission::Guarded)
-            .help(None, "h")
+            .help(None, "h", &collections)
             .accessible_name()
             .as_ref(),
         "Guarded: choose an agent to see its automatic safety mode"
     );
     assert_eq!(
-        Row::Effort(None).words("w").accessible_name().as_ref(),
+        Row::Effort(None)
+            .words("w", &collections)
+            .accessible_name()
+            .as_ref(),
         "Effort: Default"
     );
 }
@@ -1345,6 +1373,7 @@ fn the_exact_template_name_is_preselected_by_unicode_lowercase() {
 /// "Templates". Its rows keep their own escaped name and hover help distinct from agent matches.
 #[test]
 fn template_rows_sit_between_harnesses_and_models_in_the_old_words() {
+    let collections = Default::default();
     assert_eq!(Group::Harnesses as u8 + 1, Group::CustomAgents as u8);
     assert_eq!(Group::CustomAgents as u8 + 1, Group::Shells as u8);
     assert_eq!(Group::Shells as u8 + 1, Group::Templates as u8);
@@ -1352,11 +1381,11 @@ fn template_rows_sit_between_harnesses_and_models_in_the_old_words() {
     assert_eq!(Group::Templates.label(), "Templates");
     let row = Row::Template("a\u{202e}b".into());
     assert_eq!(
-        row.words("w").accessible_name().as_ref(),
+        row.words("w", &collections).accessible_name().as_ref(),
         "Template: a<U+202E>b"
     );
     assert_eq!(
-        row.help(None, "h").accessible_name().as_ref(),
+        row.help(None, "h", &collections).accessible_name().as_ref(),
         "Apply this template's settings to the draft"
     );
 }

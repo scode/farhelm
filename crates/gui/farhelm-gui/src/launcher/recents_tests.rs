@@ -411,6 +411,7 @@ fn the_environments_launches_merge_by_each_sources_next_launch() {
 /// `selection_summary_without_harness_preserves_the_saved_tail` and `the_explicit_summary_names_only_what_the_selection_sets`).
 #[test]
 fn summaries_name_the_setup() {
+    let collections = Default::default();
     let saved = LaunchSelection {
         model: Some("gpt-6-astra".into()),
         effort: Some(LaunchEffort::High.into()),
@@ -418,7 +419,7 @@ fn summaries_name_the_setup() {
         ..selection(LaunchHarness::Codex)
     };
     assert_eq!(
-        selection_summary(&saved),
+        selection_summary(&saved, &collections),
         "Codex · Model: gpt-6-astra · Effort: High · Permissions: YOLO"
     );
     assert_eq!(
@@ -436,7 +437,7 @@ fn summaries_name_the_setup() {
         ..selection(LaunchHarness::Codex)
     };
     assert_eq!(
-        selection_summary(&custom),
+        selection_summary(&custom, &collections),
         "Codex · Model: Default · Effort: Default · Permissions: Custom · --yolo 'a b'"
     );
     // Two entries that restore different wrappers need distinct compact labels and complete hover names.
@@ -448,7 +449,7 @@ fn summaries_name_the_setup() {
             };
             let label = format!("Wrapper: env {prefix}");
             assert_eq!(wrapper_summary(&saved).as_deref(), Some(label.as_str()));
-            assert!(selection_summary(&saved).ends_with(&label));
+            assert!(selection_summary(&saved, &collections).ends_with(&label));
         }
     }
 }
@@ -481,7 +482,11 @@ fn trust_neither_splits_nor_shows() {
         launch("/w", selection(LaunchHarness::Codex)),
     ]);
     assert_eq!(ranked(&history, &RecentFilter::default(), None).len(), 1);
-    assert!(!selection_summary(&trusted).to_lowercase().contains("trust"));
+    assert!(
+        !selection_summary(&trusted, &Default::default())
+            .to_lowercase()
+            .contains("trust")
+    );
 }
 
 // ---- New's folder default ------------------------------------------------------------------------------------------

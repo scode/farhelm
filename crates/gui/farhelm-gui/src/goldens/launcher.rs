@@ -362,6 +362,8 @@ enum LauncherScene {
     RememberedWrapper,
     CustomAgent,
     UnavailableCustomAgent,
+    CustomRecents,
+    NarrowCustomRecents,
     ShellWrapper,
     ShellWrapperNote,
     StaleChoice,
@@ -381,6 +383,13 @@ enum LauncherScene {
 /// The held address truncates this name. The tooltip needs to show its distinguishing suffix.
 const HELD_HOST_NAME: &str =
     "Integration build host for the production migration and release checks";
+
+impl LauncherScene {
+    /// Both layouts draw the same saved setup from a catalog that can name its registration.
+    fn custom_recents(self) -> bool {
+        matches!(self, Self::CustomRecents | Self::NarrowCustomRecents)
+    }
+}
 
 /// Show New with a chosen agent, so the screenshot covers the model, effort and permission controls and the prompt.
 pub(super) fn launcher_new_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
@@ -441,6 +450,20 @@ pub(super) fn launcher_unavailable_custom_agent_setup(
     cx: &mut App,
 ) {
     setup(state, LauncherScene::UnavailableCustomAgent, window, cx);
+}
+
+/// Show a saved custom agent by the same name as its launcher chip.
+pub(super) fn launcher_custom_recents_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    setup(state, LauncherScene::CustomRecents, window, cx);
+}
+
+/// A registration's saved ID finds the same Recent setup on a window with no side pane.
+pub(super) fn launcher_narrow_custom_recents_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::NarrowCustomRecents, window, cx);
 }
 
 /// Open a Bash launch with the wrapper row expanded and its help visible.
@@ -567,7 +590,7 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
         );
     }
     let mut extra = vec![launcher_templates(scene)];
-    if scene == LauncherScene::CustomAgent {
+    if scene == LauncherScene::CustomAgent || scene.custom_recents() {
         extra.push(super::custom_agent_state());
     } else if scene == LauncherScene::UnavailableCustomAgent {
         extra.push(CollectionState {
@@ -718,7 +741,7 @@ fn open_new_with_claude(
         LauncherScene::ShellWrapper | LauncherScene::ShellWrapperNote
     ) {
         draft.choose_harness(LaunchHarness::Bash, None, None);
-    } else if !remembered {
+    } else if !remembered && !scene.custom_recents() {
         draft.choose_harness(LaunchHarness::Claude, None, None);
     }
     if scene == LauncherScene::ManagedCheckout {
@@ -864,7 +887,11 @@ fn answer_new_reads(
         } else if command.path == "/api/tensorlake" && environment {
             Some(json!(account(true, SshKeyStatus::NotCreated)))
         } else if command.path.starts_with("/api/launch-history") {
-            Some(launcher_history(scene))
+            Some(if scene.custom_recents() {
+                custom_recents_history()
+            } else {
+                launcher_history(scene)
+            })
         } else if scene == LauncherScene::ManagedCheckout
             && command.path == "/api/github-checkout-preview"
         {
@@ -922,6 +949,10 @@ fn answer_new_reads(
         }) {
             state.after.set(Some(answer_new_reads));
         }
+        return;
+    }
+    if scene.custom_recents() {
+        show_custom_recents(state, scene, window, cx);
         return;
     }
     let catalog_drawn = window.driver_nodes().iter().any(|node| {
@@ -1244,6 +1275,50 @@ fn launcher_history(scene: LauncherScene) -> serde_json::Value {
                      "canonical_proven": true, "created_at": 1, "creation_seq": null}],
         "checkout_config_revision": if scene == LauncherScene::ManagedCheckout { CHECKOUT_REVISION } else { 1 },
     })
+}
+
+/// A setup saves the registration's ID; the current name comes from the separate catalog.
+fn custom_recents_history() -> serde_json::Value {
+    json!({
+        "launches": [{
+            "host": 1, "cwd": "/home/user/src/api", "canonical_cwd": "/home/user/src/api",
+            "github_repo": null, "created_at": 1, "creation_seq": null,
+            "selection": {"harness": "custom", "custom_agent": super::custom_agent().id},
+        }],
+        "folders": [], "checkout_config_revision": 1,
+    })
+}
+
+/// Wait for the saved agent name to paint. The narrow popup gets the same entry by querying its ID.
+fn show_custom_recents(
+    state: &SceneState,
+    scene: LauncherScene,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let row = if scene == LauncherScene::NarrowCustomRecents {
+        let launcher =
+            entry::open_launcher(window, cx).expect("the launcher is ready for the ID query");
+        let field = launcher.read(cx).search_for_golden();
+        if field.focus_handle(cx).is_focused(window)
+            && field.text(cx).as_ref() != "recent:acme-code"
+        {
+            field.edit_for_golden("recent:acme-code", window, cx);
+        }
+        "launcher-search-option-0"
+    } else {
+        "launcher-recent-0"
+    };
+    let nodes = window.driver_nodes();
+    if !nodes
+        .iter()
+        .any(|node| node.element_id.as_deref() == Some(row))
+        || !texts_within(nodes, row)
+            .iter()
+            .any(|line| line.text.contains("Acme Code") && !line.visible_bounds.is_empty())
+    {
+        state.after.set(Some(answer_new_reads));
+    }
 }
 
 /// Apply a recent setup with the pointer so its source pill and the editor's restored focus are both real.

@@ -556,6 +556,49 @@ fn a_row_names_a_custom_model_escaped(cx: &mut TestAppContext) {
     assert!(!name.contains('\u{202e}'), "{name}");
 }
 
+/// The visible name distinguishes recent agents before selection, and its saved ID can still be typed as a query
+/// even when the current display name spells it differently. Both command layouts draw the same identity.
+#[gpui::test]
+fn recent_custom_agent_uses_its_current_name_in_both_layouts(cx: &mut TestAppContext) {
+    use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry};
+    let agent = super::view_tests::acme_agent();
+    let mut setup = chosen(LaunchHarness::Custom, None, None, None);
+    setup.custom_agent = Some(agent.id.clone());
+    let folder = format!("/tmp/{}agent-checkout", "build-artifacts/".repeat(12));
+    let (mut helm, cx) = super::view_tests::launcher_over(
+        cx,
+        LaunchDraft::new(Some(1), folder.clone(), None),
+        vec![
+            fixture_hosts(&[0]),
+            crate::session_list::tests::preferences(&[], None),
+            CollectionState {
+                collection: Collection::CustomAgents,
+                meta: test_support::meta(&[&agent.id]),
+                entries: vec![KeyedEntry {
+                    key: agent.id.clone(),
+                    value: serde_json::to_value(agent).unwrap(),
+                }],
+            },
+        ],
+    );
+    answer_history(&mut helm, cx, &history(vec![launched(&folder, &setup)]));
+    let paints_name = |cx: &mut VisualTestContext, row| {
+        assert!(
+            crate::session_list::host_rail::tests::texts_within(&test_support::frame(cx), row)
+                .iter()
+                .any(|line| line.text.contains("Acme Code") && !line.visible_bounds.is_empty())
+        );
+        assert!(name_of(cx, row).is_some_and(|name| name.contains("Acme Code (acme-code)")));
+    };
+    paints_name(cx, "launcher-recent-0");
+    super::search_view_tests::type_in(cx, "recent:acme-code");
+    paints_name(cx, "launcher-search-option-0");
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
+    paints_name(cx, "launcher-search-option-0");
+    assert!(creates(&mut helm, cx).is_empty());
+}
+
 /// Picking the row fills the draft without launching. The field shows the model escaped and Launch sends its raw value.
 #[gpui::test]
 fn a_recent_model_fills_escaped_and_launches_verbatim(cx: &mut TestAppContext) {

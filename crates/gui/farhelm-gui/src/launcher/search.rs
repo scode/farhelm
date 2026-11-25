@@ -36,6 +36,7 @@
 //!   the first row. Matching repositories from the helm-wide launch history follow, in recency order. Taking one
 //!   makes the destination a managed checkout of that repository, as the repository field's pick does.
 
+use farhelm_helm_client::Collections;
 use farhelm_proto::launcher::{
     EFFORT_ORDER, LaunchCatalogModel, compatible_efforts, is_catalog_family_word,
 };
@@ -309,7 +310,7 @@ impl Row {
     /// the name, "Host: " and the host as the host list names it, "Model: " and the id with its agent type. A past
     /// launch is labelled so it is distinct from the same model in the catalog. Host-supplied values are parts of
     /// the sentence, so they are drawn and named escaped.
-    pub fn words(&self, id: impl Into<ElementId>) -> HostSentence {
+    pub fn words(&self, id: impl Into<ElementId>, collections: &Collections) -> HostSentence {
         let sentence = HostSentence::new(id);
         match self {
             Row::Name(name) => sentence
@@ -361,7 +362,10 @@ impl Row {
                 .text(" · ")
                 .host(placement)
                 .text(" · ")
-                .host(&HostText::from_host(selection_summary(&entry.selection))),
+                .host(&HostText::from_host(selection_summary(
+                    &entry.selection,
+                    collections,
+                ))),
             Row::Github(repo) => sentence
                 .text("Managed checkout: ")
                 .host(&HostText::from_host(repo_identifier(repo))),
@@ -370,7 +374,12 @@ impl Row {
 
     /// The row's hover help, the old app's (`search_result_tooltip`). A Guarded row explains the chosen agent's guarded
     /// mode, or says to choose an agent first; a name row repeats the name, escaped like the row itself.
-    pub fn help(&self, harness: Option<LaunchHarness>, id: impl Into<ElementId>) -> HostSentence {
+    pub fn help(
+        &self,
+        harness: Option<LaunchHarness>,
+        id: impl Into<ElementId>,
+        collections: &Collections,
+    ) -> HostSentence {
         let sentence = HostSentence::new(id);
         let words = match self {
             Row::Name(name) => {
@@ -407,7 +416,10 @@ impl Row {
                     .text(" · ")
                     .host(placement)
                     .text(" · ")
-                    .host(&HostText::from_host(selection_summary(&entry.selection)));
+                    .host(&HostText::from_host(selection_summary(
+                        &entry.selection,
+                        collections,
+                    )));
             }
         };
         sentence.text(words)
@@ -710,12 +722,23 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                     .map(|folder| Row::Folder(folder.display_cwd.clone())),
             );
         }
-        // Whole setups, every one the history holds, matched on where they started, their agent type and their model.
+        // A recent setup keeps the registration ID even after a rename or deletion. Search the current display
+        // name too, since that is what the user sees in the row.
         if any(Scope::Recent) && !blank_all {
+            let unicode = value.to_lowercase();
             rows.extend(
                 ranked(history, &RecentFilter::default(), None)
                     .into_iter()
                     .filter(|entry| {
+                        if entry.selection.custom_agent.as_deref().is_some_and(|id| {
+                            matches(id)
+                                || inputs.custom_agents.iter().any(|agent| {
+                                    agent.id == id
+                                        && agent.display_name.to_lowercase().contains(&unicode)
+                                })
+                        }) {
+                            return true;
+                        }
                         let words = format!(
                             "{} {} {}",
                             destination_label(entry),

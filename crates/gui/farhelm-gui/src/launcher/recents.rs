@@ -25,6 +25,7 @@
 
 use std::cmp::Reverse;
 
+use farhelm_helm_client::Collections;
 use farhelm_proto::session_requests::{LaunchHistoryEntry, LaunchHistoryReply};
 use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{
@@ -342,9 +343,10 @@ pub(super) fn wrapper_summary(selection: &LaunchSelection) -> Option<String> {
     (!prefix.is_empty()).then(|| format!("Wrapper: {prefix}"))
 }
 
-/// A recent setup's complete choices for its accessible name and hover help, including any stored wrapper.
-pub fn selection_summary(selection: &LaunchSelection) -> String {
-    let mut words = summary_without_wrapper(selection);
+/// A recent setup's complete choices for speech and hover help. Use the same current agent name as the visible row
+/// and keep the saved ID when it can distinguish registrations with the same display name.
+pub fn selection_summary(selection: &LaunchSelection, collections: &Collections) -> String {
+    let mut words = summary_without_wrapper(selection, collections);
     if let Some(wrapper) = wrapper_summary(selection) {
         words.push_str(" · ");
         words.push_str(&wrapper);
@@ -353,16 +355,26 @@ pub fn selection_summary(selection: &LaunchSelection) -> String {
 }
 
 /// The choices before the wrapper, or just the harness for a shell. The search row draws the wrapper in its own space.
-pub(super) fn summary_without_wrapper(selection: &LaunchSelection) -> String {
+pub(super) fn summary_without_wrapper(
+    selection: &LaunchSelection,
+    collections: &Collections,
+) -> String {
     if selection.harness.is_shell() {
         return format!("{} shell", harness_label(selection.harness));
     }
+    let agent = selection.custom_agent.as_deref().map_or_else(
+        || harness_label(selection.harness).to_owned(),
+        |id| {
+            let name = crate::harness::custom_name(id, collections);
+            if name.raw() == id {
+                id.to_owned()
+            } else {
+                format!("{} ({id})", name.raw())
+            }
+        },
+    );
     let mut words = format!(
-        "{} · {} · Permissions: {}",
-        selection
-            .custom_agent
-            .as_deref()
-            .unwrap_or_else(|| harness_label(selection.harness)),
+        "{agent} · {} · Permissions: {}",
         summary_before_permissions(selection),
         permission_value(selection)
     );
