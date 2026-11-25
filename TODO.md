@@ -238,11 +238,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   YOLO vs non-YOLO accurately on both YOLO and Guarded launches for Claude, Grok, and Muse, and YOLO on `--force`
   launches for Cursor, catching vendor footer wording or layout drift.
 
-- **Drift tests: `$farhelm` instructions pointer delivery.** Verify all six supporting agents (Claude, Codex, Muse via
-  `SessionStart` hook stdout; Goose via MCP `initialize` instructions; Pi and OMP via `--append-system-prompt`) actually
-  receive the `$farhelm` instructions pointer in model context, and that disabling instructions omits it without
-  breaking conversation hooks. Plan: `plans/queue/drift-instructions-delivery.md`.
-
 - **Drift tests: running-agent prompt delivery via bracketed paste.** Verify live Claude and Codex TUIs enable terminal
   bracketed paste mode, and that Farhelm's bracketed-paste plus Enter (Claude) or Tab (Codex) submits cleanly at idle,
   preserves multiline prompts without premature submission, and queues cleanly while busy.

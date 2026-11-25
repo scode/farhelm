@@ -14,6 +14,7 @@ python3 -B scripts/run-harness-drift.py
 python3 -B scripts/run-harness-drift.py --no-upgrade --harness grok
 python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection
 python3 -B scripts/run-harness-drift.py --no-upgrade --category named_conversation
+python3 -B scripts/run-harness-drift.py --no-upgrade --category instructions_delivery
 python3 -B scripts/run-harness-drift.py --upgrade-only
 ```
 
@@ -75,6 +76,10 @@ never answers a trust question: a trusted launch has to reach the composer on it
 untrusted launch in a second directory. The case then checks the effect where the agent shows it: Codex's process
 carries the trust argument, Pi loads a project extension only when trusted, and Farhelm records the trust in Claude's
 configuration, which the case reads from a private copy (see below).
+
+The `instructions_delivery` category asks an agent in two fresh sessions which command its startup context gives for
+`$farhelm`. The enabled run must name the command, and the disabled run must answer that it received no command. Both
+sessions must report a conversation Farhelm can reopen.
 
 An agent may save a trust choice for the temporary directory. Claude, the Muse launcher and OMP can update themselves
 during startup, so these cases disable their updaters for the test invocations using an environment variable for Claude
