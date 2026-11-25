@@ -75,6 +75,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Resolve dot paths before choosing the worker lock. Keep explicit names so evidence remains reachable after a
+# checkout is removed or renamed and a symlink still names its existing worker tree.
+name=$(basename -- "$checkout") || die "cannot determine the checkout name"
+case "$name" in
+.|..)
+  checkout=$(CDPATH='' cd -- "$checkout" && pwd -L) || die "cannot resolve the checkout"
+  name=$(basename -- "$checkout") || die "cannot determine the checkout name"
+  ;;
+esac
+case "$name" in ''|/) die "the checkout has no usable name" ;; esac
+
 # Keep the stamp and the files it describes together if two clients reuse an output directory. The wrapper
 # execs this script with the lease on fd 9, before either client touches any of the harness's artifact names.
 case "$cmd" in
@@ -134,7 +145,6 @@ ssh) ssh_cmd=(ssh -o BatchMode=yes -o ConnectTimeout=15 "$destination") rsh='ssh
 *) die "transport must be tailscale or ssh, not '$transport'" ;;
 esac
 
-name=$(basename "$checkout")
 base="farhelm-test-worker/$name"
 stage="$base/stage/$invocation"
 result="$base/out/$invocation"

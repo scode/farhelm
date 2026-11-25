@@ -234,7 +234,8 @@ fn reopen_command(
 /// Both reopen paths wait for the old process to exit before asking Launch
 /// Services for a new instance. A bounded wait can give up while the old
 /// process is still alive. The caller supplies any extra opener arguments
-/// and configures its own process group and environment overrides.
+/// and configures its own process group and environment overrides. The test
+/// announcement feed belongs to the old app, regardless of what reopens it.
 ///
 /// `seen_alive` lets tests release their stand-in app after the helper has
 /// observed it alive. Paths and opener arguments stay separate through `exec`.
@@ -282,7 +283,8 @@ exec "$@""#;
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::null())
+        .env_remove(crate::ANNOUNCEMENTS_PATH_ENV);
     // The next instance resolves its own login PATH. Give it this instance's
     // original PATH so startup files run against the same base each time.
     crate::restore_inherited_path(&mut command);
@@ -801,11 +803,14 @@ mod tests {
         );
         let bundle = dir.path().join("Farhelm.app");
         let alive = dir.path().join("seen-alive");
-        let _helper = Reap(
-            reopen_command(app.0.id(), &bundle, &opener, "abc123", Some(&alive))
-                .spawn()
-                .expect("start the helper"),
+        let mut command = reopen_command(app.0.id(), &bundle, &opener, "abc123", Some(&alive));
+        assert!(
+            command
+                .get_envs()
+                .any(|(name, value)| { name == crate::ANNOUNCEMENTS_PATH_ENV && value.is_none() }),
+            "the new app must not inherit the old app's test announcement feed"
         );
+        let _helper = Reap(command.spawn().expect("start the helper"));
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while !alive.exists() {
             assert!(

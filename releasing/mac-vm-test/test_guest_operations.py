@@ -132,7 +132,8 @@ The fixture home is reached through a symlink while the fictional procfs
 reports resolved executable paths, as the kernel does. The process scan counts
 the supervisor, a terminal host whose binary was already deleted and an SSH
 proxy. Only the exact proxy invocation gets a role in the receipt. Unrelated
-processes, unreadable links and non-process entries are skipped. A damaged
+processes, unreadable links and non-process entries are skipped. A proxy that
+exits while its command line is read cannot become an unexplained leftover. A damaged
 database reads as no session ids rather than failing.
 """
         real_home = self.root / 'remote-home-real'
@@ -150,7 +151,7 @@ database reads as no session ids rather than failing.
         proc = self.root / 'proc'
         lib = real_home.resolve() / '.local/lib/farhelm'
         for name, target in (('71', lib / 'farhelm'), ('80', str(lib / 'farhelm') + ' (deleted)'),
-                             ('81', lib / 'farhelm'),
+                             ('81', lib / 'farhelm'), ('82', lib / 'farhelm'),
                              ('90', '/usr/bin/sleep'), ('95', None), ('self', lib / 'farhelm')):
             (proc / name).mkdir(parents=True)
             if target is not None:
@@ -164,8 +165,20 @@ database reads as no session ids rather than failing.
         def reply(code, output):
             """Expose exactly the subprocess text mode used by the Linux probe."""
             return subprocess.CompletedProcess([], code, output.decode(), '')
-        with mock.patch('subprocess.run', side_effect=[reply(0, b'255\n'), reply(0, loaded)]):
+        open_path = Path.open
+        exiting_proxy = proc / '82'
+        command_line = exiting_proxy / 'cmdline'
+        command_line.write_bytes(b'farhelm\0internal\0stdio\0')
+        def open_during_exit(path, *args, **kwargs):
+            """Remove only the owned proxy after the probe has found its executable."""
+            if path == command_line:
+                (exiting_proxy / 'exe').unlink()
+                command_line.unlink()
+            return open_path(path, *args, **kwargs)
+        with (mock.patch('subprocess.run', side_effect=[reply(0, b'255\n'), reply(0, loaded)]),
+              mock.patch.object(Path, 'open', open_during_exit)):
             snapshot = shipped(home, proc)
+        self.assertFalse(command_line.exists(), 'the proxy disappeared during the scan')
         self.assertEqual(snapshot['binary_sha256'], hashlib.sha256(b'binary').hexdigest())
         self.assertEqual(snapshot['unit_sha256'], hashlib.sha256(b'unit').hexdigest())
         self.assertTrue(snapshot['database_present'])

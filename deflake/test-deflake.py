@@ -69,10 +69,10 @@ class SweepBase(unittest.TestCase):
         )
 
     def git(self, *args):
-        """Write unsigned fixture history independent of the user's Git identity and signing."""
+        """Create fixture history independent of Git identity, signing, and commit hooks."""
         return subprocess.check_output(
             ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
-             "-c", "commit.gpgsign=false", *args],
+             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
             cwd=self.checkout, text=True,
         ).strip()
 

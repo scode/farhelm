@@ -321,7 +321,7 @@ class WorkerTest(unittest.TestCase):
         log = self.root / f"driver-{len(self.children)}.log"
         with log.open("wb") as output:
             process = subprocess.Popen(
-                argv, env=self.env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True,
+                argv, cwd=checkout, env=self.env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True,
             )
         self.children.append((process, log))
         return process, log
@@ -378,6 +378,21 @@ class WorkerTest(unittest.TestCase):
         invocation = self.invocation(job[1].read_text())
         os.kill(int(ready.read_text()), 0)
         return job, invocation, release
+
+    def test_relative_status_uses_the_same_checkout_lock(self):
+        """Dot paths share the named tree's lock, and a named tree remains queryable without a local checkout."""
+        checkout = self.fixture("first", "checkout", "fixture source")
+        job, invocation, release = self.blocked_run(checkout, "relative")
+        try:
+            absolute = self.run_to_exit(checkout, "status")
+            self.assertIn(invocation, absolute)
+            self.assertEqual(self.run_to_exit(checkout, "status", "--checkout", "."), absolute)
+            absent = self.root / "removed" / checkout.name
+            self.assertFalse(absent.exists())
+            self.assertEqual(self.run_to_exit(checkout, "status", "--checkout", absent), absolute)
+        finally:
+            release.touch()
+            self.join(job, 0)
 
     def test_busy_request_cannot_touch_detached_source_or_evidence(self):
         """Hash the admitted run against a changed rival, then collect it after the client disconnects."""
