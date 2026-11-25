@@ -731,6 +731,7 @@ impl LaunchDraft {
             recipe,
             place,
             confirmed: false,
+            confirmed_size: None,
             name_kind,
             request,
         })

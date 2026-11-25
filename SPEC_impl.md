@@ -1005,6 +1005,13 @@ behind a Cancel may still submit. An answer acts on the value presented with the
 An answer to either launch question is accepted after its source warning is shown. It carries that permission through a
 wait for a setting write or checkout preview.
 
+**Create and launch** carries the sandbox's displayed CPU, memory and disk from the answered question. A confirmed
+request to `POST /api/environment-sessions` requires that size. The helm compares it against the recipe definition used
+for registration and creation and refuses a mismatch before registering the host or calling the provider. The legacy
+`POST /api/sandbox-sessions` still accepts the confirmation flag alone and checks the size when supplied. Unconfirmed
+container launches and launches using the Tensorlake skip setting omit the size. A confirmed launch needs a helm that
+accepts the new field, so the launcher surfaces a refusal from an older helm.
+
 A question has Cancel and its confirming answer at the ends, and may carry extra answers between them, in the order the
 feature adds them, for the questions SPEC.md asks with more than two (the template editor's "Keep editing, Discard, or
 Save", the host confirmations' permanent answer, the YOLO confirmation's guarded and permanent answers). Each extra

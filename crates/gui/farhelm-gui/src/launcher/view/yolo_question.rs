@@ -312,7 +312,7 @@ fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
     Owner {
         launch: Rc::new(move |source, mark, window, cx| {
             let _ = launching.update(cx, |launcher, cx| {
-                launcher.submit(true, false, source, mark, window, cx)
+                launcher.submit(true, None, source, mark, window, cx)
             });
         }),
         current: Rc::new(move |ask, attempt, cx| {

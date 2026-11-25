@@ -35,6 +35,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(doc)]
 use crate::AcceptedGithubPreview;
 use crate::launcher::TemplateNameKind;
+use crate::recipes::RecipeSize;
 use crate::{
     CommandLaunch, GithubCheckoutRequest, GithubRepo, LaunchSelection, LaunchTarget, Place,
 };
@@ -105,6 +106,11 @@ pub struct EnvironmentCreateBody {
     /// (a billed sandbox), unless the Tensorlake setting "Create Tensorlake
     /// sandboxes without asking" is on.
     pub confirmed: bool,
+    /// Required with `confirmed`. This is the CPU, memory and disk shown by
+    /// the answered question. Unconfirmed launches omit the field so older
+    /// helms can still decode them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirmed_size: Option<RecipeSize>,
     /// Whether a template's name is a base the managed checkout numbers or an
     /// exact name; absent for a launch that no template named.
     pub name_kind: Option<TemplateNameKind>,

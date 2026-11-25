@@ -12,7 +12,7 @@
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ProviderKind;
 use farhelm_proto::tensorlake::{Settings, SshKeyStatus};
-use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry};
+use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, KeyedEntry};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
@@ -353,30 +353,69 @@ fn cancel_creates_nothing_and_keeps_the_draft(cx: &mut TestAppContext) {
     assert_eq!(shown_refusal(cx), None);
 }
 
-/// SPEC.md, "Sandbox sessions": "Create and launch proceeds"; the helm refuses a billed create sent without consent, so
-/// the answer must be what marks the create confirmed, once, as the old question's consent was used by one submit.
-/// Specified: Create and launch sends exactly one environment create for `ready` on the Tensorlake account with
-/// `confirmed` true, the launcher hidden; the helm's refusal brings it back on its draft with "Not launched." and the
-/// helm's words; a press of Launch then asks again and sends nothing.
+/// A recipe can be edited elsewhere while its confirmation is open. The answer must send the size shown in the
+/// question, even if the catalog already holds a new one. A refusal restores the same launch draft, and the next
+/// press asks about the new size without sending a request.
 #[gpui::test]
-fn create_and_launch_sends_one_confirmed_create(cx: &mut TestAppContext) {
+fn create_and_launch_sends_the_size_shown_before_a_catalog_edit(cx: &mut TestAppContext) {
     let (mut helm, cx) = opened(cx, &usable());
     press_in_new_sandbox(&mut helm, cx, &usable());
+    let original_size = "2 CPU · 4 GB memory · 20 GB disk";
+    assert_eq!(
+        name_of(cx, "sandbox-question-size").as_deref(),
+        Some(original_size)
+    );
+    let title = draft(cx).name.value().clone();
+    let mut edited = built_json("ready");
+    edited["size"]["cpus"] = json!(4);
+    helm.push(CollectionChanges {
+        collection: Collection::Recipes,
+        meta: meta(&["plain", "ready"]),
+        upsert: vec![KeyedEntry {
+            key: "ready".into(),
+            value: edited,
+        }],
+        remove: Vec::new(),
+    });
+    settle(cx);
+    let live_size = cx.update(|_, cx| {
+        crate::session::current_store(cx)
+            .unwrap()
+            .read(cx)
+            .collections()
+            .get::<farhelm_proto::recipes::RecipeView>("ready")
+            .unwrap()
+            .size
+    });
+    assert_eq!(
+        live_size.cpus, 4,
+        "the pushed edit has reached the live catalog"
+    );
+    assert_eq!(
+        name_of(cx, "sandbox-question-size").as_deref(),
+        Some(original_size)
+    );
     test_support::click(cx, "prompt-confirm");
     let sent = environment_creates(&mut helm, cx, &usable());
     let (create, body) = the_create(&sent);
     assert_eq!(body["recipe"], json!("ready"));
     assert_eq!(body["place"], json!({ "kind": "tensorlake_account" }));
     assert_eq!(body["confirmed"], json!(true));
+    assert_eq!(
+        body["confirmed_size"],
+        json!({"cpus": 2, "memory_gb": 4, "disk_gb": 20})
+    );
     assert!(!any_open(cx), "the launcher hid while its create is out");
-    helm.reply(create.id, 409, Some(json!("sandbox fixture refused")));
+    let refusal = "The sandbox size changed. Review the updated size before launching.";
+    helm.reply(create.id, 409, Some(json!(refusal)));
     settle(cx);
     assert!(any_open(cx), "the refusal brought the launcher back");
     assert_eq!(
         shown_refusal(cx).as_deref(),
-        Some("Not launched. sandbox fixture refused")
+        Some(format!("Not launched. {refusal}").as_str())
     );
     assert_eq!(draft(cx).target, Some(sandbox("ready")));
+    assert_eq!(draft(cx).name.value(), &title);
     test_support::click(cx, "launcher-launch");
     assert_eq!(
         environment_creates(&mut helm, cx, &usable()),
@@ -387,6 +426,10 @@ fn create_and_launch_sends_one_confirmed_create(cx: &mut TestAppContext) {
         name_of(cx, "prompt").as_deref(),
         Some("Create a sandbox for this session?"),
         "the press asks again"
+    );
+    assert_eq!(
+        name_of(cx, "sandbox-question-size").as_deref(),
+        Some("4 CPU · 4 GB memory · 20 GB disk")
     );
 }
 
@@ -405,6 +448,7 @@ fn the_setting_skips_the_question_with_an_unconfirmed_create(cx: &mut TestAppCon
     let (create, body) = the_create(&sent);
     assert_eq!(body["recipe"], json!("ready"));
     assert_eq!(body["confirmed"], json!(false));
+    assert!(body.get("confirmed_size").is_none());
     assert!(!any_open(cx), "the launcher hid, asking nothing");
     helm.reply(
         create.id,

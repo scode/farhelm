@@ -4722,6 +4722,7 @@ async fn launch_environment_for_agent(
             place,
             request,
             plan.title_kind,
+            None,
         ))
         .await?;
     // The relay includes time for the approval and this post-approval wait,

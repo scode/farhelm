@@ -740,10 +740,10 @@ and
 `launcher::environment_tests::{a_new_sandbox_is_refused_for_each_missing_prerequisite_in_the_old_order, the_registration_note_needs_a_readable_key}`;
 its billing question ("Create a sandbox for this session?" with the recipe, its size, the billing words and the
 "Tensorlake pricing" link, focus on Cancel; Cancel sending nothing and keeping the draft; "Create and launch" sending
-one confirmed create on its own route to the Tensorlake account, whose refusal comes back with its draft and whose
-consent the next press asks for again; an edit retiring the question; "Create Tensorlake sandboxes without asking"
-skipping it with an unconfirmed create, and a press after such a create asking) in
-`launcher::sandbox_view_tests::{a_press_asks_before_creating_a_sandbox_with_cancel_focused, cancel_creates_nothing_and_keeps_the_draft, create_and_launch_sends_one_confirmed_create, an_edit_retires_the_question, the_setting_skips_the_question_with_an_unconfirmed_create, a_press_after_a_create_on_the_skip_setting_asks}`
+one confirmed create with the displayed size on its own route to the Tensorlake account, whose refusal comes back with
+its draft and whose consent the next press asks for again; an edit retiring the question; "Create Tensorlake sandboxes
+without asking" skipping it with an unconfirmed create, and a press after such a create asking) in
+`launcher::sandbox_view_tests::{a_press_asks_before_creating_a_sandbox_with_cancel_focused, cancel_creates_nothing_and_keeps_the_draft, create_and_launch_sends_the_size_shown_before_a_catalog_edit, an_edit_retires_the_question, the_setting_skips_the_question_with_an_unconfirmed_create, a_press_after_a_create_on_the_skip_setting_asks}`
 and `launcher::environment_tests::only_a_sandbox_asks_before_creating_unless_its_setting_skips_it`; a quick launch of a
 sandbox waiting for the account and then coming back to ask rather than create in
 `launcher::sandbox_view_tests::a_hidden_quick_launch_waits_for_the_account_and_comes_back_to_ask`. "A recipe template

@@ -423,7 +423,7 @@ impl Launcher {
             cx.notify();
             return true;
         }
-        self.submit(false, false, source, mark, window, cx);
+        self.submit(false, None, source, mark, window, cx);
         false
     }
 
@@ -489,7 +489,7 @@ impl Launcher {
         if start {
             let _ = cx.update_window(armed.window, |_, window, cx| {
                 entity.update(cx, |launcher, cx| {
-                    launcher.submit(false, false, armed.source, armed.mark, window, cx)
+                    launcher.submit(false, None, armed.source, armed.mark, window, cx)
                 });
             });
         }
