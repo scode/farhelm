@@ -289,9 +289,6 @@ consequences.
   target title can clip in an environment Delete confirmation where keyboard paging reaches the warning but cannot
   reveal the full title.
 
-- [`pi-page-describes-wrong-trust-question.md`](pi-page-describes-wrong-trust-question.md) — Pi’s Settings description
-  promises folder-trust behavior even though the setting approves project resources.
-
 - [`trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md`](trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md)
   — The new test would still pass if a future edit broke automatic Trash refresh after Replace removes its source.
 

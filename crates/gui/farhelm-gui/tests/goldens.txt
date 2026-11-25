@@ -332,8 +332,8 @@ linux/settings-notifications--dark.png d840be64cd5dea47269fc23e3abe5dd84b287028
 linux/settings-notifications--light.png 8ec48218bbc0ab8fb89a3d164799dc157a7a995c
 linux/settings-notifications-edited--dark.png 7b1b91b8cee0db46981f78855f4d45441d25cba9
 linux/settings-notifications-edited--light.png c4ea0f05d9ecba4eb0ace255d46389abe1a81ed9
-linux/settings-pi--dark.png dc6db7aed2c9e26d0d3858f194903b26bb610c79
-linux/settings-pi--light.png bce5ef487dd52d613fa2fbbde19120dfe4fa8432
+linux/settings-pi--dark.png 676b6b3502593753d1aa0bd0e5ea492414c48009
+linux/settings-pi--light.png d9bfb3aff6894ef65d52078c476b6de8836c7f29
 linux/settings-recipe-editor--dark.png 8ce268966c7f92304387803d8a0323b895001f5d
 linux/settings-recipe-editor--light.png 1bbcf32d91344329eef3351a9943745710a7b719
 linux/settings-recipe-editor-delete--dark.png 85e36e3ddf9778d2ce352c4b79fb6691f0139e8e
