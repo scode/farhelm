@@ -293,7 +293,7 @@ impl LaunchDraft {
                 if self.command.command.trim().is_empty() {
                     return Some("Enter an agent command before launching".to_owned());
                 }
-                if self.command.yolo.is_none() {
+                if self.command.effective_yolo().is_none() {
                     return Some(
                         "Say whether this command runs in YOLO mode (YOLO) before launching"
                             .to_owned(),
@@ -513,7 +513,7 @@ impl LaunchDraft {
         Some(CommandLaunch {
             custom_agent: command.custom_agent.clone(),
             command: command.command.clone(),
-            yolo: command.yolo?,
+            yolo: command.effective_yolo()?,
             agent: command.agent,
             resume: (command.resume_on && command.agent.is_some()).then(|| command.resume.clone()),
         })

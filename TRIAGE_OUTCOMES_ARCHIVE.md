@@ -48429,3 +48429,70 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Remove the feedback file and its index entry.
 - Execution: Fixed by accepting agentless literal effort and showing and clearing incompatible stored choices. Change `nylsvvlwwlvvotkoortmwrskomouuovo`, bookmark `plan/triage-custom-agents-nov24/04b-template-literal-effort`,
   https://github.com/scode/farhelm/pull/4924/changes.
+
+## trailing-templates-editor-hides-custom-yolo-control-and-saves-false.md
+
+- Outcome: `fix code`.
+- Assessment: In Templates, adding Approvals to a command template that declares a custom agent starts it at "Keeps
+  safety checks". The editor shows only "Custom agents always run in YOLO mode." and still saves YOLO as off. Every
+  apply of that template is then refused, and the editor offers no control to fix it. Choosing a custom agent also adds
+  an Approvals field the user did not ask for. Verified: Confirmed. `Field::Yolo.add` sets `Some(false)`
+  (`templates/fields.rs:148`). The custom case renders only a hint (`templates/editor/rows.rs:341-344`). Neither
+  `Field::refusal` nor `check_template_shape` refuses the combination, while `apply_template` does
+  (`crates/farhelm-proto/src/launcher.rs:1103-1113`). Choosing a custom agent sets `yolo = Some(true)` even when the
+  field was absent (`rows.rs:423-426`). This overlaps 469 heavily.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code, together with 469 and 450. Size S-M. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
+  brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. Approvals stays optional, and a retained No can be removed or replaced with the valid answer. Change `rvnylwsovspxmrovotzyskqyvpxzsnps`, bookmark `plan/triage-custom-agents-nov24/04c-custom-command-yolo`,
+  https://github.com/scode/farhelm/pull/4930/changes.
+
+## trailing-apply-template-custom-command-yolo-diverges-from-gui.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Applying a command-launch template that declares a custom agent behaves differently in the desktop app and
+  from the CLI. The app silently sets YOLO on. The shared rule the CLI uses does not, so a template without an explicit
+  YOLO answer fails from the CLI. Stacking templates can also flip a later built-in command to YOLO in the app.
+  Verified: Confirmed. `choose_command_agent` forces `yolo = Some(true)` for a custom agent and never restores it
+  (`crates/gui/farhelm-gui/src/launcher/draft.rs:1062-1069`), and template replay calls it (`templates/apply.rs:514`).
+  `apply_template` refuses only `fields.yolo == Some(false)`, not an inherited `false`, and never sets true
+  (`crates/farhelm-proto/src/launcher.rs:1103-1113`). SPEC.md 1281-1284 requires templates to have "the same effects as
+  making them by hand". SPEC.md 494-496 ("Either declaration counts as YOLO") does not say whether the YOLO answer is
+  implied. It fails safe, since it only ever flips toward YOLO, which asks first.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix spec+code. State whether a custom declaration implies YOLO, then make the fold and
+  the GUI agree. Size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Fixed. The desktop and CLI classify a custom command the same way and preserve the explicit answer for later built-in commands. Change `rvnylwsovspxmrovotzyskqyvpxzsnps`, bookmark `plan/triage-custom-agents-nov24/04c-custom-command-yolo`,
+  https://github.com/scode/farhelm/pull/4930/changes.
+
+## trailing-check-template-shape-allows-custom-agent-yolo-false.md
+
+- Outcome: `fix code`.
+- Assessment: Both the CLI and the Templates editor can save a command template that declares a custom agent with YOLO
+  off. Farhelm refuses to apply that template every time. In the desktop editor the stored "off" is hidden behind the
+  "always run in YOLO mode" message. Verified: Confirmed. `check_template_shape` has no such check
+  (`crates/farhelm-proto/src/launcher.rs:555-660`). `apply_template` (`launcher.rs:1103-1113`) and stored-launch
+  validation refuse it. The CLI path relies on `check_template_shape`, per the reviewer (`agent_requests.rs`; not
+  re-read). The GUI half is item 93.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code. Refuse the combination in `check_template_shape`, together with 93. Size S.
+  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Fixed. Every save path rejects an explicit No on a command template that names Custom. Change `rvnylwsovspxmrovotzyskqyvpxzsnps`, bookmark `plan/triage-custom-agents-nov24/04c-custom-command-yolo`,
+  https://github.com/scode/farhelm/pull/4930/changes.

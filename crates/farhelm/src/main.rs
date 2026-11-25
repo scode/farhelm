@@ -1074,7 +1074,8 @@ struct LaunchFlags {
     #[arg(long, value_name = "COMMAND", allow_hyphen_values = true, value_parser = parse_wrapper_prefix)]
     wrapper: Option<WrapperPrefix>,
     /// Make this a command launch interpreted by non-interactive Bash.
-    /// Shell expansion and operators apply; needs --yolo or --no-yolo.
+    /// Shell expansion and operators apply. A custom agent declaration counts as YOLO.
+    /// When writing a template, pair --command with --yolo or --no-yolo.
     #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
     command: Option<String>,
     /// The command bypasses its approval/classifier/sandbox safety checks. Farhelm believes this

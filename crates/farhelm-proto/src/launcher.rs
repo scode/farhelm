@@ -450,6 +450,12 @@ pub fn stacked_quick_launch_eligible<'t>(
 }
 
 impl TemplateFields {
+    /// A named registration or the generic declaration both identify a custom agent.
+    pub fn declares_custom_agent(&self) -> bool {
+        self.agent.is_some_and(LaunchHarness::uses_custom_catalog)
+            || matches!(self.custom_agent, Some(Some(_)))
+    }
+
     /// Whether the template sets a command-launch choice, including a false
     /// YOLO assertion or an explicit null reset of the resume command.
     ///
@@ -588,14 +594,13 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
             return Err("a custom agent ID needs the custom agent type".into());
         }
     }
+    if template.fields.declares_custom_agent() && template.fields.yolo == Some(false) {
+        return Err(CUSTOM_COMMAND_YOLO_REQUIRED.into());
+    }
     // A registration ID can apply only to the custom harness, even if an earlier template chose it.
     // Without either choice, the model can still belong to a built-in harness.
     if let Some(Some(model)) = &template.fields.model
-        && (template
-            .fields
-            .agent
-            .is_some_and(LaunchHarness::uses_custom_catalog)
-            || matches!(template.fields.custom_agent, Some(Some(_))))
+        && template.fields.declares_custom_agent()
     {
         crate::custom_agents::validate_model_or_effort(model).map_err(str::to_owned)?;
     }
@@ -744,6 +749,7 @@ pub struct LauncherState {
     /// GUI/CLI drafts leave this unset, and templates cannot modify it.
     pub workspace_trust: Option<bool>,
     pub command: String,
+    /// The explicit answer carried by edits. A custom declaration has its own effective answer for launch.
     pub yolo: Option<bool>,
     pub command_agent: Option<LaunchHarness>,
     /// A Command draft can declare a catalog agent or use the unregistered custom integration.
@@ -761,6 +767,19 @@ pub struct LauncherState {
     /// launch behavior and the save-as-template default independently.
     pub name_kind: Option<TemplateNameKind>,
 }
+
+/// A custom command has the fixed YOLO classification while the declaration is active.
+/// Keep the caller's explicit answer for any later built-in or undeclared command.
+pub fn effective_command_yolo(agent: Option<LaunchHarness>, answer: Option<bool>) -> Option<bool> {
+    if agent.is_some_and(LaunchHarness::uses_custom_catalog) {
+        Some(true)
+    } else {
+        answer
+    }
+}
+
+/// The save and apply refusals for an explicit No on a custom command.
+pub const CUSTOM_COMMAND_YOLO_REQUIRED: &str = "custom agents always run in YOLO mode";
 
 /// What a template is applied against besides the launcher itself.
 #[derive(Debug, Clone, Copy)]
@@ -1129,10 +1148,7 @@ pub fn apply_template(
             .is_some_and(LaunchHarness::uses_custom_catalog)
         && fields.yolo == Some(false)
     {
-        return Err(refuse(
-            "YOLO answer",
-            "custom agents always run in YOLO mode".into(),
-        ));
+        return Err(refuse("YOLO answer", CUSTOM_COMMAND_YOLO_REQUIRED.into()));
     }
 
     // 5. The destination and the session's name.
@@ -1790,6 +1806,32 @@ mod tests {
             known_recipes: &[],
             known_places: &[],
             host_fixed,
+        }
+    }
+
+    /// A saved command cannot promise safety checks when its declaration always counts as YOLO.
+    #[test]
+    fn a_custom_command_template_cannot_save_explicit_no() {
+        for (agent, custom_agent) in [
+            (Some(LaunchHarness::Custom), None),
+            (None, Some(Some("acme-code".to_owned()))),
+        ] {
+            let mut candidate = template(
+                "custom-command",
+                TemplateFields {
+                    kind: Some(LauncherKind::Command),
+                    agent,
+                    custom_agent,
+                    yolo: Some(false),
+                    ..TemplateFields::default()
+                },
+            );
+            assert_eq!(
+                check_template_shape(&candidate),
+                Err(CUSTOM_COMMAND_YOLO_REQUIRED.into())
+            );
+            candidate.fields.yolo = None;
+            assert_eq!(check_template_shape(&candidate), Ok(()));
         }
     }
 

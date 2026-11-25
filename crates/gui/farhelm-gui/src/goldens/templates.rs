@@ -137,6 +137,15 @@ pub(super) fn template_generic_agent_refusal_setup(
     open_template_editor(state, "generic-agent", None, window, cx);
 }
 
+/// Show how a stored answer that promises safety checks can be removed from a custom command template.
+pub(super) fn template_custom_yolo_refusal_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open_template_editor(state, "custom-command", None, window, cx);
+}
+
 /// The same literal effort is valid without an agent and incompatible with an explicit built-in agent.
 pub(super) fn template_literal_effort_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     open_template_editor(state, "effort-only", None, window, cx);
@@ -202,6 +211,9 @@ fn open_template_editor(
             )
         }
         "generic-agent" => Some(serde_json::json!({"kind": "agent", "agent": "custom"})),
+        "custom-command" => Some(serde_json::json!({
+            "kind": "command", "agent": "custom", "command": "my-agent {farhelm_args}", "yolo": false
+        })),
         "effort-only" => Some(serde_json::json!({"kind": "agent", "effort": "deep_focus"})),
         "codex-effort" => Some(
             serde_json::json!({"kind": "agent", "agent": "codex", "effort": "deep_focus_".repeat(23)}),

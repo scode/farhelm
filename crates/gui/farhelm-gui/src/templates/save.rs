@@ -94,7 +94,10 @@ impl Candidate {
                     .filter(|agent| agent.uses_custom_catalog())
                     .map(|_| state.command_custom_agent.clone());
                 fields.command = (!state.command.is_empty()).then(|| state.command.clone());
-                fields.yolo = state.yolo;
+                // A custom declaration supplies its answer. An earlier built-in's No still belongs to that draft.
+                fields.yolo = state
+                    .yolo
+                    .filter(|answer| *answer || !fields.declares_custom_agent());
                 fields.resume_command = state.resume_command.clone().map(Some);
             }
             None => {}

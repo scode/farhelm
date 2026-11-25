@@ -62,9 +62,9 @@ absolutely catastrophically major mistake with huge user impact."
   keeps the selected launch type and its choices. Farhelm composes the command, and the command it uses to resume a
   conversation, from those choices when the session is created (and again on Restart with), and stores them; Replace and
   agent clone copy the stored commands rather than composing them anew, while Clone and Replace with compose from the
-  choices. A **command launch** is a command line the user writes, with the user's own assertion of whether it bypasses
-  safety checks (YOLO). A command launch may also declare that it runs a given agent type, which buys that agent type's
-  status reading and conversation reporting, and, with a resume command the user writes, Resume (see Creation and
+  choices. A **command launch** is a command line the user writes, with an assertion of whether it bypasses safety
+  checks (YOLO). A custom declaration supplies that assertion (see Topology). Declaring an agent type gives the session
+  its status reading and conversation reporting, and, with a resume command the user writes, Resume (see Creation and
   Durability). A shell launch shares the Agent tab's launch path and may use a wrapper. It has no agent settings or
   resume command. The optional agent type on a command launch only accepts agent programs. This spec also calls an agent
   type a harness, after the vendor program behind it. Wording that also applies to Bash or Zsh names the shell or uses a
@@ -498,8 +498,10 @@ Registered agents appear in the session launcher's **Custom** group and are sear
 use the ordinary wrapper prefix and templates, accept literal model and effort values of up to 256 bytes from
 `[a-z0-9_-]`, and always count as YOLO. They use screen activity for Running and Idle and have no initial prompt. The
 Command tab can declare a registered agent or generic **Custom**. Either declaration counts as YOLO and carries its own
-command, optional resume command and reporting behavior. Existing launches retain their commands and capabilities after
-a registration changes. The session list uses the current display name and falls back to the saved ID when the
+command, optional resume command and reporting behavior. The declaration supplies the YOLO answer for its command in
+the desktop app and CLI. A later built-in or undeclared command still uses the explicit answer the user or a template
+set. A template that declares Custom cannot save an explicit No. Existing launches retain their commands and capabilities
+after a registration changes. The session list uses the current display name and falls back to the saved ID when the
 registration is deleted.
 
 The [custom-agent contract](website/src/content/docs/docs/agents/custom-agent-contract.md) defines the flags and
@@ -1274,10 +1276,10 @@ agent choice is independent of that destination:
   in Bash and occupy a complete word from the literal split. A quoted placeholder, or one joined to other text where it
   cannot be substituted safely, is refused when saving a launch or a template and again at spawn for an older stored
   command. Farhelm inserts each filled value as a single-quoted word, or one such word per argument for
-  `{farhelm_args}`. The command may reference the session's working directory as `{cwd}` and takes a required YOLO
-  assertion: the user states whether the command bypasses human, classifier, AI-reviewer and sandbox safety checks, and
-  Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it runs,
-  or how to resume it. A command launch may optionally declare the agent type it runs. A declared agent type requires
+  `{farhelm_args}`. The command may reference the session's working directory as `{cwd}`. A custom declaration counts as
+  YOLO. Otherwise the user states whether the command bypasses human, classifier, AI-reviewer and sandbox safety
+  checks, and Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what
+  agent it runs, or how to resume it. A command launch may optionally declare the agent type it runs. A declared agent type requires
   `{farhelm_args}` as a whole argument exactly once in the command, which marks where Farhelm places that agent type's
   own launch integration arguments (including the conversation-reporting hook, instructions pointer and Codex's
   `--no-daemon`, see Durability); it is replaced by nothing for an agent type that takes no such arguments, so the rule
@@ -1605,8 +1607,8 @@ confirmation. Farhelm treats an agent launch as YOLO when its saved permission i
 by the saved agent. An upgrade records YOLO on saved agent launches with no recorded mode and preserves their start and
 resume commands. Cached or older records with no permission follow the same rule. A plain shell has no permission mode,
 so its create, clone and replace do not ask for YOLO consent. The existing explicit approval rule for an agent-supplied
-wrapper still applies. A command launch counts as YOLO when its YOLO assertion says so, and only then: Farhelm does not
-parse command lines to second-guess the assertion. Because an agent's assertion cannot be checked either, an agent may
+wrapper still applies. A command launch counts as YOLO when it declares a custom agent or its assertion says so. Farhelm
+does not parse command lines to second-guess the assertion. Because an agent's assertion cannot be checked, an agent may
 not start a command launch, or a YOLO launch, on such a host at all (see Agent-spawned sessions). The helm enforces the
 confirmation, so no client can skip it: every create, clone, replace, replace with, and restart with that reaches it on
 such a host without the override is refused before the helm sends a launch or restart request to the supervisor. The GUI
@@ -4788,9 +4790,10 @@ no such Allow to reuse. A completed attempt returns its recorded result without 
 by its exact name, and may be repeated to apply several in order. `--agent <type>` sets the agent type; `--model`,
 `--effort`, `--permissions` and `--wrapper` set an agent launch's choices; `--wrapper` is one shell-style command line
 split into raw prefix words with quotes and escapes retained, interpreted by Bash and with no placeholders. `--command`
-makes it a command launch, which needs `--yolo` or `--no-yolo` as its assertion and may add `--agent <type>` as its
-declared agent type and `--resume-command` to opt into Resume. Templates are applied first, in order, and the other
-flags then act as further edits, so `--template my-codex --model gpt-6-luna` is `my-codex` with a different model. The
+makes it a command launch. It may add `--agent <type>` as its declared agent type and `--resume-command` to opt into
+Resume. A custom agent declaration supplies the YOLO answer. Otherwise `--yolo`, `--no-yolo` or a template supplies it.
+Templates are applied first, in order, and the other flags then act as further edits, so
+`--template my-codex --model gpt-6-luna` is `my-codex` with a different model. The
 result is validated exactly like a GUI launch, with the same refusals naming the field, and the remembered GUI defaults
 never fill a gap, so the same templates can launch differently from the CLI than from a GUI that preselected a
 remembered permission. A flag required by the verb, such as `--cwd` or the target host, may be omitted when an applied

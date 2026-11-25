@@ -296,7 +296,7 @@ impl AgentChoices {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CommandChoices {
     pub command: String,
-    /// The required YOLO assertion; `None` until the user answers it, which is not the same as "no".
+    /// The explicit answer. A custom declaration supplies its effective answer without replacing this one.
     pub yolo: Option<bool>,
     /// The optional declared agent type.
     pub agent: Option<LaunchHarness>,
@@ -307,6 +307,13 @@ pub struct CommandChoices {
     pub resume_on: bool,
     /// The resume command's raw text, kept while Resume is off or hidden.
     pub resume: String,
+}
+
+impl CommandChoices {
+    /// Use the same classification as a command assembled by the CLI's template fold.
+    pub fn effective_yolo(&self) -> Option<bool> {
+        farhelm_proto::launcher::effective_command_yolo(self.agent, self.yolo)
+    }
 }
 
 /// What an agent-choice edit did besides changing the draft, for the view to show.
@@ -693,13 +700,17 @@ impl LaunchDraft {
             .map(|_| selection.harness);
     }
 
-    /// A command launch's stored fields; its agent tab stays empty.
+    /// Seed a stored command launch. A saved Custom command records its classification, so it carries no independent
+    /// answer for a later agent choice. The declaration still supplies YOLO while selected.
     fn seed_command(&mut self, command: &CommandLaunch) {
         self.tab = Tab::Command;
         self.agent.permissions_explicit = true;
         self.command = CommandChoices {
             command: command.command.clone(),
-            yolo: Some(command.yolo),
+            yolo: (!command
+                .agent
+                .is_some_and(LaunchHarness::uses_custom_catalog))
+            .then_some(command.yolo),
             agent: command.agent,
             custom_agent: command.custom_agent.clone(),
             custom_registration_missing: false,
@@ -1069,9 +1080,6 @@ impl LaunchDraft {
         self.command.agent = agent;
         self.command.custom_agent = None;
         self.command.custom_registration_missing = false;
-        if agent.is_some_and(LaunchHarness::uses_custom_catalog) {
-            self.command.yolo = Some(true);
-        }
     }
 
     pub fn choose_command_resume(&mut self, on: bool) {
