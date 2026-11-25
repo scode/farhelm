@@ -7,7 +7,7 @@
 //!
 //! - **Asked or not.** The menu's Remove ([`start`]) asks the confirmation unless "Remove hosts without asking" is on
 //!   ([`asks_first`]); then the removal goes out at once, as the old remembered answer did.
-//! - **The confirmation** ([`ask`]) is a question of the prompt, frozen on the host's id ([`Removal`]): "Remove host ·
+//! - **The confirmation** ([`ask_shown`]) is a question of the prompt, frozen on the host's id ([`Removal`]): "Remove host ·
 //!   <name>", the host's phase and build, then a body drawn at the old dialog's sizes ([`RemoveBody`]: the destination
 //!   and the old explanation), and the footer note naming the gear as the way to undo the permanent answer. Three
 //!   answers in the old order: Cancel, "Remove, don't ask again" and Remove, where focus starts. When the host turned
@@ -137,18 +137,37 @@ pub(super) fn start(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) {
     let Some(view) = listed(host, cx) else {
         return;
     };
-    let removal = Removal::of(&view);
+    start_shown(&view, asks_first(cx), mark, window, cx);
+}
+
+/// The menu supplies the presented host and confirmation choice. Live state can refuse a missing or changed entry.
+pub(super) fn start_shown(
+    view: &HostView,
+    asks: bool,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let removal = Removal::of(view);
+    let Some((live, offered)) = super::menu::current(view.id, cx) else {
+        return;
+    };
+    if offers::HostKind::of(&live).provider() != removal.deletes {
+        return;
+    }
     // A line from an earlier Remove belongs to that attempt; this one says its own.
     show(cx, |lines| lines.not_started = None);
     if super::launch_in_flight(cx) {
         not_started(&removal, Refusal::LaunchInFlight, None, cx);
-    } else if removal.deletes.is_some() || asks_first(cx) {
-        let _ = ask(host, mark, window, cx);
-    } else {
+    } else if removal.deletes.is_some() || asks {
+        let _ = ask_shown(view, mark, window, cx);
+    } else if offered.remove == Some(true) {
         // TODO: with the preference on, the old app showed a refusal of this removal in the short host refusal dialog
         // ("Remove host · <name>", Close), opened through `mark`; it shows under the row until this opens that dialog
         // (`super::refusal`, which Update's refusals brought).
         submit(&removal, None, cx);
+    } else if offered.remove == Some(false) {
+        not_started(&removal, Refusal::Busy, None, cx);
     }
 }
 
@@ -189,7 +208,7 @@ impl Removal {
 
 /// Whether a Remove asks first: the shared "Remove hosts without asking" preference is off or the helm stored no
 /// choice.
-fn asks_first(cx: &App) -> bool {
+pub(super) fn asks_first(cx: &App) -> bool {
     let skips = session::current_store(cx).is_some_and(|store| {
         store
             .read(cx)
@@ -204,21 +223,26 @@ fn asks_first(cx: &App) -> bool {
 /// Ask the removal confirmation for `host` over everything else in `window` (see the module docs), unless the user has
 /// moved on since `mark`, the window is inert, or the registry does not list the host. Returns the question's layer.
 /// Visible to the crate for the screenshot golden.
+#[cfg(test)]
 pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
+    ask_shown(&listed(host, cx)?, mark, window, cx)
+}
+
+/// Compose the question from the host the action showed. Live offers can only disable its confirmation.
+fn ask_shown(view: &HostView, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
     let store = session::current_store(cx)?;
-    let key = HostView::key(host);
-    let (view, enabled) = {
+    let key = HostView::key(view.id);
+    let enabled = {
         let collections = store.read(cx).collections();
-        let view = collections.get::<HostView>(&key)?.clone();
-        let offered = offers::current_menu_offers(&view, collections.get(&key), cx);
+        let live = collections.get::<HostView>(&key)?;
+        let offered = offers::current_menu_offers(live, collections.get(&key), cx);
         // Each removal is enabled by its own offer: the menu offers Remove or the provider's Delete, never both.
-        let enabled = match offers::HostKind::of(&view).provider() {
+        match offers::HostKind::of(view).provider() {
             Some(_) => offered.delete.is_some_and(|(_, enabled)| enabled),
             None => offered.remove == Some(true),
-        };
-        (view, enabled)
+        }
     };
-    let removal = Removal::of(&view);
+    let removal = Removal::of(view);
     let name = removal.name.clone();
     let (title, help) = match removal.deletes {
         Some(provider) => {
@@ -230,7 +254,7 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
     let title = HostSentence::new("host-remove-title")
         .text(format!("{title} · "))
         .host(&name);
-    let summary = phase_summary("host-remove-summary", &view);
+    let summary = phase_summary("host-remove-summary", view);
     let (icon, color) = (view.icon, view.color);
     let remove = Answer::new(removal.label(), HoverHelp::tooltip(help), Tier::Danger);
     let deletes = removal.deletes.is_some();

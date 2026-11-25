@@ -73,6 +73,20 @@ fn preferences(on: bool) -> CollectionState {
     }
 }
 
+/// Apply a preference change from elsewhere while the original probe is still outstanding.
+fn turn_on_skip_after_probe(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
+    assert!(cx.update(|_, cx| super::asks_first(cx)));
+    let preference = preferences(true);
+    helm.push(CollectionChanges {
+        collection: preference.collection,
+        meta: preference.meta,
+        upsert: preference.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    assert!(!cx.update(|_, cx| super::asks_first(cx)));
+}
+
 /// Offer setup for a Tailscale draft so a refused setup has to restore the route along with its text fields.
 fn probe_a_plan(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> OpKey {
     open_dialog(cx);
@@ -214,10 +228,17 @@ pub(crate) fn reference_offer(opener: gpui::FocusHandle, mark: crate::focus::Mar
 /// for. Specified: a `provisionable` reply closes Add host and opens "Set up host · dev@newbox" with its summary, the
 /// plan's lead, step names, short paths and explanation, Copy plan and the footer note; the answers read Cancel, "Set
 /// up, don't ask again" and Set up in that order; focus is on Set up; nothing more was sent.
+/// A preference change during the probe cannot give the earlier Add permission to install.
 #[gpui::test]
 fn a_plan_opens_the_setup_confirmation_in_place_of_add_host(cx: &mut TestAppContext) {
-    let (mut helm, cx, _add) = open_rail_with(cx, Vec::new());
-    probe_a_plan(&mut helm, cx);
+    let (mut helm, cx, _add) = open_rail_with(cx, vec![preferences(false)]);
+    open_dialog(cx);
+    type_text(cx, "dev@newbox");
+    click(cx, "add-host-submit");
+    let (probe, _) = one_probe(&mut helm);
+    turn_on_skip_after_probe(&mut helm, cx);
+    helm.reply(probe, 200, Some(plan_reply()));
+    settle(cx);
     assert_eq!(
         label(cx, "prompt").as_deref(),
         Some("Set up host · dev@newbox")
@@ -672,9 +693,10 @@ fn panel_with_a_failed_setup(
 ) -> (FakeHelm, &mut VisualTestContext) {
     use crate::hosts::tests::{hosts, open_panel_in_column, progress, reference_hosts, run};
     use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus};
-    let mut snapshot = vec![
+    let snapshot = vec![
         hosts(&reference_hosts()),
         progress(&[run(2, ProvisioningOperation::Add, RunStatus::Failed)]),
+        preferences(without_asking),
         crate::sign_in::tests::questions(&[]),
         CollectionState {
             collection: Collection::SshSignInCompletions,
@@ -682,9 +704,6 @@ fn panel_with_a_failed_setup(
             entries: Vec::new(),
         },
     ];
-    if without_asking {
-        snapshot.push(preferences(true));
-    }
     let (helm, _, cx) = open_panel_in_column(cx, snapshot);
     cx.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1000.)));
     settle(cx);
@@ -820,6 +839,7 @@ fn remove_starts_during_host_setup_sign_in_and_defers_ready_replay(cx: &mut Test
 /// paths (none) and no new entry, under the host's key, while the row reads "Setting up…"; the plan opens "Set up host
 /// · build-box" with focus on Set up; Set up sends `POST /api/hosts/provision` for `p-1` under the host's key, focus
 /// returns to the row's toggle, and a refusal of it shows under the row with nothing opened.
+/// The prompt uses the preference at Re-run, even if a preferences push turns on skipping while the probe is out.
 #[gpui::test]
 fn re_run_probes_the_registered_destination_and_sets_up_under_the_hosts_key(
     cx: &mut TestAppContext,
@@ -844,6 +864,7 @@ fn re_run_probes_the_registered_destination_and_sets_up_under_the_hosts_key(
     assert_eq!(work(&key, cx), Some(Work::Probe));
     assert_eq!(label(cx, "host-status-2").as_deref(), Some("Setting up…"));
 
+    turn_on_skip_after_probe(&mut helm, cx);
     helm.reply(probe, 200, Some(plan_reply()));
     settle(cx);
     assert_eq!(

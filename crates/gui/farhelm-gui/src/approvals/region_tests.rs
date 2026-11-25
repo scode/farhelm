@@ -1463,6 +1463,8 @@ fn a_held_enter_that_opened_add_host_cannot_approve_it(cx: &mut TestAppContext) 
 
     press(cx, "enter", true);
     cx.executor().advance_clock(ARM_DELAY);
+    // Put Add on screen so the next repeat exercises the held-key guard even when the form can act.
+    test_support::show_next_frame(cx);
     press(cx, "enter", true);
     let sent = helm.commands();
     assert!(sent.is_empty(), "held Enter sent requests: {sent:?}");

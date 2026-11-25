@@ -723,13 +723,19 @@ pub(crate) fn rerun_command(host: &HostView, how: SetupRerun) -> Result<Command,
 
 /// Run `host`'s failed setup again, the host menu's Re-run, with `mark` the [`Mark`] taken in its click handler: probe
 /// the host under its own key as its kind says ([`HostKind::setup_rerun`]), and go on from the plan as the module docs
-/// say. An SSH host's plan is the setup confirmation's, skipped by "Set up new hosts without asking"; a Tensorlake
+/// say. An SSH host's plan uses the drawn "Set up new hosts without asking" choice, even after sign-in. A Tensorlake
 /// sandbox's is its creation question ("Create Tensorlake sandbox · <name>", with no Back), skipped only by
 /// Tensorlake's own "Create Tensorlake sandboxes without asking", read when the plan arrives ([`ask_or_create`]). Sends
 /// nothing for a kind with no rerun, an SSH host with no destination, or while work on the host is out. While a session
 /// launch is in flight ([`super::launch_in_flight`]) it sends nothing either, and says so on the Hosts panel's line:
 /// "Re-run <host>: not started, …" ([`not_started`]).
-pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut App) {
+pub(crate) fn rerun(
+    host: &HostView,
+    asks_before_setup: bool,
+    mark: Mark,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let Some(how) = HostKind::of(host).setup_rerun() else {
         return;
     };
@@ -790,7 +796,10 @@ pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut A
                     probe_id,
                     confirmation,
                     steps,
-                } => Ok((offer(probe_id, confirmation, steps, None), asks_first(cx))),
+                } => Ok((
+                    offer(probe_id, confirmation, steps, None),
+                    asks_before_setup,
+                )),
             },
             SetupRerun::Tensorlake => match add::read_plan(&settled.outcome) {
                 Ok(plan) => {

@@ -9,6 +9,7 @@
 //! clicking a row's toggle and then the menu's item. Every step ends in one of the shared harness's step helpers, so
 //! the focus and layer invariants are checked after each.
 
+use farhelm_helm_client::collections::decode_changes;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::ui_channel::{
@@ -64,6 +65,36 @@ fn press_remove(cx: &mut VisualTestContext) {
         "the premise: Remove is offered"
     );
     click(cx, "host-menu-remove");
+}
+
+/// Enabling removal without asking cannot authorize a press on the earlier menu's presented action.
+#[gpui::test]
+fn remove_waits_for_its_changed_confirmation_choice_to_be_shown(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
+    assert!(cx.update(|_, cx| super::asks_first(cx)));
+    click(cx, "host-menu-toggle-2");
+    crate::test_support::show_next_frame(cx);
+    let position = crate::test_support::center(cx, "host-menu-remove");
+    let preference = preferences(true);
+    let changes = decode_changes(CollectionChanges {
+        collection: preference.collection,
+        meta: preference.meta,
+        upsert: preference.entries,
+        remove: vec![],
+    })
+    .unwrap();
+    cx.update(|window, cx| {
+        let store = session::current_store(cx).unwrap();
+        store.update(cx, |store, cx| store.apply(&changes, cx));
+        assert!(!super::asks_first(cx));
+        window.draw(cx).clear(cx);
+        crate::test_support::click_before_redraw(position, window, cx);
+    });
+    settle(cx);
+    assert_eq!(sent(&mut helm), []);
+    crate::test_support::show_next_frame(cx);
+    click(cx, "host-menu-remove");
+    assert_eq!(sent(&mut helm), [("Delete /api/hosts/2".to_owned(), None)]);
 }
 
 /// The node drawn under `id`, if any.

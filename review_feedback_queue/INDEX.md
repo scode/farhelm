@@ -121,10 +121,6 @@ consequences.
   — Stop can acknowledge completion of a retained unconfirmed launch without establishing what its recorded
   terminal-host start left running.
 
-- [`trailing-hosts-menu-rerun-reads-live-host-state.md`](trailing-hosts-menu-rerun-reads-live-host-state.md) — Clicking
-  Re-run in a host menu re-reads live host state at click time, so a state update before the click can turn Re-run
-  failed setup into an unconfirmed remote host Update.
-
 - [`trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md`](trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md)
   — When waking a stopped container or previously failed sandbox fails past 20 seconds or repeats the same error, the
   launcher either hangs for 60 seconds or reports that the host was suspended again.
@@ -145,14 +141,6 @@ consequences.
 - [`trailing-new-container-managed-checkout-stretches-host-block.md`](trailing-new-container-managed-checkout-stretches-host-block.md)
   — Choosing New container and Managed checkout inserts roughly 300 px of empty vertical space below the Container host
   picker because a horizontal flex basis is applied inside a vertical flex column.
-
-- [`trailing-hosts-menu-remove-reads-live-skip-confirmation.md`](trailing-hosts-menu-remove-reads-live-skip-confirmation.md)
-  — Choosing Remove from a host menu checks the live skip-confirmation setting at click time rather than binding to the
-  drawn frame, so an SSH host and its per-host and per-session UI state can be forgotten without confirmation.
-
-- [`trailing-ssh-host-setup-reads-live-skip-confirmation-at-settle.md`](trailing-ssh-host-setup-reads-live-skip-confirmation-at-settle.md)
-  — Adding an SSH host or re-running failed setup checks the skip-confirmation preference after the probe finishes
-  instead of at click time, so enabling that setting mid-probe starts installing without showing the plan.
 
 - [`trailing-failed-rebuild-on-removed-host-blocks-recipe-delete.md`](trailing-failed-rebuild-on-removed-host-blocks-recipe-delete.md)
   — If a recipe rebuild or preparation fails on an empty container host and that host is later removed, deleting the
