@@ -1181,12 +1181,34 @@ pub(super) fn host_menu_scene(state: &SceneState, window: &mut Window, cx: &mut 
 /// at once as the reference stack had it: no folder of the host's own and no default, so the field shows "No default
 /// set". The fake, the connection and the watch are kept for the scene's life.
 pub(super) fn host_settings_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    host_settings_scene(state, window, cx, false);
+}
+
+/// A working SSH alias can be refused by Tailscale mode. Keep the address format guidance next to the switch.
+pub(super) fn host_settings_tailscale_format_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    host_settings_scene(state, window, cx, true);
+}
+
+/// Open the real dialog and settle its initial read before the refusal scene edits the SSH route.
+fn host_settings_scene(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+    invalid_tailscale_address: bool,
+) {
     let (helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let helm = Rc::new(RefCell::new(helm));
-    helm.borrow_mut().connect(vec![crate::hosts::tests::hosts(
-        &crate::hosts::tests::reference_hosts(),
-    )]);
+    let mut listed = crate::hosts::tests::reference_hosts();
+    if invalid_tailscale_address {
+        listed[1].destination = Some("dev_box".into());
+    }
+    helm.borrow_mut()
+        .connect(vec![crate::hosts::tests::hosts(&listed)]);
     let handle = window.window_handle();
     // The scene's ring handle stands in for the menu's toggle, as it stands in for the gear in the Settings scenes.
     let opener = state.ring.clone();
@@ -1202,6 +1224,17 @@ pub(super) fn host_settings_dialog_setup(state: &SceneState, window: &mut Window
                 let answer = serde_json::json!({ "root": null, "default": null });
                 helm.reply(read.id, 200, Some(answer));
             }
+        }
+        if invalid_tailscale_address {
+            crate::hosts::enable_tailscale_for_golden(cx);
+            let save = helm
+                .commands()
+                .into_iter()
+                .find(|command| command.path == "/api/hosts/2/tailscale")
+                .expect("the switch sent a mode change");
+            let guidance = "Tailscale mode needs a node name, full Tailscale DNS name, or IP address. \
+                            An SSH login is optional (login@address).";
+            helm.reply(save.id, 400, Some(serde_json::json!(guidance)));
         }
     });
 }

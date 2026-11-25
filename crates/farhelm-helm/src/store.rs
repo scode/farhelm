@@ -7328,12 +7328,13 @@ impl HelmStore {
     ) -> anyhow::Result<HostId> {
         let conn = self.conn.clone();
         let destination = destination.to_string();
-        if !destination_is_usable(&destination)
-            || (tailscale && crate::ssh::tailscale::destination_host(&destination).is_err())
-        {
+        if !destination_is_usable(&destination) {
             return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
                 destination,
             )));
+        }
+        if tailscale {
+            crate::ssh::tailscale::destination_host(&destination)?;
         }
         require_usable_remote_paths(remote_farhelm, remote_state_dir)
             .map_err(anyhow::Error::new)?;
@@ -7715,12 +7716,13 @@ impl HelmStore {
         tailscale: bool,
         expected_host: Option<(HostId, &str)>,
     ) -> anyhow::Result<(HostId, bool)> {
-        if !destination_is_usable(destination)
-            || (tailscale && crate::ssh::tailscale::destination_host(destination).is_err())
-        {
+        if !destination_is_usable(destination) {
             return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
                 destination.to_string(),
             )));
+        }
+        if tailscale {
+            crate::ssh::tailscale::destination_host(destination)?;
         }
         // Lenient: these are values Farhelm already holds (the plan's
         // install paths, what the probe dialed, or a stored row merged into
@@ -7947,7 +7949,7 @@ impl HelmStore {
                         .transaction()
                         .context("beginning the ensure-hosts transaction")?;
                     let mut added = Vec::new();
-                    for entry in &entries {
+                    for (index, entry) in entries.iter().enumerate() {
                         // Newness is checked FIRST, and separately from the
                         // conditional insert below, specifically so the alias
                         // check that follows applies only to entries this call
@@ -7981,8 +7983,11 @@ impl HelmStore {
                         // aborts the uncommitted transaction, so the batch
                         // stays all-or-nothing.
                         if !already_registered {
-                            if entry.tailscale && crate::ssh::tailscale::destination_host(&entry.destination).is_err() {
-                                return Err(anyhow::Error::new(HostStoreError::InvalidDestination(entry.destination.clone())));
+                            if entry.tailscale {
+                                crate::ssh::tailscale::destination_host(&entry.destination)
+                                    .with_context(|| {
+                                        format!("entry {index} names {:?}, which Tailscale cannot use", entry.destination)
+                                    })?;
                             }
                             require_usable_remote_paths(
                                 entry.remote_farhelm.as_deref(),
@@ -8126,9 +8131,9 @@ impl HelmStore {
                     rusqlite::params![host, destination],
                     |r| {
                         if r.get::<_, bool>(5)?
-                            && crate::ssh::tailscale::destination_host(&destination).is_err()
+                            && let Err(error) = crate::ssh::tailscale::destination_host(&destination)
                         {
-                            return Ok(Err(HostStoreError::InvalidDestination(destination.clone())));
+                            return Ok(Err(error));
                         }
                         Ok(Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
                     },
@@ -8234,8 +8239,8 @@ impl HelmStore {
                     return Ok(false);
                 }
                 let destination = destination.context("an SSH host has no destination")?;
-                if tailscale && crate::ssh::tailscale::destination_host(&destination).is_err() {
-                    return Err(HostStoreError::InvalidDestination(destination).into());
+                if tailscale {
+                    crate::ssh::tailscale::destination_host(&destination)?;
                 }
                 podman::refuse_referenced_place(&tx, host)?;
                 tx.execute("DELETE FROM podman_place_claims WHERE host_id = ?1", [host])?;

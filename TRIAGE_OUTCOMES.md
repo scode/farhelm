@@ -3077,25 +3077,6 @@
   index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-tailscale-destination-format-guidance-discarded.md
-
-- Outcome: `fix code`.
-- Assessment: Turning on Tailscale host for an SSH host whose address is an `ssh://` URI, has a port, or uses a config
-  alias with underscores fails with "is not a usable ssh destination". It should explain that Tailscale mode needs a
-  node name, DNS name or IP with an optional login. The same applies when editing or registering such an address.
-  Verified: Confirmed. `ssh/tailscale.rs` `destination_host` produces guidance, but `hosts.rs:998-1003` and the store
-  sites wrap it into `HostStoreError::InvalidDestination`. SPEC.md (Tailscale host) promises "an actionable error if
-  Tailscale cannot verify the host", which covers verification, not format, so this is a reading. The trigger is
-  ordinary.
-- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
-  Recommendation for reference: fix code S (a dedicated error variant carrying `destination_host`'s message at all
-  sites). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## trailing-authorized-stop-report-completion-without-settling-recorded-launch.md
 
 - Outcome: `fix code`.
@@ -3945,29 +3926,6 @@
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## trailing-tailscale-predictable-tmp-socket-dir-local-dos.md
-
-- Outcome: `fix code`.
-- Assessment: For Tailscale hosts, Farhelm keeps its shared SSH connections in a folder under `/tmp` whose name another
-  account on the same computer can predict. That account can create the folder first. Farhelm then refuses to connect
-  to, sign in to or set up that Tailscale host until reboot. Verified: Confirmed by source. `ssh/tailscale.rs:158-199`:
-  the name is a digest of uid, canonical state directory and destination, and a pre-existing foreign entry fails
-  `require_private_control_directory` with no fallback. Confidentiality and integrity are preserved; only availability
-  is lost. No spec text accepts or rejects hostile local accounts on the helm machine for this. Analogues: SPEC.md 1884
-  and 5905 say Farhelm is not designed for working-copy roots or install directories that other accounts can write to,
-  and 5160 accepts a narrow loopback-port gap against other local users.
-- Decision: q-localdos, "Another local account blocking a Tailscale host": the maintainer picked "Fix it". (2026-11-24
-  fewest-questions triage page (main c38b93552).) Maintainer's comment: "but why "add a salt", can we just use a proper
-  operating system allocated (securly) temp name please"
-- Completion criteria: Replace the predictable /tmp folder name with an operating-system-allocated secure temporary
-  directory (mkdtemp-style), not a salted digest. If a stable name across helm restarts turns out to be required, report
-  that back to the maintainer before choosing another shape. Recommendation for reference: fix code S. Add a random
-  per-helm salt stored in the state directory to the digest, or use a private runtime directory. Alternatively fix spec
-  to declare it out of scope. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
-  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
-  the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
 ## trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md
 

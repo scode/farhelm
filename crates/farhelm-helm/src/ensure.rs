@@ -448,6 +448,11 @@ mod tests {
                 "entry 0",
             ),
             (
+                "an address Tailscale cannot use",
+                r#"{ hosts: [{ ssh: "user@ok" }, { ssh: "dev_box", tailscale: true }] }"#,
+                "entry 1 names \"dev_box\", which Tailscale cannot use: Tailscale mode needs a node name",
+            ),
+            (
                 "NUL in the destination",
                 "{ hosts: [{ ssh: \"good.example\\u0000evil.example\" }] }",
                 "NUL",

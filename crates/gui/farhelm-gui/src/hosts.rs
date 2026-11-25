@@ -134,6 +134,8 @@ pub(crate) use settings::start_yolo_without_asking_command;
 
 #[cfg(test)]
 pub(crate) use lifecycle::show_suspend_question_for_golden;
+#[cfg(test)]
+pub(crate) use settings::enable_tailscale_for_golden;
 
 #[cfg(test)]
 mod environment_tests;

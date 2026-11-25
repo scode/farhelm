@@ -1658,6 +1658,9 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
     if find_cause::<yolo_guard::YoloNeedsConfirmation>(e).is_some() {
         return ErrorKind::Conflict;
     }
+    if find_cause::<ssh::tailscale::InvalidTailscaleDestination>(e).is_some() {
+        return ErrorKind::InvalidRequest;
+    }
     if let Some(refusal) = find_cause::<store::HostStoreError>(e) {
         return match refusal {
             store::HostStoreError::HostNotFound(_) => ErrorKind::NotFound,

@@ -997,9 +997,8 @@ pub(crate) async fn set_tailscale(
                 .map_err(|_| crate::environment::lifecycle::HostBusy)?;
             if spec.tailscale
                 && let Some(destination) = &old.destination
-                && crate::ssh::tailscale::destination_host(destination).is_err()
             {
-                return Err(HostStoreError::InvalidDestination(destination.clone()).into());
+                crate::ssh::tailscale::destination_host(destination)?;
             }
             state.store.check_ssh_tailscale_edit(host).await?;
             state
@@ -2401,6 +2400,36 @@ mod tests {
         })
         .await
         .expect("both changes carried on after their replies and landed once the run ended");
+    }
+
+    /// Turning on Tailscale for an ordinary SSH alias explains which address format to use.
+    #[farhelm_testtrace::test]
+    async fn invalid_tailscale_addresses_keep_the_same_format_guidance() {
+        let harness = lone_local_helm().await;
+        let (status, ordinary, text) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "dev_box" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(ordinary["destination"], "dev_box");
+        assert_eq!(ordinary["tailscale"], false);
+        let id = ordinary["id"].as_i64().unwrap();
+        let (status, _, message) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{id}/tailscale"),
+            Some(serde_json::json!({ "tailscale": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            message,
+            "Tailscale mode needs a node name, full Tailscale DNS name, or IP address. \
+             An SSH login is optional (login@address)."
+        );
     }
 
     /// The old master has to exit while its route is still the registered
