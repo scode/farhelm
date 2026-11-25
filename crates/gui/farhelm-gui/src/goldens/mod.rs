@@ -1842,6 +1842,12 @@ static SCENES: &[Scene] = &[
         setup: host_update_running_hosts_panel_setup,
     },
     Scene {
+        name: "host-mac-update-app-refusal",
+        size: (560., 700.),
+        draw: hosts_panels,
+        setup: host_mac_update_app_refusal_setup,
+    },
+    Scene {
         name: "host-progress-card",
         size: (360., 520.),
         draw: progress_cards,

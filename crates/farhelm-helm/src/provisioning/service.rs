@@ -2959,21 +2959,7 @@ impl ProvisioningService {
                                     return Err(BackendFailure::new(reason, ""));
                                 }
                             };
-                            // A supported reply can describe a different login.
-                            // The setup plan freezes the inspected login's
-                            // paths and launchd domain.
-                            let domain = pending.plan.actions.iter().find_map(|action| {
-                                if let ProvisioningAction::StartLaunchAgent { domain, .. } = action
-                                {
-                                    Some(domain)
-                                } else {
-                                    None
-                                }
-                            });
-                            if reach.arch != pending.plan.host_arch
-                                || reach.home != pending.plan.host_home
-                                || reach.launchd_domain.as_ref() != domain
-                            {
+                            if !pending.plan.matches_mac_reach(&reach) {
                                 return Err(BackendFailure::new(
                                     "the Mac setup target changed while awaiting confirmation. Start setup again.",
                                     "",
@@ -3096,7 +3082,26 @@ impl ProvisioningService {
                     ProbeObservation::OwnedSupervisor { owner, .. } => {
                         return Err(BackendFailure::new(owner_refusal(&owner), ""));
                     }
-                    ProbeObservation::Absent => (Some(&pending.plan), None),
+                    ProbeObservation::Absent => {
+                        // The app can be installed while no supervisor answers.
+                        if pending.plan.host_arch.is_macos() {
+                            match self.backend.inspect(target).await? {
+                                ReachOutcome::Manual(reason) => {
+                                    return Err(BackendFailure::new(reason, ""));
+                                }
+                                ReachOutcome::Supported(reach)
+                                    if !pending.plan.matches_mac_reach(&reach) =>
+                                {
+                                    return Err(BackendFailure::new(
+                                        "the Mac Update target changed after planning. Start Update again.",
+                                        "",
+                                    ));
+                                }
+                                ReachOutcome::Supported(_) => {}
+                            }
+                        }
+                        (Some(&pending.plan), None)
+                    }
                 };
                 self.register(registration, plan, discovered, None)
                     .await

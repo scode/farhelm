@@ -8261,8 +8261,8 @@ shared-directory permission rules below still apply.
 
 ADD and UPDATE both retain that concrete plan behind an opaque, one-use confirmation id. Planning is inspection-only;
 consuming the id revalidates the host and registry facts the plan relied on before the run executes its planned actions.
-If ADD's confirmation finds no answering supervisor on a Mac, it repeats the desktop-app and reach checks. A changed
-native target, home or launchd user needs a new plan with those facts.
+If ADD or UPDATE finds no answering supervisor on a Mac during revalidation, it repeats the desktop-app and reach checks
+before any planned action. A changed native target, home or launchd user needs a new plan with those facts.
 
 Setup shows the helm's ordered action descriptions in a numbered dialog and consumes the id on explicit confirmation.
 Each path chip uses the helm's home-relative spelling where available, with the full host path on hover; Copy plan

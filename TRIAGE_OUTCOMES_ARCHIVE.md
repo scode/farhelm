@@ -44873,3 +44873,28 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed in the specification. An already-waiting automatic Update question can open on Send under the
   existing keyboard focus rules. Change `lymnspuoynktwkwyuuslvnnkyqxsqpuo`, bookmark
   `plan/triage-helm-nov24/05b-wording`, [PR #4861](https://github.com/scode/farhelm/pull/4861/changes).
+
+## trailing-mac-update-miss-app-installed-before-run-admission.md
+
+- Outcome: `fix code`.
+- Assessment: Farhelm refuses to set up or update a remote Mac that has the Farhelm desktop app installed. If the app is
+  installed after Update checks the Mac but before the update run is accepted (a short window for manual Update, longer
+  for automatic), the update can go ahead and write Farhelm's own background service beside the app. Verified: Confirmed
+  by source. Update planning inspects (`service.rs` plan_update), and revalidation's Absent branch executes without
+  repeating inspect (`service.rs:2963+`). SPEC_impl.md (plan confirmation, around 8237-8240) repeats the desktop-app
+  check only for ADD: "If ADD's confirmation finds no answering supervisor on a Mac, it repeats the desktop-app and
+  reach checks." The 2026-10-11 best-effort decision covers queued or running runs, not this pre-claim window. Archived
+  precedent: the ADD analogue (mac-setup-confirmation-misses-installed-app.md) was approved as "fix code".
+- Decision: q-bound, "Approved and confirmed operations bound to the machine they were checked against": the maintainer
+  picked "Bind them all". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If this
+  turns very complicated, the executor must abort and turn it into a follow-up to-do item explaining the complexity."
+- Completion criteria: An approved or confirmed operation refuses once the host connection, machine or build it was
+  checked against has changed. Recommendation for reference: fix code S, mirroring the ADD fix for Mac Update's Absent
+  branch. Or discard given the window is small for manual Update. Complexity gate (maintainer): if the fix turns very
+  complicated during execution, the executor stops and turns it into a follow-up TODO.md entry that explains what is
+  complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. If no supervisor answers on the Mac at Update revalidation, native inspection refuses an installed
+  desktop app or changed target before any write. Change `trmmsnkwxqpomwwmroxzsymkpxxwzsrl`, bookmark
+  `plan/triage-helm-nov24/05c-mac-update`, [PR #4865](https://github.com/scode/farhelm/pull/4865/changes).
