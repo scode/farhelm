@@ -58,6 +58,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   with the launcher. Settings and the other dialogs come after this, once the look is settled. Plan:
   `plans/queue/launcher-style-quick-dialogs.md`.
 
+- **Give What's new the session launcher's look.** Restyle the upgrade highlights window as direction 2, "Launcher
+  sibling", in
+  [the What's new and Welcome directions mockup](https://snippets.scode.org/s/farhelm-whats-new-directions/), showing
+  every entry in full rather than clamped. Release curation marks each highlight's headline so the window can show it.
+  Plan: `plans/queue/launcher-style-whats-new.md`.
+
+- **Make Welcome the empty main area.** Replace the startup Welcome card with direction W7, "Empty state", in
+  [the same mockup](https://snippets.scode.org/s/farhelm-whats-new-directions/): the empty main area introduces Farhelm
+  and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching
+  indicators come later and should fit the layout. Plan: `plans/queue/welcome-empty-state.md`.
+
 - **Remove GPT-5.6 models from the catalog.** OpenAI is retiring the GPT-5.6 models (Codex 0.172.0 already interrupts
   `gpt-5.6-terra` with a retirement prompt). Remove the `gpt-5.6-*` entries from Farhelm's model catalog across Codex,
   OpenRouter (Goose, Pi, OMP), and OpenCode, along with SPEC.md and tests. Plan:
