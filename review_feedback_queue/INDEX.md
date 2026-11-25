@@ -354,10 +354,6 @@ consequences.
   — The no-default fixture checks numbering after a preview conflict and a successful create, leaving the specific
   create-time lost-race cleanup unasserted.
 
-- [`trailing-completed-setup-save-steal-focus-from-newer-input.md`](trailing-completed-setup-save-steal-focus-from-newer-input.md)
-  — When a default checkout-folder save finishes after the user changes to a new environment and starts editing another
-  field, the launcher can move focus back to Repository.
-
 - [`trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md`](trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md)
   — The desktop can offer a sandbox launch for a checkout name that cannot produce a valid directory. The helm can
   create the environment and attempt cleanup before telling the user to fix the name.

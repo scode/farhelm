@@ -46,6 +46,7 @@ use super::Refused;
 use super::choices;
 use crate::components::{Button, HoverHelp, TextInput, TextInputState, Tier};
 use crate::drafts::DraftInput;
+use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::theme::{self, metrics};
@@ -237,7 +238,11 @@ struct Stored {
 
 /// Refresh dependent views when a save succeeds or a refusal's refetch finds a different stored value. The launcher's
 /// inline field can learn that the CLI configured a folder, so its old suggestions and preview need to be checked.
-pub struct CheckoutUpdated;
+pub struct CheckoutUpdated {
+    /// A successful save can move focus only if the user has stayed with it since pressing Save.
+    /// A refetch can discover someone else's change and carries no focus request.
+    pub(crate) saved_at: Option<Mark>,
+}
 
 /// One explicitly saved checkout field, as a view of its own: its label, field, note, Save (or Retry) and outcome line.
 ///
@@ -378,7 +383,7 @@ impl CheckoutField {
                 self.loaded = true;
                 self.input.input().set_read_only(false, cx);
                 if changed_after_refusal {
-                    cx.emit(CheckoutUpdated);
+                    cx.emit(CheckoutUpdated { saved_at: None });
                 }
             }
             Err(reason) => self.unreadable = Some(reason),
@@ -459,6 +464,7 @@ impl CheckoutField {
         let expected = self
             .compare_on_save
             .then(|| self.input.stored().map(str::to_owned));
+        let saved_at = Mark::take(cx);
         let started = DraftInput::save(
             self,
             |field| &mut field.input,
@@ -471,8 +477,8 @@ impl CheckoutField {
             },
             window,
             cx,
-            |field, settled, cx| {
-                field.save_answered(&settled.outcome, cx);
+            move |field, settled, cx| {
+                field.save_answered(&settled.outcome, saved_at, cx);
                 field.save_receipt.settle(&settled.outcome, cx);
             },
         );
@@ -488,7 +494,7 @@ impl CheckoutField {
 
     /// Keep the field locked across the save and its refetch. A refusal discards the edit now so even a failed read
     /// cannot leave the rejected intent around. This route finishes synchronously, so it never returns Accepted.
-    fn save_answered(&mut self, outcome: &Outcome, cx: &mut Context<Self>) {
+    fn save_answered(&mut self, outcome: &Outcome, saved_at: Mark, cx: &mut Context<Self>) {
         match outcome {
             Outcome::Done(_) => self.saved = true,
             Outcome::Refused(_) => self.input.discard(self.window, cx),
@@ -498,7 +504,9 @@ impl CheckoutField {
         self.input.input().set_read_only(true, cx);
         Self::send_read(&self.target, self.window, cx);
         if self.saved {
-            cx.emit(CheckoutUpdated);
+            cx.emit(CheckoutUpdated {
+                saved_at: Some(saved_at),
+            });
         }
     }
 

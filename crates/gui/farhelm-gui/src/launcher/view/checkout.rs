@@ -225,10 +225,9 @@ pub(super) struct CheckoutState {
     /// Set by a checkout setup update until the next suggestions answer: whether the host needs a folder is to be
     /// asked again, even with a repository chosen.
     root_recheck: bool,
-    /// Set by a checkout setup update: if the re-check then finds the host no longer needs a
-    /// folder and the field goes, focus moves on to the repository field (the next thing to fill in) unless the user has
-    /// moved on since. Without it, focus would fall to whatever the focus coordinator recovers to, rows further down.
-    focus_after_setup: Option<Mark>,
+    /// The installed host that needed setup and the input mark from pressing Save. The repository is the next field
+    /// to fill in when a recheck removes setup for this host and the user is still waiting for the save.
+    focus_after_setup: Option<(HostKey, Mark)>,
     /// The inline setup field, made the first time it shows and kept while the launcher lives, with its subscription.
     setup: Option<(Entity<CheckoutField>, Subscription)>,
     /// The guarded answer's launch, waiting for the preview: the answer's mark, which the launch's moved-on check counts
@@ -1110,9 +1109,13 @@ impl Launcher {
     /// launcher's managed-checkout destination offers the same explicit-save field"). Made the first time it shows.
     /// A successful save or a value found changed after refusal refreshes the suggestions and preview.
     fn setup_field(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.needs_root(cx) != Some(true) {
-            // Setup just went after a refresh: focus moves on to the repository field (see `focus_after_setup`).
-            if let Some(mark) = self.checkout.focus_after_setup.take() {
+        let needs_root = self.needs_root(cx);
+        if needs_root != Some(true) {
+            // The field also disappears when the placement changes. The handoff belongs to the host we rechecked.
+            if let Some((host, mark)) = self.checkout.focus_after_setup.take()
+                && needs_root == Some(false)
+                && self.checkout_host_key(cx).as_ref() == Some(&host)
+            {
                 let handle = self.checkout.repository.focus_handle(cx);
                 cx.defer_in(window, move |_, window, cx| {
                     crate::focus::focus_in_layer(&handle, &mark, window, cx)
@@ -1125,11 +1128,16 @@ impl Launcher {
                 cx.new(|cx| CheckoutField::folder(FolderScope::Default, SETUP_NOTE, window, cx));
             let updated = cx.subscribe(
                 &field,
-                |launcher: &mut Launcher, _, _: &CheckoutUpdated, cx| {
+                |launcher: &mut Launcher, _, updated: &CheckoutUpdated, cx| {
                     launcher.checkout.reread += 1;
                     launcher.checkout.retry += 1;
                     launcher.checkout.root_recheck = true;
-                    launcher.checkout.focus_after_setup = Some(Mark::take(cx));
+                    launcher.checkout.focus_after_setup = updated.saved_at.and_then(|mark| {
+                        let (host, true) = launcher.checkout.needs_root.as_ref()? else {
+                            return None;
+                        };
+                        Some((host.clone(), mark))
+                    });
                     cx.notify();
                 },
             );

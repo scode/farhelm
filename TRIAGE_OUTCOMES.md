@@ -196,26 +196,6 @@
   Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
-## trailing-completed-setup-save-steal-focus-from-newer-input.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md, "Who may move focus": "Something the user started that finishes later … first
-  asks whether the user has moved on since starting it. Moving on means any key press or any click inside Farhelm." The
-  code contradicts it. The launcher's inline checkout-folder setup takes its moved-on mark when the save's result
-  arrives (`launcher/view/checkout.rs:1128-1133`, `focus_after_setup = Some(Mark::take(cx))`), not when the user pressed
-  Save, so keys typed while the save was in flight do not count. The later focus move to Repository
-  (`checkout.rs:1114-1120`) then checks the wrong interval. The fix follows directly: take the mark when Save is
-  pressed, carried on the field's `CheckoutUpdated` event from `settings/checkout_field.rs`, and use it for the focus
-  move. Nothing deliberate is overturned; the field doc at `checkout.rs:229-230` only says "unless the user has moved on
-  since". Estimated size ~30-70 lines with a test. Verified: Confirmed by reading code.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code —
-  follows the quoted rule; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
-  the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
-  Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## trailing-pending-scope-cleanups-logs-invalid-session-id-unescaped.md
 
 - Outcome: `fix code`.
