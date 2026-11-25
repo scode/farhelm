@@ -51,8 +51,9 @@ use farhelm_proto::launcher::{
     LaunchCatalogModel, TemplateNameKind, compatible_efforts, reconcile_harness_selection,
 };
 use farhelm_proto::{
-    CommandLaunch, GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
-    LaunchTarget, SessionInfo, SessionLaunch, parse_github_repo, ui_channel::HostView,
+    CommandLaunch, GithubRepo, LaunchEffort, LaunchEffortValue, LaunchHarness, LaunchPermission,
+    LaunchSelection, LaunchTarget, SessionInfo, SessionLaunch, parse_github_repo,
+    ui_channel::HostView,
 };
 
 use crate::drafts::Draft;
@@ -244,7 +245,7 @@ pub struct AgentChoices {
     /// Which agent type a custom (non-catalog) model id was entered for, so a later agent switch clears it exactly as
     /// [`reconcile_harness_selection`] expects.
     pub model_owner: Option<LaunchHarness>,
-    /// `None` is the agent type's default effort.
+    /// Built-in effort only. `None` is the default and is also the only value while using the custom catalog.
     pub effort: Option<LaunchEffort>,
     /// The permission as chosen. An agent switch replaces a permission the new agent does not offer with its default
     /// (the shared reconciliation), so switching back does not restore it, as in the old app.
@@ -270,11 +271,23 @@ pub struct AgentChoices {
 
 impl AgentChoices {
     /// Both saved templates and live requests use the same effort value.
-    pub(crate) fn effort_value(&self) -> Option<farhelm_proto::LaunchEffortValue> {
+    pub(crate) fn effort_value(&self) -> Option<LaunchEffortValue> {
         if self.harness.is_some_and(LaunchHarness::uses_custom_catalog) {
             (!self.custom_effort.is_empty()).then(|| self.custom_effort.clone().into())
         } else {
             self.effort.map(Into::into)
+        }
+    }
+
+    /// Store the effective effort in the chosen agent's field. A custom word such as `high` can share a built-in
+    /// spelling, but restoring it must leave only the custom text so editing it cannot uncover a second choice.
+    pub(crate) fn set_effort(&mut self, effort: Option<&LaunchEffortValue>) {
+        if self.harness.is_some_and(LaunchHarness::uses_custom_catalog) {
+            self.effort = None;
+            self.custom_effort = effort.map_or("", LaunchEffortValue::as_cli_arg).to_owned();
+        } else {
+            self.effort = effort.and_then(LaunchEffortValue::known);
+            self.custom_effort.clear();
         }
     }
 }
@@ -629,21 +642,13 @@ impl LaunchDraft {
         self.agent = AgentChoices {
             harness: Some(selection.harness),
             custom_agent: selection.custom_agent.clone(),
-            custom_effort: if selection.harness.uses_custom_catalog() {
-                selection
-                    .effort
-                    .as_ref()
-                    .map_or("", |effort| effort.as_cli_arg())
-                    .into()
-            } else {
-                String::new()
-            },
+            custom_effort: String::new(),
             custom_resumption: false,
             custom_reporting: false,
             custom_registration_missing: false,
             model: selection.model.clone(),
             model_owner: selection.model.as_ref().map(|_| selection.harness),
-            effort: selection.effort.as_ref().and_then(|value| value.known()),
+            effort: None,
             permissions: selection.harness.request_permission(selection.permissions),
             permissions_explicit: true,
             // Flags are literal words, so their editor text quotes them back; a wrapper's words keep the quotes and
@@ -657,6 +662,7 @@ impl LaunchDraft {
             wrapper_explicit: true,
             container: selection.container.clone(),
         };
+        self.agent.set_effort(selection.effort.as_ref());
     }
 
     /// Take a recent setup's choices (SPEC.md, "Recent setups": "A recent row fills every saved choice"): the Agent tab,
@@ -832,7 +838,6 @@ impl LaunchDraft {
             self.agent.custom_resumption = false;
             self.agent.custom_reporting = false;
             self.agent.custom_registration_missing = false;
-            self.agent.custom_effort.clear();
         }
         self.tab = Tab::Agent;
         Edit {
@@ -890,9 +895,10 @@ impl LaunchDraft {
         self.agent.model_owner = None;
     }
 
-    /// `None` is the default effort.
+    /// Choosing Default clears the active effort, including text entered for a registered agent.
     pub fn choose_effort(&mut self, effort: Option<LaunchEffort>) {
-        self.agent.effort = effort;
+        self.agent
+            .set_effort(effort.map(LaunchEffortValue::from).as_ref());
     }
 
     /// A permission chosen directly. It never raises the escalation banner (SPEC.md: "Choosing a permission directly
@@ -955,7 +961,7 @@ impl LaunchDraft {
             custom_agent: None,
             harness: agent.harness.unwrap_or(harness),
             model: agent.model.clone(),
-            effort: agent.effort.map(Into::into),
+            effort: agent.effort_value(),
             permissions: agent.permissions,
             permission_flags: farhelm_proto::split_permission_flags(&agent.permission_flags).ok(),
             workspace_trust: None,
@@ -980,9 +986,9 @@ impl LaunchDraft {
             harness,
             catalog.unwrap_or(&[]),
         );
-        if catalog.is_none() && harness.offers_effort() {
-            // An unread catalog cannot make an effort incompatible.
-            after.effort = effort;
+        if catalog.is_none() && harness.offers_effort() && !harness.uses_custom_catalog() {
+            // An unread model catalog cannot reject a built-in word. A custom-only word still cannot become one.
+            after.effort = effort.filter(|value| value.known().is_some());
         }
         let mut deliberate = selection;
         if !self.agent.permissions_explicit {
@@ -992,7 +998,7 @@ impl LaunchDraft {
         self.agent.harness = Some(after.harness);
         self.agent.model = after.model;
         self.agent.model_owner = owner;
-        self.agent.effort = after.effort.as_ref().and_then(|value| value.known());
+        self.agent.set_effort(after.effort.as_ref());
         self.agent.permissions = after.permissions;
         notice
     }

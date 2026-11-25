@@ -361,6 +361,7 @@ enum LauncherScene {
     SandboxCheckout,
     RememberedWrapper,
     CustomAgent,
+    CustomEffortDefault,
     UnavailableCustomAgent,
     CustomRecents,
     NarrowCustomRecents,
@@ -441,6 +442,15 @@ pub(super) fn launcher_more_options_setup(state: &SceneState, window: &mut Windo
 /// Draw the registered chips and literal model and effort inputs without requiring a vendor or a launch.
 pub(super) fn launcher_custom_agent_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::CustomAgent, window, cx);
+}
+
+/// A Default result clears the literal effort while the registered agent and its model stay selected.
+pub(super) fn launcher_custom_effort_default_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::CustomEffortDefault, window, cx);
 }
 
 /// A saved draft can keep a registration and its repairable field values after that registration disappears.
@@ -590,7 +600,11 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
         );
     }
     let mut extra = vec![launcher_templates(scene)];
-    if scene == LauncherScene::CustomAgent || scene.custom_recents() {
+    if matches!(
+        scene,
+        LauncherScene::CustomAgent | LauncherScene::CustomEffortDefault
+    ) || scene.custom_recents()
+    {
         extra.push(super::custom_agent_state());
     } else if scene == LauncherScene::UnavailableCustomAgent {
         extra.push(CollectionState {
@@ -725,7 +739,9 @@ fn open_new_with_claude(
     draft.edit_folder("/home/user/src/api".into());
     if matches!(
         scene,
-        LauncherScene::CustomAgent | LauncherScene::UnavailableCustomAgent
+        LauncherScene::CustomAgent
+            | LauncherScene::CustomEffortDefault
+            | LauncherScene::UnavailableCustomAgent
     ) {
         let fixture = super::custom_agent();
         draft.choose_custom_agent(&fixture, None, None);
@@ -735,6 +751,9 @@ fn open_new_with_claude(
         } else {
             draft.agent.model = Some("fast-v2".into());
             draft.agent.custom_effort = "deep_work".into();
+            if scene == LauncherScene::CustomEffortDefault {
+                draft.choose_effort(None);
+            }
         }
     } else if matches!(
         scene,
@@ -947,6 +966,20 @@ fn answer_new_reads(
                 node.element_id.as_deref() == Some(*id) && !node.visible_bounds.is_empty()
             })
         }) {
+            state.after.set(Some(answer_new_reads));
+        }
+        return;
+    }
+    if scene == LauncherScene::CustomEffortDefault {
+        let nodes = window.driver_nodes();
+        let row = "launcher-custom-effort-row";
+        if !nodes
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some(row))
+            || !texts_within(nodes, row).iter().any(|line| {
+                line.text.as_ref() == "Agent default" && !line.visible_bounds.is_empty()
+            })
+        {
             state.after.set(Some(answer_new_reads));
         }
         return;

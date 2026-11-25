@@ -578,7 +578,7 @@ impl Launcher {
                     self.check_hook_question(window, cx);
                 }
             }
-            Row::Effort(effort) => self.choose_effort(effort, cx),
+            Row::Effort(effort) => self.choose_effort(effort, window, cx),
             Row::Permission(permission) => {
                 self.choose_permissions(Some(permission.permission()), window, cx)
             }

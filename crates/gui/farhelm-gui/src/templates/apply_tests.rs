@@ -172,6 +172,54 @@ fn custom_agent_template_replays_the_saved_registration_and_effort() {
     assert_eq!((changed.model, changed.effort), (None, None));
 }
 
+/// A template switch uses the effort the custom field shows. A word Claude can use stays, while a custom-only
+/// word clears with the same notice as a hand switch so the desktop and CLI replay the same choice.
+#[test]
+fn template_switch_to_builtin_reconciles_the_custom_effort() {
+    let fixture = Fixture::new();
+    for (word, model, catalog_loaded, expected) in [
+        (
+            "high",
+            Some(Some("claude-fable-5")),
+            true,
+            Some(LaunchEffort::High),
+        ),
+        ("extra-deep", Some(Some("claude-fable-5")), true, None),
+        ("extra-deep", Some(None), true, None),
+        ("ultra", None, false, None),
+    ] {
+        let next = template(
+            "Claude",
+            TemplateFields {
+                agent: Some(LaunchHarness::Claude),
+                model: model.map(|id| id.map(str::to_owned)),
+                ..TemplateFields::default()
+            },
+        );
+        let mut draft = new_draft();
+        draft.choose_harness(LaunchHarness::Custom, None, None);
+        draft.agent.custom_agent = Some("acme-code".into());
+        draft.agent.custom_effort = word.into();
+        let mut context = fixture.context();
+        if !catalog_loaded {
+            context.catalog = None;
+        }
+        let applied = apply(&mut draft, &[next], &context).unwrap();
+        let selected = draft
+            .agent_selection()
+            .expect("the template selects Claude");
+        assert_eq!(
+            (selected.harness, selected.effort),
+            (LaunchHarness::Claude, expected.map(Into::into))
+        );
+        let cleared = applied
+            .notice
+            .flatten()
+            .is_some_and(|notice| notice.contains("selected effort"));
+        assert_eq!(cleared, expected.is_none(), "{word}");
+    }
+}
+
 /// Generic Custom is a deliberate declaration with its own command. Its template clears a previously
 /// selected registration and retains the same compulsory YOLO policy.
 #[test]

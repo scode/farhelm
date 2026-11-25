@@ -1313,6 +1313,51 @@ pub(super) fn acme_agent() -> farhelm_proto::custom_agents::CustomAgent {
     }
 }
 
+/// The Default search choice clears both the effort the user sees and the value a later launch will send.
+/// Taking the result itself must leave focus in search without starting the agent.
+#[gpui::test]
+fn effort_default_search_clears_the_custom_input(cx: &mut TestAppContext) {
+    let agent = acme_agent();
+    let mut launch = LaunchDraft::new(Some(1), "/src/app".into(), None);
+    launch.choose_custom_agent(&agent, None, None);
+    launch.agent.custom_effort = "extra-deep".into();
+    let (mut helm, cx) = launcher_over(
+        cx,
+        launch,
+        vec![
+            hosts(),
+            preferences(&[], None),
+            CollectionState {
+                collection: Collection::CustomAgents,
+                meta: meta(&[&agent.id]),
+                entries: vec![KeyedEntry {
+                    key: agent.id.clone(),
+                    value: serde_json::to_value(agent).unwrap(),
+                }],
+            },
+        ],
+    );
+    let shows_effort = |cx: &mut VisualTestContext, text: &str| {
+        crate::session_list::host_rail::tests::texts_within(
+            &test_support::frame(cx),
+            "launcher-custom-effort-row",
+        )
+        .iter()
+        .any(|line| line.text.as_ref() == text && !line.visible_bounds.is_empty())
+    };
+    assert!(search_focused(cx) && shows_effort(cx, "extra-deep"));
+    super::search_view_tests::type_in(cx, "effort:default");
+    assert_eq!(
+        name_of(cx, "launcher-search-option-0").as_deref(),
+        Some("Effort: Default")
+    );
+    keys(cx, "enter");
+    assert!(shows_effort(cx, "Agent default"));
+    assert!(search_focused(cx) && search_text(cx).is_empty());
+    assert_eq!(draft(cx).agent.effort_value(), None);
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+}
+
 /// Enter still belongs to the chip the user can see. If its registration disappears before the draw catches up,
 /// continuing with the previous draft could start another agent or retire a session the user wanted to replace.
 #[gpui::test]
