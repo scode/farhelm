@@ -5,11 +5,6 @@
 use super::*;
 use farhelm_helm::CreateExtras;
 use farhelm_proto::{NamedConversationCapture, SessionLaunch};
-use std::path::PathBuf;
-use std::process::Stdio;
-
-/// The vendor's ID-discovery command is part of the fixture, with its own deadline inside the whole case.
-const LOOKUP_LIMIT: Duration = Duration::from_secs(30);
 
 /// OpenCode's composer wraps well before the terminal width. Keep the input short enough to verify its echo
 /// before submitting. The echo lacks the random label needed to match a recall reply.
@@ -319,24 +314,7 @@ async fn check_without_capture(
 
     let target = match cursor_id {
         Some(id) => id,
-        None => {
-            let output = vendor_lookup(
-                env.work,
-                profile.binary,
-                &[
-                    "session",
-                    "list",
-                    "--pure",
-                    "--format",
-                    "json",
-                    "--max-count",
-                    "32",
-                ],
-                true,
-            )
-            .await?;
-            opencode_session(&output, env.work)?
-        }
+        None => opencode_workspace_session(env.work, profile.binary).await?,
     };
     env.with_session(
         launch.clone(),
@@ -344,60 +322,6 @@ async fn check_without_capture(
         async |id| recall_without_capture(env, profile, id, code_word).await,
     )
     .await
-}
-
-/// Read only the two list fields used to identify the fixture. A recent session in another directory belongs to
-/// someone else, and multiple matches in our directory cannot prove which conversation received the seed.
-fn opencode_session(output: &str, work: &Path) -> anyhow::Result<String> {
-    #[derive(serde::Deserialize)]
-    struct Session {
-        id: String,
-        directory: PathBuf,
-    }
-
-    let sessions: Vec<Session> = serde_json::from_str(output)?;
-    let canonical = work.canonicalize()?;
-    let mut matching = sessions
-        .into_iter()
-        .filter(|session| session.directory == canonical);
-    let owned = matching
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("OpenCode listed no session for the seed workspace"))?;
-    anyhow::ensure!(
-        matching.next().is_none(),
-        "OpenCode listed more than one session for the seed workspace"
-    );
-    Ok(owned.id)
-}
-
-/// The lookup runs in the same workspace as the interactive launch. Keep output in private test evidence and
-/// allow missing login to explain an early refusal, before the test has seen a successful turn.
-async fn vendor_lookup(
-    work: &Path,
-    binary: &str,
-    args: &[&str],
-    turned: bool,
-) -> Result<String, DriftError> {
-    let mut command = tokio::process::Command::new(binary);
-    command
-        .args(args)
-        .current_dir(work)
-        .stdin(Stdio::null())
-        .kill_on_drop(true);
-    let output = tokio::time::timeout(LOOKUP_LIMIT, command.output())
-        .await
-        .map_err(|_| anyhow::anyhow!("{binary} {args:?} timed out"))?
-        .map_err(anyhow::Error::from)?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(
-            refusal(&stderr.to_lowercase(), &stdout, turned).unwrap_or_else(|| {
-                anyhow::anyhow!("{binary} {args:?} exited {}\n{stderr}", output.status).into()
-            }),
-        );
-    }
-    String::from_utf8(output.stdout).map_err(|error| anyhow::Error::from(error).into())
 }
 
 /// A typed selector is passed through the ordinary launcher request field, separate from the stored launch.
@@ -528,21 +452,4 @@ fn named_conversation_covers_every_supporting_harness() {
     for harness in offered {
         assert!(HARNESSES.contains(&harness), "{harness:?}");
     }
-}
-
-/// Never use the last session on the machine as a fallback. The lookup has to find exactly one owned row,
-/// even when an unrelated session was listed first.
-#[farhelm_testtrace::test]
-fn opencode_only_resumes_a_session_in_the_test_workspace() {
-    let scratch = farhelm_teststate::tempdir().expect("owned workspace");
-    let work = scratch.path().canonicalize().expect("workspace exists");
-    let other = serde_json::json!({"id": "ses_other", "directory": work.join("another")});
-    let seed = serde_json::json!({"id": "ses_seed", "directory": work});
-    let single = serde_json::json!([other, seed]).to_string();
-    assert_eq!(opencode_session(&single, &work).unwrap(), "ses_seed");
-    let missing = serde_json::json!([other]).to_string();
-    assert!(opencode_session(&missing, &work).is_err());
-    let ambiguous =
-        serde_json::json!([other, seed, {"id": "ses_second", "directory": work}]).to_string();
-    assert!(opencode_session(&ambiguous, &work).is_err());
 }

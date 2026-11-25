@@ -15,7 +15,8 @@ use farhelm_proto::session_launch::CONVERSATION_PLACEHOLDER;
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchSelection, RestartOffer};
 use farhelm_supervisor::agent_kind::AgentHooks;
 use farhelm_supervisor::hosts::{HostTerminal, Liveness};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 /// The runner supplies a private result file. A crash, timeout or missing result is a runner-visible failure.
 const VERDICT_FILE: &str = "FARHELM_DRIFT_VERDICT_FILE";
@@ -23,6 +24,8 @@ const COLS: u16 = 115;
 const ROWS: u16 = 35;
 const START_LIMIT: Duration = Duration::from_secs(90);
 const TURN_LIMIT: Duration = Duration::from_secs(180);
+/// A vendor's ID-discovery command has its own budget inside the live case.
+const LOOKUP_LIMIT: Duration = Duration::from_secs(30);
 /// How long an unchanged trust prompt stays on screen before the same answer is sent again. A key the dialog drops
 /// would otherwise strand the case until START_LIMIT.
 const TRUST_RETRY: Duration = Duration::from_secs(3);
@@ -268,6 +271,91 @@ fn refusal(text: &str, tail: &str, turned: bool) -> Option<DriftError> {
         )));
     }
     None
+}
+
+/// Run a selector lookup in the same workspace as the interactive launch. A refusal after a successful turn belongs
+/// to the test result, even if the same response could signal missing credentials before the first turn.
+async fn vendor_lookup(
+    work: &Path,
+    binary: &str,
+    args: &[&str],
+    turned: bool,
+) -> Result<String, DriftError> {
+    let mut command = tokio::process::Command::new(binary);
+    command
+        .args(args)
+        .current_dir(work)
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(LOOKUP_LIMIT, command.output())
+        .await
+        .map_err(|_| anyhow::anyhow!("{binary} {args:?} timed out"))?
+        .map_err(|error| {
+            anyhow::Error::new(error).context(format!("could not run {binary} {args:?}"))
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(
+            refusal(&stderr.to_lowercase(), &stdout, turned).unwrap_or_else(|| {
+                anyhow::anyhow!("{binary} {args:?} exited {}\n{stderr}", output.status).into()
+            }),
+        );
+    }
+    String::from_utf8(output.stdout).map_err(|error| anyhow::Error::from(error).into())
+}
+
+/// Call after a successful OpenCode turn in `work`. The lookup must find exactly one conversation there.
+/// A refusal, missed match or ambiguity at this point fails the selected drift case.
+async fn opencode_workspace_session(work: &Path, binary: &str) -> Result<String, DriftError> {
+    let output = vendor_lookup(
+        work,
+        binary,
+        &[
+            "session",
+            "list",
+            "--pure",
+            "--format",
+            "json",
+            "--max-count",
+            "32",
+        ],
+        true,
+    )
+    .await?;
+    opencode_session(&output, work).map_err(Into::into)
+}
+
+/// Accept either spelling of a symlinked workspace. Keep the raw path when resolution fails, and require
+/// a single match so an unrelated session or a second launch can never supply the selector.
+fn opencode_session(output: &str, work: &Path) -> anyhow::Result<String> {
+    #[derive(serde::Deserialize)]
+    struct Session {
+        id: String,
+        directory: PathBuf,
+    }
+
+    let sessions: Vec<Session> = serde_json::from_str(output).map_err(|error| {
+        anyhow::Error::new(error).context("could not decode the OpenCode session list")
+    })?;
+    let listed = sessions.len();
+    let canonical = work.canonicalize().unwrap_or_else(|_| work.to_path_buf());
+    let mut matching = sessions.into_iter().filter(|session| {
+        session
+            .directory
+            .canonicalize()
+            .as_deref()
+            .unwrap_or(&session.directory)
+            == canonical.as_path()
+    });
+    let owned = matching.next().ok_or_else(|| {
+        anyhow::anyhow!("OpenCode listed no session for the seed workspace among {listed} rows")
+    })?;
+    anyhow::ensure!(
+        matching.next().is_none(),
+        "OpenCode listed more than one session for the seed workspace"
+    );
+    Ok(owned.id)
 }
 
 /// Distinguish the known workspace questions from composer banners containing an agent name.
@@ -950,6 +1038,62 @@ mod workspace_trust;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Other directories are never fallback candidates. Two rows in the same directory cannot identify the seed.
+    #[farhelm_testtrace::test]
+    fn opencode_only_resumes_a_session_in_the_test_workspace() {
+        let scratch = farhelm_teststate::tempdir().expect("owned workspace");
+        let work = scratch.path().canonicalize().expect("workspace exists");
+        let other = serde_json::json!({"id": "ses_other", "directory": work.join("another")});
+        let seed = serde_json::json!({"id": "ses_seed", "directory": work});
+        let single = serde_json::json!([other, seed]).to_string();
+        assert_eq!(opencode_session(&single, &work).unwrap(), "ses_seed");
+        let missing = serde_json::json!([other]).to_string();
+        assert!(
+            opencode_session(&missing, &work)
+                .unwrap_err()
+                .to_string()
+                .contains("listed no session")
+        );
+        let ambiguous =
+            serde_json::json!([other, seed, {"id": "ses_second", "directory": work}]).to_string();
+        assert!(
+            opencode_session(&ambiguous, &work)
+                .unwrap_err()
+                .to_string()
+                .contains("listed more than one session")
+        );
+    }
+
+    /// OpenCode may write the workspace's canonical name or the name the test opened. A different spelling can
+    /// identify the same session, but two rows using those spellings are still ambiguous.
+    #[farhelm_testtrace::test]
+    fn opencode_matches_a_symlinked_test_workspace_from_either_side() {
+        let scratch = farhelm_teststate::tempdir().expect("owned workspace");
+        let work = scratch.path().join("workspace");
+        let alias = scratch.path().join("alias");
+        std::fs::create_dir(&work).expect("workspace exists");
+        std::os::unix::fs::symlink(&work, &alias).expect("workspace alias");
+        assert_ne!(work, alias);
+        assert_eq!(alias.canonicalize().unwrap(), work.canonicalize().unwrap());
+
+        let real = serde_json::json!({"id": "ses_real", "directory": work});
+        let linked = serde_json::json!({"id": "ses_linked", "directory": alias});
+        assert_eq!(
+            opencode_session(&serde_json::json!([real]).to_string(), &alias).unwrap(),
+            "ses_real"
+        );
+        assert_eq!(
+            opencode_session(&serde_json::json!([linked]).to_string(), &work).unwrap(),
+            "ses_linked"
+        );
+        assert!(
+            opencode_session(&serde_json::json!([real, linked]).to_string(), &work)
+                .unwrap_err()
+                .to_string()
+                .contains("listed more than one session")
+        );
+    }
 
     /// The selector comes from the corresponding argv position even when another argument would look like a
     /// conversation ID. A partial saved command cannot supply that evidence.

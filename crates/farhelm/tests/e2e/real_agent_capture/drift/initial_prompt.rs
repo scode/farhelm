@@ -104,7 +104,7 @@ async fn check_fresh(
         .await?;
     println!("fresh interactive launch prompt confirmed");
     let Some(snapshot) = snapshot else {
-        return untracked_selector(env).await;
+        return untracked_selector(env, profile).await;
     };
     drop(terminal);
     let resume = snapshot
@@ -297,40 +297,20 @@ async fn check_named(
     .await
 }
 
-/// OpenCode exposes its sessions with their directories. Match the owned workspace exactly so a different
-/// user's session or another test's launch can never supply the selector. Cursor's list is a resume UI.
-async fn untracked_selector(env: &DriftEnv<'_>) -> Result<Option<String>, DriftError> {
+/// OpenCode must list one conversation for the workspace after the fresh turn. A missing or ambiguous match
+/// fails the case. Cursor exposes a resume UI, so the named prompt check has no selector to use there.
+async fn untracked_selector(
+    env: &DriftEnv<'_>,
+    profile: &Harness,
+) -> Result<Option<String>, DriftError> {
     use LaunchHarness::*;
     match env.harness {
-        OpenCode => {}
+        OpenCode => opencode_workspace_session(env.work, profile.binary)
+            .await
+            .map(Some),
         Cursor | Claude | Codex | Antigravity | Goose | Grok | Muse | Pi | Omp | Bash | Zsh
-        | Custom => {
-            return Ok(None);
-        }
+        | Custom => Ok(None),
     }
-    #[derive(serde::Deserialize)]
-    struct SessionRow {
-        directory: std::path::PathBuf,
-        id: String,
-    }
-    let mut list = tokio::process::Command::new("opencode");
-    list.args(["--pure", "session", "list", "--format", "json", "-n", "32"])
-        .current_dir(env.work)
-        .stdin(std::process::Stdio::null())
-        .kill_on_drop(true);
-    let output = tokio::time::timeout(Duration::from_secs(15), list.output())
-        .await
-        .map_err(|_| anyhow::anyhow!("OpenCode session list timed out"))?
-        .map_err(|error| anyhow::anyhow!("could not run OpenCode session list: {error}"))?;
-    if !output.status.success() {
-        return Err(anyhow::anyhow!("OpenCode session list exited with {}", output.status).into());
-    }
-    let rows = serde_json::from_slice::<Vec<SessionRow>>(&output.stdout).map_err(|error| {
-        anyhow::anyhow!("OpenCode session list JSON could not be decoded: {error}")
-    })?;
-    let mut own = rows.into_iter().filter(|row| row.directory == env.work);
-    let only = own.next();
-    Ok(only.filter(|_| own.next().is_none()).map(|row| row.id))
 }
 
 drift_cases! {
