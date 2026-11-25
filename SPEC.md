@@ -1504,28 +1504,28 @@ header's first control. It starts with the launcher mark and a placeholder namin
 While empty, it shows the Return shortcut for launching. New and Clone also show examples below it for picking an agent
 or host, choosing a repository or template, and naming the session. Replace with and Restart with keep their mode
 explanation below the field. A separate scrolling column beside the form shows up to three recent setups and all launch
-templates while the field is empty. The row that filled the form remains marked, and the form names its source until
-Reset choices or another fill. Down from the empty field moves a keyboard highlight into the list. Up from its first row
-returns Enter to the field's Launch action. Enter on a highlighted template applies it. In Replace with, a highlighted
-recent setup's key cap reads "⏎ Replace", since Enter there replaces, and so deletes, the source. The list adds no Tab
-stops. A mouse pick returns focus to the command field. With text in the field, grouped results take over the column and
-the form dims while staying editable. Escape or clicking outside the results hides them and keeps the query. When the
-window is too narrow to fit both sides, the column is hidden and typed results appear below the field. Use `recent:` and
-`tl:` to reach setups and templates there. The Destination card heads the form, followed by the Agent and Command tabs
-and their fields. The selected tab is underlined. Labels sit above the fields with short notes where needed. The Agent
-tab shows the session list's harness marks on its chips, with a rule before Bash and Zsh. Model, Effort and Permissions
-share a row when they fit. **More options** folds the conversation selector, when offered, and Wrapper prefix together
-at the bottom of the Agent form. The folded row names the fields and shows a pill for each set value, with the wrapper
-prefix in the terminal font. With both empty it says "none set". It opens and stays open while a field inside is
-required, refused or invalid. After a correction, the user can close it once no field needs attention. The footer's
-actions sit on the right. Cancel comes first, then quiet Reset choices and Save as template where offered. The main
-action comes last with a Return key cap. Its accessible name keeps the operation and target. Tab visits the command
-field, Close, Command field messages when present, the visible body controls, then the footer actions. More options is a
-Tab stop, with its editors following it when expanded. New, Clone and Replace with open with focus in the command field.
-Restart with opens on Cancel. Refusals, destructive warnings and the inline YOLO question remain adjacent to the actions
-in a bounded scroll region, so long content cannot displace those actions. The save-as-template panel remains inline in
-the scrolling body. Escape closes open search results before closing that panel. Hover help shows the held host's name.
-Project registration (associating
+templates while the field is empty. The row remains marked and the form names its source across hand edits. Reset clears
+the mark, another fill sets it, and permission Undo restores the previous mark. Down from the empty field moves a
+keyboard highlight into the list. Up from its first row returns Enter to the field's Launch action. Enter on a
+highlighted template applies it. In Replace with, a highlighted recent setup's key cap reads "⏎ Replace", since Enter
+there replaces, and so deletes, the source. The list adds no Tab stops. A mouse pick returns focus to the command field.
+With text in the field, grouped results take over the column and the form dims while staying editable. Escape or
+clicking outside the results hides them and keeps the query. When the window is too narrow to fit both sides, the column
+is hidden and typed results appear below the field. Use `recent:` and `tl:` to reach setups and templates there. The
+Destination card heads the form, followed by the Agent and Command tabs and their fields. The selected tab is
+underlined. Labels sit above the fields with short notes where needed. The Agent tab shows the session list's harness
+marks on its chips, with a rule before Bash and Zsh. Model, Effort and Permissions share a row when they fit. **More
+options** folds the conversation selector, when offered, and Wrapper prefix together at the bottom of the Agent form.
+The folded row names the fields and shows a pill for each set value, with the wrapper prefix in the terminal font. With
+both empty it says "none set". It opens and stays open while a field inside is required, refused or invalid. After a
+correction, the user can close it once no field needs attention. The footer's actions sit on the right. Cancel comes
+first, then quiet Reset choices and Save as template where offered. The main action comes last with a Return key cap.
+Its accessible name keeps the operation and target. Tab visits the command field, Close, Command field messages when
+present, the visible body controls, then the footer actions. More options is a Tab stop, with its editors following it
+when expanded. New, Clone and Replace with open with focus in the command field. Restart with opens on Cancel. Refusals,
+destructive warnings and the inline YOLO question remain adjacent to the actions in a bounded scroll region, so long
+content cannot displace those actions. The save-as-template panel remains inline in the scrolling body. Escape closes
+open search results before closing that panel. Hover help shows the held host's name. Project registration (associating
 
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot

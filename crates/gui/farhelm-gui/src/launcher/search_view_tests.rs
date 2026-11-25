@@ -1006,6 +1006,52 @@ fn clicking_a_withdrawn_template_warns_in_both_lists(cx: &mut TestAppContext) {
     }
 }
 
+/// Save as template shows a captured draft. A click on a visible template must leave both the draft and name field alone.
+#[gpui::test]
+fn a_template_click_leaves_the_save_panel_and_draft_untouched(cx: &mut TestAppContext) {
+    let mut launch = LaunchDraft::new(Some(1), "~".into(), None);
+    launch.choose_harness(LaunchHarness::Codex, None, None);
+    let (mut helm, cx) = launcher_with_templates_on(cx, None, launch);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    test_support::click(cx, "launcher-save-template");
+    let name_field = test_support::bounds(cx, "save-template-name");
+    let name_has_focus = |cx: &mut VisualTestContext| {
+        test_support::frame(cx)
+            .iter()
+            .any(|node| node.flags.focused && name_field.contains(&node.bounds.center()))
+    };
+    assert!(name_has_focus(cx));
+    assert_eq!(
+        name_of(cx, "launcher-template-partial").as_deref(),
+        Some("Template: partial")
+    );
+    let before = draft(cx);
+    test_support::click(cx, "launcher-template-partial");
+    assert_eq!(draft(cx), before);
+    assert!(name_has_focus(cx));
+}
+
+/// Clearing the keyboard highlight uses one Escape press. Its repeats must leave the editable launcher open.
+#[gpui::test]
+fn a_held_escape_clears_the_template_highlight_without_closing_the_launcher(
+    cx: &mut TestAppContext,
+) {
+    let (_helm, cx) = new_launcher_with_templates(cx, None);
+    assert!(search_focused(cx));
+    keys(cx, "down");
+    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(true));
+    test_support::press(cx, "escape", false);
+    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(false));
+    test_support::press(cx, "escape", true);
+    assert!(test_support::any_open(cx));
+    assert!(search_focused(cx));
+    test_support::press(cx, "escape", false);
+    assert!(
+        !test_support::any_open(cx),
+        "a fresh Escape can still close it"
+    );
+}
+
 /// The empty field normally launches with Enter. A removed template must consume the Enter meant for that template.
 #[gpui::test]
 fn enter_on_a_withdrawn_empty_pane_template_cannot_launch(cx: &mut TestAppContext) {
@@ -1182,12 +1228,13 @@ fn enter_on_a_held_template_keeps_its_query_and_never_queues_the_edit(cx: &mut T
 }
 
 /// A template whose agent cannot run an explicitly chosen permission raises the escalation banner, as the hand switch
-/// would, judged once for the whole template. Why: SPEC.md applies a template's edits "in the same way and with the same
-/// effects as making them by hand" (old "template permissions are compared after the complete template transaction").
+/// would, judged once for the whole template. Undo must also restore the prior source, which names the draft it restored.
 #[gpui::test]
 fn a_tl_row_that_escalates_raises_the_banner(cx: &mut TestAppContext) {
     let (mut helm, cx) = new_launcher_with_templates(cx, None);
     answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    type_in(cx, "tl:partial");
+    keys(cx, "enter");
     type_in(cx, "perms:guarded");
     keys(cx, "enter");
     assert_eq!(super::escalation_tests::banner(cx), None, "the premise");
@@ -1201,6 +1248,15 @@ fn a_tl_row_that_escalates_raises_the_banner(cx: &mut TestAppContext) {
     assert_eq!(
         super::escalation_tests::banner(cx).as_deref(),
         Some("Permission changed: Guarded → YOLO, because OpenCode does not support Guarded.")
+    );
+    assert_eq!(
+        selected_state(cx, "launcher-template-to-opencode"),
+        Some(true)
+    );
+    test_support::click(cx, "launcher-escalation-undo");
+    assert_eq!(
+        name_of(cx, "launcher-provenance-label").as_deref(),
+        Some("From a template: partial")
     );
 }
 

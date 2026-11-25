@@ -112,7 +112,10 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !command_pane_fits(window) || !self.search.text(cx).is_empty() {
+        if !command_pane_fits(window)
+            || !self.search.text(cx).is_empty()
+            || (self.save_panel.is_some() && matches!(key, SetupSource::Template(_)))
+        {
             return;
         }
         let (rows, _) = self.start_rows(cx);

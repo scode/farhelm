@@ -537,7 +537,7 @@ fn the_footer_keeps_launch_primary_and_reset_quiet(cx: &mut TestAppContext) {
             !quads.iter().any(|quad| {
                 quad.bounds == reset
                     && quad.content_mask.bounds.contains(&reset.center())
-                    && quad.background == Background::from(theme::color(palette.bg_2))
+                    && quad.background == Background::from(theme::color(palette.button_rest))
             }),
             "{appearance:?}: Reset does not take the neutral fill"
         );

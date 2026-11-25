@@ -32,7 +32,7 @@ use gpui::{
     Window, div, px,
 };
 
-use super::{Launcher, on_launcher};
+use super::{Launcher, on_launcher, search::SetupSource};
 use crate::components::{Button, HoverHelp, Role, Tier, outline_fade, slide_down};
 use crate::focus::{self, Mark};
 use crate::launcher::draft::{Edit, Escalation};
@@ -56,6 +56,8 @@ pub(super) struct EscalationBanner {
     escalation: Escalation,
     /// The note beside the agent choices before the switch, which Undo puts back with the draft, as the old Undo did.
     notice_before: Option<String>,
+    /// The source that filled the draft Undo restores. A template can change both the agent and the source at once.
+    source_before: Option<SetupSource>,
     /// The time left to show, as of the last time the count stopped or started.
     remaining: Duration,
     /// While counting: when the count last started, and the deadline that takes the banner away when it runs out.
@@ -70,7 +72,7 @@ pub(super) struct EscalationBanner {
 impl Launcher {
     /// An agent-choice edit happened (a hand switch, a model of another agent, a search row, a recent setup, a template
     /// batch): an agent switch takes the banner away, and an escalation it carries puts up a new one, counting from now.
-    /// `notice_before` is the note beside the agent choices before the edit, for Undo to put back.
+    /// Call before replacing the source mark. Undo puts it back with the old draft and `notice_before`.
     pub(super) fn follow_escalation(
         &mut self,
         switched_agent: bool,
@@ -89,6 +91,7 @@ impl Launcher {
             generation: self.escalation_generation,
             escalation,
             notice_before,
+            source_before: self.search_box.source.clone(),
             remaining: SHOWS_FOR,
             counting: None,
             hovered: false,
@@ -173,6 +176,7 @@ impl Launcher {
         let mark = Mark::take(cx);
         self.draft = *banner.escalation.undo;
         self.notice = banner.notice_before;
+        self.search_box.source = banner.source_before;
         self.sync_fields(window, cx);
         self.changed(cx);
         focus::focus_in_layer(&self.search.focus_handle(cx), &mark, window, cx);

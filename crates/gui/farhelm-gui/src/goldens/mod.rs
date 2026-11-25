@@ -1238,6 +1238,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_results_setup,
     },
     Scene {
+        name: "launcher-template-save-after-undo",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_template_save_after_undo_setup,
+    },
+    Scene {
         name: "launcher-repository-refusal",
         size: (1080., 1040.),
         draw: session_lists_then,
