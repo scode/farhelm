@@ -163,3 +163,98 @@ Each PR passed Sol source review before the rebase, and a cold read of its title
 kept the reviewed source and specification changes. The conflict resolutions affected shared bookkeeping. Opus approved
 the changed terminal pictures in both appearances. The complete captures were compared with the approved images before
 updating the reference store. The work left over from the reviews is named above and in the archived decisions.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round, through its seven PRs and the landing fix
+[#4870](https://github.com/scode/farhelm/pull/4870/changes). Between the point main was at when the executor finished
+(`0db556ae`, which already held the launcher triage plan) and the landing, main gained only plans queue commits, so
+nothing else could interact with this plan.
+
+The landing's review read the whole combined diff against SPEC.md, SPEC_impl.md and the grid stream format the
+supervisor sends the desktop app. It found the code sound in these respects: the changed grid output is still read
+correctly by desktop apps already in use and is unchanged for intact wide characters; the selection, page keys,
+scrollbar, exit-line click, Alt-click after exit and shortcut-during-composition fixes are correct, and the review
+traced their new tests as failing on the code from before this plan; the supervisor changes outside the grid output are
+tests only; and the shared test agent changed only in a comment. Its one larger point is the first item under "Things
+you should know".
+
+#### Fixes made while landing
+
+- **The grid stream format's description.** The format's own documentation said a wide character's spacer cell is never
+  sent (the spacer is the second cell of a double-width character). Since #4855, which fixed lost backgrounds there, the
+  supervisor sends a spacer whose character was overwritten or erased as a one-column space run when the cell has a
+  background or reverse video to paint. Desktop apps in use read that like any other space, but a future client written
+  from the description would not expect it. #4870 adds that case to the description; it changes no code.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the plan's PRs rebased onto main as it stood at the start of the landing (`a0218674`); the rebased stack's top commit
+was `c58088a7`. The only later change is the landing fix [#4870](https://github.com/scode/farhelm/pull/4870/changes),
+which adds one sentence to a documentation comment and changes no code, so the only check I ran again was
+`cargo fmt --all -- --check`, which passed. That final tree is what main now holds outside the plans queue.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `ad169e83-285f-4883-8165-f54b48efe459`): all 8645 tests passed, with no runtime skip. The plan changed the
+  supervisor's grid output and its tests, tests of the supervisor's sessions, the terminal host's and the end-to-end
+  tests, and the grid model the desktop app uses for links, so the whole suite was the narrowest run that covered them.
+- `cargo nextest run --locked -p farhelm-desktop`, the desktop app's own tests, on the test worker (recorder run
+  `07e8f2f1-16f7-4640-9987-6f9ca7eacb3c`): all 184 passed.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and the desktop app's
+  two clippy runs (`-p farhelm-desktop --all-targets`, with and without `--features agent`), on the test worker: passed.
+- The desktop app's end-to-end smoke (`scripts/gui-e2e-smoke.py`, recorder run `7d311840-d21c-4724-b412-390b7213491b`),
+  on the test worker: 50 steps passed, one skipped, the paste step that headless Linux cannot run. It drives terminal
+  attach, typing, replay, scrollback and the Keyboard shortcuts chord, which the plan changed.
+- `python3 scripts/check-gui-goldens.py`, the full comparison of the app's screenshot tests against their published
+  reference pictures, locally (recorder run `5334a6bb-8924-419f-ae3f-db227b25a4b9`): every scene matched, the plan's
+  changed terminal scenes included.
+- `deno check crates/gui/farhelm-grid-model/tools/generate-links.ts` (the link fixtures' generator, which the plan
+  changed), `cargo fmt --all -- --check`, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py` (no errors; one warning, about an old citation in the triage archive, already on
+  main), `dprint check` and `python -B scripts/check-test-sleeps.py`, locally: passed.
+
+Reused: none. The report's own runs covered the same code before the rebase, and everything they covered ran again
+above.
+
+Skipped: `scripts/gui-lifecycle.py`, the end-to-end run that starts, quits and relaunches the desktop app, since nothing
+in its startup, quit or window handling changed; the workspace doctests, since no documentation example changed; a Mac
+run, since no change is macOS-specific (the composition fix is in code both platforms share, though a Mac's input
+methods were not exercised); and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+- The report says a click on a newly updated printed link may do nothing. The code is broader than that: any output to
+  the terminal, not only a change to the link, can make such a click do nothing until the next redraw. The first item
+  below has the details. The changelog draft for this change has the same narrower wording; the landing left it as it
+  is, so release curation should add that a click can be ignored while the terminal updates.
+
+#### Things you should know that the report does not say
+
+- **Clicks on printed web links can be silently ignored while a program is redrawing; I recommend a follow-up.** To stop
+  a click from opening an address that arrived after the last redraw (your triage decision: fix the harmful cases), the
+  plan forgets what was last drawn whenever any output reaches the terminal, and refuses a click on a printed link until
+  the next redraw. Output elsewhere on the screen counts too: an agent's spinner, a ticking timer or streaming text.
+  While an agent works, a click on an address that has not changed at all can therefore do nothing, with no message. The
+  review estimates about one click in ten under a spinner that redraws ten times a second, and more while text streams;
+  that rests on reading how the app schedules redraws, not on a measurement. When the program has turned on mouse
+  reporting and Farhelm handles link clicks itself (the default), the click also does not reach the program. An idle
+  session's screen does not change, so clicks there work as before. The plan's own spec change allows this ("Grid or
+  scrollback updates can make a click before the next draw do nothing"), so it is not a contradiction, but the triage
+  recommended a narrower check: remember which link was underlined in the last redraw and accept a click while the link
+  under the pointer is still that one. That keeps the protection and drops the false refusals. I did not make it at
+  landing because the check guards what opens in the browser and needs its own tests. I recommend it as a follow-up.
+- **A double or triple click in the terminal's right margin or side padding no longer selects.** To stop a double click
+  on the exit line from selecting a different row, the plan now ignores multi-clicks outside the grid's cells. Before, a
+  double or triple click in the margin beside the text (the strip kept for the scrollbar, or the side padding) selected
+  the nearest word or row. It now does nothing. It is unclear anyone relies on that.
+- **The parity record calls the shortcut-during-composition gap "replaced" while gaps remain.** The plan stops the
+  Keyboard shortcuts chord from opening its overview while a terminal is composing text through an input method. The
+  record of what the desktop app still lacks compared with the old app now marks this as replaced, though the same entry
+  says Linux's native compose and other text fields can still open the overview mid-composition. "Partly" would match
+  the record's own vocabulary.
+- **Small test gaps the review noticed.** The new handling of an orphaned spacer is tested for a background color but
+  not for reverse video. The test of a click before the redraw shows that the newly arrived address does not open, but
+  it could not tell if the old address opened a second time.
