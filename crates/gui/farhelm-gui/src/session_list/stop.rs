@@ -125,8 +125,9 @@ pub(crate) fn question(
 ) -> Question<Frozen> {
     let title = HostText::from_host(row.info.title.as_str());
     let program = program_word(row);
-    // The question and both answer hints must describe the same remaining work when the main program has ended.
-    let (confirm_help, cancel_help) = if row.info.status.has_ended() {
+    let running_program = (!row.info.status.has_ended()).then_some(program);
+    // Each answer and the environment note use the program state the question was drawn from.
+    let (confirm_help, cancel_help) = if running_program.is_none() {
         (
             "Close this session's terminal tabs".to_owned(),
             "Cancel: leave the terminal tabs open".to_owned(),
@@ -141,7 +142,7 @@ pub(crate) fn question(
         Some((ui, _)) => format!(
             "{} {}",
             consequence(row),
-            environment::stop_note(ui, program)
+            environment::stop_note(ui, running_program)
         ),
         None => consequence(row),
     };
@@ -172,7 +173,7 @@ pub(crate) fn question(
     .keeps_focus_on_empty_click();
     match environment {
         Some((_, host)) => question.alternative(
-            environment::stop_and_suspend_answer(program, host),
+            environment::stop_and_suspend_answer(running_program, host),
             move |frozen, _, cx| environment::stop_and_suspend(&frozen.key, host, frozen.guard, cx),
         ),
         None => question,

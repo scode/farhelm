@@ -175,12 +175,16 @@ fn is_environment(path: &str) -> bool {
         .any(|end| path.ends_with(end))
 }
 
-/// The environment requests the window sent since the last call, as (id, method, path, body), left unanswered. Every
-/// other command (a preference write, a seen mark) is answered with success at once.
+/// The environment requests the window sent since the last call, as (id, method, path, body), left unanswered. A
+/// host activity check must be able to answer behind an outstanding ordered command. Other commands (a preference
+/// write, a seen mark) are answered with success at once.
 pub(crate) fn pending(fake: &mut FakeHelm) -> Vec<(u64, Method, String, Value)> {
     let mut found = Vec::new();
     for command in fake.commands() {
         if is_environment(&command.path) {
+            if command.method == Method::Get && command.path.starts_with("/api/sessions?host=") {
+                assert_eq!(command.lane, farhelm_helm_client::Lane::Unordered);
+            }
             found.push((
                 command.id,
                 command.method,
@@ -560,7 +564,8 @@ fn suspend_reads_its_hosts_own_listing_before_going_ahead(cx: &mut TestAppContex
     );
 }
 
-/// Once the main shell exits, the two answers describe only what they do to its open terminal tabs.
+/// The usual Stop answers describe the tabs after shell exit. The extra answer also names the environment-wide
+/// suspend, and its note explains that only the processes still running can resume.
 #[gpui::test]
 fn a_tab_only_stop_question_helps_with_the_remaining_tabs(cx: &mut TestAppContext) {
     let ended = bash_session("a").status(json!({"state": "exited", "exit_code": 0}));
@@ -570,7 +575,8 @@ fn a_tab_only_stop_question_helps_with_the_remaining_tabs(cx: &mut TestAppContex
     assert!(
         texts(cx)
             .iter()
-            .any(|text| text.starts_with("Close 1 terminal tab?"))
+            .any(|text| text.starts_with("Close 1 terminal tab?")
+                && text.ends_with("The closed tabs stay closed."))
     );
     assert_eq!(
         hover_help(cx, "prompt-confirm").as_deref(),
@@ -579,6 +585,10 @@ fn a_tab_only_stop_question_helps_with_the_remaining_tabs(cx: &mut TestAppContex
     assert_eq!(
         hover_help(cx, "prompt-cancel").as_deref(),
         Some("Cancel: leave the terminal tabs open")
+    );
+    assert_eq!(
+        hover_help(cx, "prompt-alternative-0").as_deref(),
+        Some("Close this session's terminal tabs, then suspend the whole environment")
     );
 }
 

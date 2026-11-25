@@ -494,6 +494,7 @@ pub(crate) fn begin_shown(
 /// refresh when the read answers. Returns whether the read was sent. When it was not (no
 /// UI session, an id that cannot be a query), `then` is never called, and the caller asks nothing. The Hosts panel's
 /// Suspend reads through this too (`crate::hosts::lifecycle`), so the session's and the host's Suspend ask alike.
+/// This helm-local read can answer while an ordered command waits on another host.
 pub(crate) fn read_activity(
     host: i64,
     cx: &mut App,
@@ -504,7 +505,7 @@ pub(crate) fn read_activity(
     else {
         return false;
     };
-    operations::read::<SessionList>(path, "GET /api/sessions", cx, move |listing, cx| {
+    operations::read_unordered::<SessionList>(path, "GET /api/sessions", cx, move |listing, cx| {
         let asks = activity_asks(listing.ok().as_ref(), host, cx);
         then(asks, cx);
     })
@@ -568,23 +569,28 @@ pub(crate) fn confirm(asked: Asked, _: &mut Window, cx: &mut App) {
 }
 
 /// What an environment session's Stop question adds after the ordinary consequence, in `ui`'s words: what plain Stop
-/// leaves running, and what Stop and suspend would do instead (the old row and header Stop questions).
-pub(super) fn stop_note(ui: ProviderUi, program: &str) -> String {
+/// leaves running, and what Stop and suspend would do instead. An absent program means the question only closes tabs.
+pub(super) fn stop_note(ui: ProviderUi, program: Option<&str>) -> String {
+    let closed = match program {
+        Some(program) => format!("The stopped {program} and closed tabs do not continue."),
+        None => "The closed tabs stay closed.".into(),
+    };
     format!(
-        "{} Stop and suspend freezes the remaining processes; they continue on Resume. The stopped {program} \
-         and closed tabs do not continue.",
+        "{} Stop and suspend freezes the remaining processes; they continue on Resume. {closed}",
         ui.stop_help()
     )
 }
 
-/// The Stop question's extra answer for an environment session: "Stop and suspend", with the old answer's help
-/// (`super::stop::question` sends [`stop_and_suspend`] from it).
-pub(super) fn stop_and_suspend_answer(program: &str, host: i64) -> Answer {
+/// The Stop question's extra answer uses the same program snapshot as the primary answer. When the program has
+/// already exited, the help describes closing the tabs and suspending the environment.
+pub(super) fn stop_and_suspend_answer(program: Option<&str>, host: i64) -> Answer {
+    let action = match program {
+        Some(program) => format!("Stop this session's {program} and close its terminal tabs"),
+        None => "Close this session's terminal tabs".into(),
+    };
     Answer::new(
         "Stop and suspend",
-        HoverHelp::tooltip(format!(
-            "Stop this session's {program} and close its terminal tabs, then suspend the whole environment"
-        )),
+        HoverHelp::tooltip(format!("{action}, then suspend the whole environment")),
         Tier::Danger,
     )
     .disabled_while(move |cx| host_lifecycle_refusal(host, cx))

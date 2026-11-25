@@ -788,11 +788,39 @@ pub fn read<T: DeserializeOwned + 'static>(
     cx: &mut App,
     on_read: impl FnOnce(Result<T, HostText>, &mut App) + 'static,
 ) -> bool {
+    read_in_lane(Lane::Ordered, path, shown, cx, on_read)
+}
+
+/// Read independently of ordered requests when the result needs no earlier
+/// mutation to have finished, as with the host activity check for Suspend.
+pub(crate) fn read_unordered<T: DeserializeOwned + 'static>(
+    path: ApiPath,
+    shown: impl Into<String>,
+    cx: &mut App,
+    on_read: impl FnOnce(Result<T, HostText>, &mut App) + 'static,
+) -> bool {
+    read_in_lane(Lane::Unordered, path, shown, cx, on_read)
+}
+
+/// Both lanes decode the same reply and keep the same reset and refusal behavior.
+fn read_in_lane<T: DeserializeOwned + 'static>(
+    lane: Lane,
+    path: ApiPath,
+    shown: impl Into<String>,
+    cx: &mut App,
+    on_read: impl FnOnce(Result<T, HostText>, &mut App) + 'static,
+) -> bool {
     let shown = shown.into();
     let named = shown.clone();
-    send(Method::Get, path, None, shown, cx, move |answer, cx| {
-        on_read(decode(answer, &named), cx)
-    })
+    send_in_lane(
+        lane,
+        Method::Get,
+        path,
+        None,
+        shown,
+        cx,
+        move |answer, cx| on_read(decode(answer, &named), cx),
+    )
 }
 
 /// What [`send`]'s answer to the read shown as `shown` says, decoded as `T`: a refusal passes through as it is, and a

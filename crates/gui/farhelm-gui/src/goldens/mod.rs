@@ -1049,6 +1049,12 @@ static SCENES: &[Scene] = &[
         setup: tab_only_stop_confirmation_setup,
     },
     Scene {
+        name: "environment-tab-only-stop-confirmation",
+        size: (1000., 512.),
+        draw: session_lists,
+        setup: environment_tab_only_stop_confirmation_setup,
+    },
+    Scene {
         name: "stop-while-launching-confirmation",
         size: (1000., 418.),
         draw: session_lists_then,

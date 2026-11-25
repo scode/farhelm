@@ -1694,25 +1694,6 @@
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## exited-shell-suspend-confirmation-wording.md
-
-- Outcome: `fix code`.
-- Assessment: Stopping a sandbox or container session whose shell has already exited asks about closing its remaining
-  tabs. The question's extra answer "Stop and suspend" still says in its hover that it stops the shell, and the
-  question's appended note speaks of "the stopped shell". Verified: confirmed by source. The ended-session wording
-  switch applies only to Confirm stop and Cancel (`session_list/stop.rs:127-138`). `stop_and_suspend_answer` always says
-  "Stop this session's {program}" (`session_list/environment.rs:582-591`), and `stop_note` always says "The stopped
-  {program}" (`environment.rs:572-578`). SPEC.md:2146-2147 requires the question to name the remaining tabs when the
-  main program has exited; whether that extends to the extra answer's hover is a reading. Wording only; the request's
-  guard is correct.
-- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
-  Recommendation for reference: fix code (ended-aware help and note). Size S. Size gate: about 100 lines of diff (code,
-  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
-  brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
 ## trailing-timed-out-agent-delete-lose-late-checkout-warning.md
 
 - Outcome: `fix code`.
@@ -1888,27 +1869,6 @@
   `Deleting` arm in `suspended_refusal` (or an `is_sealed` check beside it) plus a test; size S. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## trailing-suspend-read-activity-still-uses-ordered-lane.md
-
-- Outcome: `fix code`.
-- Assessment: Before Suspend (from a session row, the session header or Hosts) or Stop and suspend, the desktop checks
-  the host's session activity. That check waits in the same queue as ordered work on every host, so a slow command on an
-  unrelated host can delay the Suspend question by up to 20 seconds. If the user clicks elsewhere meanwhile, the
-  question is dropped. Verified: confirmed. `read_activity`
-  (`crates/gui/farhelm-gui/src/session_list/environment.rs:497-511`) uses `operations::read`, which calls `send` with
-  `Lane::Ordered` (`operations.rs:707-716`, `785-796`). `Work::Suspend`, `Resume` and `StopAndSuspend` are already
-  `Unordered` (`operations.rs:270-272`). The read is not the channel's "session query" that SPEC_impl keeps ordered
-  (`SPEC_impl.md:335-339`, which refers to the projection query). SPEC.md "Slow hosts" (`SPEC.md:5352-5355`) says "one
-  slow host must not stop the helm serving the others", but that sentence is about the helm, not this GUI lane, so it
-  does not settle the case outright.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code — an unordered
-  read helper for `read_activity`, plus a lane test; size S. Size gate: about 100 lines of diff (code, tests and docs,
-  not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
-  back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-launcher-choose-effort-omits-sync-fields.md

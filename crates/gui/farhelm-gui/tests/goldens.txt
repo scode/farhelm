@@ -44,6 +44,8 @@ linux/dialog-notices-stop--dark.png 41861823a20dd31f8fdf5b1db9faa82309f361f8
 linux/dialog-notices-stop--light.png 04c6f9ccf5a01ecafd005352cb763477f1ee2309
 linux/environment-delete-confirmation--dark.png 0ef0ba2ec513faedde86322292512a37c06113d4
 linux/environment-delete-confirmation--light.png 930fdafb17318a78469f80ce7a0e9a02b2cd4e99
+linux/environment-tab-only-stop-confirmation--dark.png cc8633f65da381c268453858e2f05fa58164ef21
+linux/environment-tab-only-stop-confirmation--light.png 644270d2e5a8d9c205c2aac0edb2d2640d397200
 linux/feedback-dialog--dark.png 4daf75b976b4c9fb7ce57df72b239d334655d550
 linux/feedback-dialog--light.png 4d3ece034ea130808afa648bf462912523958270
 linux/feedback-dialog-reuse--dark.png b4f4ccfaba560dee2f70e1bc398dc2ea381c05d8

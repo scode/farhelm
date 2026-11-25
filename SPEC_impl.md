@@ -334,8 +334,9 @@ relay path that also calls it.
 Commands are ordered by default. The channel starts each ordered command after the preceding ordered command replies
 (done, refused or accepted), so a launch cannot overtake its template save. The GUI can mark independent commands
 `Unordered`. Those start on arrival and can answer in any order, alongside ordered work. The session query always stays
-ordered because it changes the channel's own projection. Queued ordered commands and in-flight unordered commands share
-one backlog limit. The channel serializes replies and pushes onto the wire. Heartbeats bypass both lanes.
+ordered because it changes the channel's own projection. Suspend's host activity read uses the unordered lane because it
+reads the helm's session cache for that host. Queued ordered commands and in-flight unordered commands share one backlog
+limit. The channel serializes replies and pushes onto the wire. Heartbeats bypass both lanes.
 
 Handlers bound how long the app waits for a reply:
 

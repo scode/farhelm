@@ -594,6 +594,52 @@ fn rest_on_terminal_tabs_stop(
     );
 }
 
+/// Show the extra answer for an exited shell in its own container. The note and the answer's hover both describe
+/// the tabs still open and the remaining environment processes.
+pub(super) fn environment_tab_only_stop_confirmation_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::session_list::environment_tests::{
+        Provider, bash_session, connected, environment_host, registry,
+    };
+    let host = environment_host(Provider::Container, connected());
+    let fixture = bash_session("a")
+        .host(host.id)
+        .tabs(1)
+        .activity(TEST_NOW - 60)
+        .title("Build console")
+        .status(serde_json::json!({"state": "exited", "exit_code": 0}));
+    let row = serde_json::from_value(fixture.entry().value).expect("the shell's listed row");
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![
+        listing(&["a"], &[fixture]),
+        preferences(&["a"], None),
+        registry(&host),
+    ]);
+    state.lists.borrow_mut().push(cx.new(SessionList::new));
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    window.set_driver_enabled(true);
+    // Use the same frozen Stop question as the row menu, including the extra answer for its current host.
+    let question = crate::session_list::stop::question(
+        "a",
+        &row,
+        crate::session_list::stop::guard(&row),
+        Some((
+            crate::environment_ui::ProviderUi(farhelm_proto::ProviderKind::Podman),
+            host.id,
+        )),
+    );
+    let mark = Mark::take(cx);
+    assert!(crate::prompt::ask(question, None, &mark, |_, _, _| {}, window, cx).is_some());
+    // The golden runner waits for visible bounds before hovering the alternate answer.
+    state.hover.set(Some("prompt-alternative-0"));
+}
+
 /// Show the Stop confirmation while a create still owns this window's destination. Its alternate answer needs to
 /// explain the wait without making ordinary Stop look unavailable.
 pub(super) fn stop_while_launching_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
