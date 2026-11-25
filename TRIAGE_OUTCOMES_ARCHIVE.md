@@ -49400,3 +49400,47 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   and its interaction and visual evidence exceed this outcome’s size allowance. Change
   `rkzqtlqquulponsnwlsqqwvnnvvznmss`, bookmark `plan/triage-settings-nov24/04c-custom-agent-close-drafts-follow-up`,
   [#5006](https://github.com/scode/farhelm/pull/5006/changes).
+
+## hook-settings-toggle-uses-unshown-state.md
+
+- Outcome: `fix code`.
+- Assessment: On an agent's Settings page, "Set up conversation hooks on all hosts" saves at once. If an earlier attempt
+  to turn it on is refused just as you press Space to turn it off, the switch can act on the newly drawn (off) state
+  that you have not seen yet and save "on", recording all-hosts consent you meant to withdraw. Verified: confirmed by
+  source; timing unmeasured. The switch sends `!self.checked` from the frame being drawn
+  (`components/checkbox.rs:225-228`), with no presentation gate; the row passes `switch.state.shown()`
+  (`settings/hook_settings.rs:51-55`). SPEC.md 5788-5789 and SPEC_impl.md 995-998 ("a handler for a newly drawn frame
+  may have to refuse the press") govern. The fix is in the shared Checkbox or a per-switch snapshot, a design choice.
+  Not the sub-second-race filter: the consequence is a consent (trust-boundary) write.
+- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
+  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
+  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
+  GUI at a time". Recommendation for reference: fix code — gate switch toggles on the presented frame (shared Checkbox
+  change); size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
+  or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
+  file and its index entry.
+- Execution: Fixed as decided. Change `vtluomwuxmtkpyokkqvpsmxtzoqsvqvw`, bookmark
+  `plan/triage-settings-nov24/05-bind-hook-switch-to-presented-state`,
+  [#5007](https://github.com/scode/farhelm/pull/5007/changes).
+
+## trailing-masked-input-test-omits-a11y-value-checks.md
+
+- Outcome: `other`.
+- Assessment: The test for secret (masked) text fields checks that the typed secret is not painted and not in accessible
+  names, but never checks the accessible value that screen readers read, and never runs with accessibility active. A
+  future library change could leak the secret to screen readers unnoticed. No leak exists today. Verified: Confirmed on
+  main: `components/text_input.rs:209-215` sets `.masked` without a password content type. The reviewer's library trace
+  (gpui-component and gpui-base 0.9.1) was not re-read. The suggested code change (password content type) interacts with
+  `set_masked` reveal toggling (`:340-342`), so it needs a choice.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code, only if cheap. The guard protects a secret from
+  screen readers. Size S to M.
+- Execution: No change under the test size gate. Current masking suppresses the accessible value. Exercising accessible
+  value emission in the test needs a Kit feature with additional packages and 84 lockfile lines, or a new accessibility
+  activation seam. Change `vtluomwuxmtkpyokkqvpsmxtzoqsvqvw`, bookmark
+  `plan/triage-settings-nov24/05-bind-hook-switch-to-presented-state`,
+  [#5007](https://github.com/scode/farhelm/pull/5007/changes).

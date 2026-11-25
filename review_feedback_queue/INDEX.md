@@ -13,9 +13,6 @@ consequences.
 
 ## Highest priority: security or data loss
 
-- [`hook-settings-toggle-uses-unshown-state.md`](hook-settings-toggle-uses-unshown-state.md) — Space can save the
-  all-hosts hook opt-in while the switch still shows the on state the user intended to turn off.
-
 - [`agent-environment-launch-skips-place-host-incarnation-pin.md`](agent-environment-launch-skips-place-host-incarnation-pin.md)
   — An approved agent container-environment launch can create the container on a different machine than the card named
   if the place host was retargeted or re-identified while the card waited; the environment-launch path never pins the
@@ -90,10 +87,6 @@ consequences.
 - [`trailing-settings-containers-reload-omits-loading-keeps-error.md`](trailing-settings-containers-reload-omits-loading-keeps-error.md)
   — After a failed refresh in Settings -> Containers, deleting the last leftover or clicking Refresh hides the reading
   indicator and leaves only the old refresh error visible while the new read waits.
-
-- [`trailing-masked-input-test-omits-a11y-value-checks.md`](trailing-masked-input-test-omits-a11y-value-checks.md) — The
-  masked-input test checks painted text and accessible names but never inspects accessible values or runs with
-  accessibility active, leaving screen-reader secret exposure unguarded.
 
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed

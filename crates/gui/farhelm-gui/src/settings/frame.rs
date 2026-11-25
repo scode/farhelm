@@ -361,7 +361,7 @@ impl SettingsDialog {
                     .pt(px(10.))
                     .pb(px(16.))
                     .gap(px(SECTION_GAP))
-                    .children(self.body(self.shown.clone(), preferences, cx)),
+                    .children(self.body(self.shown.clone(), preferences, window, cx)),
             );
         div()
             .flex_1()

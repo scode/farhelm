@@ -1490,7 +1490,8 @@ impl SettingsDialog {
         &self,
         section: Section,
         preferences: Option<&Preferences>,
-        cx: &Context<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         match section {
             Section::Sessions => vec![
@@ -1649,6 +1650,7 @@ impl SettingsDialog {
                                 );
                             });
                         },
+                        window,
                         cx,
                     );
                     panels.push(
