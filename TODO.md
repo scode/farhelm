@@ -581,10 +581,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   settings and the normal agent home, and check it with a valid subscription login. Plan:
   `plans/queue/sandbox-auto-trust-and-claude-onboarding.md`.
 
-- **Fix Managed checkout repository suggestions for new sandboxes.** When `New sandbox` + `Managed checkout` is
-  selected, repository suggestions scan an existing connected host (such as Local) rather than using the recipe's
-  configured GitHub token. Plan: `plans/queue/global-checkout-repo-history.md`.
-
 - **Hide unrelated Podman status noise on Tensorlake recipe cards.** Because Managed Ubuntu is shared with Podman,
   recipe cards show a local Podman check/error line and a `Rebuild` button right above the Tensorlake status lines even
   when the user is only using Tensorlake. Plan: `plans/queue/hide-unconfigured-podman-recipe-status.md`.

@@ -223,6 +223,7 @@ pub fn merged(
         launches: Vec::new(),
         folders: Vec::new(),
         checkout_config_revision: 0,
+        needs_checkout_root: false,
     });
     let mut ordinary = std::mem::take(&mut reply.launches).into_iter().peekable();
     let mut environment = environment.iter().peekable();

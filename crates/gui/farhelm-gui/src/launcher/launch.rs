@@ -265,6 +265,11 @@ pub(crate) fn waking(cx: &App) -> bool {
     current_held(cx).is_some_and(|held| held.wake.is_some())
 }
 
+/// Only the launcher held for this wake must ignore visible-only setup refreshes while it is hidden.
+pub(super) fn wake_holds_launcher(launcher: &Entity<Launcher>, cx: &App) -> bool {
+    current_held(cx).is_some_and(|held| held.launcher == *launcher && held.wake.is_some())
+}
+
 /// A Replace with or Restart with owns its source before it can put the create on that session's operation key.
 pub(crate) fn wake_owns_source(key: &str, cx: &App) -> bool {
     current_held(cx)

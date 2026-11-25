@@ -1,6 +1,6 @@
 //! One read at a time, latest wins: the request state the launcher's debounced reads share.
 //!
-//! The managed checkout's repository suggestions and preview (`checkout`) and the folder check (`folder_check`) each
+//! The managed checkout preview (`checkout`) and the folder check (`folder_check`) each
 //! ask the helm about something the user is still changing (what is typed, the host, its connection). Each follows the
 //! same rules, which [`Latest`] keeps once:
 //!
@@ -89,7 +89,8 @@ impl<K: Clone + PartialEq, A> Latest<K, A> {
 
     /// Whether the current key is awaiting an answer, including the debounce and the time before a slot opens.
     /// Returns `None` for an unrelated key. A read the caller could not send stays pending until the key changes.
-    pub(super) fn pending_for(&self, key: &K) -> Option<bool> {
+    #[cfg(test)]
+    fn pending_for(&self, key: &K) -> Option<bool> {
         (self.asked.as_ref() == Some(key)).then_some(self.answered.is_none())
     }
 

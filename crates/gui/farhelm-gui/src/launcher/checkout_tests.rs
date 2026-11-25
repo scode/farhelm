@@ -370,12 +370,82 @@ fn to(commands: &[FakeCommand], path: &str) -> Vec<FakeCommand> {
 const REPOSITORIES: &str = "/api/github-repositories";
 const PREVIEW: &str = "/api/github-checkout-preview";
 
-/// A suggestions reply from host1's installation.
-fn repositories(repos: &[(&str, &str)], truncated: bool, scan_error: Option<&str>) -> Value {
+/// The global list carries repository identities only, in recency order.
+fn repositories(repos: &[(&str, &str)]) -> Value {
+    json!(
+        repos
+            .iter()
+            .map(|(owner, name)| json!({"owner": owner, "name": name}))
+            .collect::<Vec<_>>()
+    )
+}
+
+/// A pending repository reply also holds the commands the launcher sent after it on the ordered channel.
+struct PendingRepositoryHistory {
+    request: FakeCommand,
+    following: Vec<FakeCommand>,
+}
+
+impl PendingRepositoryHistory {
+    /// Answer the held history first, then release the later commands in their original order.
+    fn answer(self, helm: &mut FakeHelm, cx: &mut VisualTestContext, status: u16, body: Value) {
+        helm.reply(self.request.id, status, Some(body));
+        for command in self.following.into_iter().chain(sent(helm, cx)) {
+            assert_ne!(command.path, REPOSITORIES, "one global read per launcher");
+            reply_checkout_launcher_read(helm, command, false);
+        }
+        settle(cx);
+    }
+}
+
+/// Answer the ordinary fixture reads that accompany a repository or checkout-folder read.
+fn reply_checkout_launcher_read(helm: &mut FakeHelm, command: FakeCommand, needs_root: bool) {
+    let body = match command.path.as_str() {
+        "/api/launch-catalog" | REPOSITORIES => Some(json!([])),
+        path if path.starts_with("/api/launch-history?host=") => {
+            Some(checkout_host_history(needs_root, 3))
+        }
+        _ => None,
+    };
+    helm.reply(command.id, 200, body);
+}
+
+/// Hold the first repository read so the test can observe loading, failure or fresh suggestions.
+fn hold_repositories(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> PendingRepositoryHistory {
+    let mut reads = sent(helm, cx).into_iter();
+    let request = loop {
+        let command = reads
+            .next()
+            .expect("the launcher reads global repository history");
+        if command.path == REPOSITORIES {
+            break command;
+        }
+        reply_checkout_launcher_read(helm, command, false);
+    };
+    assert_eq!(request.method, farhelm_helm_client::Method::Get);
+    assert_eq!(request.body, None, "the read does not name a host or query");
+    PendingRepositoryHistory {
+        request,
+        following: reads.collect(),
+    }
+}
+
+/// Open directly on Managed checkout while its first global history answer is still pending.
+fn checkout_open_with_history_pending(
+    cx: &mut TestAppContext,
+) -> (FakeHelm, &mut VisualTestContext, PendingRepositoryHistory) {
+    let (mut helm, cx) = launcher_on(cx, command_draft(1));
+    let request = hold_repositories(&mut helm, cx);
+    test_support::click(cx, "launcher-destination-Managed checkout");
+    assert_eq!(draft(cx).destination_kind(), DestinationKind::Checkout);
+    (helm, cx, request)
+}
+
+/// A connected host's configuration comes with its launch history, independently of repository history.
+fn checkout_host_history(needs_checkout_root: bool, revision: i64) -> Value {
     json!({
-        "host": "1", "incarnation": 4, "installation_identity": "identity1",
-        "repos": repos.iter().map(|(owner, name)| json!({"owner": owner, "name": name})).collect::<Vec<_>>(),
-        "truncated": truncated, "scan_error": scan_error, "needs_checkout_root": false,
+        "launches": [], "folders": [],
+        "checkout_config_revision": revision, "needs_checkout_root": needs_checkout_root,
     })
 }
 
@@ -517,15 +587,11 @@ fn managed_checkout_shares_the_address_and_places_the_folder_below_it(cx: &mut T
     assert!(name_of(cx, "launcher-checkout-folder").is_none());
 }
 
-/// SPEC_impl.md: repository suggestions "debounce for 150 ms and discard stale host/query generations", and SPEC.md:
-/// "Incomplete discovery is visible and does not prevent selecting a valid manually entered pair". Specified: typing
-/// asks nothing before 150 ms; then one read for host1 on connection 4 with the typed text; a truncated reply with a
-/// scan error lists its matching repositories and says the error under the field; Down and Enter pick the highlighted
-/// row, which Enter never launches; the field then shows the choice and the note goes. A click into the field opens
-/// the list by itself, as the old field's focus did.
+/// Repository history is read on opening. Typing filters locally without another command; Enter selects
+/// the highlighted repository, closes the field's list and leaves Launch for a separate press.
 #[gpui::test]
-fn suggestions_are_read_after_typing_and_enter_picks_one(cx: &mut TestAppContext) {
-    let (mut helm, cx) = checkout_open(cx);
+fn repository_history_loads_on_open_and_enter_picks_a_filtered_match(cx: &mut TestAppContext) {
+    let (mut helm, cx, request) = checkout_open_with_history_pending(cx);
     click_in_body(cx, "launcher-repository");
     assert!(
         read(cx, |launcher, window, cx| launcher
@@ -544,44 +610,19 @@ fn suggestions_are_read_after_typing_and_enter_picks_one(cx: &mut TestAppContext
         .expect("the open suggestions list");
     assert_eq!(list.left(), repository.left());
     assert_eq!(list.size.width, repository.size.width);
-    // Not a valid pair itself, so the list holds only what the host found.
     test_support::keys(cx, "a c m e /");
-    test_support::advance(cx, Duration::from_millis(100));
-    assert!(
-        to(&sent(&mut helm, cx), REPOSITORIES).is_empty(),
-        "nothing before 150 ms"
-    );
-    test_support::advance(cx, Duration::from_millis(60));
-    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
-    let [read_] = &reads[..] else {
-        panic!("one read, not {}", reads.len());
-    };
-    assert_eq!(
-        read_.body,
-        Some(json!({"host": 1, "expected_incarnation": 4, "query": "acme/"}))
-    );
-    helm.reply(
-        read_.id,
+    request.answer(
+        &mut helm,
+        cx,
         200,
-        Some(repositories(
-            &[("acme", "bar"), ("acme", "baz"), ("other", "x")],
-            true,
-            Some("repository discovery is unavailable on this host; verify Git and the configured checkout root"),
-        )),
+        repositories(&[("acme", "bar"), ("acme", "baz"), ("other", "x")]),
     );
-    settle(cx);
     assert!(cx.debug_bounds("launcher-repository-list").is_some());
     assert!(
         name_of(cx, "launcher-repository-option-acme/bar").is_some()
             && name_of(cx, "launcher-repository-option-acme/baz").is_some()
             && name_of(cx, "launcher-repository-option-other/x").is_none(),
         "the matching repositories are listed"
-    );
-    assert_eq!(
-        name_of(cx, "launcher-repository-note").as_deref(),
-        Some(
-            "repository discovery is unavailable on this host; verify Git and the configured checkout root"
-        )
     );
     test_support::keys(cx, "down down enter");
     assert_eq!(
@@ -596,36 +637,19 @@ fn suggestions_are_read_after_typing_and_enter_picks_one(cx: &mut TestAppContext
         read(cx, |launcher, _, cx| launcher.repository_field_text(cx)),
         "acme/baz"
     );
-    assert!(name_of(cx, "launcher-repository-note").is_none());
     assert!(
         to(&sent(&mut helm, cx), "/api/sessions").is_empty(),
         "Enter chose; it launched nothing"
     );
 }
 
-/// A valid typed pair stays selectable when discovery fails (SPEC.md, as above). Specified: with the read refused, the
-/// list still offers the typed pair, the failure is escaped both on screen and in its accessible name, and picking
-/// the typed pair chooses it. Hidden characters in a refusal must stay visible even while discovery is unavailable.
+/// If the helm cannot read its history, a valid typed pair remains selectable immediately.
 #[gpui::test]
-fn a_typed_pair_is_chosen_when_discovery_fails(cx: &mut TestAppContext) {
-    let (mut helm, cx) = checkout_open(cx);
+fn a_typed_pair_is_chosen_when_repository_history_fails(cx: &mut TestAppContext) {
+    let (mut helm, cx, request) = checkout_open_with_history_pending(cx);
     click_in_body(cx, "launcher-repository");
     test_support::keys(cx, "a c m e / q u x");
-    test_support::advance(cx, Duration::from_millis(160));
-    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
-    assert_eq!(reads.len(), 1, "the premise: the read is out");
-    helm.reply(reads[0].id, 504, Some(json!("the host\u{202e} timed out")));
-    settle(cx);
-    let shown = "the host<U+202E> timed out";
-    assert_eq!(
-        name_of(cx, "launcher-repository-note").as_deref(),
-        Some(shown)
-    );
-    assert!(
-        crate::session_list::tests::painted(&test_support::frame(cx))
-            .iter()
-            .any(|line| line == shown)
-    );
+    request.answer(&mut helm, cx, 504, json!("repository history read failed"));
     test_support::click(cx, "launcher-repository-option-acme/qux");
     assert_eq!(
         draft(cx).checkout.and_then(|checkout| checkout.repo),
@@ -637,17 +661,13 @@ fn a_typed_pair_is_chosen_when_discovery_fails(cx: &mut TestAppContext) {
 /// selection alone misses a clipped highlight, which gives no usable feedback while focus stays in the field.
 #[gpui::test]
 fn repository_arrows_keep_the_highlight_visible_through_wrapping(cx: &mut TestAppContext) {
-    let (mut helm, cx) = checkout_open(cx);
+    let (mut helm, cx, request) = checkout_open_with_history_pending(cx);
     click_in_body(cx, "launcher-repository");
     assert!(read(cx, |launcher, window, cx| launcher
         .repository_focused(window, cx)));
-    test_support::advance(cx, Duration::from_millis(160));
-    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
-    assert_eq!(reads.len(), 1, "the premise: discovery is waiting");
     let names: Vec<_> = (0..24).map(|index| format!("repo-{index:02}")).collect();
     let repos: Vec<_> = names.iter().map(|name| ("acme", name.as_str())).collect();
-    helm.reply(reads[0].id, 200, Some(repositories(&repos, false, None)));
-    settle(cx);
+    request.answer(&mut helm, cx, 200, repositories(&repos));
     let row = |cx: &mut VisualTestContext, index| {
         let id = format!("launcher-repository-option-acme/repo-{index:02}");
         test_support::frame(cx)
@@ -684,21 +704,12 @@ fn repository_arrows_keep_the_highlight_visible_through_wrapping(cx: &mut TestAp
     }
 }
 
-/// A name edit refreshes the preview of the chosen repository. The original discovery still applies, so the host
-/// should receive only the new preview during and after the discovery debounce.
+/// Editing the name refreshes the preview for the chosen repository. The existing history still applies.
 #[gpui::test]
 fn editing_the_checkout_name_reads_no_repository_suggestions(cx: &mut TestAppContext) {
-    let (mut helm, cx) = checkout_open(cx);
+    let (mut helm, cx, request) = checkout_open_with_history_pending(cx);
     click_in_body(cx, "launcher-repository");
-    test_support::advance(cx, Duration::from_millis(160));
-    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
-    assert_eq!(reads.len(), 1, "the premise: discovery is waiting");
-    helm.reply(
-        reads[0].id,
-        200,
-        Some(repositories(&[("acme", "bar")], false, None)),
-    );
-    settle(cx);
+    request.answer(&mut helm, cx, 200, repositories(&[("acme", "bar")]));
     test_support::click(cx, "launcher-repository-option-acme/bar");
     let previews = to(&sent(&mut helm, cx), PREVIEW);
     assert_eq!(
@@ -729,7 +740,7 @@ fn editing_the_checkout_name_reads_no_repository_suggestions(cx: &mut TestAppCon
     let commands = sent(&mut helm, cx);
     assert!(
         to(&commands, REPOSITORIES).is_empty(),
-        "the name edit sends no discovery read"
+        "the name edit sends no repository history read"
     );
     let [preview] = &to(&commands, PREVIEW)[..] else {
         panic!("the name edit sends one preview");
@@ -745,16 +756,15 @@ fn editing_the_checkout_name_reads_no_repository_suggestions(cx: &mut TestAppCon
     test_support::advance(cx, Duration::from_millis(160));
     assert!(
         to(&sent(&mut helm, cx), REPOSITORIES).is_empty(),
-        "accepting the new preview sends no discovery read either"
+        "accepting the next preview sends no repository history read"
     );
 }
 
-/// Focusing Repository closes the composer's search, so only the repository field offers choices for Enter. After
-/// discovery answers with a failed scan and no matches, Enter leaves the draft unselected and sends neither a
-/// preview nor a create. The loading hint lasts until the failed scan arrives.
+/// Focusing Repository closes the command results. Enter on a query with no matching history must
+/// leave the repository unselected, including after the field's suggestion list closes and reopens.
 #[gpui::test]
 fn repository_focus_closes_search_and_enter_on_no_match_chooses_nothing(cx: &mut TestAppContext) {
-    let (mut helm, cx) = checkout_open(cx);
+    let (mut helm, cx, request) = checkout_open_with_history_pending(cx);
     test_support::click(cx, "launcher-search-row");
     assert!(
         super::view_tests::search_focused(cx),
@@ -770,32 +780,11 @@ fn repository_focus_closes_search_and_enter_on_no_match_chooses_nothing(cx: &mut
     assert!(read(cx, |launcher, window, cx| launcher
         .repository_focused(window, cx)));
     test_support::keys(cx, "i n v a l i d");
-    let loading = Some("Loading repositories…");
-    assert_eq!(name_of(cx, "launcher-repository-empty").as_deref(), loading);
-    assert!(to(&sent(&mut helm, cx), REPOSITORIES).is_empty());
-    test_support::advance(cx, Duration::from_millis(160));
-    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
-    let [discovery] = &reads[..] else {
-        panic!("the repository field requests one scan for the typed query");
-    };
     assert_eq!(
-        discovery.body,
-        Some(json!({"host": 1, "expected_incarnation": 4, "query": "invalid"}))
+        name_of(cx, "launcher-repository-empty").as_deref(),
+        Some("Loading repositories…")
     );
-    assert_eq!(name_of(cx, "launcher-repository-empty").as_deref(), loading);
-    let scan_error = "fixture scan unavailable";
-    helm.reply(
-        discovery.id,
-        200,
-        Some(repositories(&[], true, Some(scan_error))),
-    );
-    settle(cx);
-    assert_eq!(
-        name_of(cx, "launcher-repository-note").as_deref(),
-        Some(scan_error),
-        "the premise: the failed scan has answered"
-    );
-
+    request.answer(&mut helm, cx, 200, repositories(&[]));
     let words = Some("No repository matches; enter owner/repo");
     assert_eq!(name_of(cx, "launcher-repository-empty").as_deref(), words);
     test_support::keys(cx, "enter");
@@ -814,18 +803,12 @@ fn repository_focus_closes_search_and_enter_on_no_match_chooses_nothing(cx: &mut
     assert!(to(&commands, "/api/sessions").is_empty());
 }
 
-/// The composer search's `gh:` offers the same choices as the repository field, from a Folder destination too: the
-/// host's discovered repositories that match, and a valid typed `owner/repo` first whatever discovery found (SPEC.md,
-/// "Managed checkouts": "Incomplete discovery is visible and does not prevent selecting a valid manually entered
-/// pair"; the old launcher's `SearchScope::Github` rows). Why: the maintainer typed `gh:scode/farhelm` and got "No
-/// repository matches" with no row, since the search had no repository rows at all. Specified: on a Folder draft,
-/// `gh:widg` reads the host's repositories for "widg" after 150 ms and lists the one that matches
-/// ("Managed checkout: acme/widgets"); `gh:widg/new`, a valid pair discovery did not list, is offered at once and
-/// first; Enter takes it: a managed checkout of widg/new, the search box emptied. Loading covers both waits.
+/// The command field's `gh:` query uses the history even on a Folder draft, including a valid typed
+/// repository ahead of partial matches. It never issues a new request for each edit.
 #[gpui::test]
-fn gh_search_offers_discovered_repositories_and_a_valid_typed_pair(cx: &mut TestAppContext) {
+fn gh_search_offers_recent_repositories_and_a_valid_typed_pair(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_on(cx, command_draft(1));
-    answer_catalog(&mut helm, cx, Some(json!([])));
+    let request = hold_repositories(&mut helm, cx);
     assert_eq!(
         draft(cx).destination_kind(),
         DestinationKind::Folder,
@@ -837,38 +820,16 @@ fn gh_search_offers_discovered_repositories_and_a_valid_typed_pair(cx: &mut Test
         "the premise: the search box has focus"
     );
     test_support::keys(cx, "g h : w i d g");
-    let loading = Some("Loading repositories…");
-    assert_eq!(name_of(cx, "launcher-search-message").as_deref(), loading);
-    assert!(to(&sent(&mut helm, cx), REPOSITORIES).is_empty());
-    test_support::advance(cx, Duration::from_millis(160));
-    // Answer the launcher's ordered reads in send order. Only the repositories read succeeds, so the other replies
-    // leave the search alone.
-    let taken = sent(&mut helm, cx);
-    let reads = to(&taken, REPOSITORIES);
-    let [read_] = &reads[..] else {
-        panic!("one read for the gh: query, not {}", reads.len());
-    };
     assert_eq!(
-        read_.body,
-        Some(json!({"host": 1, "expected_incarnation": 4, "query": "widg"}))
+        name_of(cx, "launcher-search-message").as_deref(),
+        Some("Loading repositories…")
     );
-    assert_eq!(name_of(cx, "launcher-search-message").as_deref(), loading);
-    for command in &taken {
-        if command.path == REPOSITORIES {
-            helm.reply(
-                command.id,
-                200,
-                Some(repositories(
-                    &[("acme", "widgets"), ("other", "x")],
-                    false,
-                    None,
-                )),
-            );
-        } else {
-            helm.reply(command.id, 503, Some(json!("not answered in this test")));
-        }
-    }
-    settle(cx);
+    request.answer(
+        &mut helm,
+        cx,
+        200,
+        repositories(&[("acme", "widgets"), ("other", "x")]),
+    );
     assert_eq!(
         name_of(cx, "launcher-search-option-0").as_deref(),
         Some("Managed checkout: acme/widgets")
@@ -900,50 +861,22 @@ fn gh_search_offers_discovered_repositories_and_a_valid_typed_pair(cx: &mut Test
     );
 }
 
-/// While the search holds a `gh:` query, what the host's scan says about it shows under the search box, and Launch
-/// waits for a pick, as in the old launcher (its `github-checkout-composer.spec.ts` case for an unavailable scan). Why:
-/// SPEC.md, "Managed checkouts", has "Incomplete discovery is visible" and "Invalid `gh:` input cannot launch a hidden
-/// existing directory"; from a Folder destination there is no repository field to say it under, and a launch would
-/// quietly use the folder the user is replacing. Specified: on a complete Folder draft, `gh:x` and a truncated reply
-/// with a scan error show that error under the box (no repository field is drawn); a press of Launch says "Not
-/// launched. Select a GitHub repository before launching" and sends no create; then, with Managed checkout chosen,
-/// picking `acme/bar` in the repository field empties the search box and chooses it.
+/// An invalid `gh:` query must hold Launch even on an otherwise complete Folder draft.
 #[gpui::test]
-fn a_gh_query_shows_its_scan_note_and_holds_launch_until_a_pick(cx: &mut TestAppContext) {
+fn a_gh_query_holds_launch_until_a_repository_is_chosen(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_on(cx, command_draft(1));
-    answer_catalog(&mut helm, cx, Some(json!([])));
+    let request = hold_repositories(&mut helm, cx);
     test_support::click(cx, "launcher-search-row");
     assert!(
         super::view_tests::search_focused(cx),
         "the premise: the search box has focus"
     );
     test_support::keys(cx, "g h : x");
-    test_support::advance(cx, Duration::from_millis(160));
-    let taken = sent(&mut helm, cx);
+    request.answer(&mut helm, cx, 200, repositories(&[]));
+    assert!(cx.debug_bounds("launcher-repository-row").is_none());
     assert_eq!(
-        to(&taken, REPOSITORIES).len(),
-        1,
-        "the premise: the gh: query's read went out"
-    );
-    for command in taken {
-        if command.path == REPOSITORIES {
-            helm.reply(
-                command.id,
-                200,
-                Some(repositories(&[], true, Some("fixture scan unavailable"))),
-            );
-        } else {
-            helm.reply(command.id, 503, Some(json!("not answered in this test")));
-        }
-    }
-    settle(cx);
-    assert!(
-        cx.debug_bounds("launcher-repository-row").is_none(),
-        "the premise: a folder destination, with no repository field"
-    );
-    assert_eq!(
-        name_of(cx, "launcher-search-repository-note").as_deref(),
-        Some("fixture scan unavailable")
+        name_of(cx, "launcher-search-message").as_deref(),
+        Some("No repository matches; enter owner/repo")
     );
     test_support::keys(cx, "escape");
     test_support::click(cx, "launcher-launch");
@@ -957,11 +890,6 @@ fn a_gh_query_shows_its_scan_note_and_holds_launch_until_a_pick(cx: &mut TestApp
     );
 
     test_support::click(cx, "launcher-destination-Managed checkout");
-    assert!(
-        name_of(cx, "launcher-search-repository-note").is_some()
-            && name_of(cx, "launcher-repository-note").is_none(),
-        "with the query still in the box, its note stays under the box and is not repeated under the field"
-    );
     click_in_body(cx, "launcher-repository");
     test_support::keys(cx, "a c m e / b a r");
     test_support::click(cx, "launcher-repository-option-acme/bar");
@@ -1223,23 +1151,19 @@ fn what_a_preview_answers_for_asks_again_and_late_answers_never_apply(cx: &mut T
 
 /// A preview for the original host cannot authorize a checkout on the new host. Check after the original reply and
 /// while the replacement is still held, so the replacement cannot mask stale output. The new host must also reveal
-/// its missing checkout folder through discovery even though the repository stays selected.
+/// its missing checkout folder through launch history even though the repository stays selected.
 #[gpui::test]
 fn switching_hosts_drops_the_old_preview_and_checks_the_new_hosts_setup(cx: &mut TestAppContext) {
     // The fixture's host10 is a second connected host with its own installation identity.
     let fleet = super::view_tests::fixture_hosts(&[0, 9]);
     let (mut helm, cx) = super::view_tests::launcher_with_hosts(cx, command_draft(1), fleet);
-    answer_catalog(&mut helm, cx, Some(json!([])));
-    test_support::click(cx, "launcher-destination-Managed checkout");
-    test_support::advance(cx, Duration::from_millis(160));
-    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
-    assert_eq!(
-        reads.len(),
-        1,
-        "the premise: host1's discovery was requested"
-    );
-    helm.reply(reads[0].id, 200, Some(repositories(&[], false, None)));
+    let reads = sent(&mut helm, cx);
+    assert_eq!(to(&reads, "/api/launch-history?host=1").len(), 1);
+    for command in reads {
+        reply_checkout_launcher_read(&mut helm, command, false);
+    }
     settle(cx);
+    test_support::click(cx, "launcher-destination-Managed checkout");
     assert!(cx.debug_bounds("launcher-checkout-setup").is_none());
     edit(cx, |draft| draft.choose_repository(repo("acme", "bar")));
     let previews = to(&sent(&mut helm, cx), PREVIEW);
@@ -1258,13 +1182,11 @@ fn switching_hosts_drops_the_old_preview_and_checks_the_new_hosts_setup(cx: &mut
     test_support::advance(cx, Duration::from_millis(160));
     let pending = sent(&mut helm, cx);
     assert!(to(&pending, PREVIEW).is_empty(), "a preview is already out");
-    let discoveries = to(&pending, REPOSITORIES);
-    let [discovery] = &discoveries[..] else {
-        panic!("the new host was asked once about the chosen repository");
-    };
+    assert!(to(&pending, REPOSITORIES).is_empty());
     assert_eq!(
-        discovery.body,
-        Some(json!({"host": 10, "expected_incarnation": 4, "query": "acme/bar"}))
+        to(&pending, "/api/launch-history?host=10").len(),
+        1,
+        "the new host is asked about its checkout folder despite the repository staying selected"
     );
 
     helm.reply(first.id, 200, Some(preview_reply("/work/old", "old", 3)));
@@ -1276,16 +1198,12 @@ fn switching_hosts_drops_the_old_preview_and_checks_the_new_hosts_setup(cx: &mut
     );
     assert!(
         cx.debug_bounds("launcher-checkout-setup").is_none(),
-        "the new host's discovery is still held"
+        "the new host's launch history is still held"
     );
     // These reads were queued while the first preview was out. The replacement preview is now behind them.
     for command in pending {
-        let reply = if command.path == REPOSITORIES {
-            let mut reply = repositories(&[], false, None);
-            reply["host"] = json!("10");
-            reply["installation_identity"] = json!("identity10");
-            reply["needs_checkout_root"] = json!(true);
-            Some(reply)
+        let reply = if command.path == "/api/launch-history?host=10" {
+            Some(checkout_host_history(true, 3))
         } else {
             None
         };
@@ -1310,7 +1228,7 @@ fn switching_hosts_drops_the_old_preview_and_checks_the_new_hosts_setup(cx: &mut
     );
     assert!(
         cx.debug_bounds("launcher-checkout-setup").is_some(),
-        "discovery offered checkout-folder setup"
+        "the new host's history offered checkout-folder setup"
     );
     test_support::click(cx, "launcher-launch");
     assert!(to(&sent(&mut helm, cx), "/api/sessions").is_empty());
@@ -1685,13 +1603,21 @@ fn a_lost_race_takes_a_new_preview_and_sends_nothing(cx: &mut TestAppContext) {
 /// Submit the inline setup with a repository already chosen and its preview refused for lack of a folder.
 /// This is the state the launcher has to recover from after either a save or a CLI change.
 fn submit_inline_setup(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, u64) {
-    let (mut helm, cx) = checkout_open(cx);
-    test_support::advance(cx, Duration::from_millis(160));
-    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
-    assert_eq!(reads.len(), 1, "the premise: the suggestions read is out");
-    let mut reply = repositories(&[], false, Some("no checkout folder is configured"));
-    reply["needs_checkout_root"] = json!(true);
-    helm.reply(reads[0].id, 200, Some(reply));
+    let (helm, cx) = launcher_on(cx, command_draft(1));
+    submit_inline_setup_in(helm, cx)
+}
+
+/// Use the open fixture's host roster to submit the same initial setup on host1.
+fn submit_inline_setup_in(
+    mut helm: FakeHelm,
+    cx: &mut VisualTestContext,
+) -> (FakeHelm, &mut VisualTestContext, u64) {
+    let reads = sent(&mut helm, cx);
+    assert_eq!(to(&reads, "/api/launch-history?host=1").len(), 1);
+    for command in reads {
+        reply_checkout_launcher_read(&mut helm, command, true);
+    }
+    test_support::click(cx, "launcher-destination-Managed checkout");
     settle(cx);
     assert!(
         cx.debug_bounds("launcher-checkout-setup").is_some(),
@@ -1737,33 +1663,49 @@ fn submit_inline_setup(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestCon
 fn finish_inline_setup(helm: &mut FakeHelm, cx: &mut VisualTestContext, save: u64) {
     helm.reply(save, 204, None);
     settle(cx);
-    test_support::advance(cx, Duration::from_millis(160));
     let after = sent(helm, cx);
-    let previews = to(&after, PREVIEW);
-    assert_eq!(previews.len(), 1, "the preview is asked again");
-    let reads = to(&after, REPOSITORIES);
-    assert_eq!(reads.len(), 1, "and the suggestions");
+    assert!(to(&after, PREVIEW).is_empty(), "wait for the new revision");
+    assert_eq!(
+        to(&after, "/api/launch-history?host=1").len(),
+        1,
+        "setup is checked again"
+    );
+    assert!(
+        to(&after, REPOSITORIES).is_empty(),
+        "the global repository history is still current"
+    );
     // Answered in the order sent, as the fake requires; the field reads its route again after a done save.
-    let mut ordered = after.clone();
-    ordered.sort_by_key(|command| command.id);
-    for command in ordered {
+    for command in after {
         let body = match command.path.as_str() {
-            PREVIEW => preview_reply("/home/user/checkouts/bar-1", "bar-1", 3),
-            REPOSITORIES => repositories(&[], false, None),
+            "/api/launch-history?host=1" => checkout_host_history(false, 4),
             "/api/checkout-root" => json!({"root": "~/checkouts", "compare_on_save": true}),
             other => panic!("unexpected command after the save: {other}"),
         };
         helm.reply(command.id, 200, Some(body));
     }
     settle(cx);
+    assert_single_refreshed_preview(helm, cx, "/home/user/checkouts/bar-1");
     assert!(
         cx.debug_bounds("launcher-checkout-setup").is_none(),
         "the host needs no setup now"
     );
 }
 
+/// A new configuration revision needs one preview. Once it answers the folder is ready without another RPC.
+fn assert_single_refreshed_preview(helm: &mut FakeHelm, cx: &mut VisualTestContext, cwd: &str) {
+    let commands = sent(helm, cx);
+    let [preview] = commands.as_slice() else {
+        panic!("one refreshed preview: {commands:?}");
+    };
+    assert_eq!(preview.path, PREVIEW);
+    helm.reply(preview.id, 200, Some(preview_reply(cwd, "bar-1", 4)));
+    settle(cx);
+    assert_eq!(checkout_folder(cx), cwd);
+    assert!(to(&sent(helm, cx), PREVIEW).is_empty());
+}
+
 /// This one launcher must be usable as soon as its setup succeeds. Saving must check the preview and
-/// suggestions again, then move focus to the repository field if it finds setup can go away.
+/// checkout-folder answer again, then move focus to the repository field if it finds setup can go away.
 #[gpui::test]
 fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppContext) {
     let (mut helm, cx, save) = submit_inline_setup(cx);
@@ -1791,12 +1733,174 @@ fn a_late_inline_checkout_save_keeps_focus_in_the_new_field(cx: &mut TestAppCont
     assert!(name_focused(cx), "the completed save left focus alone");
 }
 
-/// A new container can use a typed repository when the source host has no checkout folder. The suggestions can still
-/// be incomplete, so the launcher keeps the hint for typing a repository while dropping the source's setup warning.
+/// If the launch-history recheck fails, the supervisor can still preview the newly saved checkout folder.
 #[gpui::test]
-fn new_container_checkout_ignores_the_source_hosts_missing_folder(cx: &mut TestAppContext) {
-    use super::environment_launch_tests::{answer_except, plain_preferences, window_with};
+fn a_failed_checkout_folder_recheck_still_retries_the_preview(cx: &mut TestAppContext) {
+    let (mut helm, cx, save) = submit_inline_setup(cx);
+    helm.reply(save, 204, None);
+    settle(cx);
+    let after = sent(&mut helm, cx);
+    assert_eq!(to(&after, "/api/launch-history?host=1").len(), 1);
+    assert!(
+        to(&after, PREVIEW).is_empty(),
+        "the local read is still pending"
+    );
+    for command in after {
+        match command.path.as_str() {
+            "/api/launch-history?host=1" => helm.reply(command.id, 500, None),
+            "/api/checkout-root" => helm.reply(
+                command.id,
+                200,
+                Some(json!({"root": "~/checkouts", "compare_on_save": true})),
+            ),
+            other => panic!("unexpected read after the save: {other}"),
+        }
+    }
+    settle(cx);
+    assert_single_refreshed_preview(&mut helm, cx, "/home/user/checkouts/bar-1");
+}
+
+/// Changing hosts while setup is rechecked still needs the saved revision. The first host's reply
+/// is obsolete and cannot release the preview for the new destination.
+#[gpui::test]
+fn switching_hosts_during_checkout_setup_waits_for_the_new_hosts_revision(cx: &mut TestAppContext) {
+    let fleet = super::view_tests::fixture_hosts(&[0, 9]);
+    let (helm, cx) = super::view_tests::launcher_with_hosts(cx, command_draft(1), fleet);
+    let (mut helm, cx, save) = submit_inline_setup_in(helm, cx);
+    helm.reply(save, 204, None);
+    settle(cx);
+    let first = sent(&mut helm, cx);
+    assert_eq!(to(&first, "/api/launch-history?host=1").len(), 1);
+    assert!(to(&first, PREVIEW).is_empty());
+
+    test_support::click(cx, "launcher-host");
+    test_support::click(cx, "launcher-host-option-10");
+    assert_eq!(draft(cx).host, Some(10));
+    let second = sent(&mut helm, cx);
+    let [history] = second.as_slice() else {
+        panic!("wait only for the new host's history: {second:?}");
+    };
+    assert_eq!(history.path, "/api/launch-history?host=10");
+
+    for command in first {
+        let body = match command.path.as_str() {
+            "/api/launch-history?host=1" => checkout_host_history(false, 4),
+            "/api/checkout-root" => json!({"root": "~/checkouts", "compare_on_save": true}),
+            other => panic!("unexpected read after the save: {other}"),
+        };
+        helm.reply(command.id, 200, Some(body));
+    }
+    settle(cx);
+    assert!(
+        to(&sent(&mut helm, cx), PREVIEW).is_empty(),
+        "host1 cannot release host10's preview"
+    );
+    helm.reply(history.id, 200, Some(checkout_host_history(false, 4)));
+    settle(cx);
+    let commands = sent(&mut helm, cx);
+    let [preview] = commands.as_slice() else {
+        panic!("one preview on the new host: {commands:?}");
+    };
+    assert_eq!(preview.path, PREVIEW);
+    assert_eq!(preview.body.as_ref().unwrap()["host"], json!(10));
+    let cwd = "/work/on-host10";
+    let mut reply = preview_reply(cwd, "on-host10", 4);
+    reply["host"] = json!("10");
+    reply["installation_identity"] = json!("identity10");
+    helm.reply(preview.id, 200, Some(reply));
+    settle(cx);
+    assert_eq!(checkout_folder(cx), cwd);
+    assert!(to(&sent(&mut helm, cx), PREVIEW).is_empty());
+}
+
+/// The launcher's pending folder recheck cannot follow a host while it is hidden for Resume.
+/// The wake uses its new connection's preview and completes the original press.
+#[gpui::test]
+fn a_checkout_wake_retires_a_pending_folder_recheck(cx: &mut TestAppContext) {
+    checkout_wake_during_folder_save(cx, true);
+}
+
+/// A Save reply that arrives after Resume has been pressed must not add a visible-only recheck to the held launch.
+#[gpui::test]
+fn a_checkout_wake_ignores_a_late_folder_save_reply(cx: &mut TestAppContext) {
+    checkout_wake_during_folder_save(cx, false);
+}
+
+/// Hold a save or its follow-up history read through the same wake. Both must preserve the original press.
+fn checkout_wake_during_folder_save(cx: &mut TestAppContext, save_before_wake: bool) {
+    let fleet = fixture_hosts(&[0, 11]);
+    let mut host: HostView = serde_json::from_value(fleet.entries[1].value.clone()).unwrap();
+    assert_eq!(host.id, 12);
+    assert!(matches!(host.state, HostStateView::Suspended { .. }));
+    let (helm, cx) = launcher_with_hosts(cx, command_draft(1), fleet);
+    let (mut helm, cx, save) = submit_inline_setup_in(helm, cx);
+    if save_before_wake {
+        helm.reply(save, 204, None);
+        settle(cx);
+    }
+    let old_reads = sent(&mut helm, cx);
+    assert_eq!(
+        to(&old_reads, "/api/launch-history?host=1").len(),
+        usize::from(save_before_wake)
+    );
+    assert!(to(&old_reads, PREVIEW).is_empty());
+
+    test_support::click(cx, "launcher-host");
+    test_support::click(cx, "launcher-host-option-12");
+    assert_eq!(draft(cx).host, Some(host.id));
+    assert_eq!(
+        draft(cx).checkout.and_then(|checkout| checkout.repo),
+        Some(repo("acme", "bar"))
+    );
+    let resume = press_checkout_wake(&mut helm, cx);
+
+    if !save_before_wake {
+        helm.reply(save, 204, None);
+    }
+    for command in old_reads {
+        let reply = match command.path.as_str() {
+            "/api/launch-history?host=1" => checkout_host_history(false, 4),
+            "/api/checkout-root" => json!({"root": "~/checkouts", "compare_on_save": true}),
+            other => panic!("unexpected read after the save: {other}"),
+        };
+        helm.reply(command.id, 200, Some(reply));
+    }
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    // The footer's editor can reload its own saved value. The hidden launcher sends no setup recheck of its own.
+    for command in sent(&mut helm, cx) {
+        assert_eq!(command.path, "/api/checkout-root");
+        helm.reply(
+            command.id,
+            200,
+            Some(json!({"root": "~/checkouts", "compare_on_save": true})),
+        );
+    }
+    connect_checkout_host(&mut helm, cx, &mut host);
+    let preview = hold_woken_preview(&mut helm, cx, &host, "");
+    let mut reply = woken_checkout_reply(&host, "bar-1");
+    reply["config_revision"] = json!(4);
+    preview.reply(&mut helm, 200, reply);
+    settle(cx);
+    let commands = sent(&mut helm, cx);
+    let [create] = commands.as_slice() else {
+        panic!("the original press should send one create: {commands:?}");
+    };
+    assert_eq!(create.path, "/api/sessions");
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["expected_incarnation"], host.incarnation);
+    assert_eq!(body["github_checkout"]["preview"]["config_revision"], 4);
+    assert!(!test_support::any_open(cx));
+}
+
+/// A new sandbox uses the same repository history even when the currently selected host needs a checkout folder.
+#[gpui::test]
+fn new_sandbox_uses_global_repositories_without_the_source_hosts_checkout_folder(
+    cx: &mut TestAppContext,
+) {
+    use super::environment_launch_tests::{plain_preferences, window_with};
     use super::view_tests::{fixture_hosts, pick_host_menu_row};
+    use farhelm_proto::tensorlake::SshKeyStatus;
 
     let (mut helm, cx) = window_with(
         cx,
@@ -1804,34 +1908,41 @@ fn new_container_checkout_ignores_the_source_hosts_missing_folder(cx: &mut TestA
         fixture_hosts(&[0, 1, 2]),
         plain_preferences(),
     );
-    answer_except(&mut helm, cx, |_| false);
-    test_support::click(cx, "launcher-destination-Managed checkout");
-    test_support::advance(cx, Duration::from_millis(160));
-    let reads = answer_except(&mut helm, cx, |command| command.path == REPOSITORIES);
-    let [suggestions] = reads.as_slice() else {
-        panic!("the original host should be asked once for repository suggestions");
-    };
-    let mut response = repositories(&[], true, Some("no checkout folder is configured"));
-    response["needs_checkout_root"] = json!(true);
-    helm.reply(suggestions.id, 200, Some(response));
+    let reads = sent(&mut helm, cx);
+    assert_eq!(to(&reads, REPOSITORIES).len(), 1);
+    assert_eq!(to(&reads, "/api/launch-history?host=1").len(), 1);
+    for read in reads {
+        match read.path.as_str() {
+            REPOSITORIES => helm.reply(read.id, 200, Some(repositories(&[("acme", "bar")]))),
+            "/api/tensorlake" => helm.reply(
+                read.id,
+                200,
+                Some(json!(super::environment_tests::account(
+                    true,
+                    SshKeyStatus::NotCreated
+                ))),
+            ),
+            _ => reply_checkout_launcher_read(&mut helm, read, true),
+        }
+    }
     settle(cx);
-    assert!(cx.debug_bounds("launcher-checkout-setup").is_some());
-    answer_except(&mut helm, cx, |_| false);
-
-    pick_host_menu_row(cx, "launcher-host-option-New container");
+    test_support::click(cx, "launcher-destination-Managed checkout");
+    assert!(
+        cx.debug_bounds("launcher-checkout-setup").is_some(),
+        "the original host has no folder configured"
+    );
+    pick_host_menu_row(cx, "launcher-host-option-New sandbox");
     assert!(draft(cx).target.is_some());
     assert_eq!(draft(cx).destination_kind(), DestinationKind::Checkout);
     click_in_body(cx, "launcher-repository");
     assert!(read(cx, |launcher, window, cx| launcher
         .repository_focused(window, cx)));
     assert!(cx.debug_bounds("launcher-checkout-setup").is_none());
-    assert!(name_of(cx, "launcher-repository-note").is_none());
-    assert!(test_support::frame(cx).iter().any(|node| {
-        node.label
-            .as_ref()
-            .is_some_and(|label| label.starts_with("Repository search is incomplete"))
-    }));
-    assert!(to(&sent(&mut helm, cx), "/api/checkout-root").is_empty());
+    assert!(name_of(cx, "launcher-repository-option-acme/bar").is_some());
+    assert!(
+        to(&sent(&mut helm, cx), REPOSITORIES).is_empty(),
+        "switching to New sandbox does not read again"
+    );
 }
 
 /// A CLI change can resolve a failed preview while the launcher is open. The stale save must be refused,
@@ -1855,24 +1966,14 @@ fn a_stale_inline_checkout_save_refreshes_the_preview_and_keeps_the_refusal(
         Some(json!({"root": "~/cli", "compare_on_save": true})),
     );
     settle(cx);
-    test_support::advance(cx, Duration::from_millis(160));
-    let mut refreshed = sent(&mut helm, cx);
-    assert_eq!(
-        to(&refreshed, PREVIEW).len(),
-        1,
-        "the old failed preview was replaced"
-    );
-    assert_eq!(to(&refreshed, REPOSITORIES).len(), 1, "setup was rechecked");
-    refreshed.sort_by_key(|command| command.id);
-    for command in refreshed {
-        let body = match command.path.as_str() {
-            PREVIEW => preview_reply("/home/user/cli/bar-1", "bar-1", 3),
-            REPOSITORIES => repositories(&[], false, None),
-            other => panic!("unexpected command after a refetch: {other}"),
-        };
-        helm.reply(command.id, 200, Some(body));
-    }
+    let refreshed = sent(&mut helm, cx);
+    let [history] = refreshed.as_slice() else {
+        panic!("only checkout setup is rechecked before the preview: {refreshed:?}");
+    };
+    assert_eq!(history.path, "/api/launch-history?host=1");
+    helm.reply(history.id, 200, Some(checkout_host_history(false, 4)));
     settle(cx);
+    assert_single_refreshed_preview(&mut helm, cx, "/home/user/cli/bar-1");
     assert!(cx.debug_bounds("launcher-checkout-setup").is_none());
     assert_eq!(
         test_support::label(cx, "launcher-checkout-setup-refused").as_deref(),

@@ -258,7 +258,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_90` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_91` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -269,7 +269,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 90;
+pub const PROTOCOL_VERSION: u32 = 91;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -350,18 +350,6 @@ pub const LIST_SESSIONS_CAP: usize = 500;
 /// Well under the three-second poll the hint is meant to beat. Lowering it
 /// on one side only does nothing: the slower of the two ends sets the pace.
 pub const SESSIONS_CHANGED_MIN_GAP: std::time::Duration = std::time::Duration::from_millis(200);
-
-/// Most repositories one [`ControlMsg::GithubRepoResults`] reply carries; a
-/// backend with more matches cuts the list here and says so with
-/// `truncated`.
-///
-/// The number is a dropdown size, not a search result page: the composer
-/// renders a handful of suggestions a person picks from by name, and a
-/// query that matches more than this many repositories is too vague to be
-/// useful — the user narrows it instead of scrolling. Bounding the reply
-/// here keeps it trivially under [`MAX_FRAME_LEN`] and keeps the helm's
-/// merge-with-its-cache step linear in a constant.
-pub const GITHUB_REPO_RESULTS_CAP: usize = 25;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -3622,39 +3610,6 @@ pub enum ControlMsg {
         req_id: u64,
         preview: GithubPreviewResponse,
     },
-    /// Ask the supervisor which GitHub repositories match a completion
-    /// query, for the launch composer's `gh:` dropdown. `claim` is the host
-    /// connection the asking helm is currently talking to. The helm validates
-    /// that token and stamps the REST answer; a supervisor cannot interpret
-    /// another process's incarnation counter. `query` is the raw remainder
-    /// after the `gh:` label.
-    ///
-    /// Helm→supervisor control connections ONLY, for the same
-    /// full-authority reason as [`ControlMsg::GithubCheckoutPreview`]: a
-    /// session-authenticated peer gets the restricted dispatcher's
-    /// off-list `Unauthorized` refusal. The client asks the helm, never this
-    /// frame.
-    GithubRepoSearch {
-        req_id: u64,
-        claim: ClaimContext,
-        query: String,
-        /// Effective helm-owned checkout root, expanded only on the target.
-        /// Older senders omit it; absence refuses discovery rather than
-        /// scanning an implicit directory on the supervisor machine.
-        root: Option<String>,
-    },
-    /// Reply to [`ControlMsg::GithubRepoSearch`]: at most
-    /// [`GITHUB_REPO_RESULTS_CAP`] repository identities, with `truncated`
-    /// set when more matched than the cap allowed. Identities are
-    /// [`GithubRepo`] values — validated `owner/repo` pairs — never raw
-    /// URLs: the wire carries the identity once and every consumer derives
-    /// its own rendering (`clone_url`, display text) from it, the same way
-    /// the rest of this vocabulary avoids second copies of derived truth.
-    GithubRepoResults {
-        req_id: u64,
-        repos: Vec<GithubRepo>,
-        truncated: bool,
-    },
     /// Kill the agent's entire process tree (MCP servers, dev servers, every
     /// descendant), leaving the session and its terminal in place — SPEC.md's
     /// "stop" (as distinct from "delete", below). The terminal survives the
@@ -4566,7 +4521,6 @@ impl ControlMsg {
             | ControlMsg::CheckoutTrashListed { req_id, .. }
             | ControlMsg::CheckoutTrashDeleted { req_id, .. }
             | ControlMsg::GithubCheckoutPreviewed { req_id, .. }
-            | ControlMsg::GithubRepoResults { req_id, .. }
             | ControlMsg::SessionStopped { req_id, .. }
             | ControlMsg::SessionDeleted { req_id, .. }
             | ControlMsg::SessionDeletedOrSealed { req_id, .. }
@@ -4603,7 +4557,6 @@ impl ControlMsg {
             | ControlMsg::ListCheckoutTrash { .. }
             | ControlMsg::DeleteCheckoutTrash { .. }
             | ControlMsg::GithubCheckoutPreview { .. }
-            | ControlMsg::GithubRepoSearch { .. }
             | ControlMsg::StopSession { .. }
             | ControlMsg::DeleteSession { .. }
             | ControlMsg::DeleteSessionOrSeal { .. }
@@ -4666,7 +4619,6 @@ impl ControlMsg {
             | ControlMsg::ListCheckoutTrash { req_id, .. }
             | ControlMsg::DeleteCheckoutTrash { req_id, .. }
             | ControlMsg::GithubCheckoutPreview { req_id, .. }
-            | ControlMsg::GithubRepoSearch { req_id, .. }
             | ControlMsg::StopSession { req_id, .. }
             | ControlMsg::DeleteSession { req_id, .. }
             | ControlMsg::DeleteSessionOrSeal { req_id, .. }
@@ -4705,7 +4657,6 @@ impl ControlMsg {
             | ControlMsg::CheckoutTrashListed { .. }
             | ControlMsg::CheckoutTrashDeleted { .. }
             | ControlMsg::GithubCheckoutPreviewed { .. }
-            | ControlMsg::GithubRepoResults { .. }
             | ControlMsg::SessionStopped { .. }
             | ControlMsg::SessionDeleted { .. }
             | ControlMsg::SessionDeletedOrSealed { .. }
@@ -4789,8 +4740,6 @@ impl ControlMsg {
             ControlMsg::ReconcileGithubCheckout { .. } => "ReconcileGithubCheckout",
             ControlMsg::GithubCheckoutReconciled { .. } => "GithubCheckoutReconciled",
             ControlMsg::GithubCheckoutPreviewed { .. } => "GithubCheckoutPreviewed",
-            ControlMsg::GithubRepoSearch { .. } => "GithubRepoSearch",
-            ControlMsg::GithubRepoResults { .. } => "GithubRepoResults",
             ControlMsg::StopSession { .. } => "StopSession",
             ControlMsg::SessionStopped { .. } => "SessionStopped",
             ControlMsg::DeleteSession { .. } => "DeleteSession",
@@ -5656,11 +5605,9 @@ mod tests {
     /// JSON is golden-pinned like every request/reply pair before it: a
     /// serde-attribute change here would compile and pass a round-trip
     /// while quietly producing bytes a peer on the same version cannot
-    /// parse. It also pins the reply pairs' correlation by `req_id` and
-    /// that `GithubRepoResults` carries identities, never URLs.
+    /// parse. It also pins the reply's correlation by `req_id`.
     #[farhelm_testtrace::test]
     fn github_checkout_message_json_shapes_are_pinned() {
-        let repo = parse_github_repo("acme/bar").expect("valid repo");
         let preview_request = ControlMsg::GithubCheckoutPreview {
             req_id: 21,
             request: GithubPreviewRequest {
@@ -5713,41 +5660,6 @@ mod tests {
                     "config_revision": 3,
                     "claim_context": {"host": "host-1", "incarnation": 9},
                 },
-            })
-        );
-
-        let search = ControlMsg::GithubRepoSearch {
-            req_id: 23,
-            claim: ClaimContext {
-                host: "host-1".to_string(),
-                incarnation: 9,
-            },
-            query: "bar".to_string(),
-            root: Some("~/checkouts".into()),
-        };
-        assert_eq!(
-            serde_json::to_value(&search).unwrap(),
-            serde_json::json!({
-                "type": "github_repo_search",
-                "req_id": 23,
-                "claim": {"host": "host-1", "incarnation": 9},
-                "query": "bar",
-                "root": "~/checkouts",
-            })
-        );
-
-        let results = ControlMsg::GithubRepoResults {
-            req_id: 24,
-            repos: vec![repo],
-            truncated: true,
-        };
-        assert_eq!(
-            serde_json::to_value(&results).unwrap(),
-            serde_json::json!({
-                "type": "github_repo_results",
-                "req_id": 24,
-                "repos": [{"owner": "acme", "name": "bar"}],
-                "truncated": true,
             })
         );
     }
@@ -6092,6 +6004,7 @@ mod tests {
     /// Version 88 adds custom agent launches and conversation reporting.
     /// Version 89 requires the agent relay to honor a named conversation on Create. An older helm would ignore it.
     /// Version 90 adds the Agents verb and reply. Older relays cannot decode their tags.
+    /// Version 91 removes supervisor repository discovery. Suggestions use the helm's launch history.
     /// Pinning the value here makes an accidental re-bump (or a forgotten
     /// one, if a later change needed it) a loud test failure rather than
     /// a silent drift discovered only by two builds refusing to talk to each other.
@@ -6102,8 +6015,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_90() {
-        assert_eq!(PROTOCOL_VERSION, 90);
+    fn protocol_version_is_pinned_at_91() {
+        assert_eq!(PROTOCOL_VERSION, 91);
     }
 
     /// Discovery is a read-only relay with a fixed reply tag and only the fields needed to choose

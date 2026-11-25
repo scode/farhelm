@@ -2612,11 +2612,6 @@ impl Render for Launcher {
                     .flatten(),
             )
             .child(address_and_name)
-            .children(
-                managed_checkout
-                    .then(|| self.checkout_repository_note(window, cx))
-                    .flatten(),
-            )
             .children(managed_checkout.then(|| self.checkout_folder_line(palette, cx)))
             .children(managed_checkout.then(|| self.checkout_lifetime_note(palette)))
             .children(
@@ -3016,6 +3011,7 @@ impl Launcher {
         if !launch::wake::start(cx.entity(), &self.draft, &host, source, mark, window, cx) {
             return false;
         }
+        self.retire_checkout_root_refresh();
         self.waiting_batches.clear();
         if let Some(layer) = self.layer.take() {
             layers::close(layer, window, cx);

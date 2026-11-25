@@ -3556,40 +3556,6 @@ impl SupervisorClient {
         }
     }
 
-    /// Ask the connected supervisor which GitHub repositories match a
-    /// completion query, as [`ControlMsg::GithubRepoSearch`] carries it,
-    /// returning the bounded identity list plus its `truncated` flag.
-    ///
-    /// The root comes from helm configuration; the supervisor expands it
-    /// against the target user's captured home. The reply carries
-    /// validated [`GithubRepo`] identities — never raw URLs — so every
-    /// consumer derives its own rendering.
-    pub async fn github_repo_search(
-        &self,
-        claim: farhelm_proto::ClaimContext,
-        query: &str,
-        root: Option<String>,
-    ) -> anyhow::Result<(Vec<farhelm_proto::GithubRepo>, bool)> {
-        let req_id = self.req_id();
-        match self
-            .request(
-                req_id,
-                ControlMsg::GithubRepoSearch {
-                    req_id,
-                    claim,
-                    query: query.to_string(),
-                    root,
-                },
-            )
-            .await?
-        {
-            ControlMsg::GithubRepoResults {
-                repos, truncated, ..
-            } => Ok((repos, truncated)),
-            other => Err(wrong_reply("GithubRepoSearch", &other)),
-        }
-    }
-
     /// Kill the agent's whole process tree while leaving the session and
     /// its terminal in place, closing its terminal tabs (SPEC.md's "stop").
     /// Unresolved tab cleanup returns its notice as an error; callers that

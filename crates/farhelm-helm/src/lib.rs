@@ -894,7 +894,7 @@ fn api_router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/api/github-repositories",
-            axum::routing::post(sessions::github_repositories),
+            get(sessions::github_repositories),
         )
         .route("/api/ssh-questions", get(askpass::list))
         .route(

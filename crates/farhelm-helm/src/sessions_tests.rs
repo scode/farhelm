@@ -606,14 +606,6 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
                 _ = &mut finished => break,
             };
             let reply = match parse_control(&frame).unwrap() {
-                ControlMsg::GithubRepoSearch { req_id, root, .. } => {
-                    assert_eq!(root.as_deref(), Some(requested_root));
-                    ControlMsg::GithubRepoResults {
-                        req_id,
-                        repos: Vec::new(),
-                        truncated: false,
-                    }
-                }
                 ControlMsg::GithubCheckoutPreview { req_id, request } => {
                     assert_eq!(request.host.as_deref(), Some(owned.to_string().as_str()));
                     assert_eq!(request.repo, "acme/project");
@@ -677,16 +669,6 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
     h.manager.sync_registry().await.unwrap();
     h.await_refreshed(owned).await;
     assert!(h.manager.status(owned).unwrap().is_session_owned);
-    let (status, discovery) = post_text(
-        &h,
-        "/api/github-repositories",
-        serde_json::json!({"host": owned, "query": "acme"}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{discovery}");
-    let discovery: serde_json::Value = serde_json::from_str(&discovery).unwrap();
-    assert_eq!(discovery["needs_checkout_root"], false);
-    assert_eq!(discovery["scan_error"], serde_json::Value::Null);
     let refused = super::create_target(&h.state, Some(owned))
         .err()
         .expect("owned destination refused");
@@ -862,7 +844,7 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
     );
     assert!(
         h.store
-            .github_repository_history(host, "fresh-recipe-install")
+            .launch_history(host, "fresh-recipe-install")
             .await
             .unwrap()
             .is_empty()
@@ -11553,7 +11535,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                 assert!(
                     harness
                         .store
-                        .github_repository_history(local, "local-identity")
+                        .global_github_repository_history()
                         .await
                         .unwrap()
                         .is_empty()
@@ -11619,7 +11601,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                 assert!(
                     harness
                         .store
-                        .github_repository_history(local, "local-identity")
+                        .global_github_repository_history()
                         .await
                         .unwrap()
                         .is_empty()
@@ -11886,7 +11868,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
         assert_eq!(
             harness
                 .store
-                .github_repository_history(local, "local-identity")
+                .global_github_repository_history()
                 .await
                 .unwrap(),
             vec![farhelm_proto::parse_github_repo("acme/bar").unwrap()]
@@ -12183,7 +12165,7 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
     assert_eq!(
         harness
             .store
-            .github_repository_history(local, "local-identity")
+            .global_github_repository_history()
             .await
             .unwrap(),
         vec![farhelm_proto::parse_github_repo("acme/bar").unwrap()]
@@ -12218,185 +12200,40 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
     peer.await.unwrap();
 }
 
-/// Repository completion resolves only helm-owned root settings and returns
-/// installation-scoped, validated identities. Missing configuration, a failed
-/// scan and partial results remain distinguishable from a complete empty scan;
-/// malformed remote identities are never reflected into suggestions. Recent
-/// intent ranks before scan results, dedupes with them and survives scan failure.
-/// Setup eligibility follows the effective root: a command-line host override
-/// works while the global setting is empty and must suppress inline setup.
+/// Launch history answers whether a live managed checkout destination needs setup from stored settings.
 #[farhelm_testtrace::test]
-async fn github_repository_rest_routes_config_and_preserves_incomplete_status() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, ErrorKind, GithubRepo};
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-        for attempt in 0..2 {
-            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::GithubRepoSearch {
-                req_id,
-                claim,
-                query,
-                root,
-            } = message
-            else {
-                panic!("expected repository search, got {message:?}");
-            };
-            assert_eq!(root.as_deref(), Some("~/target-checkouts"));
-            assert_eq!(query, "acme");
-            assert!(!claim.host.is_empty());
-            assert!(claim.incarnation > 0);
-            let reply = if attempt == 0 {
-                ControlMsg::GithubRepoResults {
-                    req_id,
-                    truncated: false,
-                    repos: vec![
-                        farhelm_proto::parse_github_repo("acme/bar").unwrap(),
-                        farhelm_proto::parse_github_repo("acme/bar").unwrap(),
-                        GithubRepo {
-                            owner: "user:secret@github.com".into(),
-                            name: "bad".into(),
-                        },
-                    ],
-                }
-            } else {
-                ControlMsg::Error {
-                    create_unaccepted: false,
-                    req_id,
-                    kind: ErrorKind::Internal,
-                    message: "Git failed inspecting https://user:secret@github.com/acme/bar".into(),
-                }
-            };
-            writer.write_control(&reply).await.unwrap();
-        }
-        tokio::select! {
-            biased;
-            frame = reader.read_frame() => panic!("unexpected discovery request: {frame:?}"),
-            result = &mut finished_rx => result.unwrap(),
-        }
-    });
-    let harness = rest_harness::spliced_helm(client_side).await;
-    let (claim, _) = super::create_target(&harness.state, None).unwrap();
-    // The most recent matching repo sorts after the scanned name, proving
-    // accepted-create order wins. An unrelated recent must be filtered.
-    for (index, name) in ["acme/bar", "acme/zebra", "unrelated/repo"]
-        .iter()
-        .enumerate()
-    {
-        let repo = farhelm_proto::parse_github_repo(name).unwrap();
-        harness
-            .store
-            .record_create_history_with_destination(
-                claim.host,
-                "local-identity",
-                &crate::store::CachedRow::new(
-                    claim.host,
-                    (rest_harness::session(&format!("recent-{index}"), index as i64)).clone(),
-                )
-                .unwrap(),
-                crate::store::HistoryPaths {
-                    canonical_cwd: "/ephemeral",
-                    display_cwd: "/ephemeral",
-                },
-                Some(&repo),
-                None,
-            )
-            .await
-            .unwrap();
-    }
-    let body = serde_json::json!({ "host": claim.host, "expected_incarnation": claim.incarnation, "query": "acme" });
+async fn launch_history_reports_the_effective_checkout_folder_requirement() {
+    let h = rest_harness::idle_helm().await;
+    let host = rest_harness::local_id(&h.store).await;
+    h.await_refreshed(host).await;
+    let route = format!("/api/launch-history?host={host}");
+    let (status, text) = get_json(&h, &route).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+    let before: farhelm_proto::session_requests::LaunchHistoryReply =
+        serde_json::from_value(text).unwrap();
+    assert!(before.needs_checkout_root);
+
+    h.store
+        .set_checkout_root(Some(host), "/host-checkouts")
+        .await
+        .unwrap();
     assert!(
-        harness
-            .store
-            .resolve_checkout_config(Some(claim.host))
+        h.store
+            .resolve_checkout_config(None)
             .await
             .unwrap()
             .root
             .is_none()
     );
-    let route = "/api/github-repositories";
-    let (status, text) = post_text(&harness, route, body.clone()).await;
+    let (status, text) = get_json(&h, &route).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{text}");
-    let missing: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(missing["truncated"], true);
-    assert_eq!(missing["needs_checkout_root"], true);
-    let expected = serde_json::json!([
-        { "owner": "acme", "name": "zebra" },
-        { "owner": "acme", "name": "bar" }
-    ]);
-    assert_eq!(
-        missing["repos"], expected,
-        "missing config retains accepted suggestions"
-    );
-    assert!(missing["scan_error"].as_str().unwrap().contains("Settings"));
-    harness
-        .store
-        .set_checkout_root(Some(claim.host), "~/target-checkouts")
-        .await
-        .unwrap();
-    let (status, text) = post_text(&harness, route, body.clone()).await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
-    let result: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(result["repos"], expected);
-    assert_eq!(result["needs_checkout_root"], false);
-    assert!(
-        harness
-            .store
-            .checkout_config_snapshot(None)
-            .await
-            .unwrap()
-            .global_root
-            .is_none()
-    );
-    assert_eq!(
-        result["truncated"], true,
-        "discarded invalid identity makes the result incomplete"
-    );
-    assert!(result["scan_error"].is_null());
-    assert_eq!(result["installation_identity"], "local-identity");
-    assert_eq!(result["incarnation"], claim.incarnation);
-    assert_eq!(result["host"], claim.host.to_string());
-    assert!(!text.contains("secret"));
-    harness
-        .store
-        .clear_checkout_root(Some(claim.host))
-        .await
-        .unwrap();
-    harness
-        .store
-        .set_checkout_root(None, "~/target-checkouts")
-        .await
-        .unwrap();
-    let (status, text) = post_text(&harness, route, body.clone()).await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
-    let failed: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(failed["repos"], expected);
-    assert_eq!(failed["needs_checkout_root"], false);
-    assert_eq!(failed["truncated"], true);
-    assert!(
-        failed["scan_error"]
-            .as_str()
-            .unwrap()
-            .contains("verify Git")
-    );
-    assert!(!text.contains("secret"));
-    let mut stale = body;
-    stale["expected_incarnation"] = serde_json::json!(claim.incarnation + 1);
-    let (status, precondition_headers, text) = post_text_headers(&harness, route, stale).await;
-    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
-    assert!(is_stale_precondition(&precondition_headers));
-    finished_tx.send(()).unwrap();
-    peer.await.unwrap();
+    let after: farhelm_proto::session_requests::LaunchHistoryReply =
+        serde_json::from_value(text).unwrap();
+    assert!(!after.needs_checkout_root);
+    assert!(after.checkout_config_revision > before.checkout_config_revision);
 }
 
-/// Losing the supervisor must not erase installation-scoped repo recents.
+/// Losing an originating supervisor leaves its repositories in the helm-wide history.
 /// The fixture waits until routing actually refuses that host, so success
 /// proves the endpoint reads durable intent without a live scan connection.
 #[farhelm_testtrace::test]
@@ -12440,23 +12277,10 @@ async fn github_repository_rest_preserves_recents_offline() {
         .await_state(host, |state| state.phase() == "unreachable-reprobing")
         .await;
     assert!(super::host_client(&harness.state, host).is_err());
-    let incarnation = harness.manager.status(host).unwrap().incarnation;
-    let (status, text) = post_text(
-        &harness,
-        "/api/github-repositories",
-        serde_json::json!({
-            "host": host, "expected_incarnation": incarnation, "query": "acme"
-        }),
-    )
-    .await;
+    let (status, text) = get_json(&harness, "/api/github-repositories").await;
     assert_eq!(status, axum::http::StatusCode::OK, "{text}");
-    let response: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(response["repos"], serde_json::json!([repo]));
-    assert_eq!(response["installation_identity"], "repo-installation");
-    assert_eq!(response["incarnation"], incarnation);
-    assert_eq!(response["truncated"], true);
-    assert_eq!(response["needs_checkout_root"], false);
-    assert!(response["scan_error"].as_str().unwrap().contains("offline"));
+    let response: Vec<farhelm_proto::GithubRepo> = serde_json::from_value(text).unwrap();
+    assert_eq!(response, [repo]);
 }
 
 /// A3, the preview contract at the helm's REST edge: the composer asks for
@@ -12676,63 +12500,6 @@ async fn a_preview_with_a_stale_incarnation_is_refused_before_any_frame() {
     assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
     finished_tx.send(()).expect("preview peer must remain live");
     peer.await.expect("preview peer must observe no frame");
-}
-
-/// Spec: a repository search the supervisor refused as busy shows the shared
-/// busy sentence; every other failure, including an `Unavailable` the helm
-/// decided itself, keeps the Git and checkout-root hint.
-///
-/// Why: the helm never passes a supervisor's error text through for this
-/// route, so before the busy case was recognised a search refused on a busy
-/// host told the user to check their Git install. Reading only the kind of a
-/// supervisor reply, never its text, is what keeps the route's rule against
-/// remote text intact.
-#[farhelm_testtrace::test]
-fn repository_discovery_failure_names_a_busy_host_and_nothing_else() {
-    let reply = |origin, kind| {
-        anyhow::Error::new(match origin {
-            crate::client::ErrorOrigin::Helm => crate::SupervisorError::helm(
-                kind,
-                "remote text that must never be shown".to_string(),
-            ),
-            crate::client::ErrorOrigin::SupervisorReply => {
-                crate::client::supervisor_reply_error_for_test(
-                    kind,
-                    "remote text that must never be shown".to_string(),
-                )
-            }
-        })
-        .context("searching repositories on host builder")
-    };
-    let git_hint = "repository discovery is unavailable on this host; verify Git and the configured checkout root";
-
-    assert_eq!(
-        super::repository_discovery_failure(&reply(
-            crate::client::ErrorOrigin::SupervisorReply,
-            farhelm_proto::ErrorKind::Unavailable
-        )),
-        farhelm_proto::HOST_BUSY_REFUSAL
-    );
-    for (origin, kind) in [
-        (
-            crate::client::ErrorOrigin::SupervisorReply,
-            farhelm_proto::ErrorKind::Internal,
-        ),
-        (
-            crate::client::ErrorOrigin::Helm,
-            farhelm_proto::ErrorKind::Unavailable,
-        ),
-    ] {
-        assert_eq!(
-            super::repository_discovery_failure(&reply(origin, kind)),
-            git_hint,
-            "{origin:?} {kind:?} is not a busy supervisor"
-        );
-    }
-    assert_eq!(
-        super::repository_discovery_failure(&anyhow::anyhow!("connection lost")),
-        git_hint
-    );
 }
 
 /// Spec: the fresh-create request identity of a command-launch create is
@@ -13969,12 +13736,15 @@ mod client_bodies {
                 creation_seq: Some(3),
             }],
             checkout_config_revision: 5,
+            needs_checkout_root: true,
         };
         let LaunchHistoryReply {
             launches,
             folders,
             checkout_config_revision,
+            needs_checkout_root,
         } = decode(&reply);
+        assert!(needs_checkout_root);
         assert_eq!(checkout_config_revision, 5);
         let [first, second] = &launches[..] else {
             panic!("two launches, not {}", launches.len());
@@ -14075,60 +13845,6 @@ mod client_bodies {
         assert_eq!(parent.as_deref(), Some("/home/user/src"));
         assert_eq!(children, ["a", "b"]);
         assert!(truncated);
-    }
-
-    /// The launcher's repository suggestions read is built from the shared client types, so its body must decode into
-    /// the helm's `GithubRepositoriesReq` and the helm's reply into the client's `GithubRepositoriesReply`, or the
-    /// managed-checkout destination would show nothing (or the wrong host's repositories) with no error to say why.
-    /// Specified: every field of each crosses intact, the reply's `needs_checkout_root` included; destructured without
-    /// `..`, so a field added on either side fails to compile here until it is checked.
-    #[test]
-    fn a_repositories_body_and_its_reply_decode_on_the_other_side() {
-        use super::super::{GithubRepositoriesBody as HelmReply, GithubRepositoriesReq};
-        use farhelm_proto::GithubRepo;
-        use farhelm_proto::session_requests::{GithubRepositoriesBody, GithubRepositoriesReply};
-        let body = GithubRepositoriesBody {
-            host: 7,
-            expected_incarnation: Some(3),
-            query: "acme/b".into(),
-        };
-        let GithubRepositoriesReq {
-            host,
-            expected_incarnation,
-            query,
-        } = decode(&body);
-        assert_eq!(
-            (host, expected_incarnation, query),
-            (7, Some(3), "acme/b".to_owned())
-        );
-        let repo = GithubRepo {
-            owner: "acme".into(),
-            name: "bar".into(),
-        };
-        let reply = HelmReply {
-            host: "7".into(),
-            incarnation: 3,
-            installation_identity: "install-a".into(),
-            repos: vec![repo.clone()],
-            truncated: true,
-            scan_error: Some("repository discovery is unavailable on this host".into()),
-            needs_checkout_root: true,
-        };
-        let GithubRepositoriesReply {
-            host,
-            incarnation,
-            installation_identity,
-            repos,
-            truncated,
-            scan_error,
-            needs_checkout_root,
-        } = decode(&reply);
-        assert_eq!((host.as_str(), incarnation), ("7", 3));
-        assert_eq!(installation_identity, "install-a");
-        assert_eq!(repos, [repo]);
-        assert!(truncated);
-        assert_eq!(scan_error, reply.scan_error);
-        assert!(needs_checkout_root);
     }
 
     /// The checkout preview's body must decode into the helm's `GithubCheckoutPreviewReq`: a repository or title lost on

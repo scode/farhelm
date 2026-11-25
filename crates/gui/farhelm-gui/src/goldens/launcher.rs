@@ -132,7 +132,6 @@ enum LauncherScene {
     CustomAgent,
     ShellWrapper,
     ShellWrapperNote,
-    RepositoryRefusal,
     StaleChoice,
     Results,
     IncompleteTemplate,
@@ -206,15 +205,6 @@ pub(super) fn launcher_shell_wrapper_note_setup(
     cx: &mut App,
 ) {
     setup(state, LauncherScene::ShellWrapperNote, window, cx);
-}
-
-/// An escaped host-authored failure beneath the command field that asked for a repository search.
-pub(super) fn launcher_repository_refusal_setup(
-    state: &SceneState,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    setup(state, LauncherScene::RepositoryRefusal, window, cx);
 }
 
 /// Capture a typed query against the open host catalog and file history, with a source already applied to the form.
@@ -476,6 +466,15 @@ fn open_new_with_claude(
         entry::open_with(draft, None, window, cx),
         "New opens once the helm is connected"
     );
+    if scene == LauncherScene::ManagedCheckout {
+        // The ready checkout scene starts with the configuration revision the launcher would have learned
+        // from history before the user selected a repository. Preview and the fixture's later read agree.
+        let launcher =
+            entry::open_launcher(window, cx).expect("the managed checkout launcher is open");
+        launcher.update(cx, |launcher, cx| {
+            launcher.observe_checkout_config_revision(CHECKOUT_REVISION, cx);
+        });
+    }
     state.after.set(Some(match scene {
         LauncherScene::RememberedWrapper => pick_claude,
         LauncherScene::CustomAgent => open_shell_wrapper,
@@ -543,9 +542,7 @@ fn pick_claude(_: &Entity<SessionList>, state: &SceneState, window: &mut Window,
 
 /// The ordinary local host's preview for the exact typed name. Both window widths show this same checkout.
 const CHECKOUT_PATH: &str = "/home/user/src/checkouts/widget-3";
-
-/// Staging can take several frames. The preview's independent reply cannot stand in for the debounced discovery read.
-struct CheckoutDiscoveryAnswered;
+const CHECKOUT_REVISION: i64 = 3;
 
 /// Reply in send order and wait for the model count from that catalog in the drawn form. A stable empty frame or a
 /// frame drawn before the catalog reply cannot stand in for the launcher this scene means to show.
@@ -562,9 +559,10 @@ fn answer_new_reads(
         .iter_mut()
         .find_map(|kept| kept.downcast_mut::<FakeHelm>())
         .expect("the New scene keeps its fake helm");
-    let mut repository_answered = false;
+    let commands = helm.commands();
+    let checkout_awaits_replies = scene == LauncherScene::ManagedCheckout && !commands.is_empty();
     let mut checkout_refused = false;
-    for command in helm.commands() {
+    for command in commands {
         if scene == LauncherScene::ContainerCheckoutRefusal
             && command.path == "/api/environment-sessions"
         {
@@ -574,15 +572,6 @@ fn answer_new_reads(
             let reason = farhelm_proto::github_checkout::NameError::EmptySlug.to_string();
             helm.reply(command.id, 400, Some(json!(reason)));
             checkout_refused = true;
-            continue;
-        }
-        if scene == LauncherScene::RepositoryRefusal && command.path == "/api/github-repositories" {
-            helm.reply(
-                command.id,
-                504,
-                Some(json!("The build host could not check acme\u{202e}/tools")),
-            );
-            repository_answered = true;
             continue;
         }
         let body = if command.path == "/api/launch-catalog" {
@@ -604,20 +593,12 @@ fn answer_new_reads(
             );
             Some(json!({
                 "canonical_root": "/home/user/src/checkouts", "basename": "widget-3", "cwd": CHECKOUT_PATH,
-                "config_revision": 3, "host": "1", "incarnation": 4, "installation_identity": "identity1"
+                "config_revision": CHECKOUT_REVISION, "host": "1", "incarnation": 4, "installation_identity": "identity1"
             }))
-        } else if scene == LauncherScene::ManagedCheckout
-            && command.path == "/api/github-repositories"
-        {
-            assert_eq!(
-                command.body,
-                Some(json!({"host": 1, "expected_incarnation": 4, "query": "acme/widget"}))
-            );
-            repository_answered = true;
-            Some(json!({
-                "host": "1", "incarnation": 4, "installation_identity": "identity1",
-                "repos": [{"owner": "acme", "name": "widget"}], "truncated": false, "needs_checkout_root": false,
-            }))
+        } else if command.path == "/api/github-repositories" {
+            assert_eq!(command.method, farhelm_helm_client::Method::Get);
+            assert_eq!(command.body, None);
+            Some(json!([{"owner": "acme", "name": "widget"}]))
         } else {
             None
         };
@@ -626,6 +607,12 @@ fn answer_new_reads(
     if checkout_refused {
         // Finishing the drained batch keeps any later reads answerable.
         state.after.set(Some(wait_for_container_checkout_refusal));
+        return;
+    }
+    if checkout_awaits_replies {
+        // A history reply can make the already drawn preview stale. Let every reply reach the launcher and draw
+        // the results before treating the visible path as evidence that the checkout is ready.
+        state.after.set(Some(answer_new_reads));
         return;
     }
     if scene == LauncherScene::IncompleteTemplate {
@@ -641,27 +628,13 @@ fn answer_new_reads(
             && node.label.as_deref() == Some("1 for Claude")
     });
     if scene == LauncherScene::ManagedCheckout {
-        if repository_answered {
-            keep.push(Box::new(CheckoutDiscoveryAnswered));
-            // Allow a subsequent frame to consume the discovery reply, even if the preview has already drawn.
-            state.after.set(Some(answer_new_reads));
-            return;
-        }
-        let discovery_answered = keep
-            .iter()
-            .any(|item| item.is::<CheckoutDiscoveryAnswered>());
-        if !discovery_answered {
-            state
-                .advance_clock
-                .set(Some(std::time::Duration::from_millis(160)));
-        }
         let nodes = window.driver_nodes();
         let preview_drawn = nodes.iter().any(|node| {
             node.element_id.as_deref() == Some("launcher-preview-path")
                 && node.label.as_deref() == Some(CHECKOUT_PATH)
                 && !node.visible_bounds.is_empty()
         });
-        if !catalog_drawn || !discovery_answered || !preview_drawn {
+        if !catalog_drawn || !preview_drawn {
             state.after.set(Some(answer_new_reads));
         } else {
             // Kit only exposes the editable value when accessibility is enabled. Check the painted text underneath
@@ -691,10 +664,7 @@ fn answer_new_reads(
         .iter()
         .find(|node| node.element_id.as_deref() == Some("launcher-recent-0"));
     // Query scenes can return here with the results pane already replacing the template list.
-    let shows_templates = !matches!(
-        scene,
-        LauncherScene::Narrow | LauncherScene::RepositoryRefusal | LauncherScene::StaleChoice
-    );
+    let shows_templates = !matches!(scene, LauncherScene::Narrow | LauncherScene::StaleChoice);
     if !catalog_drawn || (shows_templates && !catalog_template) {
         state.after.set(Some(answer_new_reads));
     } else if scene == LauncherScene::ContainerCheckoutRefusal {
@@ -734,15 +704,8 @@ fn answer_new_reads(
     } else if scene == LauncherScene::TemplateSaveAfterUndo {
         assert!(click_control(window, cx, "launcher-template-Review a PR"));
         state.after.set(Some(escalate_template));
-    } else if matches!(
-        scene,
-        LauncherScene::Narrow | LauncherScene::RepositoryRefusal | LauncherScene::StaleChoice
-    ) {
-        if scene == LauncherScene::RepositoryRefusal && repository_answered {
-            state.after.set(Some(wait_for_launcher_results));
-        } else {
-            state.after.set(Some(type_launcher_query));
-        }
+    } else if matches!(scene, LauncherScene::Narrow | LauncherScene::StaleChoice) {
+        state.after.set(Some(type_launcher_query));
     } else {
         let Some(recent) = recent else {
             state.after.set(Some(answer_new_reads));
@@ -967,7 +930,7 @@ fn launcher_history(scene: LauncherScene) -> serde_json::Value {
         ],
         "folders": [{"host": 1, "display_cwd": "/home/user/src/build-tools", "canonical_cwd": "/home/user/src/build-tools",
                      "canonical_proven": true, "created_at": 1, "creation_seq": null}],
-        "checkout_config_revision": 1,
+        "checkout_config_revision": if scene == LauncherScene::ManagedCheckout { CHECKOUT_REVISION } else { 1 },
     })
 }
 
@@ -998,17 +961,11 @@ fn type_launcher_query(
     let (query, stage): (&str, super::AfterDrawn) = match launcher_scene(state) {
         LauncherScene::Narrow => ("tl:", wait_for_launcher_results),
         LauncherScene::StaleChoice => ("tl:Bench", click_withdrawn_template),
-        LauncherScene::RepositoryRefusal => ("gh:acme", answer_new_reads),
         LauncherScene::RecentFill => ("recent:permission-check", wait_for_recent_fill),
         _ => ("build", wait_for_launcher_results),
     };
     if field.text(cx).as_ref() != query {
         field.edit_for_golden(query, window, cx);
-    } else if launcher_scene(state) == LauncherScene::RepositoryRefusal {
-        // The real repository read is debounced on the renderer's simulated clock.
-        state
-            .advance_clock
-            .set(Some(std::time::Duration::from_millis(160)));
     }
     state.after.set(Some(stage));
 }
@@ -1073,15 +1030,6 @@ fn wait_for_launcher_results(
     window: &mut Window,
     _: &mut App,
 ) {
-    if launcher_scene(state) == LauncherScene::RepositoryRefusal {
-        if !window.driver_nodes().iter().any(|node| {
-            node.element_id.as_deref() == Some("launcher-search-repository-note")
-                && !node.visible_bounds.is_empty()
-        }) {
-            state.after.set(Some(wait_for_launcher_results));
-        }
-        return;
-    }
     let shown = |id: &str| {
         window
             .driver_nodes()

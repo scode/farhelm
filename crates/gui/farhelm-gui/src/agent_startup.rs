@@ -536,6 +536,7 @@ impl StagedValues {
                 })
                 .collect(),
             checkout_config_revision: reply.checkout_config_revision,
+            needs_checkout_root: reply.needs_checkout_root,
         }
     }
 
@@ -900,6 +901,7 @@ mod tests {
             launches: Vec::new(),
             folders: Vec::new(),
             checkout_config_revision: 41,
+            needs_checkout_root: false,
         };
         let history = values.history(staged, view.id, real);
         assert_eq!(history.checkout_config_revision, 41);
@@ -1026,6 +1028,7 @@ mod tests {
             }],
             folders: Vec::new(),
             checkout_config_revision: 2,
+            needs_checkout_root: false,
         };
         cx.update(|cx| {
             assert_eq!(

@@ -1,7 +1,7 @@
 //! The launcher's managed-checkout destination: the Where row's Folder or Managed checkout choice, the repository field
 //! with its suggestions, and the Folder line that shows where the checkout will go.
 //!
-//! SPEC.md, "Managed checkouts" (the launcher parts) and SPEC_impl.md, "Checkout configuration and discovery". Ported
+//! SPEC.md, "Managed checkouts" (the launcher parts) and SPEC_impl.md, "Checkout configuration". Ported
 //! from the old launcher's `DestinationTypeControl` (`launch_controls.rs`), `github_checkout.rs` and the destination and
 //! preview parts of `list/create_form.rs`, at reference commit `24bc0580`, with their words. What the user chose lives
 //! in the draft ([`crate::launcher::draft::Checkout`]); what the helm said about it lives here. Here's the TLDR:
@@ -9,22 +9,15 @@
 //! - **The Where row** chooses the destination kind. Managed checkout puts Repository beside Host (or below Recipe
 //!   for a new environment), with a Folder status line and its lifetime note below the address and name. Folder
 //!   brings back the editable folder as it was. Enter on the switch only chooses, as the old control's did.
-//! - **Repository suggestions** (`POST /api/github-repositories`) are read while the user is choosing (no repository
-//!   chosen, or the list open), 150 ms after the field, the host or its connection stops changing (SPEC_impl.md:
-//!   "The launcher's requests debounce for 150 ms and discard stale host/query generations"). The list floats under the
-//!   field on the layer manager's non-focusing popover, as the model field's does (`field_list`): a valid `owner/repo`
-//!   typed into the field is always its first row, so an incomplete scan never stops a choice (SPEC.md: "Incomplete
-//!   discovery is visible and does not prevent selecting a valid manually entered pair"), and an incomplete scan says
-//!   so under the field. Enter picks the highlighted row and never launches. While the composer search holds a `gh:`
-//!   query, that query is what the read asks about instead, with or without a managed checkout chosen, and the search
-//!   offers the same choices ([`Launcher::search_repositories`]); the old launcher's one discovery read served both the
-//!   same way ("global search takes priority only while the user explicitly searches with gh:").
+//! - **Repository suggestions** (`GET /api/github-repositories`) load once when the launcher opens. The Repository
+//!   field and `gh:` search filter the same history in place. A valid typed `owner/repo` always appears first.
+//!   Enter in the repository field accepts the highlighted choice without launching.
 //! - **The preview** (`POST /api/github-checkout-preview`) is asked for whenever what it answers for changes: the host,
 //!   its connection and installation, the repository (or choosing it again), the checkout's name, the agent choices and
 //!   the configuration revision last observed (SPEC.md: "Host, installation, destination, title, agent choice and
 //!   observed configuration changes invalidate an undispatched preview"). Launch waits for it
 //!   ([`super::super::request::Preview`]).
-//! - **Latest wins, one read at a time**, for both reads, as the folder check does (`latest`): an answer counts only
+//! - **Latest wins, one read at a time**, for the preview, as the folder check does (`latest`): an answer counts only
 //!   while the launcher still asks what it was asked, so a late answer can neither bring back an old destination nor
 //!   move focus ("Late responses cannot restore its authority or steal focus"); and a read is not sent while another of
 //!   its kind is out, the next going out when that answers. The old launcher sent a preview per change; one at a time
@@ -43,9 +36,9 @@
 //!   preview went stale) comes back with "nothing was accepted" after the helm's words, and a new preview is asked for;
 //!   nothing is sent again until the user presses Launch (SPEC.md: "it never submits automatically or silently chooses
 //!   another directory").
-//! - **No checkout folder.** When the host has no checkout folder in effect (the suggestions read says so), the shared
+//! - **No checkout folder.** When the host's launch history reports no effective checkout folder, the shared
 //!   explicit-save field for the default folder shows above the repository field (`settings::checkout_field`); a save
-//!   reads the suggestions and the preview again without reopening the launcher (SPEC.md, "Managed checkouts").
+//!   rechecks the folder and refreshes the preview without reopening the launcher (SPEC.md, "Managed checkouts").
 //! - **Launches that wait for the preview.** The YOLO question's "Start guarded session instead" changes the
 //!   permission, which makes the preview stale, and a quick launch (a launch template's shortcut, started without
 //!   showing the launcher) has not asked for its preview yet. Instead of refusing, either waits for the preview and
@@ -54,12 +47,8 @@
 //!   ([`Launcher::submit_or_wait_for_preview`]). The one exception is a quick launch's own template base name taken:
 //!   it waits for the next numbered candidate's preview instead, out of sight ([`Launcher::settle_waiting_launch`]).
 
-use std::time::Duration;
-
 use farhelm_helm_client::{ApiPath, Method};
-use farhelm_proto::session_requests::{
-    GithubCheckoutPreviewBody, GithubRepositoriesBody, GithubRepositoriesReply,
-};
+use farhelm_proto::session_requests::GithubCheckoutPreviewBody;
 use farhelm_proto::ui_channel::{HostStateView, HostView, SessionRow};
 use farhelm_proto::{AcceptedGithubPreview, GithubRepo, parse_github_repo};
 use gpui::{
@@ -70,10 +59,7 @@ use gpui::{
 
 use super::field_list::{Drawn, FieldList};
 use super::latest::Latest;
-use super::{
-    ADDRESS_HEIGHT, Launcher, SourceConsent, choices::status_line, field_label, help_line,
-    help_line_container,
-};
+use super::{ADDRESS_HEIGHT, Launcher, SourceConsent, field_label, help_line, help_line_container};
 use crate::assets::Icon;
 use crate::components::{HoverHelp, OptionRow, Role, TextInputEvent, TextInputState, Vertical};
 use crate::focus::Mark;
@@ -86,14 +72,11 @@ use crate::launcher::draft::{
 use crate::launcher::request::Preview;
 use crate::launcher::request::WAIT_FOR_PREVIEW;
 use crate::launcher::search::{Scope, repository_empty_message, scoped};
+use crate::operations;
 use crate::session_pane::details::{Checkout as SessionCheckout, checkout_mark};
 use crate::settings::{CheckoutField, CheckoutUpdated, FolderScope};
 use crate::theme::{self, metrics};
-use crate::{operations, ticker};
 
-/// How long the query (the repository field's, or the search's `gh:` text), host and connection must stay unchanged
-/// before suggestions are read.
-const SUGGEST_AFTER: Duration = Duration::from_millis(150);
 /// The most rows the suggestions list offers, the old `repository_choices` cap.
 const MAX_CHOICES: usize = 100;
 /// The suggestions list's element id (`.launch-composer-repository-options`), which tests find it by.
@@ -104,11 +87,6 @@ const HOST_CHECKOUT_LIFETIME: &str =
     "New folder named after the session; it moves to the trash when its last session is deleted.";
 const ENVIRONMENT_CHECKOUT_LIFETIME: &str = "New folder named after the session, inside the new environment; \
                                             deleting its last session removes it permanently.";
-/// What the field note says for a scan the helm cut short, when it gave no reason.
-const INCOMPLETE: &str =
-    "Repository search is incomplete; a valid owner/repo can still be selected";
-/// The words for an answer about another installation than the one the launcher sees now.
-const OTHER_INSTALLATION: &str = "Repository suggestions belong to a different host installation";
 /// The supervisor's words refusing a checkout name that is taken (its `NameError::Occupied`), found anywhere in the
 /// refusal since the helm passes them on whole.
 const OCCUPIED: &str = "a directory with that checkout name already exists";
@@ -125,18 +103,6 @@ const STALE_PREVIEW: &str =
 // ---------------------------------------------------------------------------------------------------------------------
 // What the reads ask, one at a time, latest wins (`super::latest`)
 // ---------------------------------------------------------------------------------------------------------------------
-
-/// What a suggestions read asks: on which host connection and installation, for which typed text.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct SuggestKey {
-    host: i64,
-    incarnation: u64,
-    identity: String,
-    query: String,
-    /// How many times the suggestions were asked for again (after the inline setup saved a folder), so a save reads
-    /// them again even for the same text.
-    reread: u64,
-}
 
 /// What a preview answers for (the module docs): a change to any of it asks again.
 #[derive(Clone, Debug, PartialEq)]
@@ -194,9 +160,6 @@ struct HostKey {
 /// The helm's answer to a preview: the folder, or its refusal in its words.
 type PreviewAnswer = Result<AcceptedGithubPreview, HostText>;
 
-/// The suggestions read's answer, or why there is none.
-type SuggestAnswer = Result<GithubRepositoriesReply, HostText>;
-
 // ---------------------------------------------------------------------------------------------------------------------
 // The destination's state
 // ---------------------------------------------------------------------------------------------------------------------
@@ -209,22 +172,15 @@ pub(super) struct CheckoutState {
     pub(super) repository: TextInputState,
     /// The suggestions list under the repository field, with the row moved to with the arrows.
     list: FieldList,
-    suggestions: Latest<SuggestKey, SuggestAnswer>,
+    /// Repository history belongs to the helm. Load it once, independently of the selected destination.
+    repositories_asked: bool,
+    repositories: Option<Vec<GithubRepo>>,
     preview: Latest<PreviewKey, PreviewAnswer>,
     /// The highest checkout configuration revision observed, which never goes back down; `None` until one is.
     revision: Option<i64>,
     /// The last placeholder given to the name field. Setting it redraws the field, so only update it on change.
     pub(super) name_placeholder: String,
-    /// See [`SuggestKey::reread`] and [`PreviewKey::retry`].
-    reread: u64,
     retry: u64,
-    /// Whether the host, as of the last suggestions answer about it, needs a checkout folder set up (the reply's
-    /// `needs_checkout_root`, the helm's reading of the host's effective configuration). Kept across a re-read, so the
-    /// setup field stays put, with its draft and focus, while a save is checked.
-    needs_root: Option<(HostKey, bool)>,
-    /// Set by a checkout setup update until the next suggestions answer: whether the host needs a folder is to be
-    /// asked again, even with a repository chosen.
-    root_recheck: bool,
     /// The installed host that needed setup and the input mark from pressing Save. The repository is the next field
     /// to fill in when a recheck removes setup for this host and the user is still waiting for the save.
     focus_after_setup: Option<(HostKey, Mark)>,
@@ -278,14 +234,12 @@ impl CheckoutState {
         CheckoutState {
             repository,
             list: FieldList::default(),
-            suggestions: Latest::default(),
+            repositories_asked: false,
+            repositories: None,
             preview: Latest::default(),
             revision: None,
             name_placeholder: String::new(),
-            reread: 0,
             retry: 0,
-            needs_root: None,
-            root_recheck: false,
             focus_after_setup: None,
             setup: None,
             armed: None,
@@ -295,18 +249,18 @@ impl CheckoutState {
     }
 }
 
-/// The suggestions for `query`: a valid typed pair first, then the discovered repositories whose `owner/repo` contains
+/// The suggestions for `query`: a valid typed pair first, then the recent repositories whose `owner/repo` contains
 /// the query, in the helm's order, each once, at most [`MAX_CHOICES`] (the old `repository_choices`).
 pub(in crate::launcher) fn repository_choices(
     query: &str,
-    discovered: &[GithubRepo],
+    recent: &[GithubRepo],
 ) -> Vec<GithubRepo> {
     let query = query.trim().to_ascii_lowercase();
     let mut choices = Vec::new();
     if let Ok(repo) = parse_github_repo(&query) {
         choices.push(repo);
     }
-    for repo in discovered {
+    for repo in recent {
         if choices.len() == MAX_CHOICES {
             break;
         }
@@ -322,33 +276,16 @@ pub(in crate::launcher) fn repository_choices(
 // ---------------------------------------------------------------------------------------------------------------------
 
 impl Launcher {
-    /// The chosen host as the store holds it now, while it is connected with an installation identity: the only host
-    /// either read can ask about, since the helm binds both to that identity. None while a new environment is chosen:
-    /// the helm previews the path once the new environment's Farhelm connects. The checkout can use that machine's
-    /// home when the default checkout folder is unset.
+    /// Preview can only talk to a verified existing installation. A new environment provides its own
+    /// preview after provisioning, and selecting it does not need this host's checkout folder.
     fn checkout_host(&self, cx: &App) -> Option<HostView> {
         if self.draft.target.is_some() {
             return None;
         }
-        self.connected_host(cx)
-    }
-
-    /// The chosen host as the store holds it now, while it is connected with an installation identity. The repository
-    /// suggestions ask it whatever the placement, since a new environment's repository is chosen the same way.
-    fn connected_host(&self, cx: &App) -> Option<HostView> {
-        let view = self.chosen_host(cx)?.clone();
+        let view = self.chosen_host(cx)?;
         let connected = matches!(view.state, HostStateView::Connected { .. });
         let identified = view.identity.as_deref().is_some_and(|id| !id.is_empty());
-        (connected && identified).then_some(view)
-    }
-
-    /// Whether the user is choosing a repository: no repository chosen yet, or the list open over a chosen one.
-    fn choosing_repository(&self, window: &Window, cx: &App) -> bool {
-        self.draft
-            .checkout
-            .as_ref()
-            .is_some_and(|checkout| checkout.repo.is_none())
-            || self.checkout.list.is_open(window, cx)
+        (connected && identified).then(|| view.clone())
     }
 
     /// The chosen host's connection and installation, while it can be asked.
@@ -361,14 +298,18 @@ impl Launcher {
         })
     }
 
-    /// Whether the chosen host needs a checkout folder set up, as last answered about it; `None` while unknown.
+    /// Only the current existing destination can ask for setup. Keep its last answer while a save is rechecked.
     fn needs_root(&self, cx: &App) -> Option<bool> {
-        let host = self.checkout_host_key(cx)?;
-        self.checkout
-            .needs_root
-            .as_ref()
-            .filter(|(known, _)| *known == host)
-            .map(|(_, needs)| *needs)
+        self.checkout_host(cx)?;
+        self.launch_history(cx)
+            .map(|reply| reply.needs_checkout_root)
+    }
+
+    /// Release a pending focus handoff if the finished read still needs setup.
+    pub(super) fn checkout_root_read(&mut self, needs_root: bool) {
+        if needs_root {
+            self.checkout.focus_after_setup = None;
+        }
     }
 
     /// The `gh:` query the composer search holds, while it holds one.
@@ -378,67 +319,38 @@ impl Launcher {
         (scope == Scope::Github).then(|| value.to_owned())
     }
 
-    /// A suggestions read about `query` on the chosen host, while it can be asked.
-    fn suggest_key_for(&self, query: String, cx: &App) -> Option<SuggestKey> {
-        let host = self.connected_host(cx)?;
-        Some(SuggestKey {
-            host: host.id,
-            incarnation: host.incarnation,
-            identity: host.identity.unwrap_or_default(),
-            query,
-            reread: self.checkout.reread,
-        })
+    fn repository_history(&self) -> &[GithubRepo] {
+        self.checkout.repositories.as_deref().unwrap_or_default()
     }
 
-    /// The repositories the suggestions answer lists, while it is about `key`; none otherwise.
-    fn discovered(&self, key: Option<SuggestKey>) -> &[GithubRepo] {
-        key.and_then(|key| self.checkout.suggestions.answer_for(&key))
-            .and_then(|answer| answer.as_ref().ok())
-            .map_or(&[], |reply| reply.repos.as_slice())
+    fn repository_pending(&self) -> Option<bool> {
+        self.checkout
+            .repositories_asked
+            .then_some(self.checkout.repositories.is_none())
     }
 
-    /// The search's rows for its `gh:` query: a valid typed pair first, then the host's discovered repositories that
-    /// match, from the suggestions answer while it is about this host and query (the module docs); empty for any other
-    /// query. The loading status follows the same key.
+    /// A `gh:` query uses the same remembered repositories and typed choices as the Repository field.
     pub(super) fn search_repositories(&self, cx: &App) -> (Vec<GithubRepo>, Option<bool>) {
         let Some(query) = self.search_repository_query(cx) else {
             return (Vec::new(), None);
         };
-        let key = self.suggest_key_for(query.clone(), cx);
-        let pending = key
-            .as_ref()
-            .and_then(|key| self.checkout.suggestions.pending_for(key));
-        (repository_choices(&query, self.discovered(key)), pending)
+        (
+            repository_choices(&query, self.repository_history()),
+            self.repository_pending(),
+        )
     }
 
-    /// What a suggestions read would ask now: the search's `gh:` query while there is one; otherwise, while the user is
-    /// choosing, and also, with a repository chosen, once per host while whether it needs a checkout folder is not known
-    /// (so a Clone's checkout still learns it), on a host that can be asked.
-    fn suggest_key(&self, window: &Window, cx: &App) -> Option<SuggestKey> {
-        if let Some(query) = self.search_repository_query(cx) {
-            return self.suggest_key_for(query, cx);
-        }
-        let checkout = self.draft.checkout.as_ref()?;
-        if !self.choosing_repository(window, cx)
-            && self.needs_root(cx).is_some()
-            && !self.checkout.root_recheck
-        {
-            return None;
-        }
-        self.suggest_key_for(checkout.field_text(), cx)
-    }
-
-    /// Whether the composer search holds a `gh:` query, which owns the repository suggestions and their note while it
-    /// is there (the module docs), and makes Launch wait: until a repository is picked (the query then goes), the launch
-    /// would quietly use a destination the user is replacing. SPEC.md, "Managed checkouts": "Invalid
-    /// `gh:` input cannot launch a hidden existing directory"; the old launcher's "Select a GitHub repository before
-    /// launching", after the host's own reasons.
+    /// Whether the search holds an unselected `gh:` query. It holds Launch until the user chooses the repository
+    /// because the existing Folder draft is a destination the user is trying to replace.
     pub(super) fn search_holds_repository_query(&self, cx: &App) -> bool {
         self.search_repository_query(cx).is_some()
     }
 
     /// What a preview would answer for now, if a repository is chosen on a host that can be asked.
     fn preview_key(&self, cx: &App) -> Option<PreviewKey> {
+        if self.checkout_root_refresh_pending() {
+            return None;
+        }
         let checkout = self.draft.checkout.as_ref()?;
         let repo = checkout.repo.clone()?;
         let host = self.checkout_host(cx)?;
@@ -459,18 +371,9 @@ impl Launcher {
         })
     }
 
-    /// Follow the destination as drawn: ask for suggestions 150 ms after what they would be about last changed, and
-    /// for a preview as soon as what it answers for changes, each one at a time (the module docs). Called while drawing,
-    /// since a host's connection changes by a push with no edit of the launcher's.
+    /// A drawn launcher reads its repository history once and follows the preview as the destination changes.
     pub(super) fn follow_checkout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let key = self.suggest_key(window, cx);
-        if let Some(key) = self.checkout.suggestions.follow(key) {
-            let launcher = cx.weak_entity();
-            let deadline = ticker::after(SUGGEST_AFTER, cx, move |cx| {
-                let _ = launcher.update(cx, |launcher, cx| launcher.send_suggestions(key, cx));
-            });
-            self.checkout.suggestions.wait(deadline);
-        }
+        self.follow_repository_history(cx);
         self.follow_preview(cx);
         // The name field follows a name the draft changed on its own: a numbered default moving on, or the copied title
         // ignored or shown again as the destination changes. Typing changes the draft to the field's text, so this
@@ -622,75 +525,28 @@ impl Launcher {
         }
     }
 
-    /// Read the suggestions for `key`, if it is still what the launcher would ask and no read is out (then the
-    /// answer sends it).
-    fn send_suggestions(&mut self, key: SuggestKey, cx: &mut Context<Self>) {
+    /// The list is small and global. Typing and switching destinations filter locally even if the read fails.
+    fn follow_repository_history(&mut self, cx: &mut Context<Self>) {
+        if self.checkout.repositories_asked {
+            return;
+        }
         let Ok(path) = ApiPath::api(&["github-repositories"]) else {
             return;
         };
-        let body = GithubRepositoriesBody {
-            host: key.host,
-            expected_incarnation: Some(key.incarnation),
-            query: key.query.clone(),
-        };
-        let Ok(body) = serde_json::to_value(&body) else {
-            return;
-        };
-        if !self.checkout.suggestions.begin(&key) {
-            return;
-        }
         let launcher = cx.weak_entity();
-        let sent = operations::send(
-            Method::Post,
+        self.checkout.repositories_asked = operations::read::<Vec<GithubRepo>>(
             path,
-            Some(body),
-            "POST /api/github-repositories",
+            "GET /api/github-repositories",
             cx,
             move |answer, cx| {
-                let answer = operations::decode::<GithubRepositoriesReply>(
-                    answer,
-                    "POST /api/github-repositories",
-                )
-                .and_then(|reply| {
-                    // The helm names the installation that answered; one other than the launcher asked about is no
-                    // answer about this host (the old `RepositoryAuthority::accepts`).
-                    let same = reply.host == key.host.to_string()
-                        && reply.incarnation == key.incarnation
-                        && reply.installation_identity == key.identity;
-                    if same {
-                        Ok(reply)
-                    } else {
-                        Err(HostText::from_host(OTHER_INSTALLATION))
-                    }
-                });
-                let needs_root = answer.as_ref().ok().map(|reply| reply.needs_checkout_root);
                 let _ = launcher.update(cx, |launcher, cx| {
-                    let finished = launcher.checkout.suggestions.finish(&key, Some(answer));
-                    if finished.kept {
-                        if let Some(needs_root) = needs_root {
-                            let host = HostKey {
-                                host: key.host,
-                                incarnation: key.incarnation,
-                                identity: key.identity.clone(),
-                            };
-                            launcher.checkout.needs_root = Some((host, needs_root));
-                            launcher.checkout.root_recheck = false;
-                            // The field stays: the save did not give the host a folder, and focus stays in it.
-                            if needs_root {
-                                launcher.checkout.focus_after_setup = None;
-                            }
-                        }
-                        cx.notify();
-                    }
-                    if let Some(now) = finished.next {
-                        launcher.send_suggestions(now, cx);
-                    }
+                    launcher.checkout.repositories = Some(answer.unwrap_or_default());
+                    // A typed match can fill the list before the reply. Re-evaluate its highlight once the rows change.
+                    launcher.checkout.list.highlighted = None;
+                    cx.notify();
                 });
             },
         );
-        if !sent {
-            self.checkout.suggestions.unsent();
-        }
     }
 
     /// Ask for the preview `key` answers for, if it is still current and no preview is out (then the answer sends
@@ -774,8 +630,6 @@ impl Launcher {
             return;
         }
         self.checkout.revision = Some(revision);
-        // The checkout folder setting may be what changed: ask again whether the host still needs one set up.
-        self.checkout.root_recheck = true;
         cx.notify();
     }
 
@@ -812,10 +666,10 @@ fn preview_matches(key: &PreviewKey, preview: &AcceptedGithubPreview) -> bool {
 // ---------------------------------------------------------------------------------------------------------------------
 
 impl Launcher {
-    /// The list's rows for the field as it is now, from the suggestions answer while it is about this host and text.
-    fn repository_rows(&self, window: &Window, cx: &App) -> Vec<GithubRepo> {
+    /// Filter the same history locally for each edit to the Repository field.
+    fn repository_rows(&self, cx: &App) -> Vec<GithubRepo> {
         let query = self.checkout.repository.text(cx).to_string();
-        repository_choices(&query, self.discovered(self.suggest_key(window, cx)))
+        repository_choices(&query, self.repository_history())
     }
 
     /// The user typed in the repository field: the draft's query, the highlight back to none, and the list open.
@@ -829,7 +683,7 @@ impl Launcher {
 
     /// Up or Down in the field: move the highlighted row, wrapping, while the list is open and has rows.
     fn repository_arrow(&mut self, arrow: Vertical, window: &mut Window, cx: &mut Context<Self>) {
-        let count = self.repository_rows(window, cx).len();
+        let count = self.repository_rows(cx).len();
         if self.checkout.list.is_open(window, cx) && self.checkout.list.arrow(arrow, count) {
             cx.notify();
         }
@@ -843,7 +697,7 @@ impl Launcher {
             cx.notify();
             return;
         }
-        let rows = self.repository_rows(window, cx);
+        let rows = self.repository_rows(cx);
         let highlighted = self.checkout.list.highlighted.unwrap_or(0);
         if let Some(repo) = rows.get(highlighted).cloned() {
             self.pick_repository(repo, window, cx);
@@ -1070,7 +924,7 @@ impl Launcher {
             .into_any_element()
     }
 
-    /// The root setup precedes the address because the repository on an installed host needs it. The discovery
+    /// The root setup precedes the address because the repository on an installed host needs it. The history
     /// refresh can remove the field after a save, so leave a refusal in that same place even if the field goes away.
     pub(super) fn checkout_setup(
         &mut self,
@@ -1091,23 +945,10 @@ impl Launcher {
         setup
     }
 
-    /// Show the discovery note with the control whose query produced it. Inline setup already explains a missing
-    /// checkout root, and a `gh:` query has its own note under the launcher search.
-    pub(super) fn checkout_repository_note(&self, window: &Window, cx: &App) -> Option<AnyElement> {
-        if !self.choosing_repository(window, cx)
-            || self.needs_root(cx) == Some(true)
-            || self.search_holds_repository_query(cx)
-        {
-            return None;
-        }
-        self.repository_note("launcher-repository-note", window, cx)
-            .map(IntoElement::into_any_element)
-    }
-
     /// The inline checkout-folder field, while the chosen host needs a checkout folder set up: the shared explicit-save
     /// field over the default folder (SPEC.md: "When the selected installed host has no checkout folder in effect, the
     /// launcher's managed-checkout destination offers the same explicit-save field"). Made the first time it shows.
-    /// A successful save or a value found changed after refusal refreshes the suggestions and preview.
+    /// A successful save or a value found changed after refusal refreshes the checkout-folder answer and preview.
     fn setup_field(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let needs_root = self.needs_root(cx);
         if needs_root != Some(true) {
@@ -1129,15 +970,19 @@ impl Launcher {
             let updated = cx.subscribe(
                 &field,
                 |launcher: &mut Launcher, _, updated: &CheckoutUpdated, cx| {
-                    launcher.checkout.reread += 1;
+                    // A save can settle after an accepted wake hid the launcher. Its fresh connected preview
+                    // reads the effective folder itself, while this history refresh needs a visible launcher.
+                    if launcher.layer.is_none()
+                        && super::super::launch::wake_holds_launcher(&cx.entity(), cx)
+                    {
+                        return;
+                    }
                     launcher.checkout.retry += 1;
-                    launcher.checkout.root_recheck = true;
-                    launcher.checkout.focus_after_setup = updated.saved_at.and_then(|mark| {
-                        let (host, true) = launcher.checkout.needs_root.as_ref()? else {
-                            return None;
-                        };
-                        Some((host.clone(), mark))
-                    });
+                    launcher.checkout.focus_after_setup = updated
+                        .saved_at
+                        .filter(|_| launcher.needs_root(cx) == Some(true))
+                        .and_then(|mark| launcher.checkout_host_key(cx).map(|host| (host, mark)));
+                    launcher.refresh_checkout_root();
                     cx.notify();
                 },
             );
@@ -1153,54 +998,6 @@ impl Launcher {
                 .child(field.clone())
                 .into_any_element(),
         )
-    }
-
-    /// [`Self::repository_note`] for the search's `gh:` query, drawn under the search box, where the old launcher drew
-    /// it, so a Folder destination (which has no repository field) still shows an incomplete or failed scan (SPEC.md,
-    /// "Managed checkouts": "Incomplete discovery is visible"). Not while the checkout-folder setup shows above the
-    /// repository field, which says the same thing.
-    pub(super) fn search_repository_note(&self, window: &Window, cx: &App) -> Option<AnyElement> {
-        if !self.search_holds_repository_query(cx)
-            || (self.draft.checkout.is_some() && self.needs_root(cx) == Some(true))
-        {
-            return None;
-        }
-        // The search box spans the dialog, so its note starts at the box's edge rather than the fields' column.
-        self.repository_note("launcher-search-repository-note", window, cx)
-            .map(|note| note.pl_0().into_any_element())
-    }
-
-    /// The note on an incomplete scan, or a failed read (`.launch-composer-repository-note`), under the repository
-    /// field or, for a `gh:` query, the search box: the helm's reason in the warning color, or, for a scan it cut short
-    /// without one, a quiet hint that a typed pair can still be chosen.
-    fn repository_note(
-        &self,
-        id: &'static str,
-        window: &Window,
-        cx: &App,
-    ) -> Option<Stateful<Div>> {
-        let key = self.suggest_key(window, cx)?;
-        let palette = theme::palette(cx);
-        match self.checkout.suggestions.answer_for(&key)? {
-            Ok(reply) => {
-                // The source host's missing folder can limit suggestions. A new environment still accepts a
-                // manually entered repository, so show the incomplete search without the setup warning.
-                let source_needs_setup = self.draft.target.is_some() && reply.needs_checkout_root;
-                match reply.scan_error.as_ref().filter(|_| !source_needs_setup) {
-                    Some(error) => Some(status_line(id, error.clone(), palette)),
-                    // A quiet hint, announced as the other notes are.
-                    None if reply.truncated => {
-                        Some(help_line(INCOMPLETE, palette).role(Role::Status))
-                    }
-                    None => None,
-                }
-            }
-            Err(words) => Some(status_line(
-                id,
-                HostSentence::new("launcher-repository-error-text").host(words),
-                palette,
-            )),
-        }
     }
 
     /// Keep the Folder line a single polite live region across selection, allocation, preview and refusal. The
@@ -1371,23 +1168,20 @@ impl Launcher {
 }
 
 /// The open suggestions list's rows (`field_list`): a branch glyph and the `owner/repo` per suggestion, or, with none,
-/// a status line saying what to type or whether discovery is still pending.
+/// a status line saying what to type or whether history is still loading.
 fn draw_repository_rows(
     launcher: &Launcher,
     list: Stateful<Div>,
     weak: &WeakEntity<Launcher>,
-    window: &Window,
+    _window: &Window,
     cx: &App,
 ) -> Drawn {
     let palette = theme::palette(cx);
     let list = list.aria_label("Repositories");
-    let rows = launcher.repository_rows(window, cx);
+    let rows = launcher.repository_rows(cx);
     if rows.is_empty() {
         let query = launcher.checkout.repository.text(cx);
-        let pending = launcher
-            .suggest_key_for(query.to_string(), cx)
-            .and_then(|key| launcher.checkout.suggestions.pending_for(&key));
-        let message = repository_empty_message(&query, pending);
+        let message = repository_empty_message(&query, launcher.repository_pending());
         let words = message.text;
         let color = if message.warning {
             palette.warn

@@ -1,7 +1,7 @@
 //! The explicitly saved checkout fields: a checkout folder (the shared field, [`CheckoutField::folder`]) and Settings'
 //! all-hosts post-clone command ([`CheckoutField::post_clone`]).
 //!
-//! SPEC.md, "Managed checkouts" and "Session list" (Checkouts); SPEC_impl.md, "Checkout configuration and discovery".
+//! SPEC.md, "Managed checkouts" and "Session list" (Checkouts); SPEC_impl.md, "Checkout configuration".
 //! Ported from the old app's `CheckoutRootField` (`checkout_root.rs`) and `CheckoutPostCloneField`
 //! (`checkout_post_clone.rs`) at reference commit `24bc0580`, with their labels, notes, button words and outcome lines.
 //! The two were one shape in the old app (a label, a field, a note, Save or Retry, and a saved or failure line, the
@@ -237,7 +237,7 @@ struct Stored {
 }
 
 /// Refresh dependent views when a save succeeds or a refusal's refetch finds a different stored value. The launcher's
-/// inline field can learn that the CLI configured a folder, so its old suggestions and preview need to be checked.
+/// inline field can learn that the CLI configured a folder, so the launcher rechecks setup eligibility and its preview.
 pub struct CheckoutUpdated {
     /// A successful save can move focus only if the user has stayed with it since pressing Save.
     /// A refetch can discover someone else's change and carries no focus request.
@@ -250,7 +250,7 @@ pub struct CheckoutUpdated {
 /// host settings dialog draws it over a host's own folder ([`FolderScope::Host`], the default as placeholder and Use
 /// default to clear the override, SPEC.md "Topology"); and the launcher's managed-checkout destination is to draw
 /// it over the default folder when the chosen host has no folder in effect (SPEC.md, "Managed checkouts"), subscribing
-/// to [`CheckoutUpdated`] to refresh its suggestions and preview. Each owner makes the view when its dialog or section first
+/// to [`CheckoutUpdated`] to refresh setup eligibility and its preview. Each owner makes the view when its dialog or section first
 /// shows (which reads the route then), keeps the entity for as long as the dialog is open, and draws it as a child: a
 /// new view for each opening, so a reply reaches only the opening it was sent for. Enter in the field saves nothing, as
 /// in the old field, where saving the folder and submitting a surrounding form were separate acts.
