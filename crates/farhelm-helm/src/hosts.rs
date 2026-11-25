@@ -4689,9 +4689,9 @@ impl HostKind {
     }
 }
 
-/// Recipe cards omit incidental unavailable places for a shared base. Keep
-/// the recipe's own history and work visible even when a place disappears.
-/// The providers' launch and cleanup paths own their separate admission.
+/// Recipe cards keep failures for places the provider still lists, including
+/// after the recipe changes to an incompatible base. A removed place stays
+/// on the card while it has active work or recorded resources to clean up.
 pub(crate) async fn recipe_places(State(state): State<Arc<AppState>>) -> axum::response::Response {
     let result = async {
         let places = state.manager.providers().places().await?;
@@ -4700,9 +4700,10 @@ pub(crate) async fn recipe_places(State(state): State<Arc<AppState>>) -> axum::r
         let active_places = builds.active_places();
         let mut views = Vec::new();
         for (name, recipe, build) in recipes {
-            let mut candidates = build.visible_places();
+            let mut candidates = build.recorded_places();
             for place in &places {
-                if recipe.base.supports(place.place.provider())
+                if (recipe.base.supports(place.place.provider())
+                    || build.has_visible_state(place.place))
                     && !candidates.contains(&place.place)
                 {
                     candidates.push(place.place);
@@ -4714,18 +4715,21 @@ pub(crate) async fn recipe_places(State(state): State<Arc<AppState>>) -> axum::r
                 }
             }
             for place in candidates {
-                let unavailable_reason = places
-                    .iter()
-                    .find(|current| current.place == place)
-                    .map_or_else(
-                        || Some("This place is no longer available.".into()),
-                        |current| current.reason.clone(),
-                    );
+                let listed = places.iter().find(|current| current.place == place);
+                let unavailable_reason = match listed {
+                    Some(current) => current.reason.clone(),
+                    None => Some("This place is no longer available.".into()),
+                };
                 let view = builds.place_view(&name, &build, place, unavailable_reason);
-                if view.unavailable_reason.is_none()
-                    || view.building
-                    || build.has_visible_state(place)
-                    || recipe.base.sole_provider() == Some(place.provider())
+                if view.building
+                    || match listed {
+                        Some(_) => {
+                            view.unavailable_reason.is_none()
+                                || build.has_visible_state(place)
+                                || recipe.base.sole_provider() == Some(place.provider())
+                        }
+                        None => build.has_resources(place),
+                    }
                 {
                     views.push(view);
                 }

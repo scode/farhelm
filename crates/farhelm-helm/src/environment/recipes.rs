@@ -315,18 +315,6 @@ impl RecipeState {
             .collect()
     }
 
-    /// Failures still explain a recipe's history after its place disappears.
-    /// Only resources and interrupted work make the place a cleanup target.
-    pub(crate) fn visible_places(&self) -> Vec<farhelm_proto::Place> {
-        let mut places = self.recorded_places();
-        for place in self.state_places() {
-            if !places.contains(&place) && self.has_visible_state(place) {
-                places.push(place);
-            }
-        }
-        places
-    }
-
     /// The flat account fields and each host entry may carry recipe state.
     fn state_places(&self) -> impl Iterator<Item = farhelm_proto::Place> + '_ {
         std::iter::once(farhelm_proto::Place::TensorlakeAccount).chain(
@@ -337,7 +325,7 @@ impl RecipeState {
         )
     }
 
-    /// Presentation includes failures even when they left nothing to retire.
+    /// A listed place can show a failed attempt even if it owns no resources.
     #[warn(clippy::wildcard_enum_match_arm)]
     pub(crate) fn has_visible_state(&self, place: farhelm_proto::Place) -> bool {
         self.has_resources(place)

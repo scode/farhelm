@@ -2071,9 +2071,9 @@ async fn a_place_jobs_admission_step_and_end_reach_the_connected_ui() {
     );
 }
 
-/// A shared recipe needs usable places and its own history. Confirm that a
-/// stored failure retains a removed place without giving it cleanup ownership,
-/// and a single-provider recipe can still explain its check prerequisite.
+/// A failed attempt is useful on a registered host, where the user can
+/// address it. After removal, only active work and retained resources warrant
+/// an unavailable row, even on a recipe with a single provider.
 #[farhelm_testtrace::test]
 async fn recipe_places_keep_usable_history_and_single_provider_places() {
     use crate::environment::recipes::PodmanRecipeState;
@@ -2081,7 +2081,9 @@ async fn recipe_places_keep_usable_history_and_single_provider_places() {
     use farhelm_proto::{Place, RecipePlaceView, recipes::RecipeBase};
 
     let (harness, commands, local, _ws, _) = recipes_helm().await;
-    let absent = local + 1;
+    let failed = local + 1;
+    let retained = local + 2;
+    let active = local + 3;
     assert!(
         harness
             .store
@@ -2089,36 +2091,72 @@ async fn recipe_places_keep_usable_history_and_single_provider_places() {
             .await
             .unwrap()
             .iter()
-            .all(|row| row.id != absent)
+            .all(|row| ![failed, retained, active].contains(&row.id)),
+        "the removed places are absent from the host registry"
     );
-    let mut image = save();
-    image.base = RecipeBase::ContainerImage {
-        reference: "ubuntu:24.04".into(),
-        user: "dev".into(),
-    };
+    for (name, base) in [
+        (
+            "container",
+            RecipeBase::ContainerImage {
+                reference: "ubuntu:24.04".into(),
+                user: "dev".into(),
+            },
+        ),
+        (
+            "sandbox",
+            RecipeBase::TensorlakeImage {
+                image: "example/systemd".into(),
+            },
+        ),
+    ] {
+        let mut recipe = save();
+        recipe.base = base;
+        assert!(
+            harness
+                .store
+                .create_tensorlake_recipe(name.into(), recipe)
+                .await
+                .unwrap()
+                .is_ok()
+        );
+    }
+    let baseline: Vec<RecipePlaceView> =
+        serde_json::from_value(served(&harness, "/api/recipe-places").await).unwrap();
     assert!(
+        !baseline
+            .iter()
+            .any(|view| view.recipe == "dev" && view.place == Place::PodmanHost(local))
+    );
+    let single = baseline
+        .iter()
+        .find(|view| view.recipe == "container" && view.place == Place::PodmanHost(local))
+        .expect("the sole provider shows its check prerequisite");
+    assert!(single.reason.is_none() && single.unavailable_reason.is_some());
+
+    // A recipe can retain a failure recorded before its current base was saved.
+    for recipe in ["dev", "container", "sandbox"] {
         harness
             .store
-            .create_tensorlake_recipe("container".into(), image)
-            .await
-            .unwrap()
-            .is_ok()
-    );
-    harness
-        .store
-        .update_tensorlake_recipe_state("dev", move |_, state| {
-            state.podman.insert(
-                absent,
-                PodmanRecipeState {
+            .update_tensorlake_recipe_state(recipe, move |_, state| {
+                let failure = PodmanRecipeState {
                     last_failure: Some("package installation failed".into()),
                     ..Default::default()
-                },
-            );
-            assert!(!state.needs_cleanup(), "fixture: no ownership remains");
-        })
-        .await
-        .unwrap()
-        .expect("the shared recipe exists");
+                };
+                assert!(!failure.needs_cleanup());
+                state.podman.insert(local, failure.clone());
+                state.podman.insert(failed, failure);
+                state.podman.insert(
+                    retained,
+                    PodmanRecipeState {
+                        retired_images: vec!["retired-image-id".into()],
+                        ..Default::default()
+                    },
+                );
+            })
+            .await
+            .unwrap()
+            .expect("the recipe exists");
+    }
     assert!(
         harness
             .store
@@ -2131,6 +2169,23 @@ async fn recipe_places_keep_usable_history_and_single_provider_places() {
             .is_ok()
     );
 
+    // Hold the registry entry while the HTTP read takes its snapshot.
+    let builds = harness.state.recipe_builds();
+    let (finish, finished) = tokio::sync::oneshot::channel::<()>();
+    builds
+        .start_podman(
+            "dev",
+            active,
+            true,
+            harness.manager.events().clone(),
+            |_, _| async move {
+                let _ = finished.await;
+                anyhow::bail!("the test ends the job here")
+            },
+        )
+        .expect("the build is admitted");
+    assert!(builds.podman_job("dev", active).is_some());
+
     let views: Vec<RecipePlaceView> =
         serde_json::from_value(served(&harness, "/api/recipe-places").await).unwrap();
     let place = |recipe: &str, place| {
@@ -2138,17 +2193,22 @@ async fn recipe_places_keep_usable_history_and_single_provider_places() {
             .iter()
             .find(|view| view.recipe == recipe && view.place == place)
     };
-    assert!(place("dev", Place::PodmanHost(local)).is_none());
     let account = place("dev", Place::TensorlakeAccount).expect("usable account is shown");
     assert!(account.unavailable_reason.is_none());
-    let history = place("dev", Place::PodmanHost(absent)).expect("failed place is shown");
-    assert_eq!(
-        history.reason.as_deref(),
-        Some("package installation failed")
-    );
-    assert!(history.unavailable_reason.is_some());
-    let single = place("container", Place::PodmanHost(local)).expect("sole provider is shown");
-    assert!(single.reason.is_none() && single.unavailable_reason.is_some());
+    for recipe in ["dev", "container", "sandbox"] {
+        let history = place(recipe, Place::PodmanHost(local)).expect("registered failure is shown");
+        assert_eq!(
+            history.reason.as_deref(),
+            Some("package installation failed")
+        );
+        assert!(history.unavailable_reason.is_some());
+        assert!(place(recipe, Place::PodmanHost(failed)).is_none());
+        let cleanup = place(recipe, Place::PodmanHost(retained)).expect("cleanup is shown");
+        assert!(cleanup.cleanup_pending && cleanup.unavailable_reason.is_some());
+    }
+    let running = place("dev", Place::PodmanHost(active)).expect("active work is shown");
+    assert!(running.building && running.unavailable_reason.is_some());
+    finish.send(()).unwrap();
     assert!(
         commands.seen.lock().unwrap().is_empty(),
         "the list starts no checks"

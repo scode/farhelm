@@ -553,7 +553,8 @@ after removing it from Farhelm.
 The list shows each recipe's name, supported providers, base, package count, tunnel count and build status per place,
 with Rebuild per place. On a base shared by multiple providers, a container host gets a line once it can build there,
 has artifacts or a recorded failure there, or has running or interrupted work there. Container-only bases also show
-unavailable container hosts. A container host's Rebuild is disabled when the place is unavailable or the current base
+unavailable registered container hosts. After a host is removed, its row stays only while work is active there or
+resources still need cleanup. A container host's Rebuild is disabled when the place is unavailable or the current base
 cannot run there. Its hover help gives the reason. Tensorlake snapshot status is shown separately.
 
 Size is labelled **Tensorlake sandboxes only**. The editor's Software block offers managed Ubuntu, Tensorlake image and
