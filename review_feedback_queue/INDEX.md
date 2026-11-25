@@ -206,10 +206,6 @@ consequences.
   for a registered custom agent shows the generic label "Custom" instead of that agent's display name or ID, so users
   cannot visually tell different custom agents apart in recent setups without hovering.
 
-- [`trailing-refused-setup-confirmation-persists-planned-paths-on-retargeted-host.md`](trailing-refused-setup-confirmation-persists-planned-paths-on-retargeted-host.md)
-  — Confirming Setup for an already-registered SSH host writes the plan's remote Farhelm binary and state-directory
-  paths into the host's database row before taking the host's provisioning lock.
-
 - [`trailing-restart-with-custom-reporting-and-offer-use-stale-row-launch.md`](trailing-restart-with-custom-reporting-and-offer-use-stale-row-launch.md)
   — When a user edits a registered custom agent's reporting or resumption setting and uses Restart with to apply it, a
   conversation ID reported right after the restarted agent starts is judged against the previous launch's reporting
@@ -541,10 +537,6 @@ consequences.
 - [`trailing-tensorlake-setup-rerun-omits-suspended-and-sealed-refusal.md`](trailing-tensorlake-setup-rerun-omits-suspended-and-sealed-refusal.md)
   — Rerunning setup on a suspended or sealed Tensorlake host still offers the setup confirmation instead of refusing up
   front, and confirming on a suspended host temporarily overwrites Suspended with a failed setup run.
-
-- [`trailing-ssh-setup-existing-tensorlake-mutates-before-lock.md`](trailing-ssh-setup-existing-tensorlake-mutates-before-lock.md)
-  — Confirming an SSH-targeted setup plan on an existing Tensorlake host that became suspended can overwrite saved paths
-  and replace the suspended actor before taking the host lock or checking suspended state.
 
 - [`trailing-provisioning-service-omits-sealed-host-refusal.md`](trailing-provisioning-service-omits-sealed-host-refusal.md)
   — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still

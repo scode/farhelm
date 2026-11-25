@@ -723,6 +723,73 @@ pub(super) fn host_setup_failed_hosts_panel_setup(
     );
 }
 
+/// A retarget can still hold the host lock when Set up is pressed. The registered host shows the refusal under its row.
+pub(super) fn host_setup_busy_refusal(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use crate::hosts::setup::{self, Target};
+    use crate::operations::OpKey;
+    let opener = state.ring.clone();
+    let handle = window.window_handle();
+    let host = crate::hosts::tests::reference_hosts().remove(1);
+    setup_refusal_scene(
+        state,
+        host,
+        "/api/hosts/provision",
+        "this host is busy with another operation; once it finishes, run setup again",
+        cx,
+        move |host, cx| {
+            let mut offer = setup::tests::reference_offer(opener.clone(), Mark::take(cx));
+            offer.key = OpKey::host(&HostView::key(host.id));
+            offer.target = Target::Registered {
+                host: host.id,
+                name: HostText::from_host(host.name.as_str()),
+                icon: host.icon,
+                color: host.color,
+                creates: None,
+            };
+            setup::submit(offer, handle, cx);
+        },
+    );
+}
+
+/// Settle a real Hosts action against a fake helm, leaving the previous failed setup in the pushed progress list.
+fn setup_refusal_scene(
+    state: &SceneState,
+    host: HostView,
+    route: &'static str,
+    reason: &'static str,
+    cx: &mut App,
+    send: impl Fn(&HostView, &mut App) + 'static,
+) {
+    use crate::hosts::tests::{hosts, progress, run};
+    use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus};
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    let mut earlier = run(host.id, ProvisioningOperation::Add, RunStatus::Failed);
+    earlier.message = Some("The previous setup could not connect".into());
+    helm.connect(vec![
+        hosts(std::slice::from_ref(&host)),
+        progress(&[earlier]),
+    ]);
+    let panel = cx.new(HostsPanel::new);
+    state.keep.borrow_mut().push(Box::new(panel));
+    let helm = Rc::new(RefCell::new(helm));
+    let answering = helm.clone();
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
+        send(&host, cx);
+        let mut helm = answering.borrow_mut();
+        let command = helm
+            .commands()
+            .into_iter()
+            .find(|command| command.path == route);
+        let command = command.expect("the scene submitted its setup command");
+        helm.reply(
+            command.id,
+            409,
+            Some(serde_json::Value::String(reason.into())),
+        );
+    });
+}
+
 /// The Hosts panel with an Update on offer in two rows, Details off (no reference: the old reference screens show no
 /// outdated host): `build-box` on an older build, "Old version" with the amber outlined `↑ Update`, and `gpu-1` refused
 /// at the handshake on an older protocol, "Needs update" with the red one; the heading's Update all available.
