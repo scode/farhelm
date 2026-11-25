@@ -1262,6 +1262,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_custom_agent_setup,
     },
     Scene {
+        name: "launcher-unavailable-custom-agent",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_unavailable_custom_agent_setup,
+    },
+    Scene {
         name: "launcher-shell-wrapper",
         size: (1080., 1040.),
         draw: session_lists_then,

@@ -30,10 +30,6 @@ consequences.
   checkouts on Create) before failing if HOME is missing or the expanded path cannot be resolved (borderline
   highest/high; durable conversation ID stays preserved).
 
-- [`trailing-launcher-enter-deleted-custom-agent-chip-submits-previous-agent.md`](trailing-launcher-enter-deleted-custom-agent-chip-submits-previous-agent.md)
-  — Pressing Enter on a deleted custom-agent chip in the launcher submits the previously selected agent instead of
-  refusing, which in Replace with mode can retire the running session under the wrong agent (borderline highest/high).
-
 - [`agent-environment-launch-skips-place-host-incarnation-pin.md`](agent-environment-launch-skips-place-host-incarnation-pin.md)
   — An approved agent container-environment launch can create the container on a different machine than the card named
   if the place host was retargeted or re-identified while the card waited; the environment-launch path never pins the
@@ -227,11 +223,6 @@ consequences.
   (such as "high" or "low"), or switching from a built-in agent to a custom agent before the model catalog loads,
   editing or clearing Effort in the launcher leaves a hidden stale effort behind.
 
-- [`trailing-custom-agent-model-effort-error-duplicate-element-id.md`](trailing-custom-agent-model-effort-error-duplicate-element-id.md)
-  — When a user enters invalid values in both the Model and Effort fields of a custom agent in the session launcher at
-  the same time, both validation status lines mount under the same UI element ID, which collides in the accessibility
-  tree and triggers a debug panic when assistive technology is active.
-
 - [`trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md`](trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md)
   — For a registered custom agent session created without session resumption enabled, the disabled Restart with menu
   item tells the user "Custom sessions can't be resumed" instead of explaining that this launch has no stored resume
@@ -269,12 +260,6 @@ consequences.
   — The integration test for running a custom agent's conversation reporter through the app forwarder during an update
   or uninstall does not actually prove that the forwarder prevented the CLI from starting, so a regression that bypassed
   the lock or failed before locking would still pass.
-
-- [`trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md`](trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md)
-  — When the Agent tab holds a deleted custom agent (for example from Clone, Replace with, a recent setup, a template,
-  or a deletion while the launcher is open), no harness chip appears selected and the deleted agent's ID is not shown
-  anywhere in the form, even though the form still shows custom-agent fields and refuses launch with "The selected
-  custom agent is no longer registered".
 
 - [`trailing-launcher-choose-effort-omits-sync-fields.md`](trailing-launcher-choose-effort-omits-sync-fields.md) — When
   resetting a custom agent's effort to default via launcher search (`effort:default`), the launcher's custom effort text

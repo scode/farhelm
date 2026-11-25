@@ -454,31 +454,6 @@
   file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-launcher-enter-deleted-custom-agent-chip-submits-previous-agent.md
-
-- Outcome: `fix code`.
-- Assessment: In the session launcher, pressing Enter on an agent chip chooses that agent and launches. If a custom
-  agent is deleted and the user presses Enter on its chip before the launcher redraws, choosing it fails with "That
-  custom agent is no longer registered". The launch still goes ahead with whatever agent the form held before. In
-  Replace with, that retires the source session and starts the wrong agent in its place. Verified: Confirmed in code.
-  `choose_custom_agent` returns early with only a notice
-  (`crates/gui/farhelm-gui/src/launcher/view/choices.rs:119-142`), and the chip group's Enter handler calls `press`
-  unconditionally (`choices.rs:392-402`). The permission row guards the same case (`permission_enter`,
-  `choices.rs:159-163`). The trigger is narrow. The chips are drawn from the store (`choices.rs:348`), and the window
-  redraws on store changes. A deletion can only come from this window's Settings, so the user has to have Settings open
-  over the launcher, or close Settings while the DELETE is in flight. The Enter must then land in the gap between the
-  store update and the next frame, which is sub-second. Retiring the source is what the user agreed to by pressing
-  Replace with's action. What they did not agree to is the replacement agent.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code. Guard `on_enter` as `permission_enter` does, launching only
-  when the chosen custom agent became the draft's. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
-  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
-  to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## settings-footer-can-discard-the-wrong-page.md
 
 - Outcome: `fix code`.
@@ -1092,27 +1067,6 @@
   and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md
-
-- Outcome: `fix code`.
-- Assessment: The launcher's Agent tab can open with a custom agent selected (via Clone, Replace with, a recent setup or
-  a template) after that registration was deleted, or the agent can be deleted while the launcher is open. No harness
-  chip then appears selected, and the deleted ID is not shown anywhere. The custom Model/Effort/YOLO fields stay
-  visible, and Launch is refused with "The selected custom agent is no longer registered", which does not name the
-  agent. Verified: Confirmed. `crates/gui/farhelm-gui/src/launcher/view/choices.rs:349-391` builds custom chips only
-  from the live catalog, and `.chosen(Custom(id))` matches nothing. The Command tab keeps a retained entry
-  (`view.rs:2139-2148`), and the draft's comment (`draft.rs:240`) says "The composer keeps a deleted ID visible".
-  SPEC.md has no rule for the Agent tab here; it covers the session list's fallback to the saved ID (SPEC.md:497-498).
-- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
-  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
-  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
-  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
-  Recommendation for reference: fix code — add a retained, unavailable chip like the Command tab's; size S–M. Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## trailing-launcher-search-recents-omits-custom-agent-id-and-name.md
 
 - Outcome: `fix code`.
@@ -1478,23 +1432,6 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — prefix, suppress the old error, clear on settle; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
-## trailing-custom-agent-model-effort-error-duplicate-element-id.md
-
-- Outcome: `other`.
-- Assessment: If both the Model and the Effort of a custom agent in the launcher are invalid at once, their two error
-  lines share one element ID. With assistive technology active this is a debug-build panic, and in other builds an
-  accessibility identity clash. Verified: Confirmed. Both use `status_line("launcher-custom-value-error", …)` inside
-  anonymous wrappers (`crates/gui/farhelm-gui/src/launcher/view/choices.rs:243-300`). SPEC_impl.md "GPUI cookbook:
-  traps" documents the hazard ("Duplicate ids are a debug panic only while assistive technology is active") and gives
-  the rule "Rule: `(component, domain id)` ids" for the index case. It does not require unique IDs in so many words, so
-  this is not classed clearly settled. Not run under assistive technology.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code. Use distinct model and effort error IDs. Size S.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md
 

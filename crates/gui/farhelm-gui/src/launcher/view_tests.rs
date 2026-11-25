@@ -1302,6 +1302,133 @@ fn enter_on_a_harness_chip_chooses_it_and_presses_launch(cx: &mut TestAppContext
     );
 }
 
+fn acme_agent() -> farhelm_proto::custom_agents::CustomAgent {
+    farhelm_proto::custom_agents::CustomAgent {
+        id: "acme-code".into(),
+        display_name: "Acme Code".into(),
+        command: "acme-code".into(),
+        supports_resumption: false,
+        supports_reporting: false,
+    }
+}
+
+/// Enter still belongs to the chip the user can see. If its registration disappears before the draw catches up,
+/// continuing with the previous draft could start another agent or retire a session the user wanted to replace.
+#[gpui::test]
+fn enter_on_a_withdrawn_custom_agent_chip_cannot_launch(cx: &mut TestAppContext) {
+    use farhelm_proto::custom_agents::CustomAgent;
+
+    let agent = acme_agent();
+    let mut launch = LaunchDraft::new(Some(1), "/src/app".into(), None);
+    launch.choose_harness(LaunchHarness::Codex, None, None);
+    let (mut helm, cx) = launcher_over(
+        cx,
+        launch,
+        vec![
+            hosts(),
+            preferences(&[], None),
+            CollectionState {
+                collection: Collection::CustomAgents,
+                meta: meta(&[agent.id.as_str()]),
+                entries: vec![KeyedEntry {
+                    key: agent.id.clone(),
+                    value: serde_json::to_value(agent).unwrap(),
+                }],
+            },
+        ],
+    );
+    test_support::click(cx, "launcher-harness-Codex");
+    const CHIP: &str = "launcher-custom-acme-code";
+    for _ in 0..LaunchHarness::BUILT_INS.len() {
+        if focused_id(cx).as_deref() == Some(CHIP) {
+            break;
+        }
+        keys(cx, "tab");
+    }
+    assert_eq!(focused_id(cx).as_deref(), Some(CHIP));
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+
+    cx.update(|window, cx| {
+        test_support::withdraw_presented_choice::<CustomAgent>("acme-code", cx);
+        let drew_chip = |window: &gpui::Window| {
+            window
+                .driver_nodes()
+                .iter()
+                .any(|node| node.element_id.as_deref() == Some(CHIP))
+        };
+        assert!(
+            drew_chip(window),
+            "the offered chip was still drawn when the store changed"
+        );
+        window.refresh();
+        window.dispatch_event(
+            gpui::PlatformInput::KeyDown(gpui::KeyDownEvent {
+                native_key: None,
+                keystroke: gpui::Keystroke::parse("enter").unwrap(),
+                is_held: false,
+                prefer_character_input: false,
+            }),
+            cx,
+        );
+        assert!(!drew_chip(window), "the key used GPUI's new dispatch frame");
+    });
+    settle(cx);
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+    assert!(!has_node(cx, CHIP));
+    // A fresh key works on a known focused chip once the new list is shown.
+    test_support::show_next_frame(cx);
+    test_support::click(cx, "launcher-harness-Codex");
+    assert_eq!(focused_id(cx).as_deref(), Some("launcher-harness-Codex"));
+    keys(cx, "enter");
+    assert_eq!(super::launch_tests::creates(&mut helm, cx).len(), 1);
+}
+
+/// A missing saved registration stays identifiable, and both invalid fields have their own status nodes so a
+/// screen reader can follow each correction independently.
+#[gpui::test]
+fn missing_custom_agent_keeps_its_id_and_distinct_field_errors(cx: &mut TestAppContext) {
+    let mut launch = LaunchDraft::new(Some(1), "~".into(), None);
+    launch.choose_custom_agent(&acme_agent(), None, None);
+    launch.agent.model = Some("Bad Model".into());
+    launch.agent.custom_effort = "Bad Effort".into();
+    let (mut helm, cx) = launcher_over(
+        cx,
+        launch,
+        vec![
+            hosts(),
+            preferences(&[], None),
+            CollectionState {
+                collection: Collection::CustomAgents,
+                meta: meta(&[]),
+                entries: Vec::new(),
+            },
+        ],
+    );
+    cx.update(|_, cx| {
+        let store = crate::session::current_store(cx).unwrap();
+        assert!(
+            store
+                .read(cx)
+                .collections()
+                .meta(Collection::CustomAgents)
+                .is_some()
+        );
+    });
+    let chip = test_support::frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-custom-acme-code"))
+        .expect("the withdrawn selection remains drawn");
+    assert_eq!(chip.label.as_deref(), Some("acme-code"));
+    assert_eq!(chip.toggled, Some(gpui::Toggled::True));
+    assert!(chip.focus.is_none() && !chip.flags.keys);
+    assert!(has_node(cx, "launcher-custom-model-error"));
+    assert!(has_node(cx, "launcher-custom-effort-error"));
+    test_support::click(cx, "launcher-launch");
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+}
+
 /// A one-time conversation selector belongs to its chosen harness. Leaving for Bash and then pressing Enter on a
 /// different harness must perform a fresh start, even though that Enter both selects and launches.
 #[gpui::test]
