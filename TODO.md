@@ -69,9 +69,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching
   indicators come later and should fit the layout. Plan: `plans/queue/welcome-empty-state.md`.
 
-- **Cmd-Shift-[ and ] to switch tabs.** Add cmd-shift-[ and ] to switch between terminal tabs/agents within a session.
-  Plan: `plans/queue/tab-switch-shortcuts.md`.
-
 - **Hide removed container hosts with only a failed build record on recipe cards.** After #4934, a container host that
   was removed after a failed build or launch preparation (with no images or resources left) stays on the recipe card
   permanently as "Unavailable place" with a disabled Rebuild button, and nothing removes it except deleting the recipe

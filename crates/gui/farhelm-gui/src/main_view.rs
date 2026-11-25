@@ -57,7 +57,10 @@ use gpui::{
     Window, div, relative,
 };
 
-use crate::actions::{BeginSequence, QuickLaunch, ShowKeyboardShortcuts, TemplateNumberKey};
+use crate::actions::{
+    BeginSequence, NextTerminalTab, PreviousTerminalTab, QuickLaunch, ShowKeyboardShortcuts,
+    TemplateNumberKey,
+};
 use crate::actions::{DeleteSession, NewSession, QuickSwitcher, RenameSession, TemplateList};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::components::{scroll_from_controls, scroll_handle};
@@ -71,6 +74,7 @@ use crate::session_list::{self, SessionList};
 use crate::session_pane::{SessionPane, header};
 use crate::sidebar::{self, Sidebar};
 use crate::templates;
+use crate::terminal::set::TabStep;
 use crate::theme::metrics;
 use crate::{launcher, layers, render_count, root, session, settings, sounds, theme, welcome};
 
@@ -165,6 +169,25 @@ impl MainView {
     /// ([`session_list::show_sessions`]), and for tests that ask it for a row's action the way its menu does.
     pub(crate) fn session_list(&self) -> &Entity<SessionList> {
         &self.session_list
+    }
+
+    /// The physical-key interceptor consumes the chord before dispatch. Leave keyboard layers and marked terminal
+    /// text alone even when the action reaches the ground behind them.
+    fn step_terminal_tab(
+        &mut self,
+        direction: TabStep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if layers::focus_layer_open(window, cx)
+            || self.session_pane.read(cx).terminal_is_composing(window, cx)
+        {
+            return;
+        }
+        let mark = Mark::take(cx);
+        self.session_pane.update(cx, |pane, cx| {
+            pane.step_terminal_tab(direction, &mark, window, cx);
+        });
     }
 }
 
@@ -327,6 +350,12 @@ impl Render for MainView {
                     crate::terminal::text_size::step(-1, cx);
                 }
             })
+            .on_action(cx.listener(|main, _: &PreviousTerminalTab, window, cx| {
+                main.step_terminal_tab(TabStep::Previous, window, cx);
+            }))
+            .on_action(cx.listener(|main, _: &NextTerminalTab, window, cx| {
+                main.step_terminal_tab(TabStep::Next, window, cx);
+            }))
             // Taken whatever the quick launch does with it, as a once-per-press shortcut's handler must be
             // (`actions.rs`); the dispatcher decides whether it may act here at all.
             .on_action(|_: &QuickLaunch, window, cx| templates::quick_launch(window, cx))

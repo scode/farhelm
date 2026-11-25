@@ -155,7 +155,7 @@ use std::rc::Rc;
 
 use crate::terminal::CellMetrics;
 use crate::terminal::attached::Hold;
-use crate::terminal::set::{SharedHold, TerminalSet};
+use crate::terminal::set::{SharedHold, TabStep, TerminalSet};
 use crate::{session_list, theme, ticker};
 
 /// The user's latest choice of a session, kept until the pane has acted on it.
@@ -556,6 +556,25 @@ impl SessionPane {
             .and_then(|mounted| mounted.set.as_ref())
             .and_then(|set| set.read(cx).shown())
             .is_some_and(|terminal| terminal.read(cx).is_composing(window))
+    }
+
+    /// Forward a tab shortcut only to the terminal set mounted under the current UI session. Cards without
+    /// terminals have no set, and the unavailable card over a set makes that set inert.
+    pub(crate) fn step_terminal_tab(
+        &mut self,
+        direction: TabStep,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(set) = self
+            .mounted
+            .read(cx)
+            .and_then(Option::as_ref)
+            .and_then(|mounted| mounted.set.as_ref())
+        {
+            set.update(cx, |set, cx| set.step(direction, mark, window, cx));
+        }
     }
 
     /// The open session's terminals under the current UI session, for tests.

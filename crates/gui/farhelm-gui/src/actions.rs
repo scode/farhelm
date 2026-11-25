@@ -92,15 +92,16 @@
 //! GPUI's key-down event has no composing flag. An input method can hand a shortcut back to GPUI during composition,
 //! and the key can reach the app's action before it reaches the focused terminal. The session Delete and Rename
 //! handlers ask the shown terminal directly whether its input has marked text. The physical-key interceptor also
-//! stops its keys before the focused element sees them, so composition checks for those actions belong to their
-//! handlers; the Keyboard shortcuts dialog's handler has none yet (`shortcuts.rs`).
+//! stops its keys before the focused element sees them, so the Keyboard shortcuts and terminal tab actions check
+//! composition in their handlers.
 //!
 //! ## Shortcuts matched by the physical key
 //!
 //! SPEC.md matches some shortcuts by where the key sits rather than what it prints: the template number keys ("the
 //! physical digit key, independent of the printed character; the numeric keypad is excluded"), Keyboard shortcuts ("the
-//! physical Slash key, with no extra modifiers") and terminal text size ("the US-layout positions of = and −"). A key
-//! binding cannot express that, because GPUI matches bindings by the logical key: on Linux it reports Ctrl+Shift+1 as
+//! physical Slash key, with no extra modifiers"), terminal text size (the US positions of = and −) and terminal tabs
+//! (the US positions of `[` and `]`). A key binding cannot express that, because GPUI matches bindings by the logical
+//! key: on Linux it reports Ctrl+Shift+1 as
 //! Ctrl+`!` on a US layout and as something else on others. So [`PHYSICAL_KEYS`] lists them by key, and the same
 //! keystroke interceptor that guards repeats matches them before any binding or listener sees the key: it dispatches
 //! the row's action to the focused element and stops the key, so neither a focused terminal's program nor a text field
@@ -334,6 +335,10 @@ actions!(
         /// Step every open terminal's text size down (the key at the US position of −; otherwise as
         /// [`IncreaseTerminalTextSize`]).
         DecreaseTerminalTextSize,
+        /// Choose the previous live terminal tab in the open session, wrapping from its main tab to the last shell.
+        PreviousTerminalTab,
+        /// Choose the next live terminal tab in the open session, wrapping from the last shell to its main tab.
+        NextTerminalTab,
         /// Quit the app the ordinary way, so every quit path runs the host's quit handler once
         /// (`bootstrap::Host::on_quit`; SPEC.md, "Desktop window chrome": Cmd+Q closes the app). The Mac app menu's Quit
         /// item and Cmd+Q; handled app-wide by the desktop module.
@@ -1136,9 +1141,9 @@ impl PhysicalKey {
 
 /// Every shortcut SPEC.md matches by key position rather than by the key's printed character, with the modifiers the
 /// old app used at the reference commit: Command on a Mac and Ctrl+Shift on Linux, and Command+Shift on a Mac for
-/// terminal text size. A row's action runs from anywhere in the window, a focused terminal and a text field included,
-/// and the key goes no further (the module docs' "Shortcuts matched by the physical key"). Its feature adds the
-/// action's handler; until then the key does nothing at all.
+/// terminal text size and tab switching. A row's action runs from anywhere in the window, a focused terminal and a
+/// text field included, and the key goes no further (the module docs' "Shortcuts matched by the physical key"). The
+/// handler still decides whether the shortcut can act in the current UI.
 ///
 /// A row is the whole of a new shortcut: its key's identities are data in the row. One row per line, so that a new
 /// shortcut only adds a line.
@@ -1161,6 +1166,9 @@ pub const PHYSICAL_KEYS: &[PhysicalKey] = &[
     // SPEC.md, "Terminal experience": text size, at the US positions of = and −.
     PhysicalKey { key: key("AE12", 0x18, "="), mac: COMMAND_SHIFT, linux: CONTROL_SHIFT, action: &IncreaseTerminalTextSize },
     PhysicalKey { key: key("AE11", 0x1B, "-"), mac: COMMAND_SHIFT, linux: CONTROL_SHIFT, action: &DecreaseTerminalTextSize },
+    // SPEC.md, "Session view": use the bracket positions even when Shift changes the printed characters.
+    PhysicalKey { key: key("AD11", 0x21, "["), mac: COMMAND_SHIFT, linux: CONTROL_SHIFT, action: &PreviousTerminalTab },
+    PhysicalKey { key: key("AD12", 0x1E, "]"), mac: COMMAND_SHIFT, linux: CONTROL_SHIFT, action: &NextTerminalTab },
 ];
 
 /// A template number key's row: Command+digit on a Mac, Ctrl+Shift+digit on Linux.

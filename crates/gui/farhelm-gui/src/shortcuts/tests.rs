@@ -23,9 +23,9 @@ use gpui::{
 use super::{Chord, KeyboardShortcuts, Keys, Name, Row, sections, wording};
 use crate::actions::{
     self, BeginSequence, CONTEXT, DecreaseTerminalTextSize, DeleteSession,
-    IncreaseTerminalTextSize, KeyOwner, NewSession, PHYSICAL_KEYS, QuickLaunch, QuickSwitcher,
-    RenameSession, ShowKeyboardShortcuts, TERMINAL_KEYS, THIS_PLATFORM, TemplateList,
-    TemplateNumberKey,
+    IncreaseTerminalTextSize, KeyOwner, NewSession, NextTerminalTab, PHYSICAL_KEYS,
+    PreviousTerminalTab, QuickLaunch, QuickSwitcher, RenameSession, ShowKeyboardShortcuts,
+    TERMINAL_KEYS, THIS_PLATFORM, TemplateList, TemplateNumberKey,
 };
 use crate::layers;
 use crate::session_list::tests::{listing, preferences_state, session};
@@ -177,6 +177,8 @@ fn each_platform_shows_only_its_own_forms_with_new_on_the_mac_alone() {
         ("Launching", "In a sequence: cancel", "Escape"),
         ("Terminal", "Smaller terminal text", "Ctrl+Shift+−"),
         ("Terminal", "Larger terminal text", "Ctrl+Shift++"),
+        ("Terminal", "Previous terminal tab", "Ctrl+Shift+["),
+        ("Terminal", "Next terminal tab", "Ctrl+Shift+]"),
     ]));
     assert_eq!(table(Platform::Linux, &none), linux);
 
@@ -203,6 +205,8 @@ fn each_platform_shows_only_its_own_forms_with_new_on_the_mac_alone() {
         ("Launching", "In a sequence: cancel", "Escape"),
         ("Terminal", "Smaller terminal text", "⌘+Shift+−"),
         ("Terminal", "Larger terminal text", "⌘+Shift++"),
+        ("Terminal", "Previous terminal tab", "⌘+Shift+["),
+        ("Terminal", "Next terminal tab", "⌘+Shift+]"),
     ]));
     assert_eq!(table(Platform::Mac, &none), mac);
 }
@@ -267,6 +271,8 @@ fn runs(name: &Name) -> Runs {
         Name::Words("Begin launch sequence") => action(&BeginSequence),
         Name::Words("Smaller terminal text") => action(&DecreaseTerminalTextSize),
         Name::Words("Larger terminal text") => action(&IncreaseTerminalTextSize),
+        Name::Words("Previous terminal tab") => action(&PreviousTerminalTab),
+        Name::Words("Next terminal tab") => action(&NextTerminalTab),
         // The armed sequence recognizes the same physical number chords as direct launch.
         Name::Words(
             "Launch a numbered template"
