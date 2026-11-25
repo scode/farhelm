@@ -811,16 +811,16 @@ pub(crate) fn workspace_trust_enabled(
     }
 }
 
-/// These trust mechanisms carry the directory shown on the approval card to
-/// dispatch. Antigravity already resolves its directory in the supervisor.
+/// These trust mechanisms apply to a directory. Pin it before asking for approval so dispatch uses the shown path.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) fn workspace_trust_pins_approval_cwd(harness: LaunchHarness) -> bool {
     match harness {
-        LaunchHarness::Claude | LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi => {
-            true
-        }
-        LaunchHarness::Antigravity
-        | LaunchHarness::Cursor
+        LaunchHarness::Claude
+        | LaunchHarness::Codex
+        | LaunchHarness::Muse
+        | LaunchHarness::Pi
+        | LaunchHarness::Antigravity => true,
+        LaunchHarness::Cursor
         | LaunchHarness::Goose
         | LaunchHarness::Grok
         | LaunchHarness::Omp

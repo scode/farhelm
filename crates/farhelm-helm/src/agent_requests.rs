@@ -8554,6 +8554,17 @@ mod tests {
         reply_cwd: Option<String>,
         managed_checkout: bool,
     ) -> (RecordedCreates, RecordedBrowses) {
+        spawn_create_responder_with_directory(peer, refusal, reply_cwd, managed_checkout, None)
+    }
+
+    /// Optionally report a distinct canonical directory so a test can distinguish a lookup from use of its result.
+    fn spawn_create_responder_with_directory(
+        peer: tokio::io::DuplexStream,
+        refusal: Option<String>,
+        reply_cwd: Option<String>,
+        managed_checkout: bool,
+        canonical_cwd: Option<&'static str>,
+    ) -> (RecordedCreates, RecordedBrowses) {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 
@@ -8583,7 +8594,7 @@ mod tests {
                         recorded_browses.lock().unwrap().push(cwd.clone());
                         ControlMsg::DirectoryListing {
                             req_id,
-                            cwd,
+                            cwd: canonical_cwd.map_or(cwd, str::to_owned),
                             parent: Some("/".into()),
                             children: vec![],
                             truncated: false,
@@ -11187,17 +11198,20 @@ mod tests {
     /// inheriting a stored launch. Approval and dispatch must receive the
     /// same destination-normalized trust, including when an old client's
     /// trust bit disagrees with the setting or the target is unmanaged.
-    /// A switch flip while that card waits must not change its dispatch.
+    /// A switch flip while that card waits must not change its dispatch. An Antigravity opt-in also requires the
+    /// target's directory lookup before the card, just as Codex does.
     #[farhelm_testtrace::test]
     async fn ordinary_agent_create_and_spawn_normalize_trust_before_approval_and_dispatch() {
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
         use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection, SpawnPlacement};
 
         for spawned in [false, true] {
-            for (enabled, managed, incoming_trust) in [
-                (true, true, false),
-                (true, false, true),
-                (false, true, true),
+            for (harness, enabled, managed, incoming_trust) in [
+                (LaunchHarness::Codex, true, true, false),
+                (LaunchHarness::Codex, true, false, true),
+                (LaunchHarness::Codex, false, true, true),
+                (LaunchHarness::Antigravity, true, false, false),
+                (LaunchHarness::Antigravity, false, false, true),
             ] {
                 let (client_side, peer) = tokio::io::duplex(64 * 1024);
                 let (seen, browsed) =
@@ -11205,10 +11219,7 @@ mod tests {
                 let (h, local, remote) =
                     creating_fleet(client_side, vec![session("asker", 1)]).await;
                 let origin_host = if spawned { remote } else { local };
-                h.store
-                    .set_agent_trust(LaunchHarness::Codex, enabled)
-                    .await
-                    .unwrap();
+                h.store.set_agent_trust(harness, enabled).await.unwrap();
                 h.store
                     .set_yolo_without_asking(remote, false)
                     .await
@@ -11217,12 +11228,9 @@ mod tests {
                     .set_commands_without_asking(origin_host, false)
                     .await
                     .unwrap();
+                let config = h.store.resolve_checkout_config(None).await.unwrap();
                 assert_eq!(
-                    h.store
-                        .resolve_checkout_config(None)
-                        .await
-                        .unwrap()
-                        .codex_trust,
+                    crate::launches::workspace_trust_enabled(harness, &config),
                     enabled
                 );
                 let target_before = h.manager.status(remote).unwrap();
@@ -11231,7 +11239,7 @@ mod tests {
                 assert!(browsed.lock().unwrap().is_empty());
                 let expected = crate::launches::compile(LaunchSelection {
                     custom_agent: None,
-                    harness: LaunchHarness::Codex,
+                    harness,
                     model: None,
                     effort: None,
                     permissions: Some(LaunchPermission::Guarded),
@@ -11247,7 +11255,7 @@ mod tests {
                     templates: vec![],
                     edits: TemplateFields {
                         kind: Some(LauncherKind::Agent),
-                        agent: Some(LaunchHarness::Codex),
+                        agent: Some(harness),
                         permissions: Some(Some(LaunchPermission::Guarded)),
                         workspace_trust: Some(Some(incoming_trust)),
                         destination: Some(TemplateDestination::Folder("/target-directory".into())),
@@ -11288,22 +11296,18 @@ mod tests {
                 assert_eq!(cwd, "/target-directory");
                 assert_eq!(
                     launch, expected,
-                    "spawned {spawned}, setting {enabled}, managed {managed}"
+                    "{harness:?}, spawned {spawned}, setting {enabled}, managed {managed}"
                 );
+                let expected_browses: &[_] = if enabled { &["/target-directory"] } else { &[] };
+                assert_eq!(browsed.lock().unwrap().as_slice(), expected_browses);
                 assert!(
                     seen.lock().unwrap().is_empty(),
                     "approval must precede target dispatch"
                 );
-                h.store
-                    .set_agent_trust(LaunchHarness::Codex, !enabled)
-                    .await
-                    .unwrap();
+                h.store.set_agent_trust(harness, !enabled).await.unwrap();
+                let config = h.store.resolve_checkout_config(None).await.unwrap();
                 assert_eq!(
-                    h.store
-                        .resolve_checkout_config(None)
-                        .await
-                        .unwrap()
-                        .codex_trust,
+                    crate::launches::workspace_trust_enabled(harness, &config),
                     !enabled,
                     "premise: the setting changed while the normalized card waited",
                 );
@@ -11335,14 +11339,7 @@ mod tests {
                 assert_eq!(creates[0].launch.as_ref(), Some(&expected));
                 assert_eq!(creates[0].cwd, "/target-directory");
                 assert_eq!(creates[0].parent.as_deref(), spawned.then_some("asker"));
-                assert_eq!(
-                    *browsed.lock().unwrap(),
-                    if enabled {
-                        vec!["/target-directory".to_string()]
-                    } else {
-                        vec![]
-                    }
-                );
+                assert_eq!(browsed.lock().unwrap().as_slice(), expected_browses);
             }
         }
     }
@@ -12720,8 +12717,7 @@ mod tests {
     }
 
     /// Inherited spawn composes with current Settings even in a plain folder.
-    /// Approval freezes that choice for dispatch. Antigravity still resolves
-    /// its directory on the supervisor when it fills the launch argument.
+    /// Approval freezes the trust choice and the directory returned by the target for dispatch.
     #[farhelm_testtrace::test]
     async fn inherited_spawn_normalizes_trust_before_approval_and_dispatch() {
         use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
@@ -12754,12 +12750,16 @@ mod tests {
                 let inherited = crate::launches::compile(selection.clone()).unwrap();
                 assert_eq!(inherited.yolo(), Some(harness.offers_only_yolo()));
                 let mut expected_selection = selection;
-                let pins_approval = harness != LaunchHarness::Antigravity;
                 expected_selection.workspace_trust = enabled.then_some(true);
                 let expected = crate::launches::compile(expected_selection).unwrap();
                 let (client_side, peer) = tokio::io::duplex(64 * 1024);
-                let (seen, browsed) =
-                    spawn_create_responder_with_membership(peer, None, None, managed);
+                let (seen, browsed) = spawn_create_responder_with_directory(
+                    peer,
+                    None,
+                    None,
+                    managed,
+                    Some("/resolved-directory"),
+                );
                 let (h, _local, remote) =
                     creating_fleet(client_side, vec![session("asker", 1)]).await;
                 h.store.set_agent_trust(harness, enabled).await.unwrap();
@@ -12820,7 +12820,12 @@ mod tests {
                     panic!("inherited spawn approval")
                 };
                 assert_eq!(verb, LaunchVerb::SpawnInherited);
-                assert_eq!(cwd, "/target-directory");
+                let expected_cwd = if enabled {
+                    "/resolved-directory"
+                } else {
+                    "/target-directory"
+                };
+                assert_eq!(cwd, expected_cwd);
                 assert_eq!(launch, expected, "approval must show destination trust");
                 assert!(seen.lock().unwrap().is_empty(), "no create before Allow");
                 h.store.set_agent_trust(harness, !enabled).await.unwrap();
@@ -12843,7 +12848,7 @@ mod tests {
                 );
                 let creates = seen.lock().unwrap();
                 assert_eq!(creates.len(), 1);
-                assert_eq!(creates[0].cwd, "/target-directory");
+                assert_eq!(creates[0].cwd, expected_cwd);
                 assert_eq!(creates[0].launch.as_ref(), Some(&expected));
                 assert_eq!(
                     creates[0].request_fingerprint, None,
@@ -12851,7 +12856,7 @@ mod tests {
                 );
                 assert_eq!(
                     *browsed.lock().unwrap(),
-                    if enabled && pins_approval {
+                    if enabled {
                         vec!["/target-directory".to_string()]
                     } else {
                         vec![]

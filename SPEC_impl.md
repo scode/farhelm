@@ -3688,10 +3688,11 @@ overlays on fresh reads.
 
 The helm resolves these settings into an agent selection for any directory before compilation. The compiler remains pure
 so the YOLO guard can reproduce a launch exactly. A fresh checkout freezes the whole resolved launch in its existing
-create fingerprint. For an agent's Create, Spawn or Clone into an existing directory with Claude, Codex, Muse or Pi
-trust enabled, the helm asks the pinned target supervisor for the canonical directory. The card and dispatch use that
-same path so retargeting the original alias cannot redirect the launch during the wait for Allow. Direct launches go
-through ordinary supervisor directory admission. Plain Restart and Replace keep the stored launch and its trust choice.
+create fingerprint. When Farhelm applies automatic workspace trust to an agent's Create, Spawn or Clone into an existing
+directory for Claude, Codex, Muse, Pi or Antigravity, the helm asks the pinned target supervisor for the canonical
+directory. The card and dispatch use that same path so retargeting the original alias cannot redirect the launch during
+the wait for Allow. Direct launches go through ordinary supervisor directory admission. Plain Restart and Replace keep
+the stored launch and its trust choice.
 
 Protocol 55 adds the `membership_only` mode of `BrowseDirectory` and the required `managed_checkout` reply boolean. The
 focused mode skips child enumeration and the picker’s printable-label restriction. The supervisor canonicalizes the
