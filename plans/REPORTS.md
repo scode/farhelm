@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`dynamic-announcements`](reports/dynamic-announcements.report.md) landed 2026-11-24 in #4749, #4753, #4756, #4759: Add a signed central announcements feed on get.farhelm.io with helm polling, bell notice, Settings toggle, and P2 brick test
 - [`hide-non-actionable-file-hovers`](reports/hide-non-actionable-file-hovers.report.md) landed 2026-11-24 in #4777, #4779, #4780: Hide non-actionable terminal file hovers and wait silently while checking
 - [`drift-model-selection`](reports/drift-model-selection.report.md) landed 2026-11-25 in #4781, #4782, #4783: Add drift test categories and live model selection coverage across supporting agents
 - [`drift-reasoning-effort`](reports/drift-reasoning-effort.report.md) landed 2026-11-25 in #4785, #4791: Add live reasoning effort selection drift tests across supporting agents
