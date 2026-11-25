@@ -147,15 +147,57 @@ fn every_departure_from_an_unsaved_draft_asks_first(cx: &mut TestAppContext) {
     assert!(helm.commands().is_empty(), "nothing was sent");
 }
 
+/// Two departures from the same painted editor can arrive before the veil appears. The first question owns the
+/// decision. Discard opens the named template and leaves no older Save that could write a different draft.
+#[gpui::test]
+fn two_departure_clicks_leave_only_the_first_question(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    open_unsaved(&mut helm, cx);
+    let next = test_support::center(cx, "template-open-webbuilder");
+    let duplicate = test_support::center(cx, "templates-duplicate");
+    cx.update(|window, cx| {
+        let editor_layer = layers::top_layer(window, cx);
+        assert!(editor_layer.is_some());
+        test_support::click_before_redraw(next, window, cx);
+        let question = layers::top_layer(window, cx);
+        assert!(question.is_some() && question != editor_layer);
+        assert!(
+            !window
+                .driver_nodes()
+                .iter()
+                .any(|node| { node.element_id.as_deref() == Some("prompt-confirm") }),
+            "the first question's veil has yet to draw"
+        );
+        test_support::click_before_redraw(duplicate, window, cx);
+        assert_eq!(layers::top_layer(window, cx), question);
+    });
+    test_support::show_next_frame(cx);
+    assert_eq!(draft(cx).name, "codex-deep");
+    assert!(painted(cx).contains(QUESTION));
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("prompt-confirm")
+    );
+    click(cx, "prompt-alternative-0");
+    settle(cx);
+    assert_eq!(draft(cx).name, "webbuilder", "the first departure wins");
+    assert!(
+        !painted(cx).contains(QUESTION),
+        "there is no second question"
+    );
+    assert!(helm.commands().is_empty());
+}
+
 /// The reported trap: a template saved before launcher switches existed, carrying the old workspace-trust field, opens
 /// with Farhelm's own fill-ins (the inferred switch, the dropped field) showing as unsaved, and that alone made every
 /// close ask. Those fill-ins keep Save available, but leaving must not ask about them. Specified: such a template,
-/// untouched, closes on the first Escape and on the first header Close; and toggled away from the inferred switch and
-/// back, the header Close still leaves at once; none of them sends anything to the helm.
+/// untouched, closes on the first Escape and on the first header Close. It still closes after removing the inferred
+/// switch to restore the stored choice, or toggling back to the inferred switch. None sends anything to the helm.
 #[gpui::test]
 fn untouched_legacy_template_closes_without_asking(cx: &mut TestAppContext) {
-    let close_controls: [fn(&mut VisualTestContext); 3] = [
+    let close_controls: [fn(&mut VisualTestContext); 4] = [
         |cx| keys(cx, "escape"),
+        |cx| click(cx, "templates-close"),
         |cx| click(cx, "templates-close"),
         |cx| click(cx, "templates-close"),
     ];
@@ -171,9 +213,12 @@ fn untouched_legacy_template_closes_without_asking(cx: &mut TestAppContext) {
         assert!(painted(cx).contains("Unsaved changes"));
         assert_eq!(draft(cx).fields.kind, Some(LauncherKind::Agent));
         assert!(draft(cx).fields.workspace_trust.is_none());
-        if index == 2 {
+        if index >= 2 {
             click(cx, "templates-switch-Don't switch");
             assert_eq!(draft(cx).fields.kind, None);
+            assert!(painted(cx).contains("Unsaved changes"));
+        }
+        if index == 3 {
             click(cx, "templates-switch-Agent");
             assert_eq!(draft(cx).fields.kind, Some(LauncherKind::Agent));
             assert!(painted(cx).contains("Unsaved changes"));

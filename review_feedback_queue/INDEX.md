@@ -84,9 +84,6 @@ consequences.
 
 ## High priority: material UX degradation
 
-- [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
-  cause the remaining answer to save or discard a different template draft.
-
 - [`antigravity-trust-warning-omitted-from-accessibility.md`](antigravity-trust-warning-omitted-from-accessibility.md) —
   Screen-reader users can enable automatic trust without access to the visible permission and trust-list warnings.
 
@@ -251,9 +248,6 @@ consequences.
   YOLO mode.' with no toggle and lets the user save, yet actually saves YOLO as off ('Not YOLO').
 
 ## Other: correctness, diagnostics, cleanup, or convenience
-
-- [`legacy-template-can-ask-to-save-automatic-cleanup.md`](legacy-template-can-ask-to-save-automatic-cleanup.md) — A
-  legacy template can ask to save when the only remaining change is automatic cleanup of a retired trust field.
 
 - [`antigravity-trust-hint-omits-live-announcement.md`](antigravity-trust-hint-omits-live-announcement.md) — The new
   Antigravity trust hint emits no live announcement request for screen readers.

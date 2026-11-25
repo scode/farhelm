@@ -116,30 +116,6 @@
   the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
-## legacy-template-can-ask-to-save-automatic-cleanup.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md:1343-1346: "Leaving asks Keep editing, Discard, or Save ... only when the draft
-  has edits since opening or saving that Save would store. ... An inferred switch or removed legacy workspace-trust
-  field enables Save but never makes leaving ask." The code contradicts it for one template shape: a kindless template
-  that still has the old workspace-trust field. - The baseline holds the raw stored fields, trust included, and the
-  leave baseline holds the normalized opening draft with the switch inferred and trust dropped (`editor.rs:262-279`,
-  `:296-301`). - After the user picks "Don't switch" (`rows.rs:169`, `editor.rs:491-501`), the draft differs from
-  storage only by the dropped trust field and from the opening draft only by the switch. `needs_leave_confirmation`
-  (`editor.rs:415-417`) still returns true, and both departure routes ask (`dialog.rs:432-440`, `:532-547`). The
-  existing tests cover each fill-in alone (`templates/leave_tests.rs:155-187`, `:190-209`) but not this combination. The
-  method's own comment states the intended rule that neither fill-in asks, so no deliberate choice is overturned. Fix:
-  compare against a stored baseline with retired workspace trust removed for the leave decision only, keeping the raw
-  baseline for Save's dirty state, and add a test for the combination. Size about 20-40 lines. Verified: confirmed by
-  code reading.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code — the
-  spec says "never" in so many words; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## antigravity-trust-hint-omits-live-announcement.md
 
 - Outcome: `fix code`.
@@ -2007,33 +1983,6 @@
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## template-leave-prompts-can-stack.md
-
-- Outcome: `fix code`.
-- Assessment: In the Templates dialog, leaving an edited template asks "Save these changes before leaving?". Two quick
-  departure clicks can open two of these questions before the screen redraws, for example clicking another template's
-  row and then Duplicate. Answering the newer one with Discard opens an unsaved copy. Save on the older one then saves
-  that copy as a new `<name>-copy` template, not the edits it asked about, and moves on. Verified: confirmed by code
-  reading. Two clicks before a redraw are needed, as in item 1. - `ask_leave` (`dialog.rs:550-604`) does not check for
-  an open question. `prompt::ask` -> `ask_inner` (`prompt.rs:1449-1750`) has no such check either. - The click path has
-  no top-layer gate (`components/mod.rs:409-430`). - The Save answer calls `save_editor` on the live editor
-  (`dialog.rs:588-603`). Its comment assumes "the veil keeps the draft as it was", which stacked questions break. -
-  Duplicate copies the stored baseline, not the draft (`editor.rs:350-360`). This contradicts SPEC_impl.md:984-986
-  ("When a confirmation opens, it freezes what it shows: targets ... Its answer buttons come pre-wired to that frozen
-  state") and :1002 ("An answer acts on the value presented with the confirmation it answers"). Consequence: the user
-  discarded the edits on one question, and those were unsaved form input. An unwanted duplicate template is saved, which
-  Delete removes. Nothing user-owned is lost.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code — allow one leave question per editor and bind Save and Discard
-  to that editor, refusing if it was replaced. Size S (about 40-80 lines with a test that sends both clicks with no draw
-  between them). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
-  or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
-  file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## settings-footer-can-discard-the-wrong-page.md
 
