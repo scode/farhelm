@@ -325,9 +325,6 @@ consequences.
   — Installing the desktop app after Update's reach check but before the run is accepted can leave a separately
   installed launchd service where Update should refuse.
 
-- [`trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md`](trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md)
-  — Tests can keep passing if a replacement already queued for a host resumes under the wrong connection lifetime.
-
 - [`trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md`](trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md)
   — The new test would still pass if a future edit broke automatic Trash refresh after Replace removes its source.
 

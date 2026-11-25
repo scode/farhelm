@@ -561,19 +561,6 @@
   record which way it went. Recommendation for reference: discard — coverage only; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md
-
-- Outcome: `other`.
-- Assessment: Maintainer test gap only. The credential-delivery reconnect test does not cover a delivery still queued
-  for a host slot when the connection is replaced. Verified: Confirmed by the reviewer. The test file changed afterwards
-  (107915bb7, 67d8541dc) and I did not re-check whether a queued-candidate case was added.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard.
-- Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
 ## trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md
 
 - Outcome: `other`.

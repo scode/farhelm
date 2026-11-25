@@ -44759,3 +44759,19 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. Registration, destination edits, and enabling Tailscale retain the guidance about the accepted
   address format. Change `qkmlvwsnyyrqsmyvmvnupyyvuzuxlrtr`, bookmark `plan/triage-helm-nov24/03-ssh`,
   [PR #4854](https://github.com/scode/farhelm/pull/4854/changes).
+
+## trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md
+
+- Outcome: `other`.
+- Assessment: Maintainer test gap only. The credential-delivery reconnect test does not cover a delivery still queued
+  for a host slot when the connection is replaced. Verified: Confirmed by the reviewer. The test file changed afterwards
+  (107915bb7, 67d8541dc) and I did not re-check whether a queued-candidate case was added.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard.
+- Execution: Archived with no test change. Existing tests cover a replacement already in transport or waiting for a host
+  lock. Holding a candidate outside the four-host dispatch window through a new connection, with an observable ready
+  successor, needs more fixture work than the conditional size permits. Change `xyyrlkrlpoukpzrvptzxrsspkknsrwol`,
+  bookmark `plan/triage-helm-nov24/04-other`, [PR #4858](https://github.com/scode/farhelm/pull/4858/changes).
