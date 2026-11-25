@@ -33,10 +33,6 @@ consequences.
   — In Replace with on a suspended managed-checkout host, pressing Down then Enter on a retained recent checkout setup
   immediately wakes, clones fresh, and deletes the source without showing the fresh-clone warning.
 
-- [`trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md`](trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md)
-  — Toggling Claude workspace trust while an agent checkout approval card waits or an environment starts can grant trust
-  to a Not trusted approval or leave permanent trust with no archive cleanup record.
-
 - [`trailing-podman-verify-place-nonce-in-argv-forgeable.md`](trailing-podman-verify-place-nonce-in-argv-forgeable.md) —
   Because the place-identity guard passes its expected proof nonce in the SSH command line, a compromised host reached
   after an SSH alias move can echo the nonce to spoof container absence on Delete or accept a pending create.

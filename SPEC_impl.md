@@ -9785,6 +9785,9 @@ unless the stored launch is still exactly that, comparing under the session's li
 also takes, so a Restart with from the GUI while the card waited cannot make the approval resume a launch the card did
 not show. The helm also refuses up front when its cache already shows the change, which only gives a clearer message.
 
+An agent-requested fresh checkout retains the Claude trust setting for checkout preparation from before the approval
+card through dispatch, including any environment startup.
+
 Template writes (`TemplateCreate`, `TemplateEdit`, `TemplateDelete`, protocol 42) go through the same card. An edit is
 merged with the stored template before the card, so the card shows the whole result, command text the listing withholds
 included. The write then lands only on the template the card was built from: the conditional store operations

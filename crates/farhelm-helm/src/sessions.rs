@@ -55,8 +55,8 @@
 
 use crate::manager;
 use crate::workspace_trust::{
-    TrustResolvedLaunch, configured_launch_workspace_trust, normalize_launch_workspace_trust,
-    retain_stored_launch_workspace_trust,
+    ApprovedLaunchTrust, TrustResolvedLaunch, configured_launch_workspace_trust,
+    normalize_launch_workspace_trust, retain_stored_launch_workspace_trust,
 };
 use crate::{
     AppState, CreateExtras, SupervisorClient, SupervisorError, aggregate, http_error, launches,
@@ -1275,14 +1275,14 @@ pub(crate) struct CreateReq {
 }
 
 /// What an agent's environment launch carries into the launcher's create:
-/// the launch exactly as its card showed it, workspace trust already decided,
+/// the launch exactly as its card showed it, both trust choices already decided,
 /// and the agent's wrapper facts. Carried rather than recomputed because the
 /// create runs minutes later, after the environment is built, and neither a
 /// Settings change in between nor the user-create path's history bookkeeping
 /// may change or claim what the user approved.
 #[derive(Clone)]
 pub(crate) struct AgentEnvironmentCreate {
-    launch: TrustResolvedLaunch,
+    launch: ApprovedLaunchTrust,
     agent_wrapper_supplied: bool,
     wrapper_approved: bool,
 }
@@ -1312,13 +1312,13 @@ impl CreateReq {
     /// before launch kinds has neither and is refused, as Clone and Replace
     /// refuse it.
     pub(crate) fn for_agent_environment(
-        launch: TrustResolvedLaunch,
+        launch: ApprovedLaunchTrust,
         agent_wrapper_supplied: bool,
         prompt: Option<String>,
         title: Option<String>,
         repo: Option<String>,
     ) -> anyhow::Result<CreateReq> {
-        let (selection, command) = match launch.as_launch() {
+        let (selection, command) = match launch.mode.as_launch() {
             farhelm_proto::SessionLaunch::Agent { selection, .. } => {
                 (Some(selection.clone()), None)
             }
@@ -1428,7 +1428,7 @@ impl CreateReq {
         // Compile their copy so a catalog edit cannot swap the executable
         // after admission. Agent launches already carry their approved command.
         let launch = match &self.agent {
-            Some(agent) => agent.launch.as_launch().clone(),
+            Some(agent) => agent.launch.mode.as_launch().clone(),
             None => create_mode(store, &mut self.clone()).await?,
         };
         launch
@@ -1991,7 +1991,7 @@ async fn create_session_request(
                 client_identity,
                 accept_result: None,
                 origin,
-                resolved_mode: approved,
+                approved,
             },
         )
         .await?;
@@ -2008,7 +2008,7 @@ async fn create_session_request(
     // An agent's approved launch keeps the trust its card showed; a user's
     // create decides trust now, for the folder it lands in.
     let mode = match approved {
-        Some(approved) => approved,
+        Some(approved) => approved.mode,
         None => {
             let mode = ordinary_mode
                 .expect("fresh and agent requests returned or took their own launch above");
@@ -2541,7 +2541,7 @@ async fn create_fresh_session(
             client_identity,
             accept_result,
             origin: CreateOrigin::User,
-            resolved_mode: None,
+            approved: None,
         },
     )
     .await
@@ -2555,7 +2555,7 @@ struct FreshCreateContext {
     client_identity: String,
     accept_result: Option<CreatedSessionCheck>,
     origin: CreateOrigin,
-    resolved_mode: Option<TrustResolvedLaunch>,
+    approved: Option<ApprovedLaunchTrust>,
 }
 
 /// Fresh admission after either a client choice or an approved agent
@@ -2579,7 +2579,7 @@ async fn create_fresh_session_resolved(
         client_identity,
         accept_result,
         origin,
-        resolved_mode,
+        approved,
     } = context;
     let checkout = req
         .github_checkout
@@ -2636,13 +2636,18 @@ async fn create_fresh_session_resolved(
         if req.title.is_none() {
             req.title = checkout.title.clone();
         }
-        let config = checkout_config_for(state, claim.host).await?;
+        let mut config = checkout_config_for(state, claim.host).await?;
+        if let Some(approved) = &approved {
+            // Preview admission still uses the destination's current revision.
+            // Preparation and its cleanup record use the approved trust choice.
+            config.claude_trust = approved.claude_after_clone;
+        }
         let github_checkout = github_checkout_resolution(&req, client_identity.clone(), &config)
             .expect("fresh request requires resolution")?;
-        let mode = match resolved_mode {
+        let mode = match approved {
             // An agent's approval already fixed this trust choice. Reading
             // Settings again here must not change the approved launch.
-            Some(mode) => mode,
+            Some(approved) => approved.mode,
             None => configured_launch_workspace_trust(
                 create_mode(&state.store, &mut req).await?,
                 &config,
@@ -2772,7 +2777,7 @@ pub(crate) async fn create_agent_checkout(
     claim: &manager::SessionClaim,
     client: &SupervisorClient,
     checkout: farhelm_proto::GithubCheckoutRequest,
-    resolution: crate::agent_launch::Resolution<TrustResolvedLaunch>,
+    resolution: crate::agent_launch::Resolution<ApprovedLaunchTrust>,
     wrapper_approved: bool,
     intent_key: Option<String>,
     client_identity: String,
@@ -2809,7 +2814,7 @@ pub(crate) async fn create_agent_checkout(
                 agent_wrapper_supplied: resolution.agent_wrapper_supplied,
                 wrapper_approved,
             },
-            resolved_mode: Some(resolution.launch),
+            approved: Some(resolution.launch),
         },
     )
     .await
@@ -2921,7 +2926,7 @@ mod workspace_trust_tests {
     use farhelm_proto::{LaunchHarness, LaunchSelection};
 
     /// Spec: an agent's environment launch request carries the launch its card
-    /// showed, workspace trust included, and speaks with the agent's origin,
+    /// showed, both trust choices included, and speaks with the agent's origin,
     /// its direct-Allow answering any wrapper the agent supplied; a request
     /// decoded from a client body carries neither (SPEC.md, "Agents and
     /// environments").
@@ -2946,8 +2951,8 @@ mod workspace_trust_tests {
         let launch = launches::compile(selection).unwrap();
         let settings = crate::checkout_config::ResolvedCheckoutConfig {
             keep_spare: false,
-            claude_trust: false,
-            codex_trust: true,
+            claude_trust: true,
+            codex_trust: false,
             muse_trust: false,
             pi_trust: false,
             antigravity_trust: false,
@@ -2957,12 +2962,16 @@ mod workspace_trust_tests {
         };
         let approved =
             crate::workspace_trust::configured_launch_workspace_trust(launch, &settings).unwrap();
-        let trusted = approved.as_launch().clone();
+        let shown = approved.as_launch().clone();
         assert_eq!(
-            trusted.agent_selection().unwrap().workspace_trust,
-            Some(true),
-            "premise: Settings trust a managed Codex checkout"
+            shown.agent_selection().unwrap().workspace_trust,
+            None,
+            "premise: Claude preparation trust is independent of Codex launch trust"
         );
+        let approved = ApprovedLaunchTrust {
+            mode: approved,
+            claude_after_clone: settings.claude_trust,
+        };
         let req =
             CreateReq::for_agent_environment(approved, true, None, None, Some("acme/web".into()))
                 .unwrap();
@@ -2974,10 +2983,13 @@ mod workspace_trust_tests {
             }
         ));
         assert_eq!(
-            req.agent.as_ref().map(|agent| agent.launch.as_launch()),
-            Some(&trusted),
+            req.agent
+                .as_ref()
+                .map(|agent| agent.launch.mode.as_launch()),
+            Some(&shown),
             "the approved launch, trust included, is what the create will run"
         );
+        assert!(req.agent.as_ref().unwrap().launch.claude_after_clone);
         let browser: CreateReq = serde_json::from_value(serde_json::json!({
             "cwd": "~",
             "agent": { "launch": "ignored" },
