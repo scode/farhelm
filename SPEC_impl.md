@@ -6834,7 +6834,11 @@ On a recipe host, an independent delivery slot uses that installer to add `hasCo
 the project for the physical login home. Claude inherits that trust in descendants. Existing keys and the home
 directory's permissions are preserved. An install or an already satisfied document settles the host's slot. A failure
 warns and retries on reconnection. The seed uses the first third of the existing delivery deadline, so a slow settings
-update leaves time for credentials. This seed leaves symlinked and non-regular destinations in place.
+update leaves time for credentials. This seed leaves symlinked and non-regular destinations in place. Because it reuses
+the same 1 MiB reader and non-locking compare-and-replace installer, a long-lived persistent recipe host whose
+`~/.claude.json` exceeds 1 MiB (or outlasts the seed's transfer budget) warns on reconnect without settling the slot,
+and a concurrent Claude write between comparison and replacement can be lost. Both trade-offs are accepted: the seed
+exists for fresh and disposable recipe hosts, and hosts with large files have already completed onboarding.
 
 The credential ownership rule in SPEC.md applies to image and user settings. A bearer in an unstamped Codex config stays
 under the image or user's ownership. Custom headers and helpers also remain in place. A gateway needing extra headers
