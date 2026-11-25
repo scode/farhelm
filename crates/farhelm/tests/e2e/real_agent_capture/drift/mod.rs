@@ -864,6 +864,7 @@ macro_rules! drift_cases {
 
 mod base;
 mod model_selection;
+mod reasoning_effort;
 
 #[cfg(test)]
 mod tests {
