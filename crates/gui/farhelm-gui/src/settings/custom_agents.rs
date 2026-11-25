@@ -4,8 +4,8 @@ use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::ui_channel::{ApiPath, Availability, Collection, Method};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Div, Entity, InteractiveElement as _,
-    IntoElement as _, ParentElement as _, Render, Role, SharedString, Styled as _, WeakEntity,
-    Window, div, px,
+    IntoElement as _, ParentElement as _, Render, Role, SharedString,
+    StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, px,
 };
 
 use super::{
@@ -710,7 +710,14 @@ impl Render for Editor {
             .flex_col()
             .gap(px(8.))
             .children(self.removed.then(|| {
-                div().child("This registration was deleted. Register it again to keep these edits.")
+                // This is the only explanation of why a retained draft needs to be registered again.
+                let notice =
+                    "This registration was deleted. Register it again to keep these edits.";
+                div()
+                    .id("custom-agent-deleted-notice")
+                    .role(Role::Status)
+                    .aria_label(notice)
+                    .child(notice)
             }))
             .child(card::heading("Agent command", None, None, cx))
             .child(settings)

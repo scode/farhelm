@@ -982,22 +982,6 @@
   fix code — include the section name in each option's accessible name; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md
-
-- Outcome: `fix code`.
-- Assessment: In Settings → Custom agents, if the agent being edited is deleted elsewhere while the user has unsaved
-  edits, the page shows "This registration was deleted. Register it again to keep these edits." Screen readers never see
-  or announce that line. Verified: Confirmed. `crates/gui/farhelm-gui/src/settings/custom_agents.rs:685-687` is a bare
-  div with no role. GPUI exposes only elements that have a role (per `host_text.rs`). No SPEC rule requires this status
-  to be announced.
-- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
-  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Expose this consent, warning or status text to assistive technology under that principle.
-  Recommendation for reference: fix code — render it through `choices::outcome_line`; size S. Size gate: about 100 lines
-  of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## sound-preview-overlay-blocks-settings-switch.md
 
 - Outcome: `other`.

@@ -272,6 +272,7 @@ pub(super) fn heading(cx: &mut VisualTestContext) -> Option<String> {
 /// The catalog owns navigation even when it is empty. An external delete before a PUT settles takes the user
 /// back to Add while retaining the draft and its receipt. A delete confirmed on the page removes it entirely.
 /// The previews and sidebar hover help isolate registered text so it cannot reorder the surrounding app words.
+/// The retained draft also exposes the deletion and recovery instructions as a screen-reader status.
 #[gpui::test]
 fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppContext) {
     const DISPLAY_NAME: &str = "Example Code סוכן";
@@ -363,6 +364,16 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     settle(cx);
     click_section(cx, Section::AddCustomAgent);
     click(cx, "settings-section-custom-example-code");
+    let nodes = frame(cx);
+    let notice = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("custom-agent-deleted-notice"))
+        .expect("the retained draft exposes the deletion notice");
+    assert_eq!(notice.role, Some(Role::Status));
+    assert_eq!(
+        notice.label.as_deref(),
+        Some("This registration was deleted. Register it again to keep these edits.")
+    );
     assert_eq!(
         label(cx, "custom-agent-save").as_deref(),
         Some("Register again")
