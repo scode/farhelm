@@ -69,11 +69,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching
   indicators come later and should fit the layout. Plan: `plans/queue/welcome-empty-state.md`.
 
-- **Derive `instructions_delivery` drift coverage from agent capabilities.** The `instructions_delivery` drift category
-  hardcodes its six agent names instead of deriving them from agent capabilities like the other categories, so a future
-  agent that gains the `$farhelm` hint would not fail coverage checks until added by hand. Plan:
-  `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
-
 - **Keep cached repository cleanup moving past one repo's error.** At supervisor startup, if cleaning up an old cache
   generation for one repository fails (for example because a leftover git process is still writing in it), the sweep
   stops early and skips every remaining repository until the next restart

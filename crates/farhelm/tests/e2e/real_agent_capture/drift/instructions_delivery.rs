@@ -2,7 +2,7 @@
 //! still work when the pointer is omitted.
 
 use super::*;
-use farhelm_supervisor::agent_kind::AgentInstructions;
+use farhelm_supervisor::agent_kind::{AgentInstructions, delivers_instructions};
 
 /// Use the same request in both launches. State the framing and negative answer separately, so even a wrapped
 /// prompt echo cannot supply a complete reply. The end marker keeps a streamed prefix from counting as an answer.
@@ -187,14 +187,21 @@ drift_cases! {
     drift_omp => Omp,
 }
 
-/// These six harnesses deliver the pointer through startup hooks, MCP initialization or a system prompt.
-/// Keep their positive and negative live checks in the runnable inventory.
+/// Every launch integration that toggles a pointer needs exactly one live case that exercises both settings.
 #[farhelm_testtrace::test]
-fn instructions_delivery_covers_the_six_pointer_harnesses() {
-    use LaunchHarness::{Claude, Codex, Goose, Muse, Omp, Pi};
-    assert_eq!(HARNESSES.len(), 6);
-    for harness in [Claude, Codex, Muse, Goose, Pi, Omp] {
-        assert!(HARNESSES.contains(&harness), "{harness:?}");
+fn instructions_delivery_covers_every_pointer_harness() {
+    let expected: Vec<_> = LaunchHarness::BUILT_INS
+        .iter()
+        .copied()
+        .filter(|harness| delivers_instructions(harness.agent_kind()))
+        .collect();
+    assert_eq!(HARNESSES.len(), expected.len());
+    for harness in expected {
+        assert_eq!(
+            HARNESSES.iter().filter(|&&case| case == harness).count(),
+            1,
+            "{harness:?}"
+        );
     }
     assert!(!QUESTION.contains(COMMAND));
     assert!(!QUESTION.contains(&format!("FH:{MISSING}:END")));
