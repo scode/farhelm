@@ -155,26 +155,6 @@
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-unknown-agent-typo-fails-with-misleading-custom-flag-error.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md, "Agent-spawned sessions" (lines 4737-4738): "`--agent` given something that is
-  not an agent type is refused with the list of agent types." The CLI turns any well-formed ID (`cluade`) into a custom
-  agent (`crates/farhelm/src/main.rs:909-921`). The helm applies the flags first
-  (`crates/farhelm-helm/src/agent_launch.rs:256`) and checks registration only afterwards (:323-333). So `--prompt`
-  (refused at `farhelm-proto/src/launcher.rs:921-928`), a non-YOLO `--permissions`, or a dotted model fails first with a
-  custom-agent flag error and no list of agent types. `ff379d4cc` (#4752) changed only the list's text, not this order.
-  The fix follows directly: check the flags' own custom ID against the catalog before applying the flags, and keep the
-  later check for IDs inherited from templates. Verified: Confirmed by reading the code.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code — move
-  the early unknown-ID check ahead of `apply_template`, plus a helm test; size S.). Size gate: about 100 lines of diff
-  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
-  part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## tensorlake-key-discard-lacks-preservation-test.md
 
 - Outcome: `other`.

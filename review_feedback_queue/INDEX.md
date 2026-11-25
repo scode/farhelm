@@ -337,12 +337,6 @@ consequences.
   live create, edit, or delete of a custom agent end-to-end over the UI channel to verify that the served payload
   projects and decodes cleanly.
 
-- [`trailing-unknown-agent-typo-fails-with-misleading-custom-flag-error.md`](trailing-unknown-agent-typo-fails-with-misleading-custom-flag-error.md)
-  — When an agent mistypes a built-in agent name (such as `--agent cluade` or `--agent opencode`) together with
-  `--prompt`, `--permissions guarded`, or a built-in model name containing `.` or `/` (such as `gpt-6.2-sol`), Farhelm
-  refuses the command with a misleading Custom-agent flag error (e.g., "--prompt/--prompt-file is not offered by this
-  agent") instead of telling the agent that the agent name is unknown and listing the built-in types.
-
 - [`trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md`](trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md)
   — When you launch or plain-replace a registered custom agent on a host that asks before YOLO launches, the
   confirmation dialog explains the YOLO classification as "Farhelm treats every Custom permission choice as YOLO."
