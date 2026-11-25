@@ -6,7 +6,7 @@ use std::{cell::Cell, rc::Rc};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{App, AppContext as _, Context, WeakEntity, Window};
 
-use super::Launcher;
+use super::{Launcher, SourceConsent};
 use crate::components::{HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::hook_setup::HookAgent;
@@ -20,7 +20,29 @@ use crate::session;
 pub(super) struct HookQuestion {
     agent: HookAgent,
     pick: u64,
-    inline: Option<Inline<HookAgent>>,
+    inline: Option<Inline<HookAnswer>>,
+}
+
+/// The hook write names the chosen agent. Its launch keeps the source warning shown when the answer was accepted.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct HookAnswer {
+    agent: HookAgent,
+    source: SourceConsent,
+}
+
+impl HookQuestion {
+    /// Keep the unanswered question in step with the warning drawn beside it, even across a store update.
+    pub(super) fn show_source(&self, source: SourceConsent, cx: &mut App) {
+        if let Some(inline) = &self.inline {
+            inline.refresh_value(
+                HookAnswer {
+                    agent: self.agent,
+                    source,
+                },
+                cx,
+            );
+        }
+    }
 }
 
 impl Launcher {
@@ -104,7 +126,7 @@ impl Launcher {
         }
     }
 
-    pub(super) fn hook_inline(&self, cx: &App) -> Option<&Inline<HookAgent>> {
+    pub(super) fn hook_inline(&self, cx: &App) -> Option<&Inline<HookAnswer>> {
         self.hook_question
             .as_ref()?
             .inline
@@ -137,7 +159,7 @@ fn ask(
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
-) -> Inline<HookAgent> {
+) -> Inline<HookAnswer> {
     let enabling = launcher.clone();
     let dismissing = launcher.clone();
     let question = Question::new(
@@ -147,7 +169,10 @@ fn ask(
             HoverHelp::tooltip("Turn on hook setup for this agent on all hosts and launch"),
             Tier::Primary,
         ),
-        agent,
+        HookAnswer {
+            agent,
+            source: SourceConsent::default(),
+        },
     )
     .summary(HostSentence::new("hook-setup-consent").text(agent.consent()))
     .fallible_alternative(
@@ -158,8 +183,8 @@ fn ask(
             ),
             Tier::Neutral,
         ),
-        move |agent, attempt, window, cx| {
-            save(agent, attempt, pick, &dismissing, false, window, cx)
+        move |answer, attempt, window, cx| {
+            save(answer, attempt, pick, &dismissing, false, window, cx)
         },
     )
     .alternative(
@@ -168,8 +193,8 @@ fn ask(
             HoverHelp::tooltip("Launch now and ask again next time"),
             Tier::Neutral,
         ),
-        move |_, window, cx| {
-            continue_launch(&launcher, pick, Mark::take(cx), window, cx);
+        move |answer, window, cx| {
+            continue_launch(&launcher, pick, answer.source, Mark::take(cx), window, cx);
         },
     )
     .starts_on_cancel()
@@ -177,7 +202,7 @@ fn ask(
     prompt::ask_inline_fallible(
         question,
         mark,
-        move |agent, attempt, window, cx| save(agent, attempt, pick, &enabling, true, window, cx),
+        move |answer, attempt, window, cx| save(answer, attempt, pick, &enabling, true, window, cx),
         window,
         cx,
     )
@@ -188,6 +213,7 @@ fn ask(
 fn continue_launch(
     launcher: &WeakEntity<Launcher>,
     pick: u64,
+    source: SourceConsent,
     mark: Mark,
     window: &mut Window,
     cx: &mut App,
@@ -202,7 +228,7 @@ fn continue_launch(
                 .is_some_and(|layer| crate::layers::is_open(layer, window, cx))
         {
             launcher.hook_question = None;
-            launcher.press_at(mark, window, cx);
+            launcher.press_at(Some(source), mark, window, cx);
         }
     });
 }
@@ -210,7 +236,7 @@ fn continue_launch(
 /// Use the settings operation key for both writes. A refusal leaves the one-off answer available, and success
 /// launches only for the enabling answer and only while the same question still owns the draft.
 fn save(
-    agent: HookAgent,
+    answer: HookAnswer,
     attempt: Attempt,
     pick: u64,
     launcher: &WeakEntity<Launcher>,
@@ -219,9 +245,9 @@ fn save(
     cx: &mut App,
 ) {
     let command = if enable {
-        crate::settings::hook_setup_command(agent, true)
+        crate::settings::hook_setup_command(answer.agent, true)
     } else {
-        crate::settings::dismiss_hook_setup_command(agent)
+        crate::settings::dismiss_hook_setup_command(answer.agent)
     };
     let (Some(operations), Ok(command)) = (session::current_operations(cx), command) else {
         attempt.failed("The setting change could not be sent.", cx);
@@ -248,7 +274,7 @@ fn save(
                     attempt.succeeded(cx);
                     if enable {
                         let _ = cx.update_window(handle, |_, window, cx| {
-                            continue_launch(&continuing, pick, mark, window, cx);
+                            continue_launch(&continuing, pick, answer.source, mark, window, cx);
                         });
                     }
                 }

@@ -219,7 +219,8 @@ impl Launcher {
     /// controls below the field are not left under it. With Replace with, an Enter before the current no-highlight
     /// state is presented is consumed as well, so it cannot retire the source session.
     pub(super) fn folder_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if matches!(self.draft.mode, Mode::ReplaceWith { .. })
+        let replacing = matches!(self.draft.mode, Mode::ReplaceWith { .. });
+        if replacing
             && self.folder_list.list.highlighted.is_none()
             && !self
                 .folder_list
@@ -238,8 +239,10 @@ impl Launcher {
             .highlighted
             .and_then(|index| self.folder_choices(cx).get(index).cloned())
         else {
+            // A missing row cannot turn a shown folder pick into consent to replace the session.
+            let had_pick = self.folder_list.list.highlighted.is_some();
             self.folder_list.list.close(window, cx);
-            return false;
+            return replacing && had_pick;
         };
         self.choose_folder(choice, window, cx);
         true

@@ -986,9 +986,9 @@ pre-wired to that frozen state, so feature code never wires an answer by hand. C
 never by list position, and the helm refuses a target that is gone. The existing per-route refusals of a target that
 changed since its prompt stay (a delete or restart that goes beyond what its confirmation said is refused, commit
 `6aef8dc2`). No new generic precondition protocol is added on the helm or supervisor; the GUI sends each route's
-existing preconditions, and new precondition checks go only where SPEC already requires them. One confirmation does not
-freeze: the launcher's YOLO question keeps its warning about the source session live while it is open, and its answer
-acts on the warning it displayed when answered.
+existing preconditions, and new precondition checks go only where SPEC already requires them. The launcher's YOLO and
+hook setup questions keep their source warnings live until the user answers. Each answer uses the warning shown at that
+moment.
 
 This is the structural fix for the old GUI's largest bug class: an action that ran on state the user was not shown.
 
@@ -1001,8 +1001,8 @@ target. The question and request use the snapshot that admitted the press.
 SPEC.md's "One GUI at a time" (2026-10-10) lets input delivered before a redraw run as delivered, so a Confirm queued
 behind a Cancel may still submit. An answer acts on the value presented with the confirmation it answers.
 
-The warning beside a launcher's YOLO question follows the source session. An answer is accepted after that warning is
-shown and carries its permission through a wait for a host setting or checkout preview.
+An answer to either launch question is accepted after its source warning is shown. It carries that permission through a
+wait for a setting write or checkout preview.
 
 A question has Cancel and its confirming answer at the ends, and may carry extra answers between them, in the order the
 feature adds them, for the questions SPEC.md asks with more than two (the template editor's "Keep editing, Discard, or

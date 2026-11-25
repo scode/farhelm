@@ -374,6 +374,48 @@ fn replace_with_follows_the_source_and_sends_the_guard_it_shows(cx: &mut TestApp
     assert_eq!(body["only_if_nothing_alive"], json!(true));
 }
 
+/// Saving hook setup takes time. A later warning about a restarted source cannot authorize deleting it.
+#[gpui::test]
+fn a_hook_setup_answer_keeps_the_replace_warning_it_showed(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(replace_with(cx, "a"));
+    a_exits(&mut helm, cx);
+    assert_eq!(name_of(cx, "launcher-source-warning"), None);
+    assert!(replaces(&mut helm, cx).is_empty());
+
+    test_support::click(cx, "launcher-harness-Grok");
+    settle(cx);
+    let [read] = &helm.commands()[..] else {
+        panic!("expected one hook setup read");
+    };
+    assert_eq!(read.path, "/api/agent-hook-setup/grok");
+    helm.reply(read.id, 200, Some(json!({"enabled": false})));
+    settle(cx);
+    test_support::click(cx, "prompt-confirm");
+    settle(cx);
+    let [write] = &helm.commands()[..] else {
+        panic!("expected only the hook setting write before replacement");
+    };
+    assert_eq!(write.path, read.path);
+    assert_eq!(write.body, Some(json!({"enabled": true})));
+
+    helm.push(change(
+        listing_meta(&["a", "b", "c", "d"], 6, false),
+        &[session("a").host(9)],
+        &[],
+    ));
+    test_support::show_next_frame(cx);
+    assert!(name_of(cx, "launcher-source-warning").is_some());
+    helm.reply(write.id, 204, None);
+    let [replace] = &replaces(&mut helm, cx)[..] else {
+        panic!("successful setup sends one replacement");
+    };
+    assert_eq!(
+        replace.body.as_ref().unwrap()["only_if_nothing_alive"],
+        json!(true)
+    );
+}
+
 /// The helm lists `replacement` on host9 in `source`'s place (it creates the replacement and deletes the source
 /// before it answers), then answers Replace `id` with the replacement and no delete notice. `order` is the listing
 /// after the swap. The push must keep the current selection until the success has settled.

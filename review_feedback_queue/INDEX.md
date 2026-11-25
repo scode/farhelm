@@ -25,15 +25,6 @@ consequences.
 - [`settings-footer-can-save-the-wrong-page.md`](settings-footer-can-save-the-wrong-page.md) — A stale Settings footer
   can save the wrong page’s draft and overwrite the stored Tensorlake key.
 
-- [`launcher-resize-changes-enter-action.md`](launcher-resize-changes-enter-action.md) — Resizing Replace with can make
-  Enter delete the source session while the visible template choice still offers to fill the form.
-
-- [`launcher-recent-enter-before-display.md`](launcher-recent-enter-before-display.md) — Moving the highlight to a
-  recent setup can arm Replace before the new Enter action appears, allowing deletion under the earlier template cue.
-
-- [`hook-save-uses-newer-replace-warning.md`](hook-save-uses-newer-replace-warning.md) — Set up and launch can stop and
-  delete a source that became live while hook settings were saving, without a new answer from the user.
-
 - [`hook-settings-toggle-uses-unshown-state.md`](hook-settings-toggle-uses-unshown-state.md) — Space can save the
   all-hosts hook opt-in while the switch still shows the on state the user intended to turn off.
 
@@ -50,10 +41,6 @@ consequences.
 - [`tailscale-uninstall-does-not-bind-verified-host.md`](tailscale-uninstall-does-not-bind-verified-host.md) — A
   confirmed uninstall can affect a different Tailscale host if the saved name changes after Farhelm verifies the
   original host.
-
-- [`trailing-replace-with-folder-enter-out-of-bounds-highlight.md`](trailing-replace-with-folder-enter-out-of-bounds-highlight.md)
-  — In Replace with, pressing Enter after a template update shrinks the folder list can bypass the presentation guard
-  and replace and delete the source session.
 
 - [`trailing-replace-with-suspended-checkout-recent-skips-warning.md`](trailing-replace-with-suspended-checkout-recent-skips-warning.md)
   — In Replace with on a suspended managed-checkout host, pressing Down then Enter on a retained recent checkout setup
@@ -334,9 +321,6 @@ consequences.
 - [`app-settings-shared-upgrade-option-has-local-heading.md`](app-settings-shared-upgrade-option-has-local-heading.md) —
   The App heading says This Mac even though it contains a helm-shared highlights setting.
 
-- [`launcher-escape-discards-template-edits.md`](launcher-escape-discards-template-edits.md) — Escape can discard Save
-  as template edits while the launcher still shows the search results that received the key.
-
 - [`launcher-incomplete-template-banner-misplaced.md`](launcher-incomplete-template-banner-misplaced.md) — The
   incomplete-template message appears below the form and asks the user to complete the form below it.
 
@@ -360,12 +344,6 @@ consequences.
 
 - [`launcher-highlights-escape-notation.md`](launcher-highlights-escape-notation.md) — The launcher can underline the
   escape notation displayed for a path even when that notation was absent from the matching path.
-
-- [`launcher-host-reorder-test-accepts-old-host.md`](launcher-host-reorder-test-accepts-old-host.md) — The Host menu
-  reorder test can pass without demonstrating that Enter selected the visible host.
-
-- [`launcher-tab-test-omits-placement-premise.md`](launcher-tab-test-omits-placement-premise.md) — The launcher test for
-  all placements can pass when its fixture omits an environment offer.
 
 - [`launcher-undo-leaves-template-source-mark.md`](launcher-undo-leaves-template-source-mark.md) — Undo can restore the
   earlier launch settings and leave the reverted template marked as their source.

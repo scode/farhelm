@@ -1056,6 +1056,27 @@ fn the_empty_field_can_apply_a_template_and_reset_its_source(cx: &mut TestAppCon
     assert_eq!(selected_state(cx, "launcher-template-partial"), Some(false));
 }
 
+/// A resize can hide the template that Enter was about to apply. Replace with must wait until the main action is shown.
+#[gpui::test]
+fn narrowing_replace_with_cannot_turn_a_template_pick_into_a_launch(cx: &mut TestAppContext) {
+    let source = super::draft_tests::session(super::view_tests::codex(None, None, None));
+    let draft = LaunchDraft::replace_with("a", &source, Some(1));
+    let (mut helm, cx) = launcher_with_templates_on(cx, None, draft);
+    cx.simulate_resize(gpui::size(gpui::px(1080.), gpui::px(900.)));
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    assert!(search_focused(cx));
+    keys(cx, "down");
+    test_support::show_next_frame(cx);
+    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(true));
+
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    cx.simulate_keystrokes("enter");
+    let route = "/api/sessions/a/replace";
+    assert!(super::launch_tests::sent_to(&mut helm, cx, route).is_empty());
+    keys(cx, "enter");
+    assert_eq!(super::launch_tests::sent_to(&mut helm, cx, route).len(), 1);
+}
+
 /// Resizing preserves the query and its highlighted choice while moving between the pane and the popover. A press
 /// on the form closes the wide results and still reaches the control the user pressed.
 #[gpui::test]

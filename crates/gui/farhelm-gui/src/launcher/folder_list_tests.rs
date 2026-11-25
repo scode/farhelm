@@ -183,6 +183,58 @@ fn a_history_reply_cannot_turn_folder_enter_into_replace_before_presentation(
     );
 }
 
+/// A template batch can change the filter while the folder field still holds focus. Enter cannot pick the row that
+/// inherited the selected index or replace the source before the new choice is visible.
+#[gpui::test]
+fn a_template_batch_cannot_turn_folder_enter_into_a_different_action(cx: &mut TestAppContext) {
+    let (mut helm, cx) = super::entry_tests::window_with(cx, Some("a"));
+    assert!(cx.update(|window, cx| super::entry::open_replace_with("a", window, cx)));
+    settle(cx);
+    let [(read, path)] = &history_reads(&mut helm, cx)[..] else {
+        panic!("expected one history read");
+    };
+    assert!(path.ends_with("host=9"), "{path}");
+    helm.reply(*read, 200, Some(history(&["/src/recent"])));
+    settle(cx);
+    focus_folder(cx);
+    test_support::select_all_text(cx);
+    cx.simulate_input("recent");
+    keys(cx, "down");
+    test_support::show_next_frame(cx);
+    assert_eq!(
+        name_of(cx, "launcher-folder-0").as_deref(),
+        Some("/src/recent")
+    );
+    assert_eq!(
+        super::view_tests::selected_state(cx, "launcher-folder-0"),
+        Some(true)
+    );
+
+    cx.update(|window, cx| {
+        let launcher = super::entry::open_launcher(window, cx).expect("Replace with stays open");
+        launcher.update(cx, |launcher, cx| {
+            launcher.apply_batch(
+                |draft, _, _| {
+                    draft.edit_folder("/opt/elsewhere".into());
+                    Ok(super::view::BatchApplied {
+                        notice: None,
+                        note: None,
+                        template: None,
+                        switched_agent: false,
+                        escalation: None,
+                    })
+                },
+                window,
+                cx,
+            );
+        });
+    });
+    assert_eq!(draft(cx).folder.value(), "/opt/elsewhere");
+    cx.simulate_keystrokes("enter");
+    assert!(super::launch_tests::sent_to(&mut helm, cx, "/api/sessions/a/replace").is_empty());
+    assert_eq!(draft(cx).folder.value(), "/opt/elsewhere");
+}
+
 /// The launcher reads the chosen host's history when it opens, and focusing the folder field lists its recent folders
 /// under the Recent heading, then Home and Local home under Reset, each named for assistive technology. Why: SPEC.md,
 /// "Working directory": the folder field's dropdown offers "up to eight Recent folders, newest first", "Reset with Home

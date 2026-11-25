@@ -225,22 +225,23 @@ pub(super) fn show(
             // session launcher, Restart with".
             keeps_focus_on_empty_click: true,
             returns_to: ReturnTo::Opener,
-            // Escape closes the Save as template panel or the command field's inline results before it discards
-            // the draft. While the YOLO question's host write is out, Escape, Cancel, and Close all wait.
+            // Close the command results first, as the narrow popover does, so Escape preserves the template draft.
+            // While a setting or template write is out, the answer keeps the launcher open.
             on_dismiss: Some(Rc::new(move |window, cx| {
                 let Some(launcher) = dismissing.upgrade() else {
                     return layers::Dismissal::Close;
                 };
                 if launcher.read(cx).yolo_in_flight(cx)
                     || launcher.read(cx).hook_write_in_flight(cx)
+                    || launcher.read(cx).template_saving(cx)
                 {
+                    return layers::Dismissal::Stay;
+                }
+                if launcher.update(cx, |launcher, cx| launcher.dismiss_command_pane(window, cx)) {
                     return layers::Dismissal::Stay;
                 }
                 if launcher.read(cx).save_panel.is_some() {
                     launcher.update(cx, |launcher, cx| launcher.close_save_panel(window, cx));
-                    return layers::Dismissal::Stay;
-                }
-                if launcher.update(cx, |launcher, cx| launcher.dismiss_command_pane(window, cx)) {
                     return layers::Dismissal::Stay;
                 }
                 layers::Dismissal::Close
@@ -1070,6 +1071,7 @@ impl Launcher {
             .is_some()
             .then(|| self.request(false, source, cx))
             .flatten();
+        let folder_before = self.draft.folder.value().clone();
         match edit(&mut self.draft, self.catalog.as_deref(), cx) {
             Ok(BatchApplied {
                 notice,
@@ -1080,6 +1082,9 @@ impl Launcher {
             }) => {
                 if let Some(notice) = notice {
                     self.notice = notice;
+                }
+                if *self.draft.folder.value() != folder_before {
+                    self.drop_folder_highlight();
                 }
                 self.sync_fields(window, cx);
                 let unchanged = asked.is_some() && asked == self.request(false, source, cx);
@@ -1328,21 +1333,29 @@ impl Launcher {
     /// layer closes, and the launcher waits for the reply out of sight. The press is the user's answer the reply's
     /// moved-on check counts from, so this runs in the handler of that press, never deferred.
     pub(super) fn press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.press_at(Mark::take(cx), window, cx);
+        self.press_at(None, Mark::take(cx), window, cx);
     }
 
-    /// Use the input mark from the answer that started the work, even when it first needed to save a setting.
-    fn press_at(&mut self, mark: Mark, window: &mut Window, cx: &mut Context<Self>) {
+    /// A hook answer carries the source warning and input mark from its own press through the setting write.
+    /// Direct presses use the currently presented warning.
+    fn press_at(
+        &mut self,
+        answered_source: Option<SourceConsent>,
+        mark: Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.refresh_custom_capabilities(cx);
         // While the YOLO question's host write is out, its answer owns the launch: a press now would send a create
         // without consent beside the one the answer sends with it.
         if self.yolo_in_flight(cx) || self.hook_answer_pending(cx) {
             return;
         }
-        let shown = self
-            .source_frame
-            .current()
-            .and_then(|frame| frame.shown().copied());
+        let shown = answered_source.or_else(|| {
+            self.source_frame
+                .current()
+                .and_then(|frame| frame.shown().copied())
+        });
         let source = match (&self.draft.mode, shown) {
             (_, Some(source)) => source,
             (Mode::ReplaceWith { .. } | Mode::RestartWith(_), None)
@@ -2303,6 +2316,9 @@ impl Render for Launcher {
             let source = self.source_consent(cx);
             self.source_frame.capture(source, (), window);
             if let Some(state) = &self.yolo {
+                state.show_source(source, cx);
+            }
+            if let Some(state) = &self.hook_question {
                 state.show_source(source, cx);
             }
         }
