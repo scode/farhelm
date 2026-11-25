@@ -78,7 +78,7 @@ mod custom_agents;
 pub(crate) use custom_agents::{stage_custom_agent_draft, stage_custom_agent_save_refusal};
 mod editing;
 #[cfg(test)]
-pub(crate) use editing::stage_settled_key_conflict;
+pub(crate) use editing::{stage_ntfy_refusal, stage_settled_key_conflict};
 mod file_types;
 #[cfg(test)]
 mod file_types_tests;
@@ -774,6 +774,8 @@ pub(crate) struct SettingsDialog {
     shown: Section,
     /// Search temporarily replaces the page. Keep its scroll offset in the dialog so clearing the query restores it.
     page_scroll: ScrollHandle,
+    /// A close refusal scrolls only the Notifications page drawn next. Navigation can supersede it before layout.
+    scroll_to_ntfy_refusal: bool,
     /// The explicit saves still owned by the last footer or close action.
     batch: Option<editing::Batch>,
     save_generation: u64,
@@ -887,6 +889,7 @@ impl SettingsDialog {
         SettingsDialog {
             shown,
             page_scroll: ScrollHandle::new(),
+            scroll_to_ntfy_refusal: false,
             batch: None,
             save_generation: 0,
             key_conflict: false,
@@ -964,6 +967,7 @@ impl SettingsDialog {
     /// section has yet.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_on = None;
+        self.scroll_to_ntfy_refusal = false;
         if self.shown != section {
             self.page_scroll.set_offset(gpui::Point::default());
         }
@@ -1162,6 +1166,7 @@ impl SettingsDialog {
 
     /// A search temporarily undraws Recipes, just like changing sections does. Keep its draft and release its clocks.
     fn search_edited(&mut self, cx: &mut Context<Self>) {
+        self.scroll_to_ntfy_refusal = false;
         self.search.edited(cx);
         if self.search.active()
             && self.shown == Section::Recipes
@@ -1760,6 +1765,9 @@ impl Render for SettingsDialog {
         let weak = cx.weak_entity();
 
         let searching = self.search.active();
+        if std::mem::take(&mut self.scroll_to_ntfy_refusal) && !searching {
+            self.page_scroll.scroll_to_bottom();
+        }
         let page = if searching {
             div()
                 .flex_1()

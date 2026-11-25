@@ -475,6 +475,21 @@ impl NtfyAlerts {
         self.testing
     }
 
+    /// Reveal either an answered refusal or the existing message for a save that met a busy preference key.
+    pub(super) fn save_refused(&self) -> bool {
+        !self.testing
+            && (self.form.refusal().is_some() || self.refused.line(REFUSED, |_, _| ()).is_some())
+    }
+
+    /// The fixture supplies the helm's validation refusal for the invalid topic it staged.
+    #[cfg(test)]
+    pub(super) fn refuse_topic_for_golden(&mut self, cx: &mut Context<Self>) {
+        self.form.refuse_for_golden(HostText::from_host(
+            "topic must contain at most 64 letters, numbers, underscores or dashes",
+        ));
+        cx.notify();
+    }
+
     /// Restore the stored alert configuration without issuing a request or changing the saved token.
     pub(super) fn discard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(stored) = &self.stored {

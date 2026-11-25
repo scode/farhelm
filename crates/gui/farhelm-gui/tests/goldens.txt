@@ -392,6 +392,8 @@ linux/settings-muse--dark.png 56f9d7c59d57f09821d3235ad9a0afd8694a2005
 linux/settings-muse--light.png d1e4c566296b8c129893aae6240d16214e0f9621
 linux/settings-notifications--dark.png d840be64cd5dea47269fc23e3abe5dd84b287028
 linux/settings-notifications--light.png 8ec48218bbc0ab8fb89a3d164799dc157a7a995c
+linux/settings-notifications-close-refused--dark.png da5876b34a8a82db4ad1494d337fe21c0ae9a70e
+linux/settings-notifications-close-refused--light.png cbe861ee6a250c05557f61f06e13f4f092eff4be
 linux/settings-notifications-edited--dark.png 7b1b91b8cee0db46981f78855f4d45441d25cba9
 linux/settings-notifications-edited--light.png c4ea0f05d9ecba4eb0ace255d46389abe1a81ed9
 linux/settings-pi--dark.png 277f8eae2bbdc1eeea7ecb989753954f166eb545

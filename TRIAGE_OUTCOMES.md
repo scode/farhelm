@@ -236,26 +236,6 @@
   to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## settings-close-save-can-hide-notification-refusal.md
-
-- Outcome: `fix code`.
-- Assessment: When Save and Close stops because the ntfy alerts save was refused, Settings switches to Notifications at
-  the top of the page. The refusal sits below the four Sounds rows and the ntfy form, which at small window heights is
-  below the visible area. Verified: partly correct. `reveal_save_failure` only switches section (`editing.rs:551-562`),
-  which scrolls to the top; it does not reveal the failing form. Whether the error is out of view at ordinary window
-  heights was not verified (the reviewer computed it for the 560px minimum). SPEC.md 2575: "shows the affected page with
-  its error." The "Dialog explanations out of view" filter needs an unusually small window; since overflow at ordinary
-  heights is unverified, it is unclear, so it does not match.
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code — scroll the failing form into view on a close-save failure;
-  size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## settings-close-save-stalls-silently-during-tests.md
 
 - Outcome: `fix code`.

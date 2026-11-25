@@ -1801,6 +1801,12 @@ static SCENES: &[Scene] = &[
         setup: settings_notifications_edited_setup,
     },
     Scene {
+        name: "settings-notifications-close-refused",
+        size: (720., 560.),
+        draw: settings_edited,
+        setup: ntfy_refusal_setup,
+    },
+    Scene {
         name: "settings-unsaved",
         size: (800., 830.),
         draw: settings_edited,
