@@ -149,6 +149,22 @@ fn a_yolo_refusal_asks_the_question_with_cancel_focused(cx: &mut gpui::TestAppCo
     );
 }
 
+/// Generic Custom supplies its own YOLO classification. The host question explains the declaration that the user made.
+#[gpui::test]
+fn the_custom_command_yolo_question_explains_the_declaration(cx: &mut gpui::TestAppContext) {
+    let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
+    draft.choose_tab(Tab::Command);
+    draft.choose_command_agent(Some(LaunchHarness::Custom));
+    draft.edit_command("exec acme-code {farhelm_args}".into());
+    let (mut helm, cx, create) = launched_with(cx, draft);
+    assert_eq!(create.body.as_ref().unwrap()["command"]["yolo"], true);
+    refuse_for_yolo(&mut helm, cx, create.id);
+    assert_eq!(
+        name_of(cx, "yolo-reason").as_deref(),
+        Some("Farhelm treats custom agent launches as YOLO.")
+    );
+}
+
 /// The one-off answer launches the same draft with consent (SPEC.md: it "retries with the override only when the user
 /// confirms"). Specified: "Start YOLO session anyway" sends one create carrying `confirm_yolo`, and the launcher hides.
 #[gpui::test]

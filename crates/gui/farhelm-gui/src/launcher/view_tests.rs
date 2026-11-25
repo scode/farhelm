@@ -536,7 +536,7 @@ fn new_opens_on_the_agent_tab_with_focus_in_the_search_box(cx: &mut TestAppConte
 }
 
 /// The action still names the launch target to assistive technology after removing the visible summary.
-/// A Command draft includes its launch kind, where a draft with no agent chosen has no agent name to read.
+/// A Command draft includes its launch kind. The declared agent joins the name after a choice.
 #[gpui::test]
 fn the_launch_action_names_its_target_without_a_footer_summary(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
@@ -550,6 +550,12 @@ fn the_launch_action_names_its_target_without_a_footer_summary(cx: &mut TestAppC
     assert_eq!(
         name_of(cx, "launcher-launch").as_deref(),
         Some("Launch Command · host1 · ~")
+    );
+    click_in_body(cx, "launcher-command-agent");
+    test_support::click(cx, "launcher-command-agent-option-Codex");
+    assert_eq!(
+        name_of(cx, "launcher-launch").as_deref(),
+        Some("Launch Command · Codex · host1 · ~")
     );
 }
 

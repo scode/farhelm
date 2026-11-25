@@ -48539,3 +48539,44 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: Fixed. Applying a template that changes the registration retires the earlier escalation and its Undo. Change `svvwokklqksuznzqmzzltswputuzuusq`, bookmark `plan/triage-custom-agents-nov24/05-custom-escalation`,
   https://github.com/scode/farhelm/pull/4932/changes.
+
+## trailing-launcher-target-names-command-custom-agent-outside-restart-with.md
+
+- Outcome: `fix code`.
+- Assessment: On the launcher's Command tab, the main action's accessible name names a declared registered custom agent
+  ("Launch Command · <agent> · <host> · <folder>") in New, Clone and Replace with. A declared built-in agent or generic
+  Custom is not named there; it is named only in Restart with. Verified: Confirmed. In
+  `crates/gui/farhelm-gui/src/launcher/view.rs:1792-1803`, the `harness` match is gated on `Mode::RestartWith` but the
+  `custom_agent` match is not, and the doc comment (:1783-1784) describes the gated rule. No spec text covers this
+  (SPEC_impl.md:9354 says only that the footer "names the launch target through the main action's accessible name").
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code — gate it to match the documented rule (or name both everywhere, if the
+  maintainer prefers); size S. Discard is reasonable too. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. The Command main action names any declared agent in every mode, using the display name or saved ID for a registration. Change `lqzvxlmsxwttpmrsmsxvsossrnnywrqu`, bookmark `plan/triage-custom-agents-nov24/05b-launch-names`,
+  https://github.com/scode/farhelm/pull/4935/changes.
+
+## trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md
+
+- Outcome: `fix code`.
+- Assessment: On a host that asks before YOLO launches, launching a registered custom agent shows the confirmation
+  "Farhelm treats every Custom permission choice as YOLO." "Custom" is also the name of the custom permission-flags
+  mode, so the sentence reads as if the launch used custom flags, and it does not name the agent. Verified: Confirmed.
+  `crates/gui/farhelm-gui/src/launcher/yolo.rs:40-42,73-78` formats `OnlyMode(LaunchHarness::Custom)` with
+  `harness_label` = "Custom". No spec text fixes this wording.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code — add a custom-agent sentence, for example "Farhelm treats every custom agent
+  launch as YOLO."; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
+  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
+  the feedback file and its index entry.
+- Execution: Fixed. The confirmation explains that the custom declaration supplies YOLO, naming the registration or its saved ID when present. Change `lqzvxlmsxwttpmrsmsxvsossrnnywrqu`, bookmark `plan/triage-custom-agents-nov24/05b-launch-names`,
+  https://github.com/scode/farhelm/pull/4935/changes.

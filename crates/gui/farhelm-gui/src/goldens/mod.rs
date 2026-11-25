@@ -1430,6 +1430,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_yolo_setup,
     },
     Scene {
+        name: "launcher-custom-yolo-question",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_custom_yolo_setup,
+    },
+    Scene {
         name: "launcher-hook-setup",
         size: (1080., 1040.),
         draw: session_lists_then,

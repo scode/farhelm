@@ -172,6 +172,8 @@ linux/launcher-custom-recents--dark.png b7b1ebef63d31884445d463240d1b2fee4320ae2
 linux/launcher-custom-recents--light.png f7114855536042dabde382a2aba390f47c72e1ec
 linux/launcher-custom-recents-narrow--dark.png 32e17debabace9b93691c06fbe25781eb0f41e14
 linux/launcher-custom-recents-narrow--light.png dc9014071089cef1ee3f4a36595fbcd90488cdd8
+linux/launcher-custom-yolo-question--dark.png 463406bc6c92649059c9252454eee57040d23084
+linux/launcher-custom-yolo-question--light.png 2459b49e26b86957b68ba41a64fc41d0ee428235
 linux/launcher-deleted-custom-quick-launch--dark.png b8559e790b1a86933ce4c25cc878fb8d70023b18
 linux/launcher-deleted-custom-quick-launch--light.png 1c0f2826755cd8b516a5370923f8bae163911bce
 linux/launcher-held-host-help--dark.png 097f5b560a99fcf67386ec892d757e07c6713e06
