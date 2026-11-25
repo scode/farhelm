@@ -1745,23 +1745,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-new-container-managed-checkout-stretches-host-block.md
-
-- Outcome: `other`.
-- Assessment: In the launcher, choosing New container together with Managed checkout leaves a gap of about 300 pixels
-  under the Container host picker. That pushes Repository, Name and the agent choices far down the dialog. Nothing is
-  lost. The form is just badly laid out on every such launch. Verified: Confirmed by reading.
-  `crates/gui/farhelm-gui/src/launcher/view.rs:2431-2446` gives the container-host block `flex_basis(370px)`. In the
-  Managed-checkout branch (`:2476-2484`) that block goes into a vertical column, where flex-basis sets height. No GPUI
-  render was run.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code — apply the basis and minimum width only in the horizontal Folder row, and add a layout
-  assertion. Size S.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
 ## sound-preview-overlay-blocks-settings-switch.md
 
 - Outcome: `other`.
@@ -1806,23 +1789,6 @@
   for reference: discard or fix spec (say App's scope is the installation's, with the shared switch saying so itself);
   size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
-## podman-launch-lifetime-notice-hidden.md
-
-- Outcome: `other`.
-- Assessment: When the user starts a session in a new container, the launcher says only in the Host picker's help that
-  deleting the last session removes the container and its files. A new sandbox gets a visible note. Deletion itself
-  still asks and names the file loss. Verified: Confirmed. `environment_ui.rs:305-312` returns `None` for Podman, so
-  `launcher/view.rs:2606-2617` draws nothing. The text is only in `launch_help` (`:288-302`). SPEC.md requires the
-  visible note only for sandboxes (about line 1640). "Container sessions" says containers follow the sandbox Delete and
-  visibility contracts but does not name the launch note. The `None` came in 30441792a with a comment that ties the
-  notice to billing facts. No unwarned deletion is established.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code — a short Podman `launch_notice`. Size S. Or discard.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-settings-containers-reload-omits-loading-keeps-error.md
 
@@ -2481,24 +2447,6 @@
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md
-
-- Outcome: `fix code`.
-- Assessment: When the user launches a new sandbox or container with a managed checkout whose typed name cannot become a
-  folder name (no letters or digits, or too long), Farhelm creates the environment first (a sandbox bills briefly), then
-  the new Farhelm refuses the name, the environment is cleaned up, and the launch shows as failed. The name could have
-  been rejected before anything was created. Verified: Confirmed from the reviewer's trace. I checked that nothing in
-  `sessions.rs` or the launcher calls `checkout_basename` before provisioning (it is used only in `farhelm-proto` and on
-  the supervisor). SPEC.md (about line 1906) says an empty slug or a component over 200 bytes "is refused" but not when.
-  No later commit added an early check.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code — validate the
-  title and basename with `checkout_basename` before provider work. Size S-M. Size gate: about 100 lines of diff (code,
-  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
-  brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## trailing-provisioning-service-omits-sealed-host-refusal.md
 

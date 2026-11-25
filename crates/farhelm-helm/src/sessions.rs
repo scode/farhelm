@@ -1379,6 +1379,8 @@ impl CreateReq {
     /// and carry the checked launch into provisioning.
     /// Placement belongs to the recipe route, and Folder means the new home;
     /// accepting an installed host or stale folder here would disguise reuse.
+    /// A managed checkout's title and first basename must be usable before
+    /// a host exists. The new host still resolves the path and any collisions.
     pub(crate) async fn prepare_sandbox_launch(
         &mut self,
         store: &store::HelmStore,
@@ -1398,7 +1400,7 @@ impl CreateReq {
             ));
         }
         if let Some(checkout) = &self.github_checkout {
-            farhelm_proto::parse_github_repo(&checkout.repo)
+            let repo = farhelm_proto::parse_github_repo(&checkout.repo)
                 .map_err(|error| invalid_request(format!("invalid GitHub repository: {error}")))?;
             if checkout.preview.is_some() {
                 return Err(invalid_request(
@@ -1417,6 +1419,13 @@ impl CreateReq {
                     "managed checkout and session titles must agree".into(),
                 ));
             }
+            let title = self.title.as_deref().or(checkout.title.as_deref());
+            if let Some(title) = title {
+                farhelm_proto::github_checkout::check_checkout_preview_title(title)
+                    .map_err(|reason| invalid_request(reason.into()))?;
+            }
+            farhelm_proto::github_checkout::checkout_basename(&repo, title, &|_| false)
+                .map_err(|error| invalid_request(error.to_string()))?;
         } else {
             if !self.cwd.is_empty() && self.cwd != "~" {
                 return Err(invalid_request(

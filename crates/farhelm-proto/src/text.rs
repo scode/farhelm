@@ -19,6 +19,16 @@
 
 use std::borrow::Cow;
 
+/// Refuse control characters in an explicit session title. Empty titles pass
+/// so the caller can choose a default. Peer-supplied titles still use the
+/// ordinary rendering rules.
+pub fn check_session_title_printable(title: &str) -> Result<(), &'static str> {
+    if title.chars().any(char::is_control) {
+        return Err("title must not contain control characters");
+    }
+    Ok(())
+}
+
 /// Whether `ch` must never be shown as itself in peer-supplied text.
 ///
 /// Three families, each with a known presentation attack:

@@ -152,6 +152,8 @@ linux/launcher-checkout-on-suspended-host--dark.png 109aafeb89367ff0f3bbe7c122e6
 linux/launcher-checkout-on-suspended-host--light.png 262ac4523edf287d9dbaed7d10ef6ae464612681
 linux/launcher-command-results--dark.png 965a5d43af4b19d2779d487585376a242d06208c
 linux/launcher-command-results--light.png dade16fe9dabf49d7ce14f393e305601e35a6441
+linux/launcher-container-checkout-refusal--dark.png 78cbc4f5c96d1600931a32262aec8f98338462ce
+linux/launcher-container-checkout-refusal--light.png 0a61f1481bf80a50f5dc844d34ed95de50967555
 linux/launcher-custom-agent--dark.png 9bbf7bac08c2fb6dfe24916badb28f9f9cf7d49c
 linux/launcher-custom-agent--light.png fe0bdd62e33fabca11a9556d0c431351749fbcbe
 linux/launcher-held-host-help--dark.png 097f5b560a99fcf67386ec892d757e07c6713e06
@@ -172,8 +174,8 @@ linux/launcher-narrow--dark.png 77b51948026c85a00a65a0f73aaba405bdee3607
 linux/launcher-narrow--light.png 0ed34e8c68f7e69620a1a278a91a6b3dfb179820
 linux/launcher-new--dark.png e7ea34e10d9fad793cefb44581a8774f7f3eed48
 linux/launcher-new--light.png 3bd2eab508c77aae17c0165041e1899f7f434d87
-linux/launcher-new-container--dark.png ada625b6f281da62007a0814cf742b7f8ef99bd0
-linux/launcher-new-container--light.png 5e5a7ce08b4c1cc3846d1ea1556e129706fff03f
+linux/launcher-new-container--dark.png 8d2486e578d07b0affdda4bc00a0ecac249d7340
+linux/launcher-new-container--light.png b80dfca4019253a0fd024aa90a571f8105269ce2
 linux/launcher-replace-typed-recent--dark.png 3d2bea617746751dfc87fc0265406f387ced2bbb
 linux/launcher-replace-typed-recent--light.png bd0041c6fb7087614d158b8ad384b475869450dd
 linux/launcher-replace-with--dark.png 6963005db3c2776b2617eacec108dd5f5bfae107

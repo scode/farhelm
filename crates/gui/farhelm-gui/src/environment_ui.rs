@@ -307,7 +307,9 @@ impl ProviderUi {
             ProviderKind::Tensorlake => Some(
                 "This session's sandbox bills while running. Suspend stops CPU and memory billing. Deleting its last session removes the sandbox and its files.",
             ),
-            ProviderKind::Podman => None,
+            ProviderKind::Podman => {
+                Some("Deleting the last session removes this container and its files.")
+            }
         }
     }
 

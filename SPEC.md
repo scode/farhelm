@@ -1934,6 +1934,9 @@ name, and preview and launch use it alike. Changing hosts or repositories restar
 makes it explicit and disables automatic suffixes. A lost-race launch re-previews and may advance the default name, but
 still needs another click on Launch for the newly shown path.
 
+For a recipe-target launch, Farhelm validates the display title and first checkout directory name before starting the
+environment.
+
 Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no repository ignore
 an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
 remains unnamed. Whenever a checkout launch is unnamed, the name field shows the `repo-N` it will get as placeholder
@@ -5473,7 +5476,8 @@ Container sessions are experimental disposable environments built from the share
 rootless Podman container on a registered local or ordinary SSH Linux host. The container boots systemd and runs its own
 Farhelm supervisor under a login user's systemd user manager. The managed checkout is cloned inside it, using the
 default checkout folder when set and the container's home otherwise. Folder destinations use its home, without Browse or
-recent folders. Agent and command launches use the ordinary launch rules.
+recent folders. Agent and command launches use the ordinary launch rules. The launcher says that deleting the last
+session removes the container and its files.
 
 A usable container host runs Podman 4.9.3 or later, rootless, with cgroup v2, the systemd cgroup manager and a working
 `systemd-run --user`. New work also requires `sha256sum` and `tr` for place verification. A background probe records

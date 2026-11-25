@@ -47,6 +47,17 @@ pub const MAX_REPO_NAME_LEN: usize = 100;
 /// enforced elsewhere; it is not re-implemented here.
 pub const MAX_BASENAME_BYTES: usize = 200;
 
+/// Check the supplied display title before deriving a checkout basename.
+/// The same bounds apply before a recipe launch and at the host's preview.
+/// A short derived basename can still have a long or multiline title.
+pub fn check_checkout_preview_title(title: &str) -> Result<(), &'static str> {
+    crate::text::check_session_title_printable(title)?;
+    if title.len() > 64 * 1024 {
+        return Err("checkout preview title exceeds the 65536-byte limit");
+    }
+    Ok(())
+}
+
 /// One bounded title series for Clone defaults and template base names.
 ///
 /// The literal base is first, followed by `-2` through `-50`. This only
