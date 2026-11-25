@@ -267,12 +267,6 @@ consequences.
   — A registered custom agent with a long display name produces a chip in the session launcher's Custom group that
   cannot shrink or ellipsize to the dialog width, overflowing and getting clipped at the right edge of the launcher.
 
-- [`trailing-refresh-custom-capabilities-treats-unloaded-collection-as-deleted.md`](trailing-refresh-custom-capabilities-treats-unloaded-collection-as-deleted.md)
-  — If the helm's custom-agents catalog is unavailable or has not loaded yet, the launcher treats any selected custom
-  agent (on the Agent or Command tab) as deleted—blocking launch with "no longer registered" / "was deleted" messages,
-  hiding or erroring its conversation-ID field, and prompting the user to replace a registration that was not actually
-  deleted.
-
 - [`trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md`](trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md)
   — When you open Restart with on an existing custom-agent session after turning off "Supports resumption" for that
   custom agent in Settings, the launcher gives contradictory or broken behavior: if the session has no captured

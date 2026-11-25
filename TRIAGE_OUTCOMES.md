@@ -985,30 +985,6 @@
   to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-refresh-custom-capabilities-treats-unloaded-collection-as-deleted.md
-
-- Outcome: `fix code`.
-- Assessment: Sometimes the launcher has no custom-agent list: before it first arrives, or when the helm could not read
-  its catalog on the first try. The launcher then treats any selected custom agent as deleted. Launch is refused with
-  "no longer registered" or "was deleted" messages, and the Command tab offers to switch to generic Custom. Verified:
-  Confirmed. `crates/gui/farhelm-gui/src/launcher/view.rs:2254-2274` ignores the collection's availability. Settings
-  guards it explicitly (`settings/custom_agents.rs:106-121`, "An unavailable collection must not look like a deletion").
-  A later failed read keeps the previous entries (`crates/farhelm-helm/src/ui_channel.rs:474-490`). So the false
-  "deleted" state needs the first read to fail, or a launcher opened before the first snapshot. I considered the "Rare,
-  self-correcting glitches" filter and rejected it. If the first read keeps failing (a corrupt catalog row, which the
-  helm refuses to drop: `farhelm-helm/src/custom_agents.rs:27-38`), the false state lasts until repaired. That is the
-  filter's "wrong state that persists ... needing ... manual repair" exclusion.
-- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
-  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
-  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
-  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
-  Recommendation for reference: fix code — check availability as `Recipes::of` does, and decide together with 529; size
-  S–M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md
 
 - Outcome: `fix code`.

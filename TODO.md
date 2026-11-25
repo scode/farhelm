@@ -200,6 +200,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   replaced by a clipped frame before presentation, and a successful continuation after a wait. Update the documented
   Enter behavior and key hint if the fill now needs another press.
 
+- **Distinguish unread custom agent registrations from deletion.** When the session launcher opens a saved custom agent
+  choice before its list arrives or after the helm fails to read it, it can wrongly say the registration was deleted.
+  Keep the choice visible on both tabs and keep Launch unavailable when there is no entry to use. Show whether the list
+  is still loading or the read failed. Keep using entries retained from a previous successful read, and show deletion
+  advice only after a successful list omits the ID. Apply the same distinction to a stale chip or search choice and the
+  Command tab's retained choice. Restart with must keep its required conversation field visible when the list is loading
+  or unreadable, even if the field is empty. Show the reason by the field. Keep loading text neutral and avoid guessing
+  whether resumption or reporting is supported while the entry is unknown. Check both tabs in all three list states,
+  with light and dark screenshots. Before pressing Launch, confirm that the fixture installed the intended catalog state
+  and that the saved ID is absent. The prototype exceeded the triage size gate before it handled the empty Restart with
+  field and the loading message beside Launch.
+
 - **Show Custom approval flags in keyboard-highlighted Recent setups.** Two Recent setups in the launcher can show the
   same agent and Custom approval mode while saving different flags. Pointer hover and the screen-reader label give the
   full choice. When the command field keeps keyboard focus, show the saved flag words on the highlighted row in both the
