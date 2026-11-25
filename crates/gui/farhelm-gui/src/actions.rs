@@ -1141,7 +1141,8 @@ impl PhysicalKey {
 
 /// Every shortcut SPEC.md matches by key position rather than by the key's printed character, with the modifiers the
 /// old app used at the reference commit: Command on a Mac and Ctrl+Shift on Linux, and Command+Shift on a Mac for
-/// terminal text size and tab switching. A row's action runs from anywhere in the window, a focused terminal and a
+/// terminal text size. Tab switching, which the old app did not have, uses Command+Shift on a Mac and Ctrl+Shift on
+/// Linux, as its plan decided. A row's action runs from anywhere in the window, a focused terminal and a
 /// text field included, and the key goes no further (the module docs' "Shortcuts matched by the physical key"). The
 /// handler still decides whether the shortcut can act in the current UI.
 ///
