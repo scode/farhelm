@@ -1248,20 +1248,6 @@
   01" matches the test's "gives the emulator back" claim. Size S.
 - Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
-## trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md
-
-- Outcome: `other`.
-- Assessment: The supervisor test for agent-verb validation documents that Clone may omit its host, but never checks a
-  Clone with a source and no host. A regression that reinstated a host requirement would still pass. Verified:
-  confirmed. `crates/farhelm-supervisor/src/service/handlers.rs:7225-7340` has no positive absent-host Clone case, and
-  its positive Clone cases all name a host. Test gap only.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code with one assertion (cheap), or discard. Size S.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md
 
 - Outcome: `other`.
@@ -3129,22 +3115,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## launcher-underlining-can-stall-search.md
-
-- Outcome: `other`.
-- Assessment: When a typed query matches a recent setup, the launcher underlines every match in that row's full saved
-  wrapper prefix. The underline code is quadratic in the number of hits, so a wrapper thousands of characters long with
-  many hits could make each redraw slow while the user types. Verified: confirmed. `host_text.rs:513-563`
-  (`sentence_runs`) runs `hits.iter().any(...)` once per edge. Severity is unverified: a material stall needs an unusual
-  stored wrapper of thousands of characters with thousands of hits, and no measurement was taken.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code. The fix is cheap: merge the hit ranges and sweep through them once. Size S. `discard` is also
-  reasonable.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## trailing-new-container-managed-checkout-stretches-host-block.md
 
 - Outcome: `other`.
@@ -3273,35 +3243,6 @@
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — a short Podman `launch_notice`. Size S. Or discard.
 - Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
-## launcher-recent-accepts-modified-return.md
-
-- Outcome: `other`.
-- Assessment: In the command field, Shift+Return and Cmd+Return (Ctrl+Return on Linux) do exactly what Return does,
-  including taking the highlighted recent setup. The previous launcher accepted only plain Return there. Verified:
-  confirmed. `components/text_input.rs:428` maps every `PressEnter` to `Submitted { held }` without modifiers. No spec
-  rule requires plain-only Return in the editor. Harmless: the action is the one plain Return takes.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: discard. There is no harm, and nothing in the spec contradicts it. Size n/a.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
-## launcher-highlights-escape-notation.md
-
-- Outcome: `other`.
-- Assessment: When a saved folder contains a hidden character, the launcher shows it in escape notation. Search
-  underlining can mark letters inside that notation even though the match came from elsewhere in the real path. Display
-  only: the action uses the raw folder. Verified: confirmed. `host_text.rs:525-534` searches the rendered, escaped text
-  again. Cosmetic.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: discard. The fix (projecting raw match ranges through escaping) costs more than the cue is worth. Size
-  M if fixed.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## hook-hint-dismissal-survives-next-launch.md
 
