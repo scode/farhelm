@@ -25,11 +25,6 @@ consequences.
 - [`hook-settings-toggle-uses-unshown-state.md`](hook-settings-toggle-uses-unshown-state.md) — Space can save the
   all-hosts hook opt-in while the switch still shows the on state the user intended to turn off.
 
-- [`trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md`](trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md)
-  — Expanding a custom agent's ~/ command only during launch preparation kills a live agent on Restart (and allocates
-  checkouts on Create) before failing if HOME is missing or the expanded path cannot be resolved (borderline
-  highest/high; durable conversation ID stays preserved).
-
 - [`agent-environment-launch-skips-place-host-incarnation-pin.md`](agent-environment-launch-skips-place-host-incarnation-pin.md)
   — An approved agent container-environment launch can create the container on a different machine than the card named
   if the place host was retargeted or re-identified while the card waited; the environment-launch path never pins the
@@ -99,11 +94,6 @@ consequences.
 - [`trailing-delete-custom-agent-leaks-remembered-wrapper-prefix.md`](trailing-delete-custom-agent-leaks-remembered-wrapper-prefix.md)
   — When a user launches a custom agent with a wrapper prefix and later deletes that custom agent, Farhelm keeps the
   wrapper prefix remembered and silently pre-fills it when selecting another or newly registered custom agent.
-
-- [`trailing-restart-with-custom-reporting-and-offer-use-stale-row-launch.md`](trailing-restart-with-custom-reporting-and-offer-use-stale-row-launch.md)
-  — When a user edits a registered custom agent's reporting or resumption setting and uses Restart with to apply it, a
-  conversation ID reported right after the restarted agent starts is judged against the previous launch's reporting
-  setting, and the Restart reply (and listings before launch update completes) report a stale restart offer.
 
 - [`trailing-replace-with-recent-named-fill-enter-replaces.md`](trailing-replace-with-recent-named-fill-enter-replaces.md)
   — In Replace with, a screen reader announces a highlighted recent setup as "Fill from recent setup" while Enter on it

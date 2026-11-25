@@ -3317,12 +3317,12 @@ destination may be spelled the same), and guessing between them would put a sess
 registered name carrying a control character can never be typed back at all, since the relay refuses one in `--host`;
 the not-found refusal says so by count, because the fix is a rename and an agent has no rename verb for hosts.
 
-An agent's create sends the template names and launcher edits described under [Agent launches from the CLI](#agent-launches-from-the-cli).
-The helm resolves them to either a command launch, whose YOLO answer comes from the declaration or an explicit answer,
-or an agent launch, whose commands it composes from the agent type and its choices exactly as for the launcher. An agent
-cannot hand the helm arbitrary start and resume commands under an agent launch's YOLO verdict. A clone copies its source's stored launch
-exactly; a legacy source is refused with a remedy, because SPEC.md has agent clone refuse a session from before launch
-kinds.
+An agent's create sends the template names and launcher edits described under
+[Agent launches from the CLI](#agent-launches-from-the-cli). The helm resolves them to either a command launch, whose
+YOLO answer comes from the declaration or an explicit answer, or an agent launch, whose commands it composes from the
+agent type and its choices exactly as for the launcher. An agent cannot hand the helm arbitrary start and resume
+commands under an agent launch's YOLO verdict. A clone copies its source's stored launch exactly; a legacy source is
+refused with a remedy, because SPEC.md has agent clone refuse a session from before launch kinds.
 
 `Clone` resolves the explicitly named source's live owner, drains that owner's pinned connection, and rechecks the owner
 before dispatching to the destination. It does not use the helm's cache: a clone built from a cached row could copy a
@@ -9117,11 +9117,13 @@ covers built-in effort levels and custom text.
 
 `LaunchHarness::Custom` compiles a registered agent once at launch admission, composing literal argv with its optional
 model and effort. A named start takes the one-time `AgentVerb::Create.conversation` selector and the same resume flag as
-the stored resume argv. On spawn the supervisor expands a leading `~/` at the executable slot after the wrapper prefix.
-A resolved agent launch stores its `custom_reporting` flag and compiled resume argv independently. A declared custom
-command uses its own argv and always permits the custom reporter. Plain Restart and capture use the saved launch even
-when the helm edits or deletes its registration. Protocol 88 introduced the custom launch and report types. Protocol 89
-added the named selector to the agent create request, so an older peer cannot silently start the wrong conversation.
+the stored resume argv. The supervisor checks that a leading `~/` at the executable slot after the wrapper prefix can
+expand before create or retry allocates a checkout or Restart stops the running agent. Spawn applies that same
+expansion. A resolved agent launch stores its `custom_reporting` flag and compiled resume argv independently. A declared
+custom command uses its own argv and always permits the custom reporter. Plain Restart and capture use the saved launch
+even when the helm edits or deletes its registration. Protocol 88 introduced the custom launch and report types.
+Protocol 89 added the named selector to the agent create request, so an older peer cannot silently start the wrong
+conversation.
 
 `AgentKind::Custom` uses the generic screen reader and supplies no injected arguments or hook assets. The public
 reporter shares the hook drop-file path and credential and ancestry capture. Supervisor admission uses the version-0
@@ -9502,15 +9504,14 @@ unnamed template. The result must have a folder or, for agent create, a managed 
 sets `TemplateDestination::Github` and conflicts with `--cwd`). Spawn still refuses a managed destination. Either
 requires an agent type or a command and a YOLO answer. The desktop and CLI use `effective_command_yolo` for the answer
 that goes into a launch. A custom declaration supplies YOLO for its command and leaves the draft's explicit answer
-available to a later built-in command. The launch is then validated by the same
-`sessions::resolve_launch_request` a REST create goes through. Only `--command` sets the launch kind: the agent-launch
-flags leave it alone, so on a command template they are refused naming the flag, as the same edit is refused in the
-launcher. `--model`, `--effort` and `--permissions` accept `default`, sent as `null`, which resets a choice a template
-made, and `--no-resume-command` resets the resume command; an omitted flag sends nothing. The CLI has no way to clear a
-command launch's declared agent type that a template set. clap refuses a repeated flag (other than `--template`) and
-`--yolo` with `--no-yolo`. The supervisor's relay only bounds the request (host name, at most 64 template names of at
-most 128 bytes without control characters, the flags' JSON within the 64 KiB create cap); whether it says enough to
-launch is the helm's to decide.
+available to a later built-in command. The launch is then validated by the same `sessions::resolve_launch_request` a
+REST create goes through. Only `--command` sets the launch kind: the agent-launch flags leave it alone, so on a command
+template they are refused naming the flag, as the same edit is refused in the launcher. `--model`, `--effort` and
+`--permissions` accept `default`, sent as `null`, which resets a choice a template made, and `--no-resume-command`
+resets the resume command; an omitted flag sends nothing. The CLI has no way to clear a command launch's declared agent
+type that a template set. clap refuses a repeated flag (other than `--template`) and `--yolo` with `--no-yolo`. The
+supervisor's relay only bounds the request (host name, at most 64 template names of at most 128 bytes without control
+characters, the flags' JSON within the 64 KiB create cap); whether it says enough to launch is the helm's to decide.
 
 The host is the asking session's own for a spawn (which also makes a template that sets a host a refusal, through the
 launcher's host-fixed rule); otherwise an explicit `--host` name, then the install a template named, matched among host
