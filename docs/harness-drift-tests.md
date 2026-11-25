@@ -51,6 +51,12 @@ The `permission_modes` category opens the CLI with the launcher's approval choic
 indicator where the integration reads one. Tracked agents complete one text turn with Custom permission flags. The test
 checks that Restart keeps those arguments in order and that the new process reaches its composer.
 
+The `initial_prompt` category starts each agent that accepts a launch prompt with a two-line prompt whose first line
+begins with `--`, checks that the process received it as one argument, and checks the reply, which needs both lines. For
+the agents whose conversations Farhelm tracks, Restart must then reopen the conversation without the prompt in its
+arguments, so the prompt is not sent again. Where the agent also accepts a launch prompt when it opens a named
+conversation, a second launch prompt on the first conversation must recall the first turn's word.
+
 An agent may save a trust choice for the temporary directory. Claude, the Muse launcher and OMP can update themselves
 during startup, so these cases disable their updaters for the test invocations using an environment variable for Claude
 and Muse and a temporary OMP configuration overlay.
