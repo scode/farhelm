@@ -114,10 +114,6 @@ consequences.
   — If a recipe rebuild or preparation fails on an empty container host and that host is later removed, deleting the
   recipe always fails because cleanup still requires the removed host row.
 
-- [`trailing-podman-claim-and-recipe-guards-omit-tailscale.md`](trailing-podman-claim-and-recipe-guards-omit-tailscale.md)
-  — Toggling a container host's Tailscale SSH mode while a recipe build is starting can pass the SQL ownership guards
-  after a fresh probe reclaims the machine, carrying pre-toggle proxy settings onto the updated route.
-
 - [`trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md`](trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md)
   — After adopting a reinstalled or recycled container host, Farhelm can fail new container launches for up to 5 minutes
   with a misleading moved-destination error and lock out another entry for the old machine across restarts.

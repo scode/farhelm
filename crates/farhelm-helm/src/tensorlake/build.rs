@@ -312,8 +312,9 @@ impl HelmStore {
     /// A place-backed engine records helper intent before run. Validate its
     /// current place in that same write transaction, so place removal cannot
     /// leave newly recorded ownership at an already forgotten endpoint. Entry
-    /// UUID, kind and destination bind the row paired with its probe/commands;
-    /// decorative edits and supervisor install paths do not select Podman I/O.
+    /// UUID, kind, destination and SSH mode bind the row paired with its
+    /// probe and commands. Aliases and supervisor install paths can change
+    /// independently of the Podman connection.
     /// New helpers pass the exact identity they need to own. The same write
     /// records a reference, after which another entry cannot take the claim.
     pub(crate) async fn update_recipe_place_state<T: Send + 'static>(
@@ -328,7 +329,8 @@ impl HelmStore {
     }
 
     /// Definition and both providers' state still share one transactional
-    /// writer. The optional guard adds no independent state or cleanup engine.
+    /// writer. Even legacy cleanup without a claim is bound to its observed
+    /// destination and SSH mode.
     async fn write_recipe_state<T: Send + 'static>(
         &self,
         name: &str,
@@ -343,12 +345,13 @@ impl HelmStore {
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .context("starting the Tensorlake recipe state write")?;
                 if let Some((place, claim)) = place {
-                    let (kind, environment, provider, identity, destination): (String, Option<String>, Option<String>, String, Option<String>) = tx.query_row(
-                        "SELECT kind, tensorlake_sandbox, environment_provider, entry_uuid, destination FROM hosts WHERE id = ?1",
-                        [place.id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                    let (kind, environment, provider, identity, destination, tailscale): (String, Option<String>, Option<String>, String, Option<String>, bool) = tx.query_row(
+                        "SELECT kind, tensorlake_sandbox, environment_provider, entry_uuid, destination, tailscale FROM hosts WHERE id = ?1",
+                        [place.id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
                     ).context("the container place was removed before its ownership could be recorded")?;
                     let kind = crate::store::HostKind::from_columns(&kind, environment.as_deref(), provider.as_deref())?;
-                    anyhow::ensure!(kind.can_host_environments() && kind == place.kind && identity == place.entry_uuid && destination == place.destination,
+                    anyhow::ensure!(kind.can_host_environments() && kind == place.kind && identity == place.entry_uuid
+                        && destination == place.destination && tailscale == place.tailscale,
                         "the container place changed before its ownership could be recorded; retry at the current place");
                     if let Some(claim) = claim {
                         anyhow::ensure!(
