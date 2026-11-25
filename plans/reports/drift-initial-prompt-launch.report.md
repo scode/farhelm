@@ -63,3 +63,78 @@ The independent source review found three gaps. The corrected tests check the li
 conversation selector in the running process, and show separate errors when OpenCode session discovery fails. All three
 findings were addressed and the source review gate cleared. The corrected live run reproduced the same Cursor and
 OpenCode outcomes.
+
+### Landing
+
+#### What landed with it
+
+Two plans landed this round, both adding a category to the opt-in live drift tests: this one, through
+[#4787](https://github.com/scode/farhelm/pull/4787/changes) and the landing fix
+[#4795](https://github.com/scode/farhelm/pull/4795/changes), and then drift-named-conversation-starts. Both were written
+before the previous round's drift plans landed, so they were rebased onto those. The only overlap was in TODO.md (each
+plan's planned entry removed, every follow-up kept) and the drift docs. Nothing in what landed changes how this category
+launches an agent, except that Claude now starts with its background updater turned off, as every drift case does since
+the previous round.
+
+#### Fixes made while landing
+
+#4795 changes only the drift docs and TODO.md:
+
+- **The drift docs now describe this category.** It was the only recent category without a paragraph. The paragraph says
+  what prompt it sends, which agents' Restart it checks, and when it reopens the first conversation with a second
+  prompt.
+- **The Cursor follow-up asked for something the test cannot do.** It said to "find the test conversation's ID", but
+  Cursor lists its conversations only in an interactive picker, so the step that reopens the first conversation can only
+  report COULD NOT RUN for Cursor. The entry now points at `cursor-agent create-chat`, which returns a chat ID before
+  the first turn and which the named conversation category already uses.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. Both plans landed this
+round (drift-initial-prompt-launch and drift-named-conversation-starts) change only the opt-in live drift tests and
+their docs, so the landing ran the drift tests that need no vendor CLI and the checks that inspect the changed files, on
+the two plans rebased onto main and stacked together with their landing fixes.
+
+On that stack (`7aa0e277`), whose code is what main now holds:
+
+- `cargo nextest run --locked -p farhelm --test e2e -E 'test(/^real_agent_capture::drift::/)'`, on the test worker
+  (recorder run `f8d59b12-6df5-4ede-a0d6-94282b1541db`): all 23 passed, with no runtime skip.
+- `python3 -B scripts/run-harness-drift.py --list --category all`, on the test worker: it built the drift tests and
+  listed eight launch prompt and ten named conversation cases beside the other categories', starting no agent.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker: passed.
+- `python3 -B scripts/test-run-harness-drift.py`, locally (recorder run `ca051ad2-c296-422c-86db-1a96e90a14c8`): all 18
+  passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its pinned interpreter), `dprint check` and
+  `python3 scripts/check-agents-md.py` (no errors; one warning, about an old citation in the triage archive, already on
+  main), locally: passed.
+
+After that, only the drift docs changed (the launch prompt paragraph was made more precise), and `dprint check`,
+`check-agents-md` and the formatter passed again on the final stack.
+
+Reused: the executors' live runs of the two categories against the installed agents, recorded in the reports. They ran
+before the previous round turned off Claude's background updater for every drift case, so this round's Claude launches
+now carry that setting where the reported runs did not; the reasoning effort category's live runs already launched
+Claude that way.
+
+Skipped: the live drift cases themselves, since they spend vendor turns, need the vendor logins and are opt-in by
+design; the workspace-wide Rust suite and the desktop checks, since no shipped code changed; and CI, which runs only on
+demand.
+
+#### What the report says that is no longer true
+
+The report's first follow-up says to find the ID of the conversation the test created and resume Cursor with it. The
+test has no way to find that ID, so the TODO.md entry, as corrected above, now says to get one from
+`cursor-agent create-chat` instead. Otherwise the landing's own review found the report accurate.
+
+#### Things you should know that the report does not say
+
+- **OpenCode's conversation lookup exists twice, and the two copies disagree.** This category and the named conversation
+  category each find the test's OpenCode conversation in OpenCode's session list, by the test's folder. This one
+  compares the folder's path without resolving symbolic links and reports COULD NOT RUN when no conversation, or more
+  than one, matches; the other resolves the links and reports FAILED. An OpenCode release that records folders
+  differently could therefore look like a missing prerequisite here and a failure there. Sharing one lookup is a small
+  follow-up; no TODO entry records it yet.
+- **A Restart that answered the prompt again would not be caught on screen.** The check that Restart did not answer the
+  launch prompt a second time reads the screen right after startup, before any second answer could appear. What does
+  protect against a re-sent prompt is the check that the restarted process's arguments no longer hold it, which is
+  enough for a prompt Farhelm passes on the command line, as all of these agents' launch prompts are.
