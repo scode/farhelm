@@ -206,6 +206,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   replaced by a clipped frame before presentation, and a successful continuation after a wait. Update the documented
   Enter behavior and key hint if the fill now needs another press.
 
+- **Use the shared Delete confirmation for custom agents in Settings.** The footer asks with two ordinary buttons.
+  Escape can close Settings instead of cancelling Delete, focus stays away from Cancel, and the question never names the
+  registration. Port `settings/custom_agents.rs` to the recipe editor's inline prompt as described in
+  [Questions: the prompt](SPEC_impl.md#questions-the-prompt). Freeze the name and stable registration ID, start on
+  Cancel, and keep the Delete button's focus handle alive so Escape can return to it after the footer redraws. If Delete
+  fails to start, keep the draft and show the reason without replacing the text of an open question. An unanswered
+  Delete must also let an accepted Save and Close proceed, or show why the save could not start. Coordinate that part
+  with the Close → Save outcome in `triage-settings-nov24`. The prototype passed the screenshot and cancellation checks
+  but exceeded the triage budget before it covered focus restoration and the silent Save refusal. Test both from a dirty
+  registration and check light and dark captures.
+
 - **Distinguish unread custom agent registrations from deletion.** When the session launcher opens a saved custom agent
   choice before its list arrives or after the helm fails to read it, it can wrongly say the registration was deleted.
   Keep the choice visible on both tabs and keep Launch unavailable when there is no entry to use. Show whether the list

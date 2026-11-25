@@ -88,11 +88,6 @@ consequences.
   Save in the 'Save changes before closing?' dialog, saving silently fails without displaying any error and leaves
   Settings stuck open on the delete confirmation (and leaves any remaining dirty Settings forms unsaved).
 
-- [`trailing-custom-agent-settings-delete-confirmation-bypasses-ask-inline.md`](trailing-custom-agent-settings-delete-confirmation-bypasses-ask-inline.md)
-  — The custom-agent Delete confirmation in Settings bypasses the shared inline prompt, so Escape closes Settings
-  instead of cancelling, Cancel loses default focus, and external edits can change the agent while the unnamed
-  confirmation stays open (borderline high/highest; registration ID stays fixed).
-
 - [`trailing-custom-agents-share-one-remembered-wrapper-prefix.md`](trailing-custom-agents-share-one-remembered-wrapper-prefix.md)
   — Remembered wrapper prefixes are stored per agent type, but every registered custom agent shares a single bucket.
 
