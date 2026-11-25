@@ -503,8 +503,8 @@ pub(super) fn session_unavailable_cards(
     )
 }
 
-/// Two retained sessions show what actually happened to their environment. A deleting container has no reconnect
-/// promise. A suspended Bash session preserves its processes and offers Resume.
+/// Retained sessions show what happened to their environment. A deleting container has no reconnect promise, a
+/// suspended Bash session offers Resume, and an unanswered container host shows its bounded transport error.
 pub(super) fn environment_unavailable_cards(
     _: &SceneState,
     window: &mut Window,
@@ -513,6 +513,7 @@ pub(super) fn environment_unavailable_cards(
     use crate::session_list::environment_tests::{
         Provider, bash_session, deleting, environment_host, suspended_at,
     };
+    use farhelm_proto::ui_channel::HostStateView;
     let cases = [
         (
             session("a")
@@ -525,6 +526,17 @@ pub(super) fn environment_unavailable_cards(
                 .title("Inspect the benchmark logs")
                 .activity(TEST_NOW - 120),
             environment_host(Provider::Sandbox, suspended_at((TEST_NOW - 60) * 1000)),
+        ),
+        (
+            session("c").title("Review the migration notes").activity(TEST_NOW - 180),
+            environment_host(Provider::Container, HostStateView::Unreachable {
+                cause: "transport-failure".into(),
+                last_error: concat!(
+                    "Farhelm could not ask the container host whether the container is running: ",
+                    "Farhelm could not reach this container host (exit status 1): ",
+                    "SSH connection closed. No route to host",
+                ).into(),
+            }),
         ),
     ];
     draw_unavailable_cards(cases, window, cx)

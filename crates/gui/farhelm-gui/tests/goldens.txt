@@ -254,8 +254,8 @@ linux/session-details-bar--dark.png f73a0b88d418c34b286cbf5a854ac9488228bec0
 linux/session-details-bar--light.png a85863c16fcaefd15746f425f7abdaa91189db79
 linux/session-details-copy-warning--dark.png 747274a067fb5632032cc0aa4b719c740298fbea
 linux/session-details-copy-warning--light.png e3b6157e59bc6799ee2a0af27602023f73b38461
-linux/session-environment-unavailable--dark.png a6f8eb96c8bf0bddb3c1b72f276af78840d41cd2
-linux/session-environment-unavailable--light.png 425ee17af4d42fde8e36ec56bfe2b1cac91702bc
+linux/session-environment-unavailable--dark.png 138d37f146acad25d67be8304fb5ca3c32e2f18d
+linux/session-environment-unavailable--light.png 181290e2cadd797e36bf15f7aa9aaf0ddc066dc5
 linux/session-flag-agent-trust-hints--dark.png 536a781ac6c47f86ad17633d6df0407956392f89
 linux/session-flag-agent-trust-hints--light.png cdc8594ee44b4ffc577fa93e1c46b2d91ce8ef5c
 linux/session-hook-setup-hint--dark.png f84d39ba519ebb6fc0bb95d169fbf2b13e6d7b43

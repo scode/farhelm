@@ -180,9 +180,6 @@ consequences.
 - [`sound-preview-regression-misses-separate-mappings.md`](sound-preview-regression-misses-separate-mappings.md) — The
   preview test exercises one sound and can miss a wrong mapping on the three other Play controls.
 
-- [`recipe-tunnel-edit-marks-only-card.md`](recipe-tunnel-edit-marks-only-card.md) — A recipe with multiple tunnels
-  marks only the card as edited, leaving the changed row and field unidentified.
-
 - [`app-settings-shared-upgrade-option-has-local-heading.md`](app-settings-shared-upgrade-option-has-local-heading.md) —
   The App heading says This Mac even though it contains a helm-shared highlights setting.
 
@@ -249,10 +246,6 @@ consequences.
   masked-input test checks painted text and accessible names but never inspects accessible values or runs with
   accessibility active, leaving screen-reader secret exposure unguarded.
 
-- [`trailing-podman-suspend-flashes-connecting-and-runs-retry-ladder.md`](trailing-podman-suspend-flashes-connecting-and-runs-retry-ladder.md)
-  — Suspending a container briefly flashes Connecting before Suspended, and a transient post-Suspend check failure on a
-  sandbox or container runs the full active reconnect ladder instead of one quiet check.
-
 - [`trailing-provisioning-service-omits-sealed-host-refusal.md`](trailing-provisioning-service-omits-sealed-host-refusal.md)
   — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
   admitted instead of being refused.
@@ -296,10 +289,6 @@ consequences.
 - [`trailing-host-scoped-trash-confirmation-stays-open-invisibly.md`](trailing-host-scoped-trash-confirmation-stays-open-invisibly.md)
   — If a host leaves or empties while its 'Delete all on' confirmation is open in Trash, the invisible confirmation
   keeps all other hosts' Delete/Retry buttons disabled and swallows the first Close or Escape.
-
-- [`trailing-container-host-unanswered-embeds-raw-stderr.md`](trailing-container-host-unanswered-embeds-raw-stderr.md) —
-  When a verified container host command fails before the guard runs, Farhelm copies up to 64 KiB of uncropped,
-  unsanitized remote stderr directly into host status and HTTP errors.
 
 - [`trailing-suspend-read-activity-still-uses-ordered-lane.md`](trailing-suspend-read-activity-still-uses-ordered-lane.md)
   — Primary Suspend and Stop and suspend actions still wait up to 20 seconds behind any slow host on the ordered channel

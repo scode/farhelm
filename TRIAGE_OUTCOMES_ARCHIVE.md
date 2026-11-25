@@ -46917,3 +46917,64 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   account, including when the old cache is missing or a route has been restored. Change
   `qxopuwqrvrsnzyzyrskxoztywruxtlxm`, bookmark `plan/triage-podman-nov24/10-adopt-and-unused-claim`,
   [PR #4921](https://github.com/scode/farhelm/pull/4921/changes).
+
+## trailing-container-host-unanswered-embeds-raw-stderr.md
+
+- Outcome: `other`.
+- Assessment: When a container host cannot be reached, the error Farhelm shows on the container's host (and in Delete
+  and launch errors) includes the raw SSH error output, which can be up to 64 KiB, and nothing strips control characters
+  from it. Every other container error trims and cleans that output first. Verified: Confirmed.
+  `container_host_unanswered` (`podman_probe.rs:56-65`) uses `result.stderr.trim()` as it is. Siblings use
+  `tensorlake::shell::shown`. The GUI escapes host text (SPEC_impl.md "Host-supplied text"), so no display spoofing in
+  the app is established. Helm logs and HTTP error bodies get the raw text. This trigger is common (a host that is
+  asleep), so the rare-glitch filter does not apply.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code — pass the output through `shell::shown`. A one-line change plus a test, size S.
+- Execution: Fixed. Unanswered container commands now use the existing bounded diagnostic formatter. Farhelm keeps the
+  exit status and readable tail of the host error, including the final line. Change `srkooynpvpxnswkoopkpxqmzkwqzvovy`,
+  bookmark `plan/triage-podman-nov24/11-small-polish`, [PR #4927](https://github.com/scode/farhelm/pull/4927/changes).
+
+## recipe-tunnel-edit-marks-only-card.md
+
+- Outcome: `other`.
+- Assessment: In the recipe editor, editing a tunnel's port or host marks only the "Tunnels" heading as edited, not the
+  field that changed. Every other field in the editor gets its own dot. Verified: Confirmed.
+  `settings/recipes/editor.rs:1091-1157` draws the tunnel inputs without an edited flag. The only marker is the
+  heading's `caption_with_dot` (`:1227-1231`). Other fields use `edited(...)` (`:849`, `:921`, `:999`, …). SPEC.md
+  (about line 2569): "A dot marks each edited field and section." The tunnel inputs have no caption, so where the dot
+  goes and how an added row counts are design choices. That keeps it from being clearly settled.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code — per-field markers, compared by row key. Size S-M. Discard if polish is not wanted now.
+- Execution: No change under the size gate. A tunnel row has three unlabelled inline inputs. Per-field marks need a
+  placement that preserves the inline layout and a test that checks the correct field after an earlier row is removed.
+  The card-level marker remains. Change `srkooynpvpxnswkoopkpxqmzkwqzvovy`, bookmark
+  `plan/triage-podman-nov24/11-small-polish`, [PR #4927](https://github.com/scode/farhelm/pull/4927/changes).
+
+## trailing-podman-suspend-flashes-connecting-and-runs-retry-ladder.md
+
+- Outcome: `other`.
+- Assessment: After the user suspends a container session, its host briefly shows "Connecting" between "Suspending…" and
+  "Suspended". For sandboxes and containers alike, if the quick check after Suspend hits a transient failure, Farhelm
+  runs its full one-minute reconnect sequence, showing Connecting, instead of one quiet check. Verified: Partly
+  confirmed. `Podman::change` passes `|_| async { Ok(None) }` as `record` (`podman.rs:824`), so `perform`
+  (`lifecycle.rs:109-121`) publishes no Suspended state before `release_hold(host, false)`. The suppression in
+  `manager.rs:4586-4594` applies only when the state is already `Suspended { suspended_by_farhelm_at: Some(_) }`. The
+  `active` and ladder behavior was not traced end to end. SPEC.md (about line 393) says the host shows Suspending… until
+  suspension is confirmed, then Suspended. It does not mention a flash in between.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code — have Podman's `record` publish Suspended, and make a non-fresh release run one quiet check.
+  Size S-M.
+- Execution: No change under the size gate. Publishing the confirmed Podman suspension can hide the first Connecting
+  update. The existing reconnect loop still keeps its active retry window after the parked connection exits. A complete
+  fix needs the displayed state and a quiet post-suspend check for both providers, with a regression for a transient
+  provider failure. Change `srkooynpvpxnswkoopkpxqmzkwqzvovy`, bookmark `plan/triage-podman-nov24/11-small-polish`,
+  [PR #4927](https://github.com/scode/farhelm/pull/4927/changes).
