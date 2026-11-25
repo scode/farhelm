@@ -107,6 +107,64 @@ async fn submit(term: &mut Terminal<'_>, log: &Path) -> Result<(String, String),
     Ok((format!("FH{nonce}"), baseline))
 }
 
+/// The checks this category makes for some harnesses only, beyond the steps every harness shares.
+#[derive(Clone, Copy)]
+struct HarnessChecks {
+    /// A protocol reply the hook prints to the agent, which must never reach the screen.
+    hook_reply: Option<&'static str>,
+    /// The reported conversation file starts with OMP's title slot, whose width and parsing are checked.
+    title_slot_prelude: bool,
+    /// Words the agent's process must still carry when hooks are off.
+    hooks_off_child_words: &'static [&'static str],
+    /// The hooks-off session goes on to Restart onto a conversation captured with hooks on, which Restart must keep,
+    /// with the reporter still off and no hook report written.
+    hooks_off_resume: bool,
+}
+
+/// Each harness states its extra checks, so a newly added one has to decide them rather than skip them by default.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn checks(harness: LaunchHarness) -> HarnessChecks {
+    use LaunchHarness::*;
+    let none = HarnessChecks {
+        hook_reply: None,
+        title_slot_prelude: false,
+        hooks_off_child_words: &[],
+        hooks_off_resume: false,
+    };
+    match harness {
+        // Antigravity's hook answers on stdout with `{}`, which the CLI must consume without rendering.
+        Antigravity => HarnessChecks {
+            hook_reply: Some("{}"),
+            ..none
+        },
+        Omp => HarnessChecks {
+            title_slot_prelude: true,
+            ..none
+        },
+        // Turning hooks off must not drop `--no-daemon`, which keeps Codex's commands in the session's tree.
+        Codex => HarnessChecks {
+            hooks_off_child_words: &["--no-daemon"],
+            ..none
+        },
+        // Goose's hooks are turned off again at resume time, so Restart is part of what the hooks-off case checks.
+        Goose => HarnessChecks {
+            hooks_off_resume: true,
+            ..none
+        },
+        Claude | Muse | Grok | Pi | Cursor | OpenCode | Bash | Zsh | Custom => none,
+    }
+}
+
+/// Grok's reports name the conversation by the resume selector rather than a runtime ID that survives enrichment.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn identity_is_resume_selector(kind: AgentKind) -> bool {
+    use AgentKind::*;
+    match kind {
+        Grok => true,
+        Claude | Codex | Goose | Pi | Omp | Antigravity | Muse | Custom | Generic => false,
+    }
+}
+
 /// The text-only turn uses the same reply boundary as the base drift case.
 fn expectation(reply: &str, hook_witness: HookWitness) -> TurnExpectation<'_> {
     TurnExpectation {
@@ -124,7 +182,9 @@ fn hook_invisible(harness: LaunchHarness, term: &Terminal<'_>) -> anyhow::Result
         text.contains("farhelm: when the user writes")
             || text.contains("farhelm internal hook")
             || text.contains("farhelm: hook")
-            || (harness == LaunchHarness::Antigravity && text.contains("{}"))
+            || checks(harness)
+                .hook_reply
+                .is_some_and(|reply| text.contains(reply))
     };
     anyhow::ensure!(
         !leaked(&term.host.screen_tail(SCREEN_BYTES))
@@ -198,7 +258,7 @@ fn turn_reports(harness: LaunchHarness) -> &'static [&'static str] {
 /// The locator can acquire a transcript path after the first callback. Compare the runtime ID that survives
 /// that enrichment and the hook log's length cap.
 fn turn_identity(snapshot: &SessionSnapshot, conversation: &str) -> anyhow::Result<String> {
-    if snapshot.kind == AgentKind::Grok {
+    if identity_is_resume_selector(snapshot.kind) {
         return snapshot
             .resume_template
             .as_deref()
@@ -327,7 +387,7 @@ async fn enabled(
                         .await?;
                 check_turn_reports(harness, &mut term, &log, &baseline, &snapshot).await?;
                 let conversation = snapshot.captured_conversation.expect("an accepted turn has a conversation");
-                if harness == LaunchHarness::Omp {
+                if checks(harness).title_slot_prelude {
                     check_omp_title(&conversation)?;
                 }
                 *capture = Some(conversation);
@@ -516,8 +576,9 @@ async fn disabled(harness: LaunchHarness, profile: &Harness, capture: Option<&st
                         anyhow::anyhow!("hooks-off startup reported a capture\n{screen}").into(),
                     );
                 }
-                if harness == LaunchHarness::Codex {
-                    check_child_words(&term, "cmdline", &["--no-daemon"])?;
+                let hooks_off_words = checks(harness).hooks_off_child_words;
+                if !hooks_off_words.is_empty() {
+                    check_child_words(&term, "cmdline", hooks_off_words)?;
                 }
                 let log = env.state.join("hook-log").join(format!("{id}.log"));
                 let (reply, _) = submit(&mut term, &log).await?;
@@ -530,7 +591,7 @@ async fn disabled(harness: LaunchHarness, profile: &Harness, capture: Option<&st
                 require_no_report(&log)?;
                 hook_invisible(harness, &term)?;
                 println!("no callback or capture on hooks-off startup or turn");
-                if harness == LaunchHarness::Goose
+                if checks(harness).hooks_off_resume
                     && let Some(conversation) = capture
                 {
                     check_goose_resume(&env, profile, id, conversation, &log).await?;

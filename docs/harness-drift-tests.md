@@ -39,11 +39,6 @@ Goose, Pi and OMP also start without provider or model flags and check that the 
 explicit OpenRouter models need `OPENROUTER_API_KEY`. The no-flag check still runs without it, but the case is then
 reported as COULD NOT RUN.
 
-The `capture_timing_hooks` category checks whether Restart becomes available before or after the first text turn. It
-looks for the installed vendor's turn callbacks in the hook log and checks that they stay off the screen. Each harness
-also gets a fresh supervisor with hooks disabled. Codex still needs its daemon-ownership option, and Goose's Restart
-must keep its reporter disabled even when the session already has a saved conversation.
-
 A Codex retirement prompt can appear before the composer opens. The affected model is reported as unavailable when the
 prompt asks the user to choose between keeping it and switching to its replacement.
 
@@ -69,6 +64,11 @@ begins with `--`, checks that the process received it as one argument, and check
 the agents whose conversations Farhelm tracks, Restart must then reopen the conversation without the prompt in its
 arguments, so the prompt is not sent again. Where the agent also accepts a launch prompt when it opens a named
 conversation, a second launch prompt on the first conversation must recall the first turn's word.
+
+The `capture_timing_hooks` category checks whether Restart becomes available before or after the first text turn. It
+looks for the installed vendor's turn callbacks in the hook log and checks that they stay off the screen. Each harness
+also gets a fresh supervisor with hooks disabled. Codex still needs its daemon-ownership option, and Goose's Restart
+must keep its reporter disabled even when the session already has a saved conversation.
 
 An agent may save a trust choice for the temporary directory. Claude, the Muse launcher and OMP can update themselves
 during startup, so these cases disable their updaters for the test invocations using an environment variable for Claude
