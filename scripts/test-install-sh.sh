@@ -1209,6 +1209,7 @@ if [ "\${1:-}" = internal ] && [ "\${2:-}" = version-lock ]; then
   echo "helper noise" >&2
   exit "\${HELPER_EXIT:-0}"
 fi
+if [ -n "\${PROBE_START_FILE:-}" ]; then printf '%s\n' "\$*" >"\$PROBE_START_FILE"; fi
 echo "version $v"
 echo "pid \$\$"
 for arg in "\$@"; do printf 'arg [%s]\n' "\$arg"; done
@@ -1292,6 +1293,20 @@ set -e
 check "forwarder (version stays busy): gives up with exit status 127" [ "$FWD_RC" -eq 127 ]
 check "forwarder (version stays busy): says so in one line" \
   [ "$FWD_BUSY_ERR" = "farhelm: could not start version 7.0.0 of Farhelm; it is being updated or uninstalled. Run the command again." ]
+
+# The real reporter can exit quietly under its own lock. The probe marks entry before any such check.
+FWD_MARKER="$FWD_STATE/callback-started"
+check "forwarder probe starts with no marker" [ ! -e "$FWD_MARKER" ]
+set +e
+FWD_REPORT=$(forward HELPER_EXIT=75 PROBE_START_FILE="$FWD_MARKER" "$FWD" custom-agent report-conversation --id conv 2>&1)
+FWD_RC=$?
+set -e
+check "forwarder (busy custom reporter): succeeds quietly" [ "$FWD_RC:$FWD_REPORT" = "0:" ]
+check "forwarder (busy custom reporter): never starts the callback" [ ! -e "$FWD_MARKER" ]
+check "forwarder (claimed custom reporter): succeeds" \
+  forward PROBE_START_FILE="$FWD_MARKER" "$FWD" custom-agent report-conversation --id conv
+check "forwarder (claimed custom reporter): starts the callback with its arguments" \
+  [ "$(cat "$FWD_MARKER" 2>/dev/null || true)" = "custom-agent report-conversation --id conv" ]
 
 # A Running record that names a version which is gone means the supervisor
 # that wrote it is not running any more, so the forwarder uses the Installed

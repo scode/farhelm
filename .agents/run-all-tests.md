@@ -102,7 +102,8 @@ second clippy run on floating stable is needed.
   a static musl `farhelm` from `cargo build -p farhelm --target x86_64-unknown-linux-musl` passed as `--farhelm`; the
   sweep runs `test-install-sh.sh` only under the host's GNU userland). Both runs include the installer's scenario-scoped
   request counts and diagnostics for unexpected requests in refused `/latest` cases, plus legacy upgrade-floor refusal,
-  dedicated status propagation and preservation of the old app and command files.
+  dedicated status propagation, preservation of the old app and command files, and a start witness for custom report
+  forwarding after the version claim succeeds.
 - `dprint check`
 - `python3 -B deflake/test-deflake.py` (deflake tooling, including state-root ownership and sweep base ancestry). The
   recorder's own tests are listed below.

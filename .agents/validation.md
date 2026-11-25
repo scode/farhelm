@@ -1011,7 +1011,7 @@ systemd or SSH substrate ran.
   `~/Applications/Farhelm.app` changes, and no service manager runs. Every invocation uses `env -i` with an explicit
   environment, never the harness process's own. Refused `/latest` cases attribute requests by their scenario's origin
   path and report unexpected request lines, so delayed requests from another fixture cannot silently become this
-  install's request count.
+  install's request count. The forwarder fixture checks custom callbacks for busy and successful version claims.
 - `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
   — macOS-only, after building the CLI: runs the actual installer and installed uninstaller against private fixture
   homes and release archives. Covers updates, legacy upgrade-floor refusal with the old installation preserved,
