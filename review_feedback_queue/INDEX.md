@@ -105,12 +105,6 @@ consequences.
   conversation ID reported right after the restarted agent starts is judged against the previous launch's reporting
   setting, and the Restart reply (and listings before launch update completes) report a stale restart offer.
 
-- [`trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md`](trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md)
-  — When a launch template has a custom effort value without an agent type (a valid modifier template) or after
-  switching its agent type from a custom agent to a built-in agent, the Templates editor displays Effort as 'Default'
-  instead of showing the stored custom value, refuses to save, and (when Effort renders as a dropdown) ignores clicking
-  'Default' so the user cannot reset it directly.
-
 - [`trailing-templates-editor-hides-custom-yolo-control-and-saves-false.md`](trailing-templates-editor-hides-custom-yolo-control-and-saves-false.md)
   — In the Templates editor, adding Approvals to a Command template that declares a custom agent (or opening a stored
   one whose Approvals was set to 'Keeps safety checks') displays only the static message 'Custom agents always run in

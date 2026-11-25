@@ -137,6 +137,19 @@ pub(super) fn template_generic_agent_refusal_setup(
     open_template_editor(state, "generic-agent", None, window, cx);
 }
 
+/// The same literal effort is valid without an agent and incompatible with an explicit built-in agent.
+pub(super) fn template_literal_effort_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    open_template_editor(state, "effort-only", None, window, cx);
+}
+
+pub(super) fn template_literal_effort_refusal_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open_template_editor(state, "codex-effort", None, window, cx);
+}
+
 /// Open the template that sets both Host and Destination so the shared switch and separate fields are visible.
 pub(super) fn template_destination_editor_setup(
     state: &SceneState,
@@ -181,13 +194,21 @@ fn open_template_editor(
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let mut snapshot = editor_scene_collections();
-    if matches!(template, "old-custom" | "generic-agent") {
-        let mut fields = serde_json::json!({"kind": "agent", "agent": "custom"});
-        if template == "old-custom" {
-            fields["custom_agent"] = "acme-code".into();
-            fields["model"] = "BAD MODEL".into();
+    let special = match template {
+        "old-custom" => {
             snapshot.push(super::custom_agent_state());
+            Some(
+                serde_json::json!({"kind": "agent", "agent": "custom", "custom_agent": "acme-code", "model": "BAD MODEL"}),
+            )
         }
+        "generic-agent" => Some(serde_json::json!({"kind": "agent", "agent": "custom"})),
+        "effort-only" => Some(serde_json::json!({"kind": "agent", "effort": "deep_focus"})),
+        "codex-effort" => Some(
+            serde_json::json!({"kind": "agent", "agent": "codex", "effort": "deep_focus_".repeat(23)}),
+        ),
+        _ => None,
+    };
+    if let Some(fields) = special {
         snapshot[0] = CollectionState {
             collection: Collection::Templates,
             meta: test_support::meta(&[template]),

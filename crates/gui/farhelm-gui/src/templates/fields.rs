@@ -249,7 +249,8 @@ impl Field {
         {
             return Some("Generic Custom is only for Command templates. Choose a registered or built-in agent.".into());
         }
-        if custom {
+        // A template can supply only the effort. Apply the custom grammar until a built-in agent is set.
+        if custom || (self == Field::Effort && fields.agent.is_none()) {
             let custom_value = match self {
                 Field::Model => fields.model.as_ref().and_then(Option::as_deref),
                 Field::Effort => fields
@@ -286,6 +287,7 @@ impl Field {
             );
         }
         if self == Field::Effort
+            && fields.agent.is_some()
             && !custom
             && let Some(Some(chosen)) = &fields.effort
             && !chosen.known().is_some_and(|chosen| {
