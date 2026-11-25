@@ -664,6 +664,9 @@ pub(crate) struct Launcher {
     yolo: Option<yolo_question::YoloState>,
     /// A settings read or question for the agent picked in this launcher. Templates have their own launch path.
     hook_question: Option<hook_question::HookQuestion>,
+    /// A successful setup save with no continuation. The flag distinguishes a changed launch from one that
+    /// stayed blocked. Keep this apart from `note` so a template refusal cannot erase the save acknowledgment.
+    hook_setup_saved: Option<bool>,
     /// An unanswered offer to recheck when its tab restores the same agent. Agent and Command each own their pick.
     hook_offer_on_return: [Option<crate::hook_setup::HookAgent>; 2],
     hook_pick: u64,
@@ -977,6 +980,7 @@ impl Launcher {
             layer: None,
             yolo: None,
             hook_question: None,
+            hook_setup_saved: None,
             hook_offer_on_return: [None; 2],
             hook_pick: 0,
             sandbox: None,
@@ -1033,6 +1037,7 @@ impl Launcher {
         // So does the sandbox question, about the draft at its press.
         self.sandbox = None;
         self.retire_hook_answer(cx);
+        self.hook_setup_saved = None;
         // A quick launch's banner or refusal speaks of the draft as it opened, a shortcut's refusal of the press before.
         self.note = None;
         self.save_refusal = None;
@@ -1527,6 +1532,7 @@ impl Launcher {
         self.refused = None;
         self.yolo = None;
         self.sandbox = None;
+        self.hook_setup_saved = None;
         // A press speaks for itself: a quick launch's or a shortcut's refusal said before it would hide its reason.
         self.note = None;
         if yolo_consent
@@ -2448,10 +2454,10 @@ impl Render for Launcher {
         let holding = self.yolo_in_flight(cx) || self.hook_write_in_flight(cx);
         let restart = matches!(self.draft.mode, Mode::RestartWith(_));
         let source = self.source_consent(cx);
+        if let Some(state) = &self.hook_question {
+            state.show_launch(self, source, refusal.is_none(), cx);
+        }
         let source_action = if restart || matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
-            if let Some(state) = &self.hook_question {
-                state.show_source(source, cx);
-            }
             Some(self.source_frame.capture(source, (), window))
         } else {
             None
@@ -2904,6 +2910,20 @@ impl Render for Launcher {
             _ => alert,
         }
         .map(|sentence| refusal_alert("launcher-refusal", sentence, palette));
+        let hook_saved = self.hook_setup_saved.map(|launch_changed| {
+            let action = self.verb(cx);
+            let words = if launch_changed {
+                format!("Restart setup was saved. The launch changed. Review it, then press {action} again.")
+            } else {
+                format!("Restart setup was saved. Press {action} when the draft is ready.")
+            };
+            help_line_container(palette)
+                .id("launcher-hook-setup-saved")
+                .debug_selector(|| "launcher-hook-setup-saved".into())
+                .role(Role::Status)
+                .aria_label(SharedString::from(words.clone()))
+                .child(words)
+        });
         // What a press of Launch has to say, in the old footer's order: the warning about what it stops of its source
         // first (Replace with's, or Restart with's while the agent works), then the YOLO question or the sandbox
         // question while one is up (a submit retires both before it can raise either), else the refusal. The warning
@@ -2931,6 +2951,7 @@ impl Render for Launcher {
             });
         let notices = (warning.is_some()
             || note.is_some()
+            || hook_saved.is_some()
             || save_refusal.is_some()
             || question.is_some()
             || alert.is_some())
@@ -2942,6 +2963,7 @@ impl Render for Launcher {
                 .gap(px(6.))
                 .children(warning)
                 .children(note)
+                .children(hook_saved)
                 .children(save_refusal)
                 .children(last)
         });

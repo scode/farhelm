@@ -7,7 +7,7 @@
 
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionState, HostView, KeyedEntry,
+    Collection, CollectionChanges, CollectionState, HostStateView, HostView, KeyedEntry,
 };
 use farhelm_proto::{
     LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer, SessionLaunch,
@@ -417,6 +417,48 @@ fn hook_setup_success_continues_the_launch_once(cx: &mut TestAppContext) {
         !crate::test_support::any_open(cx),
         "the launcher hides for its create"
     );
+}
+
+/// The hook answer can authorize a suspended host's normal wake. Such a launch was available when answered even
+/// though the launcher could not yet compile a request on a connected host.
+#[gpui::test]
+fn hook_setup_success_can_resume_the_shown_host(cx: &mut TestAppContext) {
+    let hosts = fixture_hosts(&[0, 11]);
+    let host: HostView = serde_json::from_value(hosts.entries[1].value.clone()).unwrap();
+    assert!(matches!(host.state, HostStateView::Suspended { .. }));
+    let mut draft = LaunchDraft::new(Some(host.id), "~".into(), None);
+    draft.choose_host(host.id, "~".into());
+    let (mut helm, cx) = launcher_with_hosts(cx, draft, hosts);
+    super::wake_tests::assert_published_host(cx, &host);
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+
+    test_support::click(cx, "launcher-harness-Grok");
+    let commands = helm.commands();
+    let [read] = &commands[..] else {
+        panic!("one hook setting read expected, got {commands:?}");
+    };
+    assert_eq!(read.path, "/api/agent-hook-setup/grok");
+    helm.reply(read.id, 200, Some(serde_json::json!({"enabled": false})));
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "prompt-confirm").as_deref(),
+        Some("Set up and launch")
+    );
+    test_support::click(cx, "prompt-confirm");
+    let commands = helm.commands();
+    let [write] = &commands[..] else {
+        panic!("one hook setting write expected, got {commands:?}");
+    };
+    assert_eq!(write.path, read.path);
+    assert_eq!(write.body, Some(serde_json::json!({"enabled": true})));
+    helm.reply(write.id, 204, None);
+    settle(cx);
+    let commands = helm.commands();
+    let [resume] = &commands[..] else {
+        panic!("one Resume after setup expected, got {commands:?}");
+    };
+    assert_eq!(resume.path, format!("/api/hosts/{}/resume", host.id));
+    assert!(name_of(cx, "launch-wake").is_some());
 }
 
 /// The checked state an element under `id` reports in a fresh frame.
