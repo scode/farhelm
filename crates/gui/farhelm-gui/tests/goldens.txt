@@ -98,6 +98,8 @@ linux/host-settings-dialog--dark.png 36378a49a7782bc226aae9c73c8d8ce80feabaaa
 linux/host-settings-dialog--light.png 11d2efca44fa1371594aa36590a9395df20b4761
 linux/host-settings-dialog-end--dark.png 8e9358af29a9dd6ba558b2e5b56f917503416f7d
 linux/host-settings-dialog-end--light.png 2c94f871f040f1b996320a1d0ec22fbede7f63c2
+linux/host-setup-busy-refusal--dark.png 598947eedefc1d78b498c43155a712b26d2a00a5
+linux/host-setup-busy-refusal--light.png 954487be110418f77d62d820eae3efc75ec2f22f
 linux/host-setup-failed-hosts-panel--dark.png 610b0e0d762e3161da5be61a0e4f2c0eaf3a8d29
 linux/host-setup-failed-hosts-panel--light.png 00819069ac9d2563069de1ea0e964c7b84913553
 linux/host-setup-running-hosts-panel--dark.png a1bde8f52f47d1baa8d9aacbbb1c9c76aae68f58

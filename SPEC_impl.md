@@ -5556,13 +5556,15 @@ installation it is on, so it follows an open session the sidebar's filter hides
   at the click, so a setup replayed after a sign-in is refused as stale when the row is gone, is no longer an SSH host
   or has another destination by then. The registration transaction also checks its destination before converging the
   result. Deletion or retargeting can finish while discovery is away, so the transaction refuses a reply for a missing
-  or moved entry. Run admission checks the frozen SSH destination again under the provisioning lock before a confirmed
-  plan can use it. With the Add dialog marker, the alias passes the alias syntax rules and the helm refuses a
-  destination that already has a row (naming the row's display name) or an alias equal to any host's current display
-  name, at three points: a read before the probe contacts ssh, again when a pending setup confirmation is confirmed
-  (before the run claims the host), and inside the registration transaction, which is the only race-free one and writes
-  the alias with the new row. The marker rides the pending confirmation, and the registration derived from the stored
-  row after the insert carries none, so the run's later registration converges as before. Spellings are not normalized.
+  or moved entry. Confirmation for an existing entry takes the host's provisioning lock without waiting before saving
+  planned paths or reconciling its connection. A suspended host refuses before either change. Run admission checks the
+  frozen SSH destination and Tailscale mode under that same lock before using the plan. With the Add dialog marker, the
+  alias passes the alias syntax rules and the helm refuses a destination that already has a row (naming the row's
+  display name) or an alias equal to any host's current display name, at three points: a read before the probe contacts
+  ssh, again when a pending setup confirmation is confirmed (before the run claims the host), and inside the
+  registration transaction, which is the only race-free one and writes the alias with the new row. The marker rides the
+  pending confirmation, and the registration derived from the stored row after the insert carries none, so the run's
+  later registration converges as before. Spellings are not normalized.
 - A host's `host_identity` is `NULL` until first contact ever succeeds for that row — including the local row, which is
   minted with no identity and learns one the same way any other host does. Recording it is split into two operations so
   silent identity merging is structurally impossible at the storage layer (SPEC.md: never silently merge): first contact

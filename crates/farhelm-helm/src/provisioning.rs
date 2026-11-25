@@ -2917,10 +2917,10 @@ mod tests {
         );
     }
 
-    /// The registry row can be retargeted after confirmation saves install paths. The run is bound to the old plan's
-    /// destination and must refuse it under the provisioning guard before beginning another probe or installation.
+    /// Retarget can win while the setup plan waits for confirmation. Refusing its old route must leave the new
+    /// destination's stored coordinates as they were, without starting a probe or installation against either host.
     #[farhelm_testtrace::test]
-    async fn provisioning_refuses_retarget_after_the_setup_confirmation_write() {
+    async fn stale_setup_confirmation_preserves_retargeted_host_paths() {
         const DESTINATION: &str = "before.example";
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
@@ -2936,39 +2936,43 @@ mod tests {
         else {
             panic!("premise: the host offers setup");
         };
-        let gate = Arc::new(service::TestBoundaryGate {
-            reached: tokio::sync::Notify::new(),
-            release: tokio::sync::Notify::new(),
-        });
-        *service.registry_sync_gate.lock().unwrap() = Some(Arc::clone(&gate));
-        let confirming = Arc::clone(&service);
-        let confirmation =
-            tokio::spawn(async move { confirming.start_add(ProvisionRequest { probe_id }).await });
-        tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
-            .await
-            .expect("premise: the setup confirmation is reconciling after writing its paths");
-        assert!(
-            stored_row(&harness.store, host)
-                .await
-                .remote_farhelm
-                .is_some()
-        );
+        let locked = harness.manager.try_host_provision_lock(host).unwrap();
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            service.start_add(ProvisionRequest { probe_id }),
+        )
+        .await
+        .expect("confirmation refuses promptly when a retarget owns the lock")
+        .expect_err("confirmation cannot write under the retarget's lock");
+        assert!(matches!(
+            error.downcast_ref::<ProvisioningRequestError>(),
+            Some(ProvisioningRequestError::Refused(_))
+        ));
+        let held = stored_row(&harness.store, host).await;
+        assert_eq!(held.remote_farhelm, None);
+        assert_eq!(held.remote_state_dir, None);
+        drop(locked);
+        let ProbeResponse::Provisionable { probe_id, .. } =
+            service.probe(known_ssh_probe(DESTINATION)).await.unwrap()
+        else {
+            panic!("premise: the unlocked host offers setup again");
+        };
         {
             let _guard = harness
                 .manager
                 .try_host_provision_lock(host)
-                .expect("retarget can win before run admission");
+                .expect("an outstanding confirmation must not reserve the host");
             harness
                 .store
                 .update_ssh_destination(host, "after.example")
                 .await
                 .unwrap();
         }
-        gate.release.notify_one();
-        let error = tokio::time::timeout(Duration::from_secs(5), confirmation)
+        let before = stored_row(&harness.store, host).await;
+        assert_eq!(before.destination.as_deref(), Some("after.example"));
+        let error = service
+            .start_add(ProvisionRequest { probe_id })
             .await
-            .expect("confirmation must settle after release")
-            .unwrap()
             .expect_err("an old confirmation cannot install at the former destination");
         assert!(
             matches!(
@@ -2977,9 +2981,12 @@ mod tests {
             ),
             "{error:#}"
         );
-        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert!(backend.operations.lock().unwrap().is_empty());
         assert!(!service.memory.lock().await.busy.contains(&host));
+        let after = stored_row(&harness.store, host).await;
+        assert_eq!(after.remote_farhelm, before.remote_farhelm);
+        assert_eq!(after.remote_state_dir, before.remote_state_dir);
     }
 
     /// Replayed setup requests already name a row. A destination shared with a newly registered entry must not
@@ -5229,9 +5236,9 @@ mod tests {
     /// suspended in between must not be dialed by the confirmed run.
     ///
     /// Spec: a setup planned while the sandbox ran (one probe), confirmed
-    /// after it was found suspended, fails with the resume-first message
-    /// before its preflight probe, so the backend still saw only the
-    /// planning probe and ran no action.
+    /// after it was found suspended, refuses before writing changed install
+    /// paths or dialing again. Reconciliation of new paths would replace the
+    /// actor that carries the suspension observation.
     #[farhelm_testtrace::test]
     async fn a_plan_made_while_running_does_not_run_once_suspended() {
         let sandboxes = SwitchedSandboxes::new(crate::tensorlake::api::SandboxStatus::Running);
@@ -5261,39 +5268,29 @@ mod tests {
         };
         assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 1);
 
-        // Give confirmation the coordinates already in the registry so it observes the suspended
-        // actor without replacing it while checking the preflight guard.
-        harness
-            .store
-            .admit_tensorlake_install(
-                host,
-                plan.farhelm_path.to_str().unwrap(),
-                plan.state_dir.to_str().unwrap(),
-            )
-            .await
-            .unwrap();
-        harness.manager.sync_registry().await.unwrap();
-        harness
-            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
-            .await;
+        let before = stored_row(&harness.store, host).await;
+        assert_ne!(before.remote_farhelm.as_deref(), plan.farhelm_path.to_str());
+        assert_ne!(before.remote_state_dir.as_deref(), plan.state_dir.to_str());
         sandboxes.set(crate::tensorlake::api::SandboxStatus::Suspended);
         harness.fleet.kill_connection(host);
         harness
             .await_state(host, |state| matches!(state, HostState::Suspended { .. }))
             .await;
-        let accepted = service
+        let refusal = service
             .start_add(ProvisionRequest { probe_id })
             .await
-            .unwrap();
-        let view = wait_finished(&service, accepted.host_id).await;
-        assert_eq!(view.status, RunStatus::Failed);
+            .expect_err("confirmation must refuse before changing the connection");
         assert!(
-            view.message
-                .as_deref()
-                .unwrap_or_default()
-                .contains("resume the sandbox first"),
-            "{view:?}"
+            format!("{refusal:#}").contains("resume the sandbox first"),
+            "{refusal:#}"
         );
+        let after = stored_row(&harness.store, host).await;
+        assert_eq!(after.remote_farhelm, before.remote_farhelm);
+        assert_eq!(after.remote_state_dir, before.remote_state_dir);
+        assert!(matches!(
+            harness.manager.state(host),
+            Some(HostState::Suspended { .. })
+        ));
         assert_eq!(
             backend.probes.load(std::sync::atomic::Ordering::SeqCst),
             1,

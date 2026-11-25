@@ -3302,6 +3302,10 @@
       "reference": "host-setup-failed-hosts-panel"
     },
     {
+      "golden": "host-setup-busy-refusal",
+      "title": "Hosts showing a setup refusal while another operation holds the host"
+    },
+    {
       "golden": "host-remove-confirmation",
       "title": "The removal confirmation a host menu's Remove opens: the host's mark, name, phase and build, its destination, what removal keeps, the footer note and the three answers",
       "reference": "host-remove-confirmation"

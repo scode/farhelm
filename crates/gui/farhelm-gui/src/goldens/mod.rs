@@ -1716,6 +1716,12 @@ static SCENES: &[Scene] = &[
         setup: host_setup_failed_hosts_panel_setup,
     },
     Scene {
+        name: "host-setup-busy-refusal",
+        size: (364., 418.),
+        draw: hosts_panels,
+        setup: host_setup_busy_refusal,
+    },
+    Scene {
         name: "host-remove-confirmation",
         size: (560., 480.),
         draw: empty,

@@ -44536,3 +44536,46 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   belongs with manual precedence and must witness a shared answer while automatic updates stay enabled. Change
   `vkmsknkxzpwtvlqtynuoymvqozxvqsoz`, bookmark `plan/triage-helm-nov24/01-provisioning`,
   [PR #4840](https://github.com/scode/farhelm/pull/4840/changes).
+
+## trailing-refused-setup-confirmation-persists-planned-paths-on-retargeted-host.md
+
+- Outcome: `fix code`.
+- Assessment: When you confirm setup on an already-listed SSH host, Farhelm saves the plan's install paths on that
+  host's record before it takes the host's lock. If the destination or Tailscale mode changes in that moment, the setup
+  is refused, but the planned paths stay saved on the record. Verified: Confirmed by source.
+  `provisioning/service.rs:1587-1592` registers before `launch_claimed_run` takes `host_provision_lock` (2550-2568). The
+  comment there ("An ADD can have saved its paths before a retarget won the provisioning lock") shows the gap is known;
+  the check only compares the network target. The practical consequence is milder than the file says. An ordinary
+  retarget already keeps the previous machine's paths (`update_ssh_destination`), and for a re-setup the plan's paths
+  usually equal the stored ones. A Re-run of setup repairs it. The window is the time `register()` takes.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code M together
+  with 397 (one lock-order change in `claim_register_and_start`), or discard if lock-order risk is unwelcome. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. Setup locks the existing row before it can write its planned paths. A retarget that gets there first
+  leaves the saved coordinates untouched. Change `ppwxxwwwztumnmnrssntvpvqsrkzrtvy`, bookmark
+  `plan/triage-helm-nov24/01b-setup-admission`, [PR #4842](https://github.com/scode/farhelm/pull/4842/changes).
+
+## trailing-ssh-setup-existing-tensorlake-mutates-before-lock.md
+
+- Outcome: `fix code`.
+- Assessment: Confirming a setup plan for an already-listed Tensorlake sandbox reached by its SSH address can save new
+  install paths and restart its connection before Farhelm takes the host's lock and checks that it is not suspended.
+  This only happens when the planned paths differ from the stored ones. A sandbox that became suspended meanwhile then
+  gets dialed anyway. Verified: Confirmed by source. It is the same register-before-lock path as 88
+  (`provisioning/service.rs:1587-1592` before `launch_claimed_run`'s lock at 2550). Replacing the actor resets Suspended
+  to Connecting, so `require_not_suspended` in revalidation would pass. The spec text in 395's Assessment ("refused …
+  again before a confirmed run's preflight probe") applies. Whether the GUI ever sends an SSH-destination setup for an
+  existing finished Tensorlake host with differing paths is unverified; the probe refuses unfinished sandboxes
+  (`service.rs:917-926`).
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code M together
+  with 88. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: Fixed. A suspended sandbox reached through its saved SSH address refuses before installing new coordinates.
+  The old actor and its suspension survive the refusal. Change `ppwxxwwwztumnmnrssntvpvqsrkzrtvy`, bookmark
+  `plan/triage-helm-nov24/01b-setup-admission`, [PR #4842](https://github.com/scode/farhelm/pull/4842/changes).

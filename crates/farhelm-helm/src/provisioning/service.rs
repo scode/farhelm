@@ -1578,13 +1578,33 @@ impl ProvisioningService {
         if let Some(reason) = existing.and_then(|host| self.known_owner_refusal(host)) {
             return Err(ProvisioningRequestError::Refused(reason).into());
         }
-        if let Some(existing) = existing
-            && !self.memory.lock().await.busy.insert(existing)
-        {
-            self.retain_plan(probe_id, pending).await;
-            return Err(anyhow::Error::new(ProvisioningRequestError::Busy(existing)));
-        }
+        // Saving new paths can replace the actor and erase its suspended state. Bind registration
+        // to the existing row's provisioning lock before either changing paths or reconciling.
+        let existing_write = if let Some(host) = existing {
+            let mut memory = self.memory.lock().await;
+            if memory.busy.contains(&host) {
+                drop(memory);
+                self.retain_plan(probe_id, pending).await;
+                return Err(anyhow::Error::new(ProvisioningRequestError::Busy(host)));
+            }
+            let lock = self.manager.try_host_provision_lock(host).ok_or_else(|| {
+                ProvisioningRequestError::Refused(
+                    "this host is busy with another operation; once it finishes, run setup again"
+                        .into(),
+                )
+            })?;
+            memory.busy.insert(host);
+            Some(lock)
+        } else {
+            None
+        };
         let registered = async {
+            if let Some(host) = existing {
+                let row = self.host_row(host).await?;
+                if let Some(reason) = self.suspended_refusal(&row) {
+                    return Err(ProvisioningRequestError::Refused(reason.into()).into());
+                }
+            }
             let host = self
                 .register(registration, Some(&pending.plan), None, None)
                 .await?;
@@ -1614,7 +1634,8 @@ impl ProvisioningService {
             self.memory.lock().await.busy.remove(&existing);
             self.manager.events().bump();
         }
-        self.start_run(host, pending, claimed).await
+        let host_write = existing_write.filter(|_| claimed);
+        self.start_run(host, pending, claimed, host_write).await
     }
 
     /// Inspect an existing row and retain one exact UPDATE plan without
@@ -2461,7 +2482,7 @@ impl ProvisioningService {
             ) {
                 return Err(anyhow::Error::new(ProvisioningRequestError::UnknownPlan));
             }
-            service.start_run(host, pending, false).await
+            service.start_run(host, pending, false, None).await
         })
         .await
     }
@@ -2483,7 +2504,7 @@ impl ProvisioningService {
     }
 
     /// Start a run for `host`. `claimed` says the caller already put `host`
-    /// in the busy set (ADD claims an existing row before rewriting it; see
+    /// in the busy set (ADD claims and locks an existing row before rewriting it; see
     /// [`Self::start_add`]); otherwise the claim is made here.
     /// Manual starts do not acquire the automatic-policy gate; they share only
     /// the host's ordinary busy claim and executor with automatic updates.
@@ -2492,12 +2513,14 @@ impl ProvisioningService {
         host: HostId,
         pending: PendingPlan,
         claimed: bool,
+        host_write: Option<ProvisionLockGuard>,
     ) -> anyhow::Result<RunAccepted> {
         let run_id = {
             let mut memory = self.memory.lock().await;
             Self::claim_run(&mut memory, host, &pending, claimed, false)?
         };
-        self.launch_claimed_run(host, pending, run_id, None).await
+        self.launch_claimed_run(host, pending, run_id, host_write)
+            .await
     }
 
     /// Publish one admission while the caller holds provisioning memory. This
@@ -2555,8 +2578,8 @@ impl ProvisioningService {
                 access,
             }) = &pending.plan.target
             {
-                // An ADD can have saved its paths before a retarget won the provisioning lock. Compare the
-                // frozen network target, since registration now reflects whatever row reconciliation found.
+                // A new ADD has no existing row lock until registration. Compare the frozen network
+                // target even when registration has refreshed the row's proposed configuration.
                 if row.destination.as_deref() != Some(destination.as_str()) {
                     return Err(HostStoreError::StaleAttempt { host }.into());
                 }
