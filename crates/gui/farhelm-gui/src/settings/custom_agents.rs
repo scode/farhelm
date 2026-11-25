@@ -407,7 +407,8 @@ impl Editor {
         sent
     }
 
-    fn delete(&mut self, cx: &mut Context<Self>) {
+    /// A successful Delete ends this editor's ownership of its draft, including when no frame saw the pending delete.
+    fn delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(saved) = self.stored.as_ref() else {
             return;
         };
@@ -421,7 +422,11 @@ impl Editor {
             return;
         };
         let key = OpKey::custom_agent(&saved.id);
+        let editor_key = Some(saved.id.clone());
+        let owner = cx.entity_id();
+        let parent = self.parent.clone();
         let view = cx.weak_entity();
+        let window = window.window_handle();
         let command = Command::new(
             Work::Save,
             Method::Delete,
@@ -432,6 +437,26 @@ impl Editor {
         let sent = operations
             .update(cx, |operations, cx| {
                 operations.start(&key, command, cx, move |settled, cx| {
+                    if matches!(settled.outcome, Outcome::Done(_)) {
+                        // Changes precedes the reply, but a frame may see both at once. Retire our own draft
+                        // before it can look like an external deletion whose unsaved edits should be kept.
+                        let _ = window.update(cx, |_, window, cx| {
+                            let _ = parent.update(cx, |dialog, cx| {
+                                if dialog
+                                    .custom_agents
+                                    .get(&editor_key)
+                                    .is_some_and(|current| current.entity_id() == owner)
+                                {
+                                    dialog.custom_agents.remove(&editor_key);
+                                    if dialog.shown.custom_agent_key() == Some(editor_key) {
+                                        dialog.show(Section::AddCustomAgent, window, cx);
+                                    }
+                                    cx.notify();
+                                }
+                            });
+                        });
+                        return;
+                    }
                     let _ = view.update(cx, |editor, cx| {
                         editor.deleting = false;
                         editor.confirm_delete = false;
@@ -551,8 +576,8 @@ impl Editor {
                         Tier::Danger,
                     )
                     .busy(busy)
-                    .on_click(move |_, _, cx| {
-                        let _ = weak.update(cx, Editor::delete);
+                    .on_click(move |_, window, cx| {
+                        let _ = weak.update(cx, |editor, cx| editor.delete(window, cx));
                     }),
                 );
         } else {

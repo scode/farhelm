@@ -1606,6 +1606,12 @@ static SCENES: &[Scene] = &[
         setup: settings_custom_agent_nav_tooltip_setup,
     },
     Scene {
+        name: "settings-custom-agent-empty",
+        size: (800., 900.),
+        draw: empty,
+        setup: settings_custom_agent_empty_setup,
+    },
+    Scene {
         name: "settings-codex",
         size: (800., 830.),
         draw: empty,

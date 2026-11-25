@@ -93,11 +93,6 @@ consequences.
   instead of cancelling, Cancel loses default focus, and external edits can change the agent while the unnamed
   confirmation stays open (borderline high/highest; registration ID stays fixed).
 
-- [`trailing-custom-agent-settings-delete-dirty-leaves-ghost-draft.md`](trailing-custom-agent-settings-delete-dirty-leaves-ghost-draft.md)
-  — If a user makes any unsaved edit to a registered custom agent and then deletes it, the deleted agent remains in the
-  Settings sidebar as an unsaved draft instead of being removed; choosing Save when closing Settings then silently
-  re-registers the agent they just deleted.
-
 - [`trailing-custom-agents-share-one-remembered-wrapper-prefix.md`](trailing-custom-agents-share-one-remembered-wrapper-prefix.md)
   — Remembered wrapper prefixes are stored per agent type, but every registered custom agent shares a single bucket.
 
@@ -222,11 +217,6 @@ consequences.
   — When saving or deleting a custom agent cannot start because the helm session is resetting or unavailable, Settings
   misleadingly reports 'Another change to this custom agent is in progress' (or fails silently with no error when no
   operation store exists), and when the key is busy it ignores Farhelm's shared busy-reason wording.
-
-- [`trailing-custom-agent-settings-test-locks-in-kick-and-misses-dirty-delete.md`](trailing-custom-agent-settings-test-locks-in-kick-and-misses-dirty-delete.md)
-  — The Settings test for custom-agent lifecycle locks in an unhelpful navigation jump that kicks the user off their
-  draft page when an external delete arrives mid-save, and only exercises Delete on a clean draft, missing the bug where
-  confirming Delete on a modified custom agent leaves a ghost entry in the Settings sidebar.
 
 - [`trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md`](trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md)
   — When switching from a safer agent (such as Guarded Claude or Codex) to a registered custom agent (which always

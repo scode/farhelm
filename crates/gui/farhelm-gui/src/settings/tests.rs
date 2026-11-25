@@ -394,6 +394,12 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     settle(cx);
     assert_eq!(heading(cx).as_deref(), Some(DISPLAY_NAME));
 
+    // Changes and Reply arrive together. A deliberate Delete abandons this edit instead of retaining it for recovery.
+    fill(cx, "custom-agent-command", "~/bin/unsaved");
+    assert!(cx.update(|_, cx| super::draft_changed_for_opened(
+        Section::CustomAgent("example-code".into()),
+        cx
+    )));
     click(cx, "custom-agent-delete");
     assert!(sent(&mut helm).is_empty(), "Delete asks first");
     click(cx, "custom-agent-confirm-delete");
@@ -408,6 +414,12 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     settle(cx);
     assert_eq!(heading(cx).as_deref(), Some("Add custom agent"));
     assert!(!drawn(cx, "settings-section-custom-example-code"));
+    keys(cx, "escape");
+    assert!(!any_open(cx), "the deleted draft must not ask to be saved");
+    assert!(
+        sent(&mut helm).is_empty(),
+        "closing must not re-register it"
+    );
 }
 
 /// SPEC.md, "Session list": "The gear always opens sessions and focuses its first switch". A Settings that opened on

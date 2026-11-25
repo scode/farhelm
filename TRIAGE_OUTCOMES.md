@@ -211,21 +211,6 @@
   record which way it went. Recommendation for reference: discard (or fix code) — coverage only; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-custom-agent-settings-test-locks-in-kick-and-misses-dirty-delete.md
-
-- Outcome: `other`.
-- Assessment: The Settings test for custom-agent lifecycle asserts the jump to Add custom agent on an external delete
-  (item 82). It also deletes only a clean registration, so it misses the ghost draft of item 81. Verified: Confirmed by
-  inspection (`crates/gui/farhelm-gui/src/settings/tests.rs:272-373`, the assertion at line 330). The first half asserts
-  behavior with no shipped route (82 is filtered). The second half is a missing test for 81's bug.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: other. Add the dirty-delete case as part of 81's fix, and
-  discard the rest. Size S.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## settings-footer-can-save-the-wrong-page.md
 
 - Outcome: `fix code`.
@@ -479,28 +464,6 @@
   recipe editor does, which also settles 79. Size M (about 60-120 lines with tests, so it may exceed 100). Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## trailing-custom-agent-settings-delete-dirty-leaves-ghost-draft.md
-
-- Outcome: `fix code`.
-- Assessment: If the user edits a custom agent and then deletes it without saving, the agent disappears from the
-  launcher but stays in the Settings sidebar as an unsaved draft. Closing Settings then asks whether to save "Custom
-  agent", and choosing Save registers the deleted agent again. Verified: Partly verified. The code is confirmed. The
-  delete's completion clears `deleting` (`custom_agents.rs:416- 423`). The render-time sync keeps any editor that is
-  `!deleting && (saving || dirty)` (`custom_agents.rs:128-136`), and a removed editor's Save POSTs a fresh registration
-  (`custom_agents.rs:326-336`). Delete is offered while dirty (`custom_agents.rs:544-556`). One step is unverified: that
-  the removal push and the delete's reply are both handled before the next frame. If a frame falls between them, the
-  editor is dropped correctly. The reviewer's ordering claim (`crates/farhelm-helm/src/ui_channel.rs:1082-1100` sends
-  Changes then Reply back to back) makes that common, but it was not run.
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code. Discard the editor on a confirmed delete in the completion
-  itself, and add the dirty-delete test (487's second half). Size S. Size gate: about 100 lines of diff (code, tests and
-  docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
-  item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## settings-close-save-can-hide-notification-refusal.md
