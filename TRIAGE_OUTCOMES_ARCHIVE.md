@@ -37817,3 +37817,1221 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Fix the code (assert the raw hold or incarnation, or narrow the docstring). Discarding is also reasonable.
 - Execution: `kqlkyqxvtxlkuowuzrrqzkoxlmxxvnmm`, `plan/triage-tensorlake/07-test-gaps`,
   [draft PR](https://github.com/scode/farhelm/pull/4566/changes). Fixed as decided.
+
+## test-state-guards-accept-replaceable-parent.md
+
+- Outcome: `other`.
+- Assessment: SPEC_impl.md, Testing, "Development tooling assumes a single-user machine" (SPEC_impl.md:8680-8683): "The
+  test harnesses, the capture and recording scripts, deflake and the docs preview run on a development machine with no
+  hostile other local accounts, and need not defend against one: a secret in a process's arguments, an X display without
+  authentication, or a race with another account's symlink are accepted." Every consequence in the finding needs another
+  account that can replace entries in the temporary path. The file says itself that the ordinary sticky `/tmp` does not
+  supply that premise. The code makes no stronger promise than it keeps: `deflake/bin/deflake:137-154` checks the root
+  and its immediate parent and says why, and `scripts/record-test-run.py:308-317` does the same for the recorder's
+  parent. The sibling item `sticky-parent-guard-contradicts-own-docs.md` (fixed in f1cb3c1f0, #4386) was triaged the
+  same way: an independent check found its security consequence covered by this rule, and only the docs mismatch was
+  fixed. Verified: correct as a description of the code (the grandparent and the later path traversal are not checked).
+  It carries no consequence outside the accepted single-user assumption.
+- Decision: Covered by an accepted specification rule (quoted in the Assessment); removed during triage without asking
+  under `review_feedback_queue/AGENTS.md`, "Lifecycle". Covered means acknowledged, not implemented. (2026-11-24 triage,
+  main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## deflake-run-consumers-skip-state-ownership-check.md
+
+- Outcome: `other`.
+- Assessment: the same SPEC_impl.md rule as item 3 (SPEC_impl.md:8680-8683, quoted there). The finding states its own
+  route as "a state path controlled by another account". Without such an account, the rest is safe. `resolve_run`
+  (`deflake/bin/deflake:1363-1372`) only reads pointers that `start` wrote for this checkout. Stop
+  (`deflake/bin/deflake:1538-1545`) signals only a process whose recorded start time still matches
+  (`deflake/bin/deflake:685-703`). That also meets the same section's next sentence, which rules out keeping a bare
+  process number across runs. Verified: correct that the readers skip the root check. Harm needs forged state from
+  another account, which is accepted.
+- Decision: Covered by an accepted specification rule (quoted in the Assessment); removed during triage without asking
+  under `review_feedback_queue/AGENTS.md`, "Lifecycle". Covered means acknowledged, not implemented. (2026-11-24 triage,
+  main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## failed-restart-clears-goose-resume-target.md
+
+- Outcome: `other`.
+- Assessment: SPEC.md, "Healthy local filesystems" (SPEC.md:5285-5286, added 2026-11-04 in #3034): "Confirmed
+  2026-11-04: a full disk is included in this allowance. Accepted outcomes include losing durable state, such as a
+  Resume offer whose restoration after a failed Restart with also fails." The finding's route is exactly that case. A
+  named Restart with of a non-reporting agent (Goose) fails definitively, and the restore write then fails too. That
+  write is the store's `abort_relaunch` (core.rs:13048-13086), whose only `Err` is a database write failure
+  (store.rs:4920). `Ok(false)` (a newer generation owns the row) is not an error. What is left is the error reply naming
+  only the launch failure, with the restore failure in the supervisor log (core.rs:13073-13077). That is a diagnostic
+  consequence of the same accepted filesystem failure. Verified: The code route is confirmed: the cleared capture stays
+  cleared, and the session shows Launching or unknown. One caveat: a database write could fail for a reason other than
+  the filesystem, such as a lock timeout. I did not verify that nothing else can make this write fail. I judged that
+  residual not worth splitting off. The same clearing also applies when hooks are turned off for Claude or Codex
+  (core.rs:12718-12729), and the spec sentence covers that too.
+- Decision: Covered by an accepted specification rule (quoted in the Assessment); removed during triage without asking
+  under `review_feedback_queue/AGENTS.md`, "Lifecycle". Covered means acknowledged, not implemented. (2026-11-24 triage,
+  main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## terminal-link-panel-abbreviates-destination.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. e159ffc79 "feat: show the full link destination and mark where it differs" (#4766). SPEC.md
+  now says the hover "shows the exact target first, in full and wrapped rather than shortened however long it is". The
+  view draws `LinkDisclosure::target` whole (crates/gui/farhelm-gui/src/terminal/disclosure.rs:221;
+  link_disclosure.rs:5, :36). The remaining 300-unit shortening of the quoted label and address is explicitly accepted
+  by SPEC_impl.md (hover display paragraph): "the old client's 300-unit shortening now applies only to the label and
+  address a warning quotes".
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-custom-agent-settings-external-delete-kicks-user-mid-edit.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established in shipped code" (FILTER.md, 2026-11-21). The source is a trailing
+  review of committed code (`df0dff4c9`), so the filter can apply. Every consequence (the jump to Add custom agent while
+  typing, and the 404 shown off-page) needs a registration to be deleted by "the CLI or another client" while this
+  window edits it. No shipped control produces that. The only writer is `/api/custom-agents`, reachable only with the
+  app window's device-session credential (`crates/farhelm-helm/src/lib.rs:546-550`). The CLI has no custom-agent write.
+  SPEC.md "One GUI at a time" says "a second UI cannot arise today". The window's own Delete is item 81's route, not
+  this one. The item is `high`, not `highest`, so no independent drop check is needed. Note that 487's first half
+  asserts this behavior in a test.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-osc8-mismatch-warning-dropped-for-unicode-lookalike-hyphens.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. The `ADDRESS` regex this finding is about was replaced by the scanner in 18845174e (#4764)
+  and ba0da5053 (#4765); `link_disclosure.rs` no longer has `ADDRESS`/`INVISIBLE`. Traced against the scanner, each of
+  the finding's own examples warns now: - `my‐bank.test/login`: U+2010 is not a name character and not a host barrier,
+  so `bank.test/login` is found and mismatches. - `my‑bank.test@other.test/login`: the `@` anchor makes this login
+  details, so it warns as credentials. - `example﹒test/x`: NFKC turns U+FE52 into `.`, so the address is found and
+  marked disguised. - `my＿site.test/x`: the original-character reading lets `site.test/x` start. - `:secret@…` and
+  `example.test:443:x@other.test/x`: the `@` anchor, with userinfo starting at the token start. Not executed. Remainder,
+  a different trigger that the finding did not raise: hyphen look-alikes are still not folded, so `my‐bank.com/login` is
+  read as `bank.com/login` and is quiet when the link goes to `https://bank.com/login`. If wanted, fold it into item
+  94's look-alike decision rather than keep this item.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-templates-editor-agent-dropdown-duplicate-keys-without-agent.md
+
+- Outcome: `other`.
+- Assessment: FILTER.md "Harm whose route is not established in shipped code". The provenance is the trailing review
+  recorded under run `746bd2ca` (`TRAILING_REVIEW_HISTORY.md:71`), so this is committed code and filters apply. Every
+  consequence depends on a stored template that has a custom agent ID (or an explicit custom-agent reset) but no agent
+  type. The reviewer showed only that the helm's shape check permits that shape
+  (`farhelm-proto/src/launcher.rs:569-578`), not that any shipped control writes it. No shipped writer does: - The CLI's
+  `--agent <id>` always sets the Custom type together with the ID (`crates/farhelm/src/main.rs:909-922`, `:1125-1135`).
+  - The agent edit merge cannot unset a field, and it clears the ID when the type is built-in
+    (`farhelm-helm/src/agent_requests.rs:3781-3815`). - Every GUI writer pairs the two: the editor's Agent choice
+    (`templates/editor/rows.rs:421-422`), Add field Agent (`templates/fields.rs:141`), Remove field Agent, which clears
+    both (`fields.rs:166-170`), and Save as template (`templates/save.rs:73-74, 91-95`; the launcher sets the ID only
+    with the Custom type, `launcher/draft.rs:759-761`). - The field is new (#4723, #4731), so no older-release state
+    carries it. What remains is a hand-crafted helm API or relay request, "an input sequence no shipped control
+    produces". The consequences are a wrong dropdown display, a click that does nothing, and a debug-only panic under
+    assistive technology. None is `highest`, so the drop check does not apply. Code is unchanged since df0dff4c9.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## launcher-model-field-can-reinterpret-show-all.md
+
+- Outcome: `other`.
+- Assessment: SPEC.md "One GUI at a time", decision dated 2026-11-21: "a control the screen still shows after its target
+  changed may be used, as long as the helm refuses what is no longer valid or the result is trivially undone." The shown
+  Show all row's index (`launcher/view/model_field.rs:178-184`, an index-based highlight) comes to mean a model when the
+  catalog arrives (`view.rs:496-506`). The result is a model choice in the draft, which never launches (model Enter
+  never presses Launch) and is undone by picking again. After the redraw the moved highlight is visible.
+- Decision: Covered by an accepted specification rule (quoted in the Assessment); removed during triage without asking
+  under `review_feedback_queue/AGENTS.md`, "Lifecycle". Covered means acknowledged, not implemented. (2026-11-24 triage,
+  main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## antigravity-dismissal-can-hide-next-trust-hint.md
+
+- Outcome: `other`.
+- Assessment: "Races a person would have to win inside a sub-second window". The trigger: the × click is delivered
+  through the old rendered hitbox in the single frame after the band saw the question end (`trust_band.rs:211-214`
+  retires the dismissal, and `:476-484` inserts it again without checking the occurrence). The next observation must
+  also be the same agent asking again. That window opens and closes on its own within one frame. The whole consequence
+  is an informational hint hidden for that one later occurrence. It comes back on the next question ("asked about again
+  ... on the next ... prompt"). None of the exclusions apply: no data loss, no wrong machine or session, nothing
+  persists (the dismissal is in-memory and retired when the question leaves), and no trust effect, since the hint only
+  explains. Committed-code trailing review. Not `highest`.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## installed-agent-hook-preflight-accepts-incomplete-setup.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. The check the finding describes no longer exists. That check looked for a manual hook
+  command anywhere in the vendor's JSON (`has_manual_hook` and `manual_hook_configured`, drift.rs at 470e9e6c:189–244).
+  It was removed in f2587333c, "test: set up Grok and Antigravity hooks privately in drift runs" (#4674). Drift cases
+  now run Farhelm's own hook setup into a private copy of the vendor's configuration. They pass
+  `setup_persistent_hooks: private.is_some()` (drift.rs:677–680) and check the written files with
+  `PrivateConfig::check_installed` (drift.rs:686–688, drift/private_config.rs:302–308).
+  `docs/harness-drift-tests.md:47–66` and `:70–71` now say "You do not need to set up any agent's hooks first".
+  Verified: The finding was correct at 470e9e6c. It no longer applies.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## installed-agent-teardown-hides-test-failure.md
+
+- Outcome: `other`.
+- Assessment: The behavior is still present. In `execute`, `cleanup?` and `finished?` return before `result`
+  (drift.rs:765–776), so a failing session Delete, or the private config's final check, replaces the case's own error.
+  Both filter conditions hold: - The trigger is rare. Delete must fail on the test's private, healthy supervisor, which
+  means a fault at a specific point. - The whole consequence is a lost or misleading diagnostic. A real failure still
+  ends as FAILED, with the cleanup error instead of the original screen. A COULD NOT RUN plus a cleanup error becomes
+  FAILED, which is a stricter verdict, never a pass. No exclusion applies: no user data or processes are lost, nothing
+  is applied to the wrong target, no wrong product state persists, and no failure is reported as success. The provenance
+  is a trailing review of committed code. Verified: Confirmed by inspection. How often it happens is unmeasured.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## drift-suite-lacks-blocking-update-classification.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. The finding rests on the guide listing a blocking CLI update as a COULD NOT RUN
+  prerequisite. At 470e9e6c the guide said: "An agent running this suite never signs in or accepts a vendor update ...
+  it reports the case as COULD NOT RUN". f2e5f1679, "test: upgrade agents before drift runs" (#4665), replaced that with
+  upgrading every selected agent before any case runs (`docs/harness-drift-tests.md:31–45`). The prerequisites section
+  now names only a missing login as COULD NOT RUN, plus UPGRADE FAILED lines (`:68–73`). The reviewer also could not
+  show that any drift case reaches the Codex update screen. On that ground alone, "Harm whose route is not established"
+  would also match. Verified: The finding was partly correct at 470e9e6c. The spec mismatch is gone on main. An update
+  screen that appears right after the upgrade would now show as FAILED with the screen attached. That matches
+  `.agents/real-agent-tui.md:55–58` ("report which agent and what it showed").
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## installed-agent-readiness-oracle-is-too-weak.md
+
+- Outcome: `other`.
+- Assessment: The predicate is still weak. For the launch-only cases, `ready` returns success on any composer marker, or
+  on any trust prompt when `hook_witness` is None (drift.rs:423–436). OpenCode's markers include the bare "opencode"
+  (drift.rs:183), and Cursor's include "cursor agent" (drift.rs:174). The only consequence worth triage is a false PASS.
+  That needs a vendor frame that shows the marker while the agent is alive but not interactive. The reviewer states that
+  no such frame is established ("Vendor false-pass reachability remains unverified"). Refusal markers are checked before
+  readiness (drift.rs:422, 227–245). There is no established lesser consequence: the weak predicate is not itself a
+  harm. Verified: Confirmed for the predicate. No false pass has been observed.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## installed-agent-turn-oracle-accepts-old-output.md
+
+- Outcome: `other`.
+- Assessment: There is still no pre-submit baseline for Turn 1. `wait_for_turn` credits any line that starts with "OK"
+  from the first poll onward (drift.rs:549–551, 495–508). Turn 2 does have such a guard (drift.rs:750–754). The case
+  starts a fresh private terminal, and the Turn-1 prompt avoids spelling "OK" (drift.rs:697–699). A false pass needs a
+  vendor startup frame with a line beginning "OK" plus an accepted resumable report, and the reviewer states that no
+  such frame is established. Verified: Confirmed for the missing freshness check. The false pass rests on unverified
+  vendor behavior.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## installed-agent-preflight-can-misclassify-executable-access.md
+
+- Outcome: `other`.
+- Assessment: `which_binary` still checks only `mode & 0o111`
+  (crates/farhelm/tests/e2e/real_agent_capture.rs:1324–1335). The consequence, FAILED instead of COULD NOT RUN, needs an
+  agent binary on PATH that someone else can execute but the maintainer cannot. That is a missing source premise: nobody
+  has shown that vendor installs, which are per-user, produce this. Even then the result is a misclassified verdict,
+  which is a diagnostic, not a false pass. Verified: Confirmed for the predicate. The premise is unestablished.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## golden-runner-bypasses-cargo-runtime-setup.md
+
+- Outcome: `other`.
+- Assessment: The runner does run the test binary directly, without Cargo's runner or library-path setup
+  (scripts/check-gui- goldens.py:105–143, 309–312). Every consequence needs a configuration nobody has shown in use,
+  namely `-C prefer-dynamic`-style RUSTFLAGS that link a toolchain dylib, or a configured `target.*.runner` that the
+  build requires. The reviewer says the checked-in profile "do[es] not establish either premise". Even on that route the
+  run fails loudly at inventory, before any capture is deleted or reference fetched. Verified: Confirmed for the
+  mechanism. The premise is unestablished.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## golden-runner-misdecodes-cargo-json-paths.md
+
+- Outcome: `other`.
+- Assessment: `build_binary` decodes in text mode with the locale's encoding and uses `str.splitlines()`
+  (scripts/check-gui-goldens.py:111–116). A failure needs a non-ASCII build path together with a non-UTF-8 Python
+  locale, or a U+2028 or U+2029 character in a path. The reviewer makes it conditional on both, and nobody has shown
+  that setup in use. The consequence is a loud failure before rendering. Verified: Confirmed for the parser. The premise
+  is unestablished. The drift runner has the same pattern (scripts/run-harness-drift.py:46–56).
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## settings-radio-click-can-use-clipped-bounds.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established in shipped code." The only consequence (an accessibility Click on a
+  partly clipped radio card landing at the wrong point) depends on whether a shipped accessibility adapter dispatches
+  Click before scrolling the row into view, which the file itself marks "Unverified after investigation" and "the
+  missing premise". No established lesser consequence sits beside it. The unestablished harm (a wrong Settings radio
+  choice) is not `highest`, so no independent drop check is needed. Provenance is a trailing review of committed code.
+  Verified: unverified premise, as the reviewer says.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## stacked-template-shot-does-not-check-effort.md
+
+- Outcome: `other`.
+- Assessment: The "applied" docs shot waits for `id:launcher-effort-High` to be visible, not selected
+  (scripts/docs-shots/launch-templates.py:55–64). A wrong published picture needs the launcher to drop High when a
+  second template is stacked. The reviewer cites a unit test asserting that High survives the stacking
+  (templates/apply_tests.rs). The shot would also have to pass the maintainer's required inspection of every image
+  (docs/docs-shots/SPEC.md:135). The harm needs a product regression nobody has shown. Verified: Confirmed for the
+  capture check only.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## vanished-recent-traps-launcher-enter.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. `6a3db5996`, "fix: warn and keep query when a launcher choice disappears" (#4684), whose
+  message reads "Enter could do nothing if a highlighted recent setup disappeared. Warn beside the search".
+  `take_start_choice` (`search/start.rs:107-125`) now calls `refuse_stale_choice`, which shows the warning, and
+  `close_search` clears the highlight, so the next Enter launches.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## launcher-reconnect-discards-search-selection.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. `6a3db5996` (#4684) removed `reset_host_history_highlight` (found with `git log -S`).
+  `follow_history` now keeps the explicit pick (`launcher/view/history.rs:108-110`: "The command field keeps the earlier
+  installation on its explicit choice so the next Enter can explain why that choice disappeared"). `search_highlight`
+  (`search.rs:240-246`) never falls back to the default row while a pick exists, so Enter either takes the same row or
+  shows the stale-choice warning.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## golden-reference-failure-hides-cached-images.md
+
+- Outcome: `other`.
+- Assessment: When the strict fetch fails during an update's optional changes page, every paired row shows "Reference
+  unavailable", even for originals that are already cached. Both filter conditions hold: - The trigger is rare. The
+  cache must lack an expected picture and the remote lookup must fail, or the append-only store must miss a picture. The
+  reviewer says it "does not establish that any picture is currently missing from the store". - The whole consequence is
+  an incomplete optional review page that names the fetch failure, and rerunning once the store is reachable gives the
+  full page. The update and its certification are unaffected, so no exclusion applies. Verified: Confirmed by the
+  reviewer's source reading. I did not re-trace `golden_changes_page.py`.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## golden-report-packages-partial-capture.md
+
+- Outcome: `other`.
+- Assessment: The trigger is a renderer killed in the middle of writing a PNG, which is "a crash or interruption at a
+  specific point". The whole consequence is a broken picture on the changes page labelled as a new capture. The run's
+  nonzero status is kept, compare fails, and update certification is blocked, as the finding itself notes. So no failure
+  is reported as success and no wrong state persists. A rerun replaces the files. Verified: Confirmed by the reviewer's
+  source reading. I did not trace the Rust golden saver.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## orphan-delete-promises-unadmitted-cleanup.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". The provenance is the trailing review recorded
+  by 112f0109d (#4533), so this is a review of committed code. Trigger is rare: the deletion's local reads (saved
+  account, registry, known sandboxes) must stall more than about 10 s beside the 10-second bounded lookup. The code
+  documents this deliberate bound (`tensorlake/orphans.rs:30-36, 172-178, 305-320`: "the local reads ... take
+  milliseconds"). The whole consequence: the 504 says cleanup carries on when admission later failed. That is a
+  misleading message. Nothing was recorded or deleted, the orphan stays listed in its ordinary state, and Delete can be
+  pressed again (fails safely). No exclusion applies: no data loss, no wrong target, no persistent wrong state, no
+  success reported, no trust boundary. Not `highest`.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## restart-cleanup-comment-misstates-record-order.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. 063203912 (#4527, "fix: show terminal recovery and verify teardown"), merged after the
+  reviewed tip 1a53d9d3. It moved the host-record removal after the process sweep (host_restart.rs:764-787 on main). The
+  doc comment at :736-739 ("A host that cannot be confirmed ended, or a reap that cannot be confirmed, keeps the
+  launching record and the launch record") is now accurate. Verified: The comment no longer misstates the order, because
+  the code now matches it.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## restart-failure-hides-unconfirmed-cleanup.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. 063203912 (#4527) changed the failed-replacement unwind's sweep from
+  `ScopeKillFailure::Warn` to `Refuse` (host_restart.rs:768-781 on main), so an unconfirmed scope now makes the failure
+  ambiguous and keeps the new generation launching. That commit executed
+  `trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md`, the same finding. Verified: Fixed on main.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## terminal-primary-selection-hint-delayed.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics".
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## worker-refusal-can-copy-old-evidence.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. 022d0f010 "chore: isolate concurrent test-worker requests" (#4575). Each invocation now
+  writes into its own new `out/<invocation-id>` directory, which the worker creates with `mkdir` and so never reuses
+  (`scripts/test-worker/remote/with-lock.sh:144-145`). The runner writes there (`run-run.sh:11,20,26`), and the driver
+  copies only that directory, and only once it has a finished marker (`test-worker.sh:140,191-193,222-226`). A refusal
+  at the busy lock exits 75 before any output directory exists. Old evidence can no longer be copied under a new run.
+  What is left: `run` with no command still reaches the worker and is refused there with exit 2, but it copies an empty
+  directory, not stale files. Verified: correct at the reviewed commit 1a53d9d3, where the output directory was the
+  fixed `out/run`. Gone on main.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## release-verifier-can-downgrade-product-failure.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. 5fcaf735c (#4656) moved the recorded-failure check to the top of `Run.verdict`
+  (`releasing/mac-vm-test/brick_test.py:1653-1664`): "A recorded product failure decides first: a later harness failure
+  or lost retry evidence must not turn a confirmed break into could not run."
+  `if any(v['status'] == 'fail' ...): return 'fail'` now runs before every retry-evidence check. The reviewed commit
+  1a53d9d3 is an ancestor of 5fcaf735c. Verified: The problem described is gone on main.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## hook-failure-notice-lost-on-create-recovery.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare: the new terminal host
+  cannot be attached right after spawn, an interruption at a specific point (`service/core/host_launch.rs:633-650`,
+  which returns before `notify_hook_skip` at `:654-656`). The whole consequence is that a notification explaining a hook
+  that was not added is never created. That is a lost diagnostic. The durable setup result and the explanation at
+  Restart remain. None of the exclusions apply: no data loss, no wrong target, no wrong state recorded (the stored
+  result is correct; only the notification is missing), no false success, and no security effect. "Rare edge cases in
+  harnesses without first-class support" also fits the persistent-setup part. Committed-code review. Not `highest`.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## hook-silent-warning-lost-on-create-recovery.md
+
+- Outcome: `other`.
+- Assessment: "Rare edge cases in harnesses without first-class support". The finding concerns only Grok and Antigravity
+  persistent hook setup: the retained setup result stays Installed while `publish_retained_launch` deliberately clears
+  the hooked bit (`service/core.rs:10571-10580`, commented as "an honest unknown"). For Claude and Codex, that comment's
+  reasoning still holds. The trigger is rare: an interrupted create whose agent survives. The whole consequence stays in
+  the integration's diagnostics: no "hooks went silent" warning for that session. None of the exclusions apply: launches
+  work, nothing is lost, other sessions are untouched, and there is no security effect. Committed-code review. Not
+  `highest`.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## launcher-model-list-loses-highlight-on-load.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". The trigger is a narrow timing window: the
+  user arrows onto a past-launch model row before the model catalog read answers. When it answers, the catalog row
+  supersedes the history row (`launcher/search.rs:647-659`) and `same_search_choice` (`search.rs:870-886`) does not
+  match `HistoryModel` to `Model`. The whole consequence, since #4684, is that Enter refuses with "That choice is no
+  longer available" and clears the highlight: a safe failure that works on retry, plus a misleading message. No excluded
+  consequence applies. This is not a `highest` match.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## restart-recovery-shows-other-hook-result.md
+
+- Outcome: `other`.
+- Assessment: "Session status and history after a crash or a partly failed operation". Trigger: the supervisor crashes
+  in the middle of Restart with, and startup recovery rebuilds what happened from incomplete evidence. The generation
+  claim nulls `persistent_hook_setup` (`crates/farhelm-supervisor/src/store.rs:4855`), and the old value is restored
+  only by a same-process abort (`store.rs:4938-4951`). Consequence: only what Farhelm shows about the session is wrong,
+  namely the hook advice in the Restart explanation. The session can still be stopped, restarted, replaced and deleted.
+  None of the excluded consequences apply. The premise is a launch with no capture, so its offer was already NotCaptured
+  and no valid Resume offer is lost. Nothing destructive, no other session, no trust boundary. Verified: plausible from
+  source. The generation-claim and abort-restore ordering were confirmed. The crash-recovery takeover of the old
+  terminal was taken from the report and not re-traced line by line.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## failed-launch-clears-installed-hook-result.md
+
+- Outcome: `other`.
+- Assessment: "Session status and history after a crash or a partly failed operation". Trigger: a managed-checkout
+  create fails partway, at its database confirmation, after hook setup succeeded. The refusal transaction nulls the
+  setup result (`crates/farhelm-supervisor/src/store.rs:4269-4272`; the docstring at :4248-4249 says this is deliberate
+  for the warning flag). Consequence: the retained error row's disabled-Restart explanation says hooks were not set up.
+  That is inaccurate advice about the session ("which error explains the state"). The row can still be deleted, the
+  terminal is already ended, and nothing outside the record is affected. Verified: confirmed by source for the stated
+  branch.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## launch-setup-recording-failure-looks-skipped.md
+
+- Outcome: `other`.
+- Assessment: "Session status and history after a crash or a partly failed operation". The trigger: the supervisor fails
+  to record the hook-setup result (`service/core.rs:14853-14859` logs and continues), i.e. it "loses its ability to
+  record in the middle of a session operation". The whole consequence: the stored result reads as NotRequested, and the
+  only readers are wording and hints. Those are `PersistentHookSetup::restart_blocker` text
+  (`farhelm-proto/src/lib.rs:955-978`), the Restart and Restart with explanations (`session_list/restart.rs:133-140`,
+  `launcher/entry.rs:407-413`), the feedback note and the hook hint band (`session_pane/hook_band.rs:25-31`). That is
+  "what Farhelm shows… which error explains the state", allowed even when durable. Excluded consequences checked:
+  ordinary Stop, Restart and Delete still work; there is no destructive action, data loss or Resume-offer change (the
+  Restart offer comes from capture, not this field); no other session or host is affected; no security effect.
+  Trailing-review provenance.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## sandbox-recent-source-mark-follows-host.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. 6a3db5996 (#4684, "fix: warn and keep query when a launcher choice disappears") replaced
+  `SetupSource::Recent(Option<i64>, …)` keyed by the draft's host with `SetupSource::recent`. That function keys
+  new-environment entries to no installation (`launcher/view/search.rs:120-129`, used at `view/recents.rs:131` and
+  `view/search/start.rs:52`). Changing the ordinary host therefore no longer changes the comparison for a sandbox
+  setup's mark.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## launcher-host-search-rebuilds-registry-per-row.md
+
+- Outcome: `other`.
+- Assessment: SPEC.md "Session list" (2829-2830): "The fleet this product is for is tens of sessions across a few hosts,
+  not thousands, and the design assumes that scale outright." The per-row `ordered::<HostView>()`
+  (`search/start.rs:576-584`) is quadratic only in the host count, which that scale keeps trivial.
+- Decision: Covered by an accepted specification rule (quoted in the Assessment); removed during triage without asking
+  under `review_feedback_queue/AGENTS.md`, "Lifecycle". Covered means acknowledged, not implemented. (2026-11-24 triage,
+  main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## antigravity-drift-check-misses-plugin-manifest.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. f2587333c (#4674, "test: set up Grok and Antigravity hooks privately in drift runs")
+  removed the command-text preflight (`has_manual_hook` / `manual_hook_configured`) this finding critiqued. Drift runs
+  now run Farhelm's real setup into a private mirror. `PrivateConfig::check_installed` → `private_leaves_installed`
+  (`drift/private_config.rs:201-212`) requires every planned file to be a regular file. The planned files come from
+  `persistent_hook_paths_for_test` (`persistent_hooks.rs:118-128`), which for Antigravity includes `plugin.json` beside
+  `hooks.json` (`agent_kind/antigravity.rs:34-45`). A missing manifest now fails the premise check. Verified: The
+  original finding was correct at 1a53d9d. Main no longer has the problem.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## launcher-edit-hides-hook-save-refusal.md
+
+- Outcome: `other`.
+- Assessment: "Races a person would have to win inside a sub-second window". Trigger: the user edits a launcher field
+  while the "Set up and launch" or "Don't ask again" save is still in flight. During that window any edit drops the
+  question (`launcher/view/hook_question.rs:96-105` via `hook_write_in_flight`, :125-128). The window is the helm's
+  preference write latency, and it closes on its own. Consequence: a refusal that happens to arrive in that window goes
+  to a prompt that no longer exists (:241-246), so it is shown nowhere. Recovery is ordinary use: the setting or
+  dismissal was not stored, so the next pick of that agent asks again, and the launch continuation is retired, so
+  nothing launches. None of the excluded consequences apply: no user data, wrong target or trust boundary is involved,
+  and nothing stays wrong with no way back. Verified: confirmed by source. The trigger also needs the helm to refuse the
+  write.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## hook-hint-opens-unshown-agent-settings.md
+
+- Outcome: `other`.
+- Assessment: "Races a person would have to win inside a sub-second window." Trigger: the shown session is removed
+  elsewhere while focus is on its hook hint's Settings button, and the person presses Enter/Space inside the single
+  frame between the successor being drawn and being shown (a window that opens and closes on its own). Whole
+  consequence: Settings opens on the successor agent's page with its hook switch focused; nothing is written (the
+  reviewer says so and the handler only opens the dialog, `settings.rs:334-347`), and the user simply navigates or
+  closes — recoverable through ordinary use with nothing cleared. Exclusions checked: no data loss; no operation sent to
+  a machine or session (a local dialog opens); no persistent wrong state; no trust-boundary write. Provenance: trailing
+  review of committed code. Verified: confirmed by source; timing unmeasured.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## lost-grok-record-shows-hook-setup-hint.md
+
+- Outcome: `other`.
+- Assessment: "Rare edge cases in harnesses without first-class support". It concerns Grok only: the hook hint exists
+  only for Grok and Antigravity (`session_pane/hook_band.rs:25-34`), and the record check is Grok's. The trigger is an
+  unusual configuration (hook files on disk while automatic setup is off) combined with Restart finding Grok's
+  conversation record missing. Consequence: an imprecise hint and Restart tooltip. Both say to turn on hook setup
+  (`hook_band.rs:196-197`, `session_list/restart.rs:134-140`), while the separate "resume withdrawn" notification
+  explains the real cause. This stays inside the harness's integration features. It causes no record loss, does not
+  relax Restart, and touches no other session or trust boundary. Verified: confirmed by source. The withdrawn Grok
+  locator maps to NotCaptured (`agent_kind/mod.rs:2052-2061`), and the hint's condition (`hook_band.rs:25-34`) then
+  matches.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## launcher-recent-highlight-omits-installation.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. `6a3db5996` (#4684): "A choice that depends on the host's history belongs to the
+  installation that supplied it." `SetupSource::Recent(Option<Install>, SetupKey)` (`search.rs:100-120`) now carries
+  `Install { host, identity }` (`launcher/draft.rs:424-436`), and `StartRow::key` uses it (`search/start.rs:48-54`).
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## fixture-privacy-checks-miss-link-local-addresses.md
+
+- Outcome: `discard`.
+- Assessment: Already fixed. 01c678eaa (#4627, "test: protect private IPv4 URLs in agent screen fixtures") added IPv4
+  link-local (`169.254.0.0/16`) and CGNAT to both checks, including the IPv4-mapped form. The capture scrubber is at
+  `scripts/capture-agent-screens.py:109,160-166`, and the Rust fixture validator at
+  `crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs:277-279,299-303`. Tests at `screen_fixtures.rs:448-451`
+  cover `http://169.254.169.254/` and `http://[::ffff:169.254.1.1]/`. Verified: The finding was correct at 9a7691018.
+  Main no longer has the problem.
+- Decision: Already fixed; recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item". (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## hook-setting-read-can-miss-older-save.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Trigger: a narrow timing window. A reconnect
+  has to reopen Settings, and its read has to win the helm's database lock, while an accepted write from the previous
+  connection is still queued. Consequence: the Settings switch briefly shows the previous value. Closing and reopening
+  Settings corrects it (a fresh read). Nothing is written without the user's own toggle, nothing wrong is recorded, and
+  no trust boundary is involved. Verified: the reviewer's investigated uncertainty, not reproduced. The ordering gap is
+  plausible from the cited paths. Incidence is unmeasured.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## late-rename-persists-old-hook-advice.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Trigger: a narrow timing window. A Rename's
+  reply carries the session as it was before a concurrent Restart and lands after Restart's newer data. Consequence: the
+  helm's session cache holds the older run's projection, hook advice included. The merge applies no generation ordering
+  (`crates/farhelm-helm/src/session_cache.rs:187-192`). The report says the next authoritative refresh or reconnect
+  corrects it. The cache is the helm's copy of supervisor state, not the record of truth, so this is a display that
+  fixes itself rather than a wrong state that sticks. Nothing is acted on, and no trust boundary is involved. Verified:
+  plausible from source (merge without generation check). The exact reply ordering was not re-traced.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## hook-consent-summary-has-limited-keyboard-scroll.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established". The reviewer says outright: "Source inspection did not establish a
+  supported layout where the summary is unreachable by keyboard or assistive traversal while Enable remains usable."
+  Every consequence worth triage would need such a layout. The established remainder (no keyboard focus stop or page-key
+  scrolling for the notices area) only matters if that overflow happens. Even unverified, the consequence is a consent
+  explanation being out of view. That is not a `highest` consequence: the Enable button's own help names all hosts, and
+  nothing happens without the user's click. Verified: unresolved by the reviewer's own account. Route not shown.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-hosts-delete-just-registered-environment-from-approved-agent-launch.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". The provenance is trailing review run
+  4d6e9e3b, which reviewed committed code. The trigger is a narrow timing window: a Hosts "Delete sandbox", confirmed
+  and delivered between the new row's publication and the launch taking its busy marker and provisioning lock. Only
+  local awaits sit there: the row read, the recipe read and the registry sync
+  (`provisioning/tensorlake_add.rs:404-461`). Whole consequence: the environment the user chose to delete is deleted;
+  the approved launch then fails (the provider create re-checks the row) with a misleading "could not remove" cleanup
+  message, which fails safely. A finished task handle stays in helm memory, consulted only by host-forgetting code
+  (`provisioning/service.rs:2697-2727`), so nothing user-visible persists. No exclusion applies: no user data (the
+  environment was brand new and its deletion was requested), no wrong target, no durable wrong state, no success
+  reported, no trust boundary. Not `highest`.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-cleanup-report-failure-when-verified-container-has-already-disappeared.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Trigger: a separate removal makes the
+  container disappear between Farhelm's ownership inspection and its `podman rm` (`podman.rs:502-526`), which is a
+  narrow timing window. Whole consequence: Delete reports failure, keeps its record, and "on a later sequential retry,
+  the missing target succeeds" (from the finding). The operation fails safely and succeeds when retried. None of the
+  excluded consequences apply: nothing is lost, no wrong target, no success reported for a failure, and the kept record
+  is cleared by the ordinary retry. Provenance: trailing review run 4d6e9e3b, of committed code. Not highest.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-losing-terminal-host-hide-history-already-exposed-after-exit.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics".
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-restart-with-samples-terminal-availability-before-final-database-work.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics".
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-create-and-create-replay-sample-terminal-availability-before-projecting.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics".
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-re-adoption-publish-missing-terminal-without-invalidating-session-list.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics".
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-restart-republish-tab-exited-during-relaunch.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics".
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-legacy-interrupted-settles-launch-reads-without-proving-writer-stopped.md
+
+- Outcome: `other`.
+- Assessment: "Upgrades from older releases combined with another rare condition". - The trigger needs something carried
+  across an upgrade from an older release: the route exists only for a session still running in a legacy tmux terminal
+  that the new supervisor retires (SPEC.md, the "Old terminals" bullet; `service/core/old_terminals.rs:240-280`). - It
+  also needs a further rare fault: ending the old tmux server fails (the `StillRunning`, error and timeout arms at
+  `old_terminals.rs:254-279`), and a compatible old shim then survives and later publishes a launch-failure sentinel for
+  the same generation. The reviewer did not establish that last step. - The whole consequence:
+  `service/status.rs:672-681` treats any `Interrupted` as proof that the launch's evidence writers ended, so later reads
+  stop and the session keeps showing Interrupted rather than the launch error. That is an inaccurate status. No excluded
+  consequence applies: no installation is left unable to update or broken, no database is corrupted, there is no
+  security effect, and the session can still be restarted or deleted. Verified: the missing-proof path is confirmed in
+  source. The actual lost failure is unestablished.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## launcher-first-podman-check-hides-known-host-refusal.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Trigger: the window while a host's first
+  Podman check is still running. The helm already publishes the ordinary refusal (`view()` in `podman_probe.rs` returns
+  `reason = ordinary_refusal` with `checked_at: None`), but `launcher/request.rs:164-177` shows "needs a Podman check"
+  until `checked_at` is set. That is a timing window of a few seconds. Whole consequence: a less precise reason that
+  corrects itself when the check finishes. Launch is refused either way. No excluded consequence applies. Provenance:
+  trailing review #4650, of committed code. Not highest.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-test-worker-stop-reports-ended-before-lock-release.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". - The trigger is a narrow timing window. The
+  worker removes its lock note (`with-lock.sh:46`), then deletes its staging folder (`:48`), and only then frees the
+  checkout lock, at process exit. Stop's "ended" check (`stop.sh:61-66`) is only reached after `run-workload.py` has
+  started, and by then the large `stage/src` has already been deleted (`with-lock.sh:142`). So what is still being
+  deleted is a few tool files and a log: milliseconds. A follow-up request has to finish its own staging upload over ssh
+  before it even tries the lock, so it almost never lands inside that window. - The whole consequence is an operation
+  that fails safely and works when retried: exit 75, "in use by: unknown". The same window could make the self-test at
+  `scripts/test-worker/test-test-worker.py:424-430` fail once and pass when run again. - None of the excluded
+  consequences apply: no data loss, no wrong target, nothing wrong left behind, no false success, no security effect.
+  Verified: the mechanism is confirmed. In practice the window is a few milliseconds.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-suspend-silently-dropped-when-launch-starts-mid-check.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Provenance: trailing review of committed code
+  at `66ad3aaa`, not review before merge. Trigger: a launch targeting the same host has to start inside the window while
+  Suspend's activity read (`GET /api/sessions?host=`) is out. That is a narrow timing window. Consequence: confirmed at
+  `crates/gui/farhelm-gui/src/session_list/environment.rs:476-478` and `:668-670`, and at `hosts/lifecycle.rs:158-163`
+  and `:258-266`, which return without a note. Suspend fails safely, the host keeps running, the launch goes ahead, and
+  Suspend works when retried after the launch. The only loss is the missing explanation, and even then the now-disabled
+  Suspend control carries the "A launch on this host is in progress" tooltip (`hosts/menu.rs:344-349`). None of the
+  excluded consequences apply: no data loss, no wrong target, no wrong state that persists, no false success, no trust
+  issue.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-post-wake-disconnect-or-start-fail-reveals-silently.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Provenance: trailing review at `66ad3aaa`.
+  Trigger: the waking host has to disconnect or change installation in the instant between its post-wake preview or
+  launch completing and the wake observer reacting (`launcher/launch.rs:275-282` names this gap), or `operations.start`
+  has to fail at that point. That is a narrow timing window. Consequence: per the code at
+  `launcher/view/checkout.rs:562-590` and `view.rs` submit, the launcher reopens with the user's draft intact and no
+  refusal alert. No create is sent, and pressing Launch again either shows the current refusal or launches. That is a
+  missing diagnostic on an operation that failed safely. No excluded consequence applies. Note: the deterministic
+  failed-preview path is item 406. A fix there that always records a refusal before `reveal_prepared` would also cover
+  this route.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-terminal-set-restore-blocks-carried-upload-interruptions.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics".
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-podman-place-commands-lack-ssh-exit-status-wrapping.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established in shipped code". Every consequence (a falsely passing check, a
+  failed build step treated as success, Delete unable to confirm absence) needs a Linux container host whose SSH server
+  reports exit 0 for a failed command. The file marks this as an unverified premise. The only known example in the code
+  is Tailscale SSH on macOS (`provisioning/backend.rs:1820`), and macOS cannot host containers. The spec acknowledges
+  lossy servers in general (SPEC_impl.md about line 8183) only for setup. No excluded consequence is established. The
+  reviewers rated it not highest (identity proof and absence checks fail closed). Provenance: trailing review of
+  committed code.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-podman-probe-swallows-session-limit-on-identity-read.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Trigger: the host's SSH session limit is hit
+  exactly on the last of the probe's eight commands, the identity read (`podman_probe.rs:1101-1114`). If the limit were
+  reached earlier, an earlier command would surface the correct session-limit refusal through `run` (`:1009-1015`), so
+  this is a narrow timing window. Whole consequence: the refusal reads "could not verify this container host's machine
+  and account" instead of naming the SSH session limit, and the next check reports it correctly. No excluded consequence
+  applies. Note for the orchestrator: this does contradict SPEC_impl.md about line 6373 ("When the fallback login fails,
+  launch refusal or connection unavailability names the container host's SSH session limit"). If you prefer
+  clearly-settled over the filter, the fix is to let `ReadyPlace.identity` carry the typed refusal text (size S).
+  Propagating the error instead would break the deliberate "existing bindings keep command access" comment at
+  `:1099-1100`.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-probe-tailscale-mismatch-runs-before-new-entry-validation.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Trigger is rare: either an input the shipped
+  clients never send, or a narrow race. That input is an API probe with a mismatched `tailscale`, or a Tailscale probe
+  of a Tensorlake or Podman destination. The race is Add host racing a just-added host, since the Add dialog pre-checks
+  existing destinations and names the entry itself (`hosts/add.rs:451-475`). Whole consequence: the request is refused
+  either way, before contacting anything, with an imprecise message ("Change the Tailscale mode…" instead of naming the
+  existing entry; `provisioning/service.rs:961-971` runs before target and new-entry checks). Excluded consequences
+  checked: no data loss, no wrong target, no persisted state, no false success, no security effect. Trailing-review
+  provenance.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-brick-test-fixture-probe-launchctl-list-vs-user-domain.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established in shipped code". The finding is from a trailing review of committed
+  code (run `746bd2ca`), not from a pre-merge review. Every consequence depends on unverified platform behavior: the
+  finding itself says "Unverified after investigation" about whether `launchctl list` from these sessions omits
+  `user/<uid>` Background jobs. It also depends on an unshown premise, a base image holding a loaded-but-not-running
+  supervisor job with no plist; a running one would be caught by the probe's `ps` scan (`fixture_probe.py:113-118`). No
+  lesser consequence is established, and no `highest` consequence is plausible. Verified: The code reading is correct
+  (`fixture_probe.py:120-123`). The harm route is unestablished.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-brick-test-guest-ui-p1-remote-mac-bonus-preflight.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established in shipped code". It is from a trailing review of committed code. The
+  inconsistency is real: `releasing/mac-vm-test/guest_ui.py:149-150` still uses `not pass_id.startswith('p0-')` where
+  every other site uses `is_bonus_pass`. Its only harm, a spurious readiness failure on `p1-remote-mac`, needs the
+  computer-use provider to return several images or an image format the parser rejects for a Finder screenshot. That
+  vendor behavior is unverified, and bonus passes already apply the same parsing to the same provider without a reported
+  failure. The only other established consequence is some unnecessary image decoding, which is no harm. No `highest`
+  consequence. Verified: The inconsistency is confirmed (a one-line fix if the maintainer wants it); the harm route is
+  unestablished.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-brick-test-plain-update-relaunch-requires-local-supervisor.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established in shipped code" (the case "an input sequence no shipped control
+  produces"). It is from a trailing review of committed code. The stale sentence lives only in the non-managed
+  `instructions()` builder (`releasing/mac-vm-test/guest_workflow.py:341-347`). The only live caller, `task_for`
+  (`guest_workflow.py:681`), chooses it only when `managed_operations` is false, and the coordinator always sets it to
+  true (`brick_test.py:919`); no other caller exists. The missing test is coverage of that dead path. No established
+  harm, no `highest` consequence. Verified: The drift is confirmed but cannot be reached in live runs.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-codex-subscription-replacement-suppresses-legacy-cleanup-warning.md
+
+- Outcome: `other`.
+- Assessment: "Upgrades from older releases combined with another rare condition". The trigger needs older-release
+  state: a legacy Codex Endpoint stamp from a pre-protocol-87 settings write. It also needs a rare fault on top: the
+  legacy `~/.codex/config.toml` cleanup failing (invalid TOML or a concurrent-edit conflict), then a switch to
+  Subscription and a replacement of that login. The whole consequence is that the credential save reply omits a warning
+  the host's details still show in amber (`crates/farhelm-helm/src/provisioning/credential_delivery.rs:77-83,712-721`).
+  No excluded consequence applies (no failed update, no corruption, no security effect). Also note: the exclusion is a
+  deliberate, commented choice (`:77`). This is not a `highest` match.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-custom-agent-id-matching-model-family-hidden-without-catalog.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". The trigger is rare: it needs a custom-agent
+  ID that is also a model family word (`auto`, `sol`, …), typed in unlabelled search either in the short window before
+  the model catalog arrives or after a failed catalog read. The early return
+  (`crates/gui/farhelm-gui/src/launcher/search.rs:552- 561`) only shows "Loading models…" or "No model matches". That
+  display corrects itself when the catalog arrives, or when the user reopens the launcher, which reads the catalog again
+  (`launcher/view.rs:496-518`). The custom agent's chip stays usable throughout. No excluded consequence applies:
+  nothing is lost, nothing acts on the wrong target, and nothing durable is wrong. The source is a trailing review of
+  committed code. Not `highest`.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-drift-grok-trust-retry-resends-printable-y.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established in shipped code". The finding came from a trailing review of
+  committed code (#4760). Every consequence it names (a stray `y` in Grok's composer corrupting the prompt, or a stray
+  single-key action) depends on Grok behavior the file itself lists as unverified: the trust screen still showing, or
+  redrawing, 3 seconds after the first `y`, and Grok keeping PTY bytes buffered before its composer mounts. No lesser
+  consequence is established beside it: the resend logic (`drift.rs:269-279`, 410-430) is confirmed, but on its own it
+  causes no harm. The worst outcome is a spurious drift-test failure, so it cannot reach `highest` and needs no drop
+  check. Verified: Source premise confirmed. The harm route is unverified, as the file says.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-drift-harness-skips-private-config-finish-on-error.md
+
+- Outcome: `other`.
+- Assessment: `plans/queue/drift-model-selection.md` (`[complete]`, not landed). Its acceptance criterion 1 requires
+  "extracted launch/teardown scaffolding", and its binding "Planner-chosen implementation shape" specifies that helper
+  as owning "guaranteed cleanup (`delete_session`, `accepting.stop()`, `private.finish()` even on error)". The delivered
+  branch (`origin/plan/drift-model-selection/02-…`, PR #4782 on #4781) implements both halves of the finding.
+  `DriftEnv::with_session` runs create and attach inside a scope that always calls `delete_session`.
+  `with_drift_supervisor` always stops accepting, drops the supervisor, closes the state directory (the reap check), and
+  calls `finish(stopped.is_ok())`. `finish` always re-checks the real hook files and copies back only when the hosts are
+  confirmed gone (branch `drift/mod.rs` ~690-805, `private_config.rs` `finish`). The plan's report also says "confirming
+  isolated hosts stopped before copying configuration updates back". Verified: Confirmed on main (`drift.rs:663-678`,
+  758-770). Fixed once the plan lands.
+- Decision: Covered by an unlanded plan in `plans/queue/` (quoted in the Assessment); removed during triage without
+  asking under `review_feedback_queue/AGENTS.md`, "Lifecycle". Covered means acknowledged, not implemented. (2026-11-24
+  triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-harness-upgrades-unhandled-http-exception.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". The finding came from a trailing review of
+  committed code (#4760). Trigger: a truncated or malformed HTTP reply while downloading a vendor installer, which is an
+  interruption at a specific point. Consequence: `run_installer` catches only `OSError`
+  (`scripts/harness_upgrades.py:146-150`), so an `http.client.HTTPException` (not an `OSError` subclass) aborts the
+  drift run with a traceback before any case runs. That is an operation that fails safely and succeeds on retry, with a
+  less precise diagnostic. None of the excluded consequences apply. The temp directory is cleaned up by its context
+  manager, earlier upgrades were intended, nothing is reported as a success, and no state is left wrong. Verified:
+  Confirmed by source.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-host-removal-replies-200-before-signin-cancel-settles.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Trigger is a narrow timing window: removing a
+  host while its setup sign-in question is open, with the DELETE reply beating the cancelled task's next poll by
+  milliseconds (`setup_sign_in.rs` `cancel_host` sends on the channel without awaiting). Whole consequence: for that
+  moment the removed host's question is still listed and its operation hold is briefly restored, and both clear on the
+  next pushed update ("a display that is briefly wrong and corrects itself on the next refresh"). Excluded consequences
+  checked: the `biased` select stops late answers reaching SSH; no data loss, no wrong target, no durable state, no
+  false success, no security effect. Trailing-review provenance. If the orchestrator judges this race window "not rare"
+  because the ordering may usually go this way, it is a discard candidate on substance.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-mac-uninstall-stop-discards-absent.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Trigger is rare: retrying a remote Mac
+  uninstall after an earlier run failed partway at a later step ("an interruption at a specific point"). Whole
+  consequence: the stop step is reported Completed instead of Skipped, because `stop_launch_agent` discards the script's
+  `absent` stdout (`provisioning/backend.rs:3226-3247`; Linux checks it). That is an imprecise status display; the host
+  command itself already treats the work as done (SPEC_impl.md: "each host command treats work already done as a skip").
+  Excluded consequences checked: no data loss, no wrong target, the run's progress view is not durable registry state,
+  no false success (nothing failed), no security effect. Trailing-review provenance. If the orchestrator prefers not to
+  filter it, it is a 2-line fix (XS).
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-refused-no-confirm-remove-during-signin-loses-error-on-ready.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Trigger is a narrow timing window: with
+  "Remove hosts without asking" on, a sign-in reaches Ready while the Remove request is on the wire and the helm then
+  refuses or times out the Remove. Whole consequence: the Remove refusal under the host row is cleared before it
+  renders, when the deferred setup replay admits the same operation key (`operations.rs` `admit` → `failures.remove`),
+  i.e. "an error message … lost". The host simply stays listed, the action failed safely, and Remove can be retried.
+  Excluded consequences checked: no data loss, no wrong target, no persisted wrong state, no success reported, no
+  security effect. Trailing-review provenance.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-template-fields-implied-kind-ignores-custom-agent.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established in shipped code" (FILTER.md). The finding is from a trailing review
+  of landed code, so the filter can apply. Every consequence needs a stored template with a custom agent ID but no agent
+  type. That is an input no shipped control produces. The CLI sets both or neither
+  (`crates/farhelm/src/main.rs:1126-1136`). The agent template merge cannot clear the agent type
+  (`farhelm-helm/src/agent_requests.rs:3813-3819`). The GUI editor clears both together (`templates/fields.rs:167-169`).
+  Only a raw `PUT /api/templates` produces one, and the file itself says so. No stronger established consequence sits
+  beside it: the result is an editor display and save refusal, with no data, security or wrong-target harm. It is not a
+  `highest` candidate.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-tensorlake-504-cleanup-finishes-before-outage-leaves-stale-row.md
+
+- Outcome: `other`.
+- Assessment: "Rare, self-correcting glitches and imprecise diagnostics". Provenance: trailing review at `de430200`.
+  Trigger: three conditions have to line up. Tensorlake's sandbox listing is failing, a leftover's Delete takes just
+  over 20 s (a 504 that says cleanup carries on), and the cleanup then finishes inside the follow-up discovery's 20 s
+  window before the snapshot is taken (`crates/farhelm-helm/src/tensorlake/orphans.rs:101-117`). That is a narrow timing
+  window. Consequence: confirmed at `crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs:338-353`, which removes
+  the row only on `Ok`. The deleted sandbox stays listed in memory with a stale "carries on" note until the next
+  successful discovery. The Sandboxes view is created per Settings opening (`settings/tensorlake.rs:119-127`), so it
+  also clears when the user leaves the view. A second Delete on the stale row fails safely (the sandbox is gone). No
+  excluded consequence: nothing user-owned is lost, nothing acts on the wrong target, nothing wrong is recorded durably,
+  and no false success is reported. Note: this does contradict `SPEC.md:614-615` ("its row goes away when cleanup
+  finishes even if discovery is still unavailable"); the filter applies anyway.
+- Decision: Matches a review filter in `review_feedback_queue/FILTER.md` (named in the Assessment); removed during
+  triage without asking, as FILTER.md "Where the filters apply" directs. A filter match says nothing about whether the
+  behavior is acceptable in code. (2026-11-24 triage, main c38b93552.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## container-leftover-confirmation-host-identity-uncertain.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established in shipped code". The file itself names the missing premise: a
+  shipped way for the same host number to identify a different installation while the confirmation is still on screen.
+  My check agrees it is missing. `hosts.id` is `INTEGER PRIMARY KEY AUTOINCREMENT` (`store.rs`, cited in item 74), so a
+  number is never reused. A registered container's Delete targets the container recorded in that row's binding, not the
+  supervisor identity. The consequence that would matter (deleting beyond the displayed target) depends entirely on that
+  missing step. Provenance: trailing review 6b3f5817a/#4475, of committed code. **Flag:** the unestablished consequence
+  is a destructive action on the wrong target, which could be `highest`. Under that filter's own rule it must pass the
+  independent drop check (`review_feedback_queue/.agents/recording.md`, "Independent drop check") before removal.
+- Decision: q-unest, "Filtered, but their unproven harm could be highest": the maintainer picked "Remove them under the
+  filter" after the items were described on the page, standing in for the independent drop check FILTER.md asks for.
+  (2026-11-24 fewest-questions triage page (main c38b93552), second pass.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## hook-setup-can-report-partial-antigravity-plugin.md
+
+- Outcome: `other`.
+- Assessment: "Rare edge cases in harnesses without first-class support". It concerns Antigravity only. Trigger: a
+  narrow timing window. The user deletes the plugin directory between the two file writes
+  (`agent_kind/antigravity.rs:34-50`, `persistent_hooks.rs:43-58`, each creating the parent directory). Established
+  consequence: a half-installed plugin recorded as Installed, so that launch gets no Resume offer. A later launch
+  repairs the files. This stays within the harness's integration features. Verified: established part confirmed by
+  source. Redirect route not established.
+- Decision: q-unest, "Filtered, but their unproven harm could be highest": the maintainer picked "Remove them under the
+  filter" after the items were described on the page, standing in for the independent drop check FILTER.md asks for.
+  (2026-11-24 fewest-questions triage page (main c38b93552), second pass.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
+
+## trailing-setup-and-takeover-offer-binding-remains-unverified.md
+
+- Outcome: `other`.
+- Assessment: "Harm whose route is not established in shipped code". The file is "Unverified after investigation", and
+  its own review "refuted live substitution for the scenario reviewed". I re-checked current code:
+  `AddHostDialog::settled` (`hosts/add.rs:1203-1290`) re-enables the fields and builds the Setup offer and the takeover
+  destination and `probe_id` in the same synchronous call, and the answers act on those captured values. No route to a
+  different offer is established, and no lesser consequence is established. **Flag:** the file says it "Could be highest
+  if a different destructive plan were sent", so per FILTER.md this drop must first pass the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check").
+- Decision: q-unest, "Filtered, but their unproven harm could be highest": the maintainer picked "Remove them under the
+  filter" after the items were described on the page, standing in for the independent drop check FILTER.md asks for.
+  (2026-11-24 fewest-questions triage page (main c38b93552), second pass.)
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; the feedback file and index entry were removed during triage.
