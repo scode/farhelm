@@ -106,6 +106,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   during setup, but never asserts against the stand-in backend that setup made no `read-agent-settings` call. Add that
   negative assertion. Plan: `plans/queue/tensorlake-setup-and-repo-cache-fixes.md`.
 
+- **Cmd-Shift-[ and ] to switch tabs.** Add cmd-shift-[ and ] to switch between terminal tabs/agents within a session.
+
 ## Plan follow-ups
 
 - **Isolate hook setup errors in Restart and recovery.** A failed persistent hook setup carries the host's error in
