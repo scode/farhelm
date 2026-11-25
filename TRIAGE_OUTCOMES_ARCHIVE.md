@@ -46559,3 +46559,30 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. Cached admission and recipe state writes compare the recorded Tailscale SSH mode even after the same
   machine and account are claimed again. Change `xzrnlmxvvzkzosmplurxmmslqvvtykzq`, bookmark
   `plan/triage-podman-nov24/04-tailscale-guards`, [PR #4885](https://github.com/scode/farhelm/pull/4885/changes).
+
+## trailing-failed-rebuild-on-removed-host-blocks-recipe-delete.md
+
+- Outcome: `fix code`.
+- Assessment: If a Rebuild or a first-launch preparation of a recipe fails on a container host that holds none of that
+  recipe's images, and that host is later removed from Farhelm, the recipe can never be deleted again. Every Delete
+  fails with "the container place was removed before its state could be recorded". Re-adding the host does not help,
+  because it gets a new ID. Verified: Confirmed by reading. `prepare_images` (`build.rs:273-327`) calls `edit` before
+  `places.fresh`, and `edit_at` (`:579`) creates a per-place entry with `or_default()`, so a failure leaves an entry
+  that holds only the failure. `needs_cleanup` (`recipes.rs:80-88`) is false for it, so host removal is allowed
+  (`store/podman.rs:337-372`). `clean_images` (`build.rs:914-960`) calls `self.edit` for every entry, and `edit`
+  (`:548-561`) fails when the host row is gone. `delete_recipe_owned` (`tensorlake/recipes.rs:689-698`) then refuses.
+  `hosts.id` is AUTOINCREMENT, so the ID is never reused. No spec sentence requires that Delete always succeed, so this
+  is not clearly settled, but the fix needs no design choice.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code — in
+  `clean_images`, drop entries with `!needs_cleanup()` without calling `edit`, and do not create an entry before
+  admission. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Recipe Delete is fixed. It drops old failure-only records without consulting the removed host. Deferred
+  preventing those records before admission to TODO.md under Plan follow-ups, “Show container recipe admission failures
+  before recording build ownership.” Simply omitting the record can hide the only error for a Rebuild that Settings
+  already accepted. The first write also needs to be bound to the host that passed admission. Change
+  `uznltwqsoqxoxqmxwqwyxwlzovmonlzy`, bookmark `plan/triage-podman-nov24/05a-removed-place-recipe`,
+  [PR #4888](https://github.com/scode/farhelm/pull/4888/changes).
