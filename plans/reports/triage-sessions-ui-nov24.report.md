@@ -106,3 +106,100 @@ Each draft received independent Sol review and finished with no unresolved corre
 included which upload notices get promoted and fixes to the hover, bell and recovery fixtures. Opus inspected the
 affected views in both appearances and found no remaining mismatch. The final reference runs were compared with the
 approved captures before publication.
+
+### Landing
+
+#### What landed with it
+
+Two plans landed this round: triage-tooling-nov24 first, which fixes maintainer tooling (test harnesses, screenshot
+scripts, the drift runner and the release test) and touches none of this plan's code, then this one through
+[#4811](https://github.com/scode/farhelm/pull/4811/changes),
+[#4813](https://github.com/scode/farhelm/pull/4813/changes),
+[#4816](https://github.com/scode/farhelm/pull/4816/changes), [#4822](https://github.com/scode/farhelm/pull/4822/changes)
+and [#4826](https://github.com/scode/farhelm/pull/4826/changes). Since this plan's base (`dfae22dc`), main gained only
+plans queue commits. Both plans add scenes to the app's screenshot tests; the landing's review checked by script that
+every scene in the combined tree has a published light and dark reference picture, and the full comparison below matched
+every one. Stacking this plan on the other conflicted only in the triage ledgers and the review queue's index, where
+both plans had removed different findings and archived different decisions; I kept both sides at each of this plan's
+commits, and a script check then confirmed the index matches the findings on disk and no decision is in both the ledger
+and the archive.
+
+#### Fixes made while landing
+
+None to this plan. The landing fix #4833 named below belongs to triage-tooling-nov24.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. This round landed two
+plans, triage-tooling-nov24 and triage-sessions-ui-nov24. Neither report's checks covered the two stacked together, so
+the landing ran its checks on both plans stacked on main, with the conflict resolutions in the triage ledgers and the
+review queue's index (`40fe32d9`). The only later change is the landing fix
+[#4833](https://github.com/scode/farhelm/pull/4833/changes), which reformats one line of a test scene and removes a
+blank line from one instruction paragraph; the formatters and the instruction check passed on the final tree
+(`901f58bb`), which is what main now holds outside the plans queue.
+
+- `cargo nextest run --locked -p farhelm-gui -p farhelm-desktop -p farhelm --lib --bins --test e2e` with
+  `-E 'package(farhelm-gui) | package(farhelm-desktop) | test(/^real_agent_capture::drift::/)'`, on the test worker
+  (recorder run `c3af473f-7286-4297-9ff6-25b444186cb7`): all 3593 selected tests passed, with no runtime skip. That is
+  the desktop app's interface crate, the desktop app itself, and the drift tests that use stand-in agents.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and the desktop app's
+  two clippy runs (`-p farhelm-desktop --all-targets`, with and without `--features agent`), on the test worker: passed.
+- The desktop app's end-to-end smoke (`scripts/gui-e2e-smoke.py`, recorder run `659d1f71-c182-4ccd-ba94-df81cff63e54`:
+  50 steps, one skipped, the paste step that headless Linux cannot run) and its Linux lifecycle run
+  (`scripts/gui-lifecycle.py`, `38181353-2c50-412c-9e62-f4f4c6d1067d`), on the test worker: passed. Both plans changed
+  what these drive: the script that drives the app, and the notices and Upgrade highlights shown when a window starts.
+- `python3 scripts/check-gui-goldens.py`, the full comparison of the app's screenshot tests against their published
+  reference pictures, locally (recorder run `af16a877-369e-409b-a4e3-e6c747a1ae82`): every scene matched, the new ones
+  included.
+- The changed scripts' own tests, locally, through the recorder: `scripts/test-run-harness-drift.py`
+  (`ae3bb7ae-1b00-4552-8410-01eda68ccbb1`, 21 passed), `scripts/test-capture-agent-screens.py`
+  (`d43cf8c2-d6c3-45a2-ad2b-ac98b584e370`, 13 passed), `scripts/test-worker/test-test-worker.py`
+  (`673b2ef9-3173-4948-b02d-0ec625a2708b`, 18 passed) and the brick test's portable suite
+  (`python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py'`, `25f16a81-0bf6-42f3-92e8-4b7dd9a57f98`,
+  324 passed).
+- More of the changed scripts' own tests, locally, run directly rather than through the recorder, which was an oversight
+  of mine, so they have no run id: `python3 -B scripts/test-docs-shots.py` (31 passed),
+  `python3 -B scripts/test-check-gui-goldens.py` (21), `python3 -B scripts/test-gui-agent.py` (95),
+  `python3 -B scripts/test-gui-screenshot-batch.py` (47), `python3 -B deflake/test-deflake.py` (20), and `deno check`
+  and `deno test -A` on `scripts/boat/boat-tests.ts` (6) and `scripts/tensorlake/rust-tests.ts` (3).
+- `shellcheck` and `py_compile` on the test worker harness's changed files, `bash -n` and `shellcheck` on
+  `scripts/test-provision-centos.sh`, `python3 releasing/check-changelog.py --self-test` and `format`,
+  `python3 scripts/check-agents-md.py` (no errors; one warning, about an old citation in the triage archive, already on
+  main), `dprint check` and `python -B scripts/check-test-sleeps.py`, locally: passed.
+- `cargo fmt --all -- --check`, locally: failed on the combined stack, on one line from triage-tooling-nov24, and passed
+  after the landing fix #4833.
+
+Reused, from triage-tooling-nov24's report: the CentOS provision and update check at `1c6765e6ec02`
+(`4f766a39-8b03-4d47-a7e4-9d7ee18cf376`), which needs a container runtime the landing did not use, and the docs
+screenshot capture at `48b1e92e53b2` (`2fa76b78-a99b-4743-abee-66a1c4dbbb1b`) whose pictures the executor inspected. The
+landing's conflict resolutions and fix touched neither the CentOS script nor the docs screenshot pages.
+
+Skipped: the rest of the workspace Rust suite, since no other crate changed; the live drift cases, which are opt-in and
+spend real vendor turns; a live brick test, which needs a Mac VM; on a real Mac, the desktop app reopening itself after
+an update and the macOS version of the session toolbar's screenshot test, which the tooling report already lists as
+unverified; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+Nothing. The report's checks ran on this plan alone; the ones above ran on both plans together.
+
+#### Things you should know that the report does not say
+
+- **Where an interrupted upload is reported after a reconnect depends on what the open session shows first.** The report
+  says a reconnect that restores the terminal can still report the interruption there, and that holds when the terminal
+  comes straight back. When the session first settles on a card instead, such as the one shown while its host is
+  unreachable, the interruption becomes a window notice at that point, so if the host then comes back the user sees the
+  notice rather than the terminal's own line about the upload. Either way it is reported once, which is what the amended
+  SPEC.md asks for.
+- **The notice shown when Don't show again could not be saved names "upgrade highlights".** The dialog itself is titled
+  "What's new in Farhelm" and the Settings switch reads "Show what's new after updates". The landing's review suggested
+  naming the switch. I left the wording, since the dialog's own Don't show again help, its close button and the Settings
+  help already say "upgrade highlights", and changing it would mean republishing that notice's reference pictures. Say
+  so if you want the switch's name instead.
+- **Small things the landing's review noticed and left:**
+  - For a host that is being set up and also has a warning, a screen reader hears the warning last, after the
+    instruction to open Hosts for details, where it is easy to miss.
+  - A session title made only of spaces still counts as a title, so an upload notice for such a session names a blank
+    session instead of leaving the session out.
+  - The screenshot test for the recovery cards puts the upload notice directly above one card, a layout the app never
+    draws.
