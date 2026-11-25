@@ -309,14 +309,6 @@ consequences.
   When a verified container host command fails before the guard runs, Farhelm copies up to 64 KiB of uncropped,
   unsanitized remote stderr directly into host status and HTTP errors.
 
-- [`trailing-podman-refresh-settles-claims-with-stale-pre-probe-row.md`](trailing-podman-refresh-settles-claims-with-stale-pre-probe-row.md)
-  — If Setup or Update updates a host's remote install paths while a container host check is running, the check settles
-  claims using the stale pre-probe row and can ignore an active installation identity refusal.
-
-- [`trailing-podman-settle-claim-refuses-third-host-duplicate-transfer.md`](trailing-podman-settle-claim-refuses-third-host-duplicate-transfer.md)
-  — When a stale unused container-host entry is refused as a duplicate of a third host, the verified owner of the
-  container machine cannot automatically take over the unused claim.
-
 - [`trailing-claim-podman-place-retains-unused-claim-after-twin.md`](trailing-claim-podman-place-retains-unused-claim-after-twin.md)
   — When an unused SSH host moves externally to a machine claimed by another host, Refresh refuses it as a twin but
   keeps its old claim on disk, blocking a third entry for the vacated machine.

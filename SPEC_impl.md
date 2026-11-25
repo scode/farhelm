@@ -6474,9 +6474,11 @@ reason), and a check's start and its end bump the fleet feed, so the hosts colle
 
 The probe reads the machine ID and numeric account from one command through that route. A successful identity
 observation claims the machine/account pair in the helm registry in one transaction, fenced to the observed host entry
-and destination. An entry with no containers, image records or helpers can replace its claim. An unused twin yields to
-the verified ordinary owner when the twin lacks a recorded ordinary identity or has a current identity refusal. A
-duplicate hello naming the ordinary owner can verify that ownership while the owner's supervisor is down. Fresh
+and connection coordinates, including the configured install paths. An entry with no containers, image records or
+helpers can replace its claim. An unused twin yields to the verified ordinary owner when the twin lacks a recorded
+ordinary identity or has a current identity refusal. A duplicate hello naming the ordinary owner can verify that
+ownership while the owner's supervisor is down. A managed place check discards its result if the ordinary host actor
+does not match the saved connection settings. A matching actor can be unreachable when the host only runs Podman. Fresh
 preparation requires a current place claim and respects the ordinary host actor's duplicate, mismatch and unverified
 identity refusals. Runtime capabilities for existing containers remain separate from admission.
 

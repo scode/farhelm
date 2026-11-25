@@ -10,7 +10,7 @@
 use crate::access::{BaseRoute, RemoteCommand, base_route};
 use crate::aggregate::host_display_name;
 use crate::manager::{ConnectionManager, HostState};
-use crate::store::{HelmStore, HostId, HostRow, PlaceClaim, PodmanPlaceIdentity};
+use crate::store::{DialedAs, HelmStore, HostId, HostRow, PlaceClaim, PodmanPlaceIdentity};
 use crate::units::{MANAGER_ENVIRONMENT_BUSCTL_ARGS, ManagerEnvironment, ManagerValue};
 use anyhow::Context as _;
 use serde::Serialize;
@@ -608,6 +608,9 @@ impl PodmanPlaces {
         };
         let verified = match self.ordinary_state(&incumbent) {
             Some(HostState::Duplicate { twin, identity }) if twin == row.id => Some(identity),
+            // A duplicate pointing elsewhere can show that the incumbent is
+            // refused. The challenger still needs its own verified hello.
+            Some(HostState::Duplicate { .. }) => verified_supervisor,
             Some(HostState::IdentityMismatch { recorded, .. })
             | Some(HostState::IdentityUnverified { recorded })
                 if incumbent.host_identity.as_ref() == Some(&recorded) =>
@@ -809,12 +812,30 @@ impl PodmanPlaces {
                 return;
             };
             let Ok(route) = base_route(&row) else { return };
+            let dialed_as = DialedAs::of(&row);
             let result = probe(service.commands.as_ref(), &route).await;
             let _published = service.claim_publication.lock().await;
             if !refreshing.is_current(&service.cache.lock().unwrap()) {
                 return;
             }
+            let Ok(current) = current_row(&store, host).await else {
+                return;
+            };
+            // Setup may have changed the supervisor's install coordinates
+            // without changing the Podman route. That actor's result cannot
+            // settle a claim for a newly configured entry.
+            if row.entry_uuid != current.entry_uuid || dialed_as != DialedAs::of(&current) {
+                return;
+            }
+            let row = current;
             let ordinary_state = service.ordinary_state(&row);
+            // Setup can save the new paths before the manager replaces the
+            // old actor. A matching Unreachable actor is enough for a
+            // Podman-only host. An actor for different settings says nothing
+            // about the host that would receive this claim.
+            if ordinary_state.is_none() && service.manager.get().is_some() {
+                return;
+            }
             let ordinary_refusal = ordinary_state.as_ref().and_then(ordinary_identity_refusal);
             let verified_supervisor = match ordinary_state {
                 Some(HostState::Connected { identity, .. }) => identity,
@@ -849,6 +870,8 @@ impl PodmanPlaces {
                 }
             }
             if let Ok(current) = current_row(&store, host).await
+                && row.entry_uuid == current.entry_uuid
+                && dialed_as == DialedAs::of(&current)
                 && base_route(&current).ok().as_ref() == Some(&route)
             {
                 service.cache.lock().unwrap().probes.insert(
@@ -1459,6 +1482,82 @@ mod tests {
         assert!(places.runtime(&harness.store, former).await.is_ok());
     }
 
+    /// A refused incumbent can point to a third registry entry. That hello
+    /// cannot identify the challenger, but its own verified connection can
+    /// take ownership of the unused Podman place.
+    #[farhelm_testtrace::test]
+    async fn verified_supervisor_takes_unused_place_from_third_host_duplicate() {
+        use crate::rest_harness::{FleetBuilder, HostScript};
+
+        let builder = FleetBuilder::new()
+            .await
+            .place_commands(scripted_places(&[TEST_PLACE_IDENTITY]));
+        let install = |identity: &str| HostScript {
+            identity: Some(identity.into()),
+            ..HostScript::default()
+        };
+        let (builder, former) = builder
+            .ssh("former-place.test", install("other-install"))
+            .await;
+        let (builder, other) = builder
+            .ssh("other-place.test", install("other-install"))
+            .await;
+        let (builder, next) = builder
+            .ssh("next-place.test", install("next-install"))
+            .await;
+        for (host, name) in [(former, "previous-install"), (other, "other-install")] {
+            let row = current_row(builder.store(), host).await.unwrap();
+            builder
+                .store()
+                .record_first_contact(host, &DialedAs::of(&row), name)
+                .await
+                .unwrap();
+        }
+        let former_row = current_row(builder.store(), former).await.unwrap();
+        assert_eq!(
+            former_row.host_identity.as_deref(),
+            Some("previous-install")
+        );
+        let identity = parse_place_identity(TEST_PLACE_IDENTITY).unwrap();
+        assert_eq!(
+            builder
+                .store()
+                .claim_podman_place(&former_row, identity.clone(), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None })
+        );
+        let harness = builder.start().await;
+        harness.await_state(former, |state| {
+            matches!(state, HostState::Duplicate { twin, identity } if *twin == other && identity == "other-install")
+        }).await;
+        harness.await_state(next, |state| {
+            matches!(state, HostState::Connected { identity: Some(id), .. } if id == "next-install")
+        }).await;
+        harness
+            .state
+            .podman_places
+            .fresh(&harness.store, next)
+            .await
+            .unwrap();
+        let next_row = current_row(&harness.store, next).await.unwrap();
+        assert!(
+            harness
+                .store
+                .owns_podman_place(next_row, identity)
+                .await
+                .unwrap()
+        );
+        assert!(
+            harness
+                .store
+                .podman_place_identity(former)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
     /// A duplicate hello can identify the ordinary owner even when that
     /// owner's supervisor is down. A Podman-only check can then reunite the
     /// claims if the duplicate has no recorded resources.
@@ -1640,8 +1739,9 @@ mod tests {
     }
 
     /// Background refreshes must join per host and leave reads immediately
-    /// available while commands are held. A retarget discards both completed
-    /// and in-flight observations, even if the user restores the old text.
+    /// available while commands are held. An installation change prevents an
+    /// in-flight probe from settling an old actor's claim. A retarget discards
+    /// both completed and in-flight observations, even across a text restore.
     #[farhelm_testtrace::test]
     async fn refresh_is_background_deduplicated_and_route_bound() {
         struct HeldCommands {
@@ -1726,6 +1826,32 @@ mod tests {
         assert_eq!(Arc::strong_count(&service), references);
         assert!(service.view(&row).unwrap().refreshing);
         assert!(!service.view(&row).unwrap().usable);
+        assert_eq!(
+            store
+                .plant_remote_paths_for_tests(host, "/fixture/farhelm", "/fixture/state")
+                .await,
+            1,
+        );
+        let configured = current_row(&store, host).await.unwrap();
+        assert_eq!(base_route(&row).unwrap(), base_route(&configured).unwrap());
+        commands.release.notify_one();
+        wait_for_probe(&service, &configured).await;
+        assert!(!service.view(&configured).unwrap().usable);
+        assert!(store.podman_place_identity(host).await.unwrap().is_none());
+        let identity = parse_place_identity(TEST_PLACE_IDENTITY).unwrap();
+        assert_eq!(
+            store
+                .claim_podman_place(&row, identity.clone(), None, None)
+                .await
+                .unwrap(),
+            None,
+            "the transaction must recheck install coordinates too",
+        );
+        let row = configured;
+        service.refresh(store.clone(), host).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), commands.entered.notified())
+            .await
+            .expect("the newly configured entry must start a fresh check");
         commands.release.notify_one();
         wait_for_probe(&service, &row).await;
         assert!(service.view(&row).unwrap().usable);
@@ -1738,7 +1864,6 @@ mod tests {
             service.view(&row).unwrap().usable,
             "a no-op retains the claim"
         );
-        let identity = parse_place_identity(TEST_PLACE_IDENTITY).unwrap();
         assert!(
             store
                 .owns_podman_place(row.clone(), identity.clone())
@@ -1798,6 +1923,60 @@ mod tests {
             .expect("the current endpoint passes its check");
         assert!(service.view(&changed).unwrap().usable);
         commands.release.notify_one();
+    }
+
+    /// Setup saves install coordinates before replacing the host actor. A
+    /// probe in that interval must wait for a matching actor to settle a
+    /// claim. An unreachable supervisor on a reconciled place remains valid.
+    #[farhelm_testtrace::test]
+    async fn refresh_waits_for_the_actor_matching_the_saved_install() {
+        use crate::rest_harness::{FleetBuilder, HostScript};
+
+        let builder = FleetBuilder::new()
+            .await
+            .place_commands(scripted_places(&[TEST_PLACE_IDENTITY, TEST_PLACE_IDENTITY]));
+        let offline = |state: &HostState| matches!(state, HostState::Unreachable { .. });
+        let (builder, host) = builder
+            .ssh(
+                "place.example",
+                HostScript {
+                    reachable: false,
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_state(host, offline).await;
+        let places = &harness.state.podman_places;
+        assert_eq!(
+            harness
+                .store
+                .plant_remote_paths_for_tests(host, "/fixture/farhelm", "/fixture/state")
+                .await,
+            1,
+        );
+        let row = current_row(&harness.store, host).await.unwrap();
+        assert!(harness.manager.state_for_registry_row(&row).is_none());
+        assert!(places.fresh(&harness.store, host).await.is_err());
+        assert!(
+            harness
+                .store
+                .podman_place_identity(host)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(!places.view(&row).unwrap().usable);
+
+        harness.manager.sync_registry().await.unwrap();
+        harness.await_state(host, offline).await;
+        assert!(
+            harness
+                .manager
+                .state_for_registry_row(&row)
+                .is_some_and(|state| offline(&state))
+        );
+        assert!(places.fresh(&harness.store, host).await.is_ok());
     }
 
     /// Run the production guard and capture layer with shell functions that

@@ -46772,3 +46772,54 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   its marker. Feeding a stage directly would duplicate the diagnostic-only coverage. Change
   `wlkmnxztmzqzxtsoykzklqxvyswzsynl`, bookmark `plan/triage-podman-nov24/08-remaining-test-gaps`,
   [PR #4909](https://github.com/scode/farhelm/pull/4909/changes).
+
+## trailing-podman-settle-claim-refuses-third-host-duplicate-transfer.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC.md, "Hosts" (about line 350-353): "When Farhelm has verified which host owns the
+  ordinary identity, that entry can take an unused container host claim from a second entry whose ordinary identity is
+  absent or refused." SPEC_impl.md "Podman places, creation and images": "An unused twin yields to the verified ordinary
+  owner when the twin lacks a recorded ordinary identity or has a current identity refusal." `Duplicate` is one of the
+  refusals (`ordinary_identity_refusal`, `podman_probe.rs`), and `record_first_contact` (`store.rs:8820-8821`) puts an
+  entry that now reaches a third host's installation into `Duplicate`. `settle_claim` handles `Duplicate` only when
+  `twin == row.id` and otherwise falls to `None`, so a connected, verified owner cannot take the unused claim. The
+  code's own comment ("Any other refusal needs the challenger's own live hello…") calls for using `verified_supervisor`
+  there. Fix: add a `Some(HostState::Duplicate { .. }) => verified_supervisor` arm, plus a test. Estimated 30-50 lines.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code —
+  clearly settled; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
+  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
+  the feedback file and its index entry, or narrow it to any part the Assessment says remains.
+- Execution: Fixed as decided. A current duplicate refusal against a third installation lets the existing unused-claim
+  checks consider the challenger's own verified connection. The store still checks both entries and refuses to take an
+  in-use claim. Change `qvqsmtkoxzmzxyltksokpwnywvplpszm`, bookmark `plan/triage-podman-nov24/09-podman-claim-refresh`,
+  [PR #4917](https://github.com/scode/farhelm/pull/4917/changes).
+
+## trailing-podman-refresh-settles-claims-with-stale-pre-probe-row.md
+
+- Outcome: `fix code`.
+- Assessment: If a host's Farhelm setup or update changes where Farhelm is installed on it while a container host check
+  is running, the check can use the host's old details. A host Farhelm is refusing as a duplicate or changed
+  installation can then take the machine's container claim and block another valid entry, or a newly connected owner can
+  fail to take an unused claim. Verified: Confirmed that `refresh` reads `row` before `probe()` and uses it for
+  `ordinary_state` and `settle_claim` after publication (`podman_probe.rs`, "refresh"). The trigger is a narrow overlap
+  of setup/update with a probe. The wrong claim is stored durably. Whether the valid owner's next check takes it back
+  depends on the refusal kind (see `settle_claim`), so I cannot say it heals reliably.
+- Decision: q-podid, "How far the container-host identity check reaches": the maintainer picked "Every command and
+  cached result". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If it turns very
+  complicated, the executor must abort and turn this into a to-do item for a follow-up. Explaining what is complicated."
+- Completion criteria: Apply the container-host identity check to every command sent to a container host, including
+  against a hostile endpoint (the nonce must not be echoable), and drop capabilities and claims learned from an
+  unverified machine. Recommendation for reference: fix code — re-read the row under claim publication and check the
+  entry and route before settling. Size S. Discard is reasonable too, given the narrow trigger. Complexity gate
+  (maintainer): if the fix turns very complicated during execution, the executor stops and turns it into a follow-up
+  TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100 lines of diff
+  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
+  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed the stale-row race. A refresh settles a claim only against current registry settings and their
+  matching host actor. It checks the settings again in the write transaction and before caching. The broader
+  connection-wide proof and runtime capability work was deferred through the complexity gate to the existing Verify
+  container hosts before trusting results or sending private input TODO. Change `qvqsmtkoxzmzxyltksokpwnywvplpszm`,
+  bookmark `plan/triage-podman-nov24/09-podman-claim-refresh`,
+  [PR #4917](https://github.com/scode/farhelm/pull/4917/changes).
