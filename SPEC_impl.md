@@ -1428,12 +1428,14 @@ Owner: the notice center. It is a code owner, not a new surface.
 It is the single place that decides when to post to and withdraw from approval cards and banners such as the
 version-mismatch and outage cards, and its own generic notices. The surfaces look as they do today. A new notice is
 added only where SPEC.md requires one, and each is drawn in an existing style. Notices can carry data as well as fixed
-text. An interrupted upload carries the host-supplied names as `HostText`; the banner draws them with the app's words in
-a `HostSentence` and stays posted across resets until dismissed. The banner stack scrolls when it reaches half the
-window's content height, leaving the workspace and every Dismiss reachable. New banners scroll into view without moving
-keyboard focus. The session rows' bells with their lists and the rail's notices panel are not its surfaces: they draw
-the notification records the helm keeps and pushes, straight from the store, with no notice-center step, and the three
-status sounds (chimes) are decided by the one sound owner, not here.
+text. An interrupted upload carries the host-supplied names as `HostText`. A batch uses the first nonempty session title
+captured when its files were offered. The banner draws the names with the app's words in a `HostSentence` and stays
+posted across resets until dismissed. Each interruption has its own banner identity so identical wording does not hide a
+new interruption or cause Dismiss to withdraw both. The banner stack scrolls when it reaches half the window's content
+height, leaving the workspace and every Dismiss reachable. New banners scroll into view without moving keyboard focus.
+The session rows' bells with their lists and the rail's notices panel are not its surfaces: they draw the notification
+records the helm keeps and pushes, straight from the store, with no notice-center step, and the three status sounds
+(chimes) are decided by the one sound owner, not here.
 
 Enforced by the review gate.
 

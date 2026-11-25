@@ -1410,8 +1410,8 @@ fn deleting_the_only_filtered_session_shows_interrupted_uploads_without_a_termin
     );
 }
 
-/// Undismissed uploads can outnumber the window's available lines. The pane keeps its working area, a new
-/// interruption is visible without moving focus, and scrolling can still reach the earlier Dismiss buttons.
+/// Undismissed uploads can outnumber the window's available lines. A second interruption of the same file must
+/// scroll into view on its own without moving focus. The pane keeps its working area and older notices stay reachable.
 #[gpui::test]
 fn a_full_notice_stack_reveals_the_latest_upload_without_hiding_the_pane(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -1421,16 +1421,22 @@ fn a_full_notice_stack_reveals_the_latest_upload_without_hiding_the_pane(cx: &mu
     let uploads: Vec<_> = (1..=48)
         .map(|index| {
             Rc::new(notices::InterruptedUploads::new(
-                "a".into(),
                 Some(crate::host_text::HostText::from_host("Build artifacts")),
                 vec![crate::host_text::HostText::from_host(format!(
-                    "report-{index}.zip"
+                    "report-{}.zip",
+                    index.min(47)
                 ))],
                 true,
             ))
         })
         .collect();
     let (latest, earlier) = uploads.split_last().unwrap();
+    let previous = earlier.last().unwrap();
+    assert_eq!(
+        latest.sentence().accessible_name(),
+        previous.sentence().accessible_name(),
+        "the two occurrences have identical text"
+    );
     fleet.cx.update(|_, cx| {
         for upload in earlier {
             notices::post(Notice::InterruptedUpload(upload.clone()), cx);
@@ -1452,17 +1458,20 @@ fn a_full_notice_stack_reveals_the_latest_upload_without_hiding_the_pane(cx: &mu
         pane.top() >= viewport.bottom(),
         "the pane stays below the notices"
     );
-    let dismiss_in_view = |cx: &mut VisualTestContext, upload: &notices::InterruptedUploads| {
+    let visible_dismiss = |cx: &mut VisualTestContext, upload: &notices::InterruptedUploads| {
         let id = format!("notice-dismiss-interrupted-upload-{}", upload.key());
-        frame(cx).iter().any(|node| {
-            node.element_id.as_deref() == Some(id.as_str())
-                && node.bounds.top() >= viewport.top()
-                && node.bounds.bottom() <= viewport.bottom()
-        })
+        frame(cx)
+            .into_iter()
+            .find(|node| {
+                node.element_id.as_deref() == Some(id.as_str())
+                    && node.bounds.top() >= viewport.top()
+                    && node.bounds.bottom() <= viewport.bottom()
+            })
+            .map(|node| node.bounds)
     };
-    assert!(dismiss_in_view(fleet.cx, earlier.last().unwrap()));
+    assert!(visible_dismiss(fleet.cx, previous).is_some());
     assert!(
-        !dismiss_in_view(fleet.cx, &earlier[0]),
+        visible_dismiss(fleet.cx, &earlier[0]).is_none(),
         "the existing banners overflow"
     );
     let pointer = viewport.center();
@@ -1476,25 +1485,30 @@ fn a_full_notice_stack_reveals_the_latest_upload_without_hiding_the_pane(cx: &mu
     });
     settle(fleet.cx);
     assert!(
-        dismiss_in_view(fleet.cx, &earlier[0]),
+        visible_dismiss(fleet.cx, &earlier[0]).is_some(),
         "the oldest banner is still reachable"
     );
     assert!(
-        !dismiss_in_view(fleet.cx, earlier.last().unwrap()),
+        visible_dismiss(fleet.cx, previous).is_none(),
         "the user is looking at old notices"
     );
     fleet
         .cx
         .update(|_, cx| notices::post(Notice::InterruptedUpload(latest.clone()), cx));
     settle(fleet.cx);
-    assert!(
-        dismiss_in_view(fleet.cx, latest),
-        "the newly posted interruption is visible"
-    );
+    let dismiss =
+        visible_dismiss(fleet.cx, latest).expect("the newly posted interruption is visible");
     assert!(
         terminal_focused(fleet.cx),
         "revealing the notice leaves focus on the terminal"
     );
+    fleet
+        .cx
+        .simulate_click(dismiss.center(), gpui::Modifiers::none());
+    settle(fleet.cx);
+    let posted = fleet.cx.update(|_, cx| notices::posted(cx));
+    assert!(!posted.contains(&Notice::InterruptedUpload(latest.clone())));
+    assert!(posted.contains(&Notice::InterruptedUpload(previous.clone())));
 }
 
 /// The hold and the scrim belong to the open session's own Delete: SPEC.md lets Deletes of other sessions run while

@@ -13,8 +13,8 @@
 //! A notice can carry the host values it names. The upload banner keeps the original file names and session title
 //! as host text so they remain safe to draw after the session row and terminal are gone.
 
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use gpui::{App, AppContext as _, Entity, Global, SharedString};
 
@@ -88,37 +88,32 @@ impl Notice {
     }
 }
 
-/// One group of interrupted files with the same outcome from one session. The session key distinguishes two
-/// sessions with the same title and file names. The title is the one the first file had when it was offered.
+/// One interruption of files with the same outcome from one session. Each occurrence has its own identity so a
+/// second interruption with the same title and file names can be revealed and dismissed independently.
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct InterruptedUploads {
-    session: String,
+    occurrence: u64,
     title: Option<HostText>,
     files: Vec<HostText>,
     sent: bool,
 }
 
 impl InterruptedUploads {
-    /// Build a notice for a nonempty group. A sent request's outcome is unknown if the connection never answers.
-    pub(crate) fn new(
-        session: String,
-        title: Option<HostText>,
-        files: Vec<HostText>,
-        sent: bool,
-    ) -> Self {
+    /// Build a notice for a nonempty group. An empty title leaves out the destination clause. A sent request's
+    /// outcome is unknown if the connection never answers.
+    pub(crate) fn new(title: Option<HostText>, files: Vec<HostText>, sent: bool) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
         Self {
-            session,
-            title,
+            occurrence: NEXT.fetch_add(1, Ordering::Relaxed),
+            title: title.filter(|title| !title.raw().is_empty()),
             files,
             sent,
         }
     }
 
-    /// Stable across redraws and bounded in length even if the file names are long.
+    /// The banner and its Dismiss button keep this identity across redraws.
     pub(crate) fn key(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.hash(&mut hasher);
-        hasher.finish()
+        self.occurrence
     }
 
     /// Name a few files, the original session title, and what is known about their publication.

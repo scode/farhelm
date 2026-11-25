@@ -1163,6 +1163,50 @@ fn a_failure_and_a_cut_off_upload_outlive_their_terminal(cx: &mut TestAppContext
     );
 }
 
+/// Files offered before a title arrives can share a batch with later files. On departure, use the first nonempty
+/// captured title in each outcome group, and omit the destination clause when none was captured.
+#[gpui::test]
+fn interrupted_upload_batches_use_the_first_nonempty_title(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        notices::install(cx);
+        local_state::install(cx);
+        assert!(local_state::select("departed", cx));
+        let upload = |name, title: Option<&str>, sent| Interrupted {
+            name: HostText::from_host(name),
+            title: title.map(HostText::from_host),
+            sent,
+        };
+        cx.set_global(Carried(HashMap::from([(
+            "departed".into(),
+            CarriedLines {
+                interrupted: vec![
+                    upload("one.txt", None, true),
+                    upload("two.txt", Some(""), true),
+                    upload("three.txt", Some("Build artifacts"), true),
+                    upload("four.txt", Some("Release artifacts"), true),
+                    upload("five.txt", Some(""), false),
+                ],
+                ..CarriedLines::default()
+            },
+        )])));
+        post_departed_uploads(cx);
+        assert!(notices::posted(cx).is_empty(), "the session is still selected");
+
+        assert!(local_state::select("next", cx));
+        post_departed_uploads(cx);
+        let notices = notices::posted(cx);
+        assert_eq!(notices.len(), 2);
+        assert_eq!(
+            notices[0].text().as_ref(),
+            "Attaching one.txt, two.txt, three.txt and 1 more file to Build artifacts was interrupted — whether they were attached cannot be told."
+        );
+        assert_eq!(
+            notices[1].text().as_ref(),
+            "Attaching five.txt was interrupted before it was sent, so nothing was uploaded."
+        );
+    });
+}
+
 /// A reset of the window's connection retires its UI session and every terminal with it (SPEC_impl.md, "One failure
 /// path: the reset"), and an upload running then must neither go on unseen nor vanish (SPEC.md, "Attachments").
 /// Specified: breaking the channel while an upload runs retires the old UI session and abandons the request; once the

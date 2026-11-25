@@ -42406,3 +42406,43 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. Both Restart to update and automatic reopen clear the old app's release-test announcement override
   when launching the next instance. Change `uvttvluwpxmmpwsnoorwmtmsxtltkout`, bookmark
   `plan/triage-tooling-nov24/06-cheap-fixes-5`, [PR #4828](https://github.com/scode/farhelm/pull/4828/changes).
+
+## trailing-duplicate-interrupted-upload-notices-silently-dropped.md
+
+- Outcome: `fix code`.
+- Assessment: An upload notice for session S and file `pasted-1.png` is still showing, undismissed. A second interrupted
+  upload with the same session, file name and outcome then posts no new notice and does not scroll the existing one into
+  view. Every new terminal names its first pasted image `pasted-1.png`, so two different screenshots can collide.
+  Verified: Confirmed. `crates/gui/farhelm-gui/src/notices.rs:91-99` derives equality over session, title, files and
+  sent, and `post` (`:177-186`) ignores a notice equal to one already posted. `attachments.rs:562,611-614` restarts the
+  pasted counter for each terminal. `main_view.rs:204-206` reveals only a new last notice. The identical notice that is
+  already showing does name the file and session, so the second failure is not invisible, only merged into it and not
+  revealed.
+- Decision: q-upload, "Interrupted uploads must never disappear silently": the maintainer picked "Fix all three".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: No interrupted upload disappears silently. Recommendation for reference: fix code. Give each
+  interrupted-upload notice its own occurrence id, which also makes the element ids unique. Size S. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed in jj change `yqnkrwwuqvopkxzrmpxoywqwqtskkqxn`, bookmark `plan/triage-sessions-ui-nov24/01-notices`
+  ([#4811](https://github.com/scode/farhelm/pull/4811/changes)).
+
+## trailing-interrupted-upload-empty-title-and-batch-title-drop.md
+
+- Outcome: `fix code`.
+- Assessment: The notice for an upload interrupted in a session with an empty title reads "Attaching x to was
+  interrupted", with a dangling "to". Separately, if the first upload of a batch started before the session's row
+  loaded, the notice leaves out a title a later upload in the batch had captured. Verified: Confirmed.
+  `notices.rs:142-144` adds " to <title>" for any `Some`, and `attachments.rs:425-426` takes the first upload's title.
+  The GUI's Rename accepts an empty title (`session_list/rename.rs:19,131-133`), so an empty title comes from ordinary
+  input, not a rare trigger. The batch-title half matches "Rare, self-correcting glitches and imprecise diagnostics" (a
+  narrow timing window; the only consequence is detail missing from a message). The empty- title half does not, so the
+  item does not fully match.
+- Decision: q-upload, "Interrupted uploads must never disappear silently": the maintainer picked "Fix all three".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: No interrupted upload disappears silently. Recommendation for reference: fix code. Filter empty
+  titles when building the notice. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed in jj change `yqnkrwwuqvopkxzrmpxoywqwqtskkqxn`, bookmark `plan/triage-sessions-ui-nov24/01-notices`
+  ([#4811](https://github.com/scode/farhelm/pull/4811/changes)).
