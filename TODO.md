@@ -86,6 +86,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Start several selected sessions at once.** When multiple sessions are selected we need to be able to start sessions
   if all the marked ones are stopped.
 
+- **Right-click a session for its context menu.** Allow right clicking on sessions to bring up their context menu
+  (instead of using the ... menu on the right). When right clicking and multiple sessions are selected, it should bring
+  up the menu that applies to all selected sessions.
+
 ## Plan follow-ups
 
 - **Bind Tensorlake launch consent to the billed size shown.** A recipe edit under the same name can make a confirmed
