@@ -1,7 +1,7 @@
 //! The Agent tab's disclosure. Folding only removes editors from view. Values remain in the draft and in the
 //! folded summary, and a required or refused value keeps its editor and explanation reachable.
 
-use farhelm_proto::LaunchHarness;
+use farhelm_proto::{LaunchHarness, NamedConversationCapture};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, Div, FontWeight, InteractiveElement as _, IntoElement as _,
@@ -85,7 +85,13 @@ impl Launcher {
                     .into_any_element(),
                 );
             }
-            if !harness.captures_named_conversation()
+            let warn_about_capture = match harness.named_conversation_capture() {
+                NamedConversationCapture::Always | NamedConversationCapture::ExistingReporter => {
+                    false
+                }
+                NamedConversationCapture::Never => true,
+            };
+            if warn_about_capture
                 || (harness.uses_custom_catalog() && !self.draft.agent.custom_reporting)
             {
                 fields.push(

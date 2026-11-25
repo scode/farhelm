@@ -870,7 +870,7 @@ pub struct OfferBasis {
 /// ([`SessionStore::abort_relaunch`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PriorRun {
-    /// The identity cleared by a named restart that cannot report afterwards.
+    /// The prior identity withdrawn when a named restart might receive no replacement report.
     /// Restored only when the existing abort boundary proves no external start.
     pub cleared_capture: Option<(Option<String>, Option<String>, i64)>,
     pub outcome: LastOutcome,
@@ -4745,9 +4745,9 @@ impl SessionStore {
 
     /// Open a generation and optionally withdraw a capture it will no longer describe.
     ///
-    /// Named Goose starts cannot report a replacement. Clear inside this same
-    /// transaction so reload cannot advertise the prior conversation, and keep
-    /// its old columns only for the existing definitive-abort restoration.
+    /// A named restart may never report its destination, for example when the target Goose conversation has no
+    /// saved Farhelm reporter. Clearing in this transaction keeps the prior conversation out of reload.
+    /// Its old columns are carried for definitive-abort restoration.
     ///
     /// `kind`, when given, is the kind of terminal the new launch starts in,
     /// written in the same transaction as the generation (`None` keeps the
@@ -4901,8 +4901,7 @@ impl SessionStore {
     /// by the time this loses that race, the newer generation's own outcome
     /// is the truth and this one's prior run is ancient history.
     ///
-    /// Ordinary relaunches keep identity. A named non-reporting relaunch
-    /// restores the capture columns it withdrew, alongside the prior outcome.
+    /// When a named relaunch withdrew capture, an abort restores its capture columns alongside the prior outcome.
     /// The Codex reporting-process pin, OMP reporter asset and launch program stay cleared: they
     /// authorize one launch, not the conversation, so a later launch must
     /// establish its own pair. The outcome, terminal address, kind and scope
@@ -16279,7 +16278,7 @@ mod tests {
         assert_eq!(relaunching.agent_kind(), stopped.agent_kind());
     }
 
-    /// A named non-reporting restart cannot leave plain Restart aimed at the
+    /// A named restart without a replacement report cannot leave plain Restart aimed at the
     /// previous conversation. Withdrawal belongs to the generation transaction,
     /// while a proven pre-spawn abort must recover the exact old capture.
     #[farhelm_testtrace::test]

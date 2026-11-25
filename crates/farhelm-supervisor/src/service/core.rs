@@ -99,8 +99,8 @@ use crate::store::{
 use crate::terminal_process::TerminalProbe;
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, LaunchKind, RestartOffer, SessionInfo,
-    SessionLaunch, SessionStatus, TabInfo,
+    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, LaunchKind, NamedConversationCapture,
+    RestartOffer, SessionInfo, SessionLaunch, SessionStatus, TabInfo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -3330,7 +3330,7 @@ fn republished_terminal(definitive: bool, prior: Option<HostTerminal>) -> Option
 /// writes are rejected rather than silently landing on this one.
 ///
 /// The supplied capture state carries over, mirroring the generation claim.
-/// Ordinary restarts supply the prior capture; named non-reporting restarts
+/// Ordinary restarts supply the prior capture. Restarts that withdraw it
 /// supply the transaction's cleared mirror, or its restored capture after a
 /// definitive abort. The first-input diagnostic anchor resets on every launch.
 ///
@@ -12673,13 +12673,18 @@ impl Supervisor {
         } else {
             false
         };
-        // Keep the old capture only while a report can replace it; otherwise a
-        // later plain Restart would reopen the old conversation indefinitely.
+        // Keep the old capture only when the launch has an ordinary report path. A destination that might carry
+        // its own reporter still needs a clean capture slot, since it could be an external conversation without one.
         let clear_capture = named_start.is_some()
             && executable_launch
                 .agent_selection()
                 .is_some_and(|selection| {
-                    !selection.harness.captures_named_conversation()
+                    let needs_clear = match selection.harness.named_conversation_capture() {
+                        NamedConversationCapture::Always => false,
+                        NamedConversationCapture::ExistingReporter
+                        | NamedConversationCapture::Never => true,
+                    };
+                    needs_clear
                         || executable_launch.custom_reporting() == Some(false)
                         || reporter_failed
                         || self
@@ -12771,8 +12776,8 @@ impl Supervisor {
             seed,
         } = plan;
         let id = entry.info.id.clone();
-        // Ordinary resumes keep capture; a named non-reporting start clears
-        // it as part of opening this generation, before any new process starts.
+        // Withdraw the capture, when needed, as part of opening the generation. Reload must not offer the old
+        // conversation after a crash in the relaunch window.
         let claim = self
             .store
             .begin_relaunch_named(
@@ -12822,7 +12827,7 @@ impl Supervisor {
                 .into());
             }
         };
-        // A named non-reporting restart withdrew the durable capture. Give
+        // When a named restart withdraws the durable capture, give
         // publication its own cleared mirror; late observers of the prior run
         // must never be able to put the old conversation back into this cell.
         let cleared_entry = clear_capture.then(|| SessionEntry {

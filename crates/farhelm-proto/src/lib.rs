@@ -172,9 +172,9 @@ pub mod time;
 pub mod version;
 pub use launch::{
     ContainerConfig, ContainerEngine, LaunchEffort, LaunchEffortValue, LaunchHarness,
-    LaunchPermission, LaunchSelection, NamedConversationStart, RETIRED_CONTAINER_REASON,
-    check_permission_flags, check_wrapper_prefix, join_permission_flags, split_permission_flags,
-    split_wrapper_prefix,
+    LaunchPermission, LaunchSelection, NamedConversationCapture, NamedConversationStart,
+    RETIRED_CONTAINER_REASON, check_permission_flags, check_wrapper_prefix, join_permission_flags,
+    split_permission_flags, split_wrapper_prefix,
 };
 pub use version::{UPGRADE_FLOOR, below_upgrade_floor, is_development_build};
 /// Bash placeholder admission and original-source rendering.

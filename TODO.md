@@ -86,16 +86,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   an affected repository on selector or directory-sync failures, and add a test proving later repositories are still
   cleaned while selected caches stay intact. Plan: `plans/queue/tensorlake-setup-and-repo-cache-fixes.md`.
 
-- **Allow Goose named launches to capture and offer plain Restart.** When reopening a Goose conversation that Farhelm
-  originally created, Goose runs its persisted `farhelm-reporter` MCP server, so Farhelm captures the destination
-  conversation and offers plain Restart. `SPEC.md` and the UI copy currently state unconditionally that Goose never
-  captures named conversations and Restart will be unavailable (lumping Goose with Cursor and OpenCode), which makes the
-  `named_conversation` drift test fail
-  (`python3 -B scripts/run-harness-drift.py --no-upgrade --category named_conversation --harness goose`). Update
-  `SPEC.md`, the launcher/UI note, and the drift test so Restart is allowed and expected to work when a named Goose
-  conversation carries Farhelm's reporter, while noting that Goose conversations created outside Farhelm are not
-  captured. Check both named Create and named Restart. Plan: `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
-
 - **Accept leading-hyphen custom `--effort` values as a separate argument.** `farhelm agent create --effort -fast` (with
   a space) is rejected by clap as an unknown flag even though custom agents allow `[a-z0-9_-]` effort values and
   `--model` already sets `allow_hyphen_values = true` (`crates/farhelm/src/main.rs`). Add `allow_hyphen_values = true`

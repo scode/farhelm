@@ -119,9 +119,9 @@ This works in New, Clone and Replace with, for an agent in an existing directory
 instead; use its absolute path or a path relative to the session directory, without spaces or `~`.
 
 The choice applies to this start only. Templates and recent setups do not save it, and a later Clone starts fresh.
-Farhelm does not check whether the conversation exists; a mistyped id is handled by the agent. Goose, Cursor and
-OpenCode can open a conversation this way, but Farhelm cannot continue it with a later Restart. For restarting a session
-whose id Farhelm never learned, see [Restart with](/docs/using/stop-restart-resume/#the-headers-actions).
+The agent handles a mistyped id. If Farhelm started the Goose conversation, **Restart** becomes available when Goose
+reports it again. To reopen a Cursor or OpenCode conversation later, enter its id again. For restarting a session whose
+id Farhelm never learned, see [Restart with](/docs/using/stop-restart-resume/#the-headers-actions).
 
 ## Supply the first message
 

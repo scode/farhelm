@@ -67,6 +67,17 @@ crate::enum_with_all! {
     }
 }
 
+/// How a named start on this harness can produce a replacement capture. The selector is never itself a report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NamedConversationCapture {
+    /// Farhelm has an ordinary report path on a named start. An accepted report still determines the capture.
+    Always,
+    /// The named conversation can report only if it carries a reporter from an earlier Farhelm launch.
+    ExistingReporter,
+    /// The named start offers no capture, even when the harness supports a one-time selector.
+    Never,
+}
+
 #[warn(clippy::wildcard_enum_match_arm)]
 impl LaunchHarness {
     /// Picker lists that only show release-supplied choices omit the custom catalog marker.
@@ -494,7 +505,7 @@ impl LaunchHarness {
     ///
     /// This says nothing about later Restart: Cursor and OpenCode accept a
     /// one-time selector but still have no conversation reporting or stored
-    /// resume command. (Muse has both; see [`Self::captures_named_conversation`].)
+    /// resume command. (Muse has both; see [`Self::named_conversation_capture`].)
     /// Keep the match exhaustive when adding a harness.
     pub const fn offers_named_conversation(self) -> bool {
         match self {
@@ -534,12 +545,11 @@ impl LaunchHarness {
         }
     }
 
-    /// Whether a named start can replace the session's captured conversation.
+    /// Which reporting path a named start can use to replace the session's captured conversation.
     ///
-    /// Goose's reporter is attached only to fresh starts. Keeping its old
-    /// capture across a named restart would leave Restart aimed at a different
-    /// conversation indefinitely, so that restart must clear it transactionally.
-    pub const fn captures_named_conversation(self) -> bool {
+    /// Goose can reuse a reporter saved with the selected conversation. The supervisor still clears its previous
+    /// capture when changing conversations because the selected one may have been created outside Farhelm.
+    pub const fn named_conversation_capture(self) -> NamedConversationCapture {
         match self {
             LaunchHarness::Claude
             | LaunchHarness::Codex
@@ -548,12 +558,12 @@ impl LaunchHarness {
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::Muse
-            | LaunchHarness::Custom => true,
-            LaunchHarness::Goose
-            | LaunchHarness::Cursor
+            | LaunchHarness::Custom => NamedConversationCapture::Always,
+            LaunchHarness::Goose => NamedConversationCapture::ExistingReporter,
+            LaunchHarness::Cursor
             | LaunchHarness::OpenCode
             | LaunchHarness::Bash
-            | LaunchHarness::Zsh => false,
+            | LaunchHarness::Zsh => NamedConversationCapture::Never,
         }
     }
 

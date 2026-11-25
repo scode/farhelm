@@ -1285,7 +1285,10 @@ mod tests {
                 };
                 let index = named.argv.iter().position(|word| word == selector).unwrap();
                 assert_eq!(named.argv[index + 1], "named-target");
-                assert!(!harness.captures_named_conversation());
+                assert_eq!(
+                    harness.named_conversation_capture(),
+                    farhelm_proto::NamedConversationCapture::Never
+                );
             }
         }
     }
