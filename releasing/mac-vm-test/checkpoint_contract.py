@@ -37,14 +37,15 @@ SIDES = {
                'old_check': 'remote-old-session'},
 }
 
-# Checkpoints known to need longer than the ordinary default turn, as a floor
-# under the operator's `--timeout` (capped at the tester's 3600 s maximum).
+# Checkpoints that need a floor under the operator's `--timeout`.
 # The installer pair's `old-sessions` waits two genuine Codex conversations on
 # the previous release through capture; each old-session check runs two agent
-# turns around an agent Restart.
+# turns around an agent Restart. Announcements needs time for both launches
+# around the delivery window, including the normal relaunch when it expires.
 TURN_FLOORS = {('old-sessions', 'p0-installer-upgrade'): 1800,
                ('local-old-session', 'p0-installer-upgrade'): 1800,
-               ('remote-old-session', 'p0-installer-upgrade'): 1800}
+               ('remote-old-session', 'p0-installer-upgrade'): 1800,
+               ('p2-announcements', 'p0-installer-upgrade'): 240}
 
 # The standing fixture has a recognizable title so a compiled-in or live
 # production announcement cannot satisfy the native check.
@@ -63,15 +64,20 @@ That launch alone uses FARHELM_ANNOUNCEMENTS_PATH={ANNOUNCEMENTS_TEST_PATH}.
 The staged launch leaves the pending batch for the bell even if it arrives
 before the first window. If a launch operation returns not-ready after Quit,
 observe the previous app's exit and repeat the operation.
-Bind the new candidate and require an unread notice in the notification bell
-above Hosts. Open the bell and capture the New announcement row with its
-Open Announcements action. Use that action to open Announcements. Require
+Bind the new candidate and open the bell panel above Hosts. Reinspect the
+panel for up to 60 seconds for an unresolved New announcement row with its
+Open Announcements action. Other unread notices do not establish delivery.
+If no matching row arrives, note what the panel showed and the elapsed wait.
+Skip the dialog and history observations and go to the normal relaunch below.
+If the row arrives, capture it and use its action to open Announcements. Require
 the standing feed's title "{ANNOUNCEMENTS_TEST_TITLE}" and capture it.
 Dismiss the dialog with Got it. Reopen the bell and verify the notice is
 resolved with no Open Announcements action. Open ? > Announcements and capture
 the same title in history. Only the standing feed's exact title counts.
-Once finished with the staged launch, quit through native UI and call
-relaunch_announcements. It verifies that the new process has no override.
+In either case, finish the staged launch by quitting through native UI and
+calling relaunch_announcements. It verifies that the new process has no
+override. If no notice arrived, report could-not-run with what the bell showed
+and the elapsed wait after the relaunch.
 Pass needs the three native captures and the fixed command receipts.
 Any P2 failure leaves the recorded P0, P1 and feedback results intact.'''
 

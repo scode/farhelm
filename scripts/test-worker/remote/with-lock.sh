@@ -132,22 +132,32 @@ tree_held=1
 printf '%s\n' "$id" >"$base/lock.id" \
   && printf '%s\n' "${base##*/} $cmd $id (since $(date -u +%Y-%m-%dT%H:%M:%SZ))" >"$base/lock.holder" || exit 1
 admit_worker || exit "$?"
+[ ! -e "$stage/stop" ] || exit 143
 sweep_stale_stages
+[ ! -e "$stage/stop" ] || exit 143
 
 # Install the staged tracked files without deleting ignored state and build output. A same-size edit within the
 # mtime resolution must still reach the recorder's snapshot. Unchanged files keep their original mtimes.
-mkdir -p "$base/src" && run_without_locks rsync -a --checksum "$stage/src/" "$base/src/" \
-  && run_without_locks python3 "$tools/prune.py" "$base" <"$stage/files" \
+mkdir -p "$base/src" && run_without_locks rsync -a --checksum "$stage/src/" "$base/src/" || exit 1
+[ ! -e "$stage/stop" ] || exit 143
+run_without_locks python3 "$tools/prune.py" "$base" <"$stage/files" \
   && run_without_locks bash "$tools/snapshot.sh" "$base" "$source_commit" || exit 1
 rm -rf -- "$stage/src"
+[ ! -e "$stage/stop" ] || exit 143
 
 out=$base/out/$id
 mkdir -p "$base/out" && mkdir "$out" && printf '%s\n' "$source_commit" >"$out/source" || exit 1
-prune_evidence
 # The workload watcher keeps its group's leader waitable through Stop, even if a shell exits early.
 # The checkout and worker leases stay here, outside both the watcher and the group it can signal.
 code=0
 run_without_locks python3 "$tools/run-workload.py" "$stage" bash "$tools/run-$cmd.sh" "$base" "$out" "$@" || code=$?
+if [ -e "$stage/running" ]; then
+  prune_evidence
+elif [ "$code" -eq 143 ]; then
+  # Stop reached the watcher before spawn. Drop this invocation's empty reservation.
+  rm -- "$out/source" && rmdir -- "$out" || exit 1
+  exit "$code"
+fi
 # Publish completion atomically. Collect treats the marker as a promise that all evidence writes ended.
 printf '%s\n' "$code" >"$out/.finished" && mv "$out/.finished" "$out/finished" || exit 1
 exit "$code"

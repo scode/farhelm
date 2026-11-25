@@ -501,13 +501,38 @@ class WorkerTest(unittest.TestCase):
             self.assertTrue(refreshed.is_dir())
             self.assertGreater(refreshed.stat().st_mtime, now - 5)
             self.assertFalse(abandoned.exists())
-            self.assertEqual({path.name for path in (tree / "out").iterdir()}, {*old_ids[1:], newest})
+            self.assertEqual({path.name for path in (tree / "out").iterdir()}, {*old_ids, newest})
             release.touch()
             self.join(job, 0)
+            self.assertEqual({path.name for path in (tree / "out").iterdir()}, {*old_ids[1:], newest})
         out = self.root / "recent.out"
         gone = self.run_to_exit(checkout, "collect", "--out", out, old_ids[0], expected=1)
         self.assertIn("unknown or pruned invocation", gone)
         self.assertFalse((out / "summary.txt").exists())
+
+    def test_stop_during_preparation_does_not_replace_an_evidence_slot(self):
+        """A canceled fixture must not use up the history slot of a real test that can still be collected."""
+        checkout = self.fixture("first", "tree", "new")
+        tree = self.worker / "tree"
+        prior = {str(uuid.uuid4()) for _ in range(20)}
+        for invocation in prior:
+            result = tree / "out" / invocation
+            result.mkdir(parents=True)
+            (result / "finished").write_text("0\n")
+        (self.home / "hold-bootstrap").touch()
+        ran = self.root / "unexpected-start"
+        job = self.start(checkout, "run", "--out", self.root / "canceled", "--", "touch", ran)
+        ready = self.home / "bootstrap-entered"
+        self.wait_for(lambda: ready.exists() and ready.stat().st_size, "owned bootstrap to block", job)
+        self.assertEqual((tree / "lock.id").read_text().strip(), ready.read_text().strip())
+
+        self.assertIn("during preparation", self.run_to_exit(checkout, "stop"))
+        (self.home / "release-bootstrap").touch()
+        self.join(job, 143)
+
+        self.assertFalse(ran.exists())
+        self.assertFalse((tree / "src").exists())
+        self.assertEqual({path.name for path in (tree / "out").iterdir()}, prior)
 
     def test_a_descendant_cannot_keep_a_worker_lease_after_its_run(self):
         """A child that inherits descriptors must not keep setup locked after the command exits."""
@@ -541,8 +566,11 @@ class WorkerTest(unittest.TestCase):
         self.assertIn("could not copy evidence", result)
         self.assertIn("copy failed (command exit 7)", (out / "invocation.txt").read_text())
         self.assertFalse((out / "console.log").exists())
+        self.run_to_exit(checkout, "collect", "--out", out, invocation, expected=1)
+        self.assertIn("collection copy failed (command exit 7)", (out / "invocation.txt").read_text())
         failure.unlink()
-        self.run_to_exit(checkout, "collect", "--out", out, invocation)
+        self.run_to_exit(checkout, "collect", "--out", out, invocation, expected=7)
+        self.assertIn("collected (exit 7)", (out / "invocation.txt").read_text())
         self.assertEqual((out / "console.log").read_text(), "retained\n")
 
     def test_stop_releases_only_the_requested_checkout(self):
@@ -648,7 +676,7 @@ while True:
         self.join(job, 137)
         self.assertEqual((result / "finished").read_text(), "137\n")
         self.assertFalse((tree / "stage" / invocation).exists())
-        self.run_to_exit(checkout, "collect", "--out", self.root / "final", invocation)
+        self.run_to_exit(checkout, "collect", "--out", self.root / "final", invocation, expected=137)
 
 
 if __name__ == "__main__":

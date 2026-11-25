@@ -41837,3 +41837,284 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. A failed attempt refuses direct rerun before writing a new tester claim and leaves the supported
   recovery transition available. Change `vsupmskuvosvsqtoqsotmzrsvokzuqyk`, bookmark
   `plan/triage-tooling-nov24/04-cheap-fixes-3`, [PR #4821](https://github.com/scode/farhelm/pull/4821/changes).
+
+## trailing-brick-test-unavailable-retry-p2-stale-dict.md
+
+- Outcome: `other`.
+- Assessment: A coordinator unit test meant to show that `retry-unavailable` cannot replay a P1 or P2 check actually
+  tests P1 twice, because after the first iteration it edits a stale copy of the run state. Verified: Confirmed.
+  `releasing/mac-vm-test/test_native_coordinator.py:1129-1139` reads `entry` once, and `retry_unavailable` reloads
+  `self.run.data` via `locked()`. The production guard at `brick_test.py:1153` does reject P2 today.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. It is only a test gap and the guard works. The fix is about 2 lines if wanted.
+- Execution: No change. The P2 guard rejects retry; the finding concerns the test's reference after reload rather than a
+  runtime verdict. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark `plan/triage-tooling-nov24/05-cheap-fixes-4`,
+  [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## trailing-brick-test-announcement-override-check-untested.md
+
+- Outcome: `other`.
+- Assessment: The brick test checks that the announcement launch really used the test feed and that the following normal
+  relaunch did not. Its only unit test feeds process listings that always agree, so it would keep passing if the check
+  stopped comparing. Verified: Confirmed. `releasing/mac-vm-test/guest_operations.py:571-585` is correct today, but
+  `test_announcement_override_is_scoped_to_one_candidate_launch` (`test_guest_operations.py:805`) has no mismatch case,
+  and the function returns the expectation, not the observed value.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. The guard works and only its test is weak. Size S if fixed.
+- Execution: No change. Both launch paths perform the live environment check. The missing negative case is a test gap.
+  Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark `plan/triage-tooling-nov24/05-cheap-fixes-4`,
+  [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## trailing-brick-test-missing-announcement-feed-reported-as-candidate-failure.md
+
+- Outcome: `other`.
+- Assessment: If the maintainer has not published the standing test announcement files, the brick test reports the
+  candidate's announcements check as failed, even though the app never ran. The P2 verdict then reads "fail" for a
+  missing fixture. Verified: Correct, and deliberate. `releasing/mac-vm-test/guest_operations.py:560-564` maps only 404
+  to `fail`, and the docstring says "A missing file is an ordinary retained P2 observation". RECIPE.md:244: "A 404 fails
+  this check with the missing filename." BRICK-TEST says the same (per the finding). This conflicts with the tester's
+  general rule (`guest_tester.py:261-263`: fail only for an actual product failure). P2 is nonblocking, and the detail
+  names the missing file.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. The choice is deliberate and documented, and the detail names the cause. If the maintainer
+  prefers, map 404 to could-not-run (size S, with code, tests and docs).
+- Execution: No change. The documented publication gate records a P2 failure when the fixture is missing. The report
+  still fails that check and names the exact unpublished file and HTTP 404. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`,
+  bookmark `plan/triage-tooling-nov24/05-cheap-fixes-4`, [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## trailing-brick-test-announcement-check-has-no-delivery-wait.md
+
+- Outcome: `other`.
+- Assessment: After the brick test relaunches the candidate with the test feed, nothing waits for the app to download
+  the feed before the tester looks at the notification bell. A slow download can produce a false "fail". If the app's
+  one download attempt hits a network blip, it does not retry for 12 hours, so the check reports the candidate as
+  failed. Verified: The code path is confirmed. `releasing/mac-vm-test/checkpoint_contract.py:55-76` says only "require
+  an unread notice", with no wait or recheck. `network_announcements.rs` fetches on the first tick and then every 12
+  hours (SPEC_impl.md, "Shared preferences and announcements": "later ticks are 12 hours apart"). Unverified: how often
+  this happens. The result can be a false fail, never a false pass.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. A transient error is misattributed as a candidate failure. Tell the tester to recheck the bell
+  with fresh reads for a bounded time (around 60 seconds) and report could-not-run when no notice arrives. Size S for
+  the prompt. Telling a network error apart from a signature or schema rejection would take a log-reading operation (M),
+  which is optional.
+- Execution: Fixed. The guest waits up to 60 seconds for the announcement action and returns to a normal launch before
+  reporting absent delivery as unavailable. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark
+  `plan/triage-tooling-nov24/05-cheap-fixes-4`, [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## trailing-drift-turn2-hook-check-passes-on-noop-stop-ack.md
+
+- Outcome: `other`.
+- Assessment: The live drift tests check that each installed agent CLI still works with Farhelm: they start a session,
+  Restart it, and confirm the resumed agent recalls a code word and that its hook reported the conversation. For Codex
+  and Antigravity, the resumed turn's end-of-turn callback can be acknowledged without being verified or recorded. The
+  acknowledgment carries the conversation ID inherited from the first turn, so the test passes even if the resumed
+  agent's own hook report never got through. Verified: Confirmed by source. `saw_report` with `MatchingIdentity`
+  (`drift.rs:512-526`) accepts any new `acked` line naming the snapshot's identity. Codex's enrichment path returns
+  `Ok(())` when the previous locator is already resumable (`vendor/codex.rs:171-183`), Antigravity's Stop returns
+  `Ok(())` on a failed main-transcript check (`vendor/positional.rs:189-200`), and both are logged as `acked`
+  (`report_files.rs:245-248`). The recall witness still proves that resume works, so the gap is that the test does not
+  prove the resumed hook path. The unlanded `drift-model-selection` branch keeps the same witness logic, and no queued
+  plan's acceptance criteria change it.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code, together with 498, after `drift-model-selection` lands: require the resumed run to have a
+  committed report, or distinguish committed acks from no-op acks in the hook log. Size M (the log format or a snapshot
+  field changes, and four profiles are affected).
+- Execution: Deferred to “Require a committed hook report after Restart in the drift checks” in TODO.md. The fresh
+  witness needs the resumed generation's committed report, not a transport acknowledgment. Change
+  `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark `plan/triage-tooling-nov24/05-cheap-fixes-4`,
+  [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## trailing-drift-grok-home-overwritten-by-login-shell-rc.md
+
+- Outcome: `other`.
+- Assessment: The Grok drift test points Grok at a private copy of its config folder, so the test exercises the hook
+  file from the build under test instead of the maintainer's real one. It does this with an environment variable set
+  before the agent's login shell starts. A maintainer whose shell startup files export their own `GROK_HOME` overrides
+  that variable, so Grok reads the real config. The test then either fails to capture or passes on the real config's
+  hook, while the private-setup check still reports success. Verified: Confirmed by source. `PrivateConfig::apply`
+  pushes `GROK_HOME` into `seams.launch_env` (`drift/private_config.rs:287-298`). Host launch applies it to the host's
+  environment (`host_launch.rs:127-155`) before the `-l -i -c` login shell (`launch.rs:716-722`) sources rc files. Muse
+  and OMP overrides instead go through an `env` wrapper prefix, which applies after the shell (`drift.rs`
+  `update_override_prefix`). The trigger (an rc-file `GROK_HOME` export) was not observed on any machine. HOME, the
+  other root, is rarely re-exported by rc files. The unlanded `drift-model-selection` branch keeps the same `launch_env`
+  route.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. Also pass the mirror's root through the wrapper's `env` prefix, as Muse and OMP already do. Size
+  S.
+- Execution: Fixed. The launch wrapper reapplies the private Grok configuration root after login shell initialization on
+  Start and Restart. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark `plan/triage-tooling-nov24/05-cheap-fixes-4`,
+  [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## trailing-drift-private-config-copy-back-aborts-first-error.md
+
+- Outcome: `other`.
+- Assessment: After a Grok or Antigravity drift test, the harness copies back any config files the agent rewrote in its
+  private copy (a refreshed login token, for example) into the maintainer's real config folder. If one copy fails
+  partway, the cleanup stops there. A temporary file is left in the maintainer's real config folder, later files are not
+  copied back, so a refreshed login can be lost, and the final check that the real hook files were untouched is skipped.
+  Verified: Confirmed on main and still present in the unlanded `drift-model-selection` branch. `copy_back` uses `?` on
+  canonicalize, copy, set_permissions and rename with no removal of `staged` (`drift/private_config.rs:217-253`), and
+  `finish` returns on the first error before checking later mirrors (lines 312-319). The trigger (a copy, permission or
+  rename failure in the maintainer's own config folder) was not observed. The lost item is a vendor login token, which
+  is recoverable by logging in again.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. It needs a filesystem failure inside the maintainer's own config folder. Size S if fixed (remove
+  `staged` on error, collect per-file notes, always run the integrity check).
+- Execution: Discarded as already fixed by #4783. Copy-back retains a note for each failed file, removes the temporary
+  copy and continues checking the real hook files. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark
+  `plan/triage-tooling-nov24/05-cheap-fixes-4`, [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## trailing-grok-drift-test-uses-hook-witness-fresh-after-noop-acks.md
+
+- Outcome: `other`.
+- Assessment: The same resume witness weakness as 384, for Grok. Since b14f3355c, Grok's turn callbacks from a process
+  that is not the pinned one are acknowledged without effect. The Grok drift test still accepts any new acknowledgment
+  after Restart as proof that the resumed agent reported its conversation. Verified: Confirmed by source. `drift.rs`
+  (Grok profile) uses `HookWitness::Fresh`, and `vendor/grok.rs:180-183` returns `Ok(())` for non-SessionStart callbacks
+  that are not `Accept`, which is logged as `acked`. `reported_runtime_identity` (`real_agent_capture.rs:401-411`)
+  unwraps only `codex:` locators, so switching Grok to `MatchingIdentity` also needs `grok:` parsing. In a drift run the
+  only Grok process is the one under test, so a rival ack is unlikely in practice. Unchanged in the unlanded
+  `drift-model-selection` branch. The "Rare edge cases in harnesses without first-class support" filter does not fit,
+  because a false test pass is not one of its listed consequences.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code with 384 (one witness redesign covers both), or discard with 384. Size S-M.
+- Execution: Deferred to “Require a committed hook report after Restart in the drift checks” in TODO.md. The same
+  committed-report witness covers Grok's resumed turn. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark
+  `plan/triage-tooling-nov24/05-cheap-fixes-4`, [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## trailing-test-worker-stop-during-prep-mutates-and-prunes.md
+
+- Outcome: `other`.
+- Assessment: Stop on the test worker can be called while a run is still preparing: setting up the worker or installing
+  the source. When that happens, tests never start, as the docs promise. Preparation still runs to the end, though. It
+  copies the cancelled run's source into the worker's tree, deletes the oldest of the 20 kept run results to make room,
+  and records an empty "finished, exit 143" result. A later collect of that run succeeds but brings back nothing.
+  Verified: confirmed by reading. The stop marker is checked only at `with-lock.sh:79`. Bootstrap (`:88`), the source
+  install (`:139-142`), the output directory and pruning (`:144-146`) all run after that, and `run-workload.py:82-84`
+  returns 143 before starting anything, which `with-lock.sh:152` records as finished. Every documented promise holds
+  (`.agents/test-worker.md:58`: "During preparation, Stop records a cancellation so tests never start"). The evicted
+  result is one the next real run would evict anyway. The trigger is not a narrow window (bootstrap takes minutes), so
+  no filter applies.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard — the documented promise holds, and the effects are one early eviction and an empty result; size S
+  if fixed (re-check the stop marker before the install and before pruning, about 10 lines plus a test).
+- Execution: Fixed. Stop is checked during preparation and a canceled invocation that never starts its workload leaves
+  all earlier test evidence in place. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark
+  `plan/triage-tooling-nov24/05-cheap-fixes-4`, [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## trailing-test-worker-collect-discards-recorded-exit-status.md
+
+- Outcome: `other`.
+- Assessment: If the local client disconnects or the copy fails, `collect` fetches a finished test-worker run's results
+  later. It throws away the exit status the worker recorded and stamps the local folder only "collected". The pass or
+  fail verdict then comes only from the runner's summary, which shows a graceful-stop 143 for a run that was actually
+  force-killed (137), or no exit line at all if the runner itself was killed. Verified: confirmed. `with-lock.sh:152`
+  writes the code to `finished`. `collect.sh:95-96` prints only the source commit. `test-worker.sh:192` skips `finished`
+  when copying, and `:243` stamps `outcome: collected`. A direct run stamps `exit <code>` (`:227`).
+  `.agents/test-worker.md:83-84` says the stamp records "the source commit and result". That is a maintainer doc, not
+  SPEC, so this is not clearly settled. The self-test at `test-test-worker.py:651` does not check what was collected.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code — have collect return the recorded code and stamp `collected (exit N)`; size S (about 15 lines
+  plus test assertions).
+- Execution: Fixed. Collect retrieves the completion code along with the source stamp, records it, and returns it after
+  evidence is copied. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark `plan/triage-tooling-nov24/05-cheap-fixes-4`,
+  [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## trailing-test-worker-status-hides-bootstrap-lock.md
+
+- Outcome: `other`.
+- Assessment: When a test-worker run gives up after waiting five minutes for worker setup, its message says to check
+  `status`. But `status` shows only this checkout's own lock holder. It can't show a setup run on its own, or a setup
+  another checkout triggered, so the user sees nothing busy. Verified: confirmed. The message is at
+  `with-lock.sh:75-77`. `status.sh:5-7` reads only `<tree>/lock` and `<tree>/lock.holder`. A standalone setup takes no
+  tree lock and writes no holder file (`with-lock.sh:121-124`). The consequence is a misleading diagnostic only. The
+  trigger, setup taking over five minutes on a fresh worker, is not clearly rare, so the diagnostics filter does not
+  clearly match.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard — diagnostic only, and under Q14 "make no change"; size S if fixed (a worker-level holder file and
+  a status line, about 15 lines).
+- Execution: No change. The hidden bootstrap lease affects a diagnostic line without changing admission or already
+  recorded results. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark `plan/triage-tooling-nov24/05-cheap-fixes-4`,
+  [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## container-comparison-targets-removed-control.md
+
+- Outcome: `other`.
+- Assessment: The old-app screenshot comparison batch has a "New container" launcher scene. Its script clicks a "Runs
+  on" control that the launcher no longer has, because the choice moved into the Host picker. So that scene can never be
+  captured, even on a machine with Podman. Verified: Confirmed. The scene clicks `id:launcher-runs-on-New container`
+  (docs/gpui/screenshot-scenes.json:772–774). No `launcher-runs-on` id exists in the GUI sources, only
+  `templates-runs-on` (launcher/destination_rows.rs:136).
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code if the batch is still used, otherwise retire the scene; size S.
+- Execution: Fixed. The comparison opens Host, chooses New container in its menu and waits for the Container host
+  control. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark `plan/triage-tooling-nov24/05-cheap-fixes-4`,
+  [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).
+
+## launcher-comparison-heading-selector-case.md
+
+- Outcome: `other`.
+- Assessment: The launcher scenes in the old-app comparison batch wait for the text "Destination" after opening New. The
+  launcher now paints that heading as "DESTINATION", and the wait is case-sensitive. So the scenes stall right after
+  opening New, or pass on some other "Destination" text for the wrong reason. Verified: Confirmed. The heading is
+  `section_label("DESTINATION", ...)` with "Destination" only as its accessibility name
+  (crates/gui/farhelm-gui/src/launcher/view.rs:2575–2578). The gpui-agent text match is a case-sensitive `contains`
+  (vendor/gpui-agent/crates/cli/src/main.rs:1358). The scene list has 27 `"Destination"` text waits, more than the three
+  scenes the reviewer cited. I did not check whether each one is a launcher wait.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code, together with 175 — retarget to `id:launcher-destination-heading`; size S–M (~30–60 JSON lines).
+- Execution: Fixed. Comparison steps wait for the rendered Destination id and use its painted uppercase label for
+  dismissal, or the pinned Reset choices button after scrolling. Change `ouvuyrpnmmmuokqtztuxypqpqtyzpvnl`, bookmark
+  `plan/triage-tooling-nov24/05-cheap-fixes-4`, [PR #4825](https://github.com/scode/farhelm/pull/4825/changes).

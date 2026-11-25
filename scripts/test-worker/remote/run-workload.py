@@ -79,11 +79,16 @@ def cancel(process: subprocess.Popen) -> int:
 def run(stage: Path, argv: list[str]) -> int:
     """Normal completion follows the runner. A Stop request extends ownership to its surviving group."""
     stop = stage / "stop"
-    (stage / "running").touch()
     if stop.exists():
         return 143
 
     process = subprocess.Popen(argv, start_new_session=True)
+    # The controller counts a run toward evidence retention only after spawn.
+    try:
+        (stage / "running").touch()
+    except OSError:
+        cancel(process)
+        raise
     while True:
         status = observed_exit(process)
         if stop.exists():

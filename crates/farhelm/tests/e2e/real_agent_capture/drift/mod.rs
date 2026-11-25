@@ -841,7 +841,13 @@ async fn with_drift_supervisor_using(
     // State reaps the terminal host if startup fails, and drops before the workspace and configuration.
     let work = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
     let state = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
-    if let Some(mut prefix) = update_override_prefix(profile, state.path())? {
+    let mut prefix = update_override_prefix(profile, state.path())?.unwrap_or_default();
+    if let Some(home) = &seams.grok_home {
+        // Set GROK_HOME in the launch wrapper after the login shell has loaded its startup files. Start and Restart
+        // must read the same mirror where the test installed its hooks.
+        prefix.extend(["env".into(), format!("GROK_HOME={}", home.display())]);
+    }
+    if !prefix.is_empty() {
         prefix.extend(selection.wrapper_prefix.take().unwrap_or_default());
         selection.wrapper_prefix = Some(prefix);
     }

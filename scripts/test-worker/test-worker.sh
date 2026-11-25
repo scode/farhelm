@@ -228,19 +228,26 @@ bootstrap | rust | gui | run)
   exit "$code"
   ;;
 collect)
-  source=$(remote bash -s -- "$base" "$invocation" <"$here/remote/collect.sh")
+  collected=$(remote bash -s -- "$base" "$invocation" <"$here/remote/collect.sh")
   code=$?
   if [ "$code" != 0 ]; then
     source=unknown
     stamp_out "collection refused (exit $code)" || exit 1
     exit "$code"
   fi
+  if ! IFS=$'\t' read -r source workload_code <<<"$collected" || [ -z "$source" ] ||
+      ! [[ "$workload_code" =~ ^(0|[1-9][0-9]{0,2})$ ]] || [ "$workload_code" -gt 255 ]; then
+    source=unknown
+    stamp_out "collection refused (invalid completion record)" || exit 1
+    die "invalid completion record for $invocation"
+  fi
   if ! fetch_out; then
-    stamp_out "collection copy failed" || exit 1
+    stamp_out "collection copy failed (command exit $workload_code)" || exit 1
     echo "test-worker: could not copy evidence for $invocation to $out" >&2
     exit 1
   fi
-  stamp_out collected || die "could not stamp evidence directory $out"
+  stamp_out "collected (exit $workload_code)" || die "could not stamp evidence directory $out"
+  exit "$workload_code"
   ;;
 stop)
   remote bash -s -- "$base" <"$here/remote/stop.sh"
