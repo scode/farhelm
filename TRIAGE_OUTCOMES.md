@@ -681,21 +681,6 @@
   record which way it went. Recommendation for reference: discard — coverage only; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## terminal-paste-test-misses-first-ack-premise.md
-
-- Outcome: `other`.
-- Assessment: A supervisor unit test for a bracketed paste interrupted by a connection loss claims that the first piece
-  was acknowledged before the loss. It never shows that the runtime processed that acknowledgement, so a regression that
-  ignores it would pass. Verified: Confirmed test gap. `crates/farhelm-supervisor/src/hosts/terminal/tests.rs:2273-2290`
-  sends the ack, reads the second piece and disconnects, with no fence. The output fence used earlier in the same test
-  (:2258-2264) is not reused. No production defect is claimed.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code (reuse the existing output fence) or discard. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
 ## trailing-busy-claim-retry-test-bypasses-fleet-wake-it-depends.md
 
 - Outcome: `other`.

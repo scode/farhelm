@@ -2235,9 +2235,10 @@ async fn a_sequence_sends_nothing_after_input_lost_with_a_connection() {
 /// `2 * MAX_INPUT + 10` bytes arrives as three `Input`s that join to it,
 /// and its receipt is still pending after the first is acknowledged and
 /// `Written` after all are; a bracketed paste of three `Input`s whose first
-/// was acknowledged and second was in flight when the connection dropped is
-/// `Unknown`, and the new connection's first input is `ESC [201~`. An empty
-/// paste and one over `MAX_PASTE` are refused.
+/// receipt was `Written` and second was in flight when the connection
+/// dropped has an aggregate fate of `Unknown`. The new
+/// connection's first input is `ESC [201~`. An empty paste and one over
+/// `MAX_PASTE` are refused.
 #[farhelm_testtrace::test]
 async fn a_paste_goes_out_whole_and_is_closed_after_a_loss() {
     let stand_in = StandIn::new();
@@ -2273,13 +2274,24 @@ async fn a_paste_goes_out_whole_and_is_closed_after_a_loss() {
     let mut paste = crate::grid_input::PASTE_START.to_vec();
     paste.resize(2 * MAX_INPUT + 10, b'p');
     paste.extend_from_slice(PASTE_END);
-    let receipt = within("queueing a paste", sequence.send_paste(paste.clone(), true))
+    let mut receipt = within("queueing a paste", sequence.send_paste(paste.clone(), true))
         .await
         .unwrap();
     let first = server.input().await;
     assert_eq!(first, paste[..MAX_INPUT]);
+    assert_eq!(receipt.0.len(), 3, "one receipt per paste piece");
     server.ack((data.len() + MAX_INPUT) as u64).await;
-    let _second = server.input().await;
+    // Reading another piece can happen before the runtime handles the ack.
+    // Only the opening piece's own receipt establishes it was applied.
+    let opening = within("the opening piece's acknowledgement", receipt.0.remove(0))
+        .await
+        .unwrap();
+    assert_eq!(opening, InputFate::Written);
+    // Put the observed fate back so the final receipt still covers the whole paste.
+    let (observed, ready) = oneshot::channel();
+    observed.send(opening).unwrap();
+    receipt.0.insert(0, ready);
+    assert_eq!(server.input().await, paste[MAX_INPUT..2 * MAX_INPUT]);
     drop(server);
     let mut resumed = info;
     resumed.end = b"ack fence".len() as u64;
