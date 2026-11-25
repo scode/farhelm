@@ -914,6 +914,45 @@ fn a_rerun_that_leads_nowhere_says_why_under_the_row(cx: &mut TestAppContext) {
     );
 }
 
+/// A sandbox can become suspended between the painted Re-run menu and the
+/// helm's probe. Hosts must show how to continue while retaining the failure
+/// that originally made Re-run available.
+#[gpui::test]
+fn a_refused_tensorlake_setup_rerun_keeps_the_failed_progress(cx: &mut TestAppContext) {
+    use crate::hosts::tests::{connected, host, hosts, open_panel_in_column, progress, run};
+    use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus};
+
+    let mut failed = run(2, ProvisioningOperation::Add, RunStatus::Failed);
+    failed.message = Some("the earlier install failed".into());
+    let (mut helm, _, cx) = open_panel_in_column(
+        cx,
+        vec![
+            hosts(&[host(2, "tensorlake", connected())]),
+            progress(&[failed]),
+        ],
+    );
+    cx.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1000.)));
+    settle(cx);
+    let earlier = Some("the earlier install failed");
+    assert_eq!(label(cx, "host-run-message-2").as_deref(), earlier);
+
+    click(cx, "host-menu-toggle-2");
+    click(cx, "host-menu-rerun");
+    let (probe, body) = one_probe(&mut helm);
+    assert_eq!(
+        body,
+        json!({ "target": { "kind": "tensorlake-host", "host": 2 } })
+    );
+    let reason = "this host's Tensorlake sandbox is suspended, so Farhelm cannot reach it; resume the sandbox first, then try again";
+    helm.reply(probe, 409, Some(json!(reason)));
+    settle(cx);
+
+    assert_eq!(label(cx, "host-error-2").as_deref(), Some(reason));
+    assert_eq!(label(cx, "host-run-message-2").as_deref(), earlier);
+    assert!(!any_open(cx));
+    assert_eq!(helm.commands(), [], "the refusal sends no confirmation");
+}
+
 /// "Set up new hosts without asking" covers reruns too (the old app submitted a rerun's plan on the remembered answer).
 /// Specified: with the preference on, the rerun's plan goes straight to `POST /api/hosts/provision` under the host's
 /// key and no question opens.

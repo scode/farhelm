@@ -343,6 +343,12 @@ impl Fixture {
         host
     }
 
+    /// The private key is absent until setup ensures it. The confirmation
+    /// test checks that this path is populated by a successful probe.
+    fn host_key_path(&self) -> PathBuf {
+        crate::tensorlake::ssh_key::private_key_path(&self.root.path().join("tensorlake"))
+    }
+
     /// A controlled existing-host run must use the ordinary installer even
     /// when its recipe later acquires a reusable prepared snapshot.
     async fn rerun(&self, host: HostId) -> RunAccepted {
@@ -2280,7 +2286,7 @@ async fn setup_of_a_sealed_sandbox_is_refused_before_it_takes_the_host() {
     );
     assert!(
         !f.service.memory.lock().await.busy.contains(&host),
-        "setup released its claim"
+        "setup took no claim"
     );
     assert!(
         f.backend_events().is_empty(),
@@ -2295,43 +2301,167 @@ async fn retains_run(service: &ProvisioningService, host: HostId) -> bool {
     runs.iter().any(|run| run.host_id == host)
 }
 
-/// Why: a setup claims its host's progress before the checks that can refuse
-/// it, and the GUI re-reads progress only when the fleet feed moves or after
-/// its own channel command; a refusal reached any other way (an HTTP request,
-/// the automatic update) has no command to re-read after, so a withdrawal
-/// without a bump left a run on the GUI that never started. Spec: a setup
-/// refused as sealed after its progress claim leaves no run, and the feed has
-/// moved since the seal was noted.
+/// The live state and the deletion seal each block a rerun. Test an active
+/// deletion separately because it need not have reached the supervisor yet.
+#[derive(Clone, Copy, Debug)]
+enum SetupRerunBarrier {
+    Suspended,
+    Deleting,
+    SealedWhileDeleting,
+    SealedAfterFailedDelete,
+}
+
+impl SetupRerunBarrier {
+    const ALL: [Self; 4] = [
+        Self::Suspended,
+        Self::Deleting,
+        Self::SealedWhileDeleting,
+        Self::SealedAfterFailedDelete,
+    ];
+
+    /// Park the fixture's actor before a probe or confirmation so a connector
+    /// cannot replace the lifecycle state under test.
+    async fn publish(self, fixture: &Fixture, host: HostId) -> &'static str {
+        let manager = &fixture.harness.manager;
+        let shown = match self {
+            Self::Suspended => HostState::Suspended {
+                observed_at: 1,
+                suspended_by_farhelm_at: Some(1),
+                resume_failed: None,
+            },
+            Self::Deleting | Self::SealedWhileDeleting | Self::SealedAfterFailedDelete => {
+                HostState::Deleting { failure: None }
+            }
+        };
+        assert!(manager.hold_connection(host, shown.clone()).await);
+        assert_eq!(manager.state(host), Some(shown));
+        assert!(!manager.is_sealed(host));
+
+        match self {
+            Self::Suspended => "suspended",
+            Self::Deleting => "being deleted",
+            Self::SealedWhileDeleting => {
+                manager.note_sealed(host);
+                assert!(manager.is_sealed(host));
+                assert!(!manager.sealed_failed(host));
+                "this sandbox is being deleted, so it cannot be set up again"
+            }
+            Self::SealedAfterFailedDelete => {
+                manager.note_sealed(host);
+                manager.sealed_outcome(host, Some("sandbox deletion timed out".into()));
+                assert!(manager.sealed_failed(host));
+                "use Retry to finish deleting it"
+            }
+        }
+    }
+
+    /// Retry applies only after destruction has failed and Hosts offers it.
+    fn assert_refusal(self, error: anyhow::Error, reason: &str) {
+        let text = format!("{error:#}");
+        assert!(text.contains(reason), "{self:?}: {text}");
+        assert_eq!(
+            text.contains("use Retry"),
+            matches!(self, Self::SealedAfterFailedDelete),
+            "{self:?}: {text}"
+        );
+    }
+}
+
+/// A probe refuses while the sandbox is suspended or being deleted. A
+/// refused click has no authority to generate a key or retain a setup offer.
 #[farhelm_testtrace::test]
-async fn a_setup_refused_after_its_claim_withdraws_it_through_the_feed() {
-    let f = fixture(false).await;
-    let host = f.legacy_host().await;
-    let ProbeResponse::TensorlakeProvisionable { probe_id, .. } =
-        f.probe(ProbeDestination::TensorlakeHost { host }).await
-    else {
-        panic!("ordinary recovery offer")
-    };
-    // Noting the seal bumps the feed itself, so the baseline is read after it:
-    // only the refusal can move the feed from here.
-    f.harness.manager.note_sealed(host);
-    let seen = f.harness.manager.events().revision();
-    let refusal = f
-        .service
-        .start_add(ProvisionRequest { probe_id })
-        .await
-        .expect_err("a sealed sandbox cannot be set up again");
-    assert!(
-        format!("{refusal:#}").contains("being deleted"),
-        "{refusal:#}"
-    );
-    assert!(
-        !retains_run(&f.service, host).await,
-        "the refusal leaves no run behind"
-    );
-    assert!(
-        f.harness.manager.events().revision() > seen,
-        "the run's withdrawal bumps the feed, so a GUI that showed it re-reads"
-    );
+async fn a_setup_rerun_probe_refuses_before_creating_the_key_or_plan() {
+    for barrier in SetupRerunBarrier::ALL {
+        let f = fixture(false).await;
+        let host = f.legacy_host().await;
+        let reason = barrier.publish(&f, host).await;
+        let shown = f.harness.manager.state(host);
+        let key = f.host_key_path();
+        assert!(!key.exists());
+        assert!(f.service.memory.lock().await.tensorlake_plans.is_empty());
+
+        let refusal = f
+            .service
+            .probe_tensorlake(
+                ProbeRequest {
+                    target: ProbeDestination::TensorlakeHost { host },
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                    new_entry: None,
+                },
+                f.tensorlake.clone(),
+            )
+            .await
+            .expect_err("this sandbox cannot offer setup now");
+
+        barrier.assert_refusal(refusal, reason);
+        assert!(!key.exists(), "{barrier:?} probe created a host key");
+        assert!(f.service.memory.lock().await.tensorlake_plans.is_empty());
+        assert_eq!(f.harness.manager.state(host), shown);
+        assert!(f.backend_events().is_empty());
+    }
+}
+
+/// A setup offer can remain open while the sandbox is suspended or deletion
+/// starts. Refusal must preserve the old run, the lifecycle display and the
+/// fleet revision so the Hosts row never observes a replacement run.
+#[farhelm_testtrace::test]
+async fn a_setup_confirmation_refuses_before_replacing_failed_progress() {
+    for barrier in SetupRerunBarrier::ALL {
+        let f = fixture(false).await;
+        let host = f.legacy_host().await;
+        let earlier = farhelm_proto::provisioning::ProvisioningView {
+            host_id: host,
+            run_id: Some("earlier-setup".into()),
+            operation: Some(farhelm_proto::provisioning::ProvisioningOperation::Add),
+            status: RunStatus::Failed,
+            steps: Vec::new(),
+            message: Some("earlier setup failed".into()),
+            outcome_unknown: false,
+        };
+        f.service
+            .memory
+            .lock()
+            .await
+            .runs
+            .insert(host, earlier.clone());
+        let key = f.host_key_path();
+        assert!(!key.exists(), "the fixture starts without a host key");
+        let ProbeResponse::TensorlakeProvisionable { probe_id, .. } =
+            f.probe(ProbeDestination::TensorlakeHost { host }).await
+        else {
+            panic!("ordinary recovery offer")
+        };
+        assert!(key.is_file(), "an accepted probe ensures the fixture's key");
+        assert_eq!(
+            f.service.runs().await.runs.as_slice(),
+            std::slice::from_ref(&earlier)
+        );
+        let reason = barrier.publish(&f, host).await;
+        let manager = &f.harness.manager;
+        // The feed revision belongs to the whole fleet. Park the unrelated
+        // local actor so its retries cannot publish during the confirmation.
+        let local = crate::rest_harness::local_id(&f.harness.store).await;
+        let local_state = manager.state(local).expect("local fixture actor");
+        assert!(manager.hold_connection(local, local_state).await);
+        let before = manager.status(host).unwrap();
+        let revision = manager.events().revision();
+
+        let refusal = f
+            .service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .expect_err("this sandbox cannot accept the earlier offer");
+
+        barrier.assert_refusal(refusal, reason);
+        assert_eq!(f.service.runs().await.runs, [earlier]);
+        assert!(!f.service.memory.lock().await.busy.contains(&host));
+        let after = manager.status(host).unwrap();
+        assert_eq!(after.state, before.state);
+        assert_eq!(after.incarnation, before.incarnation);
+        assert_eq!(manager.events().revision(), revision);
+        assert!(f.backend_events().is_empty());
+    }
 }
 
 /// Why: a Suspend, Resume or removal of a sandbox holds its provisioning lock
