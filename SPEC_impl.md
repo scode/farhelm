@@ -6480,7 +6480,11 @@ ordinary identity or has a current identity refusal. A duplicate hello naming th
 ownership while the owner's supervisor is down. A managed place check discards its result if the ordinary host actor
 does not match the saved connection settings. A matching actor can be unreachable when the host only runs Podman. Fresh
 preparation requires a current place claim and respects the ordinary host actor's duplicate, mismatch and unverified
-identity refusals. Runtime capabilities for existing containers remain separate from admission.
+identity refusals. Adoption releases an unused claim inside the adoption transaction and invalidates the cached check
+and any in-flight check before publishing the new state. A settled Podman twin refusal releases this entry's prior
+unused claim if the machine or account changed. A provisional collision leaves the old claim intact while Farhelm checks
+ordinary ownership, so a new reference between the two transactions still protects the place. Runtime capabilities for
+existing containers remain separate from admission.
 
 Before a session container's first create, the binding records the current claim's machine ID and UID in the guarded
 pending-send write. Session create and lifecycle commands that check or remove a recorded container verify the bound

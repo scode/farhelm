@@ -351,7 +351,10 @@ of by removing the host from the registry.
 Container hosts also identify the machine and account that own their Podman storage, including on hosts without Farhelm
 installed. New containers and image builds use one host entry per machine and account. When Farhelm has verified which
 host owns the ordinary identity, that entry can take an unused container host claim from a second entry whose ordinary
-identity is absent or refused.
+identity is absent or refused. Adopting a new installation clears that host's prior container check and releases its
+unused claim. If a Podman check reaches a different machine or account and refuses the place because another entry holds
+its Podman claim, it also releases the checked entry's previous unused claim. Claims that still hold containers, images
+or helpers stay in place for cleanup.
 
 A host that is a Tensorlake sandbox Farhelm created is the exception to two of those rules, because Farhelm owns the
 machine and not only the entry: removing it is not merely forgetting it, and its destination cannot be corrected. A

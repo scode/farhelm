@@ -106,14 +106,6 @@ consequences.
   — The Settings pages for Codex, Muse, Pi, and Antigravity omit that their workspace-trust switch also applies to
   agent-requested launches, which run without an approval card on Always-allow hosts.
 
-- [`trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md`](trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md)
-  — After adopting a reinstalled or recycled container host, Farhelm can fail new container launches for up to 5 minutes
-  with a misleading moved-destination error and lock out another entry for the old machine across restarts.
-
-- [`trailing-podman-refresh-caches-wrong-machine-on-refusal.md`](trailing-podman-refresh-caches-wrong-machine-on-refusal.md)
-  — After an SSH alias temporarily points to another Podman machine and is restored, cached capabilities from the wrong
-  machine can break existing container operations or inject that machine's proxy settings into a recovering container.
-
 - [`trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md`](trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md)
   — If a user edits a custom agent, clicks Delete to show the confirmation buttons, and then closes Settings and chooses
   Save in the 'Save changes before closing?' dialog, saving silently fails without displaying any error and leaves
@@ -308,10 +300,6 @@ consequences.
 - [`trailing-container-host-unanswered-embeds-raw-stderr.md`](trailing-container-host-unanswered-embeds-raw-stderr.md) —
   When a verified container host command fails before the guard runs, Farhelm copies up to 64 KiB of uncropped,
   unsanitized remote stderr directly into host status and HTTP errors.
-
-- [`trailing-claim-podman-place-retains-unused-claim-after-twin.md`](trailing-claim-podman-place-retains-unused-claim-after-twin.md)
-  — When an unused SSH host moves externally to a machine claimed by another host, Refresh refuses it as a twin but
-  keeps its old claim on disk, blocking a third entry for the vacated machine.
 
 - [`trailing-suspend-read-activity-still-uses-ordered-lane.md`](trailing-suspend-read-activity-still-uses-ordered-lane.md)
   — Primary Suspend and Stop and suspend actions still wait up to 20 seconds behind any slow host on the ordered channel

@@ -8991,6 +8991,8 @@ impl HelmStore {
                             format!("purging retired identity partitions from {table}")
                         })?;
                     }
+                    podman::release_unused_place_claim(&tx, host)
+                        .context("releasing the superseded installation's unused container host claim")?;
                     tx.commit().context("committing identity adoption")?;
                     Ok(())
                 },

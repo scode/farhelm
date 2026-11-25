@@ -46823,3 +46823,97 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   container hosts before trusting results or sending private input TODO. Change `qvqsmtkoxzmzxyltksokpwnywvplpszm`,
   bookmark `plan/triage-podman-nov24/09-podman-claim-refresh`,
   [PR #4917](https://github.com/scode/farhelm/pull/4917/changes).
+
+## trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md
+
+- Outcome: `fix code`.
+- Assessment: After a container host is wiped or reinstalled (or its address now points at a different machine) and the
+  user presses Adopt in Hosts, Farhelm keeps the old machine's Podman check. For up to five minutes a new container or
+  Rebuild on that host can fail with a misleading "SSH destination may have changed" error. The host also keeps its
+  claim on the old machine, so another host entry that really reaches that old machine is refused as a duplicate until
+  the adopted host is checked again. Verified: Confirmed by reading, but it heals sooner than the reviewers say.
+  `ConnectionManager::adopt` and `HelmStore::adopt_identity` never call `invalidate_route` and never delete
+  `podman_place_claims` (grep finds no Podman reference in either). `confirm_cached_admission` (`podman_probe.rs`)
+  accepts the old cache within `FRESH_FOR`. But opening the launcher re-checks every container-capable host (GUI test
+  `opening_the_launcher_checks_the_container_hosts`, `launcher/environment_view_tests.rs:193-215`). The adopted host's
+  next check replaces its unused claim, so both symptoms go away at the next launcher open or Refresh. A launch sent
+  before that check finishes fails once, and a retry succeeds.
+- Decision: q-podid, "How far the container-host identity check reaches": the maintainer picked "Every command and
+  cached result". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If it turns very
+  complicated, the executor must abort and turn this into a to-do item for a follow-up. Explaining what is complicated."
+- Completion criteria: Apply the container-host identity check to every command sent to a container host, including
+  against a hostile endpoint (the nonce must not be echoable), and drop capabilities and claims learned from an
+  unverified machine. Recommendation for reference: fix code — on Adopt, invalidate the Podman cache entry under claim
+  publication, and release an unused claim when `referenced_place_reason` is None. Size S. Discard is reasonable too,
+  since it heals itself. Complexity gate (maintainer): if the fix turns very complicated during execution, the executor
+  stops and turns it into a follow-up TODO.md entry that explains what is complicated and why, instead of landing it.
+  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Fixed the scoped adoption cleanup. Adopt invalidates the cached check and any pending refresh before
+  publishing the new installation. It releases the prior machine claim only when no container, image or helper still
+  needs it. The full every-command and cached-result decision was deferred through the complexity gate to Verify
+  container hosts before trusting results or sending private input in TODO.md. Change
+  `qxopuwqrvrsnzyzyrskxoztywruxtlxm`, bookmark `plan/triage-podman-nov24/10-adopt-and-unused-claim`,
+  [PR #4921](https://github.com/scode/farhelm/pull/4921/changes).
+
+## trailing-claim-podman-place-retains-unused-claim-after-twin.md
+
+- Outcome: `fix code`.
+- Assessment: If an unused host entry's SSH destination changes outside Farhelm so that it reaches a machine another
+  entry already claims, Farhelm correctly refuses it as a duplicate. But it keeps the entry's old machine claim, so
+  another entry that really reaches the old machine can be refused as a duplicate of the moved one. Verified: Confirmed.
+  In `claim_podman_place` (`store/podman.rs:381-450`), the `Twin` branch returns before `tx.commit()`, so the old
+  `(host, M1)` row stays. Only a later successful claim, a retarget or a removal clears it. SPEC_impl.md allows "An
+  entry with no containers, image records or helpers can replace its claim" but does not say a refusal should release
+  it.
+- Decision: q-podid, "How far the container-host identity check reaches": the maintainer picked "Every command and
+  cached result". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If it turns very
+  complicated, the executor must abort and turn this into a to-do item for a follow-up. Explaining what is complicated."
+- Completion criteria: Apply the container-host identity check to every command sent to a container host, including
+  against a hostile endpoint (the nonce must not be echoable), and drop capabilities and claims learned from an
+  unverified machine. Recommendation for reference: fix code — release an unused claim that no longer matches, and
+  commit before returning `Twin`. Size S. Complexity gate (maintainer): if the fix turns very complicated during
+  execution, the executor stops and turns it into a follow-up TODO.md entry that explains what is complicated and why,
+  instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Fixed the scoped unused-claim release. When a Podman check reaches a different machine or account and
+  settles a duplicate place claim, the refusal releases the prior unused claim in that same transaction. Entries with
+  container or recipe resources keep their claims. The full every-command and cached-result decision was deferred
+  through the complexity gate to Verify container hosts before trusting results or sending private input in TODO.md.
+  Change `qxopuwqrvrsnzyzyrskxoztywruxtlxm`, bookmark `plan/triage-podman-nov24/10-adopt-and-unused-claim`,
+  [PR #4921](https://github.com/scode/farhelm/pull/4921/changes).
+
+## trailing-podman-refresh-caches-wrong-machine-on-refusal.md
+
+- Outcome: `fix code`.
+- Assessment: If a container host's SSH alias briefly points at another Linux machine with Podman and Farhelm checks it
+  during that time, Farhelm keeps that other machine's details (its Podman program path and proxy settings) as the
+  details existing containers use. When the alias is put back, status, reconnect, Suspend/Resume and Delete of existing
+  containers can keep failing if Podman lives at a different path on the two machines. An interrupted container create
+  that recovers in that window can install the other machine's proxy settings into the container. This lasts until the
+  host is checked again. Verified: Confirmed by reading. `refresh` (`podman_probe.rs`, "refresh", the admission-refusal
+  match) caches `result: Ok(ready)` even when the result is `Changed`, `Twin`, an ordinary refusal or an identity error.
+  `runtime()` returns any cached `Ok` for the same route text, ignoring `admission_refusal` and age. Callers use
+  `ready.podman` and `ready.proxy` (`podman.rs:441`). The recovery path is real, but it needs an alias move, a probe
+  during the move, the restore, and then an interrupted create recovering before any re-check. Opening the launcher
+  re-checks, which heals it. Not verified: that two supported hosts install Podman at different absolute paths.
+- Decision: q-podid, "How far the container-host identity check reaches": the maintainer picked "Every command and
+  cached result". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If it turns very
+  complicated, the executor must abort and turn this into a to-do item for a follow-up. Explaining what is complicated."
+- Completion criteria: Apply the container-host identity check to every command sent to a container host, including
+  against a hostile endpoint (the nonce must not be echoable), and drop capabilities and claims learned from an
+  unverified machine. Recommendation for reference: fix code — never replace an existing matched observation with one
+  whose identity conflicts or fails, and have `runtime()` re-probe when the cached identity does not match the binding's
+  recorded identity. Size S-M. Complexity gate (maintainer): if the fix turns very complicated during execution, the
+  executor stops and turns it into a follow-up TODO.md entry that explains what is complicated and why, instead of
+  landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: Deferred through the complexity gate to Verify container hosts before trusting results or sending private
+  input in TODO.md. Runtime capabilities can come from several commands and existing resource operations intentionally
+  consume some checks that refuse new work. The follow-up must keep capability results bound to a verified machine and
+  account, including when the old cache is missing or a route has been restored. Change
+  `qxopuwqrvrsnzyzyrskxoztywruxtlxm`, bookmark `plan/triage-podman-nov24/10-adopt-and-unused-claim`,
+  [PR #4921](https://github.com/scode/farhelm/pull/4921/changes).

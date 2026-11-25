@@ -335,6 +335,16 @@ pub(super) fn refuse_referenced_place(conn: &Connection, host: HostId) -> anyhow
     Ok(())
 }
 
+/// Release an adopted entry's old claim in its adoption transaction.
+/// Existing resources need the claim to keep using their original place.
+pub(super) fn release_unused_place_claim(conn: &Connection, host: HostId) -> anyhow::Result<()> {
+    if read_place_identity(conn, host)?.is_some() && referenced_place_reason(conn, host)?.is_none()
+    {
+        conn.execute("DELETE FROM podman_place_claims WHERE host_id = ?1", [host])?;
+    }
+    Ok(())
+}
+
 /// Inspect the same ownership facts for retargeting and place-identity claims.
 /// An unreadable recipe state is a store failure, so it cannot permit a claim.
 fn referenced_place_reason(conn: &Connection, host: HostId) -> anyhow::Result<Option<String>> {
@@ -389,6 +399,37 @@ impl HelmStore {
         verified_supervisor: Option<String>,
         refused_incumbent: Option<&HostRow>,
     ) -> anyhow::Result<Option<PlaceClaim>> {
+        self.claim_podman_place_with_twin(
+            row,
+            identity,
+            verified_supervisor,
+            refused_incumbent,
+            true,
+        )
+        .await
+    }
+
+    /// Try ownership first. A Twin leaves the old claim intact while the
+    /// caller checks the incumbent's actor and settles the collision.
+    pub(crate) async fn try_claim_podman_place(
+        &self,
+        row: &HostRow,
+        identity: PodmanPlaceIdentity,
+        verified_supervisor: Option<String>,
+    ) -> anyhow::Result<Option<PlaceClaim>> {
+        self.claim_podman_place_with_twin(row, identity, verified_supervisor, None, false)
+            .await
+    }
+
+    /// Only a final Twin may commit release of the old unreferenced claim.
+    async fn claim_podman_place_with_twin(
+        &self,
+        row: &HostRow,
+        identity: PodmanPlaceIdentity,
+        verified_supervisor: Option<String>,
+        refused_incumbent: Option<&HostRow>,
+        settle_twin: bool,
+    ) -> anyhow::Result<Option<PlaceClaim>> {
         let host = row.id;
         let entry = row.entry_uuid.clone();
         let dialed_as = DialedAs::of(row);
@@ -407,10 +448,9 @@ impl HelmStore {
             let Some(owns_supervisor) = owns_supervisor else {
                 return Ok(None);
             };
-            let previous = read_place_identity(&tx, host)?;
-            if previous.is_some_and(|previous| previous != identity)
-                && referenced_place_reason(&tx, host)?.is_some()
-            {
+            let previous_moved = read_place_identity(&tx, host)?
+                .is_some_and(|previous| previous != identity);
+            if previous_moved && referenced_place_reason(&tx, host)?.is_some() {
                 return Ok(Some(PlaceClaim::Changed));
             }
             let twin = tx.query_row(
@@ -438,6 +478,12 @@ impl HelmStore {
                 {
                     let kind = HostKind::from_columns(&kind, None, None)?;
                     let name = host_display_name(kind, dialed_as.destination.as_deref(), alias.as_deref());
+                    // Once the check finds this entry on a different place,
+                    // its old unused claim should no longer exclude that place.
+                    if settle_twin && previous_moved {
+                        tx.execute("DELETE FROM podman_place_claims WHERE host_id = ?1", [host])?;
+                        tx.commit()?;
+                    }
                     return Ok(Some(PlaceClaim::Twin { owner, name }));
                 }
                 tx.execute("DELETE FROM podman_place_claims WHERE host_id = ?1", [owner])?;
@@ -726,6 +772,7 @@ mod tests {
     /// A place without a supervisor can be first to claim an endpoint. When
     /// an ordinary supervisor later identifies its entry, give that entry
     /// the place claim only if there are no containers or artifacts to keep.
+    /// A new twin refusal frees the previous place only while it is unused.
     #[farhelm_testtrace::test]
     async fn podman_place_claim_follows_the_supervisor_only_when_unused() {
         let directory = tempfile::tempdir().unwrap();
@@ -800,6 +847,32 @@ mod tests {
             Some(PlaceClaim::Owned { displaced: None }),
             "a different account keeps a separate rootless store"
         );
+        assert!(matches!(
+            store.claim_podman_place(first, endpoint(1000), None, None).await.unwrap(),
+            Some(PlaceClaim::Twin { owner, .. }) if owner == second.id
+        ));
+        assert_eq!(store.podman_place_identity(first.id).await.unwrap(), None);
+        assert_eq!(
+            store.podman_place_identity(second.id).await.unwrap(),
+            Some(endpoint(1000))
+        );
+        assert_eq!(
+            store
+                .claim_podman_place(first, endpoint(1001), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None }),
+        );
+        // Another launch can register a pending container while the caller
+        // checks the twin's supervisor. Keep the original claim until then.
+        assert!(matches!(
+            store.try_claim_podman_place(first, endpoint(1000), None).await.unwrap(),
+            Some(PlaceClaim::Twin { owner, .. }) if owner == second.id
+        ));
+        assert_eq!(
+            store.podman_place_identity(first.id).await.unwrap(),
+            Some(endpoint(1001))
+        );
         store
             .register_pending_session_container(
                 "farhelm-sess-identity".into(),
@@ -808,13 +881,9 @@ mod tests {
             )
             .await
             .unwrap();
-        let claimed = |machine_id: char| PodmanPlaceIdentity {
-            machine_id: machine_id.to_string().repeat(32),
-            uid: 1001,
-        };
         assert_eq!(
             store
-                .claim_podman_place(first, claimed('2'), None, None)
+                .claim_podman_place(first, endpoint(1000), None, None)
                 .await
                 .unwrap(),
             Some(PlaceClaim::Changed),
@@ -834,6 +903,20 @@ mod tests {
                 name: "place-first.test".into()
             }),
             "even a pending container makes the original place claim in use"
+        );
+        let dialed = DialedAs::of(first);
+        store
+            .record_first_contact(first.id, &dialed, "before")
+            .await
+            .unwrap();
+        store
+            .adopt_identity(first.id, &dialed, "before", "after")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.podman_place_identity(first.id).await.unwrap(),
+            Some(endpoint(1001)),
+            "adoption must keep the place needed by the pending container",
         );
     }
 
