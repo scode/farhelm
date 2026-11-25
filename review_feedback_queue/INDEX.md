@@ -183,11 +183,6 @@ consequences.
   single 'Custom agent' and jumps Settings to whichever custom-agent draft sorts first rather than staying on the page
   the user was viewing.
 
-- [`trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md`](trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md)
-  — When switching from a safer agent (such as Guarded Claude or Codex) to a registered custom agent (which always
-  counts as YOLO), the red permission-escalation banner appears at the top of the launcher, but the custom agent's YOLO
-  permission control does not show the required thick red escalation outline.
-
 - [`trailing-launcher-target-names-command-custom-agent-outside-restart-with.md`](trailing-launcher-target-names-command-custom-agent-outside-restart-with.md)
   — When creating, cloning, or replacing a session on the Command tab with a registered custom agent declared, the main
   action's accessible name includes the custom agent's name ("Launch Command · <name> · <host> · <folder>"), whereas
@@ -213,11 +208,6 @@ consequences.
   — Sessions launched with a registered custom agent show the generic label "Custom agent" in both the session row's
   actions menu header and the quick switcher's agent column, instead of the custom agent's current display name (or its
   saved ID after the registration is deleted).
-
-- [`trailing-template-apply-custom-to-custom-misses-switched-agent.md`](trailing-template-apply-custom-to-custom-misses-switched-agent.md)
-  — If you switch in the launcher from a guarded agent (like Codex) to a custom agent — raising the red
-  permission-escalation banner with Undo — and then apply a launch template that selects a different custom agent, the
-  old escalation banner stays open instead of closing.
 
 - [`trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md`](trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md)
   — When you replace your saved Tensorlake API key with a different key in Settings without clicking Clear first, the

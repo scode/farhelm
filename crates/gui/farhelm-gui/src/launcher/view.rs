@@ -1937,7 +1937,7 @@ impl Launcher {
             fields.push(self.catalog_error_line(error, palette, cx));
         }
         if custom {
-            fields.extend(self.custom_agent_fields(palette));
+            fields.extend(self.custom_agent_fields(palette, cx));
         } else if model.is_some() || !harness.is_some_and(LaunchHarness::is_shell) {
             fields.push(self.model_choices(model, palette, cx).into_any_element());
         }

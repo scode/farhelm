@@ -44,27 +44,6 @@
   feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md, "Sessions" → "Creation" (lines 1166-1171): "When an agent switch automatically
-  makes the shown permission more dangerous, a red banner slides down ... The permission control gets a thick red
-  outline that fades after about two and a half seconds. Reduced motion replaces slide and fade with a static outline
-  while the banner is shown." The code contradicts it. Switching to a custom agent raises the banner:
-  `omitted_permission(Custom) = Yolo` (`crates/farhelm-proto/src/launch.rs:394`) feeds `escalation_since`
-  (`launcher/draft.rs:1021-1045`). But `custom_agent_fields` draws the YOLO pill as a plain div
-  (`launcher/view/choices.rs:286-290`) without `with_escalation_outline`. Every built-in agent, including YOLO-only
-  ones, gets the outline through `permission_row` (`choices.rs:558`). The fix follows directly: wrap the pill. Verified:
-  Confirmed by reading the code.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code — pass
-  `cx` and wrap the pill in `with_escalation_outline`, plus one view test; size S (well under 100 lines).). Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry,
-  or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## tensorlake-key-discard-lacks-preservation-test.md
 
 - Outcome: `other`.
@@ -630,26 +609,6 @@
   Recommendation for reference: fix code — pass collections into `agent_name` and use `custom_name`; size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## trailing-template-apply-custom-to-custom-misses-switched-agent.md
-
-- Outcome: `fix code`.
-- Assessment: Suppose a switch to a custom agent raised the red permission-escalation banner with Undo, and the user
-  then applies a template that selects a different custom agent. The old banner stays up, and its Undo would also undo
-  the template. Switching between custom agents by hand dismisses it. Verified: Confirmed.
-  `crates/gui/farhelm-gui/src/templates/apply.rs:219-230` compares only `agent.harness`, and every registered agent
-  shares `Custom`. The hand path sets `switched_agent` on an ID change (`launcher/draft.rs:760-766`). The doc comment at
-  `apply.rs:181-183` gives the rationale that is violated. SPEC_impl.md:9373-9374 says replay makes the draft "react
-  exactly as they do to the same edits by hand". That supports the fix, but it is a reading.
-- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
-  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
-  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
-  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
-  Recommendation for reference: fix code — also compare `custom_agent`; size S. Size gate: about 100 lines of diff
-  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md
