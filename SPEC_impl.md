@@ -2078,7 +2078,7 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   host's tag; every record when it holds no host) are settled as a retried create settles its own: a host start that
   outlived the request or supervisor that made it still holds the whole spec in its first stage, and could start a
   second agent after the new launch, with no marker or scope a sweep would find. Its first stage is waited for and then
-  ended with the verified signal, a record whose socket holds nothing is removed, a program found running in a host the
+  ended with the verified signal, a gone host's earlier launch record is removed, a program found running in a host the
   record names is rooted (at its pinned child) into the agent's stop, and a start that cannot be settled refuses the
   Restart with nothing stopped. Earlier records belong to hosts a confirmed later launch replaced, whose programs the
   Restart that replaced them stopped; they are left to a later start and to Delete, so a wedged one never holds a
@@ -2119,6 +2119,9 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   stopped. If the replacement host's end, scope or process-tree cleanup cannot be confirmed, the new generation keeps
   its launching row and host record with no published main terminal. The old host's runtime stops and its host stays
   reachable by its record.
+
+  If a retry finds the current generation's recorded host gone, it retains the launch record until its process sweep and
+  scope are confirmed. A gone socket alone does not give startup permission to reopen an earlier terminal.
 
   A restart that finds its row deleted when it confirms sweeps the new agent's tree and ends both hosts. Its error names
   any unconfirmed cleanup. The replacement's host record can go once the host is confirmed ended and either the tree was
@@ -2309,7 +2312,8 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   host's tag. Failed tab retries keep the earlier runtime's adopted process through every placeholder. A tab found gone
   gets a gone handle carrying that process, so the normal reap confirms that process ended and removes the launch record
   before forgetting the tab. A startup tab whose interrupted start could not be settled and left an `Unidentified`
-  placeholder remains final, as before.
+  placeholder remains final, as before. A missing agent socket during re-adoption keeps the unavailable handle while its
+  pinned host or child has not been confirmed gone, so Delete can still use those identities.
 - **The startup reclaim of orphaned hosts** (`service/core/host_reclaim.rs`), the start-up cleanup the maintainer
   approved ("Cleanup on quit"). Delete ends every host a session records before it removes the session's records and
   row, every host start writes its record first, and a tab's close ends its host before it removes the record, so a live
