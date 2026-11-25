@@ -41,11 +41,6 @@ consequences.
   — During a container build or setup, an external SSH alias or User change can open a fresh SSH connection and stream
   cached proxy credentials on stdin without checking the host identity, or read proxies from the moved host.
 
-- [`trailing-claude-trust-relative-config-dir-persists-relative-lock.md`](trailing-claude-trust-relative-config-dir-persists-relative-lock.md)
-  — If the login shell exports a relative CLAUDE_CONFIG_DIR, Farhelm accepts it, letting a symlink in a cloned
-  repository redirect pre-prompt ~/.claude.json edits and persisting a relative lock path into supervisor cleanup
-  (depends on user-exported relative CLAUDE_CONFIG_DIR).
-
 - [`trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md`](trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md)
   — Expanding a custom agent's ~/ command only during launch preparation kills a live agent on Restart (and allocates
   checkouts on Create) before failing if HOME is missing or the expanded path cannot be resolved (borderline

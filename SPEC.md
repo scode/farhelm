@@ -1851,8 +1851,8 @@ Claude's stale-lock threshold can still lose an update in either direction when 
 accepted trade-off of editing Claude's file. Trust allows repository hooks and commands just as answering Yes does.
 Farhelm skips the edit in the session's home directory and all of its parents, including the filesystem root. Claude
 treats a trusted directory as covering every directory inside it. Farhelm also skips the edit when the login shell
-supplies no usable absolute home directory. The session still starts and Claude may ask as usual. The mechanism is
-explicitly opt-in and best effort.
+supplies no usable absolute home directory or sets `CLAUDE_CONFIG_DIR` to a relative path. The session still starts and
+Claude may ask as usual. The mechanism is explicitly opt-in and best effort.
 
 Farhelm offers Claude's trust hint for a structured Claude launch or a session created from a fresh managed checkout.
 

@@ -3637,8 +3637,8 @@ the archive cleanup record, including when the checkout first runs another agent
 
 Both paths check the canonical project key against the canonical home from the login shell before resolving a config
 file. Trust skips home and every parent of home, including the filesystem root, because Claude inherits trust in
-subdirectories. An unset, empty, relative or unresolvable `HOME` skips the edit even with `CLAUDE_CONFIG_DIR` set. The
-terminal notice gives the reason and the shim continues.
+subdirectories. An unset, empty, relative or unresolvable `HOME` skips the edit even with `CLAUDE_CONFIG_DIR` set. A
+nonempty `CLAUDE_CONFIG_DIR` must also be absolute. The terminal notice gives the reason and the shim continues.
 
 Claude 2.1.300 selects `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json`, with a nonempty legacy
 `<config-dir>/.config.json` taking precedence (`<config-dir>` defaults to `~/.claude`). An empty unwritable legacy file
