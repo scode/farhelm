@@ -13,6 +13,7 @@ use super::{
 use crate::harness::*;
 use farhelm_proto::session_launch::CONVERSATION_PLACEHOLDER;
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchSelection, RestartOffer};
+use farhelm_supervisor::agent_kind::AgentHooks;
 use farhelm_supervisor::hosts::{HostTerminal, Liveness};
 use std::path::Path;
 
@@ -690,6 +691,8 @@ struct DriftEnv<'a> {
     work: &'a Path,
     state: &'a Path,
     private: Option<&'a private_config::PrivateConfig>,
+    /// Whether this fixture's supervisor may install this agent's persistent reporter files.
+    installs_hooks: bool,
 }
 
 impl DriftEnv<'_> {
@@ -726,7 +729,7 @@ impl DriftEnv<'_> {
             .await?;
         let result = async {
             if let Some(private) = self.private {
-                private.check_installed()?;
+                private.check_hook_setup(self.installs_hooks)?;
             }
             check(&session.id).await
         }
@@ -753,8 +756,19 @@ fn update_override_prefix(profile: &Harness, state: &Path) -> anyhow::Result<Opt
 /// Confirm the terminal hosts are gone before reconciling any vendor writes to that mirror.
 async fn with_drift_supervisor(
     profile: &Harness,
+    selection: LaunchSelection,
+    extra_config: Option<fn(&Path) -> anyhow::Result<private_config::PrivateConfig>>,
+    run: impl AsyncFnOnce(DriftEnv<'_>, farhelm_proto::SessionLaunch) -> DriftResult,
+) -> DriftResult {
+    with_drift_supervisor_hooks(profile, selection, extra_config, AgentHooks::default(), run).await
+}
+
+/// The capture category can turn hooks off while keeping the same ownership and mirror checks as ordinary drift.
+async fn with_drift_supervisor_hooks(
+    profile: &Harness,
     mut selection: LaunchSelection,
     extra_config: Option<fn(&Path) -> anyhow::Result<private_config::PrivateConfig>>,
+    agent_hooks: AgentHooks,
     run: impl AsyncFnOnce(DriftEnv<'_>, farhelm_proto::SessionLaunch) -> DriftResult,
 ) -> DriftResult {
     if which_binary(profile.binary).is_none() {
@@ -775,7 +789,11 @@ async fn with_drift_supervisor(
             .map(|prepare| prepare(config.path()))
             .transpose()?
     };
-    let mut seams = SupervisorSeams::default();
+    let installs_hooks = agent_hooks.allows(kind);
+    let mut seams = SupervisorSeams {
+        agent_hooks,
+        ..SupervisorSeams::default()
+    };
     if let Some(private) = &private {
         private.apply(&mut seams);
     }
@@ -796,6 +814,7 @@ async fn with_drift_supervisor(
             work: work.path(),
             state: state.path(),
             private: private.as_ref(),
+            installs_hooks,
         },
         launch,
     )
@@ -872,6 +891,7 @@ macro_rules! drift_cases {
 }
 
 mod base;
+mod capture_timing_hooks;
 mod initial_prompt;
 mod model_selection;
 mod named_conversation;

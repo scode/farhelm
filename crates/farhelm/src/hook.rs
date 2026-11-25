@@ -94,20 +94,21 @@
 //! The report is in place before this run appends its own line, so a pass
 //! that lands in between can, rarely, put the verdict above the `written`
 //! line it answers.
-//! The shape and the sanitizing of both writers' lines are defined once, in
-//! `farhelm_supervisor::hook_report`.
+//! Both writers use the same base format and sanitizing rules from `farhelm_supervisor::hook_report`.
 //!
 //! ```text
-//! <unix-seconds> <outcome> [<outcome detail> ]<conversation-id> <source>
+//! <unix-seconds> <outcome> [<outcome detail> ][<conversation-id> <source>][TAB event=<event>]
 //! ```
 //!
-//! The trailing `<conversation-id> <source>` pair is present only once the
+//! The `<conversation-id> <source>` pair is present only once the
 //! payload has parsed — i.e. from the moment there is an id to name — and
 //! `<source>` is `-` when the vendor sent no usable `source` field. Usable
 //! means a JSON string: a `source` that is `null`, a number, or any other
 //! shape renders as `-` exactly like an absent one, because the field is
 //! diagnostic-only and refusing a report over its TYPE would trade a
 //! working resume for a log nicety.
+//! A successful write names Stop and UserPromptSubmit, and Antigravity's source-less SessionStart.
+//! The tab before the event distinguishes this suffix from sanitized payload fields.
 //!
 //! Grok's payloads are the exception. Its `SessionStart` must carry a
 //! `source` of `new` or `load`, and one without it (absent or `null`) is
@@ -135,6 +136,7 @@
 //! ```text
 //! 1724470000 written conv-1 startup
 //! 1724470002 acked conv-1 startup
+//! 1724470003 written conv-1 -<TAB>event=Stop
 //! 1724470000 write-failed No such file or directory (os error 2) conv-1 -
 //! 1724470000 timeout stdin
 //! ```
@@ -142,12 +144,14 @@
 //! Every value interpolated into a line is sanitized and length-capped
 //! before it is written: control characters and the Unicode
 //! direction-and-line controls always become `_`, and the two
-//! trailing identity fields additionally lose their spaces so they stay
+//! identity fields additionally lose their spaces so they stay
 //! single positional tokens. Free-form detail keeps its spaces, since an
 //! I/O error is a sentence. The conversation id and source come from the
 //! agent — the same process that could otherwise embed a newline and forge
 //! a log line — and a log nobody can trust to be one-line-per-run is worse
 //! than no log.
+//! The written outcome may end with a known event word. This distinguishes
+//! submit and stop reports even when both use the same source and slot.
 //!
 //! Every failure of logging itself — a missing directory that cannot be
 //! created, an unwritable path, a full disk — is ignored. The log exists
@@ -421,7 +425,15 @@ fn finish_report(credential: HookCredential, mut report: HookReport) -> Outcome 
             },
             Err(error) => Outcome::detail("write-failed", error.to_string()),
         };
-    outcome.about(&report.conversation, &report.source)
+    outcome
+        .about(&report.conversation, &report.source)
+        .with_written_event(
+            report.vendor,
+            report
+                .hook_event_name
+                .as_ref()
+                .and_then(serde_json::Value::as_str),
+        )
 }
 
 /// Why a report must not be written because of its sub-agent marker, or
@@ -835,6 +847,8 @@ struct Outcome {
     detail: String,
     /// `(conversation, source)`, present once the payload has parsed.
     about: Option<(String, String)>,
+    /// The named turn event on a report the hook wrote, even if a later report replaces its slot.
+    event: Option<&'static str>,
 }
 
 impl Outcome {
@@ -844,6 +858,7 @@ impl Outcome {
             word,
             detail: String::new(),
             about: None,
+            event: None,
         }
     }
 
@@ -853,6 +868,7 @@ impl Outcome {
             word,
             detail: detail.into(),
             about: None,
+            event: None,
         }
     }
 
@@ -862,13 +878,29 @@ impl Outcome {
         self
     }
 
+    /// Name successful callbacks that can share a source with another event from the same conversation.
+    fn with_written_event(mut self, vendor: ReportVendor, event: Option<&str>) -> Self {
+        self.event = match (self.word, vendor, event) {
+            ("written", _, Some("UserPromptSubmit")) => Some("UserPromptSubmit"),
+            ("written", _, Some("Stop")) => Some("Stop"),
+            ("written", ReportVendor::Antigravity, Some("SessionStart")) => Some("SessionStart"),
+            _ => None,
+        };
+        self
+    }
+
     /// Render the log line, sanitizing every interpolated value.
     fn render(&self, seconds: u64) -> String {
         let about = self
             .about
             .as_ref()
             .map(|(conversation, source)| (conversation.as_str(), source.as_str()));
-        hook_report::render_log_line(seconds, self.word, &self.detail, about)
+        let mut line = hook_report::render_log_line(seconds, self.word, &self.detail, about);
+        if let Some(event) = self.event {
+            line.push_str("\tevent=");
+            line.push_str(event);
+        }
+        line
     }
 }
 
@@ -884,6 +916,40 @@ fn append_log(path: Option<&Path>, line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Stop and submit callbacks can share a report slot and source. A successful write keeps the known event in
+    /// its diagnostic so a later slot replacement cannot erase which callback arrived.
+    #[farhelm_testtrace::test]
+    fn written_turn_event_preserves_the_existing_hook_log_prefix() {
+        assert_eq!(
+            Outcome::word("written")
+                .about("conv-1", "")
+                .with_written_event(ReportVendor::Claude, Some("Stop"))
+                .render(17),
+            "17 written conv-1 -\tevent=Stop"
+        );
+        assert_eq!(
+            Outcome::word("written")
+                .about("conv-1", "")
+                .with_written_event(ReportVendor::Grok, Some("UserPromptSubmit"))
+                .render(17),
+            "17 written conv-1 -\tevent=UserPromptSubmit"
+        );
+        assert_eq!(
+            Outcome::word("written")
+                .about("conv-1", "")
+                .with_written_event(ReportVendor::Grok, Some("arbitrary\ntext"))
+                .render(17),
+            "17 written conv-1 -"
+        );
+        assert_eq!(
+            Outcome::word("write-failed")
+                .about("conv-1", "")
+                .with_written_event(ReportVendor::Claude, Some("Stop"))
+                .render(17),
+            "17 write-failed conv-1 -"
+        );
+    }
     use std::io::Cursor;
     use std::time::Instant;
 
@@ -1746,6 +1812,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn claude_stop_replaces_the_latest_report_with_the_current_conversation() {
         let dir = tempfile::tempdir().expect("tempdir");
+        let log = dir.path().join("hook-log/sess-1.log");
         let session = hook_report::session_dir(dir.path(), "sess-1").expect("valid id");
         let latest = session.join(hook_report::Slot::Latest.file_name());
         run_with(
@@ -1774,7 +1841,7 @@ mod tests {
                 Some(credential(dir.path())),
                 Cursor::new(payload.into_bytes()),
                 TEST_BUDGET,
-                None,
+                Some(log.clone()),
                 ReportVendor::Claude,
             );
             let written: HookReport =
@@ -1784,6 +1851,14 @@ mod tests {
             assert_eq!(written.conversation, current);
             assert_eq!(written.hook_event_name, Some(serde_json::json!("Stop")));
             assert_eq!(written.source, "");
+            let logged = std::fs::read_to_string(&log).expect("Stop log");
+            assert!(
+                logged
+                    .lines()
+                    .next_back()
+                    .unwrap()
+                    .ends_with(&format!(" {current} -\tevent=Stop"))
+            );
             let names: Vec<String> = std::fs::read_dir(&session)
                 .expect("drop directory")
                 .map(|entry| entry.expect("entry").file_name().into_string().unwrap())

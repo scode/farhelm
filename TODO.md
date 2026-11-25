@@ -208,13 +208,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Cursor and OpenCode to confirm interactive turns work under Farhelm's terminal host (today both stop at the initial
   TUI or trust screen).
 
-- **Drift tests: conversation capture timing, Stop/UserPromptSubmit hooks, and hooks-disabled mode.** Verify
-  `restart_readiness` timing (pre-prompt on Claude and Goose, first-prompt on Codex, Muse, Grok, and Antigravity,
-  first-reply on Pi and OMP), end-to-end `Stop` and Grok `UserPromptSubmit` hook payloads through Farhelm's own hooks,
-  OMP's 256-byte title-slot prelude, hook invisibility in the TUI (including Antigravity's `{}` stdout), and disabling
-  hooks via `FARHELM_AGENT_HOOKS=none` (including Goose's resume-time disable and Codex keeping `--no-daemon`). Plan:
-  `plans/queue/drift-capture-timing-hooks.md`.
-
 - **Drift tests: opt-in persistent hook installation for Grok and Antigravity.** Using isolated config directories so
   the real user home stays untouched, verify that the exact hook files Farhelm installs for Grok (`hooks/farhelm.json`)
   and Antigravity (`plugins/farhelm/{plugin.json,hooks.json}`) are discovered and invoked by the real CLIs inside
