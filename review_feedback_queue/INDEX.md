@@ -288,10 +288,6 @@ consequences.
 - [`legacy-template-can-ask-to-save-automatic-cleanup.md`](legacy-template-can-ask-to-save-automatic-cleanup.md) — A
   legacy template can ask to save when the only remaining change is automatic cleanup of a retired trust field.
 
-- [`tensorlake-key-clear-spec-misstates-leftover-refresh.md`](tensorlake-key-clear-spec-misstates-leftover-refresh.md) —
-  The implementation spec says clearing the Tensorlake API key refreshes the leftovers list. The app clears and
-  invalidates that list instead.
-
 - [`antigravity-trust-hint-omits-live-announcement.md`](antigravity-trust-hint-omits-live-announcement.md) — The new
   Antigravity trust hint emits no live announcement request for screen readers.
 
@@ -470,9 +466,6 @@ consequences.
 - [`exited-shell-suspend-confirmation-wording.md`](exited-shell-suspend-confirmation-wording.md) — Stop and suspend can
   still tell users it will stop a shell that has already exited.
 
-- [`terminal-steady-block-comment-stale.md`](terminal-steady-block-comment-stale.md) — The terminal sender's comment
-  describes a blinking cursor even though the updated contract specifies steady block behavior.
-
 - [`shift-enter-test-assumes-one-program-read.md`](shift-enter-test-assumes-one-program-read.md) — The Shift+Enter
   integration check assumes the program receives the key in one read, which the terminal host contract leaves to the PTY
   and program.
@@ -610,10 +603,6 @@ consequences.
 - [`trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md`](trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md)
   — The new test would still pass if a future edit broke automatic Trash refresh after Replace removes its source.
 
-- [`trailing-environment-delete-implementation-spec-still-describes-desktop-port-as.md`](trailing-environment-delete-implementation-spec-still-describes-desktop-port-as.md)
-  — The implementation spec says the desktop does not yet send the environment Delete request, but it is already the
-  shipped GUI path.
-
 - [`trailing-agent-create-host-help-omits-supported-hostless-launches.md`](trailing-agent-create-host-help-omits-supported-hostless-launches.md)
   — Agent create's Host help can send callers looking for an unnecessary flag when a template launches a recipe or their
   session is already inside a Farhelm environment.
@@ -720,9 +709,6 @@ consequences.
   — The release checker accepts a version with every entry in All changes. The generator, desktop reader and dialog lack
   an assertion that this release remains usable.
 
-- [`trailing-delete-scope-comment-describes-old-stop-behavior.md`](trailing-delete-scope-comment-describes-old-stop-behavior.md)
-  — The cleanup source misstates what happens to terminal tabs when a session is stopped.
-
 - [`trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md`](trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md)
   — The tests can pass without showing that a command typed in Bash or Zsh is saved when Farhelm stops the session.
 
@@ -825,10 +811,6 @@ consequences.
   — The strengthened assertion detects a stranded or lost emulator after the seed caller cancels. It can still pass if
   an empty emulator takes the old one's place and loses the screen.
 
-- [`trailing-product-spec-still-promises-no-decision-after-unanswered-environment.md`](trailing-product-spec-still-promises-no-decision-after-unanswered-environment.md)
-  — The product spec groups a request that was never sent with one that went unanswered, even though an unanswered
-  Delete may proceed.
-
 - [`trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md`](trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md)
   — The test whose contract #4529 repairs would still pass if the supervisor reinstated a blanket host requirement for
   Clone.
@@ -836,10 +818,6 @@ consequences.
 - [`trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md`](trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md)
   — The fixture checks publication after first-stage entry. Its coverage of the ordering relied on by startup recovery
   remains unverified.
-
-- [`trailing-migration-comments-reboot-classification-remains-disputed.md`](trailing-migration-comments-reboot-classification-remains-disputed.md)
-  — The migration wording may imply that a Launching row avoids the interruption assigned to Running rows. The ensuing
-  reboot classification gap remains unverified.
 
 - [`trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md`](trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md)
   — The product requires restricted sessions to be denied this operation. The independent inspection did not establish
@@ -1077,10 +1055,6 @@ consequences.
   — If a claimed container host's SSH alias moves externally, deleting an unregistered leftover in Settings ->
   Containers can falsely report success while leaving it running, and refreshing can hide all leftovers.
 
-- [`trailing-session-pane-stale-doc-on-helm-pushes.md`](trailing-session-pane-stale-doc-on-helm-pushes.md) — The
-  session_pane module comment still describes the pre-#4623 behavior where the helm withheld pushes while a command was
-  in flight.
-
 - [`trailing-suspend-read-activity-still-uses-ordered-lane.md`](trailing-suspend-read-activity-still-uses-ordered-lane.md)
   — Primary Suspend and Stop and suspend actions still wait up to 20 seconds behind any slow host on the ordered channel
   lane because their pre-flight session activity check was left on Lane::Ordered.
@@ -1256,11 +1230,6 @@ consequences.
   draft page when an external delete arrives mid-save, and only exercises Delete on a clean draft, missing the bug where
   confirming Delete on a modified custom agent leaves a ghost entry in the Settings sidebar.
 
-- [`trailing-custom-pin-corrected-text-omits-prior-restart-consequence.md`](trailing-custom-pin-corrected-text-omits-prior-restart-consequence.md)
-  — When a custom agent's parent process corrects a conversation first reported by a child process, the session
-  notification omits explaining what an earlier Restart would have resumed (unlike the other five pinned agents) and
-  says "its parent" even when a higher recorded ancestor makes the correction.
-
 - [`trailing-custom-report-forwarder-lock-test-lacks-witness.md`](trailing-custom-report-forwarder-lock-test-lacks-witness.md)
   — The integration test for running a custom agent's conversation reporter through the app forwarder during an update
   or uninstall does not actually prove that the forwarder prevented the CLI from starting, so a regression that bypassed
@@ -1430,11 +1399,6 @@ consequences.
   keyboard-focus section and the desktop app allow sending an answer to any other host's SSH question to immediately
   open and focus an already-waiting automatic Update Setup question.
 
-- [`trailing-specs-and-core-omit-grok-and-custom-from-pin-correction-lists.md`](trailing-specs-and-core-omit-grok-and-custom-from-pin-correction-lists.md)
-  — The product and implementation specs still list only Claude, Codex, Muse, and Antigravity for pin-correction
-  notifications and omit custom agents from several positional-attribution and version-0 lists, even though Grok and
-  custom agents now use the same positional process pin and post their own correction notifications.
-
 - [`trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md`](trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md)
   — A launch template on the Agent tab that selects the generic Custom agent type without naming a registered custom
   agent ID can be marked as the quick-launch template (⚡) or treated as ready to quick-launch, even though Farhelm
@@ -1489,11 +1453,6 @@ consequences.
 - [`trailing-ticker-live-motion-resume-test-misses-blink-resume.md`](trailing-ticker-live-motion-resume-test-misses-blink-resume.md)
   — The test checking that live Reduce Motion changes pause and then resume both the terminal cursor blink and the
   running-session pulse does not actually verify that the cursor blink resumes blinking after motion is turned back on.
-
-- [`trailing-ticker-reduced-motion-doc-misstates-outline-fade.md`](trailing-ticker-reduced-motion-doc-misstates-outline-fade.md)
-  — The doc comment explaining why `ticker::reduced_motion` still exists contradicts the actual behavior of the
-  permission-escalation outline, which could mislead a future change into removing the reduced-motion check and breaking
-  the static red outline.
 
 - [`trailing-toolbar-650px-height-test-unguarded-else-branch.md`](trailing-toolbar-650px-height-test-unguarded-else-branch.md)
   — The layout test meant to guard the condensed environment button's 23-pixel height in a 650-pixel session pane does

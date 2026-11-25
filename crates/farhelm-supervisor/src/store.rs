@@ -1873,9 +1873,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         // EARLIEST state, not a flattering one. That is the conservative
         // direction the crash-ordering rule demands (see `LastOutcome`):
         // claiming `running` for a session that may well have exited
-        // during the upgrade would be the record leading reality, and
-        // would additionally paint such a session `interrupted` at the
-        // next reboot. `launching` preserves the earliest durable outcome.
+        // during the upgrade would be the record leading reality.
+        // `launching` preserves the earliest durable outcome.
         // Startup retires these old tmux terminals without probing live panes.
         //
         // `DEFAULT 'launching'` on the added column is what backfills

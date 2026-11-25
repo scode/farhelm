@@ -58,9 +58,10 @@
 //!   `recovery_held`). A stall's or refusal's band and the exit line are not held: the decision named only the card,
 //!   and only the agent's terminal is held, since a Restart detaches no tab.
 //! - **A Suspend of the open session's host** from this window holds back the reconnect card too (decided by this area
-//!   on 2026-11-16, extending the orchestrator's 2026-11-15 Restart hold): it ends the stream at once, but the helm
-//!   pushes the window nothing until its command answers, so the row reads fresh and the card would show for the whole
-//!   Suspend. Not held: a shown tab's card (the set holds only the agent's), and another session's row's Suspend.
+//!   on 2026-11-16, extending the orchestrator's 2026-11-15 Restart hold). The stream can end before the host's
+//!   suspended state reaches the window. Live pushes still arrive while the command is pending, and the hold keeps
+//!   the requested disconnect from briefly looking like an outage. A shown tab or a Suspend from another row keeps
+//!   the ordinary reconnect behavior.
 //!
 //! The pane acts from observers (the selection, the user's choices, the connection), never from drawing: focus moves
 //! made while a frame is drawn are not reliably drawn themselves, and observers also run for a window that is not drawn

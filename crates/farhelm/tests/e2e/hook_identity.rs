@@ -2309,6 +2309,14 @@ done
         );
     }
     let before = snapshot_of(&h, &session.id).await;
+    let notices = listed(&h.client, &session.id).await.notifications;
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert!(
+        notices[0]
+            .text
+            .contains("could have resumed that conversation")
+    );
+    assert!(notices[0].text.contains("one of that process's ancestors"));
     h.client
         .restart_session(&session.id, true)
         .await
@@ -3500,7 +3508,13 @@ async fn grok_parent_corrects_a_child_first_selection() {
     assert_eq!(corrected.capture_ownership_version, 1);
     let notices = listed(&h.client, &session.id).await.notifications;
     assert_eq!(notices.len(), 1, "{notices:?}");
-    assert!(notices[0].text.contains("child Grok process"));
+    assert!(notices[0].text.contains("Grok conversation"));
+    assert!(
+        notices[0]
+            .text
+            .contains("could have resumed that conversation")
+    );
+    assert!(notices[0].text.contains("one of that process's ancestors"));
     assert!(!notices[0].resolved);
 
     grok_report(

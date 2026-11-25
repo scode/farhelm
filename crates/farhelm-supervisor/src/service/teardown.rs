@@ -367,10 +367,9 @@ impl Supervisor {
             .sweep_roots()
             .await
             .map_err(TeardownError::HostDiscovery)?;
-        // `WholeSession`: delete is the one lifecycle operation
-        // that takes tabs down with the agent (SPEC.md — stop
-        // leaves them running), so this
-        // sweep deliberately does NOT subtract tab processes. It
+        // Delete takes the agent and all tabs in one whole-session sweep.
+        // Stop reaps the agent first and closes the tabs individually.
+        // This sweep includes all the tab processes. It
         // roots its walk at every tab host's child as well as the
         // agent's (`SessionHosts::sweep_roots`): the marker scan
         // reaches a tab's processes only by expanding from a marked

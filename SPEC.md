@@ -1723,16 +1723,17 @@ show "the sandbox stays" for one Delete just before the other seals it; the list
 The confirmation also says that Delete stops any processes still running in the selected session and closes its terminal
 tabs, including in a sandbox or container that stays for other sessions.
 
-When the helm cannot ask the sandbox's Farhelm (the sandbox is suspended or unreachable, or its Farhelm is a version
-this helm cannot talk to until it is updated), or the request gets no answer within 20 seconds (below), nothing is
-decided. Delete does not guess and never resumes the sandbox: it offers the whole-sandbox Delete instead, whose
-confirmation warns that every session, process, file, checkout, unpushed change and snapshot in the sandbox will be
-removed, including sessions Farhelm does not list because they were started while it was not connected, and that
-resuming or updating the sandbox first lets Farhelm delete just this session. **Delete session and sandbox** proceeds;
-it works while suspended or disconnected through the ordinary Tensorlake deletion path. Sandbox and snapshot cleanup
-finish before the host and its session entries are forgotten; a failure within 20 seconds keeps a visible reason and
-allows retry (below for a later one). A sandbox that was sealed and then suspended or became unreachable before the helm
-read the seal shows no sessions until the helm reaches it again; **Delete sandbox** in Hosts is the way out meanwhile.
+When the helm cannot send the session Delete, for example because the sandbox is suspended or its Farhelm needs an
+update, no decision was made. A sent request that goes unanswered may still be running or may already have deleted the
+session and sealed the sandbox if it was the last. If the helm cannot confirm an outcome and answers with the
+whole-sandbox option within 20 seconds, the window offers that choice if the user has not moved on. Its confirmation
+warns that every session, process, file, checkout, unpushed change and snapshot in the sandbox will be removed,
+including sessions Farhelm does not list because they were started while it was not connected, and that resuming or
+updating the sandbox first lets Farhelm delete just this session. **Delete session and sandbox** proceeds; it works
+while suspended or disconnected through the ordinary Tensorlake deletion path. Sandbox and snapshot cleanup finish
+before the host and its session entries are forgotten; a failure within 20 seconds keeps a visible reason and allows
+retry (below for a later one). A sandbox that was sealed and then suspended or became unreachable before the helm read
+the seal shows no sessions until the helm reaches it again; **Delete sandbox** in Hosts is the way out meanwhile.
 **Delete sandbox** in Hosts always destroys the whole sandbox after its own confirmation, whether or not its Farhelm
 answers.
 
@@ -3236,28 +3237,28 @@ applies), for an agent that reports by its first prompt (Pi and OMP report only 
 as long as the first turn, so their silence proves nothing and is not reported); a launch Farhelm could not add its
 conversation hook to, unless the user turned hooks off for that agent themselves; a Codex or Grok conversation record
 that Restart finds missing, which withdraws the resume offer; and an OMP launch whose conversation reporter does not
-match the running Farhelm, the one refused conversation report that notifies; and a Claude, Codex, Muse or Antigravity
-launch whose selected conversation is corrected by a report from a recorded ancestor of the process that reported it.
-For Codex, the notice says a Restart before now could have resumed the earlier conversation and that Farhelm now follows
-the conversation reported by one of that process's ancestors. The Claude, Muse and Antigravity notices describe what
-Restart would have resumed and name the agent process now followed. A higher recorded ancestor can still correct the
-choice. Every other refused report (from a subagent, from an agent process the session's agent started itself, overtaken
-by a relaunch or delete, or turned away by a passing error) is the system working and never notifies. A launch that
-still carries a conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. For
-Grok and Antigravity, the silent-hook timer starts only when Farhelm verified its own hook files for that launch. After
-a supervisor restart, a launch that received the hook starts its silent-hook clock at the next qualifying Enter;
-launches stored before this behavior was introduced stay unchecked. Each notification says what happened and what the
-user can do about it, or, when nothing can be done, what they lose; it never points at a log. The
-silent-conversation-hook warning names the agent and when it normally reports its conversation, using the same timing as
-Restart's explanation. It says Restart cannot resume until that report arrives. For agents whose hooks are passed as
-launch arguments, the warning asks users of custom commands to check that they pass on `{farhelm_args}`. Grok and
-Antigravity's warning invites feedback from the help (?) menu, as it does for ordinary launches of the other agents.
-There is at most one notification of each such problem per launch of the session's agent. The warning that the agent
-never reported its conversation and the warning that Restart stopped offering to resume are marked resolved when Restart
-can resume that launch's conversation again, including after a supervisor restart. The other session-tracking kinds and
-notifications from earlier launches stay as they are. If a resolved problem returns in the same launch, its existing
-notification reopens at the top as new and unread, even if the user had cleared it; repeated checks while it remains
-unresolved do not repeat it.
+match the running Farhelm, the one refused conversation report that notifies; and a Claude, Codex, Grok, Muse,
+Antigravity or custom agent launch whose selected conversation is corrected by a report from a recorded ancestor of the
+process that reported it. For Codex, Grok and custom agents, the notice says a Restart before now could have resumed the
+earlier conversation and that Farhelm now follows the conversation reported by one of that process's ancestors. The
+Claude, Muse and Antigravity notices describe what Restart would have resumed and name the agent process now followed. A
+higher recorded ancestor can still correct the choice. Every other refused report (from a subagent, from an agent
+process the session's agent started itself, overtaken by a relaunch or delete, or turned away by a passing error) is the
+system working and never notifies. A launch that still carries a conversation Farhelm captured earlier is never told
+Restart cannot resume it, because Restart can. For Grok and Antigravity, the silent-hook timer starts only when Farhelm
+verified its own hook files for that launch. After a supervisor restart, a launch that received the hook starts its
+silent-hook clock at the next qualifying Enter; launches stored before this behavior was introduced stay unchecked. Each
+notification says what happened and what the user can do about it, or, when nothing can be done, what they lose; it
+never points at a log. The silent-conversation-hook warning names the agent and when it normally reports its
+conversation, using the same timing as Restart's explanation. It says Restart cannot resume until that report arrives.
+For agents whose hooks are passed as launch arguments, the warning asks users of custom commands to check that they pass
+on `{farhelm_args}`. Grok and Antigravity's warning invites feedback from the help (?) menu, as it does for ordinary
+launches of the other agents. There is at most one notification of each such problem per launch of the session's agent.
+The warning that the agent never reported its conversation and the warning that Restart stopped offering to resume are
+marked resolved when Restart can resume that launch's conversation again, including after a supervisor restart. The
+other session-tracking kinds and notifications from earlier launches stay as they are. If a resolved problem returns in
+the same launch, its existing notification reopens at the top as new and unread, even if the user had cleared it;
+repeated checks while it remains unresolved do not repeat it.
 
 Earlier releases gave a session in which something still ran in an old terminal the old-terminal warning: it asked for
 the session to be restarted, replaced, stopped or deleted as soon as possible, because an upcoming release would
@@ -4163,9 +4164,10 @@ request.
 Custom agents report their conversation explicitly through `farhelm custom-agent report-conversation --id <ID>`. The
 reporter stays silent and exits successfully even if it cannot write a report. Valid reports can be recorded while the
 supervisor is down. Admission checks the current launch and uses ancestry to keep a nested agent's report from replacing
-its parent's capture. Plain Restart needs both a recorded conversation and a saved resume command. A named Restart with
-keeps the old capture until a report from the new launch replaces it, and clears it in the relaunch when the new launch
-has reporting disabled.
+its parent's capture. If a nested process reports first, a recorded ancestor can correct the selection and post a
+correction notice once per launch. Plain Restart needs both a recorded conversation and a saved resume command. A named
+Restart with keeps the old capture until a report from the new launch replaces it, and clears it in the relaunch when
+the new launch has reporting disabled.
 
 Codex's first admitted selecting report pins the process that ran the hook under the session's agent terminal, skipping
 narrow shell trampolines. Renamed Codex executables and resident launchers above the emitter work with this rule. Later
@@ -4268,12 +4270,12 @@ discriminator naming the adapter that produced it — the injected hook command,
 and a report addressed to a session of another agent type is refused before any vendor state is consulted. The
 discriminator routes; it does not prove. Codex and Grok admission require foreground and record proofs, and their exact
 resume additionally requires versioned proof that the binding was admitted under those proofs, with the historical Codex
-exception described in SPEC_impl.md. Claude, Muse and Antigravity admission require the positional attribution and pin
-checks above. Antigravity also verifies the reported transcript at admission. These three use version-0 captures. Goose
-and Pi retain their existing admission and resume rules; for them the discriminator alone adds no foreground protection.
-Old senders that predate the discriminator fail closed rather than reporting untagged. A refused report changes nothing:
-no stored identity, no offer, no pending state. Resume is never silently turned into fresh, and historical captures are
-never rewritten to look proven.
+exception described in SPEC_impl.md. Claude, Muse, Antigravity and custom-agent admission require the positional
+attribution and pin checks above. Antigravity also verifies the reported transcript at admission. These captures use
+version 0. Goose and Pi retain their existing admission and resume rules; for them the discriminator alone adds no
+foreground protection. Old senders that predate the discriminator fail closed rather than reporting untagged. A refused
+report changes nothing: no stored identity, no offer, no pending state. Resume is never silently turned into fresh, and
+historical captures are never rewritten to look proven.
 
 Confirmed 2026-10-22, an accepted exception to restart resuming exactly the session's own conversation (above): Goose's
 reporter does not tell a native Goose sub-agent, or a nested Goose run that inherits the reporter, from the session's

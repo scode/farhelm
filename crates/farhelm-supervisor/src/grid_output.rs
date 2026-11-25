@@ -393,8 +393,8 @@ pub fn screen(emulator: &Emulator) -> Screen {
         y: point.line.0.clamp(0, i32::from(size.lines) - 1) as u16,
         visible: modes.cursor_visible && !hidden,
         shape,
-        // Today's terminal blinks unless the program says otherwise, and
-        // alacritty's default style is steady (module docs).
+        // The emulator reports the same style for its default and a requested
+        // steady block. Farhelm blinks both, as described in the module docs.
         blink: style == CursorStyle::default() || style.blinking,
     };
     Screen {
