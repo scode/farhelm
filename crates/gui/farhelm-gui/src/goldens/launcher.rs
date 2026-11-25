@@ -64,6 +64,65 @@ pub(super) fn launcher_restart_wake_setup(state: &SceneState, window: &mut Windo
     suspended_launcher_setup(state, window, cx, rows, open_restart);
 }
 
+/// Replace inside an owned sandbox shows what happens to both the source checkout and the new one.
+pub(super) fn sandbox_replace_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let source = session("a")
+        .host(11)
+        .host_name("Rust sandbox")
+        .cwd("/home/user/src/widgets")
+        .launch(json!({"kind": "command", "command": "make watch", "yolo": false}));
+    let mut rows = listing(&["a"], &[source]);
+    rows.entries[0].value["host_identity"] = json!("identity11");
+    setup_sandbox(
+        state,
+        window,
+        cx,
+        rows,
+        fixture_hosts(&[0, 10]),
+        open_sandbox_replace,
+    );
+}
+
+/// Choose Managed checkout on the real Replace with form, then require both explanations in the capture.
+fn open_sandbox_replace(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if crate::session::current_store(cx).is_none() {
+        state.after.set(Some(open_sandbox_replace));
+        return;
+    }
+    assert!(entry::open_replace_with("a", window, cx));
+    state.after.set(Some(|_, state, window, cx| {
+        assert!(click_control(
+            window,
+            cx,
+            "launcher-destination-Managed checkout"
+        ));
+        state.after.set(Some(|_, _, window, _| {
+            let nodes = window.driver_nodes();
+            let warning = texts_within(nodes, "launcher-replacement-checkout-warning");
+            assert!(
+                !warning.is_empty()
+                    && warning
+                        .iter()
+                        .all(|line| line.visible_bounds == line.bounds)
+            );
+            let note = nodes
+                .iter()
+                .find(|node| {
+                    node.label.as_deref().is_some_and(|words| {
+                        words.starts_with("New folder inside this environment")
+                    })
+                })
+                .expect("permanent removal note");
+            assert!(note.visible_bounds == note.bounds && !note.visible_bounds.is_empty());
+        }));
+    }));
+}
+
 /// The same pinned installation and registry for every launcher scene targeting the suspended sandbox.
 fn suspended_launcher_setup(
     state: &SceneState,

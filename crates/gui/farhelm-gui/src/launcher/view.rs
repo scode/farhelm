@@ -2655,7 +2655,7 @@ impl Render for Launcher {
             )
             .child(address_and_name)
             .children(managed_checkout.then(|| self.checkout_folder_line(palette, cx)))
-            .children(managed_checkout.then(|| self.checkout_lifetime_note(palette)))
+            .children(managed_checkout.then(|| self.checkout_lifetime_note(palette, cx)))
             .children(
                 self.host_picker
                     .note

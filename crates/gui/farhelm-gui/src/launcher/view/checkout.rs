@@ -86,6 +86,7 @@ const HOST_CHECKOUT_LIFETIME: &str =
     "New folder named after the session; it moves to the trash when its last session is deleted.";
 const ENVIRONMENT_CHECKOUT_LIFETIME: &str = "New folder named after the session, inside the new environment; \
                                             deleting its last session removes it permanently.";
+const EXISTING_ENVIRONMENT_CHECKOUT_LIFETIME: &str = "New folder inside this environment, named after the session. Deleting the checkout's last session removes the folder permanently.";
 /// The supervisor's words refusing a checkout name that is taken (its `NameError::Occupied`), found anywhere in the
 /// refusal since the helm passes them on whole.
 const OCCUPIED: &str = "a directory with that checkout name already exists";
@@ -1116,11 +1117,17 @@ impl Launcher {
         )
     }
 
-    /// Delete on an installed host can archive the checkout. Inside a new environment the last reference is
-    /// discarded, and the environment may itself go away, so the host's trash wording would be wrong there.
-    pub(super) fn checkout_lifetime_note(&self, palette: &theme::Palette) -> AnyElement {
+    /// Describe future Delete of the new checkout. Replace with's separate warning describes retiring the old checkout.
+    pub(super) fn checkout_lifetime_note(&self, palette: &theme::Palette, cx: &App) -> AnyElement {
+        use crate::session_list::environment::Environment;
         let words = if self.draft.target.is_some() {
             ENVIRONMENT_CHECKOUT_LIFETIME
+        } else if self
+            .chosen_host(cx)
+            .and_then(Environment::of_host)
+            .is_some()
+        {
+            EXISTING_ENVIRONMENT_CHECKOUT_LIFETIME
         } else {
             HOST_CHECKOUT_LIFETIME
         };

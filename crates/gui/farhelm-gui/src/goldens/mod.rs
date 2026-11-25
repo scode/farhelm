@@ -1322,6 +1322,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_replace_setup,
     },
     Scene {
+        name: "launcher-replace-checkout-in-sandbox",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: sandbox_replace_setup,
+    },
+    Scene {
         name: "launcher-narrow",
         size: (720., 900.),
         draw: session_lists_then,

@@ -47277,3 +47277,69 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   preview still brings back the form for a new choice. Change `lystsvyvrkwmswmrlkrxyynmtxqvmsvo`, bookmark
   `plan/triage-environments-nov24/02c-checkout-wake-preview-refusal`.
   [Draft PR](https://github.com/scode/farhelm/pull/4922/changes).
+
+## trailing-replace-with-existing-env-checkout-promises-trash.md
+
+- Outcome: `fix code`.
+- Assessment: In Replace with… on a session inside an existing sandbox or container, choosing Managed checkout shows the
+  lifetime note "it moves to the trash when its last session is deleted". Inside a sandbox or container that is not what
+  happens: deleting the session discards the checkout, or deletes the whole environment if it was the last session. The
+  Delete confirmation itself does state the real outcome. Verified: confirmed. `checkout_lifetime_note`
+  (`crates/gui/farhelm-gui/src/launcher/view/checkout.rs:1300-1307`) chooses the environment wording only when
+  `draft.target.is_some()`, which is a new environment. SPEC.md "Managed checkouts" (`SPEC.md:1787-1788`) requires that
+  selecting managed checkout "explains the directory's lifetime", and "Sandbox sessions" (`SPEC.md:1698-1702`, `1744`)
+  says the checkout is discarded, not moved to the trash. Note: `SPEC.md:1783`'s row-tooltip sentence states the trash
+  lifetime generally, so the spec wording itself may need a sandbox caveat. That is why this is not clearly settled.
+- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
+  Recommendation for reference: fix code — pick the wording by the chosen host's being session-owned too; size S. Size
+  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Fixed. The lifetime note describes permanent removal of the fresh checkout inside the owned environment.
+  The source checkout's separate Replace warning still describes its archive. Change `qsnxxwyunvvmywmkrypmstnukswtkwwx`,
+  bookmark `plan/triage-environments-nov24/02d-checkout-lifetime-and-wake-coverage`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4925/changes).
+
+## trailing-wake-folder-tests-omit-timeouts-removal-and-replace.md
+
+- Outcome: `other`.
+- Assessment: The tests for "wake the host, then launch into an existing folder" never let the 60-second waits actually
+  run out. They never remove or retarget the host during the wake, and never complete a Replace with… after a successful
+  wake. The product code for these paths exists. Nothing is shown to be broken. Verified: confirmed.
+  `crates/gui/farhelm-gui/src/launcher/wake_tests.rs` has no test that lets either 60-second budget expire (the longest
+  advance is 75 s during Resuming, line 136), no host-removal or retarget test, and
+  `a_replacement_holds_its_source_through_a_wake_refusal` (`:300`) covers only a 409 refusal. The file is unchanged
+  since the reviewed commit apart from `7164b1113`.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — no product defect alleged; size M if kept (several
+  GPUI tests).
+- Execution: Added the folder reconnection deadline regression. The test checks the draft before and at the deadline.
+  Busy retries, host changes, and successful Replace need distinct fixtures beyond the test-only size gate. Change
+  `qsnxxwyunvvmywmkrypmstnukswtkwwx`, bookmark `plan/triage-environments-nov24/02d-checkout-lifetime-and-wake-coverage`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4925/changes).
+
+## trailing-wake-checkout-tests-omit-replace-with.md
+
+- Outcome: `other`.
+- Assessment: No test covers Replace with… into a fresh managed checkout on a suspended host, although the parity notes
+  claim it is covered. The one product bug this gap hid (Down+Enter on a recent checkout setup skipping the fresh-clone
+  warning) is already queued separately as `trailing-replace-with-suspended-checkout-recent-skips-warning.md` (highest).
+  Verified: confirmed. The wake-checkout tests in `crates/gui/farhelm-gui/src/launcher/checkout_tests.rs` (from
+  `suspended_checkout`/`suspend_with_recents`) build only `LaunchDraft::new`. The product consequence is tracked in the
+  separate item (INDEX.md line 87). What remains here is coverage, plus a stale parity claim in
+  `docs/gpui/parity/launcher.md`.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — or fold the Replace with checkout test into the fix
+  of the highest-bucket sibling, which would need it anyway; size M if kept separately.
+- Execution: The end-to-end Replace with cases need more than the test-only allowance and the fresh-clone consent
+  regression belongs with its existing plan follow-up. Corrected the parity coverage claim. Change
+  `qsnxxwyunvvmywmkrypmstnukswtkwwx`, bookmark `plan/triage-environments-nov24/02d-checkout-lifetime-and-wake-coverage`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4925/changes).

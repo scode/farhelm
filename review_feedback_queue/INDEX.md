@@ -225,21 +225,9 @@ consequences.
   — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
   admitted instead of being refused.
 
-- [`trailing-wake-folder-tests-omit-timeouts-removal-and-replace.md`](trailing-wake-folder-tests-omit-timeouts-removal-and-replace.md)
-  — The folder-wake test suite never asserts that the 60-second connection or busy-retry timeouts fire, that host
-  removal or retarget cancels wake, or that Replace with submits with its frozen delete guard.
-
-- [`trailing-wake-checkout-tests-omit-replace-with.md`](trailing-wake-checkout-tests-omit-replace-with.md) —
-  Managed-checkout wake tests cover only New mode and never test Replace with across wake, post-wake preview, Quick
-  Switcher failure release, or retained-recent Enter.
-
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
   agent-credentials and Codex config targets unverified before and after retry.
-
-- [`trailing-replace-with-existing-env-checkout-promises-trash.md`](trailing-replace-with-existing-env-checkout-promises-trash.md)
-  — In Replace with inside an existing sandbox or container, switching Destination to Managed checkout says the checkout
-  moves to trash on Delete even though deleting in an environment discards or destroys it permanently.
 
 - [`trailing-host-scoped-trash-confirmation-stays-open-invisibly.md`](trailing-host-scoped-trash-confirmation-stays-open-invisibly.md)
   — If a host leaves or empties while its 'Delete all on' confirmation is open in Trash, the invisible confirmation

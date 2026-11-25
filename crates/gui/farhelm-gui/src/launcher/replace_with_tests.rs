@@ -245,8 +245,8 @@ fn replace_with_warns_where_about_the_sources_checkout(cx: &mut TestAppContext) 
 }
 
 /// Replacing into a fresh checkout in the source's own sandbox releases the
-/// old checkout through Replace's usual archive path. The trash remains in
-/// the sandbox and goes away when the sandbox is deleted.
+/// old checkout through Replace's usual archive path. The new checkout follows
+/// the sandbox's permanent removal rule when its last session is later deleted.
 #[gpui::test]
 fn replace_with_warns_that_the_checkouts_trash_stays_inside_the_sandbox(cx: &mut TestAppContext) {
     let (mut helm, cx) = environment_window(cx, "c", "web");
@@ -263,6 +263,8 @@ fn replace_with_warns_that_the_checkouts_trash_stays_inside_the_sandbox(cx: &mut
             "Starts from a fresh clone without the changes in this session's checkout of acme/widget. If this replaces its last session, the old checkout moves to the trash inside the sandbox or container. Deleting the sandbox or container also deletes its trash."
         )
     );
+    let lifetime = "New folder inside this environment, named after the session. Deleting the checkout's last session removes the folder permanently.";
+    assert_eq!(name_of(cx, lifetime).as_deref(), Some(lifetime));
 }
 
 /// Launch provenance alone does not tell us that the source still uses a
