@@ -68,7 +68,7 @@ impl Bindings {
 
     /// A replacement must not activate another recipe's pending selection edit.
     fn uses(&self, name: &str) -> bool {
-        self.github_token_credential.as_deref() == Some(name)
+        self.uses_github(name)
             || self.uses_claude(name)
             || self.uses_codex_login(name)
             || self.uses_codex_endpoint(name)
@@ -85,6 +85,11 @@ impl Bindings {
     /// Subscription login writes the separate auth.json file.
     fn uses_codex_login(&self, name: &str) -> bool {
         self.codex_login_credential.as_deref() == Some(name)
+    }
+
+    /// A GitHub replacement must reach the token and helper step, which runs last.
+    fn uses_github(&self, name: &str) -> bool {
+        self.github_token_credential.as_deref() == Some(name)
     }
 
     /// Pending Claude cleanup affects a push only if Claude needs that value.
@@ -164,34 +169,40 @@ struct DeliveryWarnings {
     codex_login_lookup_failed: bool,
 }
 
-/// A hard failure still ends the pass. Keep preceding lookup warnings separate
-/// so a save reply can include only the ones relevant to its delivery.
+/// The first delivery slot a hard failure leaves unfinished. Earlier slots may already have written their credentials.
+#[derive(Debug)]
+enum UnfinishedFrom {
+    LaunchEnvironment,
+    CodexLogin,
+    Github,
+}
+
+/// A hard failure ends the pass. Host details show the whole failure, while a save reports the selected slots that
+/// failed or could not run. Earlier cleanup or lookup warnings still explain any affected launch credentials.
 #[derive(Debug)]
 struct DeliveryError {
     reason: String,
-    lookup_warnings: Option<DeliveryWarnings>,
+    unfinished_from: UnfinishedFrom,
+    warnings: DeliveryWarnings,
 }
 
 impl From<String> for DeliveryError {
     fn from(reason: String) -> Self {
         Self {
             reason,
-            lookup_warnings: None,
+            unfinished_from: UnfinishedFrom::LaunchEnvironment,
+            warnings: DeliveryWarnings::default(),
         }
     }
 }
 
 impl DeliveryError {
-    /// Host details show both the failed lookup and the failure that stopped the pass.
+    /// Host details show all known warnings and the failure that stopped the pass.
     fn message(&self) -> String {
-        self.with_warning(
-            self.lookup_warnings
-                .as_ref()
-                .and_then(DeliveryWarnings::message),
-        )
+        self.with_warning(self.warnings.message())
     }
 
-    /// Keep the hard failure in every reply, with any earlier warnings selected by that reply.
+    /// Join the hard failure with the earlier warnings relevant to the reader.
     fn with_warning(&self, earlier: Option<String>) -> String {
         match earlier {
             Some(earlier) => format!("{earlier}. {}", self.reason),
@@ -711,16 +722,21 @@ impl CredentialDelivery {
                 let uses_claude = bindings.uses_claude(name);
                 let uses_codex = bindings.uses_codex_endpoint(name);
                 let uses_codex_login = bindings.uses_codex_login(name);
+                let uses_github = bindings.uses_github(name);
                 match self.apply(&row, bindings, None, DeliveryPhase::Connected, guard).await {
                     Ok(warnings) => {
                         let failure = warnings.push_failure(uses_claude, uses_codex, uses_codex_login);
                         (warnings.message(), failure)
                     }
                     Err(error) => {
-                        let earlier = error.lookup_warnings.as_ref().and_then(|warnings| {
-                            warnings.push_failure(uses_claude, uses_codex, uses_codex_login)
-                        });
-                        (Some(error.message()), Some(error.with_warning(earlier)))
+                        let earlier = error.warnings.push_failure(uses_claude, uses_codex, uses_codex_login);
+                        let blocked = match error.unfinished_from {
+                            UnfinishedFrom::LaunchEnvironment => true,
+                            UnfinishedFrom::CodexLogin => uses_codex_login || uses_github,
+                            UnfinishedFrom::Github => uses_github,
+                        };
+                        let failure = if blocked { Some(error.with_warning(earlier)) } else { earlier };
+                        (Some(error.message()), failure)
                     }
                 }
             }) => result.unwrap_or_else(|_| (Some(TIMED_OUT.into()), Some(TIMED_OUT.into()))),
@@ -805,7 +821,8 @@ impl CredentialDelivery {
             if let Some(name) = bindings.codex_login_credential {
                 guard = self
                     .apply_codex_login(row, &target, &mut record, name, guard, &mut warnings)
-                    .await?;
+                    .await
+                    .map_err(|reason| (reason, UnfinishedFrom::CodexLogin))?;
             }
             self.apply_github_token(
                 row,
@@ -815,13 +832,15 @@ impl CredentialDelivery {
                 guard,
             )
             .await
+            .map_err(|reason| (reason, UnfinishedFrom::Github))
         }
         .await;
         match later_result {
             Ok(()) => Ok(warnings),
-            Err(reason) => Err(DeliveryError {
+            Err((reason, unfinished_from)) => Err(DeliveryError {
                 reason,
-                lookup_warnings: warnings.lookup_aborted.then_some(warnings),
+                unfinished_from,
+                warnings,
             }),
         }
     }
