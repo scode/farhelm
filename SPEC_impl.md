@@ -3496,6 +3496,10 @@ it closes popovers. A file release uses the same query, preserving a cover found
 gone. A release can still finish an admitted press after it closes its own panel. An out-of-view panel gets the resize
 explanation before any cover is considered.
 
+A printed web link can open without a destination panel. A press must hit the same cell in the current grid and its last
+paint, and updates that change the grid or viewport withdraw that paint record. Hover alone leaves it usable. A visible
+continuation of a wrapped link still resolves to the whole address.
+
 The scanner that finds the web addresses a hyperlink's visible text mentions, and judges each against the destination,
 is `crates/gui/farhelm-grid-model/src/link_claims.rs`, a pure function of the label's rows and the destination that the
 hover's warning (below) calls. It works on a recognition view folded one extended grapheme cluster at a time (NFKC

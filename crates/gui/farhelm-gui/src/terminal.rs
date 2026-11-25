@@ -32,7 +32,7 @@ mod tests;
 pub(crate) mod text_size;
 pub(crate) mod tunnels;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
@@ -49,8 +49,8 @@ use farhelm_input_mapping::pointer::Geometry;
 use farhelm_proto::grid::GridInput;
 use gpui::{
     App, Bounds, ContentMask, Context, Element, ElementId, FontFeatures, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, Modifiers, PathBuilder, Pixels, Render, ShapedLine,
-    Size, TextAlign, TextRun, Window, fill, font, point, px, size,
+    InspectorElementId, IntoElement, LayoutId, Modifiers, PathBuilder, Pixels, Point, Render,
+    ShapedLine, Size, TextAlign, TextRun, Window, fill, font, point, px, size,
 };
 
 use crate::assets::TERMINAL_FONT;
@@ -357,6 +357,8 @@ pub struct TerminalView {
     /// the screen again, a reset), so a hover never outlives the text it read: a redraw that changes, moves or removes
     /// the link drops it, and one that brings a link under a still pointer shows it.
     hovered_link: Option<TerminalLink>,
+    /// The current grid's paint record. Row and viewport changes withdraw it until paint records the new frame.
+    painted_grid: Rc<Cell<Option<PaintedGrid>>>,
     /// The attached terminal confirmed that the current printed path names a downloadable file.
     path_hover_ready: bool,
     cols: u16,
@@ -390,6 +392,7 @@ impl TerminalView {
             selection: None,
             hover: None,
             hovered_link: None,
+            painted_grid: Rc::default(),
             path_hover_ready: false,
             cols: 0,
             cursor: None,
@@ -528,8 +531,14 @@ impl TerminalView {
         }
     }
 
-    /// Where the view is, for the scrollbar: the screen's rows out of every position navigation can reach, including
-    /// blank padding for lifted rows. The catch-up placeholder hides the view until its replay is complete.
+    /// The exit and status lines can lift rows out of the pane. Paging and the scrollbar use the rows left in view.
+    fn visible_grid_rows(&self) -> usize {
+        self.rows
+            .len()
+            .saturating_sub(usize::from(self.viewport.top_padding()))
+    }
+
+    /// Count the visible share while retaining the same travel between oldest content and the live screen.
     pub fn scroll_position(&self) -> ScrollbarLines {
         if !self.visible {
             return ScrollbarLines {
@@ -540,7 +549,7 @@ impl TerminalView {
         }
         let first = self.viewport.first(&self.model);
         let history = self.viewport.bottom(&self.model).saturating_sub(first);
-        let visible = self.rows.len();
+        let visible = self.visible_grid_rows();
         ScrollbarLines {
             visible,
             total: usize::try_from(history)
@@ -574,6 +583,7 @@ impl TerminalView {
     /// view), so any damage redraws it then.
     fn sync(&mut self, cx: &mut Context<Self>) {
         let damage = self.model.take_damage();
+        let history_changed = damage.history;
         // A reset (a resize or history reset, after which line numbers no longer name the lines they named) lets go
         // of the anchor, so `update_shown` below follows the screen and drops the history cache.
         let reset = self.viewport.synchronize(&self.model, &damage);
@@ -585,15 +595,20 @@ impl TerminalView {
             self.selection
                 .and_then(|selection| selection.trim_before(self.oldest_line()))
         };
-        let hovered = self.hovered_link.clone();
         let changed = self.update_grid(damage);
-        self.update_shown();
-        if changed
-            || reset
-            || scrolled_change
-            || self.selection != selection
-            || self.hovered_link != hovered
-        {
+        self.update_shown_rows();
+        let hovered_changed = self.refresh_hovered_link();
+        let grid_changed = changed || reset || scrolled_change || hovered_changed;
+        // A wrapped printed link can start in history even if the visible cells did not change.
+        if grid_changed || history_changed {
+            self.painted_grid.set(None);
+        }
+        let hovered_printed = self
+            .hovered_link
+            .as_ref()
+            .is_some_and(|link| link.kind == LinkKind::Text);
+        // A new hover will request its own paint. An existing printed link needs a usable paint right away.
+        if grid_changed || (history_changed && hovered_printed) || self.selection != selection {
             cx.notify();
         }
     }
@@ -765,6 +780,16 @@ impl TerminalView {
             .collect()
     }
 
+    /// The press must hit the same grid cell in the last paint. Pointer movement alone leaves that paint usable.
+    fn printed_link_was_painted(&self, at: Point<Pixels>, cell: (u16, u16)) -> bool {
+        self.painted_grid.get().is_some_and(|painted| {
+            let delta = at - painted.origin;
+            painted.clip.contains(&at)
+                && (f32::from(delta.x) / painted.cell.width).floor() == f32::from(cell.0)
+                && (f32::from(delta.y) / painted.cell.height).floor() == f32::from(cell.1)
+        })
+    }
+
     /// The local selection, if any.
     pub fn selection(&self) -> Option<Selection> {
         self.selection
@@ -834,7 +859,7 @@ impl TerminalView {
     }
 
     /// The selected columns of each view row, for the element to draw: one range per row the selection touches, by
-    /// the row's line, clipped to the screen's width.
+    /// the row's line. Exclude the unused wrap cell at the earlier row's own width, even after a resize.
     fn selected_rows(&self) -> Vec<(usize, Range<u16>)> {
         let Some(selection) = self.selection.filter(|selection| !selection.is_empty()) else {
             return Vec::new();
@@ -843,16 +868,21 @@ impl TerminalView {
             .filter(|&row| !matches!(self.shown[row], ShownRow::Notice | ShownRow::Blank))
             .filter_map(|row| {
                 let line = self.line_at_row(u16::try_from(row).ok()?)?;
-                let columns = selection.columns(line, self.cols);
+                let (width, text) = self.model.line(line)?;
+                let width = if text.wide_wrap_padding {
+                    text.text_columns(width).min(self.cols)
+                } else {
+                    self.cols
+                };
+                let columns = selection.columns(line, width);
                 (!columns.is_empty()).then_some((row, columns))
             })
             .collect()
     }
 
-    /// Rebuild what the element draws from the screen cache, the model's history and the viewport, and find the link
-    /// under the resting pointer again in what is now shown. Every change to what the view shows comes through here
-    /// (output, a scroll, following the screen, a reset); each caller notifies when anything changed.
+    /// Rebuild the shown rows and resting link after navigation or layout changes, when the old paint is obsolete.
     fn update_shown(&mut self) {
+        self.painted_grid.set(None);
         self.update_shown_rows();
         self.refresh_hovered_link();
     }
@@ -988,6 +1018,7 @@ impl Render for TerminalView {
             cursor_row: self.cursor_row(),
             selected: self.selected_rows(),
             underlined: self.underlined_rows(),
+            painted_grid: self.painted_grid.clone(),
             cols: self.cols,
             cursor: self.cursor,
             visible: self.visible,
@@ -1000,6 +1031,14 @@ impl Render for TerminalView {
     }
 }
 
+/// Geometry of the most recent usable grid paint, in window coordinates.
+#[derive(Clone, Copy)]
+struct PaintedGrid {
+    origin: Point<Pixels>,
+    clip: Bounds<Pixels>,
+    cell: Size<f32>,
+}
+
 /// The single element a terminal draws as: no per-cell layout nodes and no event handlers.
 struct TerminalElement {
     rows: Vec<ShownRow>,
@@ -1009,6 +1048,7 @@ struct TerminalElement {
     selected: Vec<(usize, Range<u16>)>,
     /// The hovered link's columns on each row it reaches.
     underlined: Vec<(usize, Range<u16>)>,
+    painted_grid: Rc<Cell<Option<PaintedGrid>>>,
     cols: u16,
     cursor: Option<Cursor>,
     visible: bool,
@@ -1214,6 +1254,11 @@ impl Element for TerminalElement {
     ) {
         let (_, bg) = style::defaults(self.state);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            self.painted_grid.set(self.visible.then(|| PaintedGrid {
+                origin: bounds.origin,
+                clip: window.content_mask().bounds,
+                cell: self.cell,
+            }));
             window.paint_quad(fill(bounds, bg.hsla(1.)));
             if !self.visible {
                 return;

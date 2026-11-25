@@ -8,7 +8,7 @@ use crate::terminal::attached::{AttachedTerminal, Hold, OpenStream, TerminalTarg
 use crate::terminal::set::TerminalSet;
 use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
 use crate::theme;
-use farhelm_grid_model::GridOutput;
+use farhelm_grid_model::{GridOutput, Position, Selection, SelectionMode};
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::FakeTerminal;
 use farhelm_helm_client::terminal::AttachmentLease;
@@ -146,6 +146,7 @@ pub(super) fn terminal_styles_setup(state: &SceneState, _: &mut Window, cx: &mut
 
 /// The last column of the first colored row is a separate padding run. Its background must meet the grid's edge.
 /// The following row starts with a two-cell lightning glyph from the bundled font, so no fallback font is needed.
+/// The selection crosses the wrap and leaves the last cell's background clear.
 /// The last two rows show the same glyph after erasing its right half. A new color clips the glyph at one column.
 /// When the erase leaves the same color, the glyph still has both columns to draw in.
 pub(super) fn terminal_wide_glyphs_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
@@ -181,6 +182,19 @@ pub(super) fn terminal_wide_glyphs_setup(state: &SceneState, _: &mut Window, cx:
         },
         cx,
     );
+    view.update(cx, |view, cx| {
+        view.set_selection(
+            Some(Selection::new(
+                Position {
+                    line: 0,
+                    col: width - 4,
+                },
+                Position { line: 1, col: 2 },
+                SelectionMode::Linear,
+            )),
+            cx,
+        )
+    });
     state.terminals.borrow_mut().push(view);
 }
 
@@ -253,7 +267,7 @@ pub(super) fn terminal_cursors_setup(state: &SceneState, _: &mut Window, cx: &mu
 /// program exited, so it also has the old app's exit line (`.grid-terminal-exit`) below its last row, in the terminal's
 /// reversed defaults; the second's program still runs. In both the program's last lines sit at the bottom of its screen,
 /// where a shell leaves them, and the status line takes room the fit leaves to the grid, so the screen is lifted by
-/// whole rows: its top rows go out of view and the last ones stay.
+/// whole rows: its top rows go out of view and the last ones stay. The visible scrollbar shows the remaining share.
 ///
 /// The owners need a UI session, so the setup connects a fake helm and makes them once its snapshot arrives; each
 /// owner's opener plays its whole stream at once (attach, a replay at the fitted size, its end, the stall), and the
@@ -269,7 +283,7 @@ pub(super) fn terminal_status_setup(state: &SceneState, _: &mut Window, cx: &mut
                 stalled_stream(None, keep),
             ]
         },
-        |_| {},
+        AttachedTerminal::stage_scrollbar,
     );
 }
 

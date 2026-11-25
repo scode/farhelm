@@ -79,6 +79,11 @@ impl Viewport {
         self.first_content(model) - u64::from(self.top_padding)
     }
 
+    /// Rows reserved for the pane's lift. Page navigation subtracts them from the visible row count.
+    pub fn top_padding(&self) -> u16 {
+        self.top_padding
+    }
+
     /// Reserve room to scroll content into view when the pane clips whole rows.
     /// The anchor stays attached to its line, with the usual clamp to the new range.
     pub fn set_top_padding(&mut self, rows: u16) -> bool {
