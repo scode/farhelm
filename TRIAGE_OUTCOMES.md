@@ -535,27 +535,6 @@
   part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-link-disclosure-module-doc-soft-seam.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md (terminal links paragraph): "Rows join where the hyperlink's text fills one row
-  to its last column and continues at the start of the next, as a wrap draws it, whether the terminal wrapped it or the
-  program moved to the next row itself." SPEC_impl.md agrees ("without the wrap flag, because a program that fills a row
-  and writes CR LF draws exactly what a wrap draws"). The current code's docs contradict it:
-  crates/gui/farhelm-grid-model/src/link_disclosure.rs:23-25 says "A soft seam is where the terminal wrapped the text …
-  A hard seam is everything else: a program that ends a row and continues its hyperlink on the next", and
-  crates/gui/farhelm-grid-model/src/link_claims.rs:61 says `Seam::Soft` is "The terminal wrapped the text". The behavior
-  (`RowSeam::Soft`, link_disclosure.rs:209-214) and its own doc already follow the spec. The fix is a rewording of two
-  comments: no design choice, no spec change.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code —
-  reword both comments to "the hyperlink's text meets edge to edge across the rows, as a wrap draws it, whoever moved to
-  the next row"; size XS (well under 100 lines).). Size gate: about 100 lines of diff (code, tests and docs, not
-  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
-  to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
 ## tensorlake-key-discard-lacks-preservation-test.md
 
 - Outcome: `other`.
@@ -798,23 +777,6 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
 - Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
-## trailing-final-frame-boundary-test-leaves-osc-8-and-file.md
-
-- Outcome: `other`.
-- Assessment: When a full-screen program exits, the final screen and the earlier scrollback are kept as separate
-  buffers, and link detection must not join a file path or a hyperlink label across that boundary. The guards that
-  prevent this have no test, so removing one would go unnoticed. Verified: Confirmed gap on current main. The link code
-  has been reworked a lot since (#4737-#4779). The boundary stop is still documented
-  (`crates/gui/farhelm-grid-model/src/link_disclosure.rs:277`), but no test in
-  `crates/gui/farhelm-grid-model/tests/links.rs` or `tests/paths.rs` uses an exited alternate screen. Every state
-  fixture there has `alt_screen: false`. No current mis-link is claimed.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard, or fix code with boundary tests. Size S-M.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-one-create-test-skip-already-readable-duplicate.md
 
@@ -1297,22 +1259,6 @@
   stale-statistics fixture would mostly test SQLite. Size S-M if fixed.
 - Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
-## terminal-link-oracle-regeneration-loses-wide-padding.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tooling. The script that regenerates the recorded terminal-link answers drops a row flag that
-  marks wide-character wrap padding. A regenerated fixture would quietly stop testing that case. Verified: Confirmed.
-  The checked-in grids 15/16 have `"p": true` on the first row
-  (crates/gui/farhelm-grid-model/tests/fixtures/links-oracle.json). The generator's `row()` helper
-  (crates/gui/farhelm-grid-model/tools/generate-links.ts:125) and the wide-wrap case (:161-165) never emit `p`.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. A one-field change to the generator keeps the oracle
-  reproducible. Size XS.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
 ## remote-probe-absence-test-does-not-witness-proxy.md
 
 - Outcome: `other`.
@@ -1681,92 +1627,6 @@
   record which way it went. Recommendation for reference: fix code. One unit test per branch. Size S.
 - Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
-## trailing-link-oracle-exception-asserts-only-absence.md
-
-- Outcome: `other`.
-- Assessment: Test-only. For an excepted case, the recorded-answers test only checks that the old answer no longer
-  holds, so the excepted spoof (`https://example.com` above `.evil.test/x`) could go completely quiet with the test
-  still green. Verified: Confirmed. crates/gui/farhelm-grid-model/tests/links.rs:1076-1081 asserts only `!holds`.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. Require a Mismatch for the excepted grid keys, or
-  add the case as a loud case. Land it with 105. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-link-hidden-row-test-step-cannot-fail.md
-
-- Outcome: `other`.
-- Assessment: Test-only. A test step meant to show that only the hovered row is re-judged while the pointer rests cannot
-  fail, because the "other row" belongs to a different hyperlink. Verified: Confirmed. Row 1's `y` uses link index 1
-  (`other`) (crates/gui/farhelm-grid-model/tests/links.rs:1786, :1821-1826), so it is never part of `tag`'s label.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. Make row 1 continue `tag`. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-link-label-budget-untested.md
-
-- Outcome: `other`.
-- Assessment: Test-only. The rule that link text over 8,192 UTF-16 units is "couldn't be checked" from every row has no
-  test. The 128-row rule does. Verified: Confirmed. `MAX_UNITS`
-  (crates/gui/farhelm-grid-model/src/link_disclosure.rs:198, :308, :328) has no test. `over_budget()` is used only by
-  the row-budget tests (tests/links.rs:1316, :1354).
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. Add a test across the unit edge, plus the one-row
-  two-stretch case. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-link-joined-second-reading-untested.md
-
-- Outcome: `other`.
-- Assessment: Test-only. No test has a label whose first reading mismatches and whose joined reading matches. If the
-  rescue broke, honest links split over rows at a dot would start warning unnoticed. Verified: Confirmed by reading
-  `labels_over_several_rows_join_and_separate_at_their_seams` (crates/gui/farhelm-grid-model/tests/links.rs:1194-1281).
-  Every quiet case matches in the first reading. No mutation was run.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code with 105: one quiet and one loud case. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-link-scanner-zwsp-scheme-test-vacuous.md
-
-- Outcome: `other`.
-- Assessment: Test-only. One case in a scanner test (`\u{200b}https://…`) passes only because its constructed target is
-  malformed, so it no longer tests what it claims. Verified: Likely correct. The case is at
-  crates/gui/farhelm-grid-model/src/link_claims/tests.rs:1242-1251. A leading ZWSP is its own cluster and folds to
-  nothing, so the address is the plain `https://example.test/x`. The claim that the built target is host `https` with
-  path `//example.test/x` depends on URL/IDNA handling that I did not execute.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. Drop the case, or put the ZWSP inside the scheme.
-  Size XS.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-link-scanner-disguised-scheme-reason-unpinned.md
-
-- Outcome: `other`.
-- Assessment: Test-only. No test pins that a scheme spelled with invisible or look-alike characters is reported as
-  "look-alike or invisible characters" rather than as a plain mismatch. Verified: Confirmed by reading. The
-  scheme-disguise cases assert only `mismatch(...)` (crates/gui/farhelm-grid-model/src/link_claims/tests.rs:~1150-1176),
-  and the verdict table's Disguised rows are host-only.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. Add verdict rows. Size XS.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
 ## trailing-link-scanner-comparison-leeways-untested.md
 
 - Outcome: `other`.
@@ -1784,21 +1644,6 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code. Add the 4-5 quiet rows the finding lists. They
   cheaply guard a spec rule in a user-facing security warning. Size S.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-link-scanner-host-start-test-docstring-wrong.md
-
-- Outcome: `other`.
-- Assessment: Comment-only. A test's docstring says a host start is judged on the original characters "not the
-  recognition view". The code and a sibling test use either reading, so a maintainer trusting the docstring could weaken
-  the check. Verified: Confirmed. Compare crates/gui/farhelm-grid-model/src/link_claims/tests.rs:782-783 with
-  scan.rs:580-586 and the either-reading test. Not clearly settled, because neither SPEC.md nor SPEC_impl.md states the
-  host-start rule; only the code's own doc does.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. Reword the docstring. Size XS.
 - Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## settings-footer-can-save-the-wrong-page.md

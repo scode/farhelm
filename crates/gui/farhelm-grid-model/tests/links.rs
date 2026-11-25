@@ -1023,7 +1023,7 @@ fn grid_exceptions() -> BTreeSet<(usize, u64, usize)> {
 /// warned on a complete label for a mismatch, the label the hover shows, escaped, must be the text the old client
 /// quoted. That last check keeps row joining honest: a reader that joined rows differently would show a different
 /// label. Hard row breaks, repeated tags, ambiguous runs and budget exhaustion must not turn a forged address into a
-/// quiet disclosure. A case where the answer legitimately differs is a named exception in the fixture.
+/// quiet disclosure. A named grid exception can change the quoted label while still requiring a mismatch.
 #[test]
 fn pinned_cell_links_and_label_join_oracle() {
     let oracle: Value = serde_json::from_str(include_str!("fixtures/links-oracle.json")).unwrap();
@@ -1074,6 +1074,12 @@ fn pinned_cell_links_and_label_join_oracle() {
                 });
                 let key = (index, line, result);
                 if exceptions.contains(&key) {
+                    assert!(
+                        warning
+                            .as_ref()
+                            .is_some_and(|warning| warning.reasons.contains(&Mismatch)),
+                        "the excepted label still warns of a mismatch: grid {index}, row {line}, result {result}"
+                    );
                     assert!(
                         !holds,
                         "an exception for a case that holds: grid {index}, row {line}, result {result}"
@@ -1206,6 +1212,19 @@ fn labels_over_several_rows_join_and_separate_at_their_seams() {
             evil,
             Some(("github.com/login", "github.com/login")),
         ),
+        // Both rows disclose the joined destination quietly. The same label must still warn against another site.
+        (
+            40,
+            &["https://example.com", ".other.test/x"],
+            "https://example.com.other.test/x",
+            None,
+        ),
+        (
+            40,
+            &["https://example.com", ".other.test/x"],
+            "https://example.com/x",
+            Some(("https://example.com", "https://example.com .other.test/x")),
+        ),
         (
             40,
             &["Visit", "https://github.com/"],
@@ -1321,6 +1340,27 @@ fn an_explicit_label_over_the_row_budget_is_incomplete_from_every_row() {
                 warning(&grid, line, 0),
                 expected,
                 "{count} rows, row {line}"
+            );
+        }
+    }
+}
+
+/// The text budget applies independently of the row count. One extra UTF-16 unit makes the whole label unreadable
+/// from either end, so moving the pointer cannot trade an incomplete warning for a partial label.
+#[test]
+fn an_explicit_label_over_the_text_budget_is_incomplete_from_every_row() {
+    let text = "a".repeat(128);
+    let prefix = &text[..126];
+    for (last, expected) in [("a\u{e0100}", over_budget()), ("a\u{301}", None)] {
+        let mut rows: Vec<_> = (0..63).map(|_| ascii(&text, false, Some(0))).collect();
+        // Both last cells hold two scalars. The supplementary variation selector takes an extra UTF-16 unit.
+        rows.push(json!({"w":false,"r":[[0,126,prefix,[0,-1,-1],0],[126,1,last,[0,-1,-1],0]]}));
+        let grid = model(128, rows, vec![json!(["tag", "https://example.test/"])]);
+        for line in [0, 32, 63] {
+            assert_eq!(
+                warning(&grid, line, 0),
+                expected,
+                "last row {last:?}, row {line}"
             );
         }
     }
@@ -1774,16 +1814,13 @@ fn redraw_row(grid: &mut GridModel, y: usize, row: Value, links: &[Value], rev: 
 /// drops the hidden reason must change the hovered link, even when its own text and range stay the same. Spec: row 0
 /// holds `click here` and, after a gap, `x`, one hyperlink. Recoloring `x` to the background makes the link at
 /// `click here` compare unequal and its hover warn hidden; recoloring it back restores the original link. Recoloring
-/// `x` to green, which stays readable, leaves the link equal. A same-target hyperlink on another row turning hidden
-/// leaves it equal too: only the hovered row is watched (SPEC.md).
+/// `x` to green, which stays readable, leaves the link equal. Hiding part of the same link on the next row leaves it
+/// equal while enough remains visible to connect the rows. A new hover reads the other row's warning evidence.
 #[test]
 fn a_run_turning_hidden_on_the_hovered_row_changes_the_link() {
-    let links = [
-        json!(["tag", "https://example.test/"]),
-        json!(["other", "https://example.test/"]),
-    ];
+    let links = [json!(["tag", "https://example.test/"])];
     let row = |x_style: Value| json!({"w":false,"r":[[0,10,"click here",[0,-1,-1],0],[11,1,"x",x_style,0]]});
-    let other = |style: Value| json!({"w":false,"r":[[0,1,"y",style,1]]});
+    let other = |style: Value| json!({"w":false,"r":[[0,1,"y",[0,-1,-1],0],[1,1,"z",style,0]]});
     let mut grid = model(
         20,
         vec![row(json!([0, -1, -1])), other(json!([0, -1, -1]))],
@@ -1791,6 +1828,10 @@ fn a_run_turning_hidden_on_the_hovered_row_changes_the_link() {
     );
     let at = Position { line: 0, col: 2 };
     let original = grid.link_at(at).unwrap();
+    assert_eq!(
+        grid.link_at(Position { line: 1, col: 0 }).unwrap().kind,
+        original.kind
+    );
     assert!(!original.unseen);
     assert_eq!(warning(&grid, 0, 2), None);
 
@@ -1819,12 +1860,13 @@ fn a_run_turning_hidden_on_the_hovered_row_changes_the_link() {
     );
 
     redraw_row(&mut grid, 1, other(json!([0, 0, -1])), &links, 5);
-    assert_out_of_sight(&grid, 1, 0, "background-colored");
+    assert_out_of_sight(&grid, 1, 1, "background-colored");
     assert_eq!(
         grid.link_at(at).unwrap(),
         original,
         "another row is not watched"
     );
+    assert!(reasons(&warning(&grid, 0, 2)).contains(&Hidden));
 }
 
 /// The program's own default colors decide what is hidden too, so an OSC 10 that sets the default foreground to the

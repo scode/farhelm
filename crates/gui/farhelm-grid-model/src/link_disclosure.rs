@@ -20,11 +20,11 @@
 //! text with the same destination. The **verdict** ([`verdict`]) turns that into the warning. Unseen text never reaches
 //! the label: identity already leaves it out ([`crate::links`]'s `visible_link`), exactly as conceal always did.
 //!
-//! The rows of a label meet at seams. A soft seam is where the terminal wrapped the text, so the rows are one line and
-//! always join. A hard seam is everything else: a program that ends a row and continues its hyperlink on the next. It
-//! separates like a space when the text after it starts with an address, and joins otherwise. A label that mismatches
-//! with its seams read that way is judged once more with every hard seam joined, and warns only when both readings
-//! mismatch: an honest address a program broke over rows by hand stays quiet, while a spoof has to fool both.
+//! A soft seam joins a hyperlink that reaches the row's last text column and continues at the start of the next.
+//! The two rows draw like a wrap whether the terminal wrapped the text or the program moved to the next row itself.
+//! The first reading separates a hard seam like a space when an address occurs before any letter in the segment
+//! that follows. If that reading mismatches, the verdict tries joining every hard seam. Unseen text with the
+//! link's destination at a seam keeps it separated in both readings.
 
 use crate::link_claims::{self, MismatchKind, RowText, Seam};
 use crate::links::{Identities, is_js_space};

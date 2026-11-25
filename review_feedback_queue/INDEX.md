@@ -434,10 +434,6 @@ consequences.
   — A quick Alt/Option release over the final screen can clear the highlight for a just-copied character and dispatch
   cursor keys.
 
-- [`trailing-final-frame-boundary-test-leaves-osc-8-and-file.md`](trailing-final-frame-boundary-test-leaves-osc-8-and-file.md)
-  — Existing exit tests would miss a regression that joins a file path or combines OSC 8 labels across the
-  retained-history/final-frame boundary.
-
 - [`trailing-multi-clicking-exit-message-copies-different-row.md`](trailing-multi-clicking-exit-message-copies-different-row.md)
   — A double or triple click on the exit message can replace the clipboard with terminal text from the row above it.
 
@@ -596,10 +592,6 @@ consequences.
 - [`terminal-selection-paints-wide-wrap-padding.md`](terminal-selection-paints-wide-wrap-padding.md) — Selecting text
   across a wrapped wide character can highlight the unused cell at the end of the earlier row. That cell is absent from
   the copied text.
-
-- [`terminal-link-oracle-regeneration-loses-wide-padding.md`](terminal-link-oracle-regeneration-loses-wide-padding.md) —
-  Regenerating the terminal link fixtures can drop the row flag that distinguishes printed spaces from wide-character
-  wrap padding.
 
 - [`remote-probe-absence-test-does-not-witness-proxy.md`](remote-probe-absence-test-does-not-witness-proxy.md) — The
   remote probe regression test can pass through the missing-program path both times, without checking how it handles the
@@ -1058,36 +1050,6 @@ consequences.
   test checks the link warning's "Link text (partial):" heading, its omitted-text case or its "and N more" line, though
   the spec fixes the wording.
 
-- [`trailing-link-oracle-exception-asserts-only-absence.md`](trailing-link-oracle-exception-asserts-only-absence.md) —
-  The link oracle test only checks that an excepted grid no longer gives the old answer, so the `example.com` above
-  `.evil.test/x` spoof could go quiet without a failing test.
-
-- [`trailing-link-hidden-row-test-step-cannot-fail.md`](trailing-link-hidden-row-test-step-cannot-fail.md) — The
-  "another row is not watched" step of a link-disclosure test cannot fail, because the other row belongs to a different
-  hyperlink.
-
-- [`trailing-link-label-budget-untested.md`](trailing-link-label-budget-untested.md) — Nothing tests the 8,192-unit
-  budget beyond which link text cannot be checked whole.
-
-- [`trailing-link-joined-second-reading-untested.md`](trailing-link-joined-second-reading-untested.md) — No test
-  exercises the joined second reading that quiets a multi-row link, in either direction; see the related `high`
-  joined-reading finding.
-
-- [`trailing-link-scanner-zwsp-scheme-test-vacuous.md`](trailing-link-scanner-zwsp-scheme-test-vacuous.md) — A ported
-  scanner test's zero-width-space scheme case passes only because its constructed destination is malformed.
-
-- [`trailing-link-scanner-disguised-scheme-reason-unpinned.md`](trailing-link-scanner-disguised-scheme-reason-unpinned.md)
-  — The scanner's disguised-scheme cases assert only that some warning appears, so they would pass with no character
-  folding at all.
-
 - [`trailing-link-scanner-comparison-leeways-untested.md`](trailing-link-scanner-comparison-leeways-untested.md) — No
   test covers the comparison leeways (trailing slash, escape case, empty `?`) since the oracle's quiet side was dropped,
   so a change could make honest links warn unnoticed.
-
-- [`trailing-link-scanner-host-start-test-docstring-wrong.md`](trailing-link-scanner-host-start-test-docstring-wrong.md)
-  — A scanner test docstring says a host start is judged only on the original characters, but the code accepts either
-  reading.
-
-- [`trailing-link-disclosure-module-doc-soft-seam.md`](trailing-link-disclosure-module-doc-soft-seam.md) — The
-  link-disclosure module docs say a soft seam is a terminal wrap, but the code and spec also treat a program's
-  edge-filling line break as one.

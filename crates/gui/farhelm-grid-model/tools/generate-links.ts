@@ -158,10 +158,12 @@ if (import.meta.main) {
       links: [osc],
     },
   ];
+  // The wide continuation carries wrap padding on the first wire row. Keep it when regenerating these fixtures.
+  const paddedWrap = { ...row("https://a.test/", true, 0), p: true };
   for (const ids of [["tag", "tag"], ["1_alacritty", "2_alacritty"]]) {
     inputs.push({
       cols: 16,
-      rows: [row("https://a.test/", true, 0), { w: false, r: [[0, 2, "😀", [0, -1, -1], 1]] }],
+      rows: [paddedWrap, { w: false, r: [[0, 2, "😀", [0, -1, -1], 1]] }],
       links: ids.map((id) => [id, "https://a.test/😀"]),
     });
   }
