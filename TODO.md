@@ -112,6 +112,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   experiment fixed only the supervisor's action checks, which left desktop retries repeating the wrong consent and let
   an old activity sample block recovery Restart. The full fix needs shared evidence for status, confirmations and
   cleanup, with tests covering those boundaries.
+- **Keep failed Restart cleanup retryable after session deletion.** If a replacement fails to start after its session
+  row has been deleted, the supervisor can fail to confirm the replacement's Linux scope is empty. Startup can retire
+  the launch record once its host is gone, leaving processes from the failed attempt with no cleanup retry. Preserve the
+  exact generation's obligation under SPEC_impl.md's “Approved startup retry”, using the missing-row check that decides
+  whether to restore the failed Restart's session. An apparently empty scope is insufficient while the recorded host
+  start can still launch into it. Startup also needs to avoid a session-wide process sweep if a retained create
+  reservation has restored the same session ID. The local fix grew beyond its triage budget once review identified both
+  races. Exercise a failed sweep with a confirmed-gone host, a replacement start that can still open its scope, and a
+  restored session that must stay running. Ordinary Delete waits on Restart's lifecycle claim, so remove the row in the
+  fixture while Restart is held. Verify the retry also works with an empty session table. Start with
+  `unwind_failed_host_relaunch`, the failed-relaunch republish decision, and `retry_pending_scope_cleanups`.
 
 - **Keep hook setup from launching into a folder that arrived later.** In the launcher, pick Grok or Antigravity to open
   the Restart hook question. Switch to a connected host whose remembered folder is still loading and choose **Set up and

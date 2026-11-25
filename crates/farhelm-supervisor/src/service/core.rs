@@ -24855,24 +24855,19 @@ await new Promise(() => {});
         .await
     }
 
-    /// OMP launch provenance is durable before the terminal host can start
-    /// anything: the fake host program (the host's first stage) publishes
-    /// an entered-start signal as it starts and blocks there, and the test
-    /// reads the committed row while the start is held open — then releases
-    /// it. Driven through the real `spawn_agent_in_host` with initially
-    /// empty provenance, so the test pins the actual boundary — publish,
-    /// then start — rather than the store call in isolation.
+    /// OMP launch provenance is durable while the terminal host's first stage is still in progress.
+    /// The fake first stage publishes an entered-start marker and stays blocked while the test reads the row.
     ///
     /// Why this test matters: a report requires a live agent, which
     /// requires the host's start. Reading the durable row while the start
-    /// is still held open proves the write preceded it: a publish moved
+    /// is still held open establishes that publication happened before the first stage returned. A publish moved
     /// to just after the start returns — before the result is even
     /// matched — would leave the held-open read empty while still
     /// passing any assertion made after the failure returns. Under the
     /// old post-spawn publish, this same launch would leave both
     /// columns empty at the hold point.
     #[farhelm_testtrace::test]
-    async fn omp_launch_provenance_is_published_before_the_host_starts() {
+    async fn omp_launch_provenance_is_published_before_the_host_start_returns() {
         let state = StateDir::new();
         let scratch = farhelm_teststate::tempdir().expect("fixture directory");
         let fake_host = scratch.path().join("fake-host.sh");
@@ -24977,9 +24972,8 @@ exit 1
         let held_start = ReleaseHeldStart {
             release: scratch.path().join("release-start"),
         };
-        // The spawn and the held-open read run together: the fake holds
-        // the start until the read below releases it, so the row the
-        // read observes provably precedes anything the start could run.
+        // The fake holds the first stage open until the observer reads the row,
+        // so the read happens before the first stage returns.
         let (outcome, observed) = tokio::join!(
             sup.spawn_agent_in_host(
                 &id,
@@ -25019,10 +25013,8 @@ exit 1
                         // sleep-ok: the spawn runs concurrently on this same task; retry file readability at a fixed cadence inside the original bound.
                         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                     }
-                    // THE ordering observation: the start is held open inside
-                    // the fake, so anything durable here preceded it. A
-                    // post-start publish would not be visible yet. Collected
-                    // first, released second, asserted after the join.
+                    // Read between first-stage entry and return. Publication after the start
+                    // returns would leave the row without provenance at this point.
                     let row = sup
                         .store
                         .session(&id)
@@ -25095,12 +25087,10 @@ exit 1
             Some("omp"),
             "the retained program is durable while the start was still held open"
         );
-        // Premise: the spec published — the barrier is anchored on
-        // that write, so a missing spec would fail the row assertions
-        // below for the wrong reason.
+        // The real spawn path published the spec during the attempt.
         assert!(
             crate::launch::spec_path_for_launch(&sup.state_dir, &id, 0).exists(),
-            "the launch spec publishes before the host's start is attempted"
+            "the launch spec was published"
         );
         let row = sup
             .store

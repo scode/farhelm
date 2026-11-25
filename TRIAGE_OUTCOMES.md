@@ -196,29 +196,6 @@
   Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
-## trailing-pending-scope-cleanups-logs-invalid-session-id-unescaped.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC_impl.md, "Session IDs in logs": "Session IDs must not inject log lines or use
-  invisible or direction-changing characters to disguise the ID shown in logs. … Safe escaping by the configured logging
-  formatter also satisfies the requirement." Current code contradicts it. - `service/core/host_restart.rs:917` logs
-  `session = %id` in exactly the branch reached when the ID failed validation as a UUID (`unit_name` returned `None`).
-  The retire warning at :924 also runs for that ID with `%id`. - The configured formatter
-  (`crates/farhelm/src/main.rs:2785-2793`, the default `tracing_subscriber::fmt()`, version 0.3.23 per Cargo.lock)
-  escapes only ESC, BEL, BS, FF, DEL and C1 controls (`fmt/format/escape.rs` in the registry source). Newlines and bidi
-  or invisible characters pass through unchanged. - The fix follows directly and takes no design choice: `?id` at both
-  call sites. That uses `str`'s Debug escaping, the simplest option, as the rule prefers. - I did not run a check that
-  Rust's Debug escapes U+202A-U+202E. I believe it does (they are not printable under `core::unicode`). Verified:
-  confirmed.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code — the
-  spec rule is literal and the code contradicts it; size S.). Size gate: about 100 lines of diff (code, tests and docs,
-  not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
-  back to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says
-  remains.
-- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
 ## trailing-podman-settle-claim-refuses-third-host-duplicate-transfer.md
 
 - Outcome: `fix code`.
@@ -809,61 +786,6 @@
   start).
 - Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
-## trailing-list-admission-test-observes-reply-timing-instead-of-list.md
-
-- Outcome: `other`.
-- Assessment: Building the session list is capped at a few concurrent builds per supervisor, to bound the cost. The test
-  around that cap checks that typing still flows while a list waits, and that the list is answered once a slot frees. It
-  would not catch a regression that built the list before taking a slot and only held the reply. Verified: partly
-  correct. The gap is real: `service/handlers.rs:11306-11338` checks only reply timing. But the test's own docstring
-  says its purpose is that a waiting list "does not hold up typing", which it does establish. It does not claim to guard
-  where the list is built. Shipped code takes the permit before `list_all` and drops it before sending
-  (`handlers.rs:595-619`).
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard. The test proves what it claims, and the construction
-  placement is correct by inspection. Size S-M if fixed (a witness seam inside the task).
-- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
-## trailing-seal-delete-test-cannot-show-delete-reached-directory-admission.md
-
-- Outcome: `other`.
-- Assessment: Deleting a session in a sandbox or container environment can seal and destroy the environment when it was
-  the last session. That decision must wait for any concurrent create to settle. The regression test for this does not
-  prove that Delete actually reached the create's lock, so a Delete that skipped the lock could still pass because of
-  timing. Verified: confirmed. `service/handlers.rs:12148-12183` waits only until the Delete claims the agent-request
-  fence (:12162-12168, and its comment admits "whether it then waits at the permit or at directory admission"). It then
-  plants the session and releases. The sibling test at :12103-12141 uses an exact `claims_reached_for_test` witness;
-  this one has no equivalent for `working_copy_operations`. SPEC_impl.md requires holding directory admission for the
-  seal decision. Shipped behavior is not shown wrong.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. This guards a potentially work-losing regression,
-  and the sibling test shows the witness pattern. Size S-M (may need a "reached the lock" seam).
-- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
-## trailing-borrower-reload-lacks-completed-origin-runtime-handoff-witness.md
-
-- Outcome: `other`.
-- Assessment: A test covers how a session sharing another session's checkout (a borrower) is classified across a
-  supervisor reload. To set up the reload, it releases the origin session's terminal, but it never waits for the release
-  to finish and never checks that the origin is recovered afterwards. Verified: confirmed. `service/core.rs:37525-37530`
-  calls `release_fixture_host`, which calls `HostTerminal::abort` (`hosts/terminal.rs:2421-2427`, which requests
-  cancellation without awaiting). The test then reloads and asserts only the borrower's outcome (:37531-37548). The
-  comment's premise ("so reload can adopt it without a takeover") is not enforced. The test's subject is the borrower's
-  classification, which it does check.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard. Origin recovery is outside this test's subject. Size
-  S-M if fixed.
-- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
 ## trailing-borrower-classification-test-does-not-establish-checkout-membership.md
 
 - Outcome: `other`.
@@ -878,41 +800,6 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard, or fix code with one premise assertion (size S).
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## trailing-running-seed-cancellation-checks-readability-without-observing-returned-screen.md
-
-- Outcome: `other`.
-- Assessment: When a Restart request is cancelled while the terminal's history is being encoded, the terminal's screen
-  must come back intact. The test checks that the screen can be read afterwards and that new output appears. It does not
-  check that the earlier screen content survived, so a regression that swapped in an empty screen would pass. Verified:
-  confirmed. `service/core/tests/host_terminals.rs:4560-4574` reads with a unit callback, accepts any `Some` seed, and
-  checks only output sent after the cancel. "seed line 01" is written before the cancel (:4529) and never checked
-  afterwards. Shipped code returns the original emulator (per the reviewer's citations; not independently traced).
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code. A one-line assertion that the read sees "seed line
-  01" matches the test's "gives the emulator back" claim. Size S.
-- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
-## trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md
-
-- Outcome: `other`.
-- Assessment: A test checks that, for OMP sessions, Farhelm records how the agent was launched before the terminal host
-  can start the agent. It holds the host's first stage open and reads the saved record while the start is held. It would
-  catch the record being written after the start returns, but not a write placed between launching the first stage and
-  the test's read. Verified: partly correct. `service/core.rs:24844-25083`: the read happens after the fake publishes
-  "entered" and before release (:24996-25021), and `consumed-release` proves the hold was up (:25069-25073). The
-  docstring's "Why" (a publish moved after the start returns) is exactly what it catches. Only its first line ("before
-  the terminal host can start anything") overstates it. The reviewer's own independent check did not settle the claim.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard. The test catches the regression it names. Size S if
-  one only narrows the docstring.
-- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md
 
@@ -3042,35 +2929,6 @@
   why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
-## trailing-unwind-failed-host-relaunch-drops-pending-scope-cleanup.md
-
-- Outcome: `fix code`.
-- Assessment: The same #4625 safety net covers only one of the two ways a Restart's replacement can fail after the
-  session was deleted. If the replacement's terminal host fails after starting an agent, and Farhelm cannot confirm that
-  agent's processes stopped, no cleanup task is saved. The next supervisor start then removes the leftover record
-  without retrying, so those processes can keep running. Verified: confirmed in source; the route is unverified (as for
-  413). `service/core/host_restart.rs:764-781` returns `RelaunchFailure::ambiguous` on a failed sweep without calling
-  `record_pending_scope_cleanup`. That call is made only in `tear_down_relaunch_deleted_meanwhile` (:825-839).
-  `service/core.rs:13106-13118` then finds the row gone and does not republish, and records no obligation. SPEC_impl.md
-  "Approved startup retry" reads: "If Restart cannot confirm that the replacement's recorded Linux scope is gone after
-  losing its session row, it records the session ID and launch generation in `supervisor.db`." The code contradicts that
-  for this path, so the item is close to clearly settled. I did not classify it so because the fix has two reasonable
-  shapes (record in the unwind, or in `relaunch` when `!still_exists`), and it is open whether an ambiguous failure for
-  other reasons (host may remain) should also record. I also did not confirm the claim about what startup reclaim does
-  with the record (`host_reclaim.rs:715-721`).
-- Decision: q-cleanup, "Keeping cleanup evidence until cleanup is confirmed": the maintainer picked "Keep it until
-  confirmed". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "Another case where this
-  has to not be very complicated. If this turns into a lot of code, a lot of complexity, it must be turned into a
-  follow-up to-do item that explains the complexity."
-- Completion criteria: Every path keeps or settles the cleanup evidence a launch recorded until cleanup is confirmed.
-  Recommendation for reference: fix code. The SPEC_impl sentence already demands it, and the fix is local. Size S (about
-  15 lines plus a fault-injection test, likely under 100). Complexity gate (maintainer): if the fix turns very
-  complicated during execution, the executor stops and turns it into a follow-up TODO.md entry that explains what is
-  complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-podman-verify-place-nonce-in-argv-forgeable.md

@@ -914,14 +914,14 @@ impl Supervisor {
                         continue;
                     }
                 } else {
-                    warn!(session = %id, generation, "discarding pending restart cleanup with an invalid session id");
+                    warn!(session = ?id, generation, "discarding pending restart cleanup with an invalid session id");
                 }
                 if let Err(error) = self
                     .store
                     .retire_pending_scope_cleanup(&id, generation)
                     .await
                 {
-                    warn!(session = %id, generation, error = %format!("{error:#}"),
+                    warn!(session = ?id, generation, error = %format!("{error:#}"),
                         "could not retire pending restart scope cleanup");
                 }
             }
