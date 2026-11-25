@@ -48860,3 +48860,146 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   deleted registration's default atomically and keep an accepted but delayed launch from restoring it. Change
   `ousrrqmnkkvkvtrssztlunlrprprypwz`, bookmark `plan/triage-custom-agents-nov24/08-wrapper-memory-follow-up`,
   https://github.com/scode/farhelm/pull/4952/changes.
+
+## installer-leftover-cleanup-deletes-unverified-previous-app.md
+
+- Outcome: `other`.
+- Assessment: Confirmed in source (`crates/farhelm-supervisor/src/installation/install.rs:1008-1060,1223-1272`):
+  `remove_leftovers` restores `stage/previous` only when `~/Applications/Farhelm.app` is absent (`:1249-1250`), and
+  otherwise deletes the staging directory including `previous` (`:1268`). Double-swap race not executed live.
+- Decision: Covered by `SPEC_impl.md:7879-7883` (accepted by the maintainer on 2026-10-24): "One narrow case stays open,
+  accepted by the maintainer on 2026-10-24 rather than answered with durable records of what was approved: if Finder
+  puts another app at the place in that instant and the run is then killed before its check (or Finder fills the place
+  again before the app can be put back), the next run's cleanup deletes the folder moved aside, because only a
+  moved-aside Farhelm is ever expected there." Removed immediately during triage (2026-11-25, main `5af40d23e`).
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (removed immediately during triage on 2026-11-25).
+
+## ui-channel-command-backlog-unbounded-bytes.md
+
+- Outcome: `other`.
+- Assessment: Confirmed in source (`crates/farhelm-helm/src/ui_channel.rs:91,121,130,1036-1047`): `MAX_CLIENT_MESSAGE`
+  is 4 MiB and `MAX_QUEUED_COMMANDS` is 1000 (count-only admission check), allowing ~4+ GiB of buffered command bodies.
+  OOM not executed. No shipped client sends this sequence; credentials are minted in memory for the embedded window
+  (`SPEC.md:5233-5236`), same-account processes are inside the local trust boundary (`SPEC.md:5642-5645`), and sessions
+  survive under their supervisors.
+- Decision: Covered by `review_feedback_queue/FILTER.md:254-267` ("Harm whose route is not established in shipped code",
+  added 2026-11-21): every consequence depends on an input sequence no shipped control or client produces, with no
+  established lesser consequence and no `highest` risk. Removed immediately during triage (2026-11-25, main
+  `5af40d23e`).
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (removed immediately during triage on 2026-11-25).
+
+## provisioning-run-panic-strands-host-busy.md
+
+- Outcome: `other`.
+- Assessment: Confirmed for the missing `catch_unwind` (`crates/farhelm-helm/src/provisioning/service.rs:2614-2625`
+  spawns bare `tokio::spawn` calling `revalidate_and_execute`; `memory.busy` and `memory.runs` clear only in `end_run`
+  and sibling finish paths). Unverified that any panic is reachable inside `revalidate_and_execute` in shipped code. Not
+  `highest` (no user data, credentials, or processes lost; Remove or restart recovers).
+- Decision: Covered by `review_feedback_queue/FILTER.md:254-267` ("Harm whose route is not established in shipped code",
+  added 2026-11-21): every user-visible consequence depends on an undemonstrated panic inside `revalidate_and_execute`,
+  with no lesser established consequence and no `highest` risk. Removed immediately during triage (2026-11-25, main
+  `5af40d23e`).
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (removed immediately during triage on 2026-11-25).
+
+## probe-group-kill-after-reap-pid-reuse.md
+
+- Outcome: `other`.
+- Assessment: Confirmed on the kill-after-reap ordering
+  (`crates/farhelm-helm/src/provisioning/backend.rs:2644,2816-2865` reaps the probe child at `:2818` and immediately
+  runs `libc::kill(-(pid as i32), SIGKILL)` at `:2863` with no intervening `.await`). PID-reuse harm route unverified.
+- Decision: Covered by `SPEC_impl.md:5027-5039` ("Process-number reuse inside a short window is accepted, for now",
+  decided 2026-10-05), which explicitly accepts the short bounded window "between reaping a child and signalling its
+  group" for both supervisor and helm. Removed immediately during triage (2026-11-25, main `5af40d23e`).
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (removed immediately during triage on 2026-11-25).
+
+## supervisor-error-kind-sealed-not-decodable.md
+
+- Outcome: `other`.
+- Assessment: Confirmed in source (`crates/farhelm-supervisor/src/store.rs:1067-1109`): `error_kind_column` maps
+  `ErrorKind::Sealed => "sealed"` (`:1088`), while `error_kind_from_column` omits `"sealed"` (`:1095-1109`). Confirmed
+  that no current writer persists `ErrorKind::Sealed` to a reservation row (`SPEC_impl.md:6573-6575` states a sealed
+  refusal records nothing).
+- Decision: Covered by `review_feedback_queue/FILTER.md:254-267` ("Harm whose route is not established in shipped code",
+  added 2026-11-21): every consequence depends on future unimplemented code persisting `"sealed"`, with zero established
+  consequence today and no `highest` risk. Removed immediately during triage (2026-11-25, main `5af40d23e`).
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (removed immediately during triage on 2026-11-25).
+
+## reconcile-archive-moves-creation-time-unconfirmed-checkout.md
+
+- Outcome: `other`.
+- Assessment: Confirmed in source (`crates/farhelm-supervisor/src/working_copies.rs:1730-1739,2143-2295`):
+  `reconcile_archive_with_effects` does not check `creation_time_unconfirmed` before renaming an `archive_pending`
+  source into `.farhelm-trash`, whereas current `archive_move` refuses before journaling (`:1730`). Permanent deletion
+  is still refused (`checkout_trash.rs:241,890` via `verify_archived_handle`), so the folder is displaced to recoverable
+  trash.
+- Decision: Covered by `review_feedback_queue/FILTER.md:137-156` ("Upgrades from older releases combined with another
+  rare condition", added 2026-10-14): requires both an `archive_pending` journal carried across an upgrade from a
+  pre-2026-10-22 release and a crash between `persist_journal` and `rename`, with no broken upgrade, DB corruption,
+  bricking, or security consequence. Removed immediately during triage (2026-11-25, main `5af40d23e`).
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (removed immediately during triage on 2026-11-25).
+
+## trailing-goose-named-start-reports-contrary-to-spec.md
+
+- Outcome: `other`.
+- Assessment: Confirmed on main `5af40d23e`: `SPEC.md:1260-1261,4188-4193`,
+  `LaunchHarness::captures_named_conversation()` (`crates/farhelm-proto/src/launch.rs:542-558`),
+  `more_options.rs:88-99`, and `named_conversation.rs:38,192-233` state that Goose never captures named starts, while
+  `agent_kind/goose.rs:61,116` enables `FARHELM_GOOSE_REPORTER_ENABLED=1` on resume so Farhelm-created Goose
+  conversations report and regain plain Restart.
+- Decision: Already fixed on main (`cbcc23bb6a62`, PR #4951, from `plans/queue/agent-catalog-cli-and-drift-cleanups.md`),
+  Acceptance Criterion 2 / PR 2 (`plan/agent-catalog-cli-and-drift-cleanups/02-allow-goose-named-restart`), which
+  replaces `captures_named_conversation()` with 3-way `NamedConversationCapture::{Always, ExistingReporter, Never}`,
+  keeps transactional `clear_capture` on named Goose Restart, drops the Goose warning line in `more_options.rs`, updates
+  `SPEC.md`/`SPEC_impl.md`/`docs/harness-drift-tests.md`, and updates Goose's `named_conversation` drift test for both
+  named Create and named Restart. Removed immediately during triage (2026-11-25, main `5af40d23e`).
+- Completion criteria: Remove the feedback file and its index entry (already fixed in #4951).
+- Execution: complete (removed immediately during triage on 2026-11-25).
+
+## trailing-restart-wake-failure-keeps-launch-remedies.md
+
+- Outcome: `other`.
+- Assessment: Confirmed in source (`crates/gui/farhelm-gui/src/launcher/launch/wake.rs:209-225`): two wake failure
+  reasons still say `"choose it again before launching"` / `"before the session could launch"` under `Restart error.` in
+  Restart with. Pressing Restart again immediately shows `host_refusal`'s restart-worded text. Both branches require
+  narrow wake-time windows (the host changing installation mid-Resume or disconnecting during the single `cx.defer` tick
+  after `Phase::Ready`).
+- Decision: Covered by `review_feedback_queue/FILTER.md:24-42` ("Rare, self-correcting glitches and imprecise
+  diagnostics", added 2026-09-28): rare wake-time trigger whose whole consequence is misleading error wording that
+  self-corrects on the next Restart press, with nothing wrongly restarted and no exclusions triggered. Removed
+  immediately during triage (2026-11-25, main `5af40d23e`).
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (removed immediately during triage on 2026-11-25).
+
+## trailing-claude-json-over-1mib-never-settles.md
+
+- Outcome: `other`.
+- Assessment: Confirmed in source
+  (`crates/farhelm-helm/src/provisioning/credential_delivery.rs:835-858,913-939,1294-1297`;
+  `tensorlake_backend.rs:135-188`): a persistent recipe host whose `~/.claude.json` exceeds 1 MiB fails the 1 MiB read
+  cap, leaves `claude_onboarding_seeded` unsettled, and warns on every reconnect.
+- Decision: Covered by `SPEC_impl.md:6836-6840` (added by PR #4967, commit `a6ee62bfc`): "a long-lived persistent recipe
+  host whose `~/.claude.json` exceeds 1 MiB (or outlasts the seed's transfer budget) warns on reconnect without settling
+  the slot, and a concurrent Claude write between comparison and replacement can be lost. Both trade-offs are accepted:
+  the seed exists for fresh and disposable recipe hosts, and hosts with large files have already completed onboarding."
+  Removed immediately during triage (2026-11-25, main `5af40d23e`).
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (removed immediately during triage on 2026-11-25).
+
+## trailing-antigravity-restart-selector-after-custom-dashdash.md
+
+- Outcome: `other`.
+- Assessment: Confirmed on `5af40d23e` (`crates/farhelm-helm/src/launches.rs:679-706,868-893,953-1027`): with Custom
+  permission flags ending in `--`, Antigravity places `--conversation <id>` after `--`, breaking Restart and failing
+  the `permission_modes` drift check.
+- Decision: Covered by unlanded queued plan `plans/queue/hooks-restart-and-antigravity-fixes.md` (queued in #4977 while
+  this triage PR was being rebased), Acceptance Criterion 1 / PR 1, which keeps Antigravity's `--settings` and
+  `--conversation` options before any Custom `--` delimiter and preserves `with_workspace_trust` compatibility. Removed
+  immediately during triage (2026-11-25, main `493944565`).
+- Completion criteria: Remove the feedback file and its index entry; the queued plan owns the implementation.
+- Execution: complete (removed immediately during triage on 2026-11-25).
