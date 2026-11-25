@@ -47654,3 +47654,78 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   and visual review exceed the size gate. Change `zxmomktpromlqlpltumqyyonqzlxvkux`, bookmark
   `plan/triage-environments-nov24/07d-sandbox-size-follow-up`.
   [Draft PR](https://github.com/scode/farhelm/pull/4949/changes).
+
+## trailing-borrower-classification-test-does-not-establish-checkout-membership.md
+
+- Outcome: `other`.
+- Assessment: A supervisor test checks how a session reports an interrupted checkout preparation when it borrowed
+  someone else's managed checkout. It never confirms the second session actually joined that checkout, so it could pass
+  for a plain non-member. Verified: confirmed by source. `checkout_interruption_status_matches_reload`
+  (`service/core.rs:37419ff`) creates the borrower through `create_session_without_overrides` and asserts only the
+  classification and reload agreement. Other tests check membership separately. Test gap only.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard, or fix code with one premise assertion (size S).
+- Execution: Fixed within the cheap allowance. The classification fixture checks durable membership in the same checkout
+  and the absence of checkout preparation owned by the borrower. Change `nztlxtzoukkluqsskzsmsxpsnzkyyxuq`, bookmark
+  `plan/triage-environments-nov24/08-cheap-fixes`. [Draft PR](https://github.com/scode/farhelm/pull/4953/changes).
+
+## trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md
+
+- Outcome: `other`.
+- Assessment: A session's own Farhelm connection must not be able to seal and delete its environment. The recording
+  could not confirm the refusal from excerpts. Verified: incorrect, the refusal is verified.
+  `handle_restricted_control`'s catch-all `other =>` answers `Unauthorized` (`service/handlers.rs:3463-3471`).
+  `DeleteSessionOrSeal` is handled only in full dispatch (`handlers.rs:2999`). The restricted-request test lists
+  `DeleteSessionOrSeal` (`handlers.rs:7659-7664`) and asserts an `Unauthorized` reply for each (`:7666-7671`).
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — the finding is refuted; size n/a
+- Execution: Discarded as refuted. The existing restricted dispatch test sends the seal-capable Delete and requires a
+  matching Unauthorized result. That case passed in the focused run. Change `nztlxtzoukkluqsskzsmsxpsnzkyyxuq`, bookmark
+  `plan/triage-environments-nov24/08-cheap-fixes`. [Draft PR](https://github.com/scode/farhelm/pull/4953/changes).
+
+## trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md
+
+- Outcome: `other`.
+- Assessment: When a Delete moves a checkout to trash, Farhelm tells every window to re-read Trash, and so does Replace
+  when its source's checkout moves. A test guards this for Delete even when the session row was already forgotten.
+  Replace has its own copy of the code with no such test. Verified: confirmed.
+  `delete_session_happy_path_returns_200_with_the_archive_fact` exists (`sessions_tests.rs:2053`), and no Replace
+  counterpart was found. Replace's wake is at `sessions.rs:5115-5121`. Behavior is correct today; this is a test gap
+  only.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard, or fix code with one test (size S).
+- Execution: Fixed within the cheap allowance. The fresh Replace test forgets the source first, then observes the host's
+  Trash epoch and an independent fleet wake from its archive reply. Change `nztlxtzoukkluqsskzsmsxpsnzkyyxuq`, bookmark
+  `plan/triage-environments-nov24/08-cheap-fixes`. [Draft PR](https://github.com/scode/farhelm/pull/4953/changes).
+
+## environment-launch-history-test-bypasses-origin-handoff.md
+
+- Outcome: `other`.
+- Assessment: When an agent (not the user) asks for a sandbox or container session, the desktop must not learn that
+  setup as a recent setup or default place. The code does keep agent-made sessions out of that history. But the
+  regression test feeds the "came from an agent" fact straight into the final bookkeeping step. It never goes through
+  the real request routes, so a future change that loses that fact on the way would not be caught. Nothing goes wrong
+  for users today. Verified: confirmed. `crates/farhelm-helm/src/sessions_tests.rs:146-202` builds `CreateAcceptance`
+  with `CreateOrigin::Agent` directly. The real routes take the origin from the request (`sessions.rs:1980`
+  `req.origin()`) and pass it on separately at `sessions.rs:2235-2246` (ordinary) and `sessions.rs:2589-2606` (fresh
+  checkout). No other test checks `environment_launch_history`/`last_container_host` through a request (grep across
+  `crates/farhelm-helm/src`). `sessions.rs:2934` only checks the request's `origin()` parse.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — the shipped handoff is correct, and the guard would
+  protect against a hypothetical regression; size S if kept (one request-level test).
+- Execution: No change under the test-only size gate. The available approval tests do not reach successful environment
+  acceptance. Covering the origin handoff through the ordinary and fresh-checkout paths needs more fixture work than the
+  allowance. Change `nztlxtzoukkluqsskzsmsxpsnzkyyxuq`, bookmark `plan/triage-environments-nov24/08-cheap-fixes`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4953/changes).

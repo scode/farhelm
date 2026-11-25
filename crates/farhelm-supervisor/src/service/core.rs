@@ -37388,9 +37388,26 @@ exit 1
                 .join("checkout-preparation")
                 .join(format!("{}.json", plan.id));
             let info = if evidence == "borrower" {
-                sup.create_session_without_overrides(&origin.cwd, "agent", None, 80, 24, None)
+                let borrower = sup
+                    .create_session_without_overrides(&origin.cwd, "agent", None, 80, 24, None)
+                    .await
+                    .unwrap();
+                let membership = sup
+                    .store
+                    .member_working_copy(&borrower.id)
                     .await
                     .unwrap()
+                    .expect("premise: the second session joined the managed checkout");
+                assert_eq!(
+                    membership.id, plan.id,
+                    "the borrower joined the owner's checkout"
+                );
+                let origin = sup.store.origin_working_copy(&borrower.id).await.unwrap();
+                assert!(
+                    origin.is_none(),
+                    "premise: the borrower owns no checkout preparation"
+                );
+                borrower
             } else {
                 origin
             };

@@ -169,20 +169,6 @@ consequences.
 - [`launcher-keyboard-recents-hide-custom-flags.md`](launcher-keyboard-recents-hide-custom-flags.md) — Keyboard users
   can no longer reveal the custom permission flags that distinguish otherwise identical recent setups.
 
-- [`trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md`](trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md)
-  — The new test would still pass if a future edit broke automatic Trash refresh after Replace removes its source.
-
-- [`trailing-borrower-classification-test-does-not-establish-checkout-membership.md`](trailing-borrower-classification-test-does-not-establish-checkout-membership.md)
-  — This borrower classification case can pass if its second session never joins the managed checkout.
-
-- [`trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md`](trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md)
-  — The product requires restricted sessions to be denied this operation. The independent inspection did not establish
-  the exact denial path from the supplied source excerpts.
-
-- [`environment-launch-history-test-bypasses-origin-handoff.md`](environment-launch-history-test-bypasses-origin-handoff.md)
-  — The launch-history regression test can pass if an agent-requested environment starts becoming the desktop’s default
-  host again.
-
 - [`shortcuts-chord-during-composition.md`](shortcuts-chord-during-composition.md) — The Keyboard shortcuts chord can
   interrupt an input method if native handling clears its mark first or the action cannot query the focused field.
 

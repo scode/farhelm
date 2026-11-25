@@ -730,6 +730,7 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
 /// on an existing session-owned host. The accepted preview and the create
 /// agree on the target's root before the original session is deleted. The new
 /// checkout teaches the global repository list without changing host suggestions.
+/// A checkout archived by that Delete wakes Trash even after the source is gone from the cache.
 #[farhelm_testtrace::test]
 async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
     use farhelm_proto::ControlMsg;
@@ -747,6 +748,7 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
             .is_none()
     );
     let fleet = h.fleet.clone();
+    let state = h.state.clone();
     let (done, mut finished) = tokio::sync::oneshot::channel();
     let responder = tokio::spawn(async move {
         let (read, write) = tokio::io::split(peer);
@@ -811,10 +813,19 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
         fleet.edit(host, |script| {
             script.sessions.retain(|session| session.id != "source")
         });
+        let (claim, _) = crate::sessions::host_client(&state, host).unwrap();
+        state
+            .manager
+            .forget_session(&claim, "source")
+            .await
+            .unwrap();
+        let source = store::SessionKey::new(host, "source");
+        assert!(!state.store.has_cached_session(&source).await.unwrap());
+        let revision = state.manager.events().revision();
         writer
             .write_control(&ControlMsg::SessionDeleted {
                 req_id,
-                archived: false,
+                archived: true,
                 notice: None,
             })
             .await
@@ -824,6 +835,11 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
             frame = next_control_frame(&mut reader) => panic!("unexpected operation after replacement: {frame:?}"),
             result = &mut finished => result.unwrap(),
         }
+        assert_eq!(
+            state.manager.events().revision(),
+            revision + 1,
+            "archive wakes the fleet once"
+        );
     });
     h.manager.sync_registry().await.unwrap();
     h.await_refreshed_as(host, "fresh-recipe-install", 1).await;
@@ -866,6 +882,7 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
             .unwrap()
             .is_empty()
     );
+    assert_eq!(h.state.trash_requests.epoch(host), 1);
     done.send(()).unwrap();
     responder.await.unwrap();
 }
