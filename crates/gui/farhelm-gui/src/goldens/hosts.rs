@@ -409,7 +409,8 @@ pub(super) fn hosts_panel_owned_elsewhere_setup(state: &SceneState, _: &mut Wind
 /// Details on with a Tensorlake sandbox, `gpu-sandbox`, whose credentials the helm could not deliver, below the
 /// reference hosts (against reference `hosts-panel-details`, whose stack had no sandbox): the sandbox's row in the
 /// advisory amber though it is connected, and its details naming the sandbox, its recipe and size, then "Credentials
-/// not delivered:" and the helm's reason. Drawn in the tall column, since four rows' details overflow the short one.
+/// not delivered:" with the earlier cleanup warning still visible when a later delivery fails. The tall column fits
+/// four rows and the two reasons.
 pub(super) fn hosts_panel_credentials_not_delivered_setup(
     state: &SceneState,
     _: &mut Window,
@@ -431,7 +432,9 @@ pub(super) fn hosts_panel_credentials_not_delivered_setup(
         }),
         tunnels: None,
         credential_warning: Some(
-            "the sandbox refused the Codex login file: permission denied".into(),
+            "Claude recipe credential cleanup is pending (could not install the agent settings). \
+             GitHub CLI (gh) is missing; private clones need gh installed"
+                .into(),
         ),
     });
     let mut listed = reference_hosts();

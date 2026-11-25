@@ -44944,3 +44944,51 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   terminal, and changing that contract or reproducing Kit’s text editing exceeds the scope. Change
   `swwpnpqmvrxktlrrytnrntwtmmnlxmpw`, bookmark `plan/triage-helm-nov24/05e-wayland-text-paste`,
   [PR #4869](https://github.com/scode/farhelm/pull/4869/changes).
+
+## trailing-later-codex-github-failure-hides-claude-cleanup-warning.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC_impl.md, "Named credential catalog" (6220-6223): "A failed cleanup keeps that stamp
+  for retry and withholds that agent's entry. The other agent and GitHub can still finish. The host warning names the
+  affected agent, and credential replacement reports the warning when that agent's selection uses the replaced name."
+  Current code: `crates/farhelm-helm/src/provisioning/credential_delivery.rs:822-825` builds
+  `lookup_warnings: warnings.lookup_aborted.then_some(warnings)`. So when a Claude or Codex legacy cleanup is pending
+  (`lookup_aborted` false) and the Codex login or GitHub slot then fails, the host warning (`connect`, `:533-535`) and
+  the replacement reply (`push_one`, `:719-723`) both drop the cleanup warning and name only the later failure. The fix
+  follows directly from the existing machinery: carry the warnings whenever they are present, and let the existing
+  `push_failure` choose the cleanup reason as the success path already does. No comment justifies the filter; the
+  field's doc comment (`:166-172`) gives no reason to exclude cleanup warnings. Verified: Confirmed. It also covers the
+  Codex legacy cleanup, as the file's extension says.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code. Size S
+  (about 5-10 lines of code plus a test with a failed cleanup and a failing GitHub slot, well under 100).). Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry,
+  or narrow it to any part the Assessment says remains.
+- Execution: Fixed. Hosts retain cleanup warnings when the Codex login or GitHub delivery step fails. A replacement
+  still reports a cleanup warning when its selected launch entry was withheld. Change
+  `rtnnxkpwysvnnvrwyvvmmkynzvplxqmm`, bookmark `plan/triage-helm-nov24/05f-credential-delivery`,
+  [PR #4873](https://github.com/scode/farhelm/pull/4873/changes).
+
+## trailing-codex-login-save-reports-later-github-failure.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Saving a new Codex login can install it on the host and still tell the user "Saved; not delivered to
+  <host>", giving a GitHub token problem as the reason. The user may then retry or troubleshoot a delivery that worked.
+  Verified: Confirmed. `credential_delivery.rs:719-723` reports any hard failure in the pass, and the Codex login is
+  written before the GitHub step. The behavior is deliberate: the test
+  `codex_login_save_filters_an_unrelated_launch_ lookup_warning` (`credential_delivery_tests.rs:1449-1453`) calls it
+  "the existing pass error contract". SPEC.md 536 ("reports `Saved; not delivered to <host>: <reason>` for failures")
+  does not say which failures.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix spec+code. Say in
+  SPEC.md that a save reports only failures of its own slot, and record which slot failed. Size M. It touches the same
+  code as 419; doing them together is natural. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed in the helm and both specifications. A later failure remains visible in Hosts and does not mark a
+  successfully delivered Codex login as undelivered. Saves still report failures that prevented a selected slot from
+  completing. Change `rtnnxkpwysvnnvrwyvvmmkynzvplxqmm`, bookmark `plan/triage-helm-nov24/05f-credential-delivery`,
+  [PR #4873](https://github.com/scode/farhelm/pull/4873/changes).

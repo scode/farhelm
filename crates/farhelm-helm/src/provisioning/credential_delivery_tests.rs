@@ -529,11 +529,13 @@ async fn claude_subscription_reconciles_modes_replacements_and_reconnects() {
 
 /// A legacy URL can override the launch environment, so a failed cleanup
 /// must withhold the whole Claude snapshot while other deliveries proceed.
+/// A later GitHub failure must leave the cleanup warning on the host and on a save that needs Claude.
 /// Once cleanup succeeds, an upload retry must leave subsequent edits alone.
 #[farhelm_testtrace::test]
 async fn stamped_claude_cleanup_gates_only_its_launch_environment() {
     const PENDING: &str =
         "Claude recipe credential cleanup is pending (could not install the agent settings)";
+    let both = format!("{PENDING}. GitHub CLI (gh) is missing; private clones need gh installed");
     let f = Fixture::new(true).await;
     f.github_credential().await;
     f.select_codex(false, true, true).await;
@@ -558,8 +560,9 @@ async fn stamped_claude_cleanup_gates_only_its_launch_environment() {
     );
     let _lease = f.delivery.enter(&f.row);
     *f.backend.fail.lock().unwrap() = Some("write-legacy-claude-settings".into());
+    f.backend.github_cli.store(false, Ordering::SeqCst);
     f.delivery.connect(&f.row, &f.events).await;
-    assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(PENDING));
+    assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(both.as_str()));
     let snapshot = f.snapshot().await;
     assert!(!snapshot.env.contains_key("ANTHROPIC_AUTH_TOKEN"));
     assert_eq!(
@@ -570,7 +573,7 @@ async fn stamped_claude_cleanup_gates_only_its_launch_environment() {
     let record = f.delivery.read_record(&f.row).await.unwrap();
     assert!(record.claude_environment.is_none());
     assert_eq!(record.claude, Some(EndpointStamp::Absent));
-    assert!(record.codex.is_some() && record.github.is_some());
+    assert!(record.codex.is_some() && record.github.is_none());
 
     f.replace("work", SECOND).await;
     let shared = f
@@ -579,6 +582,7 @@ async fn stamped_claude_cleanup_gates_only_its_launch_environment() {
         .await;
     assert_eq!(shared.len(), 1);
     assert_eq!(shared[0].reason, PENDING);
+    assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(both.as_str()));
     let snapshot = f.snapshot().await;
     assert!(!snapshot.env.contains_key("ANTHROPIC_AUTH_TOKEN"));
     assert_eq!(
@@ -587,6 +591,7 @@ async fn stamped_claude_cleanup_gates_only_its_launch_environment() {
     );
     assert!(!f.home.join(".codex/config.toml").exists());
 
+    f.backend.github_cli.store(true, Ordering::SeqCst);
     f.replace("git-work", "fictional-github-second").await;
     assert!(
         f.delivery
@@ -1173,7 +1178,7 @@ async fn github_without_gh_keeps_the_file_and_retries_only_the_unfinished_slot()
 
 /// Recipe edits may legally release a catalog name before the old connection
 /// retires its binding. A missing later GitHub value must not withhold a valid
-/// endpoint replacement, and its warning must not roll back that success stamp.
+/// endpoint replacement or report it as undelivered. Hosts still show the GitHub failure.
 #[farhelm_testtrace::test]
 async fn a_deleted_github_selection_does_not_block_endpoint_replacement() {
     let f = Fixture::new(false).await;
@@ -1187,10 +1192,10 @@ async fn a_deleted_github_selection_does_not_block_endpoint_replacement() {
         .delivery
         .push("work", past_the_ssh_budget(), &f.events)
         .await;
-    assert_eq!(failures.len(), 1);
+    assert!(failures.is_empty());
     assert_eq!(
-        failures[0].reason,
-        "could not resolve the recipe's GitHub credential"
+        f.delivery.warning(f.row.id).as_deref(),
+        Some("could not resolve the recipe's GitHub credential")
     );
     assert!(f.claude().await.contains(SECOND));
     assert_eq!(
@@ -1337,7 +1342,7 @@ async fn endpoint_lookup_failures_preserve_the_shared_file_and_fail_dependent_pu
                 .await;
             let both = format!("{warning}. could not resolve the recipe's GitHub credential");
             assert_eq!(failures.len(), 1);
-            assert_eq!(failures[0].reason, both);
+            assert_eq!(failures[0].reason, warning);
             assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(both.as_str()));
             assert_eq!(tokio::fs::read(f.claude_path()).await.unwrap(), prior);
         }
@@ -1446,11 +1451,10 @@ async fn claude_lookup_failure_allows_codex_login_rotation_and_refuses_setup() {
     assert_eq!(after.codex_auth, Some(delivered_login));
 }
 
-/// A late GitHub error still belongs in the save reply under the existing pass
-/// error contract. A delivered Codex login has no dependency on the Claude
-/// launch lookup, so only host details also report that lookup.
+/// A Codex login can reach its file even when a shared launch lookup and the later GitHub lookup fail.
+/// The save confirms delivery of the login, and host details report both other failures.
 #[farhelm_testtrace::test]
-async fn codex_login_save_filters_an_unrelated_launch_lookup_warning() {
+async fn delivered_codex_login_save_leaves_other_failures_in_host_details() {
     let f = Fixture::new(false).await;
     f.codex_credential().await;
     f.github_credential().await;
@@ -1479,11 +1483,7 @@ async fn codex_login_save_filters_an_unrelated_launch_lookup_warning() {
         .push("codex-work", past_the_ssh_budget(), &f.events)
         .await;
 
-    assert_eq!(failures.len(), 1);
-    assert_eq!(
-        failures[0].reason,
-        "could not resolve the recipe's GitHub credential"
-    );
+    assert!(failures.is_empty());
     assert_eq!(
         f.delivery.warning(f.row.id).as_deref(),
         Some(
@@ -1499,6 +1499,35 @@ async fn codex_login_save_filters_an_unrelated_launch_lookup_warning() {
         Some(f.stamp("codex-work", 2).await)
     );
     assert_eq!(tokio::fs::read(f.claude_path()).await.unwrap(), before);
+}
+
+/// A GitHub save must still report a failure when an earlier Codex login error stops the pass before its turn.
+#[farhelm_testtrace::test]
+async fn a_github_save_reports_the_codex_login_failure_that_blocked_it() {
+    let f = Fixture::new(false).await;
+    f.codex_credential().await;
+    f.github_credential().await;
+    f.select_codex(true, false, true).await;
+    let _lease = f.connected().await;
+    let before = tokio::fs::read(f.github_path()).await.unwrap();
+    assert_eq!(f.delivery.warning(f.row.id), None);
+
+    f.select_codex(false, false, true).await;
+    f.store
+        .delete_credential("codex-work".into())
+        .await
+        .unwrap();
+    f.replace("git-work", "fictional-github-second").await;
+    let failures = f
+        .delivery
+        .push("git-work", past_the_ssh_budget(), &f.events)
+        .await;
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        failures[0].reason,
+        "could not resolve the recipe's Codex login"
+    );
+    assert_eq!(tokio::fs::read(f.github_path()).await.unwrap(), before);
 }
 
 /// Distinct URLs and names let the edit-timing test distinguish a binding

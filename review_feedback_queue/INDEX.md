@@ -540,10 +540,6 @@ consequences.
   — When discarding a malformed session ID from startup scope cleanup, the supervisor logs it with raw Display (%id)
   instead of escaped Debug (?id), violating the session-ID logging rule.
 
-- [`trailing-later-codex-github-failure-hides-claude-cleanup-warning.md`](trailing-later-codex-github-failure-hides-claude-cleanup-warning.md)
-  — If legacy Claude (or, since #4751, Codex) settings cleanup fails on a host and a later Codex or GitHub credential
-  step also fails, Farhelm hides the cleanup warning and reports the unrelated error for that agent's replacements.
-
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
   agent-credentials and Codex config targets unverified before and after retry.
@@ -834,7 +830,3 @@ consequences.
 
 - [`trailing-credential-test-name-says-setup-refuses.md`](trailing-credential-test-name-says-setup-refuses.md) — A test
   name says a failed Claude credential lookup makes host setup fail, while setup actually completes with a notice.
-
-- [`trailing-codex-login-save-reports-later-github-failure.md`](trailing-codex-login-save-reports-later-github-failure.md)
-  — Saving a new Codex login can install it on the host and still report "not delivered", naming a later GitHub token
-  failure as the reason.

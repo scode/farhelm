@@ -128,8 +128,8 @@ linux/host-update-running-hosts-panel--dark.png fe71352b901057821afa61f9d53ddfed
 linux/host-update-running-hosts-panel--light.png b31c335404996f77fea718a2730cb7eae36de4c5
 linux/hosts-panel--dark.png 318515cc366d7b53d393620f97c7b6c54c427134
 linux/hosts-panel--light.png ea8d3073490f3f4eef2e0da0caaaff6f9a8b0052
-linux/hosts-panel-credentials-not-delivered--dark.png 89f3909f585eff7d3aaffc24a04e097fbb466965
-linux/hosts-panel-credentials-not-delivered--light.png 9dded4786471f76cdadc17d73dbb89448f2255a8
+linux/hosts-panel-credentials-not-delivered--dark.png 24df86934245f68b479c629dbaf8a11544ba6b0d
+linux/hosts-panel-credentials-not-delivered--light.png 505a55cfdbda3382aab325f7298f82436962e6ec
 linux/hosts-panel-details--dark.png 22a3011af5f3dc767765fc1978477d402bb7b4c1
 linux/hosts-panel-details--light.png 93edf8fec6280e233360281509683af6e9b5be8f
 linux/hosts-panel-host-unreachable--dark.png 8dd327f419e10b9f236ba37377fd361b5bf60c2e

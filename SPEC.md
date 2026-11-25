@@ -534,9 +534,10 @@ remote file work and a later file's failure does not undo an earlier success. De
 usable, makes the host's status and navigation mark amber, and shows a sanitized reason in its details. The next
 connection or credential replacement retries; there is no periodic retry. Saving a replacement commits its value first,
 waits at most the helm's 20-second host reply bound for delivery (including lock waits), and reports
-`Saved; not delivered to <host>: <reason>` for failures; a host still being delivered to when the bound passes is
-reported as not delivered because it did not answer in time, while its delivery carries on and shows its outcome in the
-host's warning. Ending the connected phase cancels its pending pushes before further transport work.
+`Saved; not delivered to <host>: <reason>` when delivery to a selected slot failed or could not start. A host still
+being delivered to when the bound passes is reported as not delivered because it did not answer in time, while its
+delivery carries on and shows its outcome in the host's warning. Ending the connected phase cancels its pending pushes
+before further transport work.
 
 Removing a credential from Farhelm is best effort at the next opportunity. An already connected host reconciles
 Farhelm-managed credential files at its next connection, subject to the delivery rules above. Vendor-owned login files,
