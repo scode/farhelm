@@ -112,6 +112,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   experiment fixed only the supervisor's action checks, which left desktop retries repeating the wrong consent and let
   an old activity sample block recovery Restart. The full fix needs shared evidence for status, confirmations and
   cleanup, with tests covering those boundaries.
+- **Keep a failed tab close retryable after the terminal host ends.** Close can end the terminal host and then fail to
+  confirm the final sweep for surviving shell processes. It returns an error after forgetting the tab and removing its
+  launch record, so Close and the automatic cleanup cannot retry it. If the host end also fails, the error claims the
+  processes were reaped even when their sweep failed. Keep the cleanup evidence until both checks pass, as SPEC.md's
+  “Lifecycle operations” requires. Start with `close_host_tab` and the tab reap's existing backoff. Retaining the record
+  in Close alone leaves a gap after a normal supervisor restart. Reload drops tabs whose host is gone and startup
+  reclaim removes their records. The launch record also lacks the scope selection that the ended host's tag supplied.
+  Carry that selection and the pending cleanup across reload without re-adopting a closed tab or sweeping unrelated
+  tabs. This needs a durable recovery design beyond the triage budget. Exercise a successful host end with an injected
+  final sweep failure, a failure of both checks, and a retry across supervisor restart with the scope initially
+  unavailable and then verified gone. A pending close's first sweep can fail before the failure branch that advances the
+  retry deadline. Advance the deadline on every failed automatic retry and assert that cleanup waits until the new
+  deadline.
+
 - **Keep failed Restart cleanup retryable after session deletion.** If a replacement fails to start after its session
   row has been deleted, the supervisor can fail to confirm the replacement's Linux scope is empty. Startup can retire
   the launch record once its host is gone, leaving processes from the failed attempt with no cleanup retry. Preserve the

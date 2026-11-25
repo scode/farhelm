@@ -361,9 +361,6 @@ consequences.
   — Recovery can drop the main terminal's saved host and child identities while the recorded host may still run,
   weakening later Delete cleanup.
 
-- [`trailing-tab-close-discards-retry-state-when-final-process-sweep.md`](trailing-tab-close-discards-retry-state-when-final-process-sweep.md)
-  — A terminal tab can disappear after Close reports incomplete process cleanup, leaving no tab to retry, even while its
-  session remains.
 
 - [`trailing-delete-level-tests-miss-retained-gone-host-refusal.md`](trailing-delete-level-tests-miss-retained-gone-host-refusal.md)
   — The existing assertions do not show that Delete keeps a session and its launch record if a terminal classified Gone
@@ -383,9 +380,6 @@ consequences.
   — The regression still checks that the session and its retry key are retained, but it stopped checking whether the
   client is wrongly told to discard that key.
 
-- [`trailing-tab-cleanup-test-leave-first-two-fixture-jobs-running.md`](trailing-tab-cleanup-test-leave-first-two-fixture-jobs-running.md)
-  — A failure in the regression can leave the test's own background work running for the fixture's remaining sleep
-  interval.
 
 - [`trailing-alternate-screen-stop-waits-on-output-written-before-term.md`](trailing-alternate-screen-stop-waits-on-output-written-before-term.md)
   — The test can fail even when Farhelm correctly keeps the frame of a program killed before it restored the primary

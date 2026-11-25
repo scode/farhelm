@@ -643,22 +643,6 @@
   host_creates.rs:1456; size S.
 - Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
-## trailing-tab-cleanup-test-leave-first-two-fixture-jobs-running.md
-
-- Outcome: `other`.
-- Assessment: A tab cleanup test starts background jobs that ignore the hangup and sleep for 1000 seconds, and relies on
-  the Close and Stop under test to kill the first two. Only the third job has its own kill guard. If the test fails
-  midway, two sleepers can be left running on the test machine for about 17 minutes. Verified: Confirmed.
-  host_tabs.rs:1011-1012 (`trap '' HUP`, `exec /bin/sleep 1000`), and only `third_job` is guarded (:1054). It affects
-  test hygiene only.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code — arm a `PidKillGuard` for each job as its pid is
-  read; size S. Or discard.
-- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
 ## trailing-alternate-screen-stop-waits-on-output-written-before-term.md
 
 - Outcome: `other`.
@@ -2862,29 +2846,6 @@
   explains what is complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
-## trailing-tab-close-discards-retry-state-when-final-process-sweep.md
-
-- Outcome: `fix code`.
-- Assessment: Closing a terminal tab ends its host and then sweeps once more for anything that outlived the hangup. If
-  that last sweep fails, the user sees an error, but the tab has already been forgotten. There is nothing left to retry
-  Close on, and the automatic retry does not run. Only deleting the whole session cleans up the rest. Verified:
-  Confirmed. host_tabs.rs:1023-1046: when ending the host succeeds, the record is removed and the tab forgotten before
-  the result of the final sweep is returned. The retry state (`mark_end_failed`, :1047-1050) covers only a failed host
-  end. In the both-fail branch, the error message says the processes "were reaped" (:1054), which ignores a failed final
-  sweep. Delete's whole-session sweep and tab-scope listing remain a cleanup route. No surviving process was observed.
-- Decision: q-cleanup, "Keeping cleanup evidence until cleanup is confirmed": the maintainer picked "Keep it until
-  confirmed". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "Another case where this
-  has to not be very complicated. If this turns into a lot of code, a lot of complexity, it must be turned into a
-  follow-up to-do item that explains the complexity."
-- Completion criteria: Every path keeps or settles the cleanup evidence a launch recorded until cleanup is confirmed.
-  Recommendation for reference: fix code — keep the record and the retry mark when the final sweep fails, and correct
-  the both-failed message; size S–M. Complexity gate (maintainer): if the fix turns very complicated during execution,
-  the executor stops and turns it into a follow-up TODO.md entry that explains what is complicated and why, instead of
-  landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
 - Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
 ## trailing-retry-delete-ambiguous-restart-record-before-scope-is-confirmed.md

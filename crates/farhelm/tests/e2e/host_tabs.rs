@@ -1019,14 +1019,18 @@ async fn close_stop_and_delete_kill_a_hangup_immune_unmarked_job_of_a_tab() {
     let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = create(&h.client, work.path()).await;
-    let first = h.client.open_tab(&session.id).await.expect("open a tab");
-    let second = h.client.open_tab(&session.id).await.expect("open another");
     let job = |tab: &str| {
         let path = jobs.join(format!("{tab}.pid"));
         async move { wait_for_pid_file(&path, WAIT_SECS).await }
     };
+    // The fixture jobs ignore hangup and carry no markers. Guard each one
+    // before another tab action or assertion can fail.
+    let first = h.client.open_tab(&session.id).await.expect("open a tab");
     let first_job = job(&first.id).await;
+    let _first_job_guard = PidKillGuard::arm(first_job);
+    let second = h.client.open_tab(&session.id).await.expect("open another");
     let second_job = job(&second.id).await;
+    let _second_job_guard = PidKillGuard::arm(second_job);
     for pid in [first_job, second_job] {
         assert!(
             !process_is_gone(pid) && ignores_hangup(pid) && !carries_markers(pid),
