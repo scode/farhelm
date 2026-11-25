@@ -12,3 +12,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`drift-reasoning-effort`](reports/drift-reasoning-effort.report.md) landed 2026-11-25 in #4785, #4791: Add live reasoning effort selection drift tests across supporting agents
 - [`drift-permission-modes`](reports/drift-permission-modes.report.md) landed 2026-11-25 in #4784, #4792: Add live permission mode and custom permission flag drift tests across supporting agents
 - [`drift-initial-prompt-launch`](reports/drift-initial-prompt-launch.report.md) landed 2026-11-25 in #4787, #4795: Add live launch-time initial prompt delivery drift tests across supporting agents
+- [`drift-named-conversation-starts`](reports/drift-named-conversation-starts.report.md) landed 2026-11-25 in #4786, #4796: Add live one-time named conversation start drift tests across all built-in agents

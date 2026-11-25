@@ -72,3 +72,85 @@ A fresh-context Sol high reviewer checked the code and its follow-up changes. Th
 recall against its ordinary Restart target and that a later credential error could conceal a failed recall. The test now
 targets a different conversation and treats a credential refusal after a successful seed as a failure. A separate cold
 reader reviewed the commit and PR title. The review gate cleared after the corrections.
+
+### Landing
+
+#### What landed with it
+
+Two plans landed this round, both adding a category to the opt-in live drift tests: drift-initial-prompt-launch first,
+then this one, through [#4786](https://github.com/scode/farhelm/pull/4786/changes) and the landing fix
+[#4796](https://github.com/scode/farhelm/pull/4796/changes). Both were written before the previous round's drift plans
+landed, so they were rebased onto those. The overlap was in TODO.md (each plan's planned entry removed, every follow-up
+kept), the drift docs, and the list of categories in the drift module, where both register theirs. This plan also moved
+the shared check for an agent's reply into a helper that both categories and the older ones now use, with the same
+behavior. Claude now starts with its background updater turned off, as every drift case does since the previous round. A
+planning change for the triage outcomes also reached main meanwhile, touching no code.
+
+#### Fixes made while landing
+
+#4796 changes only the drift tests, their docs and TODO.md:
+
+- **Per-agent choices now name every agent.** The category chose the check for an agent without conversation capture
+  through a catch-all branch, and decided how to find the conversation ID by comparing against Cursor by name, so any
+  other agent would have used OpenCode's session list. Only Cursor and OpenCode reach that code today, so nothing
+  misbehaved, but the repository's code rules forbid both patterns, because an agent added later silently gets the
+  default. Each now lists every agent.
+- **Cursor's unverified case now has a follow-up.** The Cursor case stopped at Cursor's login screen before its seed
+  turn, and no TODO entry said it still needs a signed-in run. The existing Cursor login entry now includes it.
+- **The docs said the seeded conversations live in the test folders.** Each agent keeps them in its own conversation
+  store, like any other conversation; the docs now say so.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. Both plans landed this
+round (drift-initial-prompt-launch and drift-named-conversation-starts) change only the opt-in live drift tests and
+their docs, so the landing ran the drift tests that need no vendor CLI and the checks that inspect the changed files, on
+the two plans rebased onto main and stacked together with their landing fixes.
+
+On that stack (`7aa0e277`), whose code is what main now holds:
+
+- `cargo nextest run --locked -p farhelm --test e2e -E 'test(/^real_agent_capture::drift::/)'`, on the test worker
+  (recorder run `f8d59b12-6df5-4ede-a0d6-94282b1541db`): all 23 passed, with no runtime skip.
+- `python3 -B scripts/run-harness-drift.py --list --category all`, on the test worker: it built the drift tests and
+  listed eight launch prompt and ten named conversation cases beside the other categories', starting no agent.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker: passed.
+- `python3 -B scripts/test-run-harness-drift.py`, locally (recorder run `ca051ad2-c296-422c-86db-1a96e90a14c8`): all 18
+  passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its pinned interpreter), `dprint check` and
+  `python3 scripts/check-agents-md.py` (no errors; one warning, about an old citation in the triage archive, already on
+  main), locally: passed.
+
+After that, only the drift docs changed (the launch prompt paragraph was made more precise), and `dprint check`,
+`check-agents-md` and the formatter passed again on the final stack.
+
+Reused: the executors' live runs of the two categories against the installed agents, recorded in the reports. They ran
+before the previous round turned off Claude's background updater for every drift case, so this round's Claude launches
+now carry that setting where the reported runs did not; the reasoning effort category's live runs already launched
+Claude that way, so the reuse holds. Neither category's Claude case has run live with it.
+
+Skipped: the live drift cases themselves, since they spend vendor turns, need the vendor logins and are opt-in by
+design; the workspace-wide Rust suite and the desktop checks, since no shipped code changed; and CI, which runs only on
+demand.
+
+#### What the report says that is no longer true
+
+Nothing. The landing's own review found the report accurate.
+
+#### Things you should know that the report does not say
+
+- **The Goose failure is a mismatch between Farhelm's documented behavior and what users see.** After a Goose session is
+  restarted onto a different conversation chosen by its ID, plain Restart becomes available again, though Farhelm says
+  Restart is unavailable after such a one-time choice. The cause is Farhelm's conversation reporter, which Goose saved
+  inside that conversation when Farhelm created it and which registers the chosen conversation again at launch. From the
+  report, that offered Restart resumes the conversation the user chose, so nothing appears to be lost; what is wrong is
+  that Farhelm offers what it said it would not. The fix could go either way (stop the reporter, or change the
+  documented behavior), and the TODO follow-up records the problem for both named Restart and the untested case of
+  creating a new session on a chosen conversation. Until it is settled, this category's Goose case reports FAILED on
+  runs where Goose 1.60.2 is installed and signed in, including in the "run all tests" flow; the TODO entry already
+  covers that failure.
+- **The seeded test conversations stay in each agent's conversation history.** Each case creates a short conversation
+  with a random label from a temporary folder, and the agent keeps it in its own store afterwards, as every drift
+  category's turns already do.
+- **OpenCode's conversation lookup exists twice, and the two copies disagree**, as the launch prompt plan's landing
+  notes describe: the same OpenCode behavior could read as FAILED here and as COULD NOT RUN there. No TODO entry records
+  sharing it yet.
