@@ -1916,10 +1916,11 @@ a sticky, `/tmp`-style directory. Keeping the root, and so its checkouts and the
 only the user can write is the user's responsibility. Farhelm does not check the root's owner or mode, and the ownership
 and archive promises in this section assume no other account can create, replace, or take over entries in it.
 
-Before Launch becomes available, the composer shows the exact host and path. Fresh GitHub checkouts on a host that
-offers Resume are an exception. The composer says the folder is picked automatically when the host is ready (or named
-after the session when a name is supplied). One press wakes the host, obtains a fresh preview and creates the session.
-An already-read recent checkout setup stays available in the command pane when that installation suspends while the
+Before Launch becomes available, the composer shows the exact host and path. Fresh GitHub checkouts on a verified host
+that offers Resume are an exception. The composer says the folder is picked automatically when the host is ready (or
+named after the session when a name is supplied). One press wakes the host, obtains a fresh preview and creates the
+session. If the resumable host has no verified installation, Folder explains why a checkout cannot be created. An
+already-read recent checkout setup stays available in the command pane when that installation suspends while the
 launcher is open. Direct template launching is the other exception: marking a template with ⚡ or giving it a number key
 is consent to its managed-checkout destination, including when combined in a quick-launch sequence, so it obtains the
 same exact preview and launches without showing the path first. A recipe-target environment launch is another exception.

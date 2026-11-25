@@ -47200,3 +47200,49 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. Wake failures use the alert for the initiating mode. The Restart with golden sends Resume to a
   suspended sandbox and checks the visible alert after the refusal. Change `ozplmkvyostnwtrksxtuxnzuqlxzoozn`, bookmark
   `plan/triage-environments-nov24/02-launcher-2`. [Draft PR](https://github.com/scode/farhelm/pull/4916/changes).
+
+## trailing-unverified-resumable-host-shows-checkout-allocation-notice.md
+
+- Outcome: `fix code`.
+- Assessment: In the launcher, a managed checkout aimed at a suspended or stopped sandbox or container that Farhelm has
+  never verified (no recorded installation identity) shows "The folder is picked automatically when the host is ready".
+  Launch is refused at the same time with "The host installation is not verified". The two lines contradict each other.
+  Nothing wrong is launched. Verified: confirmed. `LaunchDraft::checkout_refusal`
+  (`crates/gui/farhelm-gui/src/launcher/request.rs:415-424`) requires a non-empty identity before `can_wake`.
+  `checkout_allocation_notice` (`launcher/view/checkout.rs:902-913`) checks only `can_wake`. The reviewer's follow-on
+  point also holds: gating the notice alone would make the Folder line read "Waiting for a current checkout preview"
+  forever, so the fix needs one wording choice for the unverified case. How often hosts reach this state was not
+  established.
+- Decision: q-wake, "What waking a host at launch must guarantee": the maintainer picked "Never wedge, fail fast, word
+  per provider". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "Wait, another
+  complexity gate. If this turns complicated, the executor must stop and turn it into a follow-up to the item explaining
+  what's complicated and why."
+- Completion criteria: Launch-time waking never wedges, fails fast and words failures per provider. Recommendation for
+  reference: fix code — a shared eligibility helper and an explicit unverified line; size S. Complexity gate
+  (maintainer): if the fix turns very complicated during execution, the executor stops and turns it into a follow-up
+  TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100 lines of diff
+  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
+  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. Folder uses the launch refusal's reason for an unverified resumable host. The regression exercises
+  the Folder status and refused press. Change `uyquwstnswrxqxwxrlwqpnmovpvzylwy`, bookmark
+  `plan/triage-environments-nov24/02b-unverified-checkout-wake`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4918/changes).
+
+## trailing-wake-checkout-tests-omit-unverified-and-stopped-hosts.md
+
+- Outcome: `other`.
+- Assessment: The wake-checkout tests use only a verified, suspended sandbox. They never use an unverified host (the
+  contradictory hint in item 405) or a stopped container. Verified: confirmed. The fixtures assert `identity.is_some()`
+  and `Suspended` (`launcher/checkout_tests.rs:2293-2310`, `templates/dispatch_tests.rs:600-649`). Part 1 duplicates the
+  product finding in item 405. Part 2 is coverage only; `wake_tests.rs:253` covers a stopped container for folder
+  launches, not checkouts.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — part 1 is handled by 405's fix and test; size S–M if
+  kept.
+- Execution: No separate test change. The product fix in this PR covers the unverified host. A stopped-container
+  checkout test with a late failure takes a new lifecycle fixture and exceeds the test-only size gate. Change
+  `uyquwstnswrxqxwxrlwqpnmovpvzylwy`, bookmark `plan/triage-environments-nov24/02b-unverified-checkout-wake`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4918/changes).

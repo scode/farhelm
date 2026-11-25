@@ -2449,6 +2449,37 @@ fn suspended_checkout<'a>(
     (helm, cx, host)
 }
 
+/// The same suspended sandbox with its recorded identity missing. Both surfaces must explain why it cannot allocate
+/// a checkout, even though a plain-folder launch can still try to wake it.
+pub(crate) fn unverified_checkout_hosts() -> farhelm_proto::ui_channel::CollectionState {
+    let mut hosts = fixture_hosts(&[0, 11]);
+    assert_eq!(hosts.entries[1].key, "12");
+    assert_eq!(hosts.entries[1].value["state"]["phase"], "suspended");
+    hosts.entries[1].value["identity"] = Value::Null;
+    hosts
+}
+
+/// A repository choice on an unverified suspended host never authorizes Resume, preview or create.
+#[gpui::test]
+fn an_unverified_suspended_host_cannot_allocate_a_checkout(cx: &mut TestAppContext) {
+    let mut draft = command_draft(12);
+    draft.choose_repository(repo("acme", "bar"));
+    let (mut helm, cx) = launcher_with_hosts(cx, draft, unverified_checkout_hosts());
+    let detail = "launcher-preview-message";
+    assert_folder_status(cx, "launcher-preview-unverified", detail, UNVERIFIED_HOST);
+    test_support::click(cx, "launcher-launch");
+    assert_eq!(
+        shown_refusal(cx).unwrap(),
+        format!("Not launched. {UNVERIFIED_HOST}")
+    );
+    assert!(sent(&mut helm, cx).iter().all(|command| {
+        !matches!(
+            command.path.as_str(),
+            WAKE_RESUME | PREVIEW | "/api/sessions"
+        )
+    }));
+}
+
 /// Verify the actual form is fully resolved up to the host connection. It names its allocation policy and
 /// supplies no old folder or preview. Answer only unrelated reads before the press.
 fn pre_wake_traffic(helm: &mut FakeHelm, cx: &mut VisualTestContext, title: Option<&str>) {
