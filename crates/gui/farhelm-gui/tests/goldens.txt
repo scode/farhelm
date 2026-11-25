@@ -24,6 +24,8 @@ linux/buttons--dark.png 65ae19f8a49f8a5daf364896590016361516ec93
 linux/buttons--light.png 625ba3b4020adddf68f9d53799bc79084f1ef641
 linux/checkbox--dark.png c0a93158209cfdd66cba8f0133401295276993ce
 linux/checkbox--light.png 7beca66f5b7a0027ed7b717249a123f13583487b
+linux/checkout-trash-after-host-leaves--dark.png 623c107f6353e5bcbb563c68cd8f9ddb06b6356a
+linux/checkout-trash-after-host-leaves--light.png 82c95284e56db4d23e94be037f52d096fef26ad3
 linux/checkout-trash-confirm-all--dark.png 17d0ccbdd4fb632c60ec8fb2fea84b48fd185070
 linux/checkout-trash-confirm-all--light.png f981a4a9aff77f968f9dd9239728457420dffe09
 linux/checkout-trash-confirm-host--dark.png 98f366ae595e6bc8ab38572c59cbc722ca7a3a8b

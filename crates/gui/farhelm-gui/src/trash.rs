@@ -767,9 +767,20 @@ impl Render for TrashButton {
             self.bob = bobs.then(|| ticker::AnimationTicks::start(window, cx));
         }
         let lift = self.bob.as_ref().map_or(0., |bob| bob_lift(bob.count(cx)));
-        self.shown = window
-            .use_keyed_state("checkout-trash-shown", cx, |_, _| ())
-            .downgrade();
+        let shown = window.use_keyed_state("checkout-trash-shown", cx, |_, _| ());
+        let id = shown.entity_id();
+        if self.shown.entity_id() != id {
+            // Hidden buttons do not render again to release their animation handles.
+            cx.observe_release(&shown, move |button, _, _| {
+                if button.shown.entity_id() == id {
+                    button.bob = None;
+                    button.wiggle = None;
+                    button.wiggle_asked = None;
+                }
+            })
+            .detach();
+            self.shown = shown.downgrade();
+        }
         // Consume the request on this draw. The archive cue belongs to the button it saw and should never play
         // late when motion returns or the user comes back to the window.
         if self.wiggle_asked.take() == Some(self.shown.entity_id()) && moving {

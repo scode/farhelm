@@ -167,6 +167,22 @@ fn a_wiggle_ends_when_motion_is_reduced(cx: &mut TestAppContext) {
     assert_eq!(turn(cx), None, "the interrupted wiggle stays ended");
 }
 
+/// Hiding Trash releases its animation even though the button entity remains alive behind Hosts.
+#[gpui::test]
+fn hiding_trash_releases_its_running_wiggle(cx: &mut TestAppContext) {
+    let (mut fake, cx) = opened(cx);
+    let id = delete_b(&mut fake, cx);
+    fake.reply(id, 200, Some(json!({ "archived": true })));
+    test_support::settle(cx);
+    assert!(wiggling(cx));
+    test_support::click(cx, "hosts-panel-toggle");
+    assert!(cx.debug_bounds(crate::trash::BUTTON_ID).is_none());
+    assert!(
+        !wiggling(cx),
+        "the hidden button releases its ticker handle"
+    );
+}
+
 /// Why this matters: session disappearance alone is not proof a checkout moved (the protocol's `archived` flag says
 /// so), and an agent's Delete, a bare Delete and a refused one must not look like an archive here. Specified: b's
 /// Delete answered with a bare success (an empty outcome, and no body at all) or refused (409) wiggles nothing, and

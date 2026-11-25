@@ -214,10 +214,6 @@ consequences.
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
   agent-credentials and Codex config targets unverified before and after retry.
 
-- [`trailing-host-scoped-trash-confirmation-stays-open-invisibly.md`](trailing-host-scoped-trash-confirmation-stays-open-invisibly.md)
-  — If a host leaves or empties while its 'Delete all on' confirmation is open in Trash, the invisible confirmation
-  keeps all other hosts' Delete/Retry buttons disabled and swallows the first Close or Escape.
-
 - [`trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md`](trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md)
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
   failure above it, and leaves the launch refusal stuck even after an in-flight toggle succeeds.
@@ -289,10 +285,6 @@ consequences.
   — The integration test for running a custom agent's conversation reporter through the app forwarder during an update
   or uninstall does not actually prove that the forwarder prevented the CLI from starting, so a regression that bypassed
   the lock or failed before locking would still pass.
-
-- [`trailing-hidden-trash-button-retains-animation-handles.md`](trailing-hidden-trash-button-retains-animation-handles.md)
-  — If the Trash button stops being shown (because the user opens the Hosts panel or marks sessions) while its archive
-  wiggle or emptying bob is running, Farhelm does not release that animation handle while the button is hidden.
 
 - [`trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md`](trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md)
   — When the Agent tab holds a deleted custom agent (for example from Clone, Replace with, a recent setup, a template,

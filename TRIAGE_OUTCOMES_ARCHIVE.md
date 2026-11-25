@@ -47480,3 +47480,49 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Retained cleanup is bound to the admitting API key. A different key receives a refusal before a provider
   mutation, and restoring the original key permits retry. Change `nqrpzusksquwpyozuxqvqqpvwtmztomm`, bookmark
   `plan/triage-environments-nov24/05-helm-tensorlake`. [Draft PR](https://github.com/scode/farhelm/pull/4937/changes).
+
+## trailing-host-scoped-trash-confirmation-stays-open-invisibly.md
+
+- Outcome: `fix code`.
+- Assessment: In the Trash dialog, if you open a host's "Delete all on …" confirmation and that host is then removed, or
+  its trash is emptied elsewhere, the confirmation disappears from view but stays in effect. Every other host's Delete
+  and Retry button stays disabled with nothing on screen explaining why. The first Close or Escape is swallowed, and the
+  old confirmation can reappear if that host gets a new archive. Verified: confirmed. `TrashDialog::render`
+  (`crates/gui/farhelm-gui/src/trash/dialog.rs:405-407`) clears `asked` only once the inline prompt is answered
+  (`open_question`, `:241-243`). `host_section` returns `None` for an empty host (`:597-606`) and the loop draws nothing
+  for a removed host, yet `deletes_allowed` still requires `asked.is_none()` (`:416-419`), and `dismissed` (`:248-256`)
+  swallows the first close. Only `681a39091` (reduce motion) touched this code since the reviewed commit. The governing
+  rule is SPEC.md "Keyboard focus" (`SPEC.md:3853-3855`): each confirmation "goes away … when the thing it is about is
+  gone". This is close to clearly settled. It is held back because "gone" for an emptied but still-listed host is a
+  reading, and the fix has to choose what to do with the focus handles of hosts that are not drawn.
+- Decision: q-staleconf, "Confirmations and kept state whose subject is gone": the maintainer picked "Close or
+  invalidate them". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: A confirmation or kept state whose subject is gone (host removed, listing emptied, account key
+  changed) closes or is invalidated. Recommendation for reference: fix code — clear a host-scoped question whose host
+  section is not drawn, with a GPUI test; size S–M. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry.
+- Execution: Cancelled host-scoped confirmation when the host leaves or its settled trash listing is empty, including
+  cards kept visible by a notice. Other Delete buttons recover and the first Close or Escape closes Trash. Change
+  `tpsuuzvtqmzkwoqrqoqzkxnnxoywxwym`, bookmark `plan/triage-environments-nov24/06-trash`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4939/changes).
+
+## trailing-hidden-trash-button-retains-animation-handles.md
+
+- Outcome: `other`.
+- Assessment: If the trash button's archive wiggle or "freeing space" bob is running when the button is hidden (opening
+  Hosts, marking sessions), its animation timer keeps ticking 10 times a second while the button is hidden. If Reduce
+  Motion is then turned on and off while it is still hidden, an interrupted wiggle can resume late when the button comes
+  back. Verified: confirmed. `TrashButton::render` (`crates/gui/farhelm-gui/src/trash.rs:764-785`) is the only place
+  that drops `bob` and `wiggle`, and it does not run while the button is hidden. Only a docs commit (`6f1ea749a`)
+  touched it since the reviewed commit. The late-wiggle part needs a Reduce Motion toggle inside a hidden wiggle of
+  under a second, which is rare and cosmetic. The timer part is common, but its cost is not established: whether
+  notifying the hidden entity causes window repaints was not verified.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: discard — the cost is not shown to matter and the late wiggle is very rare; size S if kept.
+- Execution: Fixed within the cheap allowance. Hiding Trash releases active animation handles through its drawn token.
+  The regression switches to Hosts while the archive wiggle runs. Change `tpsuuzvtqmzkwoqrqoqzkxnnxoywxwym`, bookmark
+  `plan/triage-environments-nov24/06-trash`. [Draft PR](https://github.com/scode/farhelm/pull/4939/changes).

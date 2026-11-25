@@ -108,7 +108,8 @@ pub(crate) struct TrashDialog {
     /// Each host's "Delete all on" button, by registry id, which its cancelled question returns focus to.
     host_deletes: HashMap<i64, FocusHandle>,
     /// The question asked last while it is open: the host it is about (`None` for Delete all) and the question. Dropped
-    /// as the dialog draws once the question has closed ([`Inline::is_open`]); a newer question replaces it.
+    /// as the dialog draws once the question has closed, its host has left, or a settled listing proves its trash
+    /// empty. A newer question replaces it.
     asked: Option<(Option<i64>, Inline<Vec<Target>>)>,
     /// The button that asked the latest question (a host's id, or `None` for Delete all), kept after the question
     /// closes: a cancelled question returns focus to it, so it stays able to take focus while unavailable.
@@ -179,15 +180,20 @@ impl TrashDialog {
 
     /// Ask to delete everything on `host` (its "Delete all on"), or on every reachable host (`None`, Delete all), as the
     /// state is now: nothing opens while the registry is unread, a trash delete of this window's runs, or the guards
-    /// leave nothing to delete. The question returns focus to the button that asked it when cancelled, so that button
+    /// leave nothing to delete. Returns whether a question opened. Cancelling returns focus to the opener, so it
     /// takes focus first (a click on macOS leaves it unfocused). Visible to the crate for the screenshot goldens.
-    pub(crate) fn ask(&mut self, host: Option<i64>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn ask(
+        &mut self,
+        host: Option<i64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(button) = self.button.upgrade() else {
-            return;
+            return false;
         };
         let snapshot = button.update(cx, |button, cx| button.snapshot(cx));
         if !snapshot.hosts_known || snapshot.delete_in_flight {
-            return;
+            return false;
         }
         let batches = match host {
             Some(id) => snapshot
@@ -199,7 +205,7 @@ impl TrashDialog {
             None => snapshot.global_batches(),
         };
         let Some(batches) = batches else {
-            return;
+            return false;
         };
         let mark = Mark::take(cx);
         self.focus_delete_opener(host, Some(mark), window, cx);
@@ -235,6 +241,7 @@ impl TrashDialog {
         self.asked_by = Some(host);
         self.refused = None;
         cx.notify();
+        true
     }
 
     /// The question asked last, while it is open.
@@ -401,6 +408,25 @@ impl Render for TrashDialog {
             Some(button) => button.update(cx, |button, cx| button.snapshot(cx)),
             None => Snapshot::default(),
         };
+        let shown: Vec<_> = snapshot
+            .hosts
+            .iter()
+            .filter(|host| shows_host_section(host, &snapshot))
+            .collect();
+        let is_shown = |id| shown.iter().any(|host| host.id == id);
+        let subject_gone = self.asked_by.flatten().is_some_and(|id| {
+            shown
+                .iter()
+                .find(|host| host.id == id)
+                .is_none_or(|host| snapshot.hosts_known && has_settled_empty_listing(host))
+        });
+        // A card can stay visible to show a notice after the last cleanup target is gone. Its old question still
+        // has to release other Deletes and stop consuming Close.
+        if subject_gone {
+            self.asked = None;
+            self.asked_by = None;
+        }
+        self.host_deletes.retain(|id, _| is_shown(*id));
         // A question answered since the last frame goes, and with it its band and the hold on the rest of the dialog.
         if self.open_question(cx).is_none() {
             self.asked = None;
@@ -463,7 +489,7 @@ impl Render for TrashDialog {
             Some((None, inline)) => Some(inline.clone()),
             _ => None,
         };
-        for host in &snapshot.hosts {
+        for host in shown {
             let focus = self
                 .host_deletes
                 .entry(host.id)
@@ -479,7 +505,7 @@ impl Render for TrashDialog {
                 focus: &focus,
                 asked,
             };
-            if let Some(section) = host_section(
+            body = body.child(host_section(
                 host,
                 &snapshot,
                 deletes_allowed,
@@ -487,13 +513,8 @@ impl Render for TrashDialog {
                 &handles,
                 zone,
                 palette,
-            ) {
-                body = body.child(section);
-            }
+            ));
         }
-        // Hosts gone from the registry take their buttons' focus handles with them.
-        let present: Vec<i64> = snapshot.hosts.iter().map(|host| host.id).collect();
-        self.host_deletes.retain(|id, _| present.contains(id));
 
         let ink = theme::color(palette.fg_0);
         let heading = div()
@@ -582,8 +603,24 @@ impl Render for TrashDialog {
     }
 }
 
-/// One host's card (`.checkout-trash-host`), or `None` when the host has nothing to say: a connected, settled host with
-/// an empty listing and nothing kept for it. Its times are in `zone`, the viewer's.
+/// A pending or unsuccessful read gives no proof that the confirmation's targets are gone.
+fn has_settled_empty_listing(host: &HostSnapshot) -> bool {
+    !host.pending
+        && host
+            .listed()
+            .is_some_and(|listing| listing.checkouts.is_empty() && listing.issues.is_empty())
+}
+
+/// A settled, connected host with an empty listing and no kept notices has no card or confirmation opener.
+fn shows_host_section(host: &HostSnapshot, snapshot: &Snapshot) -> bool {
+    snapshot.deleting == Some(host.id)
+        || !host.connected
+        || !has_settled_empty_listing(host)
+        || !host.notices.is_empty()
+        || host.notice_error.is_some()
+}
+
+/// One visible host's card (`.checkout-trash-host`). Its times are in `zone`, the viewer's.
 fn host_section(
     host: &HostSnapshot,
     snapshot: &Snapshot,
@@ -592,18 +629,8 @@ fn host_section(
     handles: &Handles,
     zone: Zone,
     palette: &Palette,
-) -> Option<AnyElement> {
+) -> AnyElement {
     let listing = host.listed();
-    let show = snapshot.deleting == Some(host.id)
-        || !host.connected
-        || host.pending
-        || listing
-            .is_none_or(|listing| !listing.checkouts.is_empty() || !listing.issues.is_empty())
-        || !host.notices.is_empty()
-        || host.notice_error.is_some();
-    if !show {
-        return None;
-    }
     let id = host.id;
     let totals = listing.map(listing::totals);
     let count = totals.map_or_else(|| "Count unknown".to_owned(), |totals| totals.count_label());
@@ -759,7 +786,7 @@ fn host_section(
             palette,
         ));
     }
-    Some(card.into_any_element())
+    card.into_any_element()
 }
 
 /// What a host's card needs for its "Delete all on": whether asking is allowed at all, whether it asked last, the
