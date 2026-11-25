@@ -3134,6 +3134,7 @@ mod workspace_trust_tests {
             LaunchHarness::Codex,
             LaunchHarness::Muse,
             LaunchHarness::Pi,
+            LaunchHarness::Antigravity,
         ] {
             let config = crate::checkout_config::ResolvedCheckoutConfig {
                 keep_spare: true,
@@ -3141,7 +3142,7 @@ mod workspace_trust_tests {
                 codex_trust: enabled_harness == LaunchHarness::Codex,
                 muse_trust: enabled_harness == LaunchHarness::Muse,
                 pi_trust: enabled_harness == LaunchHarness::Pi,
-                antigravity_trust: false,
+                antigravity_trust: enabled_harness == LaunchHarness::Antigravity,
                 root: None,
                 post_clone: None,
                 config_revision: 0,
