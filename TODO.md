@@ -64,6 +64,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Handle programs that outlive their terminal host.** The desktop can describe a session as ended while its main
+  program still runs. Stop or Delete can then exceed what the user confirmed. On an unscoped launch, Stop or Restart can
+  miss the survivor if it cannot find a session marker. Count a surviving main program as alive for consent and root
+  authorized Stop and Restart at its retained PID and start identity, checked against the process table as Delete
+  already does. Refuse Stop, Delete and Restart on a process-table read error, and refuse ended-only consent while the
+  program is alive. Keep terminal availability separate so recovery stays available and the desktop can ask for the
+  consent it actually needs. Use current evidence for the recovery Restart decision as well as for ordinary Stop and
+  Delete. The ticker must wait for evidence of exit or successful cleanup before it records a completed Stop. The triage
+  experiment fixed only the supervisor's action checks, which left desktop retries repeating the wrong consent and let
+  an old activity sample block recovery Restart. The full fix needs shared evidence for status, confirmations and
+  cleanup, with tests covering those boundaries.
+
 - **Keep hook setup from launching into a folder that arrived later.** In the launcher, pick Grok or Antigravity to open
   the Restart hook question. Switch to a connected host whose remembered folder is still loading and choose **Set up and
   launch**. A history reply can settle the folder while the all-hosts setting saves. The continuation then launches in a
