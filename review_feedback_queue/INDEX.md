@@ -73,10 +73,6 @@ consequences.
 - [`hook-settings-close-hides-opt-out-failure.md`](hook-settings-close-hides-opt-out-failure.md) — Closing Settings
   while an opt-out saves can hide the refusal and leave automatic hook setup active.
 
-- [`trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md`](trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md)
-  — A Tensorlake checkout launch can admit a newer recipe size than the one shown when the user confirms, if the same
-  named recipe is edited before admission.
-
 - [`trailing-settings-trust-help-omits-agent-requested-launches.md`](trailing-settings-trust-help-omits-agent-requested-launches.md)
   — The Settings pages for Codex, Muse, Pi, and Antigravity omit that their workspace-trust switch also applies to
   agent-requested launches, which run without an approval card on Always-allow hosts.

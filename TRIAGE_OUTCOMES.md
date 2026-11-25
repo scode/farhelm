@@ -563,31 +563,6 @@
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md
-
-- Outcome: `fix code`.
-- Assessment: Launching into a new Tensorlake sandbox asks "Create a sandbox for this session?" and shows the recipe's
-  CPU, memory and disk. If that recipe's size is edited (in Settings or from another client) while the question is open,
-  or before the helm admits the launch, "Create and launch" creates the sandbox at the new size, which may bill more
-  than shown. Verified: confirmed by source. The frozen `SandboxAsk` holds the size words (`sandbox_question.rs:48-56`).
-  The answer calls `submit(false, true, …)`, which rebuilds the request from the live catalog (`:135-141`). Only a draft
-  edit retires the question, not a recipe push. The create body carries recipe, place and `confirmed`, with no size or
-  revision, and the helm reads the current definition at admission. SPEC.md, "Sandbox sessions" (`SPEC.md:1646`) names
-  the size in the question. SPEC_impl.md:984-989 freezes what a confirmation shows, but also says "No new generic
-  precondition protocol is added on the helm or supervisor ... new precondition checks go only where SPEC already
-  requires them". A helm-side size check is therefore a design decision. The trigger needs an edit of that same recipe
-  concurrent with the question.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code. At minimum, retire or refuse the answer in the GUI when the
-  recipe's size differs from what was shown (size S). Fully binding admission needs a request field and a helm check
-  (size M, and a spec decision under SPEC_impl.md:988-989). Size gate: about 100 lines of diff (code, tests and docs,
-  not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
-  back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
 ## settings-close-can-save-unlisted-drafts.md
 
 - Outcome: `fix code`.
