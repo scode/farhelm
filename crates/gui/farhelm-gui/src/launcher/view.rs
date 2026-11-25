@@ -637,6 +637,8 @@ pub(crate) struct Launcher {
     yolo: Option<yolo_question::YoloState>,
     /// A settings read or question for the agent picked in this launcher. Templates have their own launch path.
     hook_question: Option<hook_question::HookQuestion>,
+    /// An unanswered offer to recheck when its tab restores the same agent. Agent and Command each own their pick.
+    hook_offer_on_return: [Option<crate::hook_setup::HookAgent>; 2],
     hook_pick: u64,
     /// "Create a sandbox for this session?", from the press that needs it until it is answered or the draft changes
     /// (`sandbox_question`).
@@ -946,6 +948,7 @@ impl Launcher {
             layer: None,
             yolo: None,
             hook_question: None,
+            hook_offer_on_return: [None; 2],
             hook_pick: 0,
             sandbox: None,
             sandbox_skip_spent: false,
@@ -2656,10 +2659,9 @@ impl Render for Launcher {
                 Tab::Command,
             ))
             .chosen(self.draft.tab)
-            .on_choose(move |tab, _, cx| {
+            .on_choose(move |tab, window, cx| {
                 let _ = on_tab.update(cx, |launcher, cx| {
-                    launcher.draft.choose_tab(*tab);
-                    launcher.changed(cx);
+                    launcher.switch_tab(*tab, window, cx);
                 });
             })
             .on_enter(move |window, cx| {

@@ -3199,7 +3199,8 @@ An explicit selection of Grok or Antigravity in the launcher offers **Set up and
 **Don't ask again** after a settings read confirms setup is off and the offer is enabled. The first saves the setting
 before continuing the launch. The second launches with no settings write and leaves the offer enabled for the next
 launcher. The third saves the agent's shared dismissal and leaves the draft open. The launcher explains the lasting
-change to the agent's configuration.
+change to the agent's configuration. Picking another agent's model from the full Model list counts as an explicit
+selection. Returning to a tab that restores the same agent rechecks its unanswered offer.
 
 A live Grok or Antigravity session whose launch did not request setup shows a nonmodal hint above the agent terminal
 while Restart is waiting for a captured conversation. The hint is announced without taking focus. It opens Settings at

@@ -290,6 +290,95 @@ fn hook_setup_launch_waits_for_consent_and_keeps_the_one_off_answer(cx: &mut Tes
     assert_eq!(create.body.as_ref().unwrap()["launch"]["harness"], "grok");
 }
 
+/// An unanswered setup offer belongs to the retained agent choice, whether its read is pending or its question is
+/// visible. Leaving for Command must retire an old read, while returning to Agent checks the current setting again.
+#[gpui::test]
+fn an_unanswered_hook_offer_survives_tab_round_trips(cx: &mut TestAppContext) {
+    use farhelm_helm_client::Method;
+    use serde_json::json;
+
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+    let hook_read = |helm: &mut FakeHelm| {
+        let reads = helm.commands();
+        let [read] = reads.as_slice() else {
+            panic!("one setup read: {reads:?}")
+        };
+        assert_eq!(read.method, Method::Get);
+        assert_eq!(read.path, "/api/agent-hook-setup/grok");
+        read.id
+    };
+    test_support::click(cx, "launcher-harness-Grok");
+    let initial = hook_read(&mut helm);
+    test_support::click(cx, "launcher-tabs-Command");
+    test_support::click(cx, "launcher-command-agent");
+    test_support::click(cx, "launcher-command-agent-option-Grok");
+    let declared = hook_read(&mut helm);
+    test_support::click(cx, "launcher-tabs-Agent");
+    let restored = hook_read(&mut helm);
+    for stale in [initial, declared] {
+        helm.reply(stale, 200, Some(json!({ "enabled": false })));
+    }
+    settle(cx);
+    assert!(!has_node(cx, "hook-setup-consent"), "old replies retired");
+    helm.reply(restored, 200, Some(json!({ "enabled": false })));
+    settle(cx);
+    assert!(has_node(cx, "hook-setup-consent"));
+
+    // Search can also leave a tab with a visible offer. The declared Command agent keeps its unanswered offer.
+    test_support::click(cx, "launcher-tabs-Command");
+    let declared = hook_read(&mut helm);
+    helm.reply(declared, 200, Some(json!({ "enabled": false })));
+    settle(cx);
+    assert!(has_node(cx, "hook-setup-consent"));
+    test_support::click(cx, "launcher-search-row");
+    assert!(search_focused(cx));
+    cx.simulate_input("harness:claude");
+    settle(cx);
+    keys(cx, "enter");
+    assert_eq!(draft(cx).tab, Tab::Agent);
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Claude));
+    assert!(!has_node(cx, "hook-setup-consent"));
+    test_support::click(cx, "launcher-tabs-Command");
+    let restored = hook_read(&mut helm);
+    helm.reply(restored, 200, Some(json!({ "enabled": false })));
+    settle(cx);
+    assert!(has_node(cx, "hook-setup-consent"), "Command offer restored");
+}
+
+/// Picking another agent's model is an explicit agent choice. The full Model picker offers the same hook setup
+/// decision as picking Antigravity directly.
+#[gpui::test]
+fn choosing_an_antigravity_model_offers_hook_setup(cx: &mut TestAppContext) {
+    use farhelm_helm_client::Method;
+    use serde_json::json;
+
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(json!([
+            { "id": "test-model", "harness": "antigravity", "efforts": [] }
+        ])),
+    );
+    test_support::click(cx, "launcher-harness-Claude");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Claude));
+    click_in_body(cx, "launcher-model");
+    test_support::click(cx, "launcher-model-show-all");
+    test_support::click(cx, "launcher-model-option-Antigravity-test-model");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Antigravity));
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("test-model"));
+    let reads = helm.commands();
+    let [read] = reads.as_slice() else {
+        panic!("one setup read: {reads:?}")
+    };
+    assert_eq!(read.method, Method::Get);
+    assert_eq!(read.path, "/api/agent-hook-setup/antigravity");
+    helm.reply(read.id, 200, Some(json!({ "enabled": false })));
+    settle(cx);
+    assert!(has_node(cx, "hook-setup-consent"));
+}
+
 /// Installing hooks from the first-run question uses the same settings route as the switch. A successful save
 /// resumes the draft once, through the normal launch path.
 #[gpui::test]

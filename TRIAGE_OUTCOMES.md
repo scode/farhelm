@@ -2933,27 +2933,6 @@
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## launcher-loses-hook-offer-on-tab-switch.md
-
-- Outcome: `fix code`.
-- Assessment: In the new-session launcher, explicitly picking Grok or Antigravity brings up a one-time offer to set up
-  conversation hooks. Switch to the Command tab (with no agent declared) and back before answering, and the offer is
-  gone for good. Grok stays selected and launches without ever offering setup. The offer comes back in the next
-  launcher, and the session hint is unaffected. Verified: confirmed, and slightly broader than the report. This happens
-  whether the read is still out or the question is already shown. The tab handler calls only `changed`
-  (`launcher/view.rs:2641-2645`). That runs `retire_hook_answer` (`launcher/view.rs:1002`), which drops the question
-  when the active hook agent differs (`launcher/view/hook_question.rs:96-105`). A read that settles later is ignored
-  because its pick is gone (:66-72). Coming back to the Agent tab starts no new check. `check_hook_question` runs only
-  from harness, command-agent and model picks (`choices.rs:109`, `view.rs:2169`, `search.rs:535,559`). SPEC.md (~:3180)
-  says "An explicit selection of Grok or Antigravity in the launcher offers …"; it is silent about tab round-trips.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code. Re-check when
-  the tab change restores an agent whose offer was never answered. Size S. Size gate: about 100 lines of diff (code,
-  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
-  brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
 ## resume-off-command-gets-hook-warning.md
 
 - Outcome: `fix code`.
@@ -2974,25 +2953,6 @@
   warning, or reword it, when the launch has no resume command. Size S. Size gate: about 100 lines of diff (code, tests
   and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings
   the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## model-picker-skips-hook-setup-offer.md
-
-- Outcome: `fix code`.
-- Assessment: In the launcher's Model field, choosing an Antigravity model from "Show all" switches the agent to
-  Antigravity but never shows the one-time hook setup offer. Choosing the same model from the launcher's search does
-  show it. Verified: confirmed. `launcher/view/model_field.rs:225-236` (`pick_model`, Model row) calls only `chose`. The
-  search row does the equivalent edit and then calls `check_hook_question` when the agent changed
-  (`launcher/view/search.rs:516-537`). SPEC.md (~~:1153) says "Choosing another harness's model from the full model list
-  switches the harness on purpose", and (~~:3180) "An explicit selection of Grok or Antigravity … offers". Treating "on
-  purpose" as "explicit selection" is a reading, not the spec's words, so this is not clearly-settled. Grok has no
-  catalog models, so this applies to Antigravity only.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code. Mirror the
-  search row's `picked_agent` check in `pick_model`. Size S. Size gate: about 100 lines of diff (code, tests and docs,
-  not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
-  back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
 ## trailing-full-podman-inspection-strand-container-farhelm-needs-to-remove.md

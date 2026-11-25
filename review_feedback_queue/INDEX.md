@@ -261,17 +261,11 @@ consequences.
 - [`hook-recovery-text-omits-direction-isolation.md`](hook-recovery-text-omits-direction-isolation.md) — Restart and
   recovery text escape host-supplied hook errors without isolating their text direction.
 
-- [`launcher-loses-hook-offer-on-tab-switch.md`](launcher-loses-hook-offer-on-tab-switch.md) — Switching tabs during the
-  hook settings read can suppress the setup offer while retaining the chosen agent.
-
 - [`resume-off-command-gets-hook-warning.md`](resume-off-command-gets-hook-warning.md) — A command launch with Resume
   off can get a misleading silent-hook warning that an arriving report does not clear.
 
 - [`uninstall-omits-persistent-hook-cleanup.md`](uninstall-omits-persistent-hook-cleanup.md) — Uninstall can leave Grok
   and Antigravity callbacks pointing to the removed Farhelm executable, and the uninstall guidance omits cleanup.
-
-- [`model-picker-skips-hook-setup-offer.md`](model-picker-skips-hook-setup-offer.md) — Choosing an Antigravity model in
-  the full Model picker skips the hook setup offer shown for the equivalent command-field choice.
 
 - [`launcher-keyboard-recents-hide-custom-flags.md`](launcher-keyboard-recents-hide-custom-flags.md) — Keyboard users
   can no longer reveal the custom permission flags that distinguish otherwise identical recent setups.
