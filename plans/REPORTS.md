@@ -10,3 +10,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`hide-non-actionable-file-hovers`](reports/hide-non-actionable-file-hovers.report.md) landed 2026-11-24 in #4777, #4779, #4780: Hide non-actionable terminal file hovers and wait silently while checking
 - [`drift-model-selection`](reports/drift-model-selection.report.md) landed 2026-11-25 in #4781, #4782, #4783: Add drift test categories and live model selection coverage across supporting agents
 - [`drift-reasoning-effort`](reports/drift-reasoning-effort.report.md) landed 2026-11-25 in #4785, #4791: Add live reasoning effort selection drift tests across supporting agents
+- [`drift-permission-modes`](reports/drift-permission-modes.report.md) landed 2026-11-25 in #4784, #4792: Add live permission mode and custom permission flag drift tests across supporting agents

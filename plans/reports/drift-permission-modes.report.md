@@ -73,3 +73,77 @@ that several Custom flags matched the defaults, and that the Antigravity test's 
 reject a valid placement of the selector. The category now waits for the composer, uses distinct Custom inputs and
 checks the selector and delimiter independently. The remaining Antigravity failure is a product follow-up. The commit
 wording passed its cold read.
+
+### Landing
+
+#### What landed with it
+
+Two plans landed this round, both adding a category to the opt-in live drift tests: drift-reasoning-effort first, then
+this one, through [#4784](https://github.com/scode/farhelm/pull/4784/changes) and the landing fix
+[#4792](https://github.com/scode/farhelm/pull/4792/changes). They touch the same files only where each registers its
+category and records its own follow-ups in TODO.md, so stacking them needed nothing but keeping both sides. Main also
+gained three docs changes while they landed (two reorganizations of TODO.md around Tensorlake, and a triage of the
+review queue), none of which touches the drift tests.
+
+The reasoning effort plan's landing fix turned Claude's background updater off for every drift case, this category
+included, so a Claude launch and its Restart here now always test the same Claude version.
+
+#### Fixes made while landing
+
+#4792 changes only the drift tests and their docs:
+
+- **Per-agent choices now name every agent.** The category picked the agents whose YOLO label Farhelm reads from the
+  screen by naming four of them, and handled Antigravity's `--` (which ends its options) by comparing against
+  Antigravity by name. The repository's code rules forbid that, because an agent added later silently gets the default.
+  Each now lists every agent. The list of agents whose YOLO label is read repeats one the supervisor keeps, which the
+  test cannot use directly, so its comment says to update it when the supervisor learns to read another agent's label.
+- **The docs paragraph moved.** It sat between the model selection category's paragraph and that category's Codex note,
+  which then read as if it applied to every category. It now follows the other categories' paragraphs.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. Both plans landed this
+round (drift-reasoning-effort and drift-permission-modes) change only the opt-in live drift tests and their docs, so the
+landing ran the drift tests that need no vendor CLI and the checks that inspect the changed files, once on the two plans
+stacked together with their landing fixes, which is what main now holds.
+
+On the stacked plans with the landing fixes (`3ac3fd12`):
+
+- `cargo nextest run --locked -p farhelm --test e2e -E 'test(/^real_agent_capture::drift::/)'`, on the test worker
+  (recorder run `b68d5437-426c-4166-a747-29c27d4df8a8`): all 20 passed, with no runtime skip. They include each new
+  category's checks that every harness offering the feature has a case.
+- `python3 -B scripts/run-harness-drift.py --list --category all`, on the test worker: it built the drift tests and
+  listed ten base, nine model selection, eight permission modes and seven reasoning effort cases, starting no agent.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker: passed.
+- `python3 -B scripts/test-run-harness-drift.py`, locally (recorder run `148edde1-d9c4-45da-a873-6d2ee6294170`): all 18
+  passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its pinned interpreter), `dprint check` and
+  `python3 scripts/check-agents-md.py` (no errors; one warning already on main), locally: passed.
+
+The same set had also passed on an earlier revision of the landing fixes (`441426b3`, drift tests in recorder run
+`c4b82231-1bd2-43e9-a2dd-8c2647f4cff1`).
+
+Reused: the executors' live runs of the new categories against the installed agents, recorded in the reports. The
+landing fixes change how the per-agent choices are written, not what any agent is launched with, with one exception:
+Claude now starts with its background updater turned off in every category, not only the reasoning effort one. That was
+already how the reasoning effort runs in the report launched Claude.
+
+Skipped: the live drift cases themselves, since they spend vendor startups or turns, need the vendor logins and are
+opt-in by design. That leaves Claude's updater setting unexercised live in the other categories; the launch with it is
+the same one the reasoning effort runs used, and the drift tests above check how the launch command is built. Also
+skipped: the workspace-wide Rust suite and the desktop checks, since no shipped code changed, and CI, which runs only on
+demand.
+
+#### What the report says that is no longer true
+
+Nothing. The review found the report accurate.
+
+#### Things you should know that the report does not say
+
+- **The Antigravity Restart problem the report describes is a bug users can hit today.** A user who launches Antigravity
+  with Custom permission flags ending in a bare `--` gets a Restart that does not reopen the conversation, because the
+  conversation option lands after the `--`. The trigger is uncommon, and what Antigravity does with the misplaced option
+  instead was not observed: the test stops before Restart. The fix is recorded as a TODO follow-up, not made here. Until
+  it lands, this category's Antigravity case reports FAILED on every run where Antigravity is installed and signed in,
+  including in the "run all tests" flow, which since the model selection plan's landing runs every drift category. The
+  TODO entry already covers that failure, so a run need not record it again.
