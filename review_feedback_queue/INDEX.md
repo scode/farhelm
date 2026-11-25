@@ -245,9 +245,6 @@ consequences.
 - [`staged-host-update-controls-promise-unattended-installs.md`](staged-host-update-controls-promise-unattended-installs.md)
   — Host update controls can still promise automatic installation while a staged build requires a manual update.
 
-- [`update-accessible-names-can-collide-across-host-kinds.md`](update-accessible-names-can-collide-across-host-kinds.md)
-  — An SSH host and a container with the same display name can still have identical accessible Update labels.
-
 - [`sound-preview-regression-misses-separate-mappings.md`](sound-preview-regression-misses-separate-mappings.md) — The
   preview test exercises one sound and can miss a wrong mapping on the three other Play controls.
 
@@ -625,10 +622,6 @@ consequences.
 - [`trailing-tailscale-destination-format-guidance-discarded.md`](trailing-tailscale-destination-format-guidance-discarded.md)
   — Enabling Tailscale mode on an existing SSH host with a URI, port, or underscore alias reports it as 'not a usable
   ssh destination' instead of showing the Tailscale format guidance.
-
-- [`trailing-add-host-tailscale-checkbox-evicts-focus.md`](trailing-add-host-tailscale-checkbox-evicts-focus.md) —
-  Pressing Enter on the Tailscale checkbox in Add host or receiving a background approval card during an agent host-add
-  request disables the checkbox and drops keyboard focus from it.
 
 - [`trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md`](trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md)
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier

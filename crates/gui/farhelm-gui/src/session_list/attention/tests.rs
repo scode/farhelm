@@ -1031,8 +1031,8 @@ fn update_actions_wait_visibly_while_a_launch_is_in_flight(cx: &mut TestAppConte
     for (control, name) in [
         ("host-attention-update-all", "Update all"),
         ("host-attention-always-update", "Always update"),
-        ("host-attention-update-3", "Update older"),
-        ("host-attention-update-6", "Update other"),
+        ("host-attention-update-3", "Update host older"),
+        ("host-attention-update-6", "Update host other"),
     ] {
         let focusable = node(&frame(cx), control).is_some_and(|node| node.flags.focusable);
         assert!(focusable, "{control} stays keyboard-reachable");
@@ -1053,8 +1053,14 @@ fn update_actions_wait_visibly_while_a_launch_is_in_flight(cx: &mut TestAppConte
     fake.reply(launch, 200, None);
     test_support::settle(cx);
     let nodes = frame(cx);
-    assert_eq!(label(&nodes, "host-attention-update-3"), "Update older");
-    assert_eq!(label(&nodes, "host-attention-update-6"), "Update other");
+    assert_eq!(
+        label(&nodes, "host-attention-update-3"),
+        "Update host older"
+    );
+    assert_eq!(
+        label(&nodes, "host-attention-update-6"),
+        "Update host other"
+    );
     assert_ne!(
         hover_help(cx, "host-attention-update-3").as_deref(),
         Some(crate::session_list::menu::LAUNCH_PENDING)
