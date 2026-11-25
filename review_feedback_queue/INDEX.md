@@ -206,10 +206,6 @@ consequences.
   masked-input test checks painted text and accessible names but never inspects accessible values or runs with
   accessibility active, leaving screen-reader secret exposure unguarded.
 
-- [`trailing-provisioning-service-omits-sealed-host-refusal.md`](trailing-provisioning-service-omits-sealed-host-refusal.md)
-  — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
-  admitted instead of being refused.
-
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
   agent-credentials and Codex config targets unverified before and after retry.

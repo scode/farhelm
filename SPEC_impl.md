@@ -6610,6 +6610,10 @@ kept in an in-memory seal record, pending or with its last destruction's failure
 every host in that record as `HostState::Deleting` with that failure and no client, whatever its connection does
 meanwhile (held, released, reconnected, retired), so the failure and its Retry cannot be lost and nothing is routed to a
 supervisor that takes no new sessions. Retry runs the destruction again only for a host whose record holds a failure.
+
+Setup and Update refuse a deleting environment before using their own connection, including when rechecking a plan made
+before the seal.
+
 Before the first destruction attempt, the helm saves the host's seal and the time of the attempt. This lets a restarted
 helm finish destroying a sealed environment even if the supervisor never connects again. A process inside a
 session-owned environment can cause its supervisor to report a seal. The helm accepts that seal as authority to destroy

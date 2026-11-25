@@ -5246,6 +5246,79 @@ mod tests {
         }
     }
 
+    /// Failed destruction leaves the seal in effect after the connection hold has gone. A fresh Setup or Update
+    /// request must not dial the host while the user can still retry deletion.
+    #[farhelm_testtrace::test]
+    async fn a_deleting_environment_refuses_update_and_setup_before_dialing() {
+        use crate::environment::ProviderHandle;
+        use farhelm_proto::{Place, recipes::RecipeSize};
+        use std::sync::atomic::Ordering::SeqCst;
+
+        let harness = harness().await;
+        let host = ProviderHandle::register_session(
+            &harness.store,
+            "farhelm-sess-test-sealed".into(),
+            "dev".into(),
+            Place::TensorlakeAccount,
+            RecipeSize {
+                cpus: 2,
+                memory_gb: 4,
+                disk_gb: 20,
+            },
+        )
+        .await
+        .unwrap();
+        harness
+            .store
+            .set_tensorlake_sandbox_id(host, "sbx-1")
+            .await
+            .unwrap();
+        harness
+            .store
+            .admit_tensorlake_install(host, "/fixture/farhelm", "/fixture/state")
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let before = stored_row(&harness.store, host).await;
+        let setup = ProbeRequest {
+            target: ProbeDestination::Ssh {
+                tailscale: None,
+                destination: before.destination.clone().unwrap(),
+            },
+            remote_farhelm: None,
+            remote_state_dir: None,
+            new_entry: None,
+        };
+        assert!(before.is_session_owned());
+        assert_eq!(before.remote_farhelm.as_deref(), Some("/fixture/farhelm"));
+        assert_eq!(before.remote_state_dir.as_deref(), Some("/fixture/state"));
+
+        harness
+            .manager
+            .sealed_outcome(host, Some("provider unavailable".to_owned()));
+        assert!(matches!(
+            harness.manager.state(host),
+            Some(HostState::Deleting { failure: Some(_) })
+        ));
+        drop(harness.manager.try_host_provision_lock(host).unwrap());
+        for refusal in [
+            service.plan_update_for_ui(host).await.unwrap_err(),
+            service.probe(setup).await.unwrap_err(),
+        ] {
+            assert!(
+                format!("{refusal:#}").contains("being deleted"),
+                "{refusal:#}"
+            );
+        }
+        assert_eq!(backend.probes.load(SeqCst), 0);
+        assert!(backend.operations.lock().unwrap().is_empty());
+        assert_eq!(stored_row(&harness.store, host).await, before);
+        assert!(harness.manager.sealed_failed(host));
+    }
+
     /// Why: a plan is confirmed some time after it was made, and a sandbox
     /// suspended in between must not be dialed by the confirmed run.
     ///

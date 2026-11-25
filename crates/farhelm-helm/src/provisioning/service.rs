@@ -969,9 +969,8 @@ impl ProvisioningService {
         // installed path recorded at registration, not fall back to PATH.
         // A brand-new helm has no such row; the remote probe itself also
         // checks the standard flat install path for that recovery case.
-        // Setting up a known host again is refused while its sandbox is
-        // suspended, before anything dials it (see `suspended_refusal`).
-        if let Some(reason) = stored.as_ref().and_then(|row| self.suspended_refusal(row)) {
+        // Resolve the existing row's lifecycle before an independent probe can dial it.
+        if let Some(reason) = stored.as_ref().and_then(|row| self.lifecycle_refusal(row)) {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                 reason.to_string(),
             )));
@@ -1578,7 +1577,7 @@ impl ProvisioningService {
         if let Some(reason) = existing.and_then(|host| self.known_owner_refusal(host)) {
             return Err(ProvisioningRequestError::Refused(reason).into());
         }
-        // Saving new paths can replace the actor and erase its suspended state. Bind registration
+        // Saving new paths can replace the actor that reports lifecycle state. Bind registration
         // to the existing row's provisioning lock before either changing paths or reconciling.
         let existing_write = if let Some(host) = existing {
             let mut memory = self.memory.lock().await;
@@ -1601,7 +1600,7 @@ impl ProvisioningService {
         let registered = async {
             if let Some(host) = existing {
                 let row = self.host_row(host).await?;
-                if let Some(reason) = self.suspended_refusal(&row) {
+                if let Some(reason) = self.lifecycle_refusal(&row) {
                     return Err(ProvisioningRequestError::Refused(reason.into()).into());
                 }
             }
@@ -1743,7 +1742,7 @@ impl ProvisioningService {
                 binding.handle.initial_setup_refusal().into(),
             )));
         }
-        if let Some(reason) = self.suspended_refusal(&row) {
+        if let Some(reason) = self.lifecycle_refusal(&row) {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                 reason.to_string(),
             )));
@@ -2858,7 +2857,7 @@ impl ProvisioningService {
                 let row = self
                     .require_registration_unchanged(host, registration)
                     .await?;
-                self.require_not_suspended(&row)?;
+                self.require_provisionable_lifecycle(&row)?;
                 if let Some(reason) = self.known_owner_refusal(host) {
                     return Err(BackendFailure::new(reason, ""));
                 }
@@ -2979,7 +2978,7 @@ impl ProvisioningService {
                 let row = self
                     .require_registration_unchanged(host, registration)
                     .await?;
-                self.require_not_suspended(&row)?;
+                self.require_provisionable_lifecycle(&row)?;
                 self.require_update_trusted(host)?;
                 // An automatic Update has already had its chance to ask during planning. If its master
                 // expires while the run waits for a slot, the same batch probe fails with ordinary progress.
@@ -3168,16 +3167,14 @@ impl ProvisioningService {
         Ok(row)
     }
 
-    /// Refuse provisioning while an environment cannot accept a connection.
-    ///
-    /// The connection actor deliberately stops dialing a suspended environment:
-    /// a sandbox refuses new connections and a paused container blocks exec.
-    /// Provisioning uses its own connection, so it must enforce the same gate.
-    /// Nothing here resumes the environment. Asked before planning probes
-    /// anything and again before a confirmed run does, so a plan made while it ran
-    /// cannot proceed after it was suspended or a lifecycle request began.
-    fn suspended_refusal(&self, row: &HostRow) -> Option<&'static str> {
+    /// Keep provisioning's independent connection out of stopped, suspended, changing and deleting environments.
+    /// Check before the probe and again when admitting a confirmed run. A deletion seal remains authoritative even if
+    /// the actor reconnects after a failed removal.
+    fn lifecycle_refusal(&self, row: &HostRow) -> Option<&'static str> {
         match self.manager.state(row.id) {
+            Some(HostState::Deleting { .. }) => {
+                Some("this host's environment is being deleted, so it cannot be set up or updated")
+            }
             Some(HostState::Stopped { .. }) => Some(
                 "this host's environment is stopped; use Resume before setting it up or updating it",
             ),
@@ -3199,9 +3196,9 @@ impl ProvisioningService {
         }
     }
 
-    /// [`Self::suspended_refusal`] as the failure a confirmed run ends with.
-    fn require_not_suspended(&self, row: &HostRow) -> Result<(), BackendFailure> {
-        match self.suspended_refusal(row) {
+    /// Report a lifecycle refusal through the confirmed run's existing failure path.
+    fn require_provisionable_lifecycle(&self, row: &HostRow) -> Result<(), BackendFailure> {
+        match self.lifecycle_refusal(row) {
             Some(reason) => Err(BackendFailure::new(reason, "")),
             None => Ok(()),
         }
