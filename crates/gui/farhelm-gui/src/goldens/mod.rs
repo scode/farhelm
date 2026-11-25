@@ -799,7 +799,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "session-environment-unavailable",
-        size: (1036., 348.),
+        size: (1548., 348.),
         draw: environment_unavailable_cards,
         setup: no_setup,
     },

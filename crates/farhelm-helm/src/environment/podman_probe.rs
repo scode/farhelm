@@ -54,10 +54,10 @@ pub(super) const CONTAINER_PLACE_UNVERIFIED: &str = "Farhelm could not verify th
 #[cfg(test)]
 pub(crate) const TEST_PLACE_IDENTITY: &str = "fe001122aabbccddeeff001122aabbcc\n1000\n";
 /// Describe a container command that never reached the host's place check,
-/// keeping whatever the transport or the remote shell said about why.
+/// showing the readable tail as an inline diagnostic in host and session views.
 fn container_host_unanswered(result: &crate::provisioning::CommandResult) -> String {
     let status = result.failure_status();
-    let detail = result.stderr.trim();
+    let detail = crate::tensorlake::shell::shown(&result.stderr).replace('\n', " ");
     if detail.is_empty() {
         format!("Farhelm could not reach this container host ({status}).")
     } else {
@@ -2062,7 +2062,7 @@ mod tests {
     /// after the guard evaluates and proves the expected account and machine.
     /// A failure before the guard runs (a shell exiting 1, or 255 standing in
     /// for SSH failing to connect) is reported as an unreachable host with its
-    /// own stderr; only the guard's 125 reports a changed destination.
+    /// bounded diagnostic tail. The guard's 125 reports a changed destination.
     #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
     async fn absence_needs_a_same_shell_place_proof() {
@@ -2154,7 +2154,7 @@ mod tests {
         // A shell can exit before any verification. Its 1 is not Podman
         // absence, and since the check never ran it is not reported as a
         // changed destination either.
-        commands.before_guard = "echo 'no route to host' >&2; exit 1";
+        commands.before_guard = "printf '%03000d\\n\\007no route to host\\n' 0 >&2; exit 1";
         expected.uid -= 1;
         let error = commands
             .run_verified(
@@ -2165,10 +2165,13 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "Farhelm could not reach this container host (exit status 1): no route to host"
-        );
+        let message = error.to_string();
+        let detail = message
+            .strip_prefix("Farhelm could not reach this container host (exit status 1): ")
+            .expect("the transport exit must keep its status and diagnostic");
+        assert_eq!(detail.chars().count(), 2000);
+        assert!(detail.ends_with(" no route to host"));
+        assert!(!detail.contains('\u{0007}'));
 
         // SSH's own 255 for a host that cannot be reached is the common case.
         commands.before_guard = "exit 255";
