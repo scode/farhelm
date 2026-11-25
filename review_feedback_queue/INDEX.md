@@ -571,9 +571,8 @@ consequences.
   — The prepared Tensorlake Add test can pass if Farhelm releases the chosen snapshot for retirement while the new
   sandbox is still starting.
 
-- [`trailing-shortcuts-chord-opens-during-terminal-ime.md`](trailing-shortcuts-chord-opens-during-terminal-ime.md) —
-  Pressing the Keyboard shortcuts chord while an input method is composing in a focused terminal still opens the
-  overview dialog instead of ignoring composition.
+- [`shortcuts-chord-during-composition.md`](shortcuts-chord-during-composition.md) — The Keyboard shortcuts chord can
+  interrupt an input method if native handling clears its mark first or the action cannot query the focused field.
 
 - [`trailing-settings-containers-reload-omits-loading-keeps-error.md`](trailing-settings-containers-reload-omits-loading-keeps-error.md)
   — After a failed refresh in Settings -> Containers, deleting the last leftover or clicking Refresh hides the reading

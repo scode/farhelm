@@ -24,11 +24,9 @@
 //!   time the dialog draws ([`Bindings::current`]), so they are current at every opening and follow a change made
 //!   elsewhere while the dialog is open, as the old dialog followed its shared preferences.
 //!
-//! NOTE: SPEC.md also says composition does not open the dialog. The old listener checked `isComposing`; here the
-//! interceptor takes the chord before the element that owns the input handler sees it, so refusing it falls to
-//! [`open_from_chord`], which does not ask yet; the session pane's `terminal_is_composing` (which the session Delete
-//! and Rename handlers use) answers it for the shown terminal, though not for a focused text field. That gap is
-//! recorded in `docs/gpui/parity/other-dialogs.md`; a chord typed mid-composition opens the dialog.
+//! The main view keeps the overview closed while the focused terminal still has marked text at dispatch. Native
+//! input handling can finish a composition before the action reaches the main view. Focused text fields also lack a
+//! composition query for this action (see `docs/gpui/parity/other-dialogs.md`).
 
 #[cfg(test)]
 mod tests;
@@ -257,8 +255,8 @@ fn sections(platform: Platform, bindings: &Bindings) -> Vec<Section> {
 // ---- Opening --------------------------------------------------------------------------------------------------------
 
 /// The chord ([`crate::actions::ShowKeyboardShortcuts`]): open the overview over the window's page. The main view
-/// calls this for the action wherever focus is, a focused terminal included, and the action counts as taken whatever
-/// this does, as `ONCE_PER_PRESS` requires of a listed action's handler.
+/// calls this once it has checked the focused terminal's composition. The action counts as taken whatever this does,
+/// as `ONCE_PER_PRESS` requires of a listed action's handler.
 ///
 /// Does nothing while a dialog or menu holds the keyboard (SPEC.md: "does nothing while another modal is open"; a
 /// popover that never takes focus is not a modal), while the window is inert, or before the snapshot has brought the

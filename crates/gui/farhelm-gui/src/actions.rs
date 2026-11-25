@@ -324,7 +324,8 @@ actions!(
         /// dispatches it too, and a focused text field handles it as its own copy (`components::EditCommand`).
         CopyTerminalSelection,
         /// Open the Keyboard shortcuts dialog (SPEC.md, "Desktop window chrome": Cmd+/ on a Mac, Ctrl+Shift+/ on
-        /// Linux, by the physical Slash key; a row in [`PHYSICAL_KEYS`]). Runs once per press (`ONCE_PER_PRESS`).
+        /// Linux, by the physical Slash key; a row in [`PHYSICAL_KEYS`]). Runs once per press (`ONCE_PER_PRESS`). The
+        /// main view checks the focused terminal's marked text when it receives the action.
         ShowKeyboardShortcuts,
         /// Step every open terminal's text size up (SPEC.md, "Terminal experience": Cmd+Shift or Ctrl+Shift with the
         /// key at the US position of =; a row in [`PHYSICAL_KEYS`]). Acts on every repeat of a held chord, as the old
