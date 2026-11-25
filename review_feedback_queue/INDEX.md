@@ -67,9 +67,6 @@ consequences.
 
 ## High priority: material UX degradation
 
-- [`approval-omits-automatic-trust-warning-from-accessibility.md`](approval-omits-automatic-trust-warning-from-accessibility.md)
-  — Screen-reader users can miss the trusted-workspace status and warning on a launch or Restart approval.
-
 - [`settings-footer-can-discard-the-wrong-page.md`](settings-footer-can-discard-the-wrong-page.md) — A save refusal can
   switch pages before a stale Discard press runs, making it discard a different draft.
 
@@ -190,9 +187,6 @@ consequences.
   YOLO mode.' with no toggle and lets the user save, yet actually saves YOLO as off ('Not YOLO').
 
 ## Other: correctness, diagnostics, cleanup, or convenience
-
-- [`unavailable-antigravity-trust-switch-announced-as-off.md`](unavailable-antigravity-trust-switch-announced-as-off.md)
-  — Accessibility metadata reports an unread trust setting as off without marking its switch unavailable.
 
 - [`settings-close-save-can-hide-notification-refusal.md`](settings-close-save-can-hide-notification-refusal.md) — Save
   and Close can take the user to Notifications while leaving the relevant error below the viewport.

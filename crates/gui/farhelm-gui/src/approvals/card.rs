@@ -451,7 +451,7 @@ fn value(card: &Card, index: usize, fact: &Fact, palette: &Palette) -> AnyElemen
                 .accessible_name(fact.copy_name().unwrap_or_default()),
             )
             .into_any_element(),
-        Fact::Permission(chips) => permission(chips, palette),
+        Fact::Permission(chips) => permission(id, &fact.label(), chips, palette),
         Fact::Box(..) => div().into_any_element(),
     }
 }
@@ -541,9 +541,26 @@ fn chip(content: impl IntoElement, warning: bool, palette: &Palette) -> AnyEleme
         .into_any_element()
 }
 
-/// The Permissions row: the session list's shield with the chip's words and description, then stored workspace trust
-/// on a line of its own (`PermissionChips`).
-fn permission(chips: &Chips, palette: &Palette) -> AnyElement {
+/// The Permissions row names its chips and warnings as one static fact so a
+/// screen reader can read everything the card says about consent before the answers.
+fn permission(id: SharedString, label: &str, chips: &Chips, palette: &Palette) -> AnyElement {
+    let trust = chips.trust.map(|trusted| {
+        if trusted {
+            "Trusted workspace"
+        } else {
+            "Not trusted"
+        }
+    });
+    let mut accessible_text = format!("{label}. {}. {}.", chips.kind.label(), chips.description());
+    if let Some(trust) = trust {
+        accessible_text.push(' ');
+        accessible_text.push_str(trust);
+        accessible_text.push('.');
+        if chips.trust == Some(true) {
+            accessible_text.push(' ');
+            accessible_text.push_str(TRUSTED_WORKSPACE);
+        }
+    }
     let shield = svg()
         .path(chips.icon().path())
         .size(px(12.))
@@ -573,23 +590,15 @@ fn permission(chips: &Chips, palette: &Palette) -> AnyElement {
                 .line_height(SMALL_LINE)
                 .child(chips.description().to_owned()),
         );
-    let trust = chips.trust.map(|trusted| {
+    let trust_line = trust.map(|label| {
         div()
             .flex()
             .flex_wrap()
             .items_baseline()
             .gap(px(8.))
             .mt(px(5.))
-            .child(chip(
-                div().child(if trusted {
-                    "Trusted workspace"
-                } else {
-                    "Not trusted"
-                }),
-                false,
-                palette,
-            ))
-            .when(trusted, |line| {
+            .child(chip(div().child(label), false, palette))
+            .when(chips.trust == Some(true), |line| {
                 line.child(
                     div()
                         .text_size(metrics::TEXT_SM)
@@ -598,11 +607,17 @@ fn permission(chips: &Chips, palette: &Palette) -> AnyElement {
                 )
             })
     });
+    let accessible_text = SharedString::from(accessible_text);
     div()
+        .id(ElementId::Name(id))
+        .role(Role::Label)
+        .aria_label(accessible_text.clone())
+        // Linux exposes a static label's text through the value.
+        .aria_value(accessible_text)
         .flex()
         .flex_col()
         .child(line)
-        .children(trust)
+        .children(trust_line)
         .into_any_element()
 }
 

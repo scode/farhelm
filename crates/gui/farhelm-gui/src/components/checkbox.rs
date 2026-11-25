@@ -62,6 +62,7 @@ pub struct Checkbox {
     role: Role,
     checked: bool,
     disabled: bool,
+    value_unknown: bool,
     switch: bool,
     inline: bool,
     on_toggle: Option<OnToggle>,
@@ -90,6 +91,7 @@ impl Checkbox {
             role,
             checked: false,
             disabled: false,
+            value_unknown: false,
             switch: false,
             inline: false,
             on_toggle: None,
@@ -107,6 +109,13 @@ impl Checkbox {
     /// An unavailable control: drawn at half opacity, ignoring clicks and keys, and not focusable.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// The visible off position can be a placeholder while a setting is unread.
+    /// Expose the unavailable label until there is a value the user can change.
+    pub(crate) fn value_unknown(mut self, unknown: bool) -> Self {
+        self.value_unknown = unknown;
         self
     }
 
@@ -228,7 +237,7 @@ impl RenderOnce for Checkbox {
             )
         });
         let ring = focus::shows_ring(&focus, window, cx);
-        let enabled = !self.disabled;
+        let enabled = !self.disabled && !self.value_unknown;
         let toggle = self
             .on_toggle
             .clone()
@@ -270,16 +279,30 @@ impl RenderOnce for Checkbox {
                 self.content
                     .unwrap_or_else(|| self.label.clone().into_any_element()),
             );
+        // Some platform adapters infer an off value from a switch role alone.
+        // While the value is unread, expose the name and availability as text.
+        let name = if self.value_unknown {
+            SharedString::from(format!("{}. Unavailable.", self.label))
+        } else {
+            self.label.clone()
+        };
         let mut control = div()
             .id(ElementId::Name(self.id.clone()))
             // Tests find a control by its id; this records nothing outside test builds.
             .debug_selector(|| self.id.to_string())
-            .role(self.role)
-            .aria_label(self.label.clone())
-            .aria_toggled(if self.checked {
-                Toggled::True
+            .role(if self.value_unknown {
+                Role::Label
             } else {
-                Toggled::False
+                self.role
+            })
+            .aria_label(name.clone())
+            .when(self.value_unknown, |control| control.aria_value(name))
+            .when(!self.value_unknown, |control| {
+                control.aria_toggled(if self.checked {
+                    Toggled::True
+                } else {
+                    Toggled::False
+                })
             })
             .flex()
             .items_center()
