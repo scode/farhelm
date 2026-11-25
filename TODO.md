@@ -64,6 +64,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Bind a confirmed Tailscale Uninstall to the verified peer.** Uninstall checks the machine again at confirmation,
+  then resolves the Tailscale destination separately for each removal step. Keep the peer address, verified SSH keys,
+  and connection policy for the entire run, including the confirmation's checks and every destructive step. Reuse the
+  route's prepared identity for batch commands and reject a changed peer. The current plan stores a destination and
+  access mode, while command lowering owns the prepared identity and the key file. Carrying a single identity across the
+  run needs changes on both sides, with a fixture that checks which peer receives each action.
+
+- **Give explicit host actions priority over automatic SSH sign-in.** A manual Update or Uninstall can join an automatic
+  update's pending sign-in, and answering can admit the automatic run before the manual request retries. Turning
+  Tailscale on or off can also hit a route lock held by an unanswered automatic check. Keep an attached manual request's
+  question and successful answer, but fence the automatic continuation through the manual retry. A route edit must
+  retire an automatic-only check and observe release of its route guard. Define how automatic retries become eligible
+  again and preserve a question that a manual action owns. Cover both shared authentication and route edits in tests
+  with automatic updates still on. Cancelling the prompt alone cannot arbitrate the admission race after the answer.
+
 - **Handle programs that outlive their terminal host.** The desktop can describe a session as ended while its main
   program still runs. Stop or Delete can then exceed what the user confirmed. On an unscoped launch, Stop or Restart can
   miss the survivor if it cannot find a session marker. Count a surviving main program as alive for consent and root

@@ -6,6 +6,7 @@ use crate::focus::Mark;
 use crate::host_text::HostText;
 use crate::hosts::HostsPanel;
 use crate::layers;
+use crate::operations::Outcome;
 use crate::theme;
 use crate::{session, ticker};
 use farhelm_helm_client::fake::FakeHelm;
@@ -53,7 +54,7 @@ pub(super) fn hosts_shown_with_a_host_chosen_setup(
 /// `host-add-dialog`), with `dev@new-box` in the destination field, which holds focus. The opener is the scene's ring
 /// handle. The fake and the connection are kept for the scene's life, like Settings'.
 pub(super) fn host_add_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    host_add(state, window, cx, None);
+    host_add(state, window, cx, AddScene::Form);
 }
 
 /// Add host owns the setup question inline, with room for the destination, explanation and masked answer.
@@ -63,7 +64,7 @@ pub(super) fn host_add_sign_in_setup(state: &SceneState, window: &mut Window, cx
         state,
         window,
         cx,
-        Some(SshQuestion {
+        AddScene::SignIn(SshQuestion {
             id: "golden-add-question".into(),
             attempt: "golden-add-check".into(),
             target: SshQuestionTarget::Draft {
@@ -78,20 +79,23 @@ pub(super) fn host_add_sign_in_setup(state: &SceneState, window: &mut Window, cx
     );
 }
 
-fn host_add(
-    state: &SceneState,
-    window: &mut Window,
-    cx: &mut App,
-    question: Option<farhelm_proto::ui_channel::SshQuestion>,
-) {
+/// Which part of a probe belongs in an open Add form, with no network calls from the scene.
+enum AddScene {
+    Form,
+    SignIn(farhelm_proto::ui_channel::SshQuestion),
+    ProbeReply(&'static str, bool, Outcome),
+}
+
+fn host_add(state: &SceneState, window: &mut Window, cx: &mut App, scene: AddScene) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let mut snapshot = vec![crate::hosts::tests::hosts(
         &crate::hosts::tests::reference_hosts(),
     )];
-    let attempt = question.as_ref().map(|question| question.attempt.clone());
-    if let Some(question) = question {
-        snapshot.push(crate::sign_in::tests::questions(&[question]));
+    if let AddScene::SignIn(question) = &scene {
+        snapshot.push(crate::sign_in::tests::questions(std::slice::from_ref(
+            question,
+        )));
     }
     helm.connect(snapshot);
     // The dialog opens only over a live UI session, which the snapshot's connection makes after this setup returns:
@@ -104,16 +108,75 @@ fn host_add(
             crate::hosts::add::open(&opener, &mark, window, cx);
             let dialog = layers::last_opened::<crate::hosts::add::AddHostDialog>(cx);
             if let Some(dialog) = dialog {
-                let input = dialog.read(cx).destination_input();
-                input.set_text("dev@new-box", window, cx);
-                if let Some(attempt) = &attempt {
-                    dialog.update(cx, |dialog, cx| {
-                        dialog.wait_for_setup_for_golden(attempt, "dev@new-box", window, cx);
-                    });
-                }
+                let destination = match &scene {
+                    AddScene::ProbeReply(destination, ..) => *destination,
+                    AddScene::Form | AddScene::SignIn(_) => "dev@new-box",
+                };
+                dialog
+                    .read(cx)
+                    .destination_input()
+                    .set_text(destination, window, cx);
+                dialog.update(cx, |dialog, cx| match &scene {
+                    AddScene::Form => (),
+                    AddScene::SignIn(question) => {
+                        dialog.wait_for_setup_for_golden(&question.attempt, destination, window, cx)
+                    }
+                    AddScene::ProbeReply(_, tailscale, outcome) => {
+                        dialog.show_probe_reply_for_golden(*tailscale, outcome.clone(), window, cx)
+                    }
+                });
             }
         });
     });
+}
+
+/// A missing Mac capability is a completed probe with a manual reason, which Add shows on the form.
+pub(super) fn host_add_mac_clock(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let reply = farhelm_proto::provisioning::ProbeReply::<()>::Manual {
+        reason: MAC_MISSING_DATE.into(),
+    };
+    let body = serde_json::to_value(reply).expect("the manual reply encodes");
+    host_add(
+        state,
+        window,
+        cx,
+        AddScene::ProbeReply("dev@mac-box", false, Outcome::Done(Some(body))),
+    );
+}
+
+/// Tailscale uses its own socket. The probe's connection error stays visible on the Tailscale form.
+pub(super) fn host_add_tailscale_error(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let outcome = probe_refused(
+        r#"the supervisor probe closed before hello completion with exit status 255: host stderr "Permission denied""#,
+    );
+    host_add(
+        state,
+        window,
+        cx,
+        AddScene::ProbeReply("dev@mesh-box", true, outcome),
+    );
+}
+
+/// A locally interrupted probe cannot authorize setup, even when the remote wrapper reported an exit code.
+pub(super) fn host_add_stopped_probe(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let outcome = probe_refused(
+        r#"the supervisor probe closed before hello completion with signal: 15 (SIGTERM): host stderr "farhelm-probe-command-started-v1\n""#,
+    );
+    host_add(
+        state,
+        window,
+        cx,
+        AddScene::ProbeReply("dev@new-box", false, outcome),
+    );
+}
+
+/// Both failed probes return gateway errors with the helm's diagnostic as the body.
+fn probe_refused(words: &str) -> Outcome {
+    Outcome::Refused(crate::operations::Refusal {
+        words: HostText::from_host(words),
+        status: 502,
+        markers: Vec::new(),
+    })
 }
 
 /// The Add host dialog as an approval card opens it for an agent's host add (no reference screen: the old app's dialog
@@ -822,6 +885,33 @@ pub(super) fn host_update_refusal_setup(_: &SceneState, window: &mut Window, cx:
         window,
         cx,
     );
+}
+
+/// Add, Update and Uninstall use the same Mac capability check and get the same reason from the helm.
+const MAC_MISSING_DATE: &str = "remote Mac provisioning requires the command date";
+
+/// An Update can be refused before any step runs when its Mac is missing the service-stop clock.
+pub(super) fn host_update_mac_clock(_: &SceneState, window: &mut Window, cx: &mut App) {
+    mac_missing_date_refusal("Update host", window, cx);
+}
+
+/// Uninstall likewise cannot start without the clock that bounds its service-stop step.
+pub(super) fn host_uninstall_mac_clock(_: &SceneState, window: &mut Window, cx: &mut App) {
+    mac_missing_date_refusal(crate::hosts::uninstall::ACTION, window, cx);
+}
+
+/// The two existing-host actions show the capability requirement with the host's name and destination.
+fn mac_missing_date_refusal(action: &'static str, window: &mut Window, cx: &mut App) {
+    use crate::hosts::refusal::{self, Refusal};
+    use crate::hosts::tests::{aliased, reference_hosts};
+    let view = aliased(reference_hosts().remove(1), "mac-box", "dev@mac-box");
+    let reason = crate::operations::Refusal {
+        words: HostText::from_host(MAC_MISSING_DATE),
+        status: 409,
+        markers: Vec::new(),
+    };
+    let mark = Mark::take(cx);
+    let _ = refusal::open(Refusal::of(action, &view, &reason), &mark, window, cx);
 }
 
 /// The host refusal dialog for an uninstall of `build-box` refused while a session still runs there (reference

@@ -8203,9 +8203,10 @@ for initial setup.
 The helm wraps every remote setup command in a parent shell that prints `farhelm-command-status-v1 <tag> <status>` on
 stderr when its child exits. Some SSH servers report zero even for a failed command, so setup takes the result from the
 record with the command's fresh tag. SSH exit 255 still reports a transport failure. A missing or invalid record fails
-the step and includes the transport status and host diagnostic. A finished probe hello already proves that a supervisor
-answered, so that path can stop the probe without waiting for the record. Stdout carries the same data and framed
-messages as before.
+the step and includes the transport status and host diagnostic. A local transport terminated by a signal can leave
+stdout incomplete even after the record arrives, so that signal takes precedence. A finished probe hello proves that a
+supervisor answered, so that path can stop the probe without waiting for the record. Stdout carries the same data and
+framed messages as before.
 
 Inspection chooses the OS with `uname -s` before any systemd command. The combined payload target is Linux x86_64, Linux
 aarch64 or macOS aarch64; its serialized Linux architecture names remain `x86_64` and `aarch64`. Apple-silicon Macs

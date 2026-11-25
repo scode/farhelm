@@ -29,10 +29,6 @@ consequences.
   submit a fresh checkout before its updated warning is shown, allowing the previous checkout to move to trash without
   the displayed disclosure.
 
-- [`tailscale-uninstall-does-not-bind-verified-host.md`](tailscale-uninstall-does-not-bind-verified-host.md) — A
-  confirmed uninstall can affect a different Tailscale host if the saved name changes after Farhelm verifies the
-  original host.
-
 - [`trailing-replace-with-suspended-checkout-recent-skips-warning.md`](trailing-replace-with-suspended-checkout-recent-skips-warning.md)
   — In Replace with on a suspended managed-checkout host, pressing Down then Enter on a retained recent checkout setup
   immediately wakes, clones fresh, and deletes the source without showing the fresh-clone warning.
@@ -219,10 +215,6 @@ consequences.
   conversation ID reported right after the restarted agent starts is judged against the previous launch's reporting
   setting, and the Restart reply (and listings before launch update completes) report a stale restart offer.
 
-- [`trailing-shared-signin-triggers-auto-update-concurrently-with-manual-action.md`](trailing-shared-signin-triggers-auto-update-concurrently-with-manual-action.md)
-  — When automatic host updates are on (the default) and a remote SSH host needs SSH sign-in, choosing Uninstall or
-  Update on that host shares the waiting Setup sign-in question.
-
 - [`trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md`](trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md)
   — When a launch template has a custom effort value without an agent type (a valid modifier template) or after
   switching its agent type from a custom agent to a built-in agent, the Templates editor displays Effort as 'Default'
@@ -355,10 +347,6 @@ consequences.
 - [`trailing-mac-update-miss-app-installed-before-run-admission.md`](trailing-mac-update-miss-app-installed-before-run-admission.md)
   — Installing the desktop app after Update's reach check but before the run is accepted can leave a separately
   installed launchd service where Update should refuse.
-
-- [`trailing-busy-claim-retry-test-bypasses-fleet-wake-it-depends.md`](trailing-busy-claim-retry-test-bypasses-fleet-wake-it-depends.md)
-  — The new test proves the planner can try again when explicitly called, while regressions that leave a host idle
-  without waking automatic Update can pass this test.
 
 - [`trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md`](trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md)
   — Tests can keep passing if a replacement already queued for a host resumes under the wrong connection lifetime.
@@ -626,10 +614,6 @@ consequences.
   — If a host leaves or empties while its 'Delete all on' confirmation is open in Trash, the invisible confirmation
   keeps all other hosts' Delete/Retry buttons disabled and swallows the first Close or Escape.
 
-- [`trailing-resolve-remote-status-clears-local-transport-signal.md`](trailing-resolve-remote-status-clears-local-transport-signal.md)
-  — If the local SSH or Podman client process is killed by a signal after stderr delivers the status record, Farhelm
-  discards the signal termination and can treat truncated stdout as exit 0.
-
 - [`trailing-container-host-unanswered-embeds-raw-stderr.md`](trailing-container-host-unanswered-embeds-raw-stderr.md) —
   When a verified container host command fails before the guard runs, Farhelm copies up to 64 KiB of uncropped,
   unsanitized remote stderr directly into host status and HTTP errors.
@@ -658,10 +642,6 @@ consequences.
   — Primary Suspend and Stop and suspend actions still wait up to 20 seconds behind any slow host on the ordered channel
   lane because their pre-flight session activity check was left on Lane::Ordered.
 
-- [`trailing-tailscale-setup-probe-exit-255-blames-socket-length.md`](trailing-tailscale-setup-probe-exit-255-blames-socket-length.md)
-  — On machines with a long username or state-directory path, a failed Tailscale SSH probe falsely reports that
-  state-directory socket length disables interactive SSH sign-in even though Tailscale puts its sockets under /tmp.
-
 - [`trailing-ensure-hosts-skips-tailscale-validation-for-registered.md`](trailing-ensure-hosts-skips-tailscale-validation-for-registered.md)
   — An invalid Tailscale destination in --ensure-hosts is silently accepted when already registered and fails without
   the entry index or Tailscale format guidance when new.
@@ -681,12 +661,6 @@ consequences.
 - [`trailing-apply-template-custom-command-yolo-diverges-from-gui.md`](trailing-apply-template-custom-command-yolo-diverges-from-gui.md)
   — Applying launch templates that declare a custom agent on the Command tab behaves differently in the desktop app and
   the CLI.
-
-- [`trailing-automatic-signin-tests-omit-shared-prompt-with-auto-updates-on.md`](trailing-automatic-signin-tests-omit-shared-prompt-with-auto-updates-on.md)
-  — The automatic host-update sign-in test suite never tests what happens when a user clicks Update or Uninstall on a
-  host that already has an automatic-update sign-in waiting and answers that shared prompt with automatic updates still
-  turned on (the default setting), allowing a race between the automatic update resuming and the user's manual Update or
-  Uninstall to go undetected.
 
 - [`trailing-check-template-shape-allows-custom-agent-yolo-false.md`](trailing-check-template-shape-allows-custom-agent-yolo-false.md)
   — Both the CLI and the desktop Templates editor allow saving a Command launch template that declares a custom agent
@@ -800,10 +774,6 @@ consequences.
   action's accessible name includes the custom agent's name ("Launch Command · <name> · <host> · <folder>"), whereas
   declaring any built-in agent or generic Custom omits the agent name ("Launch Command · <host> · <folder>").
 
-- [`trailing-mac-reach-omits-date-for-bootout.md`](trailing-mac-reach-omits-date-for-bootout.md) — Remote Mac setup,
-  Update, and uninstall are specified to refuse during inspection if any command their shell path requires is missing
-  from the host's PATH.
-
 - [`trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md`](trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md)
   — In Restart with for a custom-agent session that has no captured conversation, if the custom agent's registration has
   resumption disabled (or is deleted), the More options disclosure is locked open with "A setting here is required or
@@ -916,12 +886,6 @@ consequences.
   — Changes to registered custom agents are wired to push over the UI channel, but the helm test suite never exercises a
   live create, edit, or delete of a custom agent end-to-end over the UI channel to verify that the served payload
   projects and decodes cleanly.
-
-- [`trailing-unanswered-auto-update-signin-blocks-set-tailscale-hostbusy.md`](trailing-unanswered-auto-update-signin-blocks-set-tailscale-hostbusy.md)
-  — While an unanswered automatic-update SSH sign-in question is waiting in the attention row (up to two minutes per
-  prompt), trying to turn **Tailscale host** on or off in Host settings fails with "This host is busy; try again after
-  its current operation finishes" even though no setup or update is running and you never started an operation on that
-  host.
 
 - [`trailing-unknown-agent-typo-fails-with-misleading-custom-flag-error.md`](trailing-unknown-agent-typo-fails-with-misleading-custom-flag-error.md)
   — When an agent mistypes a built-in agent name (such as `--agent cluade` or `--agent opencode`) together with

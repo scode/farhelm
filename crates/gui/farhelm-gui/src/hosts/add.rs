@@ -1338,6 +1338,24 @@ impl AddHostDialog {
         self.destination.input().clone()
     }
 
+    /// Render a completed probe in the unchanged Add dialog. The golden supplies the helm's reply so the scene
+    /// exercises the live error presentation without connecting to a host.
+    #[cfg(test)]
+    pub(crate) fn show_probe_reply_for_golden(
+        &mut self,
+        tailscale: bool,
+        outcome: Outcome,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.tailscale = tailscale;
+        let settled = Settled {
+            outcome,
+            user_moved_on: false,
+        };
+        self.settled(&settled, false, window.window_handle(), cx);
+    }
+
     /// Show a checking draft matched to the fixture's pending question. The golden does not send terminal input
     /// or run the probe again. The Add dialog tests cover those actions through the real interaction.
     #[cfg(test)]

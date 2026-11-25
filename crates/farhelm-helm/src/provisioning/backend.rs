@@ -1719,6 +1719,22 @@ impl SystemBackend {
         })?;
         Ok((child, status_tag))
     }
+
+    /// Only ordinary SSH puts the provisioning socket in the helm's state directory.
+    /// An unreachable Tailscale peer must not inherit that directory's socket warning.
+    fn probe_sign_in_unavailable(&self, target: &ProvisioningTarget) -> Option<String> {
+        let ProvisioningTarget::Remote(RemoteRoute::Ssh {
+            access: crate::ssh::SshAccessKind::UserConfig,
+            ..
+        }) = target
+        else {
+            return None;
+        };
+        crate::ssh::sign_in_unavailable(
+            &self.control_dir,
+            crate::ssh::SharedConnection::Provisioning,
+        )
+    }
 }
 
 /// Tensorlake's gateway does not run PAM. Ordinary ssh hosts benefit from
@@ -1759,6 +1775,7 @@ impl CommandResult {
 
     /// The result of the script comes from its stderr record. A 255 from SSH
     /// itself still belongs to the transport, including a refused mux session.
+    /// A killed local client may have delivered the record but left stdout incomplete.
     /// Keep the resolver above the shared capture layer, where the tag is known.
     fn resolve_remote_status(
         mut self,
@@ -1768,6 +1785,9 @@ impl CommandResult {
         let record = tag.find_record(self.stderr.as_bytes());
         if let Some((_, range)) = &record {
             self.stderr.replace_range(range.clone(), "");
+        }
+        if self.code.is_none() && record.is_some() {
+            return Ok(self);
         }
         if self.code == Some(255) && route_uses_ssh(route) {
             if let Some(reason) =
@@ -2860,7 +2880,9 @@ impl ProvisioningBackend for SystemBackend {
                 {
                     return Err(BackendFailure::session_limit(reason, stderr.diagnostic()));
                 }
+                // The reported script result cannot replace a local transport signal.
                 if let ProvisioningTarget::Remote(route) = &target.transport
+                    && code.is_some()
                     && !(code == Some(255) && route_uses_ssh(route))
                 {
                     let Some(reported) = stderr.command_status else {
@@ -2881,15 +2903,8 @@ impl ProvisioningBackend for SystemBackend {
                 }
                 let detail = if status.code() == Some(255)
                     && !stderr.command_started
-                    && let ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh {
-                        access,
-                        ..
-                    }) = &target.transport
-                    && access.asks_user()
-                    && let Some(reason) = crate::ssh::sign_in_unavailable(
-                        &self.control_dir,
-                        crate::ssh::SharedConnection::Provisioning,
-                    ) {
+                    && let Some(reason) = self.probe_sign_in_unavailable(&target.transport)
+                {
                     // Setup's socket can exceed the limit by one byte while the sessions socket still fits.
                     format!("SSH could not connect or log in to the host. {reason}")
                 } else {
@@ -4075,9 +4090,11 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
 /// Mac discovery does not ask about systemd. A missing command is a
 /// capability refusal, while the desktop app is an ownership refusal shared
 /// by setup, Update and uninstall. The current helm owns this private record.
+/// The list includes `date` because Update and uninstall need a clock while
+/// launchd is removing the supervisor job.
 const MACOS_REACH_SH: &str = r#"
 missing=''
-for tool in launchctl readlink sha256sum stat install chmod mkdir mv cat head tr rm rmdir find ls grep id uname env sh mount sleep; do
+for tool in launchctl readlink sha256sum stat install chmod mkdir mv cat head tr rm rmdir find ls grep id uname env sh mount sleep date; do
     if ! command -v "$tool" >/dev/null 2>&1; then missing=$tool; break; fi
 done
 if [ -z "$missing" ] && ! readlink -f -- "$HOME" >/dev/null 2>&1; then missing='readlink -f'; fi
@@ -4202,6 +4219,38 @@ mod macos_reach_tests {
             assert!(parse_macos_reach_output(&bytes).is_err());
         }
     }
+
+    /// The inspection itself must record the missing clock before Update or
+    /// uninstall can unload a job. Simulate command discovery in the child
+    /// shell so this covers the real command list without depending on a Mac.
+    #[test]
+    fn mac_reach_reports_missing_date_before_planning() {
+        let shell = format!(
+            r#"
+command() {{ [ "$1" = -v ] && [ "$2" != date ]; }}
+uname() {{ printf 'arm64\n'; }}
+id() {{ printf '501\n'; }}
+readlink() {{ return 0; }}
+{MACOS_REACH_SH}
+"#
+        );
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &shell])
+            .env("HOME", "/fixture")
+            .output()
+            .expect("run the inspection shell");
+        assert!(
+            output.status.success(),
+            "the inspection must return a record"
+        );
+        let fields: Vec<_> = output.stdout.split(|byte| *byte == 0).collect();
+        assert_eq!(
+            fields.first().copied(),
+            Some(&b"farhelm-reach-macos-v1"[..])
+        );
+        // The capability field is independent of the desktop ownership check.
+        assert_eq!(fields.get(4).copied(), Some(&b"date"[..]));
+    }
 }
 
 #[cfg(test)]
@@ -4209,33 +4258,68 @@ mod tests {
     use super::*;
     use crate::provisioning::ssh_stand_in::{LyingSsh, control_root};
 
-    /// A script can use all one-byte exit codes. Reserve SSH's 255 for the
-    /// transport while retaining a child's 255 in the wrapper record.
+    /// A long state directory prevents SSH config sharing. Tailscale uses a different socket path,
+    /// so its connection failure must keep the diagnostic about the actual peer.
     #[test]
-    fn ssh_transport_255_takes_precedence_over_a_recorded_status() {
+    fn probe_socket_warning_only_applies_to_ordinary_ssh() {
+        let backend = SystemBackend::new(PathBuf::from("/fixture").join("a".repeat(120)));
+        let route = |access| {
+            ProvisioningTarget::Remote(RemoteRoute::Ssh {
+                destination: "fixture.example".into(),
+                access,
+            })
+        };
+        let ordinary = route(crate::ssh::SshAccessKind::UserConfig);
+        assert!(
+            backend
+                .probe_sign_in_unavailable(&ordinary)
+                .unwrap()
+                .contains("SSH socket needs")
+        );
+        let tailscale = route(crate::ssh::SshAccessKind::Tailscale);
+        assert!(backend.probe_sign_in_unavailable(&tailscale).is_none());
+    }
+
+    /// A script can use all one-byte exit codes. Preserve the client's signal
+    /// and SSH's own 255 even when the script reported success.
+    #[test]
+    fn transport_failure_takes_precedence_over_a_recorded_status() {
         let tag = Tag::new();
         let route = RemoteRoute::Ssh {
             destination: "fixture.example".into(),
             access: crate::ssh::SshAccessKind::UserConfig,
         };
-        for (body, wrapper_status, transport_status, resolved_status) in
-            [("exit 255", 254, 254, 255), ("exit 0", 0, 255, 255)]
-        {
+        for (body, wrapper_status, transport_status, signal, resolved_status) in [
+            ("exit 255", 254, Some(254), None, Some(255)),
+            ("exit 0", 0, Some(255), None, Some(255)),
+            ("exit 0", 0, None, Some(libc::SIGTERM), None),
+        ] {
             let child = std::process::Command::new("sh")
                 .args(["-c", &tag.wrap(body)])
                 .output()
                 .unwrap();
             assert_eq!(child.status.code(), Some(wrapper_status));
             let captured = CommandResult {
-                code: Some(transport_status),
-                signal: None,
+                code: transport_status,
+                signal,
                 stdout: child.stdout,
                 stderr: String::from_utf8(child.stderr).unwrap(),
             };
             let result = captured.resolve_remote_status(&route, &tag).unwrap();
-            assert_eq!(result.code, Some(resolved_status));
+            assert_eq!(result.code, resolved_status);
+            assert_eq!(result.signal, signal);
             assert!(result.stderr.is_empty());
         }
+        let missing = CommandResult {
+            code: None,
+            signal: Some(libc::SIGTERM),
+            stdout: Vec::new(),
+            stderr: "connection closed".into(),
+        }
+        .resolve_remote_status(&route, &tag)
+        .unwrap_err();
+        assert!(missing.context.contains("terminated by signal"));
+        assert!(missing.to_string().contains("connection closed"));
     }
 
     /// Status framing gets its own allowance. A command can write the entire
@@ -4352,6 +4436,10 @@ mod tests {
             ProbeObservation::Absent
         ));
 
+        backend.launcher = Arc::new(InterruptedProbeClient);
+        let error = backend.probe(&target).await.unwrap_err();
+        assert!(error.context.contains("signal"), "{error}");
+
         backend.launcher = Arc::new(LyingSsh { omit_record: true });
         let error = backend.probe(&target).await.unwrap_err();
         assert!(
@@ -4361,6 +4449,28 @@ mod tests {
         );
         assert!(error.stderr.contains(REMOTE_PROBE_MARKER));
         assert!(!error.stderr.contains("farhelm-command-status-v1"));
+    }
+
+    /// Model the local client itself, including its exit by signal after delivering the wrapper's record.
+    struct InterruptedProbeClient;
+
+    impl CommandLauncher for InterruptedProbeClient {
+        fn spawn(
+            &self,
+            command: &mut tokio::process::Command,
+        ) -> std::io::Result<tokio::process::Child> {
+            let script = command.as_std().get_args().last().unwrap();
+            let mut client = tokio::process::Command::new("sh");
+            client
+                .args(["-c", "sh -c \"$1\"; kill -TERM $$", "interrupted-ssh"])
+                .arg(script)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            isolate_process_group(&mut client);
+            client.spawn()
+        }
     }
 
     /// Proxy environment files use the credential installer's exact bytes,
