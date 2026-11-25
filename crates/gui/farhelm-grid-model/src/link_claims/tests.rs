@@ -573,7 +573,7 @@ fn separating_seams_cut_tokens_and_joining_seams_do_not() {
 #[test]
 fn example_labels_get_these_verdicts() {
     use MismatchKind::{Credentials, Disguised, Mismatch};
-    let rows: [(&str, &str, Option<MismatchKind>); 22] = [
+    let rows: [(&str, &str, Option<MismatchKind>); 24] = [
         (
             "See https://github.com/login",
             "https://evil.test/",
@@ -640,6 +640,16 @@ fn example_labels_get_these_verdicts() {
         (
             "https://exa\u{feff}mple.com/x",
             "https://example.com/x",
+            Some(Disguised),
+        ),
+        (
+            "\u{ff48}ttps://example.test/x",
+            "https://other.test/x",
+            Some(Disguised),
+        ),
+        (
+            "ht\u{200b}tps://example.test/x",
+            "https://other.test/x",
             Some(Disguised),
         ),
         (
@@ -779,8 +789,8 @@ fn an_at_before_a_host_with_a_port_is_userinfo_not_a_handle() {
     assert_eq!(found("@evil.test:8443/x"), vec![]);
 }
 
-/// Where a host may start is judged on the original characters, not the recognition view. Folding turns `…` into three
-/// dots and a fullwidth solidus into `/`, which would glue the host to the word before it and hide the address.
+/// A host can start where either reading permits it. These cases need the original characters because folding turns
+/// `…` into three dots and a fullwidth solidus into `/`, which would glue the host to the preceding text.
 #[test]
 fn a_host_start_is_judged_on_the_original_characters() {
     for (label, span) in [
@@ -1237,17 +1247,20 @@ fn prose_glued_to_an_address_is_compared_with_the_target() {
 }
 
 /// A scheme-shaped claim is compared as written. Borrowing the destination's scheme could produce a valid
-/// URL from an address whose original scheme cannot be parsed.
+/// URL from an address whose original scheme cannot be parsed. The invisible character sits inside the
+/// scheme, where it is part of the claim.
 #[test]
 fn a_lookalike_scheme_is_not_reinterpreted_as_a_hostname() {
     for label in [
         "htt\u{440}s://example.test/x",
-        "\u{200b}https://example.test/x",
+        "ht\u{200b}tps://example.test/x",
     ] {
         let reinterpreted = format!("https://{label}");
         let target = Url::parse(&reinterpreted).unwrap();
         assert!(Url::parse(label).is_err(), "{label:?}");
-        assert!(mismatch(label, target.as_str()), "{label:?}");
+        let judgement = judge(&row(label), &[], &target);
+        assert!(judgement.first_mismatch.is_some(), "{label:?}");
+        assert_eq!(judgement.first_mismatch_url, None, "{label:?}");
     }
 }
 

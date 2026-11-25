@@ -58,7 +58,7 @@ impl<'a> RowText<'a> {
 /// The boundary between two rows of one label.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Seam {
-    /// The terminal wrapped the text: the rows are one line, and the seam always joins.
+    /// The hyperlink continues across the row edge as a wrap would draw it, so the seam always joins.
     Soft,
     /// Anything else. Whether it separates like whitespace or joins is the caller's call, passed per hard seam.
     Hard,
