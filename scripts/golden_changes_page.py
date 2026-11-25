@@ -13,7 +13,7 @@ from pathlib import Path
 
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Changed golden screenshots</title>
+<title>Golden screenshot review</title>
 <style>
 body {{ font: 14px system-ui, sans-serif; margin: 16px; background: #f4f5f8; color: #1a1d24; }}
 section {{ background: #fff; border: 1px solid #d0d4dc; border-radius: 6px; margin: 12px 0; padding: 8px 12px; }}
@@ -25,7 +25,8 @@ img {{ max-width: 100%; height: auto; box-sizing: border-box; border: 1px solid 
 .missing {{ color: #a33; }}
 @media (max-width: 700px) {{ .pictures {{ grid-template-columns: 1fr; }} }}
 </style></head><body>
-<h1>Changed golden screenshots</h1>
+<h1>Golden screenshot review</h1>
+{incomplete}
 {warning}
 {rows}
 </body></html>
@@ -41,9 +42,25 @@ def figure(name: str, label: str) -> str:
             f'<img src="{name}" alt="{label}"></a></figure>')
 
 
+def appearance_heading(stem: str) -> str:
+    """Name the appearance consistently in the failures list and image cards."""
+    scene, appearance = stem.rsplit("--", 1)
+    return f"<code>{html.escape(scene)}</code> <span>· {html.escape(appearance)}</span>"
+
+
+def incomplete_section(incomplete: dict[str, str]) -> str:
+    """A missing render must stay visible even when there are no changed pictures to inspect."""
+    if not incomplete:
+        return ""
+    rows = "".join(
+        f"<li>{appearance_heading(stem)} · {html.escape(reason)}</li>"
+        for stem, reason in incomplete.items()
+    )
+    return f'<section><h2>Missing or failed renders</h2><ul class="missing">{rows}</ul></section>'
+
+
 def picture_row(out: Path, stem: str, has_reference: bool, new_scene: bool, reviews: Path) -> tuple[str, bool]:
     """Use the native test's pixel evidence when present. A pair can still be inspected without its highlight."""
-    scene, appearance = stem.rsplit("--", 1)
     captured = figure(f"{stem}-capture.png", "New capture")
     original = f"{stem}-reference.png"
     review = {}
@@ -75,7 +92,7 @@ def picture_row(out: Path, stem: str, has_reference: bool, new_scene: bool, revi
             count = review["pixels"]
             noun = "pixel" if count == 1 else "pixels"
             diff = figure(marked, f"{count:,} differing {noun}")
-    heading = f"<code>{html.escape(scene)}</code> <span>· {html.escape(appearance)}</span>"
+    heading = appearance_heading(stem)
     row = f'<section><h2>{heading}</h2><div class="pictures">{previous}{captured}{diff}</div></section>'
     return row, not has_reference and not new_scene
 
@@ -94,7 +111,7 @@ def copy_reference(tool, reference: Path, target: Path, expected_blob: str | Non
 
 
 def report(tool, captures: Path, platform: str, references: Path | None, base_env: dict[str, str],
-           review_batch: ReviewBatch, manifest: Path) -> Path | None:
+           review_batch: ReviewBatch, manifest: Path, incomplete: dict[str, str]) -> Path | None:
     """Replace the checkout's review directory after each render, without changing the renderer's result.
 
     Compare mode has already filtered by pixel equality. Update mode writes the full selected set, so use the
@@ -106,7 +123,8 @@ def report(tool, captures: Path, platform: str, references: Path | None, base_en
             out = Path(temp) / "page"
             ready = False
             try:
-                collect_page(tool, Path(temp), out, captures, platform, references, base_env, review_batch, manifest)
+                collect_page(tool, Path(temp), out, captures, platform, references, base_env, review_batch, manifest,
+                             incomplete)
                 ready = (out / "index.html").is_file()
             finally:
                 # Overlapping comparisons own their own captures. Serialize just the shared directory replacement.
@@ -124,10 +142,10 @@ def report(tool, captures: Path, platform: str, references: Path | None, base_en
 
 
 def collect_page(tool, temp: Path, out: Path, captures: Path, platform: str, references: Path | None,
-                 base_env: dict[str, str], review_batch: ReviewBatch, manifest: Path) -> None:
-    """Use only files the renderer kept. Missing manifest entries distinguish a new image from a missing download."""
-    pictures = sorted((captures / platform).glob("*--*.png"))
-    if not pictures:
+                 base_env: dict[str, str], review_batch: ReviewBatch, manifest: Path, incomplete: dict[str, str]) -> None:
+    """Use completed captures. A failed writer may leave a partial file that belongs only in the run evidence."""
+    pictures = sorted(p for p in (captures / platform).glob("*--*.png") if p.stem not in incomplete)
+    if not pictures and not incomplete:
         return
     entries = tool.read_manifest(manifest)
     ids = {picture: entries.get(f"{platform}/{picture.name}") for picture in pictures}
@@ -136,7 +154,7 @@ def collect_page(tool, temp: Path, out: Path, captures: Path, platform: str, ref
     if updating:
         ids = {picture: blob for picture, blob in ids.items()
                if blob is None or tool.blob_id(picture.read_bytes()) != blob}
-        if not ids:
+        if not ids and not incomplete:
             return
         if local:
             references = Path(local).resolve()
@@ -168,5 +186,7 @@ def collect_page(tool, temp: Path, out: Path, captures: Path, platform: str, ref
     rows = [picture_row(out, *picture, reviews) for picture in pictures]
     warning = ('<p class="missing">Some reference pictures are unavailable.</p>'
                if any(unavailable for _, unavailable in rows) else "")
-    (out / "index.html").write_text(PAGE.format(warning=warning, rows="\n".join(row for row, _ in rows)),
-                                   encoding="utf-8")
+    (out / "index.html").write_text(
+        PAGE.format(incomplete=incomplete_section(incomplete), warning=warning, rows="\n".join(row for row, _ in rows)),
+        encoding="utf-8",
+    )

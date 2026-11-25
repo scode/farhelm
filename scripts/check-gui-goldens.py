@@ -31,7 +31,7 @@ go after it so a second test filter cannot quietly skip the render.
 Compare mode keeps only the differing or unreferenced captures in the run's own directory under
 `target/gui-goldens/`. Automatically fetched references live with that run so another comparison cannot replace
 them mid-render. The test prints each retained capture's path beside its failure.
-After rendering, a change in either mode writes a portable visual review under `target/gui-goldens/changes/`.
+Differences, failed renders and missing appearances are reported in a portable review under `target/gui-goldens/changes/`.
 """
 
 from __future__ import annotations
@@ -169,6 +169,30 @@ def complete_update(captures: Path, platform: str, names: list[str]) -> bool:
     return True
 
 
+def incomplete_appearances(outcomes: Path, captures: Path, names: list[str], update: bool) -> dict[str, str]:
+    """Check each requested appearance against its receipt. A matching comparison needs no retained PNG."""
+    problems = {}
+    expected_statuses = {"rendered"} if update else {"matched", "different"}
+    for name in names:
+        for appearance in ("light", "dark"):
+            stem = f"{name}--{appearance}"
+            try:
+                record = json.loads((outcomes / f"{stem}.json").read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                problems[stem] = "Missing render"
+                continue
+            except (OSError, ValueError):
+                record = None
+            status = record.get("status") if isinstance(record, dict) else None
+            if status == "failed" and isinstance(record.get("reason"), str):
+                problems[stem] = f"Render failed: {record['reason']}"
+            elif not isinstance(status, str) or status not in expected_statuses:
+                problems[stem] = "Render failed: invalid outcome record"
+            elif status != "matched" and not (captures / f"{stem}.png").is_file():
+                problems[stem] = "Missing capture after render"
+    return problems
+
+
 def available_cpus() -> int:
     """Use the assigned CPUs where the OS exposes affinity, since it can be narrower than the host's count."""
     return len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
@@ -297,19 +321,24 @@ def run_locked(tool, base_env: dict[str, str], binary: Path, names: list[str], u
             pass
         captures.mkdir(parents=True)
         tool.record_manifest(captures, manifest)
+        outcomes = manifest.parent / "outcomes"
     else:
         # A custom Cargo target can be shared by many checkouts. Both comparisons and their automatically fetched
         # references belong to this run in the checkout, so another invocation cannot replace either mid-render.
         run_dir = Path(tempfile.mkdtemp(prefix="compare-", dir=tool.WORK))
         captures = run_dir / "captures"
+        # Matching appearances leave no PNG. Keep their receipts with the run even when a worker is interrupted.
+        outcomes = run_dir / "outcomes"
         if given := base_env.get("FARHELM_GOLDENS_DIR"):
             references = Path(given).resolve()
         else:
             references = tool.fetch(manifest, run_dir / "refs", tool.REMOTE, tool.CACHE)
+    outcomes.mkdir()
     with tempfile.TemporaryDirectory(prefix="fh-goldens.") as runtime_dir:
         os.chmod(runtime_dir, 0o700)
         command = [str(binary), "--ignored", "--exact", "goldens::component_goldens", *test_args]
         env = golden_env(base_env, runtime_dir, references, captures)
+        env["FARHELM_GOLDEN_OUTCOMES_DIR"] = str(outcomes)
         groups = worker_groups(names, jobs)
         status = render_scenes(command, groups, env, lock)
     if status in STOP_STATUSES:
@@ -318,10 +347,16 @@ def run_locked(tool, base_env: dict[str, str], binary: Path, names: list[str], u
     if status < 0:
         status = 128 - status
     platform = {"darwin": "macos", "win32": "windows"}.get(sys.platform, sys.platform)
+    incomplete = incomplete_appearances(outcomes, captures / platform, names, update)
+    if incomplete:
+        print(f"incomplete golden render under {captures}: {len(incomplete)} appearances missing or failed",
+              file=sys.stderr)
+        status = status or 1
     # Keep review work under the same capture lease, but give it no role in certifying publishable captures.
     review_batch = partial(review_update, binary, base_env, jobs, lock)
     try:
-        page = golden_changes_page.report(tool, captures, platform, references, base_env, review_batch, manifest)
+        page = golden_changes_page.report(tool, captures, platform, references, base_env, review_batch, manifest,
+                                          incomplete)
     except ReviewInterrupted as interrupted:
         return interrupted.status
     if not update:

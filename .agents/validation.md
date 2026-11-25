@@ -732,28 +732,31 @@ systemd or SSH substrate ran.
   89 seconds of render time with identical files. At that point the update encoded each PNG twice. Expect a rebuild when
   first switching to this profile. For visual review, render the scenes the change touches using `--scene 'settings-*'`
   (repeatable, in compare or update mode). When that run prints `golden changes page:`, give the reviewer the entire
-  `target/gui-goldens/changes/` directory along with the intended design. A render with no differences produces no page.
-  Batch fixes from source and visual review, then re-render the touched scenes once per round. Before publishing, run
-  one full `--update` and inspect any page it reports to see the effects of shared components across the catalog. Treat
-  an unintended changed scene on the page as a finding. Only a full successful update can produce a completion marker.
-  Additional Cargo build options go before a bare `--`. Only libtest output options are supported after it, and
-  `--scene` is the selector. The runner builds the test binary once and splits the scenes among four processes by
-  default, capped at available CPUs and selected scenes. A comparison writes highlights from the pixels it already has.
-  An update gives the same binary only the changed picture pairs that have references after rendering. Use `--jobs N` to
-  change the process budget for both, including `--jobs 1` for a serial run. Use Cargo's `-j N` before `--` to limit
-  build jobs. Parallel output is grouped by process. Selected updates write to `target/gui-goldens/selected-captures`
-  and preserve a full update's pictures and completion marker.
+  `target/gui-goldens/changes/` directory along with the intended design. A complete render with no differences produces
+  no page; one with a missing or failed picture produces a page that lists them. Batch fixes from source and visual
+  review, then re-render the touched scenes once per round. Before publishing, run one full `--update` and inspect any
+  page it reports to see the effects of shared components across the catalog. Treat an unintended changed scene on the
+  page as a finding. Only a full successful update can produce a completion marker. Additional Cargo build options go
+  before a bare `--`. Only libtest output options are supported after it, and `--scene` is the selector. The runner
+  builds the test binary once and splits the scenes among four processes by default, capped at available CPUs and
+  selected scenes. A comparison writes highlights from the pixels it already has. An update gives the same binary only
+  the changed picture pairs that have references after rendering. Use `--jobs N` to change the process budget for both,
+  including `--jobs 1` for a serial run. Use Cargo's `-j N` before `--` to limit build jobs. Parallel output is grouped
+  by process. Selected updates write to `target/gui-goldens/selected-captures` and preserve a full update's pictures and
+  completion marker.
 - `python3 -B scripts/test-check-gui-goldens.py` — checks the golden runner with a stand-in renderer: private comparison
   references and captures keep earlier failures available, the renderer holds the update's capture lock, and a full
-  update receives a completion marker only after rendering. Failed, incomplete or selected updates cannot be published.
-  The tests also cover Cargo's executable discovery, ordered pattern matching and an unmatched pattern refused before
-  rendering. It also checks the CPU cap, disjoint work groups and a real killed worker that leaves other workers'
-  captures available without certifying the update. The changes page checks exercise packaged pictures and highlights,
-  native update requests, size changes, removal of stale pages, and an update without access to the store. Run it when
-  the runner or the page generator (`scripts/golden_changes_page.py` and
-  `crates/gui/farhelm-gui/src/goldens/changes.rs`) changes. Seconds, no graphics renderer or network. The Rust unit
-  tests filtered with `cargo test --locked -p farhelm-gui --lib goldens::changes` check exact highlights and size
-  changes without drawing. The stand-in also verifies that a selected update preserves a full capture set.
+  update receives a completion marker only after rendering. Compare and update fail when an expected appearance never
+  renders, reports a failure, or needs a capture that is missing. The review page lists these appearances even when it
+  has no changed PNGs. Failed, incomplete or selected updates cannot be published. The tests also cover Cargo's
+  executable discovery, ordered pattern matching and an unmatched pattern refused before rendering. It also checks the
+  CPU cap, disjoint work groups and a real killed worker that leaves other workers' captures available without
+  certifying the update. The changes page checks exercise packaged pictures and highlights, native update requests, size
+  changes, removal of stale pages, and an update without access to the store. Run it when the runner or the page
+  generator (`scripts/golden_changes_page.py` and `crates/gui/farhelm-gui/src/goldens/changes.rs`) changes. Seconds, no
+  graphics renderer or network. The Rust unit tests filtered with
+  `cargo test --locked -p farhelm-gui --lib goldens::changes` check exact highlights and size changes without drawing.
+  The stand-in also verifies that a selected update preserves a full capture set.
 - `python3 -B scripts/gui-goldens.py --self-test` — fetching and publishing the golden references, against a bare
   repository in a temporary directory standing in for the storage repository: a publish and a fetch round-tripping every
   picture under the one ref `refs/gui-goldens/keep` (never a branch or tag), a second publish adding a snapshot of only
