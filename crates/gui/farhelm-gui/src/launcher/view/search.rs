@@ -30,7 +30,7 @@
 //! - **Rows from the chosen host's launch history.** A saved folder becomes the folder as a pick from the folder list
 //!   does (leaving a managed checkout, keeping the tab). A model from a past launch chooses the agent type it ran with
 //!   and the model as that type's custom id. A recent setup fills the draft as a click on an empty-pane row does
-//!   ([`Launcher::take_recent`]), drawn on two lines, and never launches, from Enter either: the old search row only
+//!   ([`Launcher::take_recent`]) and never launches, from Enter either: the old search row only
 //!   filled, and SPEC.md's Enter that launches is the empty pane's highlighted row. A setup carrying a retired container choice,
 //!   a new environment's setup in Replace with, or a folder or setup from a history that is no longer the chosen
 //!   host's, is refused below the field. While a new environment is chosen, every folder row and Browse
@@ -1013,6 +1013,7 @@ fn draw_search_rows(
     // own children, so the scroll handle can find any row; the old list nested each group in a `role="group"`
     // node, which this leaves out (a recorded deviation): a nested row would scroll only its whole group into view.
     let mut active_child = None;
+    let collections = launcher.store.read(cx).collections();
     for (group, rows) in results.groups() {
         children.push(command_heading(
             SharedString::from(format!("launcher-search-group-{}", group.label())),
@@ -1025,9 +1026,13 @@ fn draw_search_rows(
                 active_child = Some(children.len());
             }
             let id = format!("launcher-search-option-{index}");
-            let words = row.words(SharedString::from(format!("{id}-words")));
+            let words = row.words(SharedString::from(format!("{id}-words")), collections);
             let label = words.accessible_name();
-            let help = row.help(harness, SharedString::from(format!("{id}-help")));
+            let help = row.help(
+                harness,
+                SharedString::from(format!("{id}-help")),
+                collections,
+            );
             let refusal = launcher.row_disabled(row, cx);
             let disabled = refusal.is_some();
             let help = match row {
@@ -1051,7 +1056,7 @@ fn draw_search_rows(
             } else {
                 match row {
                     Row::Recent { entry, placement } => {
-                        recent_lines(&id, entry, placement, selected, query, palette)
+                        recent_lines(&id, entry, placement, selected, query, palette, collections)
                     }
                     Row::Template(_) => words.underline_template_matches(query).into_any_element(),
                     _ => words.underline_matches(query).into_any_element(),
@@ -1102,10 +1107,33 @@ fn command_heading(
         .into_any_element()
 }
 
-/// A recent setup's row content, on two lines as the old search row drew it: "Recent setup: " with where it started (in
-/// the terminal font unless it is a repository) and the host, then, smaller and quieter, its model, effort and
-/// permissions, with YOLO in the danger ink. The agent is beside the host on the first line so an agent query has a
-/// visible match. Both lines cut their text short rather than wrap.
+/// Show the current name of the saved registration. When search matched its ID alone, show that ID beside the name
+/// so a match has visible text to underline. A deleted registration still has its saved ID.
+pub(super) fn recent_agent_words(
+    sentence: HostSentence,
+    selection: &farhelm_proto::LaunchSelection,
+    query: &str,
+    collections: &farhelm_helm_client::Collections,
+) -> HostSentence {
+    let Some(id) = selection.custom_agent.as_deref() else {
+        return sentence
+            .text(super::harness_label(selection.harness))
+            .underline_matches(query);
+    };
+    let name = crate::harness::custom_name(id, collections);
+    let term = query.to_lowercase();
+    let sentence = sentence.host(&name);
+    let sentence =
+        if !term.is_empty() && id.contains(&term) && !name.raw().to_lowercase().contains(&term) {
+            sentence.text(" (").host(&HostText::from_host(id)).text(")")
+        } else {
+            sentence
+        };
+    sentence.underline_template_matches(query)
+}
+
+/// Keep a registration's name ahead of the destination in narrow results, where a deep path could otherwise
+/// hide the match. The quieter second line names the saved model, effort and permissions.
 fn recent_lines(
     id: &str,
     entry: &LaunchHistoryEntry,
@@ -1113,23 +1141,30 @@ fn recent_lines(
     selected: bool,
     query: &str,
     palette: &theme::Palette,
+    collections: &farhelm_helm_client::Collections,
 ) -> AnyElement {
     let part = |name: &str| SharedString::from(format!("{id}-{name}"));
     let selection = &entry.selection;
     let (permission, yolo) = permission_presentation(selection);
     let destination = HostText::from_host(destination_label(entry));
     let first = HostSentence::new(part("destination")).text("Recent setup: ");
+    let registered = selection.custom_agent.is_some();
+    let first = if registered {
+        recent_agent_words(first, selection, query, collections).text(" · ")
+    } else {
+        first
+    };
     let first = if entry.github_repo.is_none() {
         first.mono(&destination)
     } else {
         first.host(&destination)
     };
-    let first = first
-        .text(" · ")
-        .host(placement)
-        .text(" · ")
-        .text(super::harness_label(selection.harness))
-        .underline_matches(query);
+    let first = first.text(" · ").host(placement);
+    let first = if registered {
+        first
+    } else {
+        recent_agent_words(first.text(" · "), selection, query, collections)
+    };
     let shell = selection.harness.is_shell();
     // The old second line's `--fg-1`, and `--on-accent-dim` on the selected row's fill.
     let quiet = if selected {
@@ -1153,7 +1188,10 @@ fn recent_lines(
                 .when(shell, |line| {
                     line.child(
                         HostSentence::new(part("selection"))
-                            .host(&HostText::from_host(summary_without_wrapper(selection)))
+                            .host(&HostText::from_host(summary_without_wrapper(
+                                selection,
+                                collections,
+                            )))
                             .underline_matches(query),
                     )
                 })

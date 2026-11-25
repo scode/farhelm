@@ -1302,7 +1302,8 @@ fn enter_on_a_harness_chip_chooses_it_and_presses_launch(cx: &mut TestAppContext
     );
 }
 
-fn acme_agent() -> farhelm_proto::custom_agents::CustomAgent {
+/// A saved registration whose ID and display name differ for launcher picker and Recent tests.
+pub(super) fn acme_agent() -> farhelm_proto::custom_agents::CustomAgent {
     farhelm_proto::custom_agents::CustomAgent {
         id: "acme-code".into(),
         display_name: "Acme Code".into(),

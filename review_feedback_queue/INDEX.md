@@ -110,11 +110,6 @@ consequences.
   — When a user launches a custom agent with a wrapper prefix and later deletes that custom agent, Farhelm keeps the
   wrapper prefix remembered and silently pre-fills it when selecting another or newly registered custom agent.
 
-- [`trailing-launcher-recents-display-literal-custom-instead-of-agent-name.md`](trailing-launcher-recents-display-literal-custom-instead-of-agent-name.md)
-  — In both the launcher's Recent list and typed search results (wide pane and narrow popover alike), every recent setup
-  for a registered custom agent shows the generic label "Custom" instead of that agent's display name or ID, so users
-  cannot visually tell different custom agents apart in recent setups without hovering.
-
 - [`trailing-restart-with-custom-reporting-and-offer-use-stale-row-launch.md`](trailing-restart-with-custom-reporting-and-offer-use-stale-row-launch.md)
   — When a user edits a registered custom agent's reporting or resumption setting and uses Restart with to apply it, a
   conversation ID reported right after the restarted agent starts is judged against the previous launch's reporting
@@ -279,11 +274,6 @@ consequences.
   — When a registered custom agent is selected in the session launcher and has a typed effort, choosing "Effort:
   Default" via composer search (e.g. `effort:default`) appears to accept the choice and clears the search box, but
   leaves the custom agent's effort unchanged and still sends it at launch.
-
-- [`trailing-launcher-search-recents-omits-custom-agent-id-and-name.md`](trailing-launcher-search-recents-omits-custom-agent-id-and-name.md)
-  — Typing a registered custom agent's ID or display name in launcher search (including `recent:<name>`) does not find
-  recent setups for that custom agent; recent setups only match the literal word `custom`, their folder/repository, or
-  their model.
 
 - [`trailing-launcher-target-names-command-custom-agent-outside-restart-with.md`](trailing-launcher-target-names-command-custom-agent-outside-restart-with.md)
   — When creating, cloning, or replacing a session on the Command tab with a registered custom agent declared, the main
