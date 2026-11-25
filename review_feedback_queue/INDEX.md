@@ -339,20 +339,8 @@ consequences.
 - [`launcher-highlights-escape-notation.md`](launcher-highlights-escape-notation.md) — The launcher can underline the
   escape notation displayed for a path even when that notation was absent from the matching path.
 
-- [`launcher-undo-leaves-template-source-mark.md`](launcher-undo-leaves-template-source-mark.md) — Undo can restore the
-  earlier launch settings and leave the reverted template marked as their source.
-
-- [`launcher-template-rows-rebuild-draft.md`](launcher-template-rows-rebuild-draft.md) — The wide launcher rebuilds the
-  same draft data for every template row while it checks held fields.
-
 - [`quick-launch-loses-template-source-mark.md`](quick-launch-loses-template-source-mark.md) — A launcher opened for
   review or correction by quick launch can omit the source marker for the template that filled it.
-
-- [`launcher-template-row-edits-behind-save-panel.md`](launcher-template-row-edits-behind-save-panel.md) — A template
-  row can change the launcher draft while Save as template remains open with the older values.
-
-- [`launcher-disabled-setup-enter-gives-no-reason.md`](launcher-disabled-setup-enter-gives-no-reason.md) — Enter on a
-  disabled setup can do nothing without showing the refusal reason to a keyboard user.
 
 - [`launcher-recent-fill-option-named-replace.md`](launcher-recent-fill-option-named-replace.md) — Recent setup options
   can announce Replace while activating the option only fills the form.
@@ -408,9 +396,6 @@ consequences.
 
 - [`resume-off-command-gets-hook-warning.md`](resume-off-command-gets-hook-warning.md) — A command launch with Resume
   off can get a misleading silent-hook warning that an arriving report does not clear.
-
-- [`held-escape-discards-launcher-draft.md`](held-escape-discards-launcher-draft.md) — On Wayland, holding Escape can
-  discard the launcher draft after dismissing a highlighted result or the hook setup question.
 
 - [`terminal-paste-test-misses-first-ack-premise.md`](terminal-paste-test-misses-first-ack-premise.md) — The interrupted
   paste check can pass without demonstrating that the runtime processed the first acknowledgement.
@@ -670,10 +655,6 @@ consequences.
 - [`trailing-trust-hint-save-errors-use-live-selection-instead-of.md`](trailing-trust-hint-save-errors-use-live-selection-instead-of.md)
   — A busy or refused Don't show again click can attach its error to a different session if selection moved after the
   hint was drawn.
-
-- [`launcher-preview-path-no-longer-copyable.md`](launcher-preview-path-no-longer-copyable.md) — The compact
-  managed-checkout row shows the exact planned folder without the selection and copy control available before the layout
-  change.
 
 - [`launcher-new-environment-folder-omits-repository-prompt.md`](launcher-new-environment-folder-omits-repository-prompt.md)
   — When no repository has been selected for a new environment, the Folder row says cloning will happen and omits its
@@ -987,10 +968,6 @@ consequences.
   — When switching from a safer agent (such as Guarded Claude or Codex) to a registered custom agent (which always
   counts as YOLO), the red permission-escalation banner appears at the top of the launcher, but the custom agent's YOLO
   permission control does not show the required thick red escalation outline.
-
-- [`trailing-launcher-footer-test-checks-stale-bg2-token.md`](trailing-launcher-footer-test-checks-stale-bg2-token.md) —
-  The test that guards against the session launcher's Reset button taking a neutral button fill no longer catches that
-  regression, because it still checks for the pre-restyle background color rather than the current neutral button fill.
 
 - [`trailing-launcher-search-custom-agent-rename-refused-as-stale.md`](trailing-launcher-search-custom-agent-rename-refused-as-stale.md)
   — If a registered custom agent is renamed while it is highlighted in the launcher's search results, or between drawing

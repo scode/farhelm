@@ -328,7 +328,9 @@ impl Launcher {
         let results = self.search_results(cx);
         if let Some(index) = self.search_highlight(&results, cx) {
             self.take_search_row(results.rows[index].clone(), window, cx);
-        } else if self.search_box.typed_choice.is_some() {
+        } else if self.search_box.typed_choice.as_ref().is_some_and(|choice| {
+            self.save_panel.is_none() || !matches!(choice.row, Row::Template(_))
+        }) {
             self.refuse_stale_choice(window, cx);
         }
     }
@@ -344,7 +346,7 @@ impl Launcher {
         let mut results = self.search_results(cx);
         if let Some(index) = picked.position(&results, self.chosen_host(cx)) {
             self.take_search_row(results.rows.swap_remove(index), window, cx);
-        } else {
+        } else if self.save_panel.is_none() || !matches!(picked.row, Row::Template(_)) {
             self.refuse_stale_choice(window, cx);
         }
     }
@@ -361,6 +363,10 @@ impl Launcher {
     /// fixed, else make its one edit, empty the box, close the results and keep focus in the box (Custom's flags take
     /// it instead).
     fn take_search_row(&mut self, row: Row, window: &mut Window, cx: &mut Context<Self>) {
+        // A template pick under the save panel leaves the query and focus alone, just like a template shortcut.
+        if self.save_panel.is_some() && matches!(row, Row::Template(_)) {
+            return;
+        }
         let refusal = self.row_disabled(&row, cx).or_else(|| {
             self.search_row_refusal(&row, cx)
                 .map(|words| HostSentence::new("launcher-refusal-reason").text(words))
@@ -636,6 +642,10 @@ impl Launcher {
     ) -> bool {
         if !self.search_box.inline_results && self.search_box.start_highlight.is_none() {
             return false;
+        }
+        if self.search_box.start_highlight.is_some() {
+            // Holding Escape to clear the highlight leaves the draft open until a fresh press.
+            focus::note_closing(true, window, cx);
         }
         self.close_search(window, cx);
         cx.notify();

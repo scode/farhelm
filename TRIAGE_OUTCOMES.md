@@ -1691,20 +1691,6 @@
   log while locked, then a positive run once unlocked; size S.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-launcher-footer-test-checks-stale-bg2-token.md
-
-- Outcome: `other`.
-- Assessment: A launcher test meant to catch Reset gaining a filled button background still compares against the old
-  fill colour, so it would miss that regression since the button restyle. Verified: confirmed.
-  `launcher/view_tests.rs:536-543` checks `palette.bg_2`, while `Tier::Neutral` now paints `palette.button_rest`
-  (`components/button.rs:812`). Test gap only.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code with a one-line test fix, or discard. Size S.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## trailing-settings-custom-agent-duplicate-host-sentence-id.md
 
 - Outcome: `other`.
@@ -3272,22 +3258,6 @@
   `Button::discloses` does, which was not checked. Size S.
 - Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
-## launcher-disabled-setup-enter-gives-no-reason.md
-
-- Outcome: `other`.
-- Assessment: In the New session launcher, arrowing onto a recent setup that cannot be used (for example one that would
-  change a held field) and pressing Enter does nothing. It gives no explanation, while hovering the same row with the
-  mouse shows why. Verified: Confirmed. `launcher/view/search/start.rs:137-139` returns silently when `row_disabled` is
-  some, and OptionRow exposes no disabled state to accessibility. Screen-reader announcement is unverified. SPEC.md
-  (launcher) says such rows "show as disabled… Their help explains which field stays fixed", but says nothing about
-  Enter on them.
-- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
-  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  fix code S. Show the refusal line on keyboard activation and expose disabled state.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## launcher-announces-two-selected-setups.md
 
 - Outcome: `other`.
@@ -3379,20 +3349,6 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (page the title line, or every host-value line). Size S-M.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## launcher-preview-path-no-longer-copyable.md
-
-- Outcome: `other`.
-- Assessment: In managed-checkout mode, the launcher's Folder line shows the planned checkout path as plain text. The
-  earlier read-only field let the user select and copy the exact path before launching. The compact layout dropped that.
-  Verified: confirmed. `launcher/view/checkout.rs:1273` draws a `HostSentence`. #4603 (`f249fdff5`) deliberately changed
-  SPEC.md's "folder field" to "Folder line" (now SPEC.md 1990). No spec rule requires copying.
-- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
-  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard, unless the maintainer wants copy back, in which case add a copy button. Size S.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-add-host-tailscale-checkbox-evicts-focus.md
 
@@ -3617,43 +3573,6 @@
   M if fixed.
 - Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
-## launcher-undo-leaves-template-source-mark.md
-
-- Outcome: `other`.
-- Assessment: When a template applied in the launcher switches the agent to a riskier permission, a banner offers Undo.
-  Undo puts back the earlier settings, but the form keeps naming the template as their source, and its row stays marked
-  as the one that filled the form. Verified: confirmed. `apply_now` sets the source marker
-  (`launcher/view.rs:1089-1091`). `undo_escalation` (`launcher/view/escalation.rs:167-179`) restores the draft and
-  notice but not the marker, and the marker is not captured when the banner is built (:73-100). Only Reset
-  (`view.rs:1478`) and fills (`recents.rs:131`) change it. On the spec: SPEC.md:1499-1500 says "The row that filled the
-  form remains marked, and the form names its source until Reset choices or another fill." Read literally, the marker
-  should stay across Undo, which is current behavior. Restoring the old marker rests on reading Undo as a fill, or on
-  the marker having to name the source of the current values. It is a display problem only.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code — capture the marker in the banner and restore it on Undo; size S. A discard is defensible
-  because the literal spec text allows the current behavior.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
-## launcher-template-rows-rebuild-draft.md
-
-- Outcome: `other`.
-- Assessment: In Replace with and Restart with, which keep the host fixed, the wide launcher redraws every template row
-  by copying the host list and rebuilding a full snapshot of the form, to check whether that template would change a
-  held field. It is wasted work, but nobody has measured any delay. Verified: confirmed as redundant work, with no
-  measured latency. - Per template row, `row_disabled` (`launcher/view/search.rs:429-438`) calls `self.hosts(cx)` and
-  `held_row_refusal` (`templates/dispatch.rs:259-270`), which rebuilds `apply::snapshot` and clones the template inside
-  `held_refusal` (`templates/apply.rs:423`). - The design scale is "tens of sessions across a few hosts"
-  (SPEC.md:2829-2830), and template catalogs are small. - No user-visible effect is shown.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: discard — no measured cost at the stated scale; size none (fix would be S-M).
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## quick-launch-loses-template-source-mark.md
 
 - Outcome: `other`.
@@ -3726,23 +3645,6 @@
   for reference: fix code. Clear the error when the dismissal preference changes or the session or run changes,
   mirroring the trust band. Size S.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## held-escape-discards-launcher-draft.md
-
-- Outcome: `other`.
-- Assessment: When the empty pane has a highlighted recent setup or template, the first Escape clears the highlight. If
-  Escape is held, the auto-repeat then closes the launcher and discards the draft, on platforms that repeat Escape
-  (Wayland and macOS). Verified: confirmed from source. `launcher/view.rs:239-246` returns Stay for the first dismissal.
-  `layers.rs:1546-1556` notes a closing key only when a layer closes. `Dismiss` is not in `ONCE_PER_PRESS`
-  (`actions.rs:698-720`). SPEC_impl.md 9351 requires the first Escape to clear the highlight. SPEC.md 3829's held-Escape
-  rule covers only the case after the last layer closes. Losing the draft is recreatable form input, not `highest`.
-  Native repeat was not exercised.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code. Note the dismissal so its repeats are swallowed. Size S.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## hook-diagnostic-path-can-render-doc-link.md
 
@@ -5564,26 +5466,6 @@
   Fix spec as well if the footer placement is kept. Size S. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
-## launcher-template-row-edits-behind-save-panel.md
-
-- Outcome: `fix code`.
-- Assessment: While Save as template is open in the launcher, clicking a template row in the wide list, or taking a
-  `tl:` result, still applies that template to the form behind the panel. The panel keeps showing and saving the values
-  it captured, so the form and the panel disagree. A shortcut press in the same state is ignored. Verified: confirmed.
-  `take_search_row` (`launcher/view/search.rs:350-374`) has no save-panel check, while the shortcut path refuses with
-  the panel open (`templates/dispatch.rs:464-468`). SPEC_impl.md:9176-9183 says "A taken `tl:` row in the composer
-  search is one such batch ... While Save as template's panel is open a press changes nothing". Whether "a press" there
-  covers row picks or only shortcut presses is a reading, and SPEC.md:1363-1364 speaks only of the chord. Hand edits of
-  the form are allowed while the panel is open, and the panel saves its displayed snapshot, so nothing wrong is saved.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code — refuse the
-  row before its search and focus side effects, and at batch admission, matching SPEC_impl's "a press changes nothing".
-  Size S. A discard is defensible because nothing wrong is saved. Size gate: about 100 lines of diff (code, tests and
-  docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
-  item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-loses-hook-offer-on-tab-switch.md

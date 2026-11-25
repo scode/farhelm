@@ -1035,8 +1035,8 @@ impl Launcher {
     /// launcher says what the batch returned (its note, if any), not what it said before. A refused one changes nothing
     /// but what it says. Focus stays where it is, so a press
     /// never moves the user out of the field they are in; a control the edits remove hands focus on through the focus
-    /// coordinator, as any control that goes away does. Nothing happens while the YOLO question's host write is out,
-    /// when the launcher holds still.
+    /// coordinator, as any control that goes away does. Nothing happens while the YOLO question's host write is out or
+    /// Save as template is open. The panel saves the draft it captured when opened.
     ///
     /// While the catalog read is out the batch waits for it, behind any batch already waiting, since the template rules
     /// need the catalog (the old app held shortcut batches while its catalog loaded, too).
@@ -1046,7 +1046,7 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.yolo_in_flight(cx) {
+        if self.yolo_in_flight(cx) || self.save_panel.is_some() {
             return;
         }
         if self.catalog.is_none() && self.catalog_error.is_none() {
@@ -1091,10 +1091,10 @@ impl Launcher {
                 let kept = if unchanged { self.yolo.take() } else { None };
                 self.changed(cx);
                 self.yolo = kept;
+                self.follow_escalation(switched_agent, escalation, notice_before, cx);
                 if let Some(name) = template {
                     self.search_box.source = Some(search::SetupSource::Template(name));
                 }
-                self.follow_escalation(switched_agent, escalation, notice_before, cx);
                 // After the edit, which takes away what the launcher was saying. A banner (a switcher pick's) goes on its
                 // own after the same while as a quick launch's, counted from now, when its template has applied.
                 if matches!(note, Some(Note::Banner(_))) {

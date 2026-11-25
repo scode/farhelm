@@ -134,6 +134,7 @@ enum LauncherScene {
     RepositoryRefusal,
     StaleChoice,
     Results,
+    TemplateSaveAfterUndo,
     Restart,
     HeldHostHelp,
     ShellHelp,
@@ -224,6 +225,15 @@ pub(super) fn launcher_shell_help_setup(state: &SceneState, window: &mut Window,
     setup(state, LauncherScene::ShellHelp, window, cx);
 }
 
+/// Show the restored source while Save as template holds the recovered draft.
+pub(super) fn launcher_template_save_after_undo_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::TemplateSaveAfterUndo, window, cx);
+}
+
 /// Keep the source warning and held host visible beside the same form and command pane used by New.
 pub(super) fn launcher_replace_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Replace, window, cx);
@@ -290,7 +300,7 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
                 .to_vec(),
         );
     }
-    let mut extra = vec![launcher_templates()];
+    let mut extra = vec![launcher_templates(scene)];
     if scene == LauncherScene::CustomAgent {
         extra.push(super::custom_agent_state());
     }
@@ -310,17 +320,23 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
 }
 
 /// The empty pane shows saved rows and their real marks and shortcut bindings before a query is entered.
-fn launcher_templates() -> CollectionState {
+fn launcher_templates(scene: LauncherScene) -> CollectionState {
+    let undo = scene == LauncherScene::TemplateSaveAfterUndo;
     let names = ["Review a PR", "Bench run", "Scratch shell"];
     let fields = [
         TemplateFields {
             agent: Some(LaunchHarness::Claude),
             effort: Some(Some(LaunchEffort::High.into())),
+            permissions: undo.then_some(Some(LaunchPermission::Guarded)),
             ..Default::default()
         },
         TemplateFields {
-            agent: Some(LaunchHarness::Codex),
-            permissions: Some(Some(LaunchPermission::Yolo)),
+            agent: Some(if undo {
+                LaunchHarness::OpenCode
+            } else {
+                LaunchHarness::Codex
+            }),
+            permissions: (!undo).then_some(Some(LaunchPermission::Yolo)),
             ..Default::default()
         },
         TemplateFields {
@@ -629,6 +645,9 @@ fn answer_new_reads(
         state.after.set(Some(choose_yolo));
     } else if scene == LauncherScene::HookSetup {
         state.after.set(Some(pick_grok));
+    } else if scene == LauncherScene::TemplateSaveAfterUndo {
+        assert!(click_control(window, cx, "launcher-template-Review a PR"));
+        state.after.set(Some(escalate_template));
     } else if matches!(
         scene,
         LauncherScene::Narrow | LauncherScene::RepositoryRefusal | LauncherScene::StaleChoice
@@ -667,6 +686,70 @@ fn answer_new_reads(
             hover_launcher_help(state, "launcher-shells-Bash", window, cx);
         }
     }
+}
+
+/// Start the permission-changing fill only after the previous template named itself on the form.
+fn escalate_template(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    assert!(template_source_shown(
+        window,
+        "From a template: Review a PR"
+    ));
+    assert!(click_control(window, cx, "launcher-template-Bench run"));
+    state.after.set(Some(undo_template));
+}
+
+/// Undo is offered by the actual banner, and the switched template must have taken over the source first.
+fn undo_template(_: &Entity<SessionList>, state: &SceneState, window: &mut Window, cx: &mut App) {
+    assert!(template_source_shown(window, "From a template: Bench run"));
+    assert!(click_control(window, cx, "launcher-escalation-undo"));
+    state.after.set(Some(save_restored_template));
+}
+
+/// Open Save as template on the restored form, then try to take a different template behind it.
+fn save_restored_template(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    assert!(template_source_shown(
+        window,
+        "From a template: Review a PR"
+    ));
+    assert!(click_control(window, cx, "launcher-save-template"));
+    state.after.set(Some(pick_behind_template_save));
+}
+
+fn pick_behind_template_save(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    assert!(window.driver_nodes().iter().any(|node| {
+        node.element_id.as_deref() == Some("save-template-name") && !node.visible_bounds.is_empty()
+    }));
+    assert!(click_control(window, cx, "launcher-template-Bench run"));
+    state.after.set(Some(|_, _, window, _| {
+        assert!(template_source_shown(
+            window,
+            "From a template: Review a PR"
+        ));
+    }));
+}
+
+/// Check the rendered source itself so a capture of the form on the wrong template cannot pass.
+fn template_source_shown(window: &Window, label: &str) -> bool {
+    window.driver_nodes().iter().any(|node| {
+        node.element_id.as_deref() == Some("launcher-provenance-label")
+            && node.label.as_deref() == Some(label)
+            && !node.visible_bounds.is_empty()
+    })
 }
 
 /// Dispatch the hover before arming the next draw. Its deferred update must replace the warming tooltip first.

@@ -9194,10 +9194,10 @@ template sets one. A refusal changes nothing and is shown as its own alert below
 own refusal of a held field, where the old launcher said why a template did not apply, until the next press of Launch or
 edit; a missing mark or an unbound key refuses there without opening Templates. Focus stays where it is, and a control
 the edits remove hands focus on through the focus coordinator, not yet to the search. While the YOLO question's host
-write is out a press changes nothing. While Save as template's panel is open a press changes nothing, presses still
-waiting for the catalog read are dropped, the sequence prefix arms nothing, and the launcher's text fields keep the
-prefix as every other field does; a launch in flight hides the launcher, so a press then lands on the page and is taken
-without effect.
+write is out a press changes nothing. While Save as template's panel is open a shortcut or template row pick changes
+nothing, presses still waiting for the catalog read are dropped, the sequence prefix arms nothing, and the launcher's
+text fields keep the prefix as every other field does; a launch in flight hides the launcher, so a press then lands on
+the page and is taken without effect.
 
 In the GPUI app a sequence is one model with no GPUI types (`templates/sequence.rs`): the ordered references, the
 unfinished word and the sequence's own copy of the ⚡ mark and number keys, taken from the store when the prefix is
@@ -9363,11 +9363,12 @@ dispatch. A host history choice carries the recorded installation from the frame
 replacement installation with the same rows cannot satisfy the earlier pick. A model also offered by the helm's history
 of launches into new environments does not depend on the host's installation. The stale-choice refusal clears the
 highlight and closes results with the query intact so the warning can show below the field. Tab, Escape and outside
-clicks clear the highlight or close results before the parent dialog handles dismissal. Held-field reasons come from the
-same rules as application, including the template's no-op treatment of equal held values. Narrow windows use the
-existing popover and field anchor. The form remembers the last applied template with edits or the setup that filled it
-until Reset. The footer retains its own bounded notices and names the launch target through the main action's accessible
-name.
+clicks clear the highlight or close results before the parent dialog handles dismissal. After Escape clears the empty
+pane's highlight, repeats of that press leave the form open. Held-field reasons come from the same rules as application,
+including the template's no-op treatment of equal held values. Narrow windows use the existing popover and field anchor.
+The form remembers the last applied template with edits or the setup that filled it across hand edits. Reset clears the
+mark and permission Undo restores the earlier one. The footer retains its own bounded notices and names the launch
+target through the main action's accessible name.
 
 The launcher's initial prompt is a separate optional field in its draft. The agent tab's template snapshot retains it
 when the agent is unset or supported; a request requires a selected supported agent. Recent setups leave the draft alone
