@@ -1,9 +1,10 @@
 //! Automatic updates reuse manual planning and execution, including every refusal.
 //!
 //! The fleet revision is the wake source: connection transitions, provisioning
-//! completion and preference writes all publish there. There is no retry timer.
+//! completion and preference writes all publish there. A shared sign-in's handoff expiry also
+//! wakes this scan so an otherwise idle host can become eligible again.
 
-use super::super::setup_sign_in::{AutomaticSignIn, Pending, SetupSettlement};
+use super::super::setup_sign_in::{AutomaticSignIn, Pending, SetupSettlement, SignInIntent};
 use super::{HostPlanResponse, ProvisionRequest, ProvisioningRequestError, ProvisioningService};
 use crate::manager::{HostSnapshot, HostState};
 use crate::store::{HostId, HostKind};
@@ -111,7 +112,7 @@ impl AttemptState {
             Self::Attempted(_) => true,
             Self::PendingSignIn { incarnation, .. } if *incarnation != host.incarnation => false,
             Self::PendingSignIn { work, .. } => match work.sign_in.outcome() {
-                Some(SetupSettlement::Released) => false,
+                Some(SetupSettlement::Released | SetupSettlement::ReadyForManualAction) => false,
                 Some(SetupSettlement::Finished(SshSignInOutcome::Failed { reason })) => {
                     *self = Self::sign_in_failed(host, &reason);
                     true
@@ -135,7 +136,7 @@ impl AttemptState {
                         }
                     }
                 }
-                None => eligible,
+                None => eligible || work.sign_in.retain_while_ineligible(),
             },
         }
     }
@@ -206,7 +207,7 @@ pub(super) async fn scan(
                     && eligible(
                         host.kind,
                         &host.state,
-                        memory.busy.contains(id),
+                        memory.busy.contains(id) || memory.manual_ssh_handoff_active(*id),
                         &helm_build,
                     ),
             )
@@ -224,7 +225,7 @@ pub(super) async fn scan(
         let (busy, failed) = {
             let memory = service.memory.lock().await;
             (
-                memory.busy.contains(&host.id),
+                memory.busy.contains(&host.id) || memory.manual_ssh_handoff_active(host.id),
                 memory
                     .automatic_runs
                     .get(&host.id)
@@ -242,7 +243,10 @@ pub(super) async fn scan(
             _ => {}
         }
         attempts.insert(host.id, AttemptState::Attempted(host.incarnation));
-        let plan = match service.plan_update_guarded(host.id, true).await {
+        let plan = match service
+            .plan_update_guarded(host.id, Some(SignInIntent::AutomaticUpdate))
+            .await
+        {
             Err(error) if error.is::<Pending>() => {
                 match begin_sign_in(service, &host, error.downcast::<Pending>()?, &helm_build).await
                 {
@@ -293,7 +297,7 @@ async fn still_eligible(
             && eligible(
                 host.kind,
                 &current.state,
-                memory.busy.contains(&host.id),
+                memory.busy.contains(&host.id) || memory.manual_ssh_handoff_active(host.id),
                 helm_build,
             )
     }))
@@ -373,8 +377,8 @@ async fn admit(
     }
 }
 
-/// A manual busy claim consumes no attempt. Its completion wakes the scan. For any other refusal, preserve the
-/// connection observed when the failure became known, which may differ from the one that began the probe.
+/// A busy host or an obsolete route consumes no attempt. The run's completion or replacement
+/// connection wakes the scan. Other refusals belong to the connection observed when the failure became known.
 fn refused(
     service: &ProvisioningService,
     host: &HostSnapshot,
@@ -382,7 +386,7 @@ fn refused(
 ) -> Option<u64> {
     if matches!(
         error.downcast_ref::<ProvisioningRequestError>(),
-        Some(ProvisioningRequestError::Busy(_))
+        Some(ProvisioningRequestError::Busy(_) | ProvisioningRequestError::SshRouteChanged)
     ) {
         None
     } else {
@@ -398,6 +402,66 @@ fn refused(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Even if the new connection is already update-eligible when a queued reader returns,
+    /// the obsolete route's refusal cannot spend the replacement's opportunity.
+    #[farhelm_testtrace::test]
+    async fn an_obsolete_route_refusal_leaves_the_replacement_connection_eligible() {
+        use crate::provisioning::tests::{FakeBackend, service};
+        use crate::rest_harness::{FleetBuilder, HostScript};
+
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "toggle.example",
+                HostScript {
+                    build: "1.0.0".into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.state._automatic_updates.stop();
+        harness.await_refreshed(host).await;
+        let root = tempfile::tempdir().unwrap();
+        let service = service(
+            &harness,
+            FakeBackend::absent(root.path().into()),
+            root.path(),
+        );
+        let previous = harness
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|snapshot| snapshot.id == host)
+            .unwrap();
+        assert!(connection_needs_update(&previous.state, "2.0.0"));
+        let row = service.host_row(host).await.unwrap();
+        let writer = harness.manager.ssh_route_lock(host).write_owned().await;
+        let queued = service.lock_ssh_plan(Some(&row));
+        tokio::pin!(queued);
+        assert!(futures_util::poll!(&mut queued).is_pending());
+
+        assert!(harness.store.set_ssh_tailscale(&row, true).await.unwrap());
+        harness.manager.sync_registry().await.unwrap();
+        harness
+            .await_refreshed_after(host, previous.incarnation)
+            .await;
+        assert!(connection_needs_update(
+            &harness.manager.status(host).unwrap().state,
+            "2.0.0"
+        ));
+        drop(writer);
+
+        let error = queued
+            .await
+            .expect_err("the queued operation must recheck its stale route");
+        assert!(matches!(
+            error.downcast_ref::<ProvisioningRequestError>(),
+            Some(ProvisioningRequestError::SshRouteChanged)
+        ));
+        assert_eq!(refused(&service, &previous, &error), None);
+    }
 
     /// Automatic targets must agree with the update badge, including release
     /// ordering, protocol urgency, busy exclusion and the reserved local row.

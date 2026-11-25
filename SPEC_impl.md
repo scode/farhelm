@@ -2800,6 +2800,14 @@ auto-only checks under the admission lock, even if the fleet watch coalesces a r
 interest when a host loses eligibility or it stops. A manual caller that already joined keeps its check. A manual reply
 still being prepared can start a fresh check if the automatic one was released.
 
+An explicit Update or Uninstall that finds a pending automatic check reserves first use of a successful answer, even if
+Ready arrives before the explicit reply. Its question gains manual ownership when the pending reply is published. The
+automatic continuation yields, and a fresh attempt waits for the explicit run to settle or for 30 seconds without a
+confirmation. The expiry wakes the ordinary fleet scan. A failed shared check still consumes the automatic attempt for
+that connection. A Tailscale mode edit queues for the host's route write guard and retires its automatic-only checks,
+while a question with a manual owner remains available to answer. The editor returns a busy reply if the route guard is
+still held at the end of the host reply bound.
+
 A confirmed manual run already has progress and performs the same sign-in before revalidating or mutating its host, even
 when the setup master used during planning has expired. Automatic Update revalidates in batch mode. An expired master
 can fail the automatic run without opening a second question.

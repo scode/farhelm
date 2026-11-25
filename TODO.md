@@ -218,15 +218,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   spans the Wayland receive code and the clipboard API used by Kit and the terminal. Cover keyboard and Edit menu paste,
   mixed offers and a reply that arrives after the target changes.
 
-- **Give explicit host actions priority over automatic SSH sign-in.** A manual Update or Uninstall can join an automatic
-  update's pending sign-in, and answering can admit the automatic run before the manual request retries. Turning
-  Tailscale on or off can also hit a route lock held by an unanswered automatic check. Keep an attached manual request's
-  question and successful answer, but fence the automatic continuation through the manual retry. A route edit must
-  retire an automatic-only check and observe release of its route guard. Define how automatic retries become eligible
-  again and preserve a question that a manual action owns. Cover both shared authentication and route edits in tests
-  with automatic updates still on. Cancelling the prompt alone cannot arbitrate the admission race after the answer.
-  Plan: `plans/queue/host-provisioning-action-fixes.md`.
-
 - **Show container recipe admission failures before recording build ownership.** An explicit Rebuild can answer Accepted
   before a fresh Podman check fails. The existing recipe place record keeps that failure visible after the job ends.
   Suppressing the record alone loses the reason if the old host check still says Ready, for example after a refresh
