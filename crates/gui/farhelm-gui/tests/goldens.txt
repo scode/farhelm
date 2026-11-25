@@ -264,8 +264,8 @@ linux/quick-switcher-query--dark.png c9ded0dddb5c8d66c97919314ae8a6b66aeea11d
 linux/quick-switcher-query--light.png 78bbdbf455f586cfef5d9bf949d2de93d9d447ff
 linux/quick-switcher-sessions--dark.png cb9dfd1de99b484bd82ec51639bfc1c40a982b16
 linux/quick-switcher-sessions--light.png 72981808a2238974d32ae71eee32d443efab8704
-linux/quick-switcher-templates--dark.png d51dfd767a9578bd46902b489226b9d940efa466
-linux/quick-switcher-templates--light.png 05d0cd8c1b4dcaf63056ade446a8820d6435a68f
+linux/quick-switcher-templates--dark.png 00042a4142e162134d55754bc608f0633e05a2bc
+linux/quick-switcher-templates--light.png f2861c6e212856eb98a72def1a15105d4ea30b74
 linux/radio-group--dark.png 3adb6fb7f2e805c3ce864c425514cd4393733d07
 linux/radio-group--light.png cc098c74f133370656d43591659defac9665f8b5
 linux/radio-group-variants--dark.png 3d9306e39a6f212cbb23034b363cc691245988d5
@@ -466,8 +466,8 @@ linux/template-generic-agent-refusal--dark.png 8a3dd4d503b36a4c858c0eaccafe25c57
 linux/template-generic-agent-refusal--light.png bbeedf45f629dd5d0988d0492f0e1f8901f1ce6b
 linux/template-invalid-custom-model--dark.png 1591df42765c98c0ad787f5dca950373082b5858
 linux/template-invalid-custom-model--light.png 0c4faa036430c5d3140931d239eb8fed6c94675b
-linux/template-launcher--dark.png 9fe50d686462e46b735f283510a207e34bbae455
-linux/template-launcher--light.png 12c26af4371598b0f425ab27c55030bad2332822
+linux/template-launcher--dark.png cce574abf0f78540cf80b3ca84a43f161fce7bb0
+linux/template-launcher--light.png 0baefebc238665909523d55c963f41c3daf49593
 linux/template-leave-question--dark.png 6a012d242788d9f8c8db3d9a76196498e0c9b62d
 linux/template-leave-question--light.png 95f9f2643b79c43f78f808b63e0d32a6f0bb916c
 linux/template-literal-effort--dark.png ef805c6d80522433d4c429f2cef41d7313c86ea3

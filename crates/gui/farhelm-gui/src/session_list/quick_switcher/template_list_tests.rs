@@ -159,13 +159,20 @@ fn retype(cx: &mut VisualTestContext, text: &str) {
     settle(cx);
 }
 
-/// The key chips drawn in the template row named `name`, in order: of the texts in the row, the ones spelled as this
-/// platform spells the ⚡ chord or a number key's chord (the name and summary never are, in this fleet).
-fn chips(cx: &mut VisualTestContext, name: &str) -> Vec<String> {
-    let chord_prefix = number_key_name("");
+/// Painted words of one row, so the launch cues cannot be mistaken for the header hints.
+fn row_texts(cx: &mut VisualTestContext, name: &str) -> Vec<String> {
     texts_within(&frame(cx), &format!("{TEMPLATE_ROW_ID}{name}"))
         .into_iter()
         .map(|text| text.text.to_string())
+        .collect()
+}
+
+/// The numeric shortcut chips drawn in the row. Including the ⚡ chord as a possible match catches the old
+/// full chord returning beside today's bolt.
+fn chips(cx: &mut VisualTestContext, name: &str) -> Vec<String> {
+    let chord_prefix = number_key_name("");
+    row_texts(cx, name)
+        .into_iter()
         .filter(|text| text == QUICK_LAUNCH_SHORTCUT_NAME || text.starts_with(&chord_prefix))
         .collect()
 }
@@ -190,9 +197,9 @@ fn launched(main: &mut Main<'_>) -> String {
 /// number shortcut when assigned". A list that mixed in sessions or the New row would let Enter do something other
 /// than start a template. Specified: from a's live, focused terminal the chord opens the dialog named "Template
 /// launcher" with focus in its field (named "Search templates", showing "Start a template") and sends no session read;
-/// it lists redeploy, deploy and partial under "Templates" in the helm's order, redeploy selected, each helped "Start a
-/// session from this template", with no session, New or Quick launch row; deploy's row has the ⚡ chord and number key
-/// 1's chord as chips, partial's number key 8's, redeploy's none. The empty field shows how to quick launch or use
+/// it lists redeploy, deploy and partial under "Templates" in the helm's order, redeploy selected, with no session,
+/// New or Quick launch row. Help describes either starting a session or opening New. Deploy has the ⚡ mark and number key
+/// 1, partial's number key 8 and an "opens New" tag, redeploy's neither. The empty field shows how to quick launch or use
 /// number keys, and the footer names Enter's action as "start".
 #[gpui::test]
 fn the_chord_opens_the_template_list_from_a_terminal(cx: &mut TestAppContext) {
@@ -248,15 +255,31 @@ fn the_chord_opens_the_template_list_from_a_terminal(cx: &mut TestAppContext) {
         }),
         "no session, New or Quick launch row"
     );
-    assert_eq!(
-        chips(main.cx, "deploy"),
-        [QUICK_LAUNCH_SHORTCUT_NAME.to_owned(), number_key_name("1")]
-    );
+    assert_eq!(chips(main.cx, "deploy"), [number_key_name("1")]);
     assert_eq!(chips(main.cx, "partial"), [number_key_name("8")]);
     assert_eq!(chips(main.cx, "redeploy"), Vec::<String>::new());
     assert_eq!(
+        node(&nodes, "quick-switcher-bolt-deploy").and_then(|mark| mark.label.as_deref()),
+        Some("Quick launch")
+    );
+    assert!(node(&nodes, "quick-switcher-bolt-partial").is_none());
+    assert!(node(&nodes, "quick-switcher-bolt-redeploy").is_none());
+    for (name, partial) in [("partial", true), ("deploy", false), ("redeploy", false)] {
+        assert_eq!(
+            row_texts(main.cx, name)
+                .iter()
+                .any(|text| text == "opens New"),
+            partial,
+            "the preparation cue describes {name}'s template"
+        );
+    }
+    assert_eq!(
         hover_help(main.cx, "quick-switcher-template-deploy").as_deref(),
         Some(TEMPLATE_LIST_ROW_HELP)
+    );
+    assert_eq!(
+        hover_help(main.cx, "quick-switcher-template-partial").as_deref(),
+        Some(super::TEMPLATE_ROW_HELP)
     );
 }
 
@@ -573,11 +596,10 @@ fn a_pick_uses_the_template_as_the_store_holds_it_now(cx: &mut TestAppContext) {
     );
 }
 
-/// The ⚡ and number-key chips are the template list's alone: the old switcher's `tl:` section drew a template's name and
-/// summary only, and its rows open New rather than starting anything. Specified: with ⚡ and number keys bound, Cmd+K
-/// and `tl:` draw deploy's and partial's rows with no chip, and deploy's row keeps the section's own hover help.
+/// A `tl:` pick always opens New and never invokes a shortcut, so the list omits Cmd+J's launch cues for both
+/// complete and partial templates. Deploy's row keeps the section's own hover help.
 #[gpui::test]
-fn the_switchers_tl_rows_draw_no_key_chips(cx: &mut TestAppContext) {
+fn the_switchers_tl_rows_draw_no_launch_cues(cx: &mut TestAppContext) {
     let mut main = open_main(cx, fleet());
     main.session_reads();
     keys(main.cx, crate::actions::QUICK_SWITCHER_CHORD);
@@ -586,6 +608,12 @@ fn the_switchers_tl_rows_draw_no_key_chips(cx: &mut TestAppContext) {
     assert_eq!(drawn_templates(main.cx).0.len(), 3, "the premise: the rows");
     assert_eq!(chips(main.cx, "deploy"), Vec::<String>::new());
     assert_eq!(chips(main.cx, "partial"), Vec::<String>::new());
+    assert!(node(&frame(main.cx), "quick-switcher-bolt-deploy").is_none());
+    assert!(
+        !row_texts(main.cx, "partial")
+            .iter()
+            .any(|text| text == "opens New")
+    );
     assert_eq!(
         hover_help(main.cx, "quick-switcher-template-deploy").as_deref(),
         Some(super::TEMPLATE_ROW_HELP)

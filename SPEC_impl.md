@@ -9260,23 +9260,25 @@ Cmd+J list call; the launcher's search draws its rows (`launcher::search` filter
 `tl:`, in a Templates group between Harnesses and Models, each "Template: " and the name), and the sidebar's quick
 switcher draws the other two, the Cmd+J list being the switcher in a templates-only mode
 (`session_list::quick_switcher::Mode::Templates`) rather than a dialog of its own. It matches a lowercased substring of
-the name, in the helm's order, each row with its summary, ⚡ and number key (the caller decides which to draw: the old
-switcher's section drew name and summary, Cmd+J the shortcuts too), read from the store when the list draws; the caller
-strips the `tl:` label, which is the trimmed query up to its first colon, `tl` in any case. A pick from the switcher's
-section (`dispatch::pick_from_switcher`) opens New on its prefill at once and applies the template to it as a press in
-the open launcher does (next paragraph), so it waits for New's catalog read; it never launches, and a press of Launch in
-that frame or two starts New's plain prefill and drops the pick, as it drops any batch still waiting. A template that
-cannot launch on its own is followed by the needs-more-choices banner once it applies. Its refusals are the old switcher
-pick's words, shown in New without "Not launched.", since nothing was launching. The Quick launch row is the ⚡ chord's
-dispatch with the switcher origin, and a Cmd+J pick is the dispatch of the picked name with the list origin
-(`rows::launch_from_list`), resolved afresh like any name, so a template deleted between a frame and the press opens New
-with "Template … is no longer available". All three act only once the switcher has closed, since the page path refuses
-while a dialog holds the keyboard, and do nothing while the launcher is busy. A quick launch that starts from the page
-or shows New there also returns the sidebar from its Hosts panel (`session_list::show_sessions`), as the old one did
-through the list's New. The Cmd+J list keeps its choice as a template's name, so a pushed change never hands Enter to
-another template, and it does not open while the launcher's slot holds a launcher out of sight (a quick launch being
-prepared, a launch waiting for its reply, a refused launch behind its notice), as the old key listener's "preparing"
-context refused, nor during a host change in flight, which is new: the old list opened then and refused only the pick.
+the name, in the helm's order. The rows carry the mark and summary from the current store. Cmd+J also draws the ⚡,
+number key and a tag when `stacked_quick_launch_eligible` determines that the saved fields need New to complete them.
+This is the same synchronous rule as dispatch uses before it starts preparation. A later refusal during preparation can
+still send an eligible template to New. The caller strips the `tl:` label, which is the trimmed query up to its first
+colon, `tl` in any case. A pick from the switcher's section (`dispatch::pick_from_switcher`) opens New on its prefill at
+once and applies the template to it as a press in the open launcher does (next paragraph), so it waits for New's catalog
+read; it never launches, and a press of Launch in that frame or two starts New's plain prefill and drops the pick, as it
+drops any batch still waiting. A template that cannot launch on its own is followed by the needs-more-choices banner
+once it applies. Its refusals are the old switcher pick's words, shown in New without "Not launched.", since nothing was
+launching. The Quick launch row is the ⚡ chord's dispatch with the switcher origin, and a Cmd+J pick is the dispatch of
+the picked name with the list origin (`rows::launch_from_list`), resolved afresh like any name, so a template deleted
+between a frame and the press opens New with "Template … is no longer available". All three act only once the switcher
+has closed, since the page path refuses while a dialog holds the keyboard, and do nothing while the launcher is busy. A
+quick launch that starts from the page or shows New there also returns the sidebar from its Hosts panel
+(`session_list::show_sessions`), as the old one did through the list's New. The Cmd+J list keeps its choice as a
+template's name, so a pushed change never hands Enter to another template, and it does not open while the launcher's
+slot holds a launcher out of sight (a quick launch being prepared, a launch waiting for its reply, a refused launch
+behind its notice), as the old key listener's "preparing" context refused, nor during a host change in flight, which is
+new: the old list opened then and refused only the pick.
 
 While the session launcher is the dialog holding the keyboard (`launcher::entry::open_launcher`: a weak slot the
 launcher sets each time it is shown, checked against the layer stack's topmost layer that takes focus, never a downcast

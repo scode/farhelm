@@ -4065,23 +4065,26 @@ sessions in arrow-key order and is selected when no session matches, except whil
 when arrow keys cannot reach it. Picking it opens New with that name and the default launch target and directory
 (Creation), plus remembered permission defaults. The empty field's hints include `tl:`. With a leading `tl:`
 (case-insensitive), sessions and the New row are replaced by matching templates, using the session launcher's own
-template search; `tl:` alone lists every template. Picking one opens New with its edits applied, without using the query
-as the session name. New shows a cancellable loading state until the template inputs are ready, before allowing draft
-edits. Neither name nor template pick launches a session: Launch remains the user's action. With no query, a separate
-final "Quick launch: <template>" row uses the direct quick-launch path, or opens Templates to mark one; the first recent
-session stays initially selected. After a failed session read, New and template search remain usable.
+template search; `tl:` alone lists every template. Each row shows the template's mark, name and summary. Picking one
+opens New with its edits applied, without using the query as the session name. New shows a cancellable loading state
+until the template inputs are ready, before allowing draft edits. Neither name nor template pick launches a session:
+Launch remains the user's action. With no query, a separate final "Quick launch: <template>" row uses the direct
+quick-launch path, or opens Templates to mark one; the first recent session stays initially selected. After a failed
+session read, New and template search remain usable.
 
 Cmd+J on macOS, Ctrl+Shift+J on Linux, opens a template-only list when no dialog is open. It follows the quick
-switcher's focus, Escape, loading and modal rules. Typing filters template names as `tl:` does, without a prefix. Rows
-show the template name, summary and its ⚡ or number shortcut when assigned. Enter starts the highlighted template
-through the fresh quick-launch path; clicking a row does the same. A name exactly equal to the trimmed query
-(case-sensitively) is highlighted over an earlier substring match, and Enter starts it; arrowing to another row changes
-that choice. With no match and no template already chosen, Enter does nothing; a chosen template deleted while the list
-is open gives the missing-name error below (matching the old app). A partial template opens New with its choices
-applied. A pick uses the template currently holding that name, including a template edited or recreated since the list
-opened; a name missing from the current catalog shows a preparation error in New. The chord never reaches the terminal's
-program and does nothing while any modal is open, including New, Clone, Replace with and hidden quick-launch
-preparation, or before preferences finish loading.
+switcher's focus, Escape, loading and modal rules. Its empty field shows the quick-launch and number shortcuts. Typing
+filters template names as `tl:` does, without a prefix. The rows show the same marks, names and summaries, with a bolt
+for the quick-launch template and a key chip for any assigned number shortcut. An "opens New" tag marks a template whose
+saved choices are incomplete. A template can still need New when current launch inputs cannot be resolved. Enter starts
+the highlighted template through the fresh quick-launch path. Clicking a row does the same. A name exactly equal to the
+trimmed query (case-sensitively) is highlighted over an earlier substring match, and Enter starts it; arrowing to
+another row changes that choice. With no match and no template already chosen, Enter does nothing; a chosen template
+deleted while the list is open gives the missing-name error below (matching the old app). A partial template opens New
+with its choices applied. A pick uses the template currently holding that name, including a template edited or recreated
+since the list opened; a name missing from the current catalog shows a preparation error in New. The chord never reaches
+the terminal's program and does nothing while any modal is open, including New, Clone, Replace with and hidden
+quick-launch preparation, or before preferences finish loading.
 
 Cmd+/ on macOS, Ctrl+Shift+/ on Linux, opens **Keyboard shortcuts**, including from a focused terminal. Matching uses
 the physical Slash key, with no extra modifiers; repeat and composition do not open it. The chord never reaches the

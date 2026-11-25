@@ -60,6 +60,11 @@ const fn rgba_token(value: u32) -> Token {
 /// Fully transparent: the edge of a button tier that has none, kept so every tier is the same size.
 pub const TRANSPARENT: Token = rgba_token(0);
 
+/// Translucent white keeps the template preparation tag distinct on either appearance's accent selection.
+pub(crate) const SELECTED_TEMPLATE_TAG_BORDER: Token = rgba_token(0xffffff4d);
+/// A quieter wash inside the selected tag, below the contrast of its label and outline.
+pub(crate) const SELECTED_TEMPLATE_TAG_GROUND: Token = rgba_token(0xffffff1f);
+
 /// The recording cues keep the sample's colors in either app appearance.
 #[cfg(feature = "agent")]
 pub(crate) mod video {
