@@ -64,6 +64,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Bind the brick test's reopen samples to an app relaunch.** The bonus checkpoint currently checks that the remote
+  process and its counter survived between samples. The samples can come from the same app lifetime. Require this
+  attempt's before sample, a witnessed quit and fresh app identity, then the after sample. Carry that ordering through
+  guest receipt validation and host import. The counter and version checks alone cannot establish the transition.
+
+- **Keep the brick test's installer pair retryable after an unavailable P0 check.** `record()` settles derived P1 and P2
+  skips from a recoverable P0 observation. `retry-unavailable` then reads those skips as later executed checks. Keep
+  later observations and independent skips, and let the supported recovery discard only skips derived from the retried
+  checkpoint. Record why the eligible attempt can be repeated and preserve its evidence. Cover older saved manifests as
+  well as new ones. A change to the retry predicate alone leaves derived skips permanently recorded.
+
 - **Publish captured agent screens as recoverable pairs.** `scripts/capture-agent-screens.py` copies each scrubbed
   screen and title from staging into a version directory. An I/O failure or interruption can leave those two files from
   different captures and remove the staged replacement. Preserve the previous matched pair, retain the validated

@@ -199,7 +199,10 @@ database reads as no session ids rather than failing.
         operations = self.operations()
         with self.assertRaisesRegex(RuntimeError, 'required first'):
             operations.perform('remote_host_after')
-        with mock.patch.object(operations, 'ssh', return_value={'stdout': '{}'}) as ssh:
+        before = {'service': {'ActiveState': 'active', 'SubState': 'running', 'MainPID': '71'},
+                  'lib_present': True, 'unit_present': True, 'binary_sha256': 'binary', 'unit_sha256': 'unit',
+                  'data_present': True, 'database_present': True, 'farhelm_pids': [71], 'session_ids': ['session-a']}
+        with mock.patch.object(operations, 'ssh', return_value={'stdout': json.dumps(before)}) as ssh:
             operations.dispatch('remote_host_before')
             operations.dispatch('remote_host_after')
             self.assertIn('def remote_host_snapshot', ssh.call_args.args[0])
@@ -323,8 +326,9 @@ imported as fail; one whose starting premise failed stays a harness error.
         result = claim(before)
         self.assertEqual(result['status'], 'fail')
         self.assertIn('lost the retained data', result['detail'])
-        with self.assertRaisesRegex(TesterError, 'effect premise failed'):
-            claim(dict(before, farhelm_pids=[]))
+        for invalid in ({'farhelm_pids': []}, {'session_ids': []}, {'session_ids': None}):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(TesterError, 'effect premise failed'):
+                claim(dict(before, **invalid))
 
     def test_installer_relaunch_pass_needs_the_owned_restart_to_a_new_app(self):
         """Installed candidate files beside the old, still-running app must not pass as a relaunch.
@@ -365,7 +369,7 @@ pair's remaining P0 checks. A pass still needs its receipts.
 """
         self.value.update(check_id='local-old-session', pass_id='p0-installer-upgrade')
         self.assertFalse((self.output / 'managed-operations.json').exists())
-        for status in ('could-not-run', 'fail'):
+        for status in ('could-not-run', 'fail', 'permission-block'):
             with self.subTest(status=status):
                 result = managed_result(self.value, self.output, {'status': status, 'detail': 'UI-only observation'})
                 self.assertEqual((result['status'], result['evidence']), (status, []))

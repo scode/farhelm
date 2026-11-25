@@ -439,9 +439,6 @@ consequences.
 - [`capture-stop-retry-can-lose-starting-host.md`](capture-stop-retry-can-lose-starting-host.md) — Retrying cleanup
   after an interrupted capture start can remove the recovery directory before the host finishes starting.
 
-- [`release-verifier-does-not-bind-relaunch-samples.md`](release-verifier-does-not-bind-relaunch-samples.md) — The
-  release verifier can accept continuity samples without establishing that they span the app relaunch.
-
 - [`agent-settings-search-omits-agent-name.md`](agent-settings-search-omits-agent-name.md) — Settings search can give
   different agents' pages or hook controls the same accessible name.
 
@@ -638,10 +635,6 @@ consequences.
 - [`trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md`](trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md)
   — The desktop can offer a sandbox launch for a checkout name that cannot produce a valid directory. The helm can
   create the environment and attempt cleanup before telling the user to fix the name.
-
-- [`trailing-indented-blank-lines-defeat-release-note-pr-coverage-checks.md`](trailing-indented-blank-lines-defeat-release-note-pr-coverage-checks.md)
-  — A separator containing only spaces can make the gate overlook a highlighted PR missing from All changes, or reject a
-  list that already cites it.
 
 - [`trailing-empty-highlights-release-path-lacks-consumer-test.md`](trailing-empty-highlights-release-path-lacks-consumer-test.md)
   — The release checker accepts a version with every entry in All changes. The generator, desktop reader and dialog lack
@@ -1026,67 +1019,10 @@ consequences.
   turned on (the default setting), allowing a race between the automatic update resuming and the user's manual Update or
   Uninstall to go undetected.
 
-- [`trailing-brick-test-cleanup-skips-p1-retry-and-preflight-evidence.md`](trailing-brick-test-cleanup-skips-p1-retry-and-preflight-evidence.md)
-  — During a release brick test, if a retained provider-retry archive for a P1 check (such as old-session survival or
-  remote-host uninstall) goes missing or is modified on disk, the P1 verdict degrades to could not run, yet ordinary
-  pair cleanup still deletes the live test VMs instead of keeping them so the operator can recover or inspect the
-  evidence.
-
-- [`trailing-brick-test-dead-end-misses-deleted-p0-automation-failure.md`](trailing-brick-test-dead-end-misses-deleted-p0-automation-failure.md)
-  — If an earlier P0 test pair finishes recording its last check and then hits an interruption or reconciliation failure
-  before exiting, releasing that pair and continuing to the installer pair causes the installer pair to fail with a
-  harness error at P2 instead of skipping P2 cleanly.
-
 - [`trailing-brick-test-exiting-stdio-proxy-mid-scan-fails-remove.md`](trailing-brick-test-exiting-stdio-proxy-mid-scan-fails-remove.md)
   — During the brick test's Linux remote Remove check, if the closing SSH stdio proxy exits between two `/proc` reads
   while taking the post-Remove snapshot, the probe keeps its PID in `farhelm_pids` without recognizing it as a stdio
   proxy.
-
-- [`trailing-brick-test-fixture-probe-forwards-sys-executable.md`](trailing-brick-test-fixture-probe-forwards-sys-executable.md)
-  — When the release brick test uses a separate macOS base image for the headless remote Mac peer, the clean-fixture
-  probe can fail to start over SSH even when the peer has Python installed at the documented path, because the GUI Mac
-  sends its own resolved Python binary path instead of the configured path.
-
-- [`trailing-brick-test-linux-remote-start-accepts-empty-sessions.md`](trailing-brick-test-linux-remote-start-accepts-empty-sessions.md)
-  — The release brick test's Linux remote host Remove and Uninstall checks accept a starting remote database that
-  contains zero sessions, so an empty or freshly recreated sessions table after Uninstall can pass the retained-data
-  check instead of failing the starting premise.
-
-- [`trailing-brick-test-machine-profile-conflicting-mac-address.md`](trailing-brick-test-machine-profile-conflicting-mac-address.md)
-  — A brick-test machine profile can name the same macOS base VM for both the GUI Mac and the headless remote Mac while
-  giving two conflicting hardware MAC addresses; profile loading accepts this contradiction, so the run only fails hours
-  later after all P0 pairs finish and the remote Mac pass starts.
-
-- [`trailing-brick-test-old-sessions-nonexistent-unavailable-status.md`](trailing-brick-test-old-sessions-nonexistent-unavailable-status.md)
-  — The brick-test prompt for the `old-sessions` checkpoint tells the guest tester that if `terminal_hosts` or
-  `remote_terminal_hosts` returns `status unavailable`, it should report `could-not-run` with its detail.
-
-- [`trailing-brick-test-old-sessions-stdout-prints-fail.md`](trailing-brick-test-old-sessions-stdout-prints-fail.md) —
-  During a release brick test, if the guest tester reports `fail` on the previous-release `old-sessions` check, the
-  coordinator saves it as `could-not-run` in workflow state but prints `"status": "fail"` in its live progress line,
-  which can mislead an operator or supervising agent reporting live progress while the pair is still running.
-
-- [`trailing-brick-test-p1-automation-failure-drops-unverified-fail.md`](trailing-brick-test-p1-automation-failure-drops-unverified-fail.md)
-  — During a release brick test, if a P1 check hits a guest automation failure after reporting a product failure and the
-  host import then fails (for example because the guest event log exceeded the 96 MiB export limit and was omitted from
-  the archive), the coordinator discards the unverified product-failure claim instead of flagging the run as
-  promotion_blocked_pending_review.
-
-- [`trailing-brick-test-p1-permission-block-swallowed.md`](trailing-brick-test-p1-permission-block-swallowed.md) — In
-  the release brick test, if the guest tester hits an OS/CUA/authentication permission prompt during UI inspection
-  before running any fixed command operation, the executor turns `permission-block` into an `automation-failure`.
-
-- [`trailing-brick-test-record-settle-breaks-retry-unavailable.md`](trailing-brick-test-record-settle-breaks-retry-unavailable.md)
-  — During a release brick test run in full, stop-after-P1, or stop-after-P2 scope, the documented
-  `brick_test.py retry-unavailable` recovery command always refuses to retry any P0 checkpoint on the installer-upgrade
-  pair (`p0-installer-upgrade`), forcing the operator to discard the pair and start over after repairing a fixture
-  prerequisite.
-
-- [`trailing-brick-test-require-no-failure-allows-rerun-on-failed-p0.md`](trailing-brick-test-require-no-failure-allows-rerun-on-failed-p0.md)
-  — After a P0 check fails or records `could-not-run` on a live P0 test pair, running `brick_test.py test` again on that
-  pair is no longer refused; if the failure was on the last in-scope check it exits cleanly as `complete` and wipes the
-  failed attempt metadata needed for `retry-unavailable`, and if earlier it stamps a spurious harness
-  `automation_failure` on the next check.
 
 - [`trailing-brick-test-unavailable-retry-p2-stale-dict.md`](trailing-brick-test-unavailable-retry-p2-stale-dict.md) —
   The brick-test coordinator unit test meant to guard against retrying a P2 live feedback send never actually tests P2;

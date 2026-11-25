@@ -425,6 +425,8 @@ def _cited_prs(lines: list[str]) -> set[int]:
     """
     items: list[str] = []
     for line in lines:
+        if not line.strip():
+            continue
         if line.startswith("- "):
             items.append(line[2:])
         elif line.startswith("  ") and items:
@@ -1426,6 +1428,9 @@ def self_test() -> int:
         "- A feature the maintainer highlighted. (#31)", "- A feature the maintainer highlighted. (#31, #37)"
     )
     expect(check_changelog_format(wrapped) == [], "a fold entry's wrapped reference counts toward the highlights' PRs")
+    spaced = FOLD_CHANGELOG.replace("- A feature the maintainer highlighted. (#31)",
+                                   "- A feature the maintainer highlighted. (#31)\n  ")
+    expect(check_changelog_format(spaced) == [], "an indented blank line leaves the highlight's reference intact")
     complete_fold_variants = {
         "a highlight citing a PR the fold leaves out": FOLD_CHANGELOG.replace(
             "- A feature the maintainer highlighted. (#31)", "- A feature the maintainer highlighted. (#31, #39)"
@@ -1434,6 +1439,9 @@ def self_test() -> int:
         "the older summary in a new section": FOLD_CHANGELOG.replace(FOLD_SUMMARY, LEGACY_FOLD_SUMMARY),
         "a highlight whose wrapped reference cites a PR the fold leaves out": FOLD_CHANGELOG.replace(
             "- A feature the maintainer highlighted. (#31)", "- A feature the maintainer highlighted. (#31,\n  #39)"
+        ),
+        "a highlight with a missing folded PR followed by an indented blank line": spaced.replace(
+            "highlighted. (#31)", "highlighted. (#31, #39)"
         ),
     }
     for what, text in complete_fold_variants.items():

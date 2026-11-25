@@ -688,7 +688,8 @@ print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regu
                 raise RuntimeError('cleanliness is a setup premise, never a repair operation')
             path = self.work / 'fixture-clean.json'
             self.command([sys.executable, str(Path(__file__).with_name('fixture_probe.py')), '--role', 'mac',
-                '--ssh-alias', self.context['ssh']['alias'], '--output', str(path)], timeout=180)
+                '--ssh-alias', self.context['ssh']['alias'], '--mac-peer-python', self.task['settings']['python'],
+                '--output', str(path)], timeout=180)
             report = json.loads(path.read_text())
             self.receipts.append('fixture-clean.json')
             if report.get('clean') is not True:
@@ -804,10 +805,10 @@ raise SystemExit(0 if all(r['returncode']==0 for r in rows) else 1)
             else:
                 script = remote_host_payload() + '\nprint(json.dumps(remote_host_snapshot()))\n'
             sample = json.loads(self.ssh(script)['stdout'])
-            if self.task['pass_id'] == REMOTE_MAC_PASS and operation == 'remote_host_before':
+            if operation == 'remote_host_before':
                 # Refuse the starting premise while the action gate can still
                 # prevent the model from clicking Uninstall on this fixture.
-                require_remote_host_start(sample, REMOTE_MAC_PASS)
+                require_remote_host_start(sample, self.task['pass_id'])
             return sample
         if operation == 'public_latest':
             with urlopen('https://get.farhelm.io/latest', timeout=30) as response:

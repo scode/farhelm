@@ -292,7 +292,7 @@ failure that would stop the pair's remaining P0 checks.
     operations = root / 'managed-operations.json'
     if operations.is_file():
         record = json.loads(operations.read_text())
-    elif value['status'] in ('fail', 'could-not-run'):
+    elif value['status'] in ('fail', 'could-not-run', 'permission-block'):
         record = {'completed': [], 'receipts': [], 'observations': {}, 'continuity': None}
     else:
         raise TesterError('managed tester retained no operation receipts')
@@ -783,6 +783,27 @@ product-failure claim. The normal success path still parses every row strictly.
         return value
 
 
+def managed_failure_claim(task, final):
+    """Recover a bounded failure reply even when the child exited before normal import."""
+    try:
+        if final.is_symlink() or not final.is_file():
+            return None
+        with final.open('rb') as stream:
+            raw = stream.read(MAX_INPUT + 1)
+        if len(raw) > MAX_INPUT:
+            return None
+        reported = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(reported, dict) or set(reported) != {'status', 'detail'}
+            or reported['status'] not in ('permission-block', 'fail')
+            or not isinstance(reported['detail'], str) or not 0 < len(reported['detail'].strip()) <= 4000):
+        return None
+    return {'identity': {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')},
+            'status': reported['status'], 'detail': reported['detail'].strip(),
+            'evidence': [], 'continuity': None}
+
+
 def run(task, directory, spawner=subprocess.Popen, clock=time.monotonic, pause=time.sleep):
     """Execute one bounded, owned child and retain success and failure records.
 
@@ -858,14 +879,16 @@ authentication configuration is changed.
                 # final.txt preserves the model's original claim separately.
                 record = root / 'managed-operations.json'
                 evidence = json.loads(record.read_text())['receipts'] if record.is_file() else []
-                # A real app failure can itself make a later native read fail.
-                # Keep that product claim unverified for review while the
-                # enclosing execution still reports automation failure.
-                claimed_failure = isinstance(reported, dict) and reported.get('status') == 'fail'
+                # Keep a product claim available for review and a permission
+                # refusal available to stop the host scheduler, even if the
+                # enclosing execution failed to import the observation.
+                reported_status = reported.get('status') if isinstance(reported, dict) else None
+                claimed_failure = reported_status in ('fail', 'permission-block')
                 detail = (str(reported.get('detail', '')) + '\nUnverified because: ' + str(error)
                           if claimed_failure else str(error))
                 observation = {'identity': {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')},
-                               'status': 'fail' if claimed_failure else 'automation-failure', 'detail': detail[:4000],
+                               'status': reported_status if claimed_failure else 'automation-failure',
+                               'detail': detail[:4000],
                                'evidence': evidence, 'continuity': None}
                 result.write_text(json.dumps(observation, indent=2) + '\n')
                 raise
@@ -899,14 +922,19 @@ authentication configuration is changed.
         result = work / 'result.json'
         try:
             operations = root / 'managed-operations.json'
-            if managed and not result.exists() and operations.is_file():
-                # A fixed child can fail before returning a final observation.
-                # Preserve its checked command receipts without inventing a
-                # product verdict or requiring another model to serialize them.
-                record = json.loads(operations.read_text())
-                result.write_text(json.dumps({'identity': {key: task[key] for key in
-                    ('attempt', 'run_id', 'pass_id', 'check_id')}, 'status': 'automation-failure',
-                    'detail': str(error)[:4000], 'evidence': record['receipts'], 'continuity': None}))
+            if managed and not result.exists():
+                claim = managed_failure_claim(task, root / 'final.txt')
+                if claim is not None:
+                    # Preserve the refusal or failure even if receipt salvage also fails.
+                    summary['unverified_result'] = claim
+                if operations.is_file():
+                    record = json.loads(operations.read_text())
+                    if claim is None:
+                        claim = {'identity': {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')},
+                                 'status': 'automation-failure', 'detail': str(error)[:4000], 'continuity': None}
+                    claim = dict(claim, evidence=record['receipts'])
+                if claim is not None:
+                    result.write_text(json.dumps(claim))
             accepted = root / 'result.json'
             if accepted.is_file():
                 summary['unverified_result'] = validate_observation(task, json.loads(accepted.read_text()), work)

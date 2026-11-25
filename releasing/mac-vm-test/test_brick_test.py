@@ -1560,6 +1560,23 @@ clean up normally rather than ask for a second retention decision.
                 with self.subTest(check=check):
                     self.assertEqual(report['promotion_blocked_pending_review'], check != 'old-sessions')
 
+    def test_p2_is_unavailable_after_a_released_p0_automation_failure(self):
+        """A complete set of product results does not erase a failed owning attempt."""
+        self.enable_p0()
+        self.complete_stable_p0()
+        with self.run.locked():
+            entry = self.run.selected('p0-updater-upgrade')
+            self.assertEqual((entry['phase'], self.run.verdict(entry)), ('deleted', 'pass'))
+            entry['automation_failure'] = {'check_id': 'update-relaunch', 'status': 'could-not-run'}
+            self.run.save()
+        children = self.complete_p0('p0-installer-upgrade', through='remote-host-uninstall')
+        with self.run.locked():
+            entry = self.run.selected('p0-installer-upgrade')
+            self.assertEqual(entry['results']['p2-feedback-send']['status'], 'skipped')
+            self.assertEqual(entry['results']['p2-announcements']['status'], 'skipped')
+            self.run.cleanup('p0-installer-upgrade')
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
     def test_empty_evidence_cannot_settle_a_nonpass_for_cleanup(self):
         """A zero-byte diagnostic is no evidence; the guests behind the observation must stay."""
         children = self.ready_for_p2()
@@ -1598,18 +1615,23 @@ A hand-made unavailable send with no evidence, or a send whose import failed
 in the harness, may still need the live guests; only the maintainer's
 retention decision (`--discard-failed`) releases them.
 """
-        for case in ('no evidence', 'automation failure'):
+        for case in ('no evidence', 'automation failure', 'missing P1 retry'):
             with self.subTest(case=case):
                 children = self.ready_for_p2()
                 with self.run.locked():
                     if case == 'no evidence':
                         self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'could-not-run', [],
                                         'Hand-made unavailable send without evidence.')
-                    else:
+                    elif case == 'automation failure':
                         self.run.selected('p0-installer-upgrade')['automation_failure'] = {
                             'check_id': 'p2-feedback-send', 'status': 'could-not-run', 'kind': 'harness-failure',
                             'detail': 'Synthetic import failure after Send.'}
                         self.run.limit_scope('p1-only')
+                    else:
+                        self.run.limit_scope('p0-only')
+                        self.run.selected('p0-installer-upgrade')['provider_retries'] = [
+                            {'check_id': 'old-sessions', 'sha256': {'missing-retry.tar::./x': 'f' * 64}}]
+                        self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
                     with self.assertRaisesRegex(Refused, 'incomplete or failed'):
                         self.run.cleanup('p0-installer-upgrade')
                     self.assertTrue(all(child.poll() is None for child in children))

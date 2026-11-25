@@ -267,6 +267,25 @@ historical pass names when a later release raises the production boundary.
         self.assertIn(final['detail'], summary['unverified_result']['detail'])
         self.assertEqual(json.loads((output / 'export/final.txt').read_text()), final)
 
+    def test_managed_permission_refusal_is_retained_on_nonzero_exit(self):
+        """An executor failure must still tell the host scheduler that the guest hit a permission block."""
+        value = dict(task(), check_id='old-sessions', context={'managed_operations': True})
+        output = self.root / 'managed-permission-refusal'
+        final = {'status': 'permission-block', 'detail': 'The fixture denied screen recording.'}
+
+        def spawn(_argv, **kwargs):
+            """Emit a bounded reply before the owned provider child exits unsuccessfully."""
+            script = 'import sys; from pathlib import Path; Path(sys.argv[1]).write_text(sys.argv[2]); sys.exit(7)'
+            return subprocess.Popen([sys.executable, '-c', script, str(output / 'final.txt'), json.dumps(final)], **kwargs)
+
+        with self.assertRaisesRegex(TesterError, 'tester process failed'):
+            run(value, output, spawner=spawn)
+
+        summary = json.loads((output / 'export/execution.json').read_text())
+        self.assertEqual((summary['status'], summary['exit_code']), ('automation-failure', 7))
+        self.assertEqual(summary['unverified_result']['status'], 'permission-block')
+        self.assertEqual(summary['unverified_result']['detail'], final['detail'])
+
     def test_failed_tool_and_failed_turn_cannot_be_hidden_by_result(self):
         """Vendor refusal and model errors are execution failures even with a pass file."""
         for stream in ([{'type': 'turn.failed'}], [{'type': 'error'}], events()[:-1]):
