@@ -58,6 +58,7 @@ pub struct Checkbox {
     label: SharedString,
     content: Option<gpui::AnyElement>,
     help: HoverHelp,
+    description: Option<SharedString>,
     role: Role,
     checked: bool,
     disabled: bool,
@@ -85,6 +86,7 @@ impl Checkbox {
             label: label.into(),
             content: None,
             help,
+            description: None,
             role,
             checked: false,
             disabled: false,
@@ -118,6 +120,12 @@ impl Checkbox {
     /// description together inside the toggle's click target.
     pub(crate) fn content(mut self, content: impl IntoElement) -> Self {
         self.content = Some(content.into_any_element());
+        self
+    }
+
+    /// Give assistive technology the full explanation when the hover help is only a short pointer to it.
+    pub(crate) fn accessible_description(mut self, description: impl Into<SharedString>) -> Self {
+        self.description = Some(description.into());
         self
     }
 
@@ -299,11 +307,14 @@ impl RenderOnce for Checkbox {
             control,
             &self.id,
             &self.help,
-            true,
+            self.description.is_none(),
             Some(&focus),
             window,
             cx,
-        );
+        )
+        .when_some(self.description, |control, description| {
+            control.aria_description(description)
+        });
         let control = if enabled {
             focus::track(control, &focus, focus::OnPress::Control)
         } else {

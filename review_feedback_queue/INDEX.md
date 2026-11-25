@@ -80,9 +80,6 @@ consequences.
 
 ## High priority: material UX degradation
 
-- [`antigravity-trust-warning-omitted-from-accessibility.md`](antigravity-trust-warning-omitted-from-accessibility.md) —
-  Screen-reader users can enable automatic trust without access to the visible permission and trust-list warnings.
-
 - [`approval-omits-automatic-trust-warning-from-accessibility.md`](approval-omits-automatic-trust-warning-from-accessibility.md)
   — Screen-reader users can miss the trusted-workspace status and warning on a launch or Restart approval.
 
@@ -275,9 +272,6 @@ consequences.
 
 - [`uninstall-omits-persistent-hook-cleanup.md`](uninstall-omits-persistent-hook-cleanup.md) — Uninstall can leave Grok
   and Antigravity callbacks pointing to the removed Farhelm executable, and the uninstall guidance omits cleanup.
-
-- [`hook-removal-help-missing-from-accessibility.md`](hook-removal-help-missing-from-accessibility.md) — The Grok and
-  Antigravity Settings pages can expose their setup switches without the persistence and removal guidance.
 
 - [`model-picker-skips-hook-setup-offer.md`](model-picker-skips-hook-setup-offer.md) — Choosing an Antigravity model in
   the full Model picker skips the hook setup offer shown for the equivalent command-field choice.

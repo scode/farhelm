@@ -2275,6 +2275,18 @@ const TRUST_PATHS: [&str; 5] = [
     "/api/checkout-agent-trust/antigravity",
 ];
 
+/// A help paragraph has text that a platform adapter can read as a label.
+fn accessible_help_contains(cx: &mut VisualTestContext, expected: &str) -> bool {
+    frame(cx).iter().any(|node| {
+        node.element_id.is_some()
+            && node.role == Some(Role::Label)
+            && node
+                .value
+                .as_deref()
+                .is_some_and(|text| text.contains(expected))
+    })
+}
+
 /// Answer one trust read and, on Antigravity's page, the separate hook setup read. Neither changes the hint preference.
 fn answer_trust(
     helm: &mut FakeHelm,
@@ -2318,6 +2330,10 @@ fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mu
 
     answer_trust(&mut helm, &reads, true, cx);
     assert_eq!(switch_on(cx, TrustAgent::Claude.id()), Some(true));
+    assert!(accessible_help_contains(
+        cx,
+        "can rarely undo Farhelm's edit"
+    ));
     assert!(!drawn(cx, TrustAgent::Codex.id()));
 
     click_section(cx, Section::Agent(LaunchHarness::Codex));
@@ -2335,10 +2351,7 @@ fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mu
 
     click_section(cx, Section::Agent(LaunchHarness::Cursor));
     assert_eq!(heading(cx).as_deref(), Some("Cursor"));
-    assert_eq!(
-        label(cx, super::NO_AGENT_SETTINGS_ID).as_deref(),
-        Some(super::NO_AGENT_SETTINGS)
-    );
+    assert!(accessible_help_contains(cx, super::NO_AGENT_SETTINGS));
     assert_eq!(sent(&mut helm), [], "an empty page reads nothing");
 
     click_section(cx, Section::Agent(LaunchHarness::Claude));
@@ -2375,6 +2388,7 @@ fn grok_hook_setup_and_its_hint_are_independent_settings(cx: &mut TestAppContext
     settle(cx);
     assert_eq!(switch_on(cx, agent.id()), Some(false));
     assert_eq!(switch_on(cx, agent.dismissal_id()), Some(false));
+    assert!(accessible_help_contains(cx, agent.removal()));
     click(cx, agent.id());
     let writes = helm.commands();
     let [write] = writes.as_slice() else {
@@ -2457,6 +2471,14 @@ fn a_trust_switch_saves_through_its_route_and_a_refusal_restores_it(cx: &mut Tes
 
     keys(cx, "escape");
     open_trust_at(&mut helm, cx, &gear, TrustAgent::Antigravity);
+    assert!(accessible_help_contains(
+        cx,
+        "repository hooks, settings and commands are then trusted"
+    ));
+    assert!(accessible_help_contains(
+        cx,
+        "replaces Antigravity's saved list of trusted folders"
+    ));
     keys(cx, "space");
     let saves = sent(&mut helm);
     assert_eq!(

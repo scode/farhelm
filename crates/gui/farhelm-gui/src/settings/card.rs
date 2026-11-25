@@ -3,7 +3,8 @@
 
 use farhelm_proto::LaunchHarness;
 use gpui::{
-    AnyElement, App, Div, FontWeight, IntoElement, ParentElement as _, SharedString, Styled as _,
+    AnyElement, App, Div, ElementId, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, Role, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
     Svg, div, prelude::FluentBuilder as _, px, svg,
 };
 
@@ -100,13 +101,26 @@ pub(super) fn caption(label: &'static str, edited: bool, palette: &theme::Palett
         .child(super::editing::caption(label, edited.then_some(palette)))
 }
 
-/// Supporting copy for both the ordinary switch rows and longer trust descriptions.
-pub(super) fn help(description: impl Into<SharedString>, cx: &App) -> Div {
+/// Secondary typography shared by help paragraphs and their decorative marks.
+pub(super) fn help_style(cx: &App) -> Div {
     div()
         .text_size(metrics::TEXT_SM)
         .line_height(px(17.))
         .text_color(theme::color(theme::palette(cx).fg_1))
-        .child(description.into())
+}
+
+/// Keep the visible help readable in the accessibility tree. Label values supply the text to platform adapters.
+pub(super) fn help(
+    id: impl Into<ElementId>,
+    description: impl Into<SharedString>,
+    cx: &App,
+) -> Stateful<Div> {
+    let text = description.into();
+    help_style(cx)
+        .id(id)
+        .role(Role::Label)
+        .aria_value(text.clone())
+        .child(text)
 }
 
 /// A switch title and its visible description share a wrapping column. Keep the type scale the same across cards
@@ -124,5 +138,5 @@ pub(super) fn switch_copy(title: impl IntoElement, description: &'static str, cx
                 .font_weight(FontWeight::MEDIUM)
                 .child(title),
         )
-        .children((!description.is_empty()).then(|| help(description, cx)))
+        .children((!description.is_empty()).then(|| help("settings-switch-help", description, cx)))
 }
