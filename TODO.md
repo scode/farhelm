@@ -206,6 +206,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   replaced by a clipped frame before presentation, and a successful continuation after a wait. Update the documented
   Enter behavior and key hint if the fill now needs another press.
 
+- **Publish Restart with settings with the replacement generation.** A custom agent can report a conversation as soon as
+  it starts. Restart with currently publishes its new generation before saving the edited launch in the supervisor
+  store, so startup reports can be accepted or permanently refused under the previous reporting setting. The reply and
+  concurrent listings can also give the old Restart offer. Bind the new launch to the generation before its reports can
+  be admitted, then publish the matching snapshot and derive the offer from it. Preserve the old launch on a definitive
+  abort and retain the new settings when the process starts but building the reply fails. This spans the generation
+  transaction, recovery and terminal publication, above the triage size gate. Test startup reports with reporting
+  switched in both directions, the offer after a named restart, and the persisted launch on each failure side of spawn.
+
 - **Use the shared Delete confirmation for custom agents in Settings.** The footer asks with two ordinary buttons.
   Escape can close Settings instead of cancelling Delete, focus stays away from Cancel, and the question never names the
   registration. Port `settings/custom_agents.rs` to the recipe editor's inline prompt as described in

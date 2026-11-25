@@ -6214,8 +6214,8 @@ impl Supervisor {
             OldTerminals::none()
         };
 
-        // A missing home matters only when a `~` create arrives; that
-        // request receives its own refusal without disabling identity reports.
+        // Requests using `~` receive their own refusal when home is missing.
+        // Identity reports can still work for the supervisor's other sessions.
         let user_home = seams
             .user_home
             .clone()
@@ -8993,6 +8993,26 @@ impl Supervisor {
         .await
     }
 
+    /// Admission checks this expansion before allocation or stop. Spawn applies
+    /// it to the literal executable slot after the raw shell prefix.
+    fn expand_custom_program(
+        &self,
+        selection: Option<&farhelm_proto::LaunchSelection>,
+        argv: &[String],
+    ) -> anyhow::Result<Option<(usize, String)>> {
+        let Some(selection) = selection.filter(|s| s.harness.uses_custom_catalog()) else {
+            return Ok(None);
+        };
+        let slot = selection.wrapper_prefix.as_ref().map_or(0, Vec::len);
+        let program = argv
+            .get(slot)
+            .context("the custom agent launch needs an executable after its wrapper prefix")?;
+        match expand_tilde_path("custom agent command", program, self.user_home.as_deref())? {
+            std::borrow::Cow::Borrowed(_) => Ok(None),
+            std::borrow::Cow::Owned(expanded) => Ok(Some((slot, expanded))),
+        }
+    }
+
     /// Prepare a launch before checkout allocation or session recording: the
     /// working directory is usable, the invocation parses into an argv, the
     /// integration snapshot resolves, and the title is resolved — refused
@@ -9104,6 +9124,7 @@ impl Supervisor {
         // silently rather than fail.
         crate::agent_kind::ensure_executable_argv("command", &argv)
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        self.expand_custom_program(launch.agent_selection(), &argv)?;
         // The resume command becomes what every Restart runs, so it is held
         // to the restart rule here rather than at the restart that would
         // otherwise discover it; `decode_session_row` refuses at load what
@@ -9869,6 +9890,7 @@ impl Supervisor {
             )
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
             let snapshot = IntegrationSnapshot::of(&row.launch);
+            self.expand_custom_program(row.launch.agent_selection(), &argv)?;
             if let Some(template) = snapshot.resume_template.as_deref() {
                 crate::agent_kind::ensure_resume_template(template)
                     .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
@@ -12488,6 +12510,7 @@ impl Supervisor {
         let executable_launch = restart_with
             .as_ref()
             .map_or(&entry.info.launch, |replacement| &replacement.launch);
+        self.expand_custom_program(executable_launch.agent_selection(), &argv)?;
         if let SessionLaunch::Command(command) = executable_launch
             && let Some(source) = &command.resume
         {
@@ -14550,18 +14573,8 @@ impl Supervisor {
             farhelm_proto::check_wrapper_prefix(Some(prefix))
                 .map_err(|message| anyhow::anyhow!(message))?;
         }
-        if selection.is_some_and(|selection| selection.harness.uses_custom_catalog()) {
-            // The wrapper prefix is shell text. Expand the caller's home only in the first
-            // literal argument after that prefix, before it gets quoted for execution.
-            // See the contract changelog in `website/src/content/docs/docs/agents/custom-agent-contract.md`.
-            let program = argv
-                .get_mut(snapshot.wrapper_prefix_words)
-                .context("the custom agent launch needs an executable after its wrapper prefix")?;
-            if program.starts_with('~') {
-                *program =
-                    expand_tilde_path("custom agent command", program, self.user_home.as_deref())?
-                        .into_owned();
-            }
+        if let Some((slot, program)) = self.expand_custom_program(selection, &argv)? {
+            argv[slot] = program;
         }
         // Placeholder substitution is the FIRST transformation and hook
         // injection the second, so the injected tail — literals this crate
@@ -27952,6 +27965,63 @@ exit 1
                 && refusal.contains("belongs in an argument slot"),
             "the refusal uses the shared placeholder-as-program wording: {refusal}"
         );
+    }
+
+    /// An unusable host home refuses a wrapped custom agent during create
+    /// validation, before a managed checkout can be allocated.
+    #[farhelm_testtrace::test]
+    async fn create_refuses_unexpandable_wrapped_custom_program() {
+        let state = StateDir::new();
+        let root = tempfile::tempdir().unwrap();
+        let checkout = checkout_fixture(&root.path().canonicalize().unwrap());
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                user_home: Some("relative-home".into()),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let SessionLaunch::Agent { mut selection, .. } = named_test_launch() else {
+            unreachable!("the fixture provides an agent selection");
+        };
+        selection.harness = LaunchHarness::Custom;
+        selection.custom_agent = Some("custom-fixture".into());
+        selection.permissions = Some(farhelm_proto::LaunchPermission::Yolo);
+        selection.wrapper_prefix = Some(vec!["exec".into()]);
+        let launch = SessionLaunch::Agent {
+            selection,
+            start: vec!["exec".into(), "~/agent".into(), "{farhelm_args}".into()],
+            resume: None,
+            custom_reporting: Some(false),
+        };
+        assert!(sup.store.load_all().await.unwrap().is_empty());
+        let inputs = CreateInputs {
+            setup_persistent_hooks: false,
+            prompt: None,
+            named_start: None,
+            github_checkout: Some(checkout),
+            cwd: "",
+            parent: None,
+            launch,
+            title: None,
+            cols: 80,
+            rows: 24,
+        };
+        let error = sup
+            .create_session(inputs, None)
+            .await
+            .expect_err("unexpandable program passed admission");
+        assert_eq!(error_kind(&error), ErrorKind::Internal, "{error:#}");
+        assert!(
+            error.to_string().contains("the custom agent command"),
+            "{error:#}"
+        );
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        assert!(sup.store.load_all().await.unwrap().is_empty());
     }
 
     /// A raw create whose program is `{conversation}` is refused when its
