@@ -12,6 +12,8 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+import urllib.error
+import urllib.request
 
 from agent_screen_host import OUTER_SESSION_MARKERS
 import harness_upgrades
@@ -340,6 +342,28 @@ class UpgradePhaseTests(unittest.TestCase):
             self.assertEqual(result.status, "current")
             self.assertIn("updater broke", harness_upgrades.describe("fake", result))
             self.assertEqual(installs, [("https://example.invalid/install", "false")])
+
+    def test_installer_redirects_require_https_at_each_hop(self):
+        """Refuse a non-TLS redirect before a downloader can connect to its target."""
+        source = urllib.request.Request("https://example.invalid/install")
+        handler = harness_upgrades.InstallerRedirects()
+        target = "https://download.invalid/install"
+        self.assertEqual(handler.redirect_request(source, None, 302, "Found", {}, target).full_url, target)
+        for scheme in ("http", "ftp"):
+            with self.subTest(scheme=scheme), self.assertRaisesRegex(urllib.error.URLError, "must use HTTPS"):
+                handler.redirect_request(source, None, 302, "Found", {}, f"{scheme}://download.invalid/install")
+
+    def test_installer_checks_the_final_url_before_reading_bytes(self):
+        """A response outside HTTPS must never supply bytes to the fallback shell."""
+        with patch.object(urllib.request, "build_opener") as build, patch.object(harness_upgrades, "run_updater") as run:
+            response = build.return_value.open.return_value.__enter__.return_value
+            response.geturl.return_value = "http://download.invalid/install"
+            ok, detail = harness_upgrades.run_installer("https://example.invalid/install", {})
+            self.assertFalse(ok)
+            self.assertIn("must use HTTPS", detail)
+            self.assertIsInstance(build.call_args.args[0], harness_upgrades.InstallerRedirects)
+            response.read.assert_not_called()
+            run.assert_not_called()
 
     def run_main(self, argv, upgrade_result=None):
         """Run the runner's main against stand-ins, returning its exit code, output and what it upgraded or probed."""

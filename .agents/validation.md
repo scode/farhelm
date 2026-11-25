@@ -1170,8 +1170,10 @@ systemd or SSH substrate ran.
 - `python3 -B scripts/test-run-harness-drift.py` — the drift runner's build and category discovery, default base
   selection, harness filters, child environment, per-case timeout, category verdicts and evidence retention against
   stand-ins. It also checks the once-per-harness upgrade step (`scripts/harness_upgrades.py`): a recipe for every drift
-  case's binary, versions around each updater, stdin closed, the fallback installer only after a failed updater, and a
-  failed upgrade failing the run. Run it when the runner or the upgrade recipes change. Seconds and zero vendor turns.
+  case's binary, versions around each updater, stdin closed, the fallback installer only after a failed updater, HTTPS
+  throughout the download, and a failed upgrade failing the run. Run it when the runner or upgrade recipes change.
+  Seconds and zero vendor turns.
+
   The non-ignored e2e tests in `real_agent_capture::drift::tests` check the reply and recall lines, fresh accepted hook
   evidence, matching resume arguments and captured conversation selectors without starting a vendor CLI. The base module
   pins which harnesses it covers. Tests in `real_agent_capture::drift::private_config::tests` check the private copy of

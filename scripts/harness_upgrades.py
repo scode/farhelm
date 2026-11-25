@@ -26,6 +26,8 @@ import shutil
 import subprocess
 import tempfile
 from typing import NamedTuple
+import urllib.error
+import urllib.parse
 import urllib.request
 
 # Updaters download tens of megabytes (goose's archive is about 57 MB) and npm-based ones resolve a dependency tree.
@@ -141,14 +143,31 @@ def run_updater(argv: list[str], env: dict[str, str]) -> tuple[bool, str]:
     return done.returncode == 0, last_line(done.stdout) if done.returncode else ""
 
 
+def require_installer_https(url: str) -> None:
+    """Installer bytes become shell code, so every URL used to fetch them requires TLS."""
+    if urllib.parse.urlsplit(url).scheme != "https":
+        raise urllib.error.URLError("installer URL must use HTTPS")
+
+
+class InstallerRedirects(urllib.request.HTTPRedirectHandler):
+    """Check every resolved target before urllib opens the next connection."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        require_installer_https(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def run_installer(url: str, env: dict[str, str]) -> tuple[bool, str]:
-    """Download a vendor's installer to a private file and run it with bash, as its documented `curl | bash` would."""
+    """Run a vendor installer from a private file after verifying the download stayed on HTTPS."""
     with tempfile.TemporaryDirectory(prefix="fh-harness-installer-") as directory:
         script = Path(directory) / "install.sh"
         try:
-            with urllib.request.urlopen(url, timeout=VERSION_TIMEOUT) as response:
+            require_installer_https(url)
+            opener = urllib.request.build_opener(InstallerRedirects())
+            with opener.open(url, timeout=VERSION_TIMEOUT) as response:
+                require_installer_https(response.geturl())
                 script.write_bytes(response.read())
-        except OSError as error:
+        except (OSError, ValueError) as error:
             return False, f"could not download {url}: {error}"
         return run_updater(["bash", str(script)], env)
 
