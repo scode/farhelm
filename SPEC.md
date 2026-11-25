@@ -5858,9 +5858,9 @@ permission mode and the recent setups the New dialog offers. Each is recorded fr
 request that succeeded, never from what a host replies or lists. A supervisor's create reply, the settings a plain
 Replace copies from a listed row, and anything an agent creates do not qualify, because none of them is a choice the
 user made in the GUI. A choice is still recorded only once its create succeeds; the host's success decides whether it is
-recorded. When an agent asks to create or clone a trusted Claude, Codex, Muse or Pi session, the approval card and the
-launch use the same canonical directory from the target host. Retargeting the original alias cannot redirect the launch
-while it waits for approval.
+recorded. When Farhelm applies automatic workspace trust on an agent's request to create or clone a Claude, Codex, Muse,
+Pi or Antigravity session in an existing directory, the approval card and launch use the same canonical directory from
+the target host. Retargeting the original alias cannot redirect the launch while it waits for approval.
 
 Failures or malicious behavior from a remote host must not disrupt unrelated hosts or ordinary helm/GUI controls, apart
 from the explicitly permitted operations above and the exceptions below. Supervisors need sensible recovery from

@@ -33,10 +33,6 @@ consequences.
   — In Replace with on a suspended managed-checkout host, pressing Down then Enter on a retained recent checkout setup
   immediately wakes, clones fresh, and deletes the source without showing the fresh-clone warning.
 
-- [`trailing-antigravity-omitted-from-approval-cwd-pinning.md`](trailing-antigravity-omitted-from-approval-cwd-pinning.md)
-  — When Antigravity workspace trust is on, agent Create, Spawn, and Clone show an unpinned symlink on the approval card
-  and resolve it only at start, allowing symlink masking or redirection during the approval wait.
-
 - [`trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md`](trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md)
   — Toggling Claude workspace trust while an agent checkout approval card waits or an environment starts can grant trust
   to a Not trusted approval or leave permanent trust with no archive cleanup record.

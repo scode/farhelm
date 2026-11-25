@@ -46107,3 +46107,28 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: `otmrspxlxopppwqxsozyplnpmunknzls`, `plan/triage-hooks-trust-nov24/04-launcher`,
   [draft PR](https://github.com/scode/farhelm/pull/4877/changes). Fixed. An Antigravity model picked from the full Model
   list checks its setup offer when it changes the agent choice, using the same guard as the launcher's search results.
+
+## trailing-antigravity-omitted-from-approval-cwd-pinning.md
+
+- Outcome: `fix spec+code`.
+- Assessment: An agent can ask Farhelm to start an Antigravity session with automatic workspace trust in a folder given
+  through a symlink. The approval card shows the symlink path, and the target host resolves it only when Antigravity
+  starts. Codex, Claude, Muse and Pi pin the real folder before the card. For Antigravity, an existing symlink can hide
+  which folder gets trusted, and a symlink repointed while the card waits sends the trusted launch somewhere else.
+  Verified: confirmed. `farhelm-helm/src/launches.rs:814-832` still returns `false` for Antigravity. Its comment
+  ("Antigravity already resolves its directory in the supervisor") does not address the approval wait, and Codex
+  resolves its folder at the same point (`agent_kind/mod.rs:2438-2460`) yet is pinned. SPEC_impl.md around 3677-3681
+  lists only "Claude, Codex, Muse or Pi" for pinning, "so retargeting the original alias cannot redirect the launch
+  during the wait for Allow". Around 5387-5389 it says only "The supervisor resolves the directory when it fills the
+  slot." The omission is documented, but no text accepts redirecting the trust.
+- Decision: q-agtrust, "Antigravity left out of approval-card folder pinning": the maintainer picked "Pin Antigravity
+  too". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Pin Antigravity's folder before the approval card like Claude, Codex, Muse and Pi, and add it to
+  the SPEC_impl list. Recommendation for reference: fix spec+code. Change the one match arm, add Antigravity to the
+  SPEC_impl list, and extend the two helm tests. Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry.
+- Execution: `ssxpxzloulxpnmwrvsmulrlxykvlqoqn`, `plan/triage-hooks-trust-nov24/05a-antigravity-approval-folder`,
+  [draft PR](https://github.com/scode/farhelm/pull/4895/changes). Fixed. Agent-requested Antigravity launches with
+  workspace trust enabled use the existing canonical directory check before approval. Approval and dispatch carry the
+  same directory, using the connection that checked it. Both specifications now include Antigravity.
