@@ -194,20 +194,21 @@ systemd or SSH substrate ran.
   supervisor's client against real hosts the same way: take-over and the peer process, a stopped host timing out and
   then ended by the verified SIGTERM, a stopped host with a full backlog found by its process rather than judged gone, a
   killed host's socket judged gone, a read decoding the snapshot record, a gap and the exit, resizes and snapshot
-  replies, input acknowledged in order, Shift+Enter in one read, no resend after a takeover mid-input, and `Shutdown`.
-  `crates/farhelm/tests/terminal_host_stop.rs` runs `farhelm internal stop-terminal-hosts` against real hosts, each
-  success checked against the host processes when the command returns: live hosts shut down with their programs hung up,
-  a killed host's socket file removed, a stopped host ended by the verified SIGTERM, a state directory given through a
-  symlink stopping its live host and leaving a stopped one unconfirmed and unsignalled, a `hosts` symlink whose target's
-  host is left running, a missing directory succeeding at once, a socket that cannot be confirmed failing the run while
-  a host beside it still stops, a `Goodbye` without an end failing it, a relative or empty state directory refused as a
-  usage error, and a full, unread stderr not holding the exit back. `crates/farhelm/tests/terminal_host_registry.rs`
-  scans real hosts: the spawn's own found by their tags, a host with a foreign tag kept as unavailable, a killed host's
-  socket judged gone and removed, and every other host still running after the scan. Under a minute, part of the
-  workspace nextest run; the focused macOS CI job runs it too, in the terminal host step. Portable to macOS except where
-  it reads `/proc`. Outside that selection, Linux only and part of the workspace nextest run:
-  `cargo nextest run -p farhelm --test e2e -E 'test(terminal_host_cleanup::)'` shows that dropping the e2e suite's
-  in-process harness and its real supervisor process ends a host started in their state directories.
+  replies, input acknowledged in order, Shift+Enter's two bytes reaching a raw program in order, no resend after a
+  takeover mid-input, and `Shutdown`. `crates/farhelm/tests/terminal_host_stop.rs` runs
+  `farhelm internal stop-terminal-hosts` against real hosts, each success checked against the host processes when the
+  command returns: live hosts shut down with their programs hung up, a killed host's socket file removed, a stopped host
+  ended by the verified SIGTERM, a state directory given through a symlink stopping its live host and leaving a stopped
+  one unconfirmed and unsignalled, a `hosts` symlink whose target's host is left running, a missing directory succeeding
+  at once, a socket that cannot be confirmed failing the run while a host beside it still stops, a `Goodbye` without an
+  end failing it, a relative or empty state directory refused as a usage error, and a full, unread stderr not holding
+  the exit back. `crates/farhelm/tests/terminal_host_registry.rs` scans real hosts: the spawn's own found by their tags,
+  a host with a foreign tag kept as unavailable, a killed host's socket judged gone and removed, and every other host
+  still running after the scan. Under a minute, part of the workspace nextest run; the focused macOS CI job runs it too,
+  in the terminal host step. Portable to macOS except where it reads `/proc`. Outside that selection, Linux only and
+  part of the workspace nextest run: `cargo nextest run -p farhelm --test e2e -E 'test(terminal_host_cleanup::)'` shows
+  that dropping the e2e suite's in-process harness and its real supervisor process ends a host started in their state
+  directories.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal runtime' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test terminal_host_runtime -E 'test(/^hosts::terminal::/) | binary(terminal_host_runtime)'`
   — the supervisor's runtime for a terminal in a terminal host (`crates/farhelm-supervisor/src/hosts/terminal.rs`). The
   `hosts::terminal::` unit tests (also part of the `hosts::` selection above) drive it against stand-in hosts in the

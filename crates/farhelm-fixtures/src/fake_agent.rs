@@ -1844,9 +1844,8 @@ extern "C" fn restore_primary_screen_and_exit(_signal: libc::c_int) {
 /// Draws a SECOND row (`STATUS BAR`) whose background color is painted
 /// via `\x1b[K` (erase-to-end-of-line under the current SGR) rather than
 /// printed as literal space characters, so the frame has the shape of a
-/// real TUI's status line. No test currently asserts on this row; it is
-/// kept so the fixture stays a faithful full-screen app rather than a
-/// single banner line.
+/// real TUI's status line. The Stop replay test checks that the visible
+/// status label disappears with the banner when the primary screen returns.
 fn altscreen() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     write!(out, "\x1b[?1049h\x1b[2J\x1b[H")?;

@@ -747,6 +747,26 @@ fn trailing_url_punctuation_is_not_decoration() {
     }
 }
 
+/// A recognized address stays quiet when its label and target differ only by a spelling the comparison ignores.
+#[test]
+fn equivalent_address_spellings_stay_quiet() {
+    for (label, target) in [
+        ("https://x.test/a/", "https://x.test/a"),
+        ("https://x.test/a", "https://x.test/a/"),
+        (
+            "https://x.test/%7euser?q=%2f",
+            "https://x.test/%7Euser?q=%2F",
+        ),
+        ("https://x.test/a?#part", "https://x.test/a#part"),
+        ("https://x.test/a?#", "https://x.test/a"),
+    ] {
+        let claims = addresses(&row(label), &[]);
+        assert_eq!(claims.len(), 1, "{label:?}");
+        assert_eq!(&label[claims[0].trimmed.clone()], label);
+        assert_eq!(verdict(label, target), None, "{label:?} -> {target:?}");
+    }
+}
+
 /// Every address counts, not just the first: one honest address doesn't vouch for a second that goes elsewhere, and
 /// the count feeds the hover's "and N more".
 #[test]

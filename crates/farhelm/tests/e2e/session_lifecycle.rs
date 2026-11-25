@@ -3758,7 +3758,13 @@ async fn stop_takes_no_screen_capture_and_replays_none() {
         .await
         .expect("attach");
     let mut seen = rx_replay;
-    wait_for(&mut rx, &mut seen, "ALT-SCREEN APP", 20).await;
+    // READY follows the frame and installation of the SIGTERM handler that restores the primary screen.
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let frame = String::from_utf8_lossy(&seen);
+    assert!(
+        frame.contains("ALT-SCREEN APP") && frame.contains("STATUS BAR"),
+        "both alternate-screen labels must be visible before Stop: {frame}"
+    );
     h.client.detach(chan).await;
 
     h.client.stop_session(&session.id).await.expect("stop");
@@ -3776,13 +3782,11 @@ async fn stop_takes_no_screen_capture_and_replays_none() {
     let text = String::from_utf8_lossy(&replay);
     assert!(
         !text.contains("ALT-SCREEN APP"),
-        "the stopped app's alt-screen frame must not be replayed — only a capture taken \
-         before the kill could produce it: {text}"
+        "the stopped app's alternate-screen banner must be absent from replay: {text}"
     );
     assert!(
         !text.contains("STATUS BAR"),
-        "no part of the alt-screen frame (its styled status row included) may survive the \
-         stop: {text}"
+        "the stopped app's alternate-screen status label must be absent from replay: {text}"
     );
     assert!(
         !h.state.path().join("snapshots").exists(),

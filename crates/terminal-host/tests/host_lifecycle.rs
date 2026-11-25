@@ -28,11 +28,11 @@ fn output_before_a_client_connects_is_kept_and_the_exit_follows_it() {
     let host = start(&spec(&[
         "/bin/sh",
         "-c",
-        "printf 'early output\\n'; printf '%s\\n' \"$$\" > \"$1\"; exit 3",
+        "printf 'early output'; printf ' and last fragment'; printf '%s\\n' \"$$\" > \"$1\"; exit 3",
         "sh",
         child_pid.to_str().expect("fixture path is UTF-8"),
     ]));
-    // The marker follows the pty write. The startup helper connects only
+    // The marker follows both pty writes. The startup helper connects only
     // to learn the host's pid for cleanup. The first Hello must come later.
     eventually("the child exits", || {
         std::fs::read_to_string(&child_pid)
@@ -41,20 +41,9 @@ fn output_before_a_client_connects_is_kept_and_the_exit_follows_it() {
             .is_some_and(|pid| !running(pid))
     });
     let mut client = host.connect(true);
-    client.read_all();
-    let (text, _) = client.output_until("early output");
-    assert!(text.contains("early output"));
-    let exit = client.until(|m| matches!(m, HostMessage::Exited { .. }));
-    assert!(
-        matches!(
-            exit,
-            HostMessage::Exited {
-                exit: ChildExit::Code(3),
-                ..
-            }
-        ),
-        "{exit:?}"
-    );
+    let (text, exit) = client.output_to_exit();
+    assert_eq!(text, "early output and last fragment");
+    assert_eq!(exit, ChildExit::Code(3));
     assert_eq!(client.info().child_exit, Some(ChildExit::Code(3)));
 }
 
