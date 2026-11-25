@@ -9219,6 +9219,9 @@ thread, a shown launcher's moved-on rule decides whether a prepared launch opens
 keeps a launch from overtaking a template save sent before it. A launcher prepared out of sight shown after the user
 moved on waits behind the launch notice, as a refused launch does.
 
+The eligibility fold keeps the Agent tab's custom registration choice across tab switches. An explicit null ID or a
+switch to a built-in agent on that tab clears it. Custom requires an ID on the Agent tab to count as a complete choice.
+
 One row search (`templates/rows.rs`) is what the quick switcher's templates section, the launcher's `tl:` search and the
 Cmd+J list call; the launcher's search draws its rows (`launcher::search` filters them by `rows::matches`, only under
 `tl:`, in a Templates group between Harnesses and Models, each "Template: " and the name), and the sidebar's quick

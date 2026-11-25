@@ -146,7 +146,7 @@ fn hover_help_names_the_behavior_and_the_choice() {
         )
     );
     assert!(bolt_help(false, false).ends_with(
-        "Can't mark this one: an agent launch needs an agent; a command launch needs a nonblank command."
+        "Can't mark this one. Agent needs a built-in or registered custom agent. Command needs a nonblank command."
     ));
     assert!(bolt_help(false, true).ends_with("Click to mark this one."));
     assert_eq!(

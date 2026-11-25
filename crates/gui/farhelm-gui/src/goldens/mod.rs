@@ -1292,6 +1292,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_deleted_quick_launch_setup,
     },
     Scene {
+        name: "launcher-incomplete-custom-quick-launch",
+        size: (1080., 1080.),
+        draw: session_lists_then,
+        setup: launcher_incomplete_custom_quick_launch_setup,
+    },
+    Scene {
         name: "launcher-custom-recents",
         size: (1080., 950.),
         draw: session_lists_then,

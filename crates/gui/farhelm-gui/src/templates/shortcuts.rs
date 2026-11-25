@@ -184,9 +184,8 @@ pub fn keys_command(keys: &BTreeMap<String, String>) -> Result<Command, PathErro
     crate::settings::preference_command(serde_json::json!({ "template_shortcuts": keys }))
 }
 
-/// Whether `template` may be given ⚡: an agent launch needs an agent type, a command launch a nonblank command, judged
-/// by the shared rule the helm applies to an agent's write too. A marked template that no longer qualifies can still be
-/// unmarked, which is the caller's to allow.
+/// The bolt uses the same eligibility rule as an agent's template write. Agent needs a built-in or registered custom
+/// agent. Command needs a nonblank command. A marked template that no longer qualifies can still be unmarked.
 pub fn may_mark(template: &LaunchTemplate) -> bool {
     quick_launch_eligible(&template.fields)
 }
@@ -207,7 +206,7 @@ pub fn bolt_help(marked: bool, eligible: bool) -> String {
     } else {
         format!(
             "{chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold \
-             ⚡. Can't mark this one: an agent launch needs an agent; a command launch needs a nonblank command."
+             ⚡. Can't mark this one. Agent needs a built-in or registered custom agent. Command needs a nonblank command."
         )
     }
 }

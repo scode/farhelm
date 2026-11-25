@@ -178,6 +178,8 @@ linux/launcher-hook-setup--dark.png e2da2eaf5eddb2649daab8f6cc50987e0b6a3c49
 linux/launcher-hook-setup--light.png c44c6bbee52b9d65f8319378a4066e676f1e6dc1
 linux/launcher-host-menu--dark.png 136751a18fb7c316d2aedac88818b0436ee16369
 linux/launcher-host-menu--light.png 35e16fadd5fd7c3a43473cc40cf81941b6342783
+linux/launcher-incomplete-custom-quick-launch--dark.png f43ad5f4841234ba80b751f0a2b8fb7612a3faee
+linux/launcher-incomplete-custom-quick-launch--light.png 7f7ce03641e7e620152783795e5f1a97588eec01
 linux/launcher-incomplete-template--dark.png 9bd2cffc7330ae11fd27da3853d8478bcb687165
 linux/launcher-incomplete-template--light.png f80df1b2a3dde7f1cf633d2976766e6fc9759998
 linux/launcher-managed-checkout--dark.png ef5f35c94ebd2fde25e714227252e170eaef5502
@@ -424,8 +426,8 @@ linux/tab-only-stop-confirmation--dark.png e2acf7e40ac1022a52a8da97683e4275c8b45
 linux/tab-only-stop-confirmation--light.png 27d08e4f2c384648d64cd308ceea25144c7b43c3
 linux/tab-strip--dark.png 96bdfde8dfff295c92ec1f824c750bcaf058a13c
 linux/tab-strip--light.png 9f909e41b6604fa2551fdad6a8c3d28da18d6b38
-linux/template-destination-editor--dark.png d5037e70bfbb030a81d54f9c95d6228219a0a181
-linux/template-destination-editor--light.png 134b0eb3e65446fe71f11d82ea6e3c669eee6346
+linux/template-destination-editor--dark.png af17d5ca6cd38fbaab037fb5b63995235799fd28
+linux/template-destination-editor--light.png f17aa2e5a4ff16de41f7e1cd6ffe2922e0a03c09
 linux/template-editor--dark.png 1c92b06304dc9733d4d849b49c7c42e819051337
 linux/template-editor--light.png cdd62d4c83b05f6f1a01a10d7e5ef997500554bc
 linux/template-invalid-custom-model--dark.png 1591df42765c98c0ad787f5dca950373082b5858
@@ -438,8 +440,8 @@ linux/template-number-menu--dark.png b743ee016487ba2a0bd615651d07f4925c3ade9f
 linux/template-number-menu--light.png ccbe7b15a0086bcffc48854a44fd8f1bea781982
 linux/template-shell-permissions--dark.png 32a94990a65e8a9b5fc02635cd2e589fa545d364
 linux/template-shell-permissions--light.png b9336225fbb139fdbbfbc86ef9d14891291cece6
-linux/template-wrapper-help--dark.png 4ad4c470c32117083ec692ba38399f72857a20a3
-linux/template-wrapper-help--light.png 615f06f3fa19fbe0212898b6683059a76d42d90c
+linux/template-wrapper-help--dark.png 35b66522d938eebc99572c0590be8a09b6013995
+linux/template-wrapper-help--light.png 129758e06275a48504c987309e7937af1975a1a1
 linux/templates-dialog--dark.png 2b8b2b0d36b3fa64c9d5286bafb672e81dccf4bd
 linux/templates-dialog--light.png 6f8e4e685fad195985acde14a651c2557e3b5d18
 linux/tensorlake-cleanup-key-refusal--dark.png 35ac5b4005b61fc922b34a2ea709b284e0f91d6b
