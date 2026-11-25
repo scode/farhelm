@@ -1618,6 +1618,12 @@ static SCENES: &[Scene] = &[
         setup: settings_custom_agent_save_refused_setup,
     },
     Scene {
+        name: "settings-custom-agent-catalog-unavailable",
+        size: (800., 900.),
+        draw: empty,
+        setup: settings_custom_agent_catalog_unavailable_setup,
+    },
+    Scene {
         name: "settings-custom-agent-dirty",
         size: (800., 900.),
         draw: empty,

@@ -1653,10 +1653,13 @@ impl SettingsDialog {
                 }
                 panels
             }
-            Section::CustomAgent(_) | Section::AddCustomAgent => self
-                .custom_editor()
-                .map(|editor| editor.clone().into_any_element())
+            Section::CustomAgent(_) | Section::AddCustomAgent => custom_agents::catalog_notice(cx)
                 .into_iter()
+                .chain(
+                    self.custom_editor()
+                        .cloned()
+                        .map(IntoElement::into_any_element),
+                )
                 .collect(),
             Section::Notifications => [
                 self.sounds(preferences, cx),

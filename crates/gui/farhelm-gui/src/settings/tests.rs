@@ -16,8 +16,8 @@ use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::LaunchHarness;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionState, HostView, KeyedEntry, PREFERENCES_KEY,
-    Preferences,
+    Availability, Collection, CollectionChanges, CollectionState, HostView, KeyedEntry,
+    PREFERENCES_KEY, Preferences,
 };
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement as _, Render,
@@ -274,23 +274,44 @@ pub(super) fn heading(cx: &mut VisualTestContext) -> Option<String> {
 /// The previews and sidebar hover help isolate registered text so it cannot reorder the surrounding app words.
 /// The retained draft also exposes the deletion and recovery instructions as a screen-reader status.
 /// A busy key refuses either write with the shared reason and leaves the draft available for retry.
+/// An unreadable catalog exposes the helm's reason on the first read and preserves the page on a failed refresh.
 #[gpui::test]
 fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppContext) {
     const DISPLAY_NAME: &str = "Example Code סוכן";
     const COMMAND: &str = "~/bin/כלי-42";
     let collection = Collection::CustomAgents;
+    let status = |order: &[&str], availability| CollectionChanges {
+        collection,
+        meta: farhelm_proto::ui_channel::CollectionMeta {
+            availability,
+            ..meta(order)
+        },
+        upsert: vec![],
+        remove: vec![],
+    };
+    let unavailable = || Availability::Unavailable {
+        error: "The registration database is locked. Try again.".into(),
+    };
     let (mut helm, cx, _gear) = open_rail_with(
         cx,
         &Preferences::default(),
         vec![CollectionState {
             collection,
-            meta: meta(&[]),
+            meta: status(&[], unavailable()).meta,
             entries: vec![],
         }],
     );
     open_settings(cx);
     click_section(cx, Section::AddCustomAgent);
     assert_eq!(heading(cx).as_deref(), Some("Add custom agent"));
+    let catalog_error = "custom-agent-catalog-error";
+    assert_eq!(
+        label(cx, catalog_error).as_deref(),
+        Some("Could not load custom agents: The registration database is locked. Try again.")
+    );
+    helm.push(status(&[], Availability::Available));
+    settle(cx);
+    assert!(!drawn(cx, catalog_error));
     fill(cx, "custom-agent-name", DISPLAY_NAME);
     fill(cx, "custom-agent-command", COMMAND);
     into_view(cx, "custom-agent-resumption");
@@ -416,6 +437,13 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     helm.reply(register, 201, Some(recovered));
     settle(cx);
     assert_eq!(heading(cx).as_deref(), Some(DISPLAY_NAME));
+    helm.push(status(&["example-code"], unavailable()));
+    settle(cx);
+    assert!(drawn(cx, catalog_error) && drawn(cx, "custom-agent-delete"));
+    assert_eq!(heading(cx).as_deref(), Some(DISPLAY_NAME));
+    helm.push(status(&["example-code"], Availability::Available));
+    settle(cx);
+    assert!(!drawn(cx, catalog_error));
 
     // Changes and Reply arrive together. A deliberate Delete abandons this edit instead of retaining it for recovery.
     fill(cx, "custom-agent-command", "~/bin/unsaved");
