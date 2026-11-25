@@ -63,19 +63,34 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
     // which is the restart gap PLAN_M2.md names.
     retire_supervisor(state.path(), sup, client).await;
     end_all_terminals(state.path()).await;
-    let sup = supervisor_on(state.path())
-        .await
-        .expect("second supervisor");
+    let starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = Arc::clone(&starts);
+    let mut seams = SupervisorSeams::default();
+    // Settlement could erase every trace of an attempted start by the reply.
+    seams.faults.host_start_interrupt = Some(Arc::new(move || {
+        observed.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }));
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        SupervisorTimeouts::default(),
+        seams,
+    )
+    .await
+    .expect("second supervisor");
     assert!(
         sup.owns_state_dir(),
         "the replacement owns the state directory"
     );
     let client = connect_client(&sup).await;
+    assert!(sup.agent_host_for_test(&session.id).await.is_none());
 
     let err = client
         .open_tab(&session.id)
         .await
         .expect_err("a terminal-less session cannot gain a tab");
+    assert_eq!(starts.load(Ordering::Relaxed), 0, "no spec handoff");
     assert!(
         format!("{err:#}").contains("restart"),
         "the refusal must point at restarting the session, got: {err:#}"

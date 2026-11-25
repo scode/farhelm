@@ -351,21 +351,12 @@ consequences.
 
 
 
-- [`trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md`](trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md)
-  — The existing assertions can miss a regression where Delete skips an inaccessible scope belonging to a terminal tab.
 
 
 
-- [`trailing-delete-level-tests-miss-retained-gone-host-refusal.md`](trailing-delete-level-tests-miss-retained-gone-host-refusal.md)
-  — The existing assertions do not show that Delete keeps a session and its launch record if a terminal classified Gone
-  still has a live adopted process.
 
 
-- [`trailing-tab-resume-pass-without-receiving-flood-output.md`](trailing-tab-resume-pass-without-receiving-flood-output.md)
-  — The terminal-tab regression can pass while the paused tab fails to deliver the output produced during its pause.
 
-- [`trailing-paused-tab-test-pass-without-exercising-pause.md`](trailing-paused-tab-test-pass-without-exercising-pause.md)
-  — The tab-isolation test can pass without showing that the tab ever stopped receiving output.
 
 - [`trailing-landing-removed-ambiguous-create-refusal-marker-assertion.md`](trailing-landing-removed-ambiguous-create-refusal-marker-assertion.md)
   — The regression still checks that the session and its retry key are retained, but it stopped checking whether the
@@ -379,19 +370,9 @@ consequences.
 - [`trailing-failed-restart-annotation-test-accepts-errors-before-restoration-is.md`](trailing-failed-restart-annotation-test-accepts-errors-before-restoration-is.md)
   — The regression can pass without proving a failed relaunch restores the user's stopped status.
 
-- [`trailing-real-supervisor-restart-assertions-leave-recovered-socket-identity-unchecked.md`](trailing-real-supervisor-restart-assertions-leave-recovered-socket-identity-unchecked.md)
-  — The executable-path restart tests show that the original host stays alive and the reattached session works. They can
-  miss a changed durable socket address because the two observations are never tied together after reattach.
 
-- [`trailing-strengthened-stop-tree-test-permits-cleanup-after-success-reply.md`](trailing-strengthened-stop-tree-test-permits-cleanup-after-success-reply.md)
-  — The test can pass even if Stop tells the user it finished while the host's child or descendant is still running.
 
-- [`trailing-restart-gap-open-tab-checks-survivors-but-never-witnesses.md`](trailing-restart-gap-open-tab-checks-survivors-but-never-witnesses.md)
-  — The test can pass if a refused Open Tab launches a shell and cleans it up before replying.
 
-- [`trailing-restart-ordering-witness-record-gone-without-reading-old-pid.md`](trailing-restart-ordering-witness-record-gone-without-reading-old-pid.md)
-  — The test can accept a failed fixture PID read as evidence that the previous agent tree had already stopped before
-  the replacement host ran.
 
 
 
