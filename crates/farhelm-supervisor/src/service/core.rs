@@ -12607,9 +12607,7 @@ impl Supervisor {
         // terminal is settled too: a host start an earlier Restart left (one
         // that failed definitively keeps the row as it was) would otherwise
         // go unseen.
-        let outstanding = self
-            .settle_outstanding_launches(session_id, entry.terminal.as_ref())
-            .await?;
+        let outstanding = self.settle_outstanding_launches(&entry).await?;
         // No terminal to probe is not proof of no agent: an ambiguous create
         // (`terminal_less_launch_may_be_live`) may have left one running.
         // Restart no longer asks about it, though. Its status reads unknown,
@@ -12626,7 +12624,7 @@ impl Supervisor {
         // strays either way; the programs it found running are not swept.
         refuse_unconsented_stop(alive_pid.is_some(), stop_if_running, &entry)?;
         if alive_pid.is_some() {
-            let roots = alive_identity.into_iter().chain(outstanding);
+            let roots = alive_identity.into_iter().chain(outstanding.roots);
             if let Err(failure) = stop_live_agent(self, session_id, &entry, roots).await {
                 match failure {
                     // The tree IS stopped and only the bookkeeping is
@@ -12669,7 +12667,7 @@ impl Supervisor {
             let reaped = reap_process_tree(
                 &self.seams.scopes,
                 ScopeUnits::recorded(entry.scope.clone()),
-                outstanding,
+                outstanding.roots,
                 session_id,
                 &SweepTarget::AgentOnly,
                 // Refuse: relaunching while the prior scope may still hold
@@ -12681,6 +12679,7 @@ impl Supervisor {
                 .await;
             reaped.context("reaping the prior run's leftover descendants before relaunching")?;
         }
+        host_restart::retire_gone_launch_records(outstanding.gone_current_records).await;
 
         // A new host starts from the previous terminal's history, read here,
         // after the stop and before the generation is claimed, so that a
@@ -18484,9 +18483,9 @@ pub(crate) mod tests {
     /// Why it matters: a still-loaded scope may hold a daemon the process sweep
     /// cannot see, and relaunching next to it is the "alongside" SPEC.md's
     /// Lifecycle operations forbid; the rule confirmed on 2026-09-28 says such
-    /// an operation fails visibly instead. Specified: for an exited agent whose
-    /// recorded scope never confirms collected, restart returns an error and
-    /// the row keeps its generation.
+    /// an operation fails visibly instead. A replacement whose host ended
+    /// can still have a populated scope. A refused retry keeps the row's
+    /// generation and the record startup uses to rule out an older host.
     #[farhelm_testtrace::test]
     async fn restart_refuses_while_the_prior_scope_is_unconfirmed() {
         let state = StateDir::new();
@@ -18538,11 +18537,8 @@ pub(crate) mod tests {
                         ]),
                     },
                     terminal_address: String::new(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
-                    outcome: LastOutcome::Exited {
-                        exit_code: Some(0),
-                        annotation: None,
-                    },
+                    terminal_kind: crate::store::TerminalKind::Host,
+                    outcome: LastOutcome::Launching,
                     // Restart only resumes, so the row carries a captured
                     // conversation and the resume command to enter it.
                     canonical_cwd: Some(canonical.clone()),
@@ -18553,14 +18549,8 @@ pub(crate) mod tests {
                 None,
             )
             .await
-            .expect("seed the exited session");
-        let mut entry = entry_with(
-            None,
-            LastOutcome::Exited {
-                exit_code: Some(0),
-                annotation: None,
-            },
-        );
+            .expect("seed the unconfirmed launch");
+        let mut entry = entry_with(None, LastOutcome::Launching);
         entry.info.id = id.to_string();
         entry.info.cwd = canonical.clone();
         entry.canonical_cwd = Some(canonical);
@@ -18569,6 +18559,16 @@ pub(crate) mod tests {
             .lock()
             .await
             .insert(id.to_string(), Arc::new(entry));
+        let artifacts = LaunchArtifacts::for_launch(state.path(), id, 0);
+        let record = host_launch::LaunchHostRecord {
+            socket: crate::hosts::free_host_name(state.path()).unwrap(),
+            starter: crate::hosts::HostProcess {
+                pid: std::process::id(),
+                start: 0,
+            },
+        }
+        .encode();
+        std::fs::write(artifacts.host(), &record).expect("retain a record whose host is gone");
 
         let error = sup
             .restart_session(id, false, None, None)
@@ -18588,6 +18588,7 @@ pub(crate) mod tests {
             0,
             "nothing was relaunched"
         );
+        assert_eq!(std::fs::read_to_string(artifacts.host()).unwrap(), record);
     }
 
     /// Closing a tab retries a stale "no user manager" verdict before giving

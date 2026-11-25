@@ -112,6 +112,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   experiment fixed only the supervisor's action checks, which left desktop retries repeating the wrong consent and let
   an old activity sample block recovery Restart. The full fix needs shared evidence for status, confirmations and
   cleanup, with tests covering those boundaries.
+- **Settle an unconfirmed agent start before Stop reports success.** A launch can stay pending with no terminal when
+  Farhelm cannot confirm its terminal host ended. Authorized Stop can record an exit and return success without checking
+  the recorded start. A first stage that still holds the launch spec can start the agent after that reply. Use Restart's
+  recorded-start settlement under the lifecycle claim and after both consent guards. Include pinned agent children in
+  cleanup and keep the launch evidence if the recorded scope or process sweep is unconfirmed. Preserve the distinction
+  between a launch that left no live agent and a Stop that found one. The latter needs the user-stop annotation even if
+  a sweep retry no longer sees the child, and an outcome write failure must report that cleanup already ran. A direct
+  early sweep missed both cases. The final fix needs a durable stop-intent and retry path beyond the triage budget.
+  Extend the retained-create fixture in `host_creates.rs` to drive authorized Stop against an unanswering and a gone
+  host, and add an answering host with a live child. Assert refusal preserves the launch, a completed retry preserves
+  its stop annotation, and a failed write reports the work already done.
+
 - **Keep a failed tab close retryable after the terminal host ends.** Close can end the terminal host and then fail to
   confirm the final sweep for surviving shell processes. It returns an error after forgetting the tab and removing its
   launch record, so Close and the automatic cleanup cannot retry it. If the host end also fails, the error claims the

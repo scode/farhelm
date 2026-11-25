@@ -92,7 +92,7 @@
 //! session then holds no terminal, the old runtime is stopped, and both
 //! generations' hosts stay reachable through their records or tags.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -173,6 +173,25 @@ pub(super) struct RestartSeed {
     blob: Option<Vec<u8>>,
     cols: u16,
     rows: u16,
+}
+
+/// Evidence from settling recorded agent starts, carried into the process sweep.
+/// A gone current host's record still distinguishes an unresolved launch from one that never started.
+#[derive(Default)]
+pub(super) struct SettledAgentLaunches {
+    pub(super) roots: Vec<(u32, u64)>,
+    pub(super) gone_current_records: Vec<PathBuf>,
+}
+
+/// Retire a settled gone host's launch record once its remaining cleanup is confirmed.
+pub(super) async fn retire_gone_launch_records(records: impl IntoIterator<Item = PathBuf>) {
+    for path in records {
+        if let Err(error) = tokio::fs::remove_file(&path).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(path = %path.display(), %error, "could not remove the settled launch record");
+        }
+    }
 }
 
 impl Supervisor {
@@ -516,7 +535,8 @@ impl Supervisor {
     /// and a second stage forked before that is waited out. Then:
     ///
     /// - nothing at its socket: the record (and a socket file a killed host
-    ///   left) is removed;
+    ///   left) is removed, except for the current generation's record, which
+    ///   the caller retires only after confirming its process sweep;
     /// - a host tagged for this session: its program, when it runs, is pinned
     ///   over the connection as a sweep root; the host is left as it was
     ///   (an earlier generation's host is ended at a later start as
@@ -534,10 +554,10 @@ impl Supervisor {
     /// its current host's.
     pub(super) async fn settle_outstanding_launches(
         &self,
-        session_id: &str,
-        held: Option<&HostTerminal>,
-    ) -> anyhow::Result<Vec<(u32, u64)>> {
-        let (held, held_generation) = match held {
+        entry: &SessionEntry,
+    ) -> anyhow::Result<SettledAgentLaunches> {
+        let session_id = entry.info.id.as_str();
+        let (held, held_generation) = match entry.terminal.as_ref() {
             Some(host) => (
                 host.socket().file_name().map(ToOwned::to_owned),
                 match host.tag().map(|tag| &tag.role) {
@@ -547,7 +567,7 @@ impl Supervisor {
             ),
             None => (None, None),
         };
-        let mut roots = Vec::new();
+        let mut settled = SettledAgentLaunches::default();
         for path in self.launch_records_of(session_id).await? {
             // Only the agent's launches after the held host's. An earlier one
             // belongs to a host a confirmed later launch replaced, whose
@@ -596,11 +616,10 @@ impl Supervisor {
             {
                 super::AtRecordedSocket::Gone => {
                     self.remove_ended_socket(&socket).await;
-                    if let Err(error) = tokio::fs::remove_file(&path).await
-                        && error.kind() != std::io::ErrorKind::NotFound
-                    {
-                        warn!(path = %path.display(), %error,
-                            "could not remove the launch record of a start that left nothing");
+                    if generation == Some(entry.generation) {
+                        settled.gone_current_records.push(path);
+                    } else {
+                        retire_gone_launch_records([path]).await;
                     }
                 }
                 super::AtRecordedSocket::Answered {
@@ -616,7 +635,7 @@ impl Supervisor {
                                 info!(session = %session_id, socket = %socket.display(),
                                     "an earlier start of this session's terminal host runs a \
                                      program; stopping it before the restart");
-                                roots.push((root.pid, root.start));
+                                settled.roots.push((root.pid, root.start));
                             }
                             crate::hosts::terminal::Child::Reaped => {}
                             crate::hosts::terminal::Child::Unpinned => {
@@ -636,7 +655,7 @@ impl Supervisor {
                 }
             }
         }
-        Ok(roots)
+        Ok(settled)
     }
 
     /// The installed [`HostRestartFault`]'s answer for `stage`, as a

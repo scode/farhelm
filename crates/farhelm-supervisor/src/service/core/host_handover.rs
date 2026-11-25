@@ -210,6 +210,8 @@
 //!    placeholder, or no terminal for a host that has ended), keeping the
 //!    entry's run and session cells; a runtime it made that is not
 //!    installed is stopped, leaving its host as it was.
+//!    For an agent, a missing socket leaves the prior unavailable handle
+//!    in place while its pinned host or child may still run.
 //!    A tab keeps its id, known creation stamp and scope, or learns those
 //!    from its tag when startup left them unknown. A tab's host found gone
 //!    is kept as a finished handle for the reap to close and remove its
@@ -1669,6 +1671,16 @@ impl Supervisor {
         old: &HostTerminal,
         outcome: RowHost,
     ) -> bool {
+        // The socket can disappear while the host or its child still runs.
+        // Keep the unavailable handle so Delete can use its pins and guarded
+        // verbs still refuse to act on a terminal they cannot read.
+        let keep_old = matches!(&outcome, RowHost::Absent)
+            && (old.adopted_process().is_some_and(|host| {
+                !matches!(
+                    crate::procs::finished_exiting(host.pid, host.start),
+                    Ok(true)
+                )
+            }) || !matches!(old.status().pinned_child_root(), Ok(None)));
         let installed = {
             let _adoption = self.host_adoption.lock().await;
             let mut sessions = self.sessions.lock().await;
@@ -1690,7 +1702,7 @@ impl Supervisor {
                         };
                         Some(host)
                     }
-                    RowHost::Absent => None,
+                    RowHost::Absent => keep_old.then(|| old.clone()),
                 };
                 let replacement = Arc::new(super::SessionEntry {
                     info: current.info.clone(),
@@ -1740,11 +1752,11 @@ impl Supervisor {
                     }
                 }
             }
-            RowHost::Absent => {
+            RowHost::Absent if replacement.terminal.is_none() => {
                 info!(session = %id,
                     "a session's unavailable terminal host turned out to have ended");
             }
-            RowHost::Unavailable(_) => {}
+            RowHost::Unavailable(_) | RowHost::Absent => {}
         }
         true
     }

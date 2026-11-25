@@ -105,9 +105,6 @@ consequences.
   — A Tensorlake checkout launch can admit a newer recipe size than the one shown when the user confirms, if the same
   named recipe is edited before admission.
 
-- [`trailing-authorized-stop-report-completion-without-settling-recorded-launch.md`](trailing-authorized-stop-report-completion-without-settling-recorded-launch.md)
-  — Stop can acknowledge completion of a retained unconfirmed launch without establishing what its recorded
-  terminal-host start left running.
 
 - [`trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md`](trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md)
   — When waking a stopped container or previously failed sandbox fails past 20 seconds or repeats the same error, the
@@ -357,18 +354,12 @@ consequences.
 - [`trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md`](trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md)
   — The existing assertions can miss a regression where Delete skips an inaccessible scope belonging to a terminal tab.
 
-- [`trailing-agent-re-adoption-discard-cleanup-identities-without-confirming-host.md`](trailing-agent-re-adoption-discard-cleanup-identities-without-confirming-host.md)
-  — Recovery can drop the main terminal's saved host and child identities while the recorded host may still run,
-  weakening later Delete cleanup.
 
 
 - [`trailing-delete-level-tests-miss-retained-gone-host-refusal.md`](trailing-delete-level-tests-miss-retained-gone-host-refusal.md)
   — The existing assertions do not show that Delete keeps a session and its launch record if a terminal classified Gone
   still has a live adopted process.
 
-- [`trailing-retry-delete-ambiguous-restart-record-before-scope-is-confirmed.md`](trailing-retry-delete-ambiguous-restart-record-before-scope-is-confirmed.md)
-  — If a failed Restart leaves an unresolved scope, another refused Restart can erase the evidence that blocks startup
-  from reopening the older terminal.
 
 - [`trailing-tab-resume-pass-without-receiving-flood-output.md`](trailing-tab-resume-pass-without-receiving-flood-output.md)
   — The terminal-tab regression can pass while the paused tab fails to deliver the output produced during its pause.

@@ -2302,6 +2302,36 @@ async fn delete_roots_children_after_failed_agent_and_tab_reconnects() {
     }
 }
 
+/// Losing the socket name does not establish that the adopted host or its
+/// pinned child ended. Keep both identities for Delete while Stop still
+/// sees an unreadable terminal.
+#[farhelm_testtrace::test]
+async fn readoption_keeps_agent_process_pins_when_its_socket_disappears() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .unwrap();
+    let (old, test_host) = readoption_runtime(&sup, &state).await;
+    let peer = old.adopted_process().expect("the host's pinned process");
+    let child = old.status().pinned_child_root().unwrap().unwrap();
+    readoption_make_unstable(&old, &test_host).await;
+    std::fs::remove_file(old.socket()).expect("remove the owned socket name");
+    assert!(
+        runs(peer.pid) && runs(child.pid),
+        "the host and child still run"
+    );
+
+    let _claim = sup.lifecycle_locks.claim("s1").await;
+    let outcome = sup.probe_placeholder("s1", 0, &old).await;
+    assert!(matches!(&outcome, RowHost::Absent), "the socket is missing");
+    assert!(sup.install_readopted("s1", 0, &old, outcome).await);
+    let retained = s1_terminal(&sup).await.expect("retained terminal");
+    assert_eq!(retained.adopted_process(), Some(peer));
+    assert_eq!(retained.status().pinned_child_root(), Ok(Some(child)));
+    assert!(retained.probe().is_err(), "the terminal stays unreadable");
+    end_discoverable(test_host);
+}
+
 /// Install an adopted agent at a socket the one-socket retry can discover.
 /// An ordinary temporary socket would look absent to that scan and would
 /// let a test pass through the wrong recovery path.
