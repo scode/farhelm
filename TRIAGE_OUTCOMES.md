@@ -44,24 +44,6 @@
   feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-custom-agent-settings-launch-preview-breaks-bidi-isolation.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC_impl.md "Host-supplied text": "Host text is never concatenated with the app's words
-  in any other way." The code puts the command and Farhelm's flag words into one host value:
-  `HostText::from_host(format!("{command} [--model <model>] [--effort <effort>]{tail}"))`
-  (`crates/gui/farhelm-gui/src/settings/custom_agents.rs:633-643`). The fix follows directly: draw the command as its
-  own host value and the flag words as app text in the same host sentence. It needs no spec change, and the code carries
-  no comment marking this as deliberate. One small detail remains: whether the app words keep the terminal font, which
-  styling the preview's container covers. Estimated diff under 30 lines including a test, well under 100.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes. Size gate: about 100 lines of
-  diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
-  part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## trailing-custom-agent-settings-omits-per-field-unsaved-dots.md
 
 - Outcome: `fix code`.
@@ -99,24 +81,6 @@
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry,
   or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## trailing-settings-custom-agent-nav-tooltip-omits-bidi-isolation.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC_impl.md, "Host-supplied text" (lines 1192-1197): "Host text is never concatenated
-  with the app's words in any other way", and "Hover help may name a host value ... only as a host sentence". The code
-  contradicts it: `crates/gui/farhelm-gui/src/settings/frame.rs:291,312` builds
-  `HoverHelp::tooltip(format!("Show {label} settings"))` from `display.accessible_text()`, which embeds a custom agent's
-  display name into an app string. The fix follows directly: build the tooltip as a `HostSentence` for the custom-agent
-  section. Verified: Confirmed by reading the code. Escaping already happens, so only direction isolation is missing.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code — use
-  `HoverHelp::sentence` for `Section::CustomAgent`; size S.). Size gate: about 100 lines of diff (code, tests and docs,
-  not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
-  back to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says
-  remains.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-templates-editor-allows-generic-custom-on-agent-template.md
@@ -260,24 +224,6 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: other. Add the dirty-delete case as part of 81's fix, and
   discard the rest. Size S.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## trailing-settings-custom-agent-duplicate-host-sentence-id.md
-
-- Outcome: `other`.
-- Assessment: When a custom agent's Settings page is open, its sidebar entry and its page heading both draw a label with
-  the same element ID. Screen-reader nodes are unaffected, but the app's test and automation lookups, which match on the
-  bare ID, become ambiguous. Verified: Confirmed by reading the code. `Section::display_label` hard-codes
-  `custom-agent-name-{id}` (`settings/custom_agents.rs:52`), and `settings/frame.rs` calls it for both the nav row
-  (:290) and the heading. The reviewer's analysis of the vendored GPUI shows the accessibility IDs are scoped and do not
-  collide; only the flat driver ID collides. This breaks the `HostSentence` usage rule in `host_text.rs`, not a spec
-  rule. No user-visible effect.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard — no user-visible effect (or fix code with a slot
-  prefix, size S).
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## settings-footer-can-save-the-wrong-page.md
