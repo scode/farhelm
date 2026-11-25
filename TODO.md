@@ -64,6 +64,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Publish captured agent screens as recoverable pairs.** `scripts/capture-agent-screens.py` copies each scrubbed
+  screen and title from staging into a version directory. An I/O failure or interruption can leave those two files from
+  different captures and remove the staged replacement. Preserve the previous matched pair, retain the validated
+  replacement on failure, and let a later run recover any interrupted publication. Renaming each file atomically still
+  leaves an interruption window between the two renames. Settle the pair publication and recovery contract with the
+  fixture loader, then exercise both an I/O failure and an interrupted replacement using stand-ins.
+
+- **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
+  out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
+  its version, so a case can report a verdict for the wrong binary. Cover both timeouts and cancellation during
+  preparation, including a signal arriving as the process starts. Reuse the same teardown for the updater and the
+  fallback shell, and verify with a local child process that no write can race the version probe or a case.
+
 - **Show missing renders on the portable golden changes page.** A comparison can finish with both ordinary pixel
   differences and scenes that never rendered. The page contains retained differences, so a reviewer cannot infer
   coverage from missing images. Have the renderer report each selected light and dark appearance's render outcome

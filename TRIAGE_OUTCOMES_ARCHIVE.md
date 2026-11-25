@@ -41263,3 +41263,303 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. A control socket setup error reaches the fallback that stops the terminal host owned by the capture.
   Change `wrutovllzooqzoxtrrroysnzywrzsoxz`, bookmark `plan/triage-tooling-nov24/02-cheap-fixes-1`,
   [PR #4809](https://github.com/scode/farhelm/pull/4809/changes).
+
+## capture-drive-error-discards-staged-screens.md
+
+- Outcome: `other`.
+- Assessment: The screen capture drives a real agent through several scenarios that spend real vendor turns, staging
+  each screen as it goes. If the agent's terminal stops answering partway, for example a control request times out after
+  30 seconds, every screen staged for that agent is deleted. The capture of all later agents is skipped, so the
+  maintainer has to rerun everything. Verified: Confirmed by source. `Recorder.attempt` catches only `ScenarioTimeout`
+  (`scripts/capture-agent-screens.py:376-387`). A `HostError` from any request (`agent_screen_host.py:166-173`,
+  including a socket timeout after `REQUEST_SECONDS = 30`) propagates out of `drive`. The `finally` in `capture_harness`
+  (lines 783-791) runs close but then re-raises, so the copy loop (lines 798-799) never runs, and `main` (lines 878-885)
+  removes `work_root`, which holds the staging directory. The trigger is ordinary: a stalled or crashed controller, or
+  an agent that stops reading its terminal. Not observed in a run.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. Treat a drive `HostError` as an unsuccessful harness outcome, still publish the validated
+  screens, and continue with the next harness. Size S (about 20-40 lines plus a stand-in test).
+- Execution: Fixed. A drive controller failure is reported while its previously verified screens are published and later
+  harnesses run. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark `plan/triage-tooling-nov24/03-cheap-fixes-2`,
+  [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## capture-fixture-copy-can-break-screen-pair.md
+
+- Outcome: `other`.
+- Assessment: After a capture, the new agent screens are copied into the committed fixture folder one file at a time. If
+  a copy fails or is interrupted (disk full, Ctrl-C), a screen and its title can come from different captures or be
+  truncated, and the staged originals are deleted afterwards. Verified: Confirmed by source: `shutil.copy2` writes
+  straight into `target` (`scripts/capture-agent-screens.py:798-799`), with no atomic swap and no check that a screen
+  and its title come from the same capture. The damage is to files in a git working tree, which `git checkout` restores,
+  and the fixture tests that run next would likely flag a truncated pair. Neither the trigger nor the damage has been
+  observed.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. It needs an I/O failure mid-copy, and git restores the damaged files. Size S-M if fixed.
+- Execution: Deferred to “Publish captured agent screens as recoverable pairs” in TODO.md. A screen and its title need a
+  shared publication and interruption recovery contract. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark
+  `plan/triage-tooling-nov24/03-cheap-fixes-2`, [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## capture-stop-retry-requires-original-binary.md
+
+- Outcome: `other`.
+- Assessment: When the agent-screen tool cannot confirm that it stopped a run, it keeps the run directory and tells the
+  maintainer to retry the stop. The retry always uses the exact `farhelm` build that started the run. If that build has
+  since been removed or rebuilt elsewhere, the documented retry cannot finish, and the command has no option to name
+  another compatible build. Verified: Confirmed by source. `HostRun.__init__` reads the path from the run directory
+  (`scripts/agent_screen_host.py:88-92`), the fallback stop runs that path (line 242), and `agent-tui.py stop` takes
+  only the run directory (`scripts/agent-tui.py:134-140`, 308-310). Workarounds exist: rewrite the directory's `farhelm`
+  file, or run `farhelm internal stop-terminal-hosts --state-dir <dir>` by hand.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. It needs a stop that already failed, followed by a missing build, and a manual workaround exists.
+  Size S if fixed (a `--farhelm` option on stop, or one line in `.agents/real-agent-tui.md`).
+- Execution: No change. An unavailable original build already leaves a diagnostic and retains the run for the
+  compatible-executable recovery path. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark
+  `plan/triage-tooling-nov24/03-cheap-fixes-2`, [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## centos-gate-can-stage-sibling-binary.md
+
+- Outcome: `other`.
+- Assessment: The CentOS provisioning gate builds the supervisor binary and then tests it from Cargo's output directory.
+  When several checkouts share that directory, which the repository allows, another checkout's build can replace the
+  binary between the build and the test, so the gate reports results for code it did not build. Verified: Confirmed.
+  `scripts/test-provision-centos.sh:64-65` uses `CARGO_TARGET_DIR` directly, and lines 262-271 and 494-500 build, check
+  and hand over that same mutable path. The same flaw in the Podman payload builder was fixed in 4ffa4f72e (#4503) under
+  Q14 ("Fixed under Q14 ... can otherwise mix source revisions in test evidence"), and that commit changed only two
+  lines of this script. Unverified: an actual concurrent replacement.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. It misattributes test evidence, which is the class Q14 fixed for Podman. Build into a
+  checkout-local or run-owned path, or copy the binary before checking it. Size S.
+- Execution: Fixed. The run builds its payload in checkout-local Cargo directories and the ELF check, provision and
+  update use its staged copy. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark
+  `plan/triage-tooling-nov24/03-cheap-fixes-2`, [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## centos-gate-resolves-relative-target-from-caller.md
+
+- Outcome: `other`.
+- Assessment: If someone runs the CentOS gate from outside the checkout with a relative `CARGO_TARGET_DIR`, Cargo builds
+  inside the checkout but the static-binary check looks relative to the caller's directory. The gate then fails with
+  "missing file" after a successful build, or checks some other file that happens to sit at that path. Verified:
+  Confirmed. `scripts/test-provision-centos.sh:64` keeps the path as given, line 263 builds in a subshell after
+  `cd "$repo"`, and line 271 checks the path from the caller's directory. Unverified: that a second file ever exists at
+  the caller-relative path.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code. A crash of a documented command, or a check of the wrong bytes; resolve the path against `$repo`.
+  Size S; it can go with 216.
+- Execution: Fixed. The ELF check and fixture get the same absolute staged path, independent of the caller’s directory
+  and nextest’s Cargo target. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark
+  `plan/triage-tooling-nov24/03-cheap-fixes-2`, [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## capture-test-python-minimum-undocumented.md
+
+- Outcome: `other`.
+- Assessment: The standalone self-test for the screen-capture tool now needs Python 3.11, but its documented command
+  just says `python3`. On an older Python it fails at import rather than with a clear message. Verified: Confirmed.
+  `scripts/test-capture-agent-screens.py` uses `contextlib.chdir` (line 10) and `TestCase.enterContext` (lines 115-224),
+  both new in Python 3.11. The entries at `.agents/validation.md:1164` and `.agents/run-all-tests.md:136` name no
+  minimum. The repository's other tooling already assumes 3.11+ (`.agents/validation.md:58`,
+  `docs/test-run-evidence.md:132`, `scripts/plans-landing/README.md:12`), so the real-world impact is close to nil.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. Every documented tooling path already needs 3.11+. Size S if fixed (one clause).
+- Execution: No change. The documented test host already needs Python 3.11 for its recorder and tooling, and this
+  standalone test has no older Python support promise. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark
+  `plan/triage-tooling-nov24/03-cheap-fixes-2`, [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## worker-staging-failure-leaves-in-progress-evidence.md
+
+- Outcome: `other`.
+- Assessment: When the test worker can't be reached, or uploading the scripts or the working copy fails, the command
+  prints an error and exits 2. The note it leaves in the local output folder, though, still says the run is "staging",
+  as if it were still in progress. Verified: confirmed. `scripts/test-worker/test-worker.sh:212` stamps
+  `outcome: staging`. A failure at line 214 or 216 calls `die`, which exits without restamping. The error is printed and
+  the exit status is right. Only the stamp is stale. The trigger (an unreachable worker) is common, so the "rare
+  glitches" filter does not apply.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard — under Q14, no evidence is lost or misattributed (the stamp names the right invocation) and
+  nothing crashes; size S if fixed (restamp in the two failure branches, about 5 lines plus a test).
+- Execution: No change. The failed staging invocation returns an error before the workload starts, with its own source
+  stamp and no verdict to lose. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark
+  `plan/triage-tooling-nov24/03-cheap-fixes-2`, [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## trailing-tensorlake-sandbox-tests-allocates-before-ledger.md
+
+- Outcome: `other`.
+- Assessment: The Tensorlake test tooling creates a sandbox first and only then writes it into its local cleanup ledger.
+  If the tool is interrupted, or the ledger write fails, between those two steps, a billed sandbox is left running that
+  cleanup doesn't know about. Verified: confirmed (`scripts/tensorlake/sandbox-tests.ts:33-40`), and not new: this is
+  the finding of `worker-allocation-precedes-ownership-ledger.md`, decided 2026-11-21 under Q14 and executed as "No
+  change" in #4559 (`TRIAGE_OUTCOMES_ARCHIVE.md`, "worker-allocation-precedes-ownership-ledger.md": "The finding
+  concerns resource ownership and billing before tests start, outside the evidence and verdict scope approved in
+  triage"). Q14's recommendation for reference was Discard. The file header promises only that a sandbox is recorded
+  "before it is used", which holds.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard — the maintainer already decided no change for this exact finding; size none.
+- Execution: No change. The maintainer already declined this allocation and cleanup ordering change. The window precedes
+  any test evidence. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark `plan/triage-tooling-nov24/03-cheap-fixes-2`,
+  [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## trailing-drift-runner-list-upgrade-only-conflict.md
+
+- Outcome: `other`.
+- Assessment: The drift runner's `--list` option is supposed to list test cases without running agents. Combined with
+  `--upgrade-only`, the runner ignores `--list` and upgrades every installed agent CLI instead. Verified: Confirmed on
+  main (`scripts/run-harness-drift.py:217-235`: `--list` is outside the mutually exclusive group, and `upgrade_only` is
+  checked first). The delivered `drift-model-selection` PR #4781 adds
+  `parser.error("--list cannot be used with --upgrade-only")` (branch `run-harness-drift.py:238-239`). That plan's
+  acceptance criteria name only the `--category`/`--upgrade-only` refusal, so this is not strictly "covered-plan".
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: other. Remove the item once #4781 lands, since the delivered code fixes it, or treat it as already fixed at
+  that point. Size none.
+- Execution: Discarded as already fixed by #4781. Argument parsing rejects --list with --upgrade-only before any vendor
+  action. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark `plan/triage-tooling-nov24/03-cheap-fixes-2`,
+  [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## trailing-harness-upgrades-orphans-updater-grandchildren.md
+
+- Outcome: `other`.
+- Assessment: When an agent CLI's updater or install script hangs until the runner's timeout, or the runner is stopped
+  during the upgrade step, only the top-level process is killed. Its download or unpack children keep running and can
+  replace the agent's files while the drift test for that agent is already running. Verified: Confirmed by source.
+  `run_updater` calls `subprocess.run(..., timeout=UPGRADE_TIMEOUT)` without a new session or group kill
+  (`scripts/harness_upgrades.py:123-139`), and `prepare` (`run-harness-drift.py:174-191`) installs no signal cleanup.
+  Not established: an updater that has actually hung, or a test actually disturbed by an orphan. The likely result is a
+  confusing drift failure or a run against a half-updated CLI. The "Rare, self-correcting glitches" filter is unclear
+  here (orphan processes persist until they finish), so it was not applied.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. It needs a vendor updater that hangs past the timeout. Size S-M if fixed (`start_new_session` plus
+  `killpg`, and signal handling in `prepare`).
+- Execution: Deferred to “Stop the agent updater's process group before running drift cases” in TODO.md. The fix needs
+  teardown across timeouts, fallback and signals during process startup to preserve version attribution. Change
+  `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark `plan/triage-tooling-nov24/03-cheap-fixes-2`,
+  [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## trailing-test-worker-disk-guard-df-du-edge-cases.md
+
+- Outcome: `other`.
+- Assessment: Before each run, the test worker checks free disk space and cleans the checkout's own build output when
+  space is short. The finding lists four edge cases. A negative free-space reading would be read as positive. A failed
+  second reading after a cleanup step counts as zero, which deletes all of this checkout's build output and wrongly
+  reports the disk as full of other workloads. A build folder that could not be removed can be blamed on other
+  workloads. And a fresh checkout with nothing to remove still says it "removed" output. Verified: partly correct. - (1)
+  Likely incorrect on Linux ext4. `scripts/test-worker/remote/env.sh:38` does strip the sign, but ext4's statfs clamps
+  available space at 0 rather than going negative. That comes from kernel knowledge; it was not checked on the worker. -
+  (2) Confirmed in code: the re-reads at `:65` and `:73` are not guarded the way `:56-59` is, and `:67` and `:76` treat
+  an empty reading as 0. It needs the first reading to succeed and to have already called for cleanup, then a later
+  reading to fail, for example when Stop's signal kills `df` mid-cleanup. The worst result is a cold rebuild, plus a
+  false "FULL BY OTHER WORKLOADS". `.agents/test-worker.md:93-97` tells unattended flows to notify the maintainer on
+  that line. - (3) and (4) are confirmed wording imprecisions (`:64,72,77`). - Only the checkout's own build output can
+  ever be removed.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard — no crash and no lost evidence, and the worst case is a cold rebuild in a rare window. If it is
+  fixed, guard only the empty re-reading in (2) and correct the wording in (4); size S (about 15 lines plus a test).
+- Execution: No change. A failed recheck may force a cold build or a misleading cleanup summary before a test starts,
+  with no completed verdict or evidence affected. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark
+  `plan/triage-tooling-nov24/03-cheap-fixes-2`, [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## trailing-release-shot-custom-agent-failure-strands-settings-draft.md
+
+- Outcome: `other`.
+- Assessment: The release-notes screenshot tool captures each picture in turn and resets the app between them. If the
+  v0.45.0 custom-agent picture fails after the agent name is typed, Settings stays open with an unsaved draft that the
+  reset's Escape presses cannot close. Every later picture in the run, including the session-list and other docs pages,
+  then fails with a misleading "layers remain" error. Published pictures are not affected, because a failed run cannot
+  be published. Verified: Confirmed by source. `custom_agent_draft` returns its `discard_draft` cleanup only after both
+  fills succeed (`scripts/docs-shots/release-notes.py:324-340`), and `reset` (`scripts/docs_shots.py:305-324`) only
+  presses Escape. The reviewer's chain (Escape on dirty Settings asks "Save changes before closing?", and Escape on that
+  question means "Keep editing") was taken from the cited GUI code without re-tracing every hop. Not observed in a run.
+  `docs/docs-shots/SPEC.md` promises that a failed shot does not cost later shots, but it is not SPEC.md or
+  SPEC_impl.md.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code, together with 578. Wrap the steps after the first mutation in `try`/`except` with cleanup, as
+  `grouped_sessions` (`release-notes.py:48-80`) already does. Size S.
+- Execution: Fixed. A failed fill closes Settings and discards any staged draft before returning the shot’s error.
+  Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark `plan/triage-tooling-nov24/03-cheap-fixes-2`,
+  [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## release-verifier-retry-overruns-deadline.md
+
+- Outcome: `other`.
+- Assessment: When a brick-test check hits a provider rate limit, the coordinator retries it within the check's time
+  budget. It computes the remaining seconds, then stages files and starts the guest executor. The executor starts a
+  fresh countdown for that same number of seconds, so the staging time is not counted and a retry can run slightly past
+  the check's deadline. Verified: Confirmed. `releasing/mac-vm-test/brick_test.py:1034-1037` passes a relative
+  `remaining` to `task_for` with no recheck at dispatch. The overrun is bounded by staging time, which the Tart command
+  limit bounds. No real overrun was observed.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. It does not crash, lose evidence or change a verdict, and the overrun is small. Size S if fixed
+  (pass an absolute deadline).
+- Execution: No change. A retry can complete past its shared allowance. The retained verdict describes work that ran and
+  the timing-budget defect falls outside the narrow evidence rule. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark
+  `plan/triage-tooling-nov24/03-cheap-fixes-2`, [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).
+
+## trailing-release-shot-guarded-replace-failure-leaves-yolo-question.md
+
+- Outcome: `other`.
+- Assessment: The same tool as 577. If the v0.45.0 guarded-Replace picture fails after Replace is confirmed, the YOLO
+  question stays open under the "bench tokenizer" session row for the rest of the run, because it is drawn inline rather
+  than as a layer the reset can see. Later session-list pictures that show that row can include the stray question or
+  show its actions as unavailable, with no warning. That run has already failed, so nothing it produces is published.
+  Verified: Confirmed by source. The cleanup is registered only after both waits succeed (`release-notes.py:350-374`),
+  and `reset` acts only on `layer-` elements (`docs_shots.py:313-324`). That the question is drawn inline and not as a
+  layer, and that the row's actions are disabled, were taken from the reviewer's GUI citations without full re-tracing.
+  What the later pictures would show was inferred, not observed.
+- Decision: q-tooling, "Robustness gaps in maintainer-only tooling": the maintainer picked "Re-apply the Nov 21 rule
+  (Q14, "Fix only what corrupts evidence or crashes")". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code with 577 (the same try/cleanup pattern, clicking `id:prompt-cancel`). Size S.
+- Execution: Fixed. A failed Confirm reply or missing guarded choice cancels the outstanding question and waits for its
+  title to disappear. Change `zzvsyntqymnmsknyysrlnntrxnsnyysq`, bookmark `plan/triage-tooling-nov24/03-cheap-fixes-2`,
+  [PR #4818](https://github.com/scode/farhelm/pull/4818/changes).

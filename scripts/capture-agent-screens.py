@@ -354,6 +354,8 @@ class Recorder:
     ui_only: bool = False
     captured: list[str] = field(default_factory=list)
     missed: list[str] = field(default_factory=list)
+    # The controller stopped serving this drive. Earlier scrubbed frames still belong to this capture.
+    drive_failed: bool = False
     # The terminal host could not be confirmed stopped. The screens it showed are still written; the run fails so
     # the kept run directory (named in the error) gets looked at.
     stop_failed: bool = False
@@ -809,6 +811,11 @@ def capture_harness(
     print(f"{name} {version}: capturing", file=sys.stderr)
     try:
         drive(term, rec, work)
+    except HostError as error:
+        detail = scrubber.scrub(str(error))
+        print(f"{name} {version}: drive failed: {detail}", file=sys.stderr)
+        rec.missed.append(f"terminal host drive failed: {detail}")
+        rec.drive_failed = True
     finally:
         # A stop that cannot be confirmed must not throw away screens already captured with real vendor turns, nor
         # skip the remaining harnesses: report it, keep the staged screens, and fail the run at the end.
@@ -891,7 +898,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{name}: captured {', '.join(rec.captured) or 'nothing'}")
         for miss in rec.missed:
             print(f"{name}: {miss}")
-    status = 0 if all(rec.captured and not rec.stop_failed for rec in results.values()) else 1
+    status = 0 if all(rec.captured and not (rec.drive_failed or rec.stop_failed) for rec in results.values()) else 1
     if not args.no_test:
         status = run_fixture_tests() or status
     return status

@@ -439,27 +439,8 @@ consequences.
 - [`capture-stop-retry-can-lose-starting-host.md`](capture-stop-retry-can-lose-starting-host.md) — Retrying cleanup
   after an interrupted capture start can remove the recovery directory before the host finishes starting.
 
-- [`capture-drive-error-discards-staged-screens.md`](capture-drive-error-discards-staged-screens.md) — A capture
-  controller error can discard previously verified frames even after shutdown handling runs.
-
-- [`capture-fixture-copy-can-break-screen-pair.md`](capture-fixture-copy-can-break-screen-pair.md) — A fixture copy
-  failure can damage the previous screen and title pair and discard the staged replacement.
-
-- [`capture-stop-retry-requires-original-binary.md`](capture-stop-retry-requires-original-binary.md) — A retained
-  capture cannot use the advertised stop retry when the exact build path disappears, even if a compatible executable is
-  available.
-
-- [`release-verifier-retry-overruns-deadline.md`](release-verifier-retry-overruns-deadline.md) — The release verifier
-  can start a retry whose action allowance extends past the shared checkpoint deadline.
-
 - [`release-verifier-does-not-bind-relaunch-samples.md`](release-verifier-does-not-bind-relaunch-samples.md) — The
   release verifier can accept continuity samples without establishing that they span the app relaunch.
-
-- [`centos-gate-can-stage-sibling-binary.md`](centos-gate-can-stage-sibling-binary.md) — The CentOS gate can stage a
-  sibling checkout's supervisor from a shared Cargo output directory.
-
-- [`centos-gate-resolves-relative-target-from-caller.md`](centos-gate-resolves-relative-target-from-caller.md) — The
-  CentOS gate can verify the wrong file when Cargo output is relative and the command starts outside the checkout.
 
 - [`agent-settings-search-omits-agent-name.md`](agent-settings-search-omits-agent-name.md) — Settings search can give
   different agents' pages or hook controls the same accessible name.
@@ -534,9 +515,6 @@ consequences.
 - [`launcher-yolo-reply-uses-current-question.md`](launcher-yolo-reply-uses-current-question.md) — A permanent
   permission reply checks whichever launcher question is in flight. Whether a later question can receive the older
   launch permission remains unverified.
-
-- [`capture-test-python-minimum-undocumented.md`](capture-test-python-minimum-undocumented.md) — The standalone capture
-  test gained a Python 3.11 dependency while its documented command still only names python3.
 
 - [`environment-delete-title-unreachable-by-keyboard.md`](environment-delete-title-unreachable-by-keyboard.md) — A long
   target title can clip in an environment Delete confirmation where keyboard paging reaches the warning but cannot
@@ -816,9 +794,6 @@ consequences.
   remote probe regression test can pass through the missing-program path both times, without checking how it handles the
   stand-in's exit.
 
-- [`worker-staging-failure-leaves-in-progress-evidence.md`](worker-staging-failure-leaves-in-progress-evidence.md) — A
-  failed worker upload can leave its local evidence directory marked as staging after the command has returned an error.
-
 - [`host-lifecycle-test-misses-other-host-control.md`](host-lifecycle-test-misses-other-host-control.md) — The test
   checks that a launch leaves another host available through a helper. It can pass even if the other host’s actual menu
   is disabled.
@@ -886,10 +861,6 @@ consequences.
 - [`trailing-ssh-setup-existing-tensorlake-mutates-before-lock.md`](trailing-ssh-setup-existing-tensorlake-mutates-before-lock.md)
   — Confirming an SSH-targeted setup plan on an existing Tensorlake host that became suspended can overwrite saved paths
   and replace the suspended actor before taking the host lock or checking suspended state.
-
-- [`trailing-tensorlake-sandbox-tests-allocates-before-ledger.md`](trailing-tensorlake-sandbox-tests-allocates-before-ledger.md)
-  — An interruption or ledger write failure right after sandbox creation in the Tensorlake test harness can leave an
-  untracked worker sandbox running outside cleanup.
 
 - [`trailing-provisioning-service-omits-sealed-host-refusal.md`](trailing-provisioning-service-omits-sealed-host-refusal.md)
   — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
@@ -1207,10 +1178,6 @@ consequences.
   temporary file is left behind in the maintainer's real directory, other rewritten files (such as a refreshed login
   token) are dropped instead of copied back, and the final check that real hook files were untouched is skipped.
 
-- [`trailing-drift-runner-list-upgrade-only-conflict.md`](trailing-drift-runner-list-upgrade-only-conflict.md) — Passing
-  `--list` together with `--upgrade-only` to the drift test runner silently ignores `--list` and upgrades all installed
-  agent CLIs instead of rejecting the conflicting options or listing the cases.
-
 - [`trailing-grok-drift-test-uses-hook-witness-fresh-after-noop-acks.md`](trailing-grok-drift-test-uses-hook-witness-fresh-after-noop-acks.md)
   — The opt-in real-agent drift test for Grok can now accept a quietly ignored turn callback on the resumed turn as
   proof that the restarted Grok session reported its conversation, instead of verifying that the acknowledged report
@@ -1221,11 +1188,6 @@ consequences.
   click time rather than what was drawn on screen, so an undrawn update can change the replacement's title or directory,
   and if the row left the filtered session list right before the press the question closes and does nothing with no
   notice.
-
-- [`trailing-harness-upgrades-orphans-updater-grandchildren.md`](trailing-harness-upgrades-orphans-updater-grandchildren.md)
-  — If a vendor agent updater or fallback shell installer hangs until its timeout, or the drift runner is stopped with
-  SIGTERM during the upgrade phase, only the top-level shell/wrapper process is killed while its download or extraction
-  subprocesses keep running and can mutate the agent binary while the drift test runs.
 
 - [`trailing-hidden-trash-button-retains-animation-handles.md`](trailing-hidden-trash-button-retains-animation-handles.md)
   — If the Trash button stops being shown (because the user opens the Hosts panel or marks sessions) while its archive
@@ -1395,11 +1357,6 @@ consequences.
   sandbox stays open — keeping the Sandboxes section visible even after Clear, or letting you confirm deleting an
   old-key sandbox under the new key.
 
-- [`trailing-test-worker-disk-guard-df-du-edge-cases.md`](trailing-test-worker-disk-guard-df-du-edge-cases.md) — On a
-  full ext4 test worker, or if `df`/`du` fails after cleanup (for example when a run is stopped mid-cleanup), the
-  worker's disk guard can misread negative available space as positive free GB, wipe a healthy tree on a transient
-  second `df` failure, or falsely emit `FULL BY OTHER WORKLOADS` and page the maintainer.
-
 - [`trailing-ticker-leaks-dead-subscribers-under-reduced-motion.md`](trailing-ticker-leaks-dead-subscribers-under-reduced-motion.md)
   — When the user keeps the operating system's Reduce Motion setting turned on, Farhelm's GUI animation list accumulates
   stale entries every time a cursor blink, pulsing indicator, or spinner starts and stops, leaking memory slowly over a
@@ -1510,11 +1467,3 @@ consequences.
 - [`trailing-link-disclosure-module-doc-soft-seam.md`](trailing-link-disclosure-module-doc-soft-seam.md) — The
   link-disclosure module docs say a soft seam is a terminal wrap, but the code and spec also treat a program's
   edge-filling line break as one.
-
-- [`trailing-release-shot-custom-agent-failure-strands-settings-draft.md`](trailing-release-shot-custom-agent-failure-strands-settings-draft.md)
-  — If the v0.45.0 custom-agent release screenshot fails partway, it leaves an unsaved Settings draft that makes every
-  later screenshot in the capture fail.
-
-- [`trailing-release-shot-guarded-replace-failure-leaves-yolo-question.md`](trailing-release-shot-guarded-replace-failure-leaves-yolo-question.md)
-  — If the v0.45.0 guarded-Replace release screenshot fails partway, its YOLO question stays open under a session row
-  that later session-list screenshots show.
