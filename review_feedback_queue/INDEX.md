@@ -35,11 +35,6 @@ consequences.
   guard consumes; a constructed dual-newline layout can make uninstall delete the user's data directory (traced, not
   run; deliberate-setup drop rejected by independent check).
 
-- [`installer-leftover-cleanup-deletes-unverified-previous-app.md`](installer-leftover-cleanup-deletes-unverified-previous-app.md)
-  — After an interrupted install, leftover cleanup deletes the displaced "previous" app without verifying ownership
-  whenever the place is occupied — the exact case the restoration promise was written for; can destroy a foreign app
-  (double-swap trigger rare; single-swap variant deletes the user's reinstallable prior install).
-
 - [`trailing-legacy-claude-settings-v036-hosts-never-cleaned.md`](trailing-legacy-claude-settings-v036-hosts-never-cleaned.md)
   — A Tensorlake host set up by 0.36.0 and not connected under 0.37-0.43 keeps Farhelm's old Claude endpoint URL and
   token in Claude's settings for good; per SPEC_impl.md they can take precedence and receive a new token (Claude Code
@@ -174,10 +169,6 @@ consequences.
   displaced UI channel's Displaced notice can be dropped by a reader/writer drain race, so the displaced window
   reconnects and steals the seat back (latent: a second UI cannot arise in the shipped embedded app).
 
-- [`ui-channel-command-backlog-unbounded-bytes.md`](ui-channel-command-backlog-unbounded-bytes.md) — The UI channel's
-  1000-command backlog allowance bounds count but not bytes, letting a credential-holding client buffer ~4 GiB of
-  command bodies and OOM the helm (hardening).
-
 - [`upload-cancel-mid-publication-reported-not-published.md`](upload-cancel-mid-publication-reported-not-published.md) —
   An upload cancelled while the host is publishing it can be reported to the user as "definitely not published" although
   the host's answer says the outcome is unknown (reachability premise unverified; recorded higher).
@@ -194,14 +185,6 @@ consequences.
   — Two helms provisioning the same host concurrently can delete each other's active staging temporary via the orphan
   sweep (no liveness check); the victim run fails visibly and retryably (cross-helm premise unverified).
 
-- [`provisioning-run-panic-strands-host-busy.md`](provisioning-run-panic-strands-host-busy.md) — A provisioning run task
-  has no panic guard; a mid-run panic leaves the host marked busy with a Running run forever, blocking further
-  Setup/Update/Uninstall until Remove or restart (reachable-panic premise unverified).
-
-- [`probe-group-kill-after-reap-pid-reuse.md`](probe-group-kill-after-reap-pid-reuse.md) — A failing supervisor probe
-  SIGKILLs its saved process-group id after reaping the child, so a reused pid could make the kill hit an unrelated
-  group (microsecond window, route not established; sibling helper kills before reap).
-
 - [`update-identity-unverified-misleading-plan-again-remedy.md`](update-identity-unverified-misleading-plan-again-remedy.md)
   — Update on a host whose supervisor reports no identity (record has one) is accepted then fails with "identity changed
   / plan again", a futile remedy; the real remedies are not named (rare state, safe refusal).
@@ -217,14 +200,6 @@ consequences.
 - [`podman-settle-claim-incumbent-state-non-atomic.md`](podman-settle-claim-incumbent-state-non-atomic.md) — A place
   claim transfer reads the incumbent's live identity refusal non-atomically; if it resolves to Connected in the window,
   the claim still moves (benign routing shift between twins on the same machine; resource guards hold).
-
-- [`supervisor-error-kind-sealed-not-decodable.md`](supervisor-error-kind-sealed-not-decodable.md) — The supervisor's
-  error-kind encoder emits "sealed" but the decoder has no arm for it, so a failed reservation carrying Sealed could
-  never be read back (latent: no current writer emits it; trivial round-trip fix).
-
-- [`reconcile-archive-moves-creation-time-unconfirmed-checkout.md`](reconcile-archive-moves-creation-time-unconfirmed-checkout.md)
-  — reconcile_archive lacks the creation-time-unconfirmed refusal archive_move has, so recovering a legacy interrupted
-  archive can move an unconfirmed checkout to trash (displaced/recoverable, not destroyed; legacy-journal premise).
 
 - [`trailing-drift-copyback-runs-while-agent-may-live.md`](trailing-drift-copyback-runs-while-agent-may-live.md) — A
   Grok or Antigravity drift case copies refreshed vendor files back once its terminal hosts end, even when the agent may
@@ -243,17 +218,9 @@ consequences.
   of a refreshed vendor login is only a console note and the drift case still reports passed, so the maintainer may be
   signed out unnoticed.
 
-- [`trailing-antigravity-restart-selector-after-custom-dashdash.md`](trailing-antigravity-restart-selector-after-custom-dashdash.md)
-  — With Custom permission flags ending in `--`, Antigravity Restart places the conversation choice after `--`, so
-  Restart cannot resume and the new drift case always fails (pre-existing product defect).
-
 - [`trailing-drift-cursor-initial-prompt-never-passes.md`](trailing-drift-cursor-initial-prompt-never-passes.md) —
   Cursor's launch-prompt drift case always ends "could not run" even when Cursor accepts the prompt, so the check can
   never pass.
-
-- [`trailing-goose-named-start-reports-contrary-to-spec.md`](trailing-goose-named-start-reports-contrary-to-spec.md) — A
-  named Goose start into a conversation Farhelm created appears to capture it and regain plain Restart, contrary to the
-  launcher text and SPEC.md (pre-existing; admission premise unverified).
 
 - [`trailing-drift-capture-timing-check-too-coarse.md`](trailing-drift-capture-timing-check-too-coarse.md) — The
   capture-timing drift check treats prompt-timed and reply-timed agents alike, so a vendor drift between "at the first
@@ -389,12 +356,6 @@ consequences.
 
 - [`trailing-repository-history-failure-shown-as-no-matches.md`](trailing-repository-history-failure-shown-as-no-matches.md)
   — A failed repository-history read shows "No repository matches" and is not retried while the launcher is open.
-
-- [`trailing-restart-wake-failure-keeps-launch-remedies.md`](trailing-restart-wake-failure-keeps-launch-remedies.md) —
-  Restart with wake failures tell the user to choose the host again, which Restart with does not allow.
-
-- [`trailing-claude-json-over-1mib-never-settles.md`](trailing-claude-json-over-1mib-never-settles.md) — A recipe host
-  whose `~/.claude.json` exceeds 1 MiB shows a first-run-pending warning on every connection forever.
 
 - [`trailing-symlinked-claude-json-permanent-warning.md`](trailing-symlinked-claude-json-permanent-warning.md) — A
   symlinked `~/.claude.json` leaves a permanent amber warning that misnames the cause.
