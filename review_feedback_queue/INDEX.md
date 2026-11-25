@@ -235,11 +235,6 @@ consequences.
   actions menu header and the quick switcher's agent column, instead of the custom agent's current display name (or its
   saved ID after the registration is deleted).
 
-- [`trailing-settings-search-omits-registered-custom-agent-sections.md`](trailing-settings-search-omits-registered-custom-agent-sections.md)
-  — Searching in Settings for a registered custom agent's display name or ID always returns no matches and hides every
-  registered custom agent from the Settings sidebar, even though each registered custom agent is its own Settings
-  section.
-
 - [`trailing-template-apply-custom-to-custom-misses-switched-agent.md`](trailing-template-apply-custom-to-custom-misses-switched-agent.md)
   — If you switch in the launcher from a guarded agent (like Codex) to a custom agent — raising the red
   permission-escalation banner with Undo — and then apply a launch template that selects a different custom agent, the

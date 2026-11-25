@@ -392,6 +392,8 @@ linux/settings-recipes-rows--dark.png cc0c649422085ebf5bc338f0d8d7827681844f3a
 linux/settings-recipes-rows--light.png d09bcf25c9aa3e2a4722357dba7d1af673808846
 linux/settings-search--dark.png b4656b0f44bb4c8f506807cf565cee3412750947
 linux/settings-search--light.png 323438579cf4990efb40810f66cfb6204af03407
+linux/settings-search-custom-agents--dark.png 59b3061c8f555cd0924bbc5565f68e7dc18723aa
+linux/settings-search-custom-agents--light.png 88cdfeee6bbcdca5b07e96b6c045d7eb78bf9095
 linux/settings-search-empty--dark.png 1cb1b4555fb8b411b42945fa7a26a905b69f67ff
 linux/settings-search-empty--light.png ffaeed4a1e238fcb8c38fc2ef24bd1120664c78f
 linux/settings-sessions--dark.png 880b612a91b9a04b84bfe3de02757b30633831b7

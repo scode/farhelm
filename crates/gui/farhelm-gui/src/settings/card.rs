@@ -55,7 +55,7 @@ pub(super) fn surface(cx: &App) -> Div {
 
 /// A card's title, optional note and action share a heading. The action stays at the end as the note wraps.
 pub(super) fn heading(
-    title: &'static str,
+    title: impl IntoElement,
     note: Option<&'static str>,
     action: Option<AnyElement>,
     cx: &App,

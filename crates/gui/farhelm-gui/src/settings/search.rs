@@ -1,10 +1,11 @@
-//! Settings searches the app's words. The catalog is independent of which sections happen to be mounted, so typing
-//! never loads a section or queries a host. Only opening a result runs the section's usual reads.
+//! Settings searches the app's words and the pushed custom agent registrations. Searching never mounts a section or
+//! queries a host. Only opening a result runs the section's usual reads.
 
 #[cfg(test)]
 mod tests;
 
 use farhelm_input_mapping::Platform;
+use farhelm_proto::custom_agents::CustomAgent;
 use gpui::{
     AnyElement, App, Context, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement,
     ParentElement as _, Role, ScrollHandle, StatefulInteractiveElement as _, Styled as _,
@@ -24,9 +25,9 @@ use crate::components::{
 };
 use crate::focus::{self, Mark};
 use crate::hook_setup::HookAgent;
-use crate::host_text::match_ranges as highlights;
-use crate::layers;
+use crate::host_text::{Line, match_ranges as highlights};
 use crate::theme::{self, Palette, metrics};
+use crate::{layers, session};
 
 /// Where a result lands after showing its section. The live view owns the handle and knows when it can take focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,11 +50,14 @@ pub(super) enum Target {
 }
 
 /// An entry's stable element id refers to the setting or its group, never to the position in the results.
+#[derive(PartialEq, Eq)]
 struct Entry {
     section: Section,
     id: &'static str,
     label: &'static str,
     help: Vec<String>,
+    /// Registration values are searchable without putting a host command in a result's help or label.
+    registration_words: Vec<String>,
     target: Target,
 }
 
@@ -70,6 +74,7 @@ impl Entry {
             id,
             label,
             help: help.into_iter().map(Into::into).collect(),
+            registration_words: Vec::new(),
             target,
         }
     }
@@ -88,7 +93,12 @@ impl Entry {
     fn matches(&self, words: &[String]) -> bool {
         let fields: Vec<_> = [self.section.label(), self.synonyms(), self.label]
             .into_iter()
-            .chain(self.help.iter().map(String::as_str))
+            .chain(
+                self.help
+                    .iter()
+                    .chain(&self.registration_words)
+                    .map(String::as_str),
+            )
             .map(fold)
             .collect();
         words
@@ -157,8 +167,8 @@ impl Entry {
             (Section::Notifications, Target::Top) if self.id == SOUNDS_ID => "sound bell",
             (Section::Notifications, _) => "push phone",
             (Section::App, _) => "update upgrade version",
-            (Section::AddCustomAgent, _) => {
-                "wrapper registration harness conversation report resume"
+            (Section::CustomAgent(_) | Section::AddCustomAgent, _) => {
+                "custom agents wrapper registration harness conversation report resume"
             }
             _ => "",
         }
@@ -433,8 +443,8 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                 ),
             ]),
             Section::AddCustomAgent => entries.push(add(
-                section.button_id(),
-                "Custom agents",
+                "custom-agent-command",
+                "Command",
                 &[super::custom_agents::COMMAND_HELP],
                 Target::Top,
             )),
@@ -536,12 +546,64 @@ impl Search {
             .count()
     }
 
+    /// Keep an open query in step with pushes without resetting its selection on an unrelated redraw.
+    pub(super) fn refresh_custom_catalog(&mut self, cx: &App) {
+        if self.active() && self.update_custom_entries(cx) {
+            self.match_current_query(cx);
+        }
+    }
+
+    /// Place pushed registrations before Add as in navigation. A failed read keeps the last successful list.
+    fn update_custom_entries(&mut self, cx: &App) -> bool {
+        let mut entries = Vec::new();
+        if let Some(store) = session::current_store(cx) {
+            for agent in store.read(cx).collections().ordered::<CustomAgent>() {
+                let mut entry = Entry::new(
+                    Section::CustomAgent(agent.id.clone()),
+                    "custom-agent-command",
+                    "Command",
+                    [super::custom_agents::COMMAND_HELP],
+                    Target::Top,
+                );
+                entry.registration_words = vec![
+                    agent.display_name.clone(),
+                    agent.id.clone(),
+                    agent.command.clone(),
+                ];
+                entries.push(entry);
+            }
+        }
+        let end = self
+            .catalog
+            .iter()
+            .position(|entry| entry.section == Section::AddCustomAgent)
+            .unwrap_or(self.catalog.len());
+        let start = self
+            .catalog
+            .iter()
+            .position(|entry| matches!(entry.section, Section::CustomAgent(_)))
+            .unwrap_or(end);
+        if self.catalog[start..end] == entries {
+            return false;
+        }
+        drop(self.catalog.splice(start..end, entries));
+        true
+    }
+
     /// Every edit selects the first result, including one that replaces a query with no matches.
     pub(super) fn edited(&mut self, cx: &App) {
         self.words = self.input.text(cx).split_whitespace().map(fold).collect();
         // Repeated terms impose the same requirement and would otherwise repeat highlight work on every redraw.
         self.words.sort_unstable();
         self.words.dedup();
+        if self.active() {
+            // Enter can arrive before the first result frame, so the edit itself needs the pushed registrations.
+            self.update_custom_entries(cx);
+        }
+        self.match_current_query(cx);
+    }
+
+    fn match_current_query(&mut self, cx: &App) {
         self.matches = if self.active() {
             self.catalog
                 .iter()
@@ -688,12 +750,20 @@ impl Search {
         {
             let section = &self.catalog[group[0]].section;
             let id = format!("settings-search-group-{}", section.key());
+            let title = match section {
+                Section::AddCustomAgent => "Add custom agent".into(),
+                _ => match section.display_label(cx) {
+                    Line::Sentence(name) => name.underline_template_matches(query.trim()).into(),
+                    title => title,
+                },
+            };
+            let name = title.accessible_text();
             rows.push(
-                card::heading(section.label(), None, None, cx)
+                card::heading(title, None, None, cx)
                     .id(id.clone())
                     .debug_selector(|| id)
                     .role(Role::Heading)
-                    .aria_label(section.label())
+                    .aria_label(name)
                     .pb(px(6.))
                     .when(position != 0, |heading| heading.pt(px(12.)))
                     .into_any_element(),

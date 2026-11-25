@@ -670,8 +670,10 @@ impl Section {
     }
 
     /// Search uses the same stable suffix as the navigation button.
-    fn key(&self) -> &'static str {
-        self.button_id().trim_start_matches("settings-section-")
+    fn key(&self) -> String {
+        self.nav_button_id()
+            .trim_start_matches("settings-section-")
+            .to_owned()
     }
 
     /// Element IDs stay the same as settings move within a page or groups change position.
@@ -1748,6 +1750,7 @@ impl Render for SettingsDialog {
         let palette = theme::palette(cx);
         let store = session::current_store(cx);
         self.sync_custom_agents(store.as_ref(), window, cx);
+        self.search.refresh_custom_catalog(cx);
         let preferences = store
             .as_ref()
             .and_then(|store| preferences(store.read(cx).collections()))
