@@ -155,29 +155,6 @@
   record which way it went. Recommendation for reference: discard (or fix code) — coverage only; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## settings-footer-can-save-the-wrong-page.md
-
-- Outcome: `fix code`.
-- Assessment: The Settings footer's Save and Discard act on whichever page is current when the press is handled, not the
-  page drawn under the pointer. If the page changes and a press lands before the next frame is shown, Save can save the
-  other page's draft, including replacing the one stored Tensorlake API key with the other key form's draft. Verified:
-  confirmed by source; timing unmeasured. Both footer closures call `save_page`/`discard_page`, which read `self.shown`
-  live (`editing.rs:301-314,337-355`). SPEC.md "One GUI at a time" (5788-5789): "A pointer or keyboard action uses the
-  target, consent and preconditions from the frame the user was shown, or is ignored when that frame has not yet been
-  shown or its target is no longer in view." SPEC_impl.md 995-999 says the same for controls that send requests
-  directly. The fix needs a design choice (capture the section at render vs. a shared `when_shown` gate, since GPUI
-  draws a dirty frame before key dispatch), so not clearly settled. Not the sub-second-race filter: the consequence can
-  replace a stored credential.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code — bind footer actions to the drawn section and refuse a press
-  for an unshown page; with 43; size S-M. Size gate: about 100 lines of diff (code, tests and docs, not counting this
-  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## hook-settings-toggle-uses-unshown-state.md
 
 - Outcome: `fix code`.
@@ -197,24 +174,6 @@
   change); size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
   or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
   file and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
-## settings-footer-can-discard-the-wrong-page.md
-
-- Outcome: `fix code`.
-- Assessment: When a Settings save is refused, Settings jumps to the refused form's page. A Discard press that was aimed
-  at the footer of the page you were on, landing before the new page is shown, discards the refused page's draft
-  instead, before you have seen its error. Verified: confirmed by source. A refusal takes the batch and calls `show` for
-  the failing section (`editing.rs:457-468,544-562`); the footer Discard reads `self.shown` at press time
-  (`editing.rs:301-310,337-339`). Same governing text as 7. Not the sub-second-race filter: a discarded draft is neither
-  a refillable cache nor convenience history, which that filter requires.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code — with 7 (same binding); size S. Size gate: about 100 lines of
-  diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## settings-close-can-save-unlisted-drafts.md

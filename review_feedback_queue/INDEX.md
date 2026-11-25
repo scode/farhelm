@@ -19,8 +19,6 @@ consequences.
 - [`settings-queued-save-can-commit-later-draft.md`](settings-queued-save-can-commit-later-draft.md) — A queued Settings
   save can commit later edits to an approved form, including changes that clear a saved alert token.
 
-- [`settings-footer-can-save-the-wrong-page.md`](settings-footer-can-save-the-wrong-page.md) — A stale Settings footer
-  can save the wrong page’s draft and overwrite the stored Tensorlake key.
 
 - [`hook-settings-toggle-uses-unshown-state.md`](hook-settings-toggle-uses-unshown-state.md) — Space can save the
   all-hosts hook opt-in while the switch still shows the on state the user intended to turn off.
@@ -47,8 +45,6 @@ consequences.
 
 ## High priority: material UX degradation
 
-- [`settings-footer-can-discard-the-wrong-page.md`](settings-footer-can-discard-the-wrong-page.md) — A save refusal can
-  switch pages before a stale Discard press runs, making it discard a different draft.
 
 - [`settings-close-can-miss-detached-credential-save.md`](settings-close-can-miss-detached-credential-save.md) —
   Settings can close without waiting for a credential save whose editor is already closed.
