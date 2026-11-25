@@ -80,19 +80,28 @@ const EDITOR_SCENE_TEMPLATES: [(&str, &str); 3] = [
     ),
 ];
 
-/// The editor scenes' snapshot: [`EDITOR_SCENE_TEMPLATES`] and number keys 1 and 8 on `codex-deep` and
-/// `quick-claude`, nothing marked ⚡. The template list's scene shows the same reference stack.
-fn editor_scene_collections() -> Vec<CollectionState> {
+/// The editor scenes' snapshot and number keys 1 and 8. The template launcher puts its marked template first to
+/// capture both shortcut cues on the selection and the preparation tag on an ordinary row.
+fn editor_scene_collections(marked: Option<&str>) -> Vec<CollectionState> {
+    let mut templates = editor_scene_templates();
+    let mut preferences = serde_json::json!({
+        "template_shortcuts": {"1": "codex-deep", "8": "quick-claude"},
+    });
+    if let Some(marked) = marked {
+        preferences["quick_launch_template"] = serde_json::json!(marked);
+        templates
+            .meta
+            .order
+            .sort_by_key(|name| name.as_str() != marked);
+    }
     vec![
-        editor_scene_templates(),
+        templates,
         CollectionState {
             collection: Collection::Preferences,
             meta: test_support::meta(&[PREFERENCES_KEY]),
             entries: vec![KeyedEntry {
                 key: PREFERENCES_KEY.into(),
-                value: serde_json::json!({
-                    "template_shortcuts": {"1": "codex-deep", "8": "quick-claude"},
-                }),
+                value: preferences,
             }],
         },
     ]
@@ -207,7 +216,7 @@ fn open_template_editor(
 ) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    let mut snapshot = editor_scene_collections();
+    let mut snapshot = editor_scene_collections(None);
     let special = match template {
         "old-custom" => {
             snapshot.push(super::custom_agent_state());
@@ -313,15 +322,12 @@ pub(super) fn template_number_menu_scene(
     div().into_any_element()
 }
 
-/// The template list as Cmd+J opens it (reference `template-launcher`): the editor scenes' snapshot
-/// ([`editor_scene_collections`]), so `codex-deep` and `quick-claude` show their key chips and `api-repo`, first, is
-/// selected; focus in the search field. The list asks the session list to show Sessions after a pick, and the scene has
-/// none, so it is handed a list that is gone. The fake, the connection and the watch are kept for the scene's life,
-/// like Settings'.
+/// The selected `codex-deep` shows the inverse ⚡ and key 1. The `api-repo` row has a long summary and needs New, so
+/// the capture shows the ordinary tag staying visible through truncation. `quick-claude` shows key 8.
 pub(super) fn template_launcher_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    helm.connect(editor_scene_collections());
+    helm.connect(editor_scene_collections(Some("codex-deep")));
     let handle = window.window_handle();
     super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {

@@ -16,7 +16,9 @@
 //! this module is what the switcher needs from the templates side for its section, its Quick launch row and its
 //! templates-only mode, the Cmd+J list: what a pick does in each, and the row's label and action.
 
-use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateFields};
+use farhelm_proto::launcher::{
+    LaunchTemplate, LauncherKind, TemplateFields, stacked_quick_launch_eligible,
+};
 use gpui::{App, Window};
 
 use super::dispatch::{self, Origin, Reference};
@@ -72,9 +74,8 @@ impl TemplateMark {
     }
 }
 
-/// One template as a list row may show it. A row carries the name, the summary, the ⚡ mark and the number key, and the
-/// caller decides what to draw: the old switcher's templates section drew the name and summary only, and the Cmd+J
-/// list added the ⚡ and number-key badges (SPEC.md names the shortcuts for Cmd+J's rows alone).
+/// One template as a list row may show it. The caller chooses which shortcuts and preparation cues make sense for
+/// its pick. Cmd+J tries to launch while a `tl:` pick always hands off to New.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
     /// The template's name, exactly as stored: host text, to be drawn escaped, and the name a pick passes back.
@@ -87,6 +88,9 @@ pub struct Row {
     pub marked: bool,
     /// The number key the template holds, if any ("1" to "9", "0").
     pub key: Option<&'static str>,
+    /// The dispatch's synchronous kind check says this template needs New to complete it. A template that passes
+    /// this check can still need New if preparation cannot resolve one of its choices against the current catalog.
+    pub(crate) opens_new: bool,
 }
 
 /// The text a launcher-search or switcher `query` asks templates for: what follows a leading `tl:`, trimmed, or `None`
@@ -132,6 +136,7 @@ pub fn rows(filter: &str, cx: &App) -> Result<Vec<Row>, HostSentence> {
             mark: TemplateMark::from_fields(Some(&template.fields)),
             marked: bindings.is_marked(&template.name),
             key: bindings.key_of(&template.name),
+            opens_new: !stacked_quick_launch_eligible(std::iter::once(&template.fields)),
         })
         .collect())
 }

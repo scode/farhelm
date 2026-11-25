@@ -65,8 +65,8 @@
 //! - **Templates.** A query that starts with `tl:` in any ASCII case ([`template_rows::template_query`]) turns the
 //!   card into the templates section: "Templates" for the heading, the templates whose names hold the rest of the
 //!   query in the helm's order ([`template_rows::rows`], the launcher's own template search) in place of the
-//!   sessions, and no New or Quick launch row. Each row draws the name and summary only, as the old section did; the
-//!   ⚡ and number-key badges were the Cmd+J list's. No match says "No templates match", and a template collection
+//!   sessions, and no New or Quick launch row. Each row draws the mark, name and summary. No match says
+//!   "No templates match", and a template collection
 //!   the helm cannot read says "Couldn't load templates:" and the helm's words in place of the rows. The templates are
 //!   pushed state, read from the store on every frame, so they need no read of their own: the section works while
 //!   the session read is loading or after it failed (SPEC.md: "After a failed session read, New and template search
@@ -88,8 +88,9 @@
 //!   Cmd+J paragraph), as the old app's `SwitcherMode::Templates` was: opened by its own chord under the same refusals
 //!   and one more, any launcher held out of sight ([`open`] says which), with the same focus, Escape and outside-press
 //!   rules, and named "Template launcher". It sends no session read and shows no session, New or Quick launch row: the
-//!   whole query, with no prefix, filters templates as `tl:` does, and each row adds the template's ⚡ and number-key
-//!   chords to its name and summary. A template named exactly the trimmed query (case-sensitively) is selected over an
+//!   whole query, with no prefix, filters templates as `tl:` does. Rows add the template's ⚡ mark and number-key chip
+//!   when assigned, and an "opens New" tag when the launch kind still needs a choice. A template named exactly the
+//!   trimmed query (case-sensitively) is selected over an
 //!   earlier match until the arrows choose another row, so typing a whole name and pressing Enter starts that template
 //!   even when another name contains it. The selection is kept as a template's name, not a row's place, because the rows
 //!   follow the templates the helm pushes while the list is open and a pick launches unseen. What is drawn selected is
@@ -173,12 +174,8 @@ pub(crate) const TEMPLATE_ROW_ID: &str = "quick-switcher-template-";
 pub(crate) const TEMPLATE_ROW_HELP: &str =
     "Open New with this template applied; nothing launches yet";
 
-/// A template row's hover help in the template list, the old templates-only mode's `data-tooltip`: there a pick starts
-/// the template rather than opening New.
+/// The template list's help for a row whose saved choices can start a session. Partial templates use New's help.
 pub(crate) const TEMPLATE_LIST_ROW_HELP: &str = "Start a session from this template";
-
-/// `.quick-switcher-template-keys`: the gap between a template row's key chips.
-const KEY_CHIP_GAP: Pixels = px(5.);
 
 // ---- Matching -----------------------------------------------------------------------------------------------------------
 
@@ -967,7 +964,7 @@ impl Render for QuickSwitcher {
                             let weak = weak.clone();
                             let name = row.name.clone();
                             let selected = selected == Some(Selected::Template(position));
-                            template_row(row, selected, self.mode, palette)
+                            template_row(row, selected, self.mode, row_context.inner_width, palette)
                                 .on_click(move |_, window, cx| {
                                     let _ = weak.update(cx, |switcher, cx| {
                                         switcher.pick_template(&name, window, cx)
@@ -1366,16 +1363,15 @@ fn footer_hints(mode: Mode, palette: &Palette) -> AnyElement {
 
 // ---- Command rows ---------------------------------------------------------------------------------------------------
 
-/// One template's row in the templates section (the old `.quick-switcher-template`, one column): its name at weight
-/// 600 over its summary in the quiet 12-pixel ink, both host text where the template's author wrote them. The summary
-/// uses the same one-line ellipsis as the Templates list ([`summary::line`]). On the selected row it takes the dimmer
-/// inverse ink. The name supplies the row's accessible label and stable id.
-///
-/// In the template list ([`Mode::Templates`]) the row's help says a pick starts the template, and a third line holds
-/// its shortcuts as key chips (the old `.quick-switcher-template-keys`): the ⚡ chord when it holds ⚡, then its number
-/// key's chord, in this platform's form, as the old list showed only there (SPEC.md: "Rows show the template name,
-/// summary and its ⚡ or number shortcut when assigned"). A template holding neither has no third line.
-fn template_row(row: &TemplateRow, selected: bool, mode: Mode, palette: &Palette) -> OptionRow {
+/// The two template lists share the leading mark and text. Only Cmd+J tries to launch on a pick. Its clues stay
+/// visible at the right edge even when a long summary needs an ellipsis.
+fn template_row(
+    row: &TemplateRow,
+    selected: bool,
+    mode: Mode,
+    inner_width: Pixels,
+    palette: &Palette,
+) -> OptionRow {
     let name = HostText::from_host(row.name.as_str());
     let id: SharedString = format!("{TEMPLATE_ROW_ID}{}", row.name).into();
     let summary_id = format!("quick-switcher-summary-{}", row.name);
@@ -1385,41 +1381,90 @@ fn template_row(row: &TemplateRow, selected: bool, mode: Mode, palette: &Palette
     } else {
         palette.fg_1
     };
-    let (help, chords) = match mode {
-        Mode::Sessions => (TEMPLATE_ROW_HELP, Vec::new()),
-        Mode::Templates => {
-            let mark = row.marked.then(|| QUICK_LAUNCH_SHORTCUT_NAME.to_owned());
-            let key = row.key.map(templates::number_key_name);
-            (
-                TEMPLATE_LIST_ROW_HELP,
-                mark.into_iter().chain(key).collect(),
-            )
-        }
+    let help = match mode {
+        Mode::Sessions => TEMPLATE_ROW_HELP,
+        Mode::Templates if row.opens_new => TEMPLATE_ROW_HELP,
+        Mode::Templates => TEMPLATE_LIST_ROW_HELP,
     };
-    let option = OptionRow::new(id, label, HoverHelp::tooltip(help), Role::ListBoxOption)
-        .selected(selected)
-        .child(
+    let (icon, ink) = row.mark.appearance(selected, palette);
+    // A bare tl: can show the whole catalog. There are no trailing cues to measure in that mode.
+    let text_width = (mode == Mode::Sessions)
+        .then_some((inner_width - px(row_marks::GLYPH_WIDTH + 7.)).max(px(0.)));
+    let mut contents = command_row_content(
+        Some(row_marks::cell(
+            format!("quick-switcher-template-mark-{}", row.name).into(),
+            icon,
+            ink,
+        )),
+        text_width,
+        [
             div()
                 .min_w_0()
                 .truncate()
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(host_text::element(&name)),
-        )
-        .child(
+                .font_weight(FontWeight::MEDIUM)
+                .child(host_text::element(&name))
+                .into_any_element(),
             summary::line(summary_id, &row.summary)
                 .text_size(metrics::TEXT_SM)
-                .text_color(theme::color(quiet)),
-        );
-    if chords.is_empty() {
-        return option;
-    }
-    option.child(
-        div().flex().flex_wrap().gap(KEY_CHIP_GAP).children(
-            chords
-                .into_iter()
-                .map(|chord| key_chip(chord, quiet, palette)),
-        ),
+                .text_color(theme::color(quiet))
+                .into_any_element(),
+        ],
     )
+    .items_center();
+    if mode == Mode::Templates && (row.opens_new || row.marked || row.key.is_some()) {
+        contents = contents.child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(7.))
+                .children(row.opens_new.then(|| opens_new_tag(selected, palette)))
+                .children(row.marked.then(|| {
+                    div()
+                        .id(format!("quick-switcher-bolt-{}", row.name))
+                        .role(Role::Image)
+                        .aria_label("Quick launch")
+                        .flex_none()
+                        .child(command_glyph(
+                            Icon::BoltFilled,
+                            row_ink(selected, palette, palette.warn_bright),
+                        ))
+                }))
+                .children(
+                    row.key
+                        .map(|key| key_chip(templates::number_key_name(key), quiet, palette)),
+                ),
+        );
+    }
+    OptionRow::new(id, label, HoverHelp::tooltip(help), Role::ListBoxOption)
+        .selected(selected)
+        .child(contents)
+}
+
+/// The preparation tag is shorter and rounder than a shortcut chip, so it reads as a cue rather than a key.
+fn opens_new_tag(selected: bool, palette: &Palette) -> gpui::Div {
+    let (ink, edge, ground) = if selected {
+        (
+            palette.on_fill,
+            theme::SELECTED_TEMPLATE_TAG_BORDER,
+            theme::SELECTED_TEMPLATE_TAG_GROUND,
+        )
+    } else {
+        (palette.fg_1, palette.border_dim, palette.bg_1)
+    };
+    div()
+        .flex_none()
+        .px(px(6.))
+        .py(px(2.))
+        .border_1()
+        .border_color(theme::color(edge))
+        .bg(theme::color(ground))
+        .rounded_full()
+        .text_size(px(11.))
+        .line_height(px(14.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::color(ink))
+        .child("opens New")
 }
 
 /// Reserve the trailing width for the complete quick-launch shortcut, even when a template name truncates.

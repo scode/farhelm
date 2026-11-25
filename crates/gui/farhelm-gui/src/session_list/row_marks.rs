@@ -62,7 +62,7 @@ pub(super) const PERMISSION_ID_SUFFIX: &str = "-permission";
 
 /// `.sidebar-glyph`'s box: each of the agent track's two cells is this wide and the row's line this tall. The mark is
 /// drawn in a square of the cell's width, centred, as the old `viewBox 0 0 12 12` in a 10 by 12 box drew it.
-const GLYPH_WIDTH: f32 = 10.;
+pub(super) const GLYPH_WIDTH: f32 = 10.;
 const GLYPH_HEIGHT: f32 = 12.;
 
 /// `.session-agent`'s `column-gap`, between the agent mark and the shield.

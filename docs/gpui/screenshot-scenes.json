@@ -3027,7 +3027,7 @@
     },
     {
       "golden": "template-launcher",
-      "title": "The template list as Cmd+J opens it: three templates with their summaries, number keys 1 and 8 as key chips, the first selected",
+      "title": "Cmd+J showing the selected quick-launch template, two number shortcuts and a template that opens New",
       "reference": "template-launcher"
     },
     {

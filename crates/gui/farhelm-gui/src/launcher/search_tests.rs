@@ -330,6 +330,7 @@ fn with_templates(names: &[&str]) -> Draft {
                 name: (*name).to_owned(),
                 summary: Vec::new(),
                 mark: TemplateMark::Template,
+                opens_new: true,
                 marked: false,
                 key: None,
             })
