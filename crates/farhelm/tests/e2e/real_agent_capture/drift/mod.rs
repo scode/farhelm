@@ -543,23 +543,8 @@ struct TurnExpectation<'a> {
 }
 
 impl TurnExpectation<'_> {
-    /// A reply is a line that starts with the expected word, after common answer bullets and in any casing. Models
-    /// add to a bare "OK" despite the prompt (goose and OMP's defaults answered "OK (test label ... noted)." and
-    /// "OK — test label ... noted." on 2026-11-22), so text after the word counts as long as a non-alphanumeric
-    /// character ends the word. A word later in a line, such as one embedded in the prompt echo, is not a reply.
     fn saw_reply(&self, text: &str) -> bool {
-        text.lines().map(str::trim).any(|line| {
-            let line = line
-                .trim_start_matches(['•', '●', '✦', '◆', '-', '*'])
-                .trim_start();
-            line.get(..self.reply.len()).is_some_and(|word| {
-                word.eq_ignore_ascii_case(self.reply)
-                    && !line[self.reply.len()..]
-                        .chars()
-                        .next()
-                        .is_some_and(char::is_alphanumeric)
-            })
-        })
+        reply_on_screen(text, self.reply)
     }
 
     /// After Restart both turns must resolve to the same resume command. If admission can acknowledge a callback
@@ -579,6 +564,23 @@ impl TurnExpectation<'_> {
             }
         }
     }
+}
+
+/// A reply starts a line after any answer bullet. Goose and OMP can add prose after "OK", so match the word at
+/// a boundary. The prompt echo can mention the same word later in a line and supplies no reply evidence.
+fn reply_on_screen(text: &str, reply: &str) -> bool {
+    text.lines().map(str::trim).any(|line| {
+        let line = line
+            .trim_start_matches(['•', '●', '✦', '◆', '-', '*'])
+            .trim_start();
+        line.get(..reply.len()).is_some_and(|word| {
+            word.eq_ignore_ascii_case(reply)
+                && !line[reply.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_alphanumeric)
+        })
+    })
 }
 
 /// The supervisor writes the reported identity as the third field of an acknowledgment.
@@ -871,6 +873,7 @@ macro_rules! drift_cases {
 mod base;
 mod initial_prompt;
 mod model_selection;
+mod named_conversation;
 mod permission_modes;
 mod reasoning_effort;
 
