@@ -293,6 +293,13 @@ enum Restore {
     Attaching(String),
 }
 
+/// The direction a shortcut moves through the session's tab strip.
+#[derive(Clone, Copy)]
+pub(crate) enum TabStep {
+    Previous,
+    Next,
+}
+
 /// The open session's terminals. See the module docs.
 pub struct TerminalSet {
     /// The UI session the terminals were made under, whose opener each new one takes.
@@ -505,6 +512,44 @@ impl TerminalSet {
             Some(home) => focus::choose_terminal(&home, mark, window, cx),
             None => focus::set_home(None, window, cx),
         }
+    }
+
+    /// Cycle the main terminal and the shell tabs with mounted terminals. Confirmed closes and tabs beyond the attach
+    /// limit can still occupy painted positions, so keep the original strip index when scrolling to the choice.
+    pub(crate) fn step(
+        &mut self,
+        direction: TabStep,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.inert || self.shown().is_none() {
+            return;
+        }
+        let mut live = vec![(0, None)];
+        live.extend(
+            self.tabs
+                .iter()
+                .enumerate()
+                .filter(|(_, tab)| {
+                    tab.terminal.is_some() && !self.confirmed_closed.contains(&tab.id)
+                })
+                .map(|(index, tab)| (index + 1, Some(tab.id.as_str()))),
+        );
+        if live.len() == 1 {
+            return;
+        }
+        let current = live
+            .iter()
+            .position(|&(_, id)| id == self.chosen.as_deref())
+            .unwrap_or(0);
+        let target = match direction {
+            TabStep::Previous => (current + live.len() - 1) % live.len(),
+            TabStep::Next => (current + 1) % live.len(),
+        };
+        let (strip_index, id) = live[target];
+        self.choose(id.map(str::to_owned), mark, window, cx);
+        self.scroll.scroll_to_item(strip_index);
     }
 
     /// A deliberate choice or close fallback replaces the restore target and

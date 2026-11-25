@@ -2469,6 +2469,14 @@ tab to its left in opening order. The main terminal takes over when there is no 
 already in the background leaves the active terminal in place. The fallback takes focus if the closed terminal held it.
 An open question or dialog keeps its focus.
 
+`Cmd+Shift+[` and `Cmd+Shift+]` on macOS, `Ctrl+Shift+[` and `Ctrl+Shift+]` on Linux, choose the previous and next
+terminal tab. They wrap between the main terminal and the last attached shell tab, skipping tabs whose close was
+confirmed and tabs without an attached terminal. The chords use the physical US bracket positions with no extra
+modifiers and repeat while held. They work anywhere in the main window, focus the chosen terminal and bring its tab
+button into view. They have no effect with only the main terminal, with no usable session terminal, while a card covers
+the terminal, while a dialog or menu holds the keyboard, or while the focused terminal has marked text from an input
+method. The chords are consumed before they can reach a terminal program or text field.
+
 For as long as the app runs, the session view remembers your selection in each session, including the choice after a tab
 closes. It shows the main terminal if you chose it or if the remembered tab is gone or unavailable to attach. The main
 tab is **Shell** when the session is known to run Bash or Zsh, and **Agent** otherwise. The main terminal is available
@@ -4076,12 +4084,12 @@ terminal's program, and does nothing while another modal is open or before prefe
 is also available from the **?** menu, where the item shows its shortcut. Its Sessions, Launching and Terminal groups
 show every app-wide shortcut and the keys inside a quick-launch sequence, with action names beside key chips. New
 appears only in the Mac desktop app. Each shortcut shows only the form this client handles: quick switcher, template
-list, ⚡, terminal text size and this dialog follow the operating system, while New, Delete, Rename, number keys and the
-sequence prefix use Command only in the Mac desktop app. The dialog names the current ⚡ template, or says none is
-marked, and lists assigned number keys with their template names. It refreshes those shared bindings once each time it
-opens; a failed read keeps cached names. Keys used only inside other dialogs are omitted. Escape, Close or a click
-outside closes the ordinary modal and restores the opener's focus, including the terminal or the **?** button. The
-documentation's Keyboard shortcuts page lists both platform forms.
+list, ⚡, terminal text size, terminal tab switching and this dialog follow the operating system, while New, Delete,
+Rename, number keys and the sequence prefix use Command only in the Mac desktop app. The dialog names the current ⚡
+template, or says none is marked, and lists assigned number keys with their template names. It refreshes those shared
+bindings once each time it opens; a failed read keeps cached names. Keys used only inside other dialogs are omitted.
+Escape, Close or a click outside closes the ordinary modal and restores the opener's focus, including the terminal or
+the **?** button. The documentation's Keyboard shortcuts page lists both platform forms.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size

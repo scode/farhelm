@@ -223,7 +223,7 @@ fn sections(platform: Platform, bindings: &Bindings) -> Vec<Section> {
         typed("In a sequence: cancel", "Escape"),
     ]);
 
-    let text_size = |key: &'static str| {
+    let shifted_terminal = |key: &'static str| {
         let modifiers = ChordModifiers {
             command: mac,
             control: !mac,
@@ -232,8 +232,10 @@ fn sections(platform: Platform, bindings: &Bindings) -> Vec<Section> {
         Keys::Chord(Chord { modifiers, key })
     };
     let terminal = vec![
-        words("Smaller terminal text", text_size("−")),
-        words("Larger terminal text", text_size("+")),
+        words("Smaller terminal text", shifted_terminal("−")),
+        words("Larger terminal text", shifted_terminal("+")),
+        words("Previous terminal tab", shifted_terminal("[")),
+        words("Next terminal tab", shifted_terminal("]")),
     ];
 
     vec![

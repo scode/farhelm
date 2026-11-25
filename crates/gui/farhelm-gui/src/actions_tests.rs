@@ -26,11 +26,12 @@ use gpui::{
 
 use crate::actions::{
     CONTEXT, Captured, DecreaseTerminalTextSize, DeleteSession, HideApp, HideOtherApps,
-    IncreaseTerminalTextSize, KeyOwner, MAC_MENU_CHORDS, MinimizeWindow, NewSession, PHYSICAL_KEYS,
-    PhysicalKey, QuickLaunch, QuickSwitcher, Quit, RenameSession, ShowKeyboardShortcuts,
-    TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateList,
-    TemplateNumberKey, ToggleFullScreen, arm_key_capture, disarm_key_capture, key_capture_armed,
-    new_session_binding, owner_on, physical_key_at, physical_on, terminal_key_owner,
+    IncreaseTerminalTextSize, KeyOwner, MAC_MENU_CHORDS, MinimizeWindow, NewSession,
+    NextTerminalTab, PHYSICAL_KEYS, PhysicalKey, PreviousTerminalTab, QuickLaunch, QuickSwitcher,
+    Quit, RenameSession, ShowKeyboardShortcuts, TERMINAL_CONTEXT, TERMINAL_KEYS,
+    TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateList, TemplateNumberKey, ToggleFullScreen,
+    arm_key_capture, disarm_key_capture, key_capture_armed, new_session_binding, owner_on,
+    physical_key_at, physical_on, terminal_key_owner,
 };
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
@@ -73,6 +74,8 @@ impl Render for Scene {
             self.ran.clone(),
             (self.ran.clone(), self.digits.clone()),
         );
+        let previous_tab = self.ran.clone();
+        let next_tab = self.ran.clone();
         let content = div()
             .size_full()
             .flex()
@@ -97,6 +100,12 @@ impl Render for Scene {
             })
             .on_action(move |action: &DecreaseTerminalTextSize, _, _| {
                 smaller.borrow_mut().push(action.name())
+            })
+            .on_action(move |action: &PreviousTerminalTab, _, _| {
+                previous_tab.borrow_mut().push(action.name())
+            })
+            .on_action(move |action: &NextTerminalTab, _, _| {
+                next_tab.borrow_mut().push(action.name())
             })
             .on_action(move |action: &TemplateNumberKey, _, _| {
                 numbers.0.borrow_mut().push(action.name());
@@ -885,6 +894,8 @@ fn identity(platform: Platform, us: &str) -> gpui::NativeKeyIdentity {
         "-" => ("AE11", 0x1B),
         "=" => ("AE12", 0x18),
         "/" => ("AB10", 0x2C),
+        "[" => ("AD11", 0x21),
+        "]" => ("AD12", 0x1E),
         other => panic!("no oracle entry for {other}"),
     };
     match platform {
@@ -909,6 +920,8 @@ fn shifted(us: &str) -> &'static str {
         "-" => "_",
         "=" => "+",
         "/" => "?",
+        "[" => "{",
+        "]" => "}",
         other => panic!("no shifted character for {other}"),
     }
 }
@@ -966,7 +979,7 @@ fn row_of(action: &dyn gpui::Action) -> &'static PhysicalKey {
         .expect("the table has the row")
 }
 
-/// SPEC.md matches the number keys, Keyboard shortcuts and terminal text size by the key's position. Every row's
+/// SPEC.md matches number keys, Keyboard shortcuts, terminal text size and tab switching by the key's position. Every row's
 /// identities agree with the platforms' tables, and every row answers its own chord on both platforms, from the native
 /// identity a real key carries, and from the logical key alone when the event has no identity (the bridge's and the
 /// tests' injected keys). The Mac's rows are checked here on Linux through the platform parameter, as the terminal key
@@ -1191,10 +1204,10 @@ fn every_physical_shortcut_runs_from_a_focused_terminal_and_never_reaches_it(
 }
 
 /// SPEC.md: number keys and Keyboard shortcuts act once per held press ("held keys act once"; "repeat ... do not open
-/// it"), while text size steps on every repeat of a held chord, as the old app did (its terminal script stepped with no
-/// repeat check). Neither the press nor any repeat reaches the terminal.
+/// it"), while text size and tab switching step on every repeat of a held chord. Neither the press nor any repeat
+/// reaches the terminal.
 #[gpui::test]
-fn a_held_number_key_acts_once_and_a_held_text_size_chord_repeats(cx: &mut TestAppContext) {
+fn a_held_number_key_acts_once_and_held_terminal_chords_repeat(cx: &mut TestAppContext) {
     let mut opened = open(cx);
     opened.focus_terminal();
     for (row, runs) in [
@@ -1202,6 +1215,8 @@ fn a_held_number_key_acts_once_and_a_held_text_size_chord_repeats(cx: &mut TestA
         (row_of(&ShowKeyboardShortcuts), 1),
         (row_of(&IncreaseTerminalTextSize), 3),
         (row_of(&DecreaseTerminalTextSize), 3),
+        (row_of(&PreviousTerminalTab), 3),
+        (row_of(&NextTerminalTab), 3),
     ] {
         opened.ran.borrow_mut().clear();
         for held in [false, true, true] {

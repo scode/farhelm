@@ -1287,16 +1287,17 @@ not say whether an input method is composing. The session Delete and Rename hand
 holds focus and has marked text before acting.
 
 The shortcuts SPEC.md matches by key position rather than printed character (the template number keys, Keyboard
-shortcuts, terminal text size) are rows of one physical-key table in the same module, because a binding matches only the
-logical key. A row names the key's position and its exact modifiers on each platform; the position comes from the key
-event's native identity (an XKB position name on Linux, a virtual keycode on macOS), so a non-US layout's key at the
-same place matches and a keypad digit does not. The same keystroke interceptor matches them before any binding or
-listener: it dispatches the row's action and stops the key, so no terminal program or text field receives it, whether or
-not a feature handles the action yet. A held repeat of a row whose action ignores repeat is stopped without dispatching.
-Only an event with no native identity at all (a key the test bridge injects) is matched by its unshifted US key instead;
-on real hardware such events are input-method text and replayed keystrokes, never these chords. Because the interceptor
-takes these keys before the element that owns the input handler, refusing one typed mid-composition (SPEC.md asks it of
-Keyboard shortcuts) falls to the action's handler, which can ask the focused input whether it is composing.
+shortcuts, terminal text size and terminal tab switching) are rows of one physical-key table in the same module, because
+a binding matches only the logical key. A row names the key's position and its exact modifiers on each platform; the
+position comes from the key event's native identity (an XKB position name on Linux, a virtual keycode on macOS), so a
+non-US layout's key at the same place matches and a keypad digit does not. The same keystroke interceptor matches them
+before any binding or listener: it dispatches the row's action and stops the key, so no terminal program or text field
+receives it, whether or not a feature handles the action yet. A held repeat of a row whose action ignores repeat is
+stopped without dispatching. Only an event with no native identity at all (a key the test bridge injects) is matched by
+its unshifted US key instead; on real hardware such events are input-method text and replayed keystrokes, never these
+chords. Because the interceptor takes these keys before the element that owns the input handler, refusing one typed
+mid-composition (SPEC.md asks it of Keyboard shortcuts and terminal tab switching) falls to the action's handler, which
+can ask the focused input whether it is composing.
 
 A mode that takes every key without taking focus (SPEC.md's quick-launch sequence) arms the one app-wide key capture
 slot in the same module. Focus cannot move to a capturing element, so the same keystroke interceptor hands every

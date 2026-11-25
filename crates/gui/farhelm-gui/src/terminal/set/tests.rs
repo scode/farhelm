@@ -47,6 +47,15 @@ const T2_TAB: &str = "session-terminal-tab-t2";
 /// Tab t3's element id, as the strip names it.
 const T3_TAB: &str = "session-terminal-tab-t3";
 
+/// The real main view receives the local platform's chords. The physical-key tests cover both native key identities.
+fn tab_chords() -> (&'static str, &'static str) {
+    if cfg!(target_os = "macos") {
+        ("cmd-shift-[", "cmd-shift-]")
+    } else {
+        ("ctrl-shift-[", "ctrl-shift-]")
+    }
+}
+
 /// Every fake terminal the connection handed out, in the order they were opened, with the attach each was for.
 type Opened = Rc<RefCell<Vec<(FakeTerminal, TerminalAttach)>>>;
 
@@ -460,6 +469,114 @@ fn choosing_a_tab_shows_and_focuses_its_terminal(cx: &mut TestAppContext) {
     assert!(!window.typed_into(t1));
 }
 
+/// The shortcut follows the displayed order, including the main terminal. A confirmed close can precede its roster
+/// push. The closed shell must be skipped in either direction while its button still occupies a strip position.
+#[gpui::test]
+fn tab_shortcuts_wrap_skip_a_confirmed_close_and_focus_the_destination(cx: &mut TestAppContext) {
+    let (previous, next) = tab_chords();
+    let mut window = open(cx, skipping(&["t1", "t2", "t3"]));
+    let agent = window.stream_of(None);
+    let t1 = window.stream_of(Some("t1"));
+    let t3 = window.stream_of(Some("t3"));
+    for (stream, text) in [(agent, "agent"), (t1, "first"), (t3, "last")] {
+        window.go_live(stream, text);
+        window.received(stream);
+    }
+    tab_requests(&mut window.helm);
+    click(window.cx, "session-terminal-close-t2");
+    let requests = tab_requests(&mut window.helm);
+    assert_eq!(requests.len(), 1, "one close request");
+    assert_eq!(requests[0].2, "/api/sessions/a/tabs/t2");
+    window.helm.reply(requests[0].0, 200, Some(json!({})));
+    settle(window.cx);
+    let set = window.set();
+    window.cx.update(|w, cx| {
+        let set = set.read(cx);
+        assert!(set.confirmed_closed.contains("t2"), "close is confirmed");
+        assert_eq!(
+            set.tab_ids(),
+            ["t1", "t2", "t3"],
+            "the roster still lists t2"
+        );
+        let focus = set.agent_focus.clone();
+        crate::focus::focus_control(&focus, &Mark::take(cx), w, cx);
+        assert!(focus.is_focused(w), "focus starts on the tab strip");
+    });
+    assert_eq!(window.chosen(), None);
+
+    for (chord, shown) in [
+        (previous, Some("t3")),
+        (previous, Some("t1")),
+        (next, Some("t3")),
+        (next, None),
+        (next, Some("t1")),
+    ] {
+        keys(window.cx, chord);
+        assert_eq!(window.chosen().as_deref(), shown, "{chord}");
+        for stream in [agent, t1, t3] {
+            assert!(!window.typed_into(stream), "{chord} leaked to {stream}");
+        }
+    }
+    keys(window.cx, "x");
+    assert!(window.typed_into(t1), "typing follows the new tab");
+    assert!(!window.typed_into(agent));
+    assert!(!window.typed_into(t3));
+}
+
+/// Choosing a tab from the keyboard puts focus in its terminal. The strip has to reveal the chosen button even
+/// though that button never takes focus.
+#[gpui::test]
+fn a_tab_shortcut_reveals_the_chosen_button(cx: &mut TestAppContext) {
+    let ids: Vec<String> = (1..=20).map(|n| format!("t{n}")).collect();
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    let tab_is_visible = |window: &mut Window| {
+        test_support::frame(window.cx)
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some("session-terminal-tab-t20"))
+            .is_some_and(|node| {
+                node.visible_bounds == node.bounds && node.bounds.size.width > gpui::px(0.)
+            })
+    };
+    assert!(!tab_is_visible(&mut window), "the last tab starts clipped");
+    keys(window.cx, tab_chords().0);
+    assert_eq!(window.chosen().as_deref(), Some("t20"));
+    assert!(
+        tab_is_visible(&mut window),
+        "the chosen tab was scrolled into view"
+    );
+}
+
+/// With only the main terminal, either bracket chord is consumed without changing focus or feeding the program.
+#[gpui::test]
+fn tab_shortcuts_do_nothing_with_only_the_main_terminal(cx: &mut TestAppContext) {
+    let (previous, next) = tab_chords();
+    let mut window = open(cx, snapshot(&[]));
+    let agent = window.stream_of(None);
+    window.go_live(agent, "agent");
+    let set = window.set();
+    window.cx.update(|w, cx| {
+        let set = set.read(cx);
+        assert!(
+            set.tab_ids().is_empty(),
+            "the premise: only the main terminal"
+        );
+        let focus = set.agent_focus.clone();
+        crate::focus::focus_control(&focus, &Mark::take(cx), w, cx);
+        assert!(focus.is_focused(w));
+    });
+
+    keys(window.cx, previous);
+    keys(window.cx, next);
+    assert_eq!(window.chosen(), None);
+    assert!(
+        window
+            .cx
+            .update(|w, cx| set.read(cx).agent_focus.is_focused(w))
+    );
+    assert!(!window.typed_into(agent));
+}
+
 // ---- Tabs that come and go -----------------------------------------------------------------------------------------
 
 /// The tab list is the helm's: a tab opened elsewhere (by an agent, say) must appear and attach without a reload, and
@@ -565,6 +682,61 @@ fn session_shortcuts_ignore_a_focused_terminal_composition(cx: &mut TestAppConte
         );
         app.quit();
     }
+}
+
+/// A tab shortcut stays consumed while a dialog owns the keyboard or the shown terminal holds marked text.
+/// Leaving those states makes the same shortcut choose and focus the shell.
+#[gpui::test]
+fn tab_shortcuts_leave_dialog_focus_and_terminal_composition_alone(cx: &mut TestAppContext) {
+    let (previous, next) = tab_chords();
+    let mut window = open(cx, snapshot(&["t1"]));
+    let agent = window.stream_of(None);
+    let shell = window.stream_of(Some("t1"));
+    window.go_live(agent, "agent");
+    window.go_live(shell, "shell");
+    let set = window.set();
+
+    keys(window.cx, crate::actions::RENAME_SESSION_CHORD);
+    assert!(window.focus_inside("rename-title"), "Rename owns focus");
+    keys(window.cx, previous);
+    keys(window.cx, next);
+    assert_eq!(window.chosen(), None, "the dialog prevents switching");
+    assert!(window.focus_inside("rename-title"), "Rename keeps focus");
+    keys(window.cx, "escape");
+
+    let mark_text = |window: &mut Window, text: &str| {
+        window.cx.update(|w, cx| {
+            let terminal = set.read(cx).agent().clone();
+            terminal.update(cx, |terminal, _| {
+                assert!(terminal.is_live() && terminal.focus_handle().is_focused(w));
+                terminal.mark_text(text);
+                assert_eq!(terminal.is_composing(w), !text.is_empty());
+            });
+        });
+    };
+    mark_text(&mut window, "日本");
+    keys(window.cx, previous);
+    keys(window.cx, next);
+    assert_eq!(window.chosen(), None, "marked text prevents switching");
+    assert!(
+        window
+            .cx
+            .update(|w, cx| set.read(cx).agent().read(cx).is_composing(w))
+    );
+    assert!(
+        !window.typed_into(agent),
+        "the chords never reached the agent"
+    );
+    assert!(
+        !window.typed_into(shell),
+        "the chords never reached the shell"
+    );
+    mark_text(&mut window, "");
+
+    keys(window.cx, next);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    keys(window.cx, "x");
+    assert!(window.typed_into(shell));
 }
 
 /// A reaped tab goes quietly and the preceding shell takes over typing. The
@@ -862,8 +1034,8 @@ fn a_stalled_terminal_holds_back_no_other(cx: &mut TestAppContext) {
 /// The window builds terminals from a tab list it did not write (a supervisor reached over SSH, say), so it attaches at
 /// most 32 tabs, as the old app did, while still listing every one so none is hidden from the user. Specified: with 35
 /// tabs listed (t1 to t35), 33 streams open (the agent terminal and t1 to t32), the strip draws a tab for the agent
-/// terminal and each of the 35, and choosing t35 shows the not-attached notice instead of a terminal. Reopening the
-/// session shows the agent so the pane has a terminal to draw and focus.
+/// terminal and each of the 35. The shortcuts wrap through the attached tabs, where there is a terminal to focus.
+/// Choosing t35 still shows the not-attached notice, and reopening shows the agent terminal.
 #[gpui::test]
 fn tabs_past_the_bound_are_listed_but_not_attached(cx: &mut TestAppContext) {
     let ids: Vec<String> = (1..=35).map(|n| format!("t{n}")).collect();
@@ -874,6 +1046,13 @@ fn tabs_past_the_bound_are_listed_but_not_attached(cx: &mut TestAppContext) {
     let listed = window.cx.update(|_, cx| set.read(cx).tab_ids().len());
     assert_eq!(listed, 35);
     assert_eq!(window.strip_labels().len(), 36, "the strip lists every tab");
+    let (previous, next) = tab_chords();
+    keys(window.cx, previous);
+    assert_eq!(window.chosen().as_deref(), Some("t32"));
+    assert!(test_support::terminal_focused(window.cx));
+    keys(window.cx, next);
+    assert_eq!(window.chosen(), None);
+
     // Chosen through the set rather than a click: t35's tab is scrolled out of the strip's view.
     window.cx.update(|w, cx| {
         set.update(cx, |set, cx| {
@@ -881,6 +1060,10 @@ fn tabs_past_the_bound_are_listed_but_not_attached(cx: &mut TestAppContext) {
         })
     });
     settle(window.cx);
+    assert!(window.cx.debug_bounds(NOT_ATTACHED_ID).is_some());
+    keys(window.cx, previous);
+    keys(window.cx, next);
+    assert_eq!(window.chosen().as_deref(), Some("t35"));
     assert!(window.cx.debug_bounds(NOT_ATTACHED_ID).is_some());
     drop(set);
 
@@ -1536,6 +1719,14 @@ fn an_inert_set_makes_every_terminal_and_the_strip_inert(cx: &mut TestAppContext
     assert!(all_inert);
     click(window.cx, T1_TAB);
     assert_eq!(window.chosen(), None, "the strip takes no presses");
+    let (previous, next) = tab_chords();
+    keys(window.cx, previous);
+    keys(window.cx, next);
+    assert_eq!(
+        window.chosen(),
+        None,
+        "the shortcuts leave the inert set alone"
+    );
 
     window
         .cx
