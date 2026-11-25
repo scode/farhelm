@@ -348,13 +348,13 @@ impl Editor {
         self.edited(cx);
     }
 
-    /// Save acknowledgments and external writes may arrive while fields are dirty. A clean editor follows the helm,
-    /// while a dirty editor keeps the text that the user was editing.
+    /// Follow the pushed value when clean and no Save is pending. Its own push can make the fields match before its reply,
+    /// so a later push must still leave the in-flight draft alone.
     fn saw_saved(&mut self, saved: CustomAgent, window: &mut Window, cx: &mut Context<Self>) {
-        let clean = !self.dirty(cx);
+        let follow = !self.saving && !self.dirty(cx);
         self.removed = false;
         self.stored = Some(saved);
-        if clean {
+        if follow {
             self.restore(window, cx);
         } else {
             cx.notify();
@@ -681,7 +681,8 @@ impl Editor {
                         "Save this custom agent on the helm",
                         Tier::Primary,
                     )
-                    .disabled(!this.dirty(cx))
+                    // The catalog can match the draft before the receipt releases Save's keyboard focus.
+                    .disabled(!this.dirty(cx) && !busy)
                     .busy(busy)
                     .on_click(move |_, window, cx| {
                         let _ = weak.update(cx, |editor, cx| editor.save(window, cx));
@@ -759,6 +760,18 @@ pub(crate) fn show_close_delete_refusal_for_golden(window: &mut Window, cx: &mut
             editor.confirm_delete = true;
             assert!(!editor.save(window, cx));
         });
+    });
+}
+
+/// Picture the stage where an in-flight Save already matches the catalog. The interaction test drives the push.
+#[cfg(test)]
+pub(crate) fn hold_custom_agent_save_for_golden(window: &mut Window, cx: &mut App) {
+    let editor = crate::layers::last_opened::<SettingsDialog>(cx)
+        .and_then(|dialog| dialog.read(cx).custom_editor().cloned())
+        .expect("the registered custom agent is open");
+    editor.update(cx, |editor, cx| {
+        assert!(!editor.dirty(cx));
+        assert!(editor.save(window, cx));
     });
 }
 

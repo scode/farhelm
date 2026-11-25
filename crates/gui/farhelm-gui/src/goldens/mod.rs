@@ -233,11 +233,20 @@ fn session_at_age(key: &'static str, title: &str, ago: i64) -> Fixture {
 /// One press of Tab, dispatched as the platform would: the focus coordinator moves focus to the next tab stop, and the
 /// keyboard becomes the window's last input, which is what makes a focused control draw its ring.
 fn press_tab(window: &mut Window, cx: &mut App) {
+    press_tab_in_order(true, window, cx);
+}
+
+/// Reverse traversal starts at the last action when the dialog itself holds focus.
+fn press_tab_in_order(forward: bool, window: &mut Window, cx: &mut App) {
     window.dispatch_event(
         gpui::PlatformInput::KeyDown(gpui::KeyDownEvent {
             native_key: None,
             keystroke: gpui::Keystroke {
                 key: "tab".into(),
+                modifiers: gpui::Modifiers {
+                    shift: !forward,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             is_held: false,
@@ -1765,6 +1774,12 @@ static SCENES: &[Scene] = &[
         setup: settings_custom_agent_close_delete_refusal_setup,
     },
     Scene {
+        name: "settings-custom-agent-busy-save",
+        size: (800., 900.),
+        draw: settings_scroll_end,
+        setup: settings_busy_custom_agent_save_setup,
+    },
+    Scene {
         name: "settings-codex",
         size: (800., 830.),
         draw: empty,
@@ -2248,11 +2263,11 @@ fn settle(
             // The draw takes the after-draw callback out of the slot. Check after its deferred effect has had
             // a chance to put the next step back, or a partly staged scene can appear ready.
             let (ready, toolbar_unready) = cx.update_window(window, |_, window, cx| {
-                let state = &view.read(cx).state;
+                let state = view.read(cx).state.clone();
                 let ready = state.after.get().is_none()
-                    && !settings::settings_scene_pending(state)
+                    && !settings::advance_settings_scene(&state, window, cx)
                     && state.hover.get().is_none();
-                (ready, session_toolbar_unready(state, window))
+                (ready, session_toolbar_unready(&state, window))
             })?;
             if ready && toolbar_unready.is_none() {
                 break;

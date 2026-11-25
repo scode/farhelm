@@ -76,7 +76,8 @@ mod credentials;
 mod custom_agents;
 #[cfg(test)]
 pub(crate) use custom_agents::{
-    show_close_delete_refusal_for_golden, stage_custom_agent_draft, stage_custom_agent_save_refusal,
+    hold_custom_agent_save_for_golden, show_close_delete_refusal_for_golden,
+    stage_custom_agent_draft, stage_custom_agent_save_refusal,
 };
 mod editing;
 #[cfg(test)]

@@ -1084,6 +1084,23 @@ struct ScrollEnd {
     done: Cell<bool>,
 }
 
+/// Start the held Save once, then wait for it to paint with keyboard focus.
+struct BusySaveFocus(Cell<bool>);
+
+/// Capture after the matching catalog row and the pending Save's keyboard ring are both on screen.
+pub(super) fn settings_busy_custom_agent_save_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    window.set_driver_enabled(true);
+    settings_custom_agent_setup(state, window, cx);
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(BusySaveFocus(Cell::new(false))));
+}
+
 fn stage_scroll_end(state: &SceneState, wait_for_recipe_back: bool) {
     stage_scroll(state, wait_for_recipe_back, 1.);
 }
@@ -1186,9 +1203,14 @@ pub(super) fn settings_tunnel_question_setup(
     );
 }
 
-/// A stable frame can precede the second form's read. Do not finish a draft screenshot during that gap.
-pub(super) fn settings_scene_pending(state: &SceneState) -> bool {
-    state.keep.borrow().iter().any(|item| {
+/// Return whether Settings needs another frame. Advance keyboard focus after each observed draw so a redraw during
+/// input dispatch cannot queue another press ahead of the focus move.
+pub(super) fn advance_settings_scene(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    if state.keep.borrow().iter().any(|item| {
         item.downcast_ref::<DraftScene>()
             .is_some_and(|draft| draft.step.get() != DraftStep::Done)
             || item
@@ -1197,7 +1219,31 @@ pub(super) fn settings_scene_pending(state: &SceneState) -> bool {
             || item
                 .downcast_ref::<ScrollEnd>()
                 .is_some_and(|end| !end.done.get())
-    })
+    }) {
+        return true;
+    }
+    let held = state.keep.borrow().iter().find_map(|item| {
+        item.downcast_ref::<BusySaveFocus>()
+            .map(|scene| scene.0.replace(true))
+    });
+    match held {
+        None => return false,
+        Some(false) => {
+            crate::settings::hold_custom_agent_save_for_golden(window, cx);
+            return true;
+        }
+        Some(true) => {}
+    }
+    if let Some(save) = window.driver_nodes().iter().find(|node| {
+        node.element_id.as_deref() == Some("custom-agent-save")
+            && !node.flags.click
+            && node.focus.is_some_and(|focus| focus.is_focused(window))
+    }) && crate::focus::last_input_was_keyboard(window, cx)
+    {
+        return !save.flags.focused;
+    }
+    super::press_tab_in_order(false, window, cx);
+    true
 }
 
 pub(super) fn settings_terminal_edited_setup(
