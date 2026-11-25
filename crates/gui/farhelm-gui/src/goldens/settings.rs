@@ -74,6 +74,8 @@ struct SettingsFixture {
     custom_agents: Option<CollectionState>,
     /// Stage the busy refusal once after the saved registration is open.
     custom_agent_save_refusal: bool,
+    /// Fill the Add form before measuring the five dirty fields.
+    custom_agent_dirty_add: bool,
 }
 
 /// `entries` as a pushed collection's first snapshot, each filed under the key `key` gives it, in their order.
@@ -117,6 +119,7 @@ fn settings_scene_with(
         search,
         custom_agents,
         custom_agent_save_refusal,
+        custom_agent_dirty_add,
     } = fixture;
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -170,6 +173,9 @@ fn settings_scene_with(
             if custom_agent_save_refusal {
                 crate::settings::stage_custom_agent_save_refusal(window, cx);
             }
+            if custom_agent_dirty_add {
+                crate::settings::stage_custom_agent_draft(window, cx);
+            }
             if let Some(query) = search {
                 crate::settings::search_for_opened(query, window, cx);
             }
@@ -208,6 +214,45 @@ pub(super) fn settings_custom_agent_empty_setup(
                 meta: test_support::meta(&[]),
                 entries: Vec::new(),
             }),
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+}
+
+/// Exercise all five field markers together, including the ID that can only be edited on Add.
+pub(super) fn settings_custom_agent_dirty_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    settings_scene_with(
+        state,
+        crate::settings::Section::AddCustomAgent,
+        SettingsFixture {
+            custom_agent_dirty_add: true,
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+}
+
+/// A long saved name still shares one title row with the fixed scope.
+pub(super) fn settings_custom_agent_long_name_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let mut agents = super::custom_agent_state();
+    agents.entries[0].value["display_name"] =
+        "Acme Code for Multi-Repository Release Engineering and Internal Tools".into();
+    settings_scene_with(
+        state,
+        crate::settings::Section::CustomAgent("acme-code".into()),
+        SettingsFixture {
+            custom_agents: Some(agents),
             ..SettingsFixture::default()
         },
         window,

@@ -439,6 +439,9 @@ impl SettingsDialog {
                                     .role(Role::Heading)
                                     .aria_label(display.accessible_text())
                                     .aria_description(description.clone())
+                                    // Keep the scope in view even when a registration name takes the rest of the row.
+                                    .min_w_0()
+                                    .truncate()
                                     .text_size(px(16.))
                                     .line_height(px(20.))
                                     .font_weight(FontWeight::SEMIBOLD)

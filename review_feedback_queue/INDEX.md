@@ -204,10 +204,6 @@ consequences.
   single 'Custom agent' and jumps Settings to whichever custom-agent draft sorts first rather than staying on the page
   the user was viewing.
 
-- [`trailing-custom-agent-settings-omits-per-field-unsaved-dots.md`](trailing-custom-agent-settings-omits-per-field-unsaved-dots.md)
-  — Editing Display name, ID, Command, or capability checkboxes on a custom-agent page marks the sidebar row and footer
-  as unsaved, but never shows the unsaved dot next to any edited field.
-
 - [`trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md`](trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md)
   — When switching from a safer agent (such as Guarded Claude or Codex) to a registered custom agent (which always
   counts as YOLO), the red permission-escalation banner appears at the top of the launcher, but the custom agent's YOLO
@@ -243,11 +239,6 @@ consequences.
   — If the helm fails to read the custom-agents catalog (for example due to a database error or a corrupted catalog
   row), Settings hides the failure and shows an empty Custom agents section with only '+ Add custom agent', leaving the
   user with no explanation for why their agents disappeared or why re-adding an existing ID fails as already taken.
-
-- [`trailing-settings-heading-lacks-min-w-0-and-truncate-for-long-custom-agent-name.md`](trailing-settings-heading-lacks-min-w-0-and-truncate-for-long-custom-agent-name.md)
-  — Opening a custom agent with a long display name in Settings can push the page's scope label ("Every host on this
-  helm") past the right edge of the dialog or expand the pinned heading vertically over multiple lines, reducing space
-  for the scrollable form.
 
 - [`trailing-settings-search-omits-registered-custom-agent-sections.md`](trailing-settings-search-omits-registered-custom-agent-sections.md)
   — Searching in Settings for a registered custom agent's display name or ID always returns no matches and hides every

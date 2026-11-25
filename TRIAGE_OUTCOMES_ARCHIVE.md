@@ -48311,3 +48311,37 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   index entry.
 - Execution: Fixed with the shared busy reason and distinct helm reset and disconnected notices. Change `rtuwltqruymwquntnylmosonuwlllqvy`, bookmark `plan/triage-custom-agents-nov24/03e-settings-write-refusals`,
   https://github.com/scode/farhelm/pull/4906/changes.
+
+## trailing-custom-agent-settings-omits-per-field-unsaved-dots.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC.md, Settings dialog paragraph (line 2569): "A dot marks each edited field and
+  section." The custom-agent editor always passes `None` for the edited marker
+  (`choices::labelled(label, id, field, None)`, `crates/gui/farhelm-gui/src/settings/custom_agents.rs:462`), and its
+  capability switches have none (`custom_agents.rs:466-497`). The recipe editor shows the pattern
+  (`settings/recipes/editor.rs:782-794`, passing `edited.then_some(palette)` to `editing::caption`). The fix compares
+  each field with the stored registration, or with empty for Add, and passes the marker. It needs no design choice and
+  overturns no commented choice. Estimated diff 30-70 lines with a test, under 100.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes. Size gate: about 100 lines of
+  diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
+  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
+  part the Assessment says remains.
+- Execution: Fixed with shared markers driven by each field’s saved value. Change `qymwnnlpmvzyqxkzvwpkvrtpzqxlksys`, bookmark `plan/triage-custom-agents-nov24/03f-settings-field-markers`,
+  https://github.com/scode/farhelm/pull/4912/changes.
+
+## trailing-settings-heading-lacks-min-w-0-and-truncate-for-long-custom-agent-name.md
+
+- Outcome: `other`.
+- Assessment: Opening a custom agent with a very long display name in Settings can push the page's scope label ("Every
+  host on this helm") off the right edge, or grow the pinned heading over several lines. Verified: Confirmed by reading
+  the code. `#settings-heading` and its row lack `min_w_0` and truncation (`settings/frame.rs:429-447`), unlike the nav
+  row (:299). I did not check how it renders. No spec rule covers it.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code — add `min_w_0` and `truncate`; size S.
+- Execution: Fixed within the polish budget, with single-line truncation and a golden that exercises a long registration. Change `qymwnnlpmvzyqxkzvwpkvrtpzqxlksys`, bookmark `plan/triage-custom-agents-nov24/03f-settings-field-markers`,
+  https://github.com/scode/farhelm/pull/4912/changes.

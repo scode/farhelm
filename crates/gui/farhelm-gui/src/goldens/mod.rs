@@ -1618,6 +1618,18 @@ static SCENES: &[Scene] = &[
         setup: settings_custom_agent_save_refused_setup,
     },
     Scene {
+        name: "settings-custom-agent-dirty",
+        size: (800., 900.),
+        draw: empty,
+        setup: settings_custom_agent_dirty_setup,
+    },
+    Scene {
+        name: "settings-custom-agent-long-name",
+        size: (800., 900.),
+        draw: empty,
+        setup: settings_custom_agent_long_name_setup,
+    },
+    Scene {
         name: "settings-codex",
         size: (800., 830.),
         draw: empty,

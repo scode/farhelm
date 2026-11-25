@@ -10,7 +10,7 @@ use gpui::{
 
 use super::{
     Section, SettingsDialog, card, choices,
-    editing::{EditState, SaveReceipt},
+    editing::{self, EditState, SaveReceipt},
 };
 use crate::components::{
     Button, Checkbox, HoverHelp, TextInput, TextInputEvent, TextInputState, Tier,
@@ -505,12 +505,14 @@ impl Editor {
         cx.notify();
     }
 
+    /// Use the Settings caption so a changed field is marked without shifting the input.
     fn field(
         id: &'static str,
         input: &TextInputState,
         label: &'static str,
         hint: &'static str,
         technical: bool,
+        edited: Option<&theme::Palette>,
         cx: &App,
     ) -> Div {
         let field = TextInput::new(id, input, label, HoverHelp::tooltip(hint));
@@ -519,17 +521,19 @@ impl Editor {
             .flex()
             .flex_col()
             .gap(px(4.))
-            .child(choices::labelled(label, id, field, None))
+            .child(choices::labelled(label, id, field, edited))
             .child(choices::help(hint, cx))
     }
 
     fn capability(&self, resume: bool, cx: &Context<Self>) -> Checkbox {
-        let (id, label, hint, checked) = if resume {
+        let saved = self.stored.as_ref();
+        let (id, label, hint, checked, before) = if resume {
             (
                 "custom-agent-resumption",
                 "Supports session resumption",
                 RESUME_HELP,
                 self.resumption,
+                saved.is_some_and(|agent| agent.supports_resumption),
             )
         } else {
             (
@@ -537,11 +541,13 @@ impl Editor {
                 "Supports session reporting",
                 REPORT_HELP,
                 self.reporting,
+                saved.is_some_and(|agent| agent.supports_reporting),
             )
         };
         let weak = cx.weak_entity();
+        let caption = editing::caption(label, (checked != before).then_some(theme::palette(cx)));
         Checkbox::new(id, label, HoverHelp::tooltip(hint), Role::CheckBox)
-            .content(card::switch_copy(div().child(label), hint, cx))
+            .content(card::switch_copy(caption, hint, cx))
             .checked(checked)
             .disabled(self.busy())
             .on_toggle(move |on, _, cx| {
@@ -672,6 +678,24 @@ pub(crate) fn stage_custom_agent_save_refusal(window: &mut Window, cx: &mut App)
     });
 }
 
+/// Populate the Add draft once so the golden shows all the fields that can acquire markers, including its generated ID.
+#[cfg(test)]
+pub(crate) fn stage_custom_agent_draft(window: &mut Window, cx: &mut App) {
+    let editor = crate::layers::last_opened::<SettingsDialog>(cx)
+        .and_then(|dialog| dialog.read(cx).custom_editor().cloned())
+        .expect("the golden opens Add custom agent");
+    editor.update(cx, |editor, cx| {
+        assert!(editor.stored.is_none());
+        editor.name.edit_for_golden("Local Code", window, cx);
+        editor
+            .command
+            .edit_for_golden("~/bin/local-code", window, cx);
+        editor.resumption = true;
+        editor.reporting = true;
+        editor.edited(cx);
+    });
+}
+
 fn button(id: &'static str, label: &'static str, help: &'static str, tier: Tier) -> Button {
     Button::new(id, label, HoverHelp::tooltip(help), Role::Button).tier(tier)
 }
@@ -702,12 +726,14 @@ fn default_id(name: &str) -> String {
 impl Render for Editor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         let draft = self.draft(cx);
-        let command = if draft.command.is_empty() {
-            "<cmd>".to_owned()
+        let saved = self.stored.as_ref();
+        // Add uses the same empty baseline as its footer. A registered agent compares against the last saved values.
+        let edited = |text: &str, before: &str| (text != before).then_some(theme::palette(cx));
+        let command = HostText::from_host(if draft.command.is_empty() {
+            "<cmd>"
         } else {
-            draft.command
-        };
-        let command = HostText::from_host(command);
+            &draft.command
+        });
         let preview = |id: &'static str, label, tail: &str| {
             div()
                 .flex()
@@ -734,6 +760,10 @@ impl Render for Editor {
                     "Display name",
                     "Shown in the launcher and session list",
                     false,
+                    edited(
+                        &draft.display_name,
+                        saved.map_or("", |agent| &agent.display_name),
+                    ),
                     cx,
                 ),
                 Self::field(
@@ -742,6 +772,7 @@ impl Render for Editor {
                     "ID",
                     "Used in launch templates and CLI flags. The ID stays fixed after saving.",
                     true,
+                    edited(&draft.id, saved.map_or("", |agent| &agent.id)),
                     cx,
                 ),
                 Self::field(
@@ -750,6 +781,7 @@ impl Render for Editor {
                     "Command",
                     COMMAND_HELP,
                     true,
+                    edited(&draft.command, saved.map_or("", |agent| &agent.command)),
                     cx,
                 ),
             ],
