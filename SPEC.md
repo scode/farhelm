@@ -1526,6 +1526,7 @@ when expanded. New, Clone and Replace with open with focus in the command field.
 destructive warnings and the inline YOLO question remain adjacent to the actions in a bounded scroll region, so long
 content cannot displace those actions. The save-as-template panel remains inline in the scrolling body. Escape closes
 open search results before closing that panel. Hover help shows the held host's name. Project registration (associating
+metadata with a directory) is optional convenience and never a prerequisite.
 
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
