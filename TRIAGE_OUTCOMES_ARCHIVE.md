@@ -48741,3 +48741,69 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   for reference: fix code — truncate chip labels; size S.
 - Execution: Fixed. The custom chip stays inside its row and ellipsizes the painted name while retaining its accessible label. Change `ztpytunoxrmwtozwknpqtupowquymzrv`, bookmark `plan/triage-custom-agents-nov24/07-custom-agent-labels`,
   https://github.com/scode/farhelm/pull/4950/changes.
+
+## trailing-custom-agents-share-one-remembered-wrapper-prefix.md
+
+- Outcome: `fix spec+code`.
+- Assessment: The launcher remembers the last wrapper prefix per agent type and fills it in when that type is chosen.
+  All registered custom agents share a single memory. A wrapper used with one custom agent is therefore pre-filled for a
+  different one, and launching another custom agent without a wrapper erases the first agent's remembered wrapper.
+  Verified: Confirmed. Memory is keyed by `LaunchHarness` alone (`crates/farhelm-helm/src/store.rs:263-274`), and the
+  launcher asks for `LaunchHarness::Custom` (`launcher/view/choices.rs:136`). Whether this is a defect depends on
+  reading the spec. SPEC.md 1178-1180 says "remembered per agent type". SPEC_impl.md says a session's agent "is always
+  its agent type's word or `custom`", and SPEC.md 4808 lists "built-in types followed by the helm's registered custom
+  agents", which reads as if "custom" were one type. The pre-filled wrapper is visible as a pill on the folded More
+  options row (SPEC.md 1509-1510).
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix spec+code if per-registration is wanted: key the memory by custom-agent ID, prune it
+  on delete, and reload on a custom-to-custom switch. That covers 83, 84 and 85 in one change, size M. Otherwise fix
+  spec only, to say custom agents share one memory. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to TODO.md, Plan follow-ups, “Keep wrapper defaults per custom agent registration.” Store and push per-registration memory without assigning the old shared preference to a particular agent. Change `ousrrqmnkkvkvtrssztlunlrprprypwz`, bookmark `plan/triage-custom-agents-nov24/08-wrapper-memory-follow-up`,
+  https://github.com/scode/farhelm/pull/4952/changes.
+
+## trailing-custom-to-custom-switch-retains-previous-wrapper-prefix.md
+
+- Outcome: `fix code`.
+- Assessment: Switching the launcher from one registered custom agent to another, by chip, search or template, keeps the
+  first agent's wrapper prefix and marks it as the user's explicit choice. A built-in agent switch would load the new
+  type's remembered prefix instead. It also gives no notice when the model or effort the user chose is cleared.
+  Verified: Confirmed. `switch_agent` runs its cleanup only when the harness changes
+  (`crates/gui/farhelm-gui/src/launcher/draft.rs:825-836`). `choose_custom_agent` clears model, effort and conversation
+  but not the wrapper (`draft.rs:759-767`), and template replay does the same (`templates/apply.rs:519-529`). Whether
+  this is a defect rests on the same spec reading as 83.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: Fold into 83's decision. Size S on top of 83. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
+  brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to TODO.md, Plan follow-ups, “Keep wrapper defaults per custom agent registration.” Use the new registration's default on chip, search and template changes, while preserving a template's explicit prefix. Change `ousrrqmnkkvkvtrssztlunlrprprypwz`, bookmark `plan/triage-custom-agents-nov24/08-wrapper-memory-follow-up`,
+  https://github.com/scode/farhelm/pull/4952/changes.
+
+## trailing-delete-custom-agent-leaks-remembered-wrapper-prefix.md
+
+- Outcome: `fix code`.
+- Assessment: Deleting a custom agent leaves its remembered wrapper prefix in place, so the wrapper is pre-filled for
+  another custom agent or for one registered later. Verified: Confirmed, but it is a consequence of 83's shared key.
+  `delete_custom_agent` deletes only the row, and its comment says that is deliberate ("Drop only the registration",
+  `crates/farhelm-helm/src/custom_agents.rs:94-106`). With one shared memory there is nothing per-agent to prune.
+  Pruning only matters if 83 keys the memory by ID.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: Fold into 83: prune on delete only if the memory becomes per-ID. Otherwise discard. Size
+  S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: Deferred to TODO.md, Plan follow-ups, “Keep wrapper defaults per custom agent registration.” Prune the deleted registration's default atomically and keep an accepted but delayed launch from restoring it. Change `ousrrqmnkkvkvtrssztlunlrprprypwz`, bookmark `plan/triage-custom-agents-nov24/08-wrapper-memory-follow-up`,
+  https://github.com/scode/farhelm/pull/4952/changes.

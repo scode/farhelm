@@ -83,18 +83,6 @@ consequences.
   Save in the 'Save changes before closing?' dialog, saving silently fails without displaying any error and leaves
   Settings stuck open on the delete confirmation (and leaves any remaining dirty Settings forms unsaved).
 
-- [`trailing-custom-agents-share-one-remembered-wrapper-prefix.md`](trailing-custom-agents-share-one-remembered-wrapper-prefix.md)
-  — Remembered wrapper prefixes are stored per agent type, but every registered custom agent shares a single bucket.
-
-- [`trailing-custom-to-custom-switch-retains-previous-wrapper-prefix.md`](trailing-custom-to-custom-switch-retains-previous-wrapper-prefix.md)
-  — Switching between two custom agents in the launcher or via templates retains the first agent's wrapper prefix and
-  explicit flag under collapsed More options instead of resetting it (borderline high/highest if a wrapper injects
-  agent-specific context).
-
-- [`trailing-delete-custom-agent-leaks-remembered-wrapper-prefix.md`](trailing-delete-custom-agent-leaks-remembered-wrapper-prefix.md)
-  — When a user launches a custom agent with a wrapper prefix and later deletes that custom agent, Farhelm keeps the
-  wrapper prefix remembered and silently pre-fills it when selecting another or newly registered custom agent.
-
 - [`trailing-replace-with-recent-named-fill-enter-replaces.md`](trailing-replace-with-recent-named-fill-enter-replaces.md)
   — In Replace with, a screen reader announces a highlighted recent setup as "Fill from recent setup" while Enter on it
   replaces and deletes the source session; highest if the "⏎ Replace" key cap is not announced with it.
