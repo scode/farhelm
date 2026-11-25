@@ -1262,6 +1262,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_custom_agent_setup,
     },
     Scene {
+        name: "launcher-custom-effort-default",
+        size: (1080., 950.),
+        draw: session_lists_then,
+        setup: launcher_custom_effort_default_setup,
+    },
+    Scene {
         name: "launcher-unavailable-custom-agent",
         size: (1080., 1160.),
         draw: session_lists_then,

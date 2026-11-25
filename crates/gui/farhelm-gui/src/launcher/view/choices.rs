@@ -128,9 +128,16 @@ impl Launcher {
         self.check_hook_question(window, cx);
     }
 
-    pub(super) fn choose_effort(&mut self, effort: Option<LaunchEffort>, cx: &mut Context<Self>) {
+    /// Search can choose Default for the custom text field, so resync it before redrawing or submitting.
+    pub(super) fn choose_effort(
+        &mut self,
+        effort: Option<LaunchEffort>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.draft.choose_effort(effort);
         self.notice = None;
+        self.sync_fields(window, cx);
         self.changed(cx);
     }
 
@@ -495,12 +502,14 @@ impl Launcher {
             Select::new("launcher-effort", "Effort", help, Role::ComboBox)
                 .options(options)
                 .chosen(chosen.map_or("default", LaunchEffort::as_cli_arg))
-                .on_choose(move |value, _, cx| {
+                .on_choose(move |value, window, cx| {
                     let effort = offered
                         .iter()
                         .copied()
                         .find(|effort| effort.as_cli_arg() == value.as_ref());
-                    let _ = on_change.update(cx, |launcher, cx| launcher.choose_effort(effort, cx));
+                    let _ = on_change.update(cx, |launcher, cx| {
+                        launcher.choose_effort(effort, window, cx)
+                    });
                 })
                 .on_enter(move |window, cx| {
                     let _ = on_enter.update(cx, |launcher, cx| launcher.press(window, cx));
@@ -521,9 +530,10 @@ impl Launcher {
                 })
                 .compact_segments()
                 .chosen(Some(chosen))
-                .on_change(move |effort, _, cx| {
-                    let _ =
-                        on_change.update(cx, |launcher, cx| launcher.choose_effort(*effort, cx));
+                .on_change(move |effort, window, cx| {
+                    let _ = on_change.update(cx, |launcher, cx| {
+                        launcher.choose_effort(*effort, window, cx)
+                    });
                 })
                 .on_enter(move |window, cx| {
                     let _ = on_enter.update(cx, |launcher, cx| launcher.press(window, cx));

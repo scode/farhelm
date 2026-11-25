@@ -47859,3 +47859,85 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   maintainer. Remove the feedback file and its index entry.
 - Execution: Deferred to the TODO.md entry “Show Custom approval flags in keyboard-highlighted Recent setups.” A complete keyboard reveal needs scrolling without changing the highlight. Change `vnpmwptlszvrqxmvxovwtzllollvrwpl`, bookmark `plan/triage-custom-agents-nov24/02b-launcher-recent-flags`,
   https://github.com/scode/farhelm/pull/4820/changes.
+
+## trailing-launcher-search-effort-default-misses-custom-effort.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC.md, "Creation" (line 1188, then 1194): search matches "effort words offered by that
+  harness and model plus `effort:default`", and "Accepting a result applies it and clears the box". For a custom agent,
+  `offers_effort` is true (`launch.rs:375`), so search offers "Effort: Default" (`launcher/search.rs:669-671`). But
+  `LaunchDraft::choose_effort` (`launcher/draft.rs:894-896`) writes only `agent.effort`, while a custom agent's effort
+  is read from `custom_effort` (`draft.rs:273-279`). So accepting it applies nothing, and the typed effort is still
+  sent. The visible field is not synced either (`view/choices.rs:112-116`). Verified: Confirmed by reading the code.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code — clear
+  `custom_effort` for a custom harness and sync the field, plus a draft test; size S.). Size gate: about 100 lines of
+  diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
+  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
+  part the Assessment says remains.
+- Execution: Fixed by clearing the active custom effort when choosing Default in search. Change `tuntrtszupnwookpkyoklqlvtkstqkzo`, bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`,
+  https://github.com/scode/farhelm/pull/4824/changes.
+
+## trailing-launcher-choose-effort-omits-sync-fields.md
+
+- Outcome: `fix code`.
+- Assessment: Choosing "Effort: Default" from search for a custom agent does not resync the launcher's custom effort
+  text box. Verified: partly correct. `launcher/view/choices.rs:112-116` indeed skips `sync_fields`. But
+  `LaunchDraft::choose_effort` (`launcher/draft.rs:894-896`) does not clear `custom_effort` today, so the box still
+  matches the draft. The real bug is the sibling queue item
+  `trailing-launcher-search-effort-default-misses-custom-effort.md`. This desync appears only once that item is fixed.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: other. Fold into the
+  sibling item's fix (`sync_fields` alongside clearing `custom_effort`) and remove this item with it. Size S. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed by synchronizing the effort field with that search choice. Change `tuntrtszupnwookpkyoklqlvtkstqkzo`, bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`,
+  https://github.com/scode/farhelm/pull/4824/changes.
+
+## trailing-custom-agent-draft-retains-stale-builtin-effort.md
+
+- Outcome: `fix code`.
+- Assessment: In the launcher, a custom agent's effort is a typed word, but the form can also hold a hidden built-in
+  effort from a restored setup or a switch made before the model list loaded. After editing or clearing the custom
+  effort, switching to Claude or Codex brings back the old effort. Applying a model template on the custom agent shows a
+  false "effort was cleared" notice. Switching away from a custom agent also drops a typed effort without saying so.
+  Verified: Confirmed. `restore_selection` sets both `custom_effort` and `effort`
+  (`crates/gui/farhelm-gui/src/launcher/draft.rs:629-646`). `choices_for` passes `agent.effort`, not the custom value
+  (`draft.rs:952-965`). `reconcile` keeps the old effort when the catalog is unread, even for Custom
+  (`draft.rs:983-986`). The custom effort field writes only `custom_effort`.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code. Never hold a built-in effort while the agent is custom, and reconcile from the
+  effective value. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Fixed by keeping only the effort the selected agent exposes. Change `tuntrtszupnwookpkyoklqlvtkstqkzo`, bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`,
+  https://github.com/scode/farhelm/pull/4824/changes.
+
+## trailing-template-replay-drops-custom-agent-effort-switching-to-builtin.md
+
+- Outcome: `fix code`.
+- Assessment: Suppose a template, or a quick-launch sequence, switches from a custom agent with the effort "high" to a
+  built-in agent such as Claude. The desktop drops the effort to Default, while the CLI applying the same templates
+  keeps "high". A non-standard custom effort is cleared with no "effort was cleared" notice. Verified: Confirmed by
+  reading the code. `LaunchDraft::choices_for` reads `agent.effort`, not the custom effort
+  (`launcher/draft.rs:952-965`), and replay switches agents through `choose_harness` (`templates/apply.rs:509-514`). The
+  shared `apply_template` fold keeps the effort. SPEC_impl.md:9417 says "the CLI and `tl:` cannot disagree about what a
+  template means", so the GUI and CLI disagree for a sequence. A hand switch from a custom agent also drops the effort,
+  so what the hand path should do is itself a design choice.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code — have `choices_for` read `effort_value()`, plus tests for the notice; size S.
+  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Fixed by reconciling the visible effort when a template switches agents. Change `tuntrtszupnwookpkyoklqlvtkstqkzo`, bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`,
+  https://github.com/scode/farhelm/pull/4824/changes.

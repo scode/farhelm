@@ -120,7 +120,24 @@ fn custom_agent_choices_round_trip_through_a_saved_setup() {
     let mut recent = new_draft();
     recent.restore_recent(&selection, None);
     assert_eq!(recent.agent_selection(), Some(selection));
+    assert_eq!(
+        recent.agent.effort, None,
+        "the saved word lives only in the custom field"
+    );
     assert_eq!(recent.active_conversation(), None);
+    let edit = recent.choose_custom_model("other-model", Some(&catalog()));
+    assert_eq!(
+        edit.notice, None,
+        "a custom model change keeps the visible effort"
+    );
+    assert_eq!(recent.agent.custom_effort, "high");
+    recent.choose_effort(None);
+    recent.choose_harness(LaunchHarness::Claude, None, None);
+    assert_eq!(
+        recent.agent.effort_value(),
+        None,
+        "Default cannot uncover a saved built-in effort"
+    );
     launch.agent.custom_resumption = false;
     assert_eq!(launch.conversation, "one-start");
     assert!(

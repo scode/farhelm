@@ -210,11 +210,6 @@ consequences.
   still pass even if custom-agent ancestor correction and its user-facing correction notification were completely
   broken.
 
-- [`trailing-custom-agent-draft-retains-stale-builtin-effort.md`](trailing-custom-agent-draft-retains-stale-builtin-effort.md)
-  — When cloning, replacing, or loading a recent setup for a custom agent whose effort matches a built-in effort word
-  (such as "high" or "low"), or switching from a built-in agent to a custom agent before the model catalog loads,
-  editing or clearing Effort in the launcher leaves a hidden stale effort behind.
-
 - [`trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md`](trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md)
   — For a registered custom agent session created without session resumption enabled, the disabled Restart with menu
   item tells the user "Custom sessions can't be resumed" instead of explaining that this launch has no stored resume
@@ -253,10 +248,6 @@ consequences.
   or uninstall does not actually prove that the forwarder prevented the CLI from starting, so a regression that bypassed
   the lock or failed before locking would still pass.
 
-- [`trailing-launcher-choose-effort-omits-sync-fields.md`](trailing-launcher-choose-effort-omits-sync-fields.md) — When
-  resetting a custom agent's effort to default via launcher search (`effort:default`), the launcher's custom effort text
-  field is never resynchronized with the draft, so the visible text input can retain stale custom effort text.
-
 - [`trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md`](trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md)
   — When switching from a safer agent (such as Guarded Claude or Codex) to a registered custom agent (which always
   counts as YOLO), the red permission-escalation banner appears at the top of the launcher, but the custom agent's YOLO
@@ -266,11 +257,6 @@ consequences.
   — If a registered custom agent is renamed while it is highlighted in the launcher's search results, or between drawing
   a search result and clicking it, the launcher drops the selection and warns that the choice is no longer available
   even though that agent is still present and matches the search.
-
-- [`trailing-launcher-search-effort-default-misses-custom-effort.md`](trailing-launcher-search-effort-default-misses-custom-effort.md)
-  — When a registered custom agent is selected in the session launcher and has a typed effort, choosing "Effort:
-  Default" via composer search (e.g. `effort:default`) appears to accept the choice and clears the search box, but
-  leaves the custom agent's effort unchanged and still sends it at launch.
 
 - [`trailing-launcher-target-names-command-custom-agent-outside-restart-with.md`](trailing-launcher-target-names-command-custom-agent-outside-restart-with.md)
   — When creating, cloning, or replacing a session on the Command tab with a registered custom agent declared, the main
@@ -346,11 +332,6 @@ consequences.
   — If you switch in the launcher from a guarded agent (like Codex) to a custom agent — raising the red
   permission-escalation banner with Undo — and then apply a launch template that selects a different custom agent, the
   old escalation banner stays open instead of closing.
-
-- [`trailing-template-replay-drops-custom-agent-effort-switching-to-builtin.md`](trailing-template-replay-drops-custom-agent-effort-switching-to-builtin.md)
-  — Applying a launch template (or quick-launch sequence) that switches from a custom agent with a standard effort word
-  such as `high` to a built-in agent like Claude drops the effort to Default in the desktop launcher, whereas the CLI
-  keeps `high`.
 
 - [`trailing-templates-editor-allows-generic-custom-on-agent-template.md`](trailing-templates-editor-allows-generic-custom-on-agent-template.md)
   — Switching a Command template with generic 'Custom' to an Agent template shows 'Custom (not offered)' in the Agent

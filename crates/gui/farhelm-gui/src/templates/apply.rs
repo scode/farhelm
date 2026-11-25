@@ -501,15 +501,29 @@ fn replay(
     }
     let kind = applied.kind.unwrap_or(LauncherKind::Agent);
 
-    // 2. The agent type.
+    // 2. The agent type. The model edit in this same template must not erase an effort clear the switch reports.
+    let mut cleared_custom_effort = false;
     if let Some(agent) = fields.agent {
         match kind {
             LauncherKind::Agent => {
-                *notice = Some(
-                    draft
-                        .choose_harness(agent, context.catalog, remembered(agent))
-                        .notice,
-                );
+                let leaving_custom_effort = draft
+                    .agent
+                    .harness
+                    .is_some_and(LaunchHarness::uses_custom_catalog)
+                    && !agent.uses_custom_catalog()
+                    && !draft.agent.custom_effort.is_empty();
+                // Replay must agree with the checked template fold, which cannot confirm a built-in effort
+                // against an unread catalog. A hand switch still keeps its usual optimistic choice.
+                let catalog = if leaving_custom_effort {
+                    Some(context.catalog.unwrap_or_default())
+                } else {
+                    context.catalog
+                };
+                let edit = draft.choose_harness(agent, catalog, remembered(agent));
+                cleared_custom_effort = leaving_custom_effort
+                    && draft.agent.effort.is_none()
+                    && fields.effort.is_none();
+                *notice = Some(edit.notice);
             }
             LauncherKind::Command => draft.choose_command_agent(Some(agent)),
         }
@@ -552,27 +566,21 @@ fn replay(
                 } else {
                     draft.choose_custom_model(id, context.catalog)
                 };
-                *notice = Some(edit.notice);
+                if !cleared_custom_effort || edit.notice.is_some() {
+                    *notice = Some(edit.notice);
+                }
             }
         }
         Some(None) => {
             draft.choose_default_model();
-            *notice = Some(None);
+            if !cleared_custom_effort {
+                *notice = Some(None);
+            }
         }
         None => {}
     }
     if let Some(effort) = &fields.effort {
-        if applied
-            .harness
-            .is_some_and(LaunchHarness::uses_custom_catalog)
-        {
-            draft.agent.custom_effort = effort
-                .as_ref()
-                .map_or("", |value| value.as_cli_arg())
-                .to_owned();
-        } else {
-            draft.choose_effort(effort.as_ref().and_then(|value| value.known()));
-        }
+        draft.agent.set_effort(effort.as_ref());
     }
     if let Some(permissions) = fields.permissions {
         // A template's explicit reset asks for today's default. In Restart with, whose draft shows the permission the
