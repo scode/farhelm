@@ -422,14 +422,17 @@ fn post_departed_uploads(cx: &mut App) {
             .into_iter()
             .partition(|upload| upload.sent);
         for (sent, uploads) in [(true, sent), (false, unsent)] {
-            if let Some(first) = uploads.first() {
-                let title = first.title.clone();
+            if !uploads.is_empty() {
+                // The session row may have arrived after the first file was offered. Use the first available
+                // captured title so the notice can name the session even after the row goes away.
+                let title = uploads
+                    .iter()
+                    .filter_map(|upload| upload.title.as_ref())
+                    .find(|title| !title.raw().is_empty())
+                    .cloned();
                 let files = uploads.into_iter().map(|upload| upload.name).collect();
                 notices_to_post.push(Notice::InterruptedUpload(Rc::new(InterruptedUploads::new(
-                    key.clone(),
-                    title,
-                    files,
-                    sent,
+                    title, files, sent,
                 ))));
             }
         }

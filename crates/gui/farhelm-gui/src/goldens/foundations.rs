@@ -961,21 +961,20 @@ pub(super) fn notice_banner(_: &SceneState, _: &mut Window, _: &mut App) -> AnyE
         .into_any_element()
 }
 
-/// The two outcomes shown together when a session closes with a sent upload and several more waiting. The labels
-/// mix app words with the original names, including the summary of files beyond the three named.
+/// Repeated interruptions can show identical banners with separate Dismiss buttons. Include a blank title and a
+/// named session's waiting batch to pin both forms of the destination clause and the summary of extra files.
 pub(super) fn interrupted_upload_notices(
     _: &SceneState,
     _: &mut Window,
     _: &mut App,
 ) -> AnyElement {
-    let notice = |sent, names: &[&str]| {
+    let notice = |sent, title: &str, names: &[&str]| {
         let files = names
             .iter()
             .map(|name| HostText::from_host(*name))
             .collect();
         crate::main_view::banner(Notice::InterruptedUpload(Rc::new(InterruptedUploads::new(
-            "release".into(),
-            Some(HostText::from_host("Review the release")),
+            Some(HostText::from_host(title)),
             files,
             sent,
         ))))
@@ -984,9 +983,11 @@ pub(super) fn interrupted_upload_notices(
         .w_full()
         .flex()
         .flex_col()
-        .child(notice(true, &["build-log.txt"]))
+        .child(notice(true, "", &["pasted-1.png"]))
+        .child(notice(true, "", &["pasted-1.png"]))
         .child(notice(
             false,
+            "Review the release",
             &[
                 "overview.png",
                 "metrics.csv",

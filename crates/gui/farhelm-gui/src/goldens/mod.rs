@@ -649,7 +649,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "interrupted-upload-notices",
-        size: (920., 124.),
+        size: (920., 176.),
         draw: interrupted_upload_notices,
         setup: no_setup,
     },

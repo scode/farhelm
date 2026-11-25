@@ -191,10 +191,6 @@ consequences.
   — If an upload is cut off when the open session switches to a recovery, retired, or post-reset unavailable card,
   neither a terminal message nor a window notice appears until you leave the session (and never if you quit).
 
-- [`trailing-duplicate-interrupted-upload-notices-silently-dropped.md`](trailing-duplicate-interrupted-upload-notices-silently-dropped.md)
-  — While an interrupted-upload banner remains undismissed, a later interrupted upload of the same file name (including
-  a different screenshot named pasted-1.png after returning to the session) is silently dropped.
-
 - [`trailing-new-container-managed-checkout-stretches-host-block.md`](trailing-new-container-managed-checkout-stretches-host-block.md)
   — Choosing New container and Managed checkout inserts roughly 300 px of empty vertical space below the Container host
   picker because a horizontal flex basis is applied inside a vertical flex column.
@@ -854,10 +850,6 @@ consequences.
 - [`trailing-pending-scope-cleanups-logs-invalid-session-id-unescaped.md`](trailing-pending-scope-cleanups-logs-invalid-session-id-unescaped.md)
   — When discarding a malformed session ID from startup scope cleanup, the supervisor logs it with raw Display (%id)
   instead of escaped Debug (?id), violating the session-ID logging rule.
-
-- [`trailing-interrupted-upload-empty-title-and-batch-title-drop.md`](trailing-interrupted-upload-empty-title-and-batch-title-drop.md)
-  — An interrupted upload in a session with an empty title renders 'to was', and batched interrupted uploads discard a
-  later upload's title if the first upload started before the session row loaded.
 
 - [`trailing-overflowing-banner-stack-resets-to-oldest-after-reconnect.md`](trailing-overflowing-banner-stack-resets-to-oldest-after-reconnect.md)
   — When an overflowing banner stack reconnects or takes back control and its newest notice was already drawn before
