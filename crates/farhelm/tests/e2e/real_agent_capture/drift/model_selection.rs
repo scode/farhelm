@@ -100,12 +100,9 @@ async fn check_launch(
             }
         }
         env.with_session(launch, farhelm_helm::CreateExtras::default(), async |id| {
-            let cols = match harness {
-                LaunchHarness::Muse => MUSE_MODEL_COLS,
-                _ => COLS,
-            };
             let mut terminal =
-                Terminal::attach_with_width(env.sup, env.client, id, false, cols).await?;
+                Terminal::attach_with_width(env.sup, env.client, id, false, model_cols(harness))
+                    .await?;
             let observed = tokio::time::timeout(MODEL_START_LIMIT, async {
                 terminal
                     .ready(profile, TrustPolicy::AutoAnswer, false)
@@ -113,13 +110,8 @@ async fn check_launch(
                 loop {
                     let screen = terminal.host.screen_tail(SCREEN_BYTES).to_ascii_lowercase();
                     terminal.check(&screen, false).await?;
-                    if harness == LaunchHarness::Codex
-                        && model.is_some_and(|id| codex_retirement_prompt(&screen, id))
-                    {
-                        return Err(DriftError::CouldNotRun(
-                            "Codex asks whether to switch models before drawing the composer"
-                                .to_owned(),
-                        ));
+                    if let Some(reason) = startup_interruption(harness, &screen, model) {
+                        return Err(DriftError::CouldNotRun(reason.to_owned()));
                     }
                     if !trust_prompt(&screen) && screen_proves_model(harness, &screen, model) {
                         return Ok(());
@@ -138,6 +130,34 @@ async fn check_launch(
         .await
     })
     .await
+}
+
+/// The terminal width a model case attaches at. Only Muse needs more than the shared width, to keep its footer from
+/// shortening the model name.
+fn model_cols(harness: LaunchHarness) -> u16 {
+    use LaunchHarness::*;
+    match harness {
+        Muse => MUSE_MODEL_COLS,
+        Claude | Codex | Antigravity | Cursor | OpenCode | Goose | Pi | Omp | Grok | Bash | Zsh
+        | Custom => COLS,
+    }
+}
+
+/// A vendor prompt that stands between the launch and the composer and that the test leaves for the vendor's user
+/// to answer, so the model cannot be confirmed either way. Only Codex has one today: its model retirement notice.
+fn startup_interruption(
+    harness: LaunchHarness,
+    screen: &str,
+    model: Option<&str>,
+) -> Option<&'static str> {
+    use LaunchHarness::*;
+    match harness {
+        Codex => model
+            .is_some_and(|id| codex_retirement_prompt(screen, id))
+            .then_some("Codex asks whether to switch models before drawing the composer"),
+        Claude | Antigravity | Muse | Cursor | OpenCode | Goose | Pi | Omp | Grok | Bash | Zsh
+        | Custom => None,
+    }
 }
 
 /// The retirement notice names two models before Codex chooses one. The test leaves that choice to the vendor user.

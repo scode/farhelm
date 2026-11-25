@@ -256,16 +256,16 @@ rerunning the check.
 
 ### Real agent drift
 
-Run `python3 -B scripts/run-harness-drift.py` on Linux as part of this explicitly requested flow, before the sweep. This
-runs the default `base` category. Other drift categories, including `model_selection`, use an explicit `--category`. The
-runner first upgrades every agent CLI to its vendor's latest release (`docs/harness-drift-tests.md`, "Upgrading the
-agents first"). Each tracked agent then spends two real vendor turns to verify that Restart preserves the conversation.
-Record PASSED, COULD NOT RUN and FAILED separately with the version each ran against and the recorder run IDs, and
-report any UPGRADE FAILED line. Missing credentials leave coverage unknown for that agent; never sign in to get past
-them, and never write an agent's real hook files (the cases set hooks up in a private copy of its configuration). A
-FAILED case is handled like any other failure under the ground rules: fixed when the fix is straightforward, otherwise
-recorded in `TODO.md` with its evidence (it is drift in a vendor's CLI, not a flake), and either way it does not hold
-back the sweep or the release gate. Keep going through the rest of this flow and preserve the evidence for any failures.
+Run `python3 -B scripts/run-harness-drift.py --category all` on Linux as part of this explicitly requested flow, before
+the sweep. That selects every drift category, `model_selection` included; the bare command runs only `base`. The runner
+first upgrades every agent CLI to its vendor's latest release (`docs/harness-drift-tests.md`, "Upgrading the agents
+first"). Each tracked agent then spends two real vendor turns to verify that Restart preserves the conversation. Record
+PASSED, COULD NOT RUN and FAILED separately with the version each ran against and the recorder run IDs, and report any
+UPGRADE FAILED line. Missing credentials leave coverage unknown for that agent; never sign in to get past them, and
+never write an agent's real hook files (the cases set hooks up in a private copy of its configuration). A FAILED case is
+handled like any other failure under the ground rules: fixed when the fix is straightforward, otherwise recorded in
+`TODO.md` with its evidence (it is drift in a vendor's CLI, not a flake), and either way it does not hold back the sweep
+or the release gate. Keep going through the rest of this flow and preserve the evidence for any failures.
 
 ## 3. Deflake sweep
 

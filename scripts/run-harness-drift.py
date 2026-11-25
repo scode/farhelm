@@ -120,7 +120,8 @@ def recorded_case(binary: Path, test: str, name: str, env: dict[str, str]) -> Re
             "--kind", "development",
             "--selection", f"real {name} harness drift",
             "--concurrency", "one test, one libtest thread",
-            # Two turns, both composer startups, and private fixture cleanup share this budget.
+            # One harness's whole category shares this budget: a base case's two turns and both composer startups, or
+            # a model selection case's launches one after another, plus private fixture cleanup.
             "--timeout", "720",
             "--keep-farhelm-env", VERDICT_ENV,
             "--", str(binary), "--ignored", "--exact", test, "--test-threads", "1", "--nocapture",
