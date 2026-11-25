@@ -2837,6 +2837,9 @@ enum RelaunchDisposition {
 struct RelaunchFailure {
     error: anyhow::Error,
     disposition: RelaunchDisposition,
+    /// The replacement's scope still needs confirmation. A missing session row leaves no
+    /// ordinary cleanup path for this generation, so recovery records a startup obligation.
+    scope_cleanup_unconfirmed: bool,
 }
 
 impl RelaunchFailure {
@@ -2845,6 +2848,7 @@ impl RelaunchFailure {
         RelaunchFailure {
             error,
             disposition: RelaunchDisposition::Definitive,
+            scope_cleanup_unconfirmed: false,
         }
     }
 
@@ -2853,6 +2857,7 @@ impl RelaunchFailure {
         RelaunchFailure {
             error,
             disposition: RelaunchDisposition::Ambiguous,
+            scope_cleanup_unconfirmed: false,
         }
     }
 
@@ -2863,6 +2868,7 @@ impl RelaunchFailure {
         RelaunchFailure {
             error,
             disposition: RelaunchDisposition::Published,
+            scope_cleanup_unconfirmed: false,
         }
     }
 }
@@ -8125,9 +8131,8 @@ impl Supervisor {
         // state directory already reclaimed (one that plants a host as soon
         // as the socket appears would otherwise race it). Bounded by its
         // budget; what it cannot settle is left for the next start.
-        // The recorded scope retries need no host discovery, so let both cleanups start within the same budget.
-        // A stalled scan cannot prevent a scope check, and a stalled scope manager cannot delay the bind past
-        // the existing reclaim bound.
+        // Scope retries settle their own recorded starts. Orphan reclaim skips those launches,
+        // so both cleanups can share this startup budget without racing on a record.
         let reclaim_budget = self.timeouts.orphan_reclaim;
         let reclaim_deadline = tokio::time::Instant::now() + reclaim_budget;
         tokio::join!(
@@ -12976,7 +12981,7 @@ impl Supervisor {
             Err(failure) if failure.disposition == RelaunchDisposition::Published => {
                 Err(failure.error)
             }
-            Err(failure) => {
+            Err(mut failure) => {
                 // Definitive from here on means exactly one thing, since
                 // the published case returned above.
                 let definitive = failure.disposition == RelaunchDisposition::Definitive;
@@ -13081,6 +13086,17 @@ impl Supervisor {
                         true
                     }
                 };
+                if !still_exists
+                    && failure.scope_cleanup_unconfirmed
+                    && let Err(error) = self
+                        .store
+                        .record_pending_scope_cleanup(&id, claim.generation)
+                        .await
+                {
+                    failure.error = failure.error.context(format!(
+                        "could not save the failed restart's scope cleanup for the next start: {error:#}"
+                    ));
+                }
                 let mut sessions = self.sessions.lock().await;
                 self.restarting_rows
                     .lock()

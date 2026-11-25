@@ -290,8 +290,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   early sweep missed both cases. The final fix needs a durable stop-intent and retry path beyond the triage budget.
   Extend the retained-create fixture in `host_creates.rs` to drive authorized Stop against an unanswering and a gone
   host, and add an answering host with a live child. Assert refusal preserves the launch, a completed retry preserves
-  its stop annotation, and a failed write reports the work already done. Plan:
-  `plans/queue/supervisor-stop-and-restart-cleanup-fixes.md`.
+  its stop annotation, and a failed write reports the work already done. The existing durable Stop intent treats a
+  missing terminal as exit evidence. Same-boot recovery can also clear the intent when it rediscovers a live host, or
+  complete it from a dead child even though the scope has not been checked. Carry the pending sweep through observation,
+  status and consent, and retries after adoption. An empty terminal address also occurs when create confirmation fails
+  after the terminal became usable, so changing that case's recovery needs an explicit decision. A keyed create retry
+  already preserves an existing Stop intent without starting another agent.
 
 - **Keep a failed tab close retryable after the terminal host ends.** Close can end the terminal host and then fail to
   confirm the final sweep for surviving shell processes. It returns an error after forgetting the tab and removing its
@@ -306,19 +310,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   unavailable and then verified gone. A pending close's first sweep can fail before the failure branch that advances the
   retry deadline. Advance the deadline on every failed automatic retry and assert that cleanup waits until the new
   deadline.
-
-- **Keep failed Restart cleanup retryable after session deletion.** If a replacement fails to start after its session
-  row has been deleted, the supervisor can fail to confirm the replacement's Linux scope is empty. Startup can retire
-  the launch record once its host is gone, leaving processes from the failed attempt with no cleanup retry. Preserve the
-  exact generation's obligation under SPEC_impl.md's “Approved startup retry”, using the missing-row check that decides
-  whether to restore the failed Restart's session. An apparently empty scope is insufficient while the recorded host
-  start can still launch into it. Startup also needs to avoid a session-wide process sweep if a retained create
-  reservation has restored the same session ID. The local fix grew beyond its triage budget once review identified both
-  races. Exercise a failed sweep with a confirmed-gone host, a replacement start that can still open its scope, and a
-  restored session that must stay running. Ordinary Delete waits on Restart's lifecycle claim, so remove the row in the
-  fixture while Restart is held. Verify the retry also works with an empty session table. Start with
-  `unwind_failed_host_relaunch`, the failed-relaunch republish decision, and `retry_pending_scope_cleanups`. Plan:
-  `plans/queue/supervisor-stop-and-restart-cleanup-fixes.md`.
 
 - **Keep hook setup from launching into a folder that arrived later.** In the launcher, pick Grok or Antigravity to open
   the Restart hook question. Switch to a connected host whose remembered folder is still loading and choose **Set up and

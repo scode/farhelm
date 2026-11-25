@@ -1314,6 +1314,9 @@ pub(crate) struct ScopeUnits {
     /// is not proof every target was contained (legacy tabs are inferred).
     /// Required unscoped or uncertain targets keep this true across merges.
     needs_sweep: bool,
+    /// A deleted launch can share its marker with a restored run. Its startup retry may
+    /// inspect the recorded scope without examining the rest of the session's processes.
+    scope_only: bool,
     /// Initial signal policy for the main launch, shared by scope and portable cleanup.
     hangup_main: bool,
 }
@@ -1513,6 +1516,29 @@ pub(crate) async fn reap_process_tree_with_podman_deadline(
     .await
 }
 
+/// Retry only the named scope of a deleted launch. A restored session can share the old
+/// session marker, so even an empty or unconfirmed scope cannot authorize a process walk.
+pub(crate) async fn reap_recorded_scope(
+    scopes: &crate::scope::ScopeManager,
+    unit: String,
+    session_id: &str,
+    podman_deadline: tokio::time::Instant,
+) -> anyhow::Result<Reaped> {
+    reap_process_tree_with_podman_deadline(
+        scopes,
+        ScopeUnits {
+            scope_only: true,
+            ..ScopeUnits::recorded(Some(unit))
+        },
+        None,
+        session_id,
+        &SweepTarget::AgentOnly,
+        ScopeKillFailure::Refuse,
+        Some(podman_deadline),
+    )
+    .await
+}
+
 /// Keep the machine-wide walk lazy and injectable: tests can refuse any
 /// invocation, proving that scope-only cleanup does not enumerate processes.
 /// Production supplies the unchanged portable sweep through the sole wrapper.
@@ -1561,6 +1587,7 @@ where
     // skipping a scope the launch had). That failure keeps the sweep. A
     // `possible` unit also earns the re-probe, but is skipped when it fails.
     let mut needs_sweep = units.needs_sweep;
+    let scope_only = units.scope_only;
     let mut scope_errors: Vec<String> = Vec::new();
     let earns_reprobe = units.has_recorded() || !units.possible.is_empty();
     let hangup_main = units.hangup_main;
@@ -1622,6 +1649,15 @@ where
         }
     }
     let scope_error = (!scope_errors.is_empty()).then(|| scope_errors.join("; "));
+
+    if scope_only {
+        return match scope_error {
+            Some(error) => Err(anyhow::anyhow!(
+                "the recorded scope could not be confirmed gone ({error})"
+            )),
+            None => Ok(report),
+        };
+    }
 
     if !needs_sweep && had_scopes && scope_error.is_none() {
         // Reuse the confirmation oracle with no wait: only these identities
