@@ -3944,9 +3944,9 @@ routes each HTTP request to one connected supervisor and checks the observed hos
 no archive listing cache. IDs select records, never paths supplied by the client. The session Delete reply includes
 `archived: true` only when its completed last-reference teardown moved a checkout; bare successes and notice-only
 replies retain their existing JSON shapes. If the helm's reply deadline expires, it saves any late cleanup notice under
-the host and removed session's ID and wakes the notices feed after committing it. A timely reply carries its own notice
-and adds nothing to this history. A read mark also resolves a late Delete's notice because the Delete has already
-finished.
+the host and removed session's ID and wakes the notices feed after committing it. This includes Replace's source Delete.
+A timely reply carries its own notice and adds nothing to this history. A read mark also resolves a late Delete's notice
+because the Delete has already finished.
 
 `checkout_trash` operates only on retired working-copy rows with a recorded archive destination. It derives that path
 under the recorded root, opens the root and archive without following their final symlinks, and applies the
@@ -6596,6 +6596,10 @@ and any cleanup notice. On the 504 that says Delete carries on, the app drops th
 host and session pushes without offering the whole-environment confirmation at once or showing a late count. `Deleted`
 runs the ordinary local forgetting and reports the supervisor's count; `Sealed` destroys the environment through the
 same removal path as host removal, under the lock already held.
+
+At the inner deadline, the helm releases the Delete turn and provisioning lock. If an already-sent request later reports
+a non-final Delete with a checkout notice, the helm keeps the notice in the bell. The receiver lasts until its reply or
+connection close. The listing remains responsible for reporting a late seal.
 
 Whenever a connection publishes a listing with `sealed` set for a session-owned, machine-deleting host, a helm-owned
 finisher destroys it through that same function, at most one at a time per host. A sealed listing from any other host is

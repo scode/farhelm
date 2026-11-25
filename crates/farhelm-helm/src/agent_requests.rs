@@ -19122,14 +19122,21 @@ mod tests {
         /// changed: the session listed, nothing destroyed. Once the answer is
         /// released, a `Deleted` stops listing the session and keeps the
         /// environment, with the reported checkout path in the notice feed.
-        /// A `Sealed` shows the host as being deleted while its destruction
-        /// is held, then forgets the host.
+        /// A `Deleted` that arrives after the inner reply deadline still
+        /// gives the bell its checkout notice, even though the helm released
+        /// the host's Delete turn and provisioning lock. A timely inner
+        /// `Sealed` shows the host as being deleted during destruction.
         #[farhelm_testtrace::test]
         async fn an_environment_delete_answers_at_the_bound_and_its_late_answer_lands() {
             const CHECKOUT_NOTICE: &str = "The managed checkout at /work/one was not archived";
-            for (label, late) in [
-                ("Deleted", Answer::DeletedWithNotice(CHECKOUT_NOTICE)),
-                ("Sealed", Answer::Sealed),
+            for (label, late, expired) in [
+                ("Deleted", Answer::DeletedWithNotice(CHECKOUT_NOTICE), false),
+                ("Sealed", Answer::Sealed, false),
+                (
+                    "Deleted after inner deadline",
+                    Answer::DeletedWithNotice(CHECKOUT_NOTICE),
+                    true,
+                ),
             ] {
                 let (h, _, _, containers) = container_fleet().await;
                 let destruction = hold_destruction(&containers);
@@ -19146,6 +19153,7 @@ mod tests {
                 .await;
 
                 tokio::time::pause();
+                let started = tokio::time::Instant::now();
                 let call = spawn_environment_delete(&h, owned, "one", ENVIRONMENT_DELETE);
                 premise(&arrived, "the Delete reached the environment's supervisor").await;
                 assert_eq!(*seen.lock().unwrap(), ["seal-delete:one"], "{label}");
@@ -19160,6 +19168,18 @@ mod tests {
                 );
                 assert_eq!(destroys(&containers), 0, "{label}");
 
+                if expired {
+                    let tick = std::time::Duration::from_millis(1);
+                    let deadline = crate::sessions::ENVIRONMENT_DELETE_REPLY_DEADLINE;
+                    tokio::time::advance(deadline - started.elapsed() - tick).await;
+                    assert!(h.manager.try_host_provision_lock(owned).is_none());
+                    tokio::time::advance(tick * 2).await;
+                    let _turn =
+                        tokio::time::timeout(tick, h.manager.environment_delete_turn(owned))
+                            .await
+                            .expect("inner deadline releases the environment Delete turn");
+                    assert!(h.manager.try_host_provision_lock(owned).is_some());
+                }
                 release.notify_one();
                 tokio::time::resume();
                 if let Answer::Sealed = late {
@@ -19176,7 +19196,11 @@ mod tests {
                     await_unregistered(&h, owned).await;
                     assert_eq!(destroys(&containers), 1, "{label}: destroyed exactly once");
                 } else {
-                    await_unlisted(&h, owned, "one").await;
+                    // The expired waiter only receives notices. The real
+                    // supervisor refreshes the list through its own hint.
+                    if !expired {
+                        await_unlisted(&h, owned, "one").await;
+                    }
                     assert!(registered(&h, owned).await, "the environment stays");
                     assert_eq!(destroys(&containers), 0);
                     poll_until(

@@ -74,6 +74,8 @@ use tracing::warn;
 
 pub(crate) mod groups;
 mod sandbox;
+#[cfg(test)]
+pub(crate) use sandbox::ENVIRONMENT_DELETE_REPLY_DEADLINE;
 pub(crate) use sandbox::{
     EnvironmentUnasked, finish_seal_locked, retry_environment_delete, spawn_seal_finisher,
 };
@@ -3970,7 +3972,7 @@ pub(crate) async fn delete_session(
     };
     let (send_notice, late_notice) = tokio::sync::oneshot::channel();
     let request_state = Arc::clone(&state);
-    let delete_key = key.clone();
+    let delete_key = key;
     let response = within_host_reply_bound_saying(
         async move {
             let result = if environment {
@@ -3981,7 +3983,7 @@ pub(crate) async fn delete_session(
             match result {
                 Ok(outcome) => {
                     if let Some(notice) = outcome.notice.clone() {
-                        let _ = send_notice.send(notice);
+                        let _ = send_notice.send((delete_key, notice));
                     }
                     axum::Json(outcome).into_response()
                 }
@@ -3991,11 +3993,19 @@ pub(crate) async fn delete_session(
         timed_out,
     )
     .await;
-    // A timely result carries its own notice. After the reply deadline no
-    // caller sees that body, so the host's notice history owns the message.
+    retain_late_checkout_notice(state, response, late_notice)
+}
+
+/// A timely result carries its own notice. After the reply deadline the bell
+/// owns the detail, tied to the session whose Delete released the checkout.
+fn retain_late_checkout_notice(
+    state: Arc<AppState>,
+    response: axum::response::Response,
+    late_notice: tokio::sync::oneshot::Receiver<(store::SessionKey, String)>,
+) -> axum::response::Response {
     if response.status() == axum::http::StatusCode::GATEWAY_TIMEOUT {
         tokio::spawn(async move {
-            if let Ok(detail) = late_notice.await
+            if let Ok((key, detail)) = late_notice.await
                 && let Err(error) = state
                     .store
                     .record_late_delete(key, detail, Arc::clone(state.manager.events()))
@@ -5085,13 +5095,15 @@ pub(crate) async fn replace_session(
     // source. A disconnect between them must not leave the old session behind,
     // and neither may the reply bound (see `HOST_REPLY_BOUND`), which ends
     // only the wait: both halves still run, and the pushed list shows them.
-    within_host_reply_bound(async move {
-        let key = match resolve_session_ref(&state, &id).await {
+    let (send_notice, late_notice) = tokio::sync::oneshot::channel();
+    let request_state = Arc::clone(&state);
+    let response = within_host_reply_bound(async move {
+        let key = match resolve_session_ref(&request_state, &id).await {
             Ok(key) => key,
             Err(error) => return http_error(error),
         };
         match do_replace_session(
-            &state,
+            &request_state,
             &key,
             req.intent_key,
             req.with,
@@ -5107,14 +5119,20 @@ pub(crate) async fn replace_session(
                 entry_uuid,
                 session,
                 delete_notice,
-            }) => match qualify_session_info(&entry_uuid, session) {
-                Ok(session) => replace_reply(session, delete_notice),
-                Err(error) => http_error(error),
-            },
+            }) => {
+                if let Some(notice) = delete_notice.clone() {
+                    let _ = send_notice.send((key, notice));
+                }
+                match qualify_session_info(&entry_uuid, session) {
+                    Ok(session) => replace_reply(session, delete_notice),
+                    Err(error) => http_error(error),
+                }
+            }
             Err(e) => http_error(e),
         }
     })
-    .await
+    .await;
+    retain_late_checkout_notice(state, response, late_notice)
 }
 
 /// The replace endpoint's success body ([`farhelm_proto::SessionReplaceReply`]): the new session's own JSON, plus a

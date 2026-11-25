@@ -2244,10 +2244,18 @@ async fn delete_session_passes_the_supervisors_notice_to_the_caller() {
     peer.await.unwrap();
 }
 
-/// Once the Delete reply has timed out, only the shared notice can tell
-/// the user where the supervisor left the checkout.
+/// Once an ordinary Delete or Replace with has timed out, only the shared
+/// notice can tell the user where the supervisor left the source checkout.
 #[farhelm_testtrace::test]
 async fn a_late_delete_keeps_its_checkout_notice_in_the_feed() {
+    assert_late_checkout_notice("DELETE", "/api/sessions/sess-1", "").await;
+    let body = r#"{"with":{"cwd":"/different","command":{"command":"sh","yolo":false}}}"#;
+    assert_late_checkout_notice("POST", "/api/sessions/sess-1/replace", body).await;
+}
+
+/// Both routes must persist the same source checkout notice when the wire
+/// Delete answers after the helm already returned a 504.
+async fn assert_late_checkout_notice(method: &'static str, path: &str, body: &'static str) {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use tower::ServiceExt;
@@ -2264,10 +2272,27 @@ async fn a_late_delete_keeps_its_checkout_notice_in_the_feed() {
         handshake(&mut reader, &mut writer, "supervisor")
             .await
             .unwrap();
+        if method == "POST" {
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession { req_id, cwd, .. } = request else {
+                panic!("expected replacement create, got {request:?}");
+            };
+            assert_eq!(cwd, "/different");
+            let mut session = rest_harness::session("replacement", 1_700_000_001);
+            session.cwd = cwd;
+            writer
+                .write_control(&ControlMsg::SessionCreated { req_id, session })
+                .await
+                .unwrap();
+        }
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, .. } = request else {
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
             panic!("expected DeleteSession, got {request:?}");
         };
+        assert_eq!(session_id, "sess-1");
         delete_seen.send(()).unwrap();
         finish.await.unwrap();
         writer
@@ -2284,31 +2309,36 @@ async fn a_late_delete_keeps_its_checkout_notice_in_the_feed() {
     let harness = rest_harness::spliced_helm(client_side).await;
     let router = harness.router();
     let request = axum::http::Request::builder()
-        .method("DELETE")
-        .uri(harness.local_session_uri("/api/sessions/sess-1"))
+        .method(method)
+        .uri(harness.local_session_uri(path))
         .header("host", "127.0.0.1:7433")
-        .body(axum::body::Body::empty())
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(body))
         .unwrap();
-    let waiting = tokio::spawn(router.oneshot(request));
-    tokio::time::timeout(std::time::Duration::from_secs(5), seen)
-        .await
-        .expect("waiting for the fixture to receive Delete")
-        .expect("the supervisor fixture received Delete");
     tokio::time::pause();
-    tokio::time::advance(crate::sessions::HOST_REPLY_BOUND).await;
-    let response = rest_harness::within_reply_bound(waiting)
+    let waiting = tokio::spawn(async move {
+        let start = tokio::time::Instant::now();
+        (router.oneshot(request).await.unwrap(), start.elapsed())
+    });
+    rest_harness::within_reply_bound(seen)
         .await
-        .unwrap()
-        .unwrap();
+        .expect("the supervisor fixture received Delete");
+    let (response, waited) = rest_harness::within_reply_bound(waiting).await.unwrap();
+    rest_harness::assert_answered_at_reply_bound(waited, "checkout Delete reply");
     assert_eq!(response.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
     let body = axum::body::to_bytes(response.into_body(), 8 * 1024)
         .await
         .unwrap();
-    assert!(String::from_utf8_lossy(&body).contains("notices bell"));
+    if method == "DELETE" {
+        assert!(String::from_utf8_lossy(&body).contains("notices bell"));
+    }
     tokio::time::resume();
     // The supervisor can publish removal before replying. Forget the row
     // first so an ordinary cache wake cannot stand in for the notice's wake.
     let host = rest_harness::local_id(&harness.store).await;
+    harness
+        .fleet
+        .edit(host, |script| script.sessions.retain(|s| s.id != "sess-1"));
     let (claim, _) = crate::sessions::host_client(&harness.state, host).unwrap();
     harness
         .manager
@@ -2337,6 +2367,16 @@ async fn a_late_delete_keeps_its_checkout_notice_in_the_feed() {
         }
     );
     assert!(!notice.read && !notice.resolved);
+    let db = harness.store.connection_for_test();
+    let key: String = db
+        .lock()
+        .query_row(
+            "SELECT condition_key FROM notices WHERE id = ?1",
+            [notice.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(key, "sess-1");
     close_peer.send(()).unwrap();
     peer.await.unwrap();
 }

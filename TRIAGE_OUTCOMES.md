@@ -1713,29 +1713,6 @@
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-replace-drops-late-checkout-warning.md
-
-- Outcome: `fix code`.
-- Assessment: Replace with into another folder or a fresh clone deletes the source session. If that deletion leaves the
-  source's checkout on disk (it could not be moved to trash) and the Replace takes longer than the 20-second reply
-  bound, the notice naming the left-behind folder never reaches the user. The desktop's ordinary Delete saves such late
-  notices to the notices bell. Verified: confirmed by source. The Replace route uses a plain `within_host_reply_bound`
-  and drops the late body (`sessions.rs:5202-5240`). The Delete route captures the notice and records it with
-  `record_late_delete` after a 504 (`sessions.rs:4099-4135`). `finish_replacement` captures the notice
-  (`sessions.rs:5115-5121`), and its own comment says it "must reach the user like any other Delete's". SPEC.md,
-  "Managed checkouts" (`SPEC.md:2088-2095`: "That outcome must never be silent ... If the reply timed out before Delete
-  finished, its checkout notice appears in the navigation rail's notices bell") is written about Delete. That it covers
-  Replace's source Delete rests on a reading (SPEC_impl.md:3907-3908 says Replace's reply carries the notice, and
-  :3931-3934 describes the late save for Delete). The folder itself is retained on disk.
-- Decision: q-latenotice, "Late "checkout left behind" notices": the maintainer picked "Every route reaches the bell".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: A late "checkout left behind" notice from any route that removes a session reaches the notices
-  bell. Recommendation for reference: fix code. Reuse the Delete route's late-notice wiring for Replace. Size S-M (about
-  40-80 lines with a test). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
-  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
-  the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
 ## trailing-timed-out-agent-delete-lose-late-checkout-warning.md
 
 - Outcome: `fix code`.
@@ -1754,26 +1731,6 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## trailing-environment-delete-drops-checkout-warning-received-after-inner-reply.md
-
-- Outcome: `fix code`.
-- Assessment: Deleting one session from a sandbox or container that stays for other sessions waits up to four minutes
-  for the environment's Farhelm. If the answer comes later and says a checkout was left behind, the notice is dropped.
-  Verified: confirmed by source. `tokio::time::timeout(ENVIRONMENT_DELETE_REPLY_DEADLINE, …)` maps elapsed to
-  `EnvironmentUnasked` and drops the reply (`sessions/sandbox.rs:245-252`). The 240 s bound is a deliberate, commented
-  choice ("a request still unanswered then has almost certainly lost its connection", `:157-166`). The trigger needs a
-  teardown over four minutes, which SPEC.md "Slow hosts" makes acceptable as slowness but not as a lost notice. The
-  rare-glitch filter was judged ambiguous by the recording's own independent check; I agree it is unclear, so it does
-  not match.
-- Decision: q-latenotice, "Late "checkout left behind" notices": the maintainer picked "Every route reaches the bell".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: A late "checkout left behind" notice from any route that removes a session reaches the notices
-  bell. Recommendation for reference: discard, given the four-minute premise. If item 59 gets a shared late-notice path,
-  folding this in is size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
-  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
-  the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
 ## trailing-host-scoped-trash-confirmation-stays-open-invisibly.md
