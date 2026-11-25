@@ -535,19 +535,25 @@ connection or credential replacement retries; there is no periodic retry. Saving
 waits at most the helm's 20-second host reply bound for delivery (including lock waits), and reports
 `Saved; not delivered to <host>: <reason>` for failures; a host still being delivered to when the bound passes is
 reported as not delivered because it did not answer in time, while its delivery carries on and shows its outcome in the
-host's warning. Ending the connected phase cancels its pending pushes before further transport work. The list shows each
-recipe's name, supported providers, base, package count, tunnel count and build status per place, with Rebuild per
-place. Size is labelled **Tensorlake sandboxes only**. The editor's Software block offers managed Ubuntu, Tensorlake
-image and snapshot bases, and a container image with its login user, each stating its supported providers, plus Ubuntu
-packages for every base. The custom-base note explains that the base must run systemd as its init system, allow
-passwordless sudo, be Ubuntu or Debian with apt, and include bash, curl and git. The build checks these requirements
-first and stops with the missing requirement. Help explains that Farhelm then installs Claude Code and Codex with their
-official installers and saves a snapshot or image at that place. The editor replaces the list in place. Leaving it with
-unsaved changes by its own Back or Cancel asks whether to save, discard or keep editing. Closing Settings includes the
-recipe draft in the dialog's unsaved-changes question. Delete asks for confirmation in the pinned footer. If Podman
-reports no image for an interrupted capture, the footer asks again and offers **Delete anyway**. The question warns that
-an image could still appear on the container host and need cleanup later. A list refresh that fails keeps the rows
-shown, says they may be out of date, and offers **Retry loading**.
+host's warning. Ending the connected phase cancels its pending pushes before further transport work.
+
+Removing a credential from Farhelm is best effort at the next opportunity. An already connected host reconciles
+Farhelm-managed credential files at its next connection, subject to the delivery rules above. Vendor-owned login files,
+including a delivered Codex login, follow their own sign-out rules. Revoke a leaked credential with the vendor even
+after removing it from Farhelm.
+
+The list shows each recipe's name, supported providers, base, package count, tunnel count and build status per place,
+with Rebuild per place. Size is labelled **Tensorlake sandboxes only**. The editor's Software block offers managed
+Ubuntu, Tensorlake image and snapshot bases, and a container image with its login user, each stating its supported
+providers, plus Ubuntu packages for every base. The custom-base note explains that the base must run systemd as its init
+system, allow passwordless sudo, be Ubuntu or Debian with apt, and include bash, curl and git. The build checks these
+requirements first and stops with the missing requirement. Help explains that Farhelm then installs Claude Code and
+Codex with their official installers and saves a snapshot or image at that place. The editor replaces the list in place.
+Leaving it with unsaved changes by its own Back or Cancel asks whether to save, discard or keep editing. Closing
+Settings includes the recipe draft in the dialog's unsaved-changes question. Delete asks for confirmation in the pinned
+footer. If Podman reports no image for an interrupted capture, the footer asks again and offers **Delete anyway**. The
+question warns that an image could still appear on the container host and need cleanup later. A list refresh that fails
+keeps the rows shown, says they may be out of date, and offers **Retry loading**.
 
 Each agent's recipe choice is **None | API endpoint | Subscription**. API endpoint requires a base URL and offers named
 endpoint tokens; Subscription requires a named login for that agent from Credentials. Switching modes retains each draft
@@ -1203,8 +1209,9 @@ agent choice is independent of that destination:
   refusals and request errors in the launcher use yellow warning colors; loading messages and typing hints keep the
   ordinary text color, while permission danger stays red. Spaces alone ask for a search or an empty box and never
   launch. Escape or a click outside search closes its rows or message without clearing the query. Enter on a nonempty
-  query with the area closed first reopens it; a separate Enter picks the visible highlighted row, or leaves the
-  explanation in place when there is none.
+  query with the area closed first reopens it. A separate Enter picks the highlighted result from the current choices,
+  or leaves the explanation in place when there is none. A result from an arriving background update may take effect
+  before the next frame (see [One GUI at a time](#one-gui-at-a-time)).
 
   If an explicitly highlighted choice disappears before Enter, or a clicked row has already disappeared, the field shows
   "That choice is no longer available; choose a current result", keeps the query and clears the highlight. That Enter
@@ -1217,9 +1224,6 @@ agent choice is independent of that destination:
   Action buttons keep their normal press. The search box, model field, YOLO confirmation, and save-as-template panel
   keep their own Enter rules. In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without
   launching; with no highlighted entry it launches as before. A held Enter never launches.
-
-  A key or click may act before a frame shows an arriving background update, with destructive confirmations and launches
-  that retire a session (Replace with) limited to the action and consent already shown.
 
   An exact family word in launcher search preselects its latest model, using the first matching harness when none is
   chosen. When a word names both an agent and a model family, such as `grok`, typing it alone chooses that agent if none
@@ -1353,7 +1357,8 @@ agent choice is independent of that destination:
   dialog for about ten seconds; undo refuses if its old name has been taken. For a stored template that fails current
   save rules, the control says "Delete permanently" before deletion and no undo is offered. The label the user saw
   decides: a click on "Delete permanently" never offers undo, and a click on plain "Delete" always does, even if the
-  template list changed in between. Closing the dialog ends its undo notice.
+  stored copy changed in between. Delete removes the named template at whatever revision is currently stored. Closing
+  the dialog ends its undo notice.
 
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Its list button shows a muted outline bolt
   when unmarked and a filled amber bolt when marked, at the same size. Cmd+P on macOS or Ctrl+Shift+P elsewhere starts
@@ -1521,21 +1526,21 @@ registration (associating metadata with a directory) is optional convenience and
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
 accept a second launch or be replaced with another draft. Launches and changes to the host registry still exclude each
-other. Suspend and Resume are not changes to the host registry: from Hosts or from a sandbox session's row, top bar or
-Stop question (Stop and suspend), they are refused only while this window's own launch targets or is waking that same
-host, and their buttons are disabled for exactly that. Launches on other hosts and host changes elsewhere proceed while
-one is pending, and a launch on that host is left to the launcher's availability rule below and to the host's own
-lifecycle lock. Required confirmations remain modal until the launch is submitted. A failure or follow-up question
-restores the same launcher with its draft if the user has not moved on since submitting it. Otherwise a notice offers
-it, and the launcher returns when the user opens that notice (see [Keyboard focus](#keyboard-focus)). Whether such a
-notice keeps New and other launches refused until it is opened is not settled yet. Switching to a session on another
-host does not change the submitted launch's destination. The acted-on session's progress, actions, terminal attachment
-and row outcome settle as soon as the reply arrives. The accepted press keeps the launcher hidden through the wake (see
-"Topology"). Once the host reconnects, an existing-folder launch can send its create and a fresh checkout obtains its
-preview on the new connection before sending it. Busy retries and connection waiting share one 60-second budget. An
-accepted Resume and the provider's subsequent **Resuming** phase pause that budget. A checkout preview can finish after
-the minute once the host has connected. On expiry the launcher returns with its draft and explains why it did not start.
-A later connection cannot start the expired launch.
+other. Suspend and Resume are not changes to the host registry. From Hosts or from a sandbox session's row, top bar or
+Stop question (Stop and suspend), the window disables and refuses them while its pending launcher submission targets or
+is waking that same host. Plain Replace and Restart leave these actions available. Launches on other hosts and host
+changes elsewhere proceed while a launch is pending, and a launch on that host is left to the launcher's availability
+rule below and to the host's own lifecycle lock. Required confirmations remain modal until the launch is submitted. A
+failure or follow-up question restores the same launcher with its draft if the user has not moved on since submitting
+it. Otherwise a notice offers it, and the launcher returns when the user opens that notice (see
+[Keyboard focus](#keyboard-focus)). Whether such a notice keeps New and other launches refused until it is opened is not
+settled yet. Switching to a session on another host does not change the submitted launch's destination. The acted-on
+session's progress, actions, terminal attachment and row outcome settle as soon as the reply arrives. The accepted press
+keeps the launcher hidden through the wake (see "Topology"). Once the host reconnects, an existing-folder launch can
+send its create and a fresh checkout obtains its preview on the new connection before sending it. Busy retries and
+connection waiting share one 60-second budget. An accepted Resume and the provider's subsequent **Resuming** phase pause
+that budget. A checkout preview can finish after the minute once the host has connected. On expiry the launcher returns
+with its draft and explains why it did not start. A later connection cannot start the expired launch.
 
 Once the request has waited about two seconds, a small pill at the bottom of the window shows a spinner and a status:
 Launching, Restarting or Replacing, the captured host's name and elapsed seconds, updated about once a second, including
@@ -1600,7 +1605,9 @@ follows that same order; Cancel keeps initial focus, except that a plain Replace
 reply, takes focus only if the user has not moved on since answering Replace (see [Keyboard focus](#keyboard-focus)).
 The usual Replace answers, agent clone and inherited spawn copy the stored command. For an older agent launch without
 permission flags this preserves the original command and applies the YOLO gate. Clone, Replace with and Restart with
-compile new choices. Guarded launches need a host that understands protocol 48 or later.
+compile new choices. For a stored agent launch with a missing or unsupported mode, Clone and Replace with prefill the
+agent's default for a new launch, Guarded when offered. Guarded launches need a host that understands protocol 48 or
+later.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
@@ -1860,11 +1867,12 @@ ordinary keyed retry whose resolved launch changes may refuse the reused key. Th
 workspace-trust upgrade if the original attempt used a symlink and stored its canonical path.
 
 Antigravity has its own off-by-default, all-hosts switch. It applies to newly composed Antigravity agent launches in
-ordinary directories, managed checkouts and disposable environments. The per-launch `--settings` argument trusts the
-canonical working directory on the session's host. It replaces the saved trust list for that process and leaves the
-settings file alone. Custom permission options supplying `--settings` or `--settings=...` take precedence. Plain Restart
-and the Replace answers that reuse the saved command keep the stored launch. **Replace as guarded instead** reads
-Settings as Replace with does. Literal Command launches supply their own arguments.
+ordinary directories, managed checkouts and disposable environments. The per-launch `--settings` argument names the
+canonical working directory on the session's host when it can be resolved and represented as text. Otherwise it uses the
+submitted path. It replaces the saved trust list for that process and leaves the settings file alone. Custom permission
+options supplying `--settings` or `--settings=...` take precedence. Plain Restart and the Replace answers that reuse the
+saved command keep the stored launch. **Replace as guarded instead** reads Settings as Replace with does. Literal
+Command launches supply their own arguments.
 
 Codex, Muse and Antigravity show the same nonmodal discovery hint while their recognized trust question is current in
 the agent terminal, their switch is off, and their own hint has not been dismissed. The hint names the agent, offers
@@ -2574,7 +2582,7 @@ asks once with the affected forms named and offers **Keep editing**, **Discard**
 save is in flight. A close that saves waits for pending operations and sends the remaining saves one at a time. The
 first failure keeps Settings open and shows the affected page with its error. Two different unsaved Tensorlake keys
 leave Settings open on Credentials with a message to save the desired key first. When Settings closes, focus returns to
-the gear.
+the control that opened it if it is still available, such as the gear or the Settings button in a hook hint.
 
 Related controls and list rows share cards, with separators between rows and actions such as Refresh, New recipe and Add
 in their group headings. The Containers delete question opens inside the leftovers card. The recipe editor keeps Name,
@@ -3280,11 +3288,12 @@ Notifications about a host or the whole app have a separate bell at the top of t
 Hosts. It uses the same 16px size and quiet colors as its neighboring controls. Unread items make it filled red with an
 unread count; its accessible name reports that count too. Clicking opens newest-first history beside the bell. Escape,
 clicking outside, clicking the bell again or leaving the panel with keyboard focus closes it and marks the unread items
-in its last displayed list as read, including items outside the viewport. The bell then goes quiet; a failed best-effort
+in its last drawn list as read, including items outside the viewport. The bell then goes quiet; a failed best-effort
 mark may leave it loud until another close. Resolved items are quiet even if never opened and stay greyed in the panel.
-**Clear resolved** removes the resolved items in the last displayed list, including items outside the viewport. Read and
-cleared state is kept by the helm across resets and restarts. Removing a host removes its notices; an unreachable host
-keeps its last known notices.
+**Clear resolved** removes the resolved items in the last drawn list, including items outside the viewport. The last
+drawn list can include an update before its frame reaches the screen (see [One GUI at a time](#one-gui-at-a-time)). Read
+and cleared state is kept by the helm across resets and restarts. Removing a host removes its notices; an unreachable
+host keeps its last known notices.
 
 A late Delete notice names the host and shows its cleanup details, including the path and reason for any checkout left
 behind. Reading this notice marks it resolved so it can be cleared from the history.
@@ -4131,16 +4140,18 @@ edit is independent of capture. A hook passed on the command line for one launch
 the vendor owns — no configuration file, no conversation record, no trust state — and cannot outlive the launch that
 carried it. It is not invisible in the absolute: the report it delivers is written to a file in farhelm's own state
 directory and from there lands in farhelm's own database, and every run leaves a line in farhelm's own hook log.
-Vendor-owned state is the boundary these limits protect. The Grok and Antigravity opt-in covers the files named for
-Farhelm. Existing manual hooks elsewhere still work. Every integrated agent type identifies conversations only through
-accepted reports; Farhelm never selects a conversation by scanning vendor state. Historical stored identities remain
-usable under the same per-type Resume rules, regardless of their source. A reporting credential alone does not establish
-which Codex conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation
-and reuses it on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report
-without a session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of
-that exact file without following symlinks and requires its session ID to match. A failed check withdraws the durable
-resume offer, which makes Restart unavailable, and rejects the stale Resume request so the user can refresh; it never
-silently launches fresh under that request.
+Vendor-owned state is the boundary these limits protect. Grok's `hooks/farhelm.json` under `$GROK_HOME` (normally
+`~/.grok`) and Antigravity's Farhelm plugin folder belong to Farhelm. Opt-in hook setup may replace the whole Grok file,
+and the Antigravity removal instructions may tell the user to delete the whole folder. Existing manual hooks elsewhere
+still work. Every integrated agent type identifies conversations only through accepted reports; Farhelm never selects a
+conversation by scanning vendor state. Historical stored identities remain usable under the same per-type Resume rules,
+regardless of their source. A reporting credential alone does not establish which Codex conversation is in the
+foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi loads
+a private static extension from Farhelm's state directory on every launch. A Pi report without a session file withdraws
+the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without following
+symlinks and requires its session ID to match. A failed check withdraws the durable resume offer, which makes Restart
+unavailable, and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that
+request.
 
 Custom agents report their conversation explicitly through `farhelm custom-agent report-conversation --id <ID>`. The
 reporter stays silent and exits successfully even if it cannot write a report. Valid reports can be recorded while the
@@ -5572,15 +5583,16 @@ Conditions the user, or whoever administers their machine, deliberately set up o
 intent: their shell environment, the OS certificate store and proxies, or symlinks and files they reshape by hand. If
 the trigger takes a deliberate setup and the consequence follows from what that setup means, guarding against it is not
 Farhelm's job. For example, an intercepting proxy whose certificate the OS trusts can read feedback sent through it.
-This line between deliberate and accidental interference applies to files too: a hand-made imitation of an installation
-record, a symlink whose target path contains a newline, a symlink planted at a path Farhelm reserves for its own marker
-files, or every name the installer would use to keep a user's file already being taken. The accidental guards need not
-handle those states. Likewise, when a session was launched through a symlink outside the checkout root and the user
-later points that symlink at an archived checkout, a new terminal tab can open inside that archive, and deleting it from
-the trash is not refused. This never relaxes the remote-host boundary, removes a protection this specification states
-for a specific case (such as a container host's SSH destination moving, the foreign-replacement guard, the installer
-keeping a user's file, or uninstall refusing unknown app-bundle entries), or accepts database corruption, a bricked
-installation or similar lasting damage.
+Workspace trust likewise follows directory choices and changes the user deliberately made outside Farhelm, including
+changes made by their post-clone command. This line between deliberate and accidental interference applies to files too:
+a hand-made imitation of an installation record, a symlink whose target path contains a newline, a symlink planted at a
+path Farhelm reserves for its own marker files, or every name the installer would use to keep a user's file already
+being taken. The accidental guards need not handle those states. Likewise, when a session was launched through a symlink
+outside the checkout root and the user later points that symlink at an archived checkout, a new terminal tab can open
+inside that archive, and deleting it from the trash is not refused. This never relaxes the remote-host boundary, removes
+a protection this specification states for a specific case (such as a container host's SSH destination moving, the
+foreign-replacement guard, the installer keeping a user's file, or uninstall refusing unknown app-bundle entries), or
+accepts database corruption, a bricked installation or similar lasting damage.
 
 The reserved namespace is Farhelm's. A resource that matches Farhelm's reserved names or carries its required ownership
 labels is treated as Farhelm's own under the existing cleanup rules, even when it was created outside Farhelm, reuses a
@@ -5785,11 +5797,12 @@ specification keeps a draft editable, as in the Templates editor and Credentials
 again. The GUI never retries or replays a failed save on its own.
 
 Confirmed 2026-10-10: an action a user takes inside a sub-second window before the screen updates, or in a dialog hidden
-behind another, may be carried out as delivered. A pointer or keyboard action uses the target, consent and preconditions
-from the frame the user was shown, or is ignored when that frame has not yet been shown or its target is no longer in
-view. A drop lands where the pointer was released. A Cancel and a submit of the same dialog that arrive together before
-a redraw may still submit, and confirming a dialog that another one covers confirms that dialog. Guards this spec names
-explicitly, such as the approval cards' 700 ms pause and the preconditions destructive prompts carry, still hold.
+behind another, may be carried out as delivered. By default, a pointer or keyboard action uses the target, consent and
+preconditions from the frame the user was shown, or is ignored when that frame has not yet been shown or its target is
+no longer in view. A drop lands where the pointer was released. A Cancel and a submit of the same dialog that arrive
+together before a redraw may still submit, and confirming a dialog that another one covers confirms that dialog. Guards
+this spec names explicitly, such as the approval cards' 700 ms pause and the preconditions destructive prompts carry,
+still hold.
 
 Decided 2026-10-26: convenience state in the GUI (labels, marks, remembered folders and selections, the order dialogs
 open in) may lag behind a delayed reply from the helm or a change an agent or the command line made. Only what a
@@ -5798,6 +5811,8 @@ destructive action or a launch is shown and fenced against has to be current.
 Decided 2026-11-21: a control the screen still shows after its target changed may be used, as long as the helm refuses
 what is no longer valid or the result is trivially undone. A question left open on a sandbox that has since been
 suspended may still be answered and get the helm's refusal, and a pin drag may land where the release puts it.
+Throughout the app, a key or click may act before a frame shows an arriving background update, with destructive
+confirmations and launches that retire a session (Replace with) limited to the action and consent already shown.
 
 ### Remote input, session defaults, and availability
 
@@ -6028,18 +6043,19 @@ tell apart safely. Other aliases, including shared unit or installation folders,
 directories and managed checkouts do not gain this exception.
 
 Confirmed 2026-10-11: Farhelm has dedicated ownership of the managed checkouts it creates, their checkout roots and the
-trash (`.farhelm-trash`) and reserved spare container (`.farhelm-spares`). Out-of-band manipulation of those paths is
-unsupported, including restoring a filesystem snapshot over them, user-instigated kernel-level overrides, or using
-uncommon filesystems such as FAT. Farhelm adds no complexity to detect or defend against these changes. The
-foreign-replacement guard protects ordinary replacement, such as a folder removed and recreated or a re-clone; replacing
-a folder inside the guard's check-then-move window is out of band too. The guard does not extend inside
-`.farhelm-spares` (accepted 2026-10-21): anything in that container that Farhelm did not put there, including a folder
-removed and recreated, is out of band, and Farhelm may adopt it and delete it. For example, a launch can take a replaced
-spare as its own, and startup cleanup then deletes what the launch left behind. Everywhere else the guard applies as
-stated. This acceptance does not extend to the state directory or installation, or change the ownership checks required
-elsewhere: installer checksum matching, uninstall refusing unknown app-bundle entries, and the symlink and
-canonical-path rules still apply. Ordinary reboots and remounts on supported filesystems such as btrfs, NFS and
-overlayfs remain supported, as the managed-checkout identity rule above specifies.
+trash (`.farhelm-trash`) and reserved spare container (`.farhelm-spares`). Farhelm owns the reserved spare container and
+anything already in it as soon as its parent serves as a checkout root, including when that root defaults to the sandbox
+home. Out-of-band manipulation of those paths is unsupported, including restoring a filesystem snapshot over them,
+user-instigated kernel-level overrides, or using uncommon filesystems such as FAT. Farhelm adds no complexity to detect
+or defend against these changes. The foreign-replacement guard protects ordinary replacement, such as a folder removed
+and recreated or a re-clone; replacing a folder inside the guard's check-then-move window is out of band too. The guard
+does not extend inside `.farhelm-spares` (accepted 2026-10-21): anything in that container that Farhelm did not put
+there, including a folder removed and recreated, is out of band, and Farhelm may adopt it and delete it. For example, a
+launch can take a replaced spare as its own, and startup cleanup then deletes what the launch left behind. Everywhere
+else the guard applies as stated. This acceptance does not extend to the state directory or installation, or change the
+ownership checks required elsewhere: installer checksum matching, uninstall refusing unknown app-bundle entries, and the
+symlink and canonical-path rules still apply. Ordinary reboots and remounts on supported filesystems such as btrfs, NFS
+and overlayfs remain supported, as the managed-checkout identity rule above specifies.
 
 Confirmed 2026-10-22: a checkout root reachable from more than one host (for example on a network mount two hosts both
 see) is unsupported too. Each host's supervisor knows only its own sessions, so one host can archive, and later

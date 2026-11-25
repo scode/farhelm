@@ -5223,8 +5223,12 @@ open the batch from the bell even if the signed feed arrives before the first wi
 The announcement fetcher uses a 15-second request timeout, capped streaming reads (256 KiB for JSON, 4 KiB for the
 signature), HTTPS on `get.farhelm.io`, and no redirects. A 404 on either file is quiet. Other transport, HTTP, size,
 authentication or schema errors log a warning and leave the queue alone. `verify_signed_metadata` uses
-`RELEASE_KEY_RING` and requires the trusted comment `farhelm announcements` before any JSON is parsed. The v1 object has
-`version: 1` and an `announcements` array. Each entry has `id`, `title`, `body`, optional `detail` and
+`RELEASE_KEY_RING` and requires the trusted comment `farhelm announcements` before any JSON is parsed. The standing
+brick-test feed deliberately uses the production key and signing purpose so the brick test takes the production
+verification path. The signature authenticates the bytes and purpose without binding the filename or proving freshness.
+The resulting replay risk is accepted.
+
+The v1 object has `version: 1` and an `announcements` array. Each entry has `id`, `title`, `body`, optional `detail` and
 `link { label, url }`. Optional `min_version` and `max_version` use inclusive SemVer precedence, `os` is `macos` or
 `linux` (or a list of those), and `expires_at` is RFC 3339. At or after expiry, the entry is excluded. An entry field
 the v1 schema does not name is a schema error, so a misspelled targeting field cannot widen an entry's audience. Links
@@ -5464,18 +5468,18 @@ installation it is on, so it follows an open session the sidebar's filter hides
   `--conversation {conversation}` with a literal ID. The supervisor appends one `--prompt-interactive=<prompt>` argument
   for a fresh or named start with an initial prompt. Attaching the value keeps leading dashes in the prompt from being
   parsed as options. Protocol 82 introduces the whole-argument Antigravity trust placeholder. The supervisor fills it
-  with a JSON settings object naming the canonical working directory. The screen reader recognizes Antigravity's
-  workspace trust menu as Waiting and uses the generic classifier on other screens. OMP is also a structured harness
-  only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider flags
-  for the harness default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent
-  explicit; a literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise
-  of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix`
-  interpretations on the id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`).
-  `--thinking <effort>` carries the seven-level list (`off` through `max`; OMP's `auto` is not offered), and
-  `--approval-mode yolo|always-ask|write` carries the YOLO/Approve/Guarded choices. An omitted permission selects
-  Guarded for new launches. Older stored launches with no permission keep their historical YOLO meaning. SmartApprove
-  and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at
-  sidebar size.
+  with a JSON settings object naming the canonical working directory when it can be resolved and represented as text.
+  Otherwise it uses the submitted spelling. The screen reader recognizes Antigravity's workspace trust menu as Waiting
+  and uses the generic classifier on other screens. OMP is also a structured harness only at launch time: its release
+  catalog holds the same OpenRouter model IDs as Pi's, omits model and provider flags for the harness default, and
+  compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent explicit; a literal custom id
+  stays one argv element and is stored verbatim — provider qualification is not a promise of literal upstream routing
+  for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix` interpretations on the id it receives, as
+  documented in `website/src/content/docs/docs/agents/omp.md`). `--thinking <effort>` carries the seven-level list
+  (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask|write` carries the
+  YOLO/Approve/Guarded choices. An omitted permission selects Guarded for new launches. Older stored launches with no
+  permission keep their historical YOLO meaning. SmartApprove and Chat are refused for OMP; the row glyph is the Greek
+  capital omega, chosen so it cannot read as Pi's "P" at sidebar size.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter
@@ -6217,11 +6221,12 @@ arguments, and launch records, logs, host argv and host environment carry no bea
 Before publishing the snapshot, a legacy stamp authorizes clearing the old Farhelm keys for that agent. For Codex, only
 an Endpoint stamp records a settings write. An old Absent stamp leaves settings alone. An old Claude settings URL can
 otherwise take precedence and receive the new token. An old Codex settings bearer can survive a provider override that
-omits a bearer. A host with no legacy stamp records Cleared directly, preserving its image settings. A failed cleanup
-keeps that stamp for retry and withholds that agent's entry. The other agent and GitHub can still finish. The host
-warning names the affected agent, and credential replacement reports the warning when that agent's selection uses the
-replaced name. A successful cleanup commits Cleared before the snapshot upload, so an upload retry preserves subsequent
-settings edits.
+omits a bearer. A host with no legacy stamp records Cleared directly, preserving its image settings. An old Claude
+settings write whose stamp was never recorded, for instance after a crash between the remote write and the local commit,
+can therefore remain. This migration accepts that case. A failed cleanup keeps that stamp for retry and withholds that
+agent's entry. The other agent and GitHub can still finish. The host warning names the affected agent, and credential
+replacement reports the warning when that agent's selection uses the replaced name. A successful cleanup commits Cleared
+before the snapshot upload, so an upload retry preserves subsequent settings edits.
 
 Recipes persist optional `github_token_credential` names. The GitHub slot atomically installs 0600 bytes through stdin
 at `github_token::host_file(remote_state_dir)`, the shared `github-token` basename, or unlinks only that file for None.
@@ -8759,11 +8764,11 @@ drawn from the same menu pieces as the session row's menu.
 
 The rail's notices bell sits at the top of the rail's foot, above Hosts (`crates/gui/farhelm-gui/src/rail_notices.rs`).
 The bell and its panel draw the helm's pushed notices straight from the store. Every close sends one read mark for the
-unread notices in the last displayed list, including rows outside the viewport. A notice that arrived after that frame
-stays unread. A failed mark is only logged and leaves the bell loud until the next close. Clear resolved sends the same
-list's resolved IDs, including rows outside the viewport. The helm deletes those still resolved when it acts. The trash
-cleanup notice's Retry now and Open Trash go through the Trash dialog's own command, guards and entry point, so the bell
-adds no second cleanup owner.
+unread notices in the last drawn list, including rows outside the viewport. Drawing can include an arriving notice
+before that frame reaches the screen. A notice that arrived after that frame stays unread. A failed mark is only logged
+and leaves the bell loud until the next close. Clear resolved sends the same list's resolved IDs, including rows outside
+the viewport. The helm deletes those still resolved when it acts. The trash cleanup notice's Retry now and Open Trash go
+through the Trash dialog's own command, guards and entry point, so the bell adds no second cleanup owner.
 
 The version's hover help comes from pure functions of the window's build and the updater's state: `version_help` in
 `crates/gui/farhelm-gui/src/sidebar/header.rs` without an updater, the updater's `readout` in
