@@ -1165,7 +1165,8 @@ fn a_launch_elsewhere_does_not_hold_suspend(cx: &mut TestAppContext) {
 }
 
 /// A host-level Suspend could freeze the supervisor before it answers a create already sent to that host.
-/// The open launch protects its destination, and both lifecycle verbs show why they are unavailable.
+/// The open launch protects its destination while the other host's menu stays actionable.
+/// Check that Resume on the destination loses activation and focus before the launch replies.
 #[gpui::test]
 fn a_pending_launch_holds_its_hosts_lifecycle_controls(cx: &mut TestAppContext) {
     let (mut helm, cx) = panel(cx, connected(), Vec::new());
@@ -1179,6 +1180,14 @@ fn a_pending_launch_holds_its_hosts_lifecycle_controls(cx: &mut TestAppContext) 
         cx.update(|_, cx| { crate::launcher::launch::host_lifecycle_refusal(5, cx).is_none() }),
         "the same launch leaves the other host available"
     );
+    click(cx, "host-menu-toggle-5");
+    assert!(
+        frame(cx).iter().any(|node| {
+            node.element_id.as_deref() == Some("host-menu-suspend") && node.flags.click
+        }),
+        "the other host's menu still offers Suspend"
+    );
+    keys(cx, "escape");
     click(cx, "host-menu-toggle-4");
     assert_eq!(
         hover_help(cx, "host-menu-suspend").as_deref(),
@@ -1200,6 +1209,14 @@ fn a_pending_launch_holds_its_hosts_lifecycle_controls(cx: &mut TestAppContext) 
     // changed but the launcher still owns the destination.
     push_sandbox(&mut helm, suspended());
     settle(cx);
+    assert!(
+        frame(cx).iter().any(|node| {
+            node.element_id.as_deref() == Some("host-resume-4")
+                && !node.flags.click
+                && !node.flags.focusable
+        }),
+        "inline Resume has neither an activation target nor a focus target"
+    );
     assert_eq!(
         hover_help(cx, "host-resume-4").as_deref(),
         Some("A launch on this host is in progress; try again once it finishes")
