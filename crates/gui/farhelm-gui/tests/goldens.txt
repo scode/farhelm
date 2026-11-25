@@ -366,6 +366,8 @@ linux/settings-credential-editor--dark.png 9f71491cd37427513b09ca21c22c2ebdaf0f6
 linux/settings-credential-editor--light.png 8d095c73645b64661aaf0c8518bf2db8de779332
 linux/settings-credentials--dark.png b4f092efa520c043ed8abcdedcac638545febbc5
 linux/settings-credentials--light.png eb3696ad173bf7f996e11abc6d1141569eaf0534
+linux/settings-credentials-key-conflict--dark.png 399b6d778ca677c21cbee2cd5aa0dd53d1d96558
+linux/settings-credentials-key-conflict--light.png ad8a46809a099652eaee5c1319c23a3bb900406f
 linux/settings-cursor--dark.png d8ad012ada154d51db4d1e36ffa9f51f47ac2699
 linux/settings-cursor--light.png bd600c900b660a3430b614521425ba1303d71d40
 linux/settings-custom-agent--dark.png 680aa6ca74f88420b802bfa95f33ad588f734783

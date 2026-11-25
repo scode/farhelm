@@ -241,27 +241,6 @@
   the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## settings-close-can-miss-conflicting-tensorlake-keys.md
-
-- Outcome: `fix code`.
-- Assessment: The Tensorlake API key can be typed in two places (Tensorlake and Credentials). If one key save is running
-  and the other form holds a different key when you choose Save and Close, Settings waits, then saves the second key
-  over the first instead of stopping on Credentials to ask which key you want. Verified: confirmed by source. With a
-  batch running, the close answer only records `SaveAndClose` (`editing.rs:637-639`); the conflict check in the later
-  `start_batch(None)` needs both typed keys (`:394-406`), and the first key's field has cleared after its save. SPEC.md
-  2575-2576: "Two different unsaved Tensorlake keys leave Settings open on Credentials with a message to save the
-  desired key first." Whether a key whose save is in flight counts as "unsaved" is a reading (the close question itself
-  lists it as unsaved).
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code — run the key-conflict check when the close answer is given;
-  size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## settings-close-can-save-newly-staged-codex-login.md
 
 - Outcome: `fix code`.

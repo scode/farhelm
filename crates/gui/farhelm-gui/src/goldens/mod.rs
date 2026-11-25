@@ -1650,6 +1650,12 @@ static SCENES: &[Scene] = &[
         setup: settings_credentials_setup,
     },
     Scene {
+        name: "settings-credentials-key-conflict",
+        size: (800., 830.),
+        draw: settings_edited,
+        setup: settings_key_conflict_setup,
+    },
+    Scene {
         name: "settings-credential-editor",
         size: (800., 830.),
         draw: settings_edited,

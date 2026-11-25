@@ -820,6 +820,22 @@ pub(super) fn settings_credentials_setup(state: &SceneState, window: &mut Window
     settings_scene(state, crate::settings::Section::Credentials, window, cx);
 }
 
+/// Credentials after Save and Close refused two different keys and the previously authorized save settled.
+pub(super) fn settings_key_conflict_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use crate::settings::Section;
+    settings_scene_with(
+        state,
+        Section::Credentials,
+        SettingsFixture {
+            tensorlake_key: true,
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+    stage_draft(state, Section::Credentials, DraftStep::ShowKeyConflict);
+}
+
 /// Picture the agent login editor with both agent marks in the segmented choice.
 pub(super) fn settings_credential_editor_setup(
     state: &SceneState,
@@ -1094,7 +1110,7 @@ pub(super) fn settings_notifications_setup(state: &SceneState, window: &mut Wind
 /// come from the same draft state as an edit typed in the app.
 struct DraftScene {
     section: crate::settings::Section,
-    step: Cell<DraftStep>,
+    step: Rc<Cell<DraftStep>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1104,13 +1120,14 @@ enum DraftStep {
     OpenNotifications,
     EditNotifications,
     AskToClose,
+    ShowKeyConflict,
     Done,
 }
 
 fn stage_draft(state: &SceneState, section: crate::settings::Section, first: DraftStep) {
     state.keep.borrow_mut().push(Box::new(DraftScene {
         section,
-        step: Cell::new(first),
+        step: Rc::new(Cell::new(first)),
     }));
 }
 
@@ -1180,6 +1197,15 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
     let section = match step {
         DraftStep::Edit | DraftStep::OpenNotifications => draft.section.clone(),
         DraftStep::EditNotifications => Section::Notifications,
+        DraftStep::ShowKeyConflict => {
+            let step = draft.step.clone();
+            window.defer(cx, move |window, cx| {
+                if settings::stage_settled_key_conflict(window, cx).is_some() {
+                    step.set(DraftStep::Done);
+                }
+            });
+            return div().into_any_element();
+        }
         DraftStep::VerifyDraft => {
             if settings::draft_changed_for_opened(draft.section.clone(), cx) {
                 draft.step.set(DraftStep::Done);
@@ -1226,7 +1252,10 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
             DraftStep::OpenNotifications => DraftStep::EditNotifications,
             DraftStep::EditNotifications => DraftStep::AskToClose,
             DraftStep::Edit => DraftStep::VerifyDraft,
-            DraftStep::VerifyDraft | DraftStep::AskToClose | DraftStep::Done => {
+            DraftStep::VerifyDraft
+            | DraftStep::AskToClose
+            | DraftStep::ShowKeyConflict
+            | DraftStep::Done => {
                 unreachable!("these steps do not edit a field")
             }
         };

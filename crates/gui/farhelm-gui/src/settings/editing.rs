@@ -61,6 +61,22 @@ impl EditState {
     }
 }
 
+/// Stage the visible result of a rejected close after the earlier key write settles. The interaction tests drive the
+/// close and receipt ordering. This fixture uses the real masked input and conflict reveal to pin the resulting view.
+#[cfg(test)]
+pub(crate) fn stage_settled_key_conflict(window: &mut Window, cx: &mut App) -> Option<()> {
+    let dialog = layers::last_opened::<SettingsDialog>(cx)?;
+    let key = dialog.read(cx).credentials.as_ref()?.read(cx).key();
+    if key.read(cx).typed_key().is_none() {
+        key.read(cx)
+            .replacement_input_for_golden(cx)?
+            .edit_for_golden("fixture-replacement-key", window, cx);
+        return None;
+    }
+    dialog.update(cx, |dialog, cx| dialog.reveal_key_conflict(window, cx));
+    Some(())
+}
+
 type OnSaveSettled = Box<dyn FnOnce(bool, &mut App)>;
 
 /// The dialog can join an explicit Save that a form already sent, or wait on one it just started. The continuation
@@ -634,7 +650,11 @@ impl SettingsDialog {
             &mark,
             move |(), window, cx| {
                 let _ = save.update(cx, |dialog, cx| {
-                    if let Some(batch) = &mut dialog.batch {
+                    // An outstanding key save clears its field on success. Check the two drafts while
+                    // they are still both present, before letting that save carry on into a close batch.
+                    if dialog.batch.is_some() && dialog.keys_disagree(cx) {
+                        dialog.reveal_key_conflict(window, cx);
+                    } else if let Some(batch) = &mut dialog.batch {
                         batch.after = AfterBatch::SaveAndClose;
                     } else {
                         dialog.start_batch(None, window, cx);

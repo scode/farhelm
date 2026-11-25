@@ -77,6 +77,8 @@ mod custom_agents;
 #[cfg(test)]
 pub(crate) use custom_agents::{stage_custom_agent_draft, stage_custom_agent_save_refusal};
 mod editing;
+#[cfg(test)]
+pub(crate) use editing::stage_settled_key_conflict;
 mod file_types;
 #[cfg(test)]
 mod file_types_tests;
@@ -1697,8 +1699,8 @@ impl SettingsDialog {
             }
             Section::Credentials => {
                 let conflict = self.key_conflict.then(|| {
-                    let message =
-                        "Two different Tensorlake keys are typed. Save the one you want first.";
+                    let message = "You entered two different Tensorlake keys. Save the one you want to use. \
+                                   If that key is already saved, discard the draft.";
                     choices::outcome_line(
                         "settings-key-conflict",
                         Role::Alert,

@@ -275,6 +275,18 @@ fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
 /// The two key fields write one account. A close Save cannot choose between different replacement drafts.
 #[gpui::test]
 fn closing_with_two_different_key_drafts_never_chooses_one(cx: &mut TestAppContext) {
+    assert_closing_with_two_different_key_drafts(cx, false);
+}
+
+/// A previously authorized Save may finish while Settings stays open. Its success clears the first field, so
+/// checking only after that reply would silently let Save and Close replace it with the other draft.
+#[gpui::test]
+fn closing_with_conflicting_keys_does_not_replace_a_pending_key_save(cx: &mut TestAppContext) {
+    assert_closing_with_two_different_key_drafts(cx, true);
+}
+
+/// Exercise the same two independent drafts while either neither key or just the first key is already saving.
+fn assert_closing_with_two_different_key_drafts(cx: &mut TestAppContext, saving_first: bool) {
     let (mut helm, cx, _) = open_rail(cx, &Preferences::default());
     let read = show_tensorlake(&mut helm, cx);
     helm.reply(read.id, 200, Some(account(false, false)));
@@ -290,18 +302,35 @@ fn closing_with_two_different_key_drafts_never_chooses_one(cx: &mut TestAppConte
     assert_eq!(typed_in_credentials(cx), "fictional-second-key");
     show_section(cx, Section::Tensorlake);
     assert_eq!(typed_here(cx), "fictional-first-key");
+    let pending = saving_first.then(|| {
+        click(cx, "settings-footer-save");
+        let (id, body) = one_account_save(&mut helm);
+        assert_eq!(body, json!({ "api_key": "fictional-first-key" }));
+        assert_eq!(preference_work(cx), Some(Work::Save));
+        id
+    });
     click(cx, "settings-close");
     click(cx, "prompt-confirm");
-    assert!(
-        painted(cx)
-            .contains("Two different Tensorlake keys are typed. Save the one you want first.")
-    );
+    assert!(painted(cx).contains("You entered two different Tensorlake keys."));
     assert_eq!(typed_in_credentials(cx), "fictional-second-key");
     assert!(
         sent(&mut helm)
             .iter()
             .all(|request| request.method == Method::Get)
     );
+    if let Some(id) = pending {
+        helm.reply(id, 200, Some(account(true, false)));
+        settle(cx);
+        assert_eq!(preference_work(cx), None, "the first save settled");
+        assert!(painted(cx).contains("If that key is already saved, discard the draft."));
+        assert_eq!(typed_in_credentials(cx), "fictional-second-key");
+        assert!(
+            sent(&mut helm)
+                .iter()
+                .all(|request| request.method == Method::Get),
+            "the old save's success did not authorize a replacement key"
+        );
+    }
 }
 
 // ---- Creating sandboxes --------------------------------------------------------------------------------------------
