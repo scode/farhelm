@@ -122,6 +122,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   place the provider no longer lists only while the recipe still has resources (`has_resources`) or active build work
   there, while continuing to show failure-only state for hosts that are still registered.
 
+- **Drop the post-clone Claude workspace-trust edit.** Update `SPEC.md` and the implementation so workspace trust for
+  agents whose config files must be edited (rather than supporting per-invocation trust flags) happens on launch of that
+  agent kind, not earlier at checkout preparation. Stop editing `~/.claude.json` during managed-checkout creation when a
+  session starts another agent (or before launch), along with the checkout-preparation Claude trust snapshotting and
+  docs/tests that existed for that path.
+
 ## Plan follow-ups
 
 - **Bind Tensorlake launch consent to the billed size shown.** A recipe edit under the same name can make a confirmed
