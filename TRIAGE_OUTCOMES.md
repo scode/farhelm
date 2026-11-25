@@ -1079,21 +1079,6 @@
   placement is correct by inspection. Size S-M if fixed (a witness seam inside the task).
 - Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
 
-## trailing-stop-classification-test-pass-without-stop-waiting-for-exit.md
-
-- Outcome: `other`.
-- Assessment: A supervisor test is meant to show that Stop of an already-dead agent briefly waits for the terminal's
-  final exit record before quoting the screen. It could pass even if Stop skipped that wait. Verified: Confirmed by the
-  reviewer's source trace (`service/core/tests/host_terminals.rs:743-773`). Not re-traced line by line here. The
-  production wait exists (`service/handlers.rs:1010-1016`). The gap is that no test ties Stop to that wait.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard (closing it needs a new scheduling seam). Size M if
-  fixed.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
 ## trailing-seal-delete-test-cannot-show-delete-reached-directory-admission.md
 
 - Outcome: `other`.
@@ -1130,21 +1115,6 @@
   record which way it went. Recommendation for reference: discard. Origin recovery is outside this test's subject. Size
   S-M if fixed.
 - Execution: ``planned in `plans/queue/triage-supervisor-nov24.md` ``.
-
-## trailing-live-route-conformance-pass-when-terminal-control-skips-target.md
-
-- Outcome: `other`.
-- Assessment: A conformance test checks that terminal controls (pause, resume, detach, resize) do not stall other
-  readers. It checks only that the other reader progressed, not that each control acted on its target. The resize even
-  asks for the size the target already has. Verified: Confirmed by the reviewer's source trace (`service/handlers.rs`
-  test module, around :10860-11196). Not re-traced line by line here. No production control failure is claimed.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard, or fix code (add per-control postconditions and a
-  distinct resize). Size S-M.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-omp-owner-exit-test-overstates-evidence-behind-resume-offer.md
 
@@ -3592,71 +3562,6 @@
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
 - Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
-
-## trailing-gone-terminal-ended-confirmation.md
-
-- Outcome: `fix code`.
-- Assessment: A session whose terminal host has died, while the program it ran may still be alive, is shown as ended
-  (with the recovery card). Stop on that ended row is sent with "refuse if the agent is running", and so is a Delete
-  whose prompt said nothing was alive or only that the agent had ended. If the main program survived its host's death,
-  the supervisor lets the guard pass and its cleanup kills that program. The user agreed to stop an ended session, not a
-  running program. Verified: Confirmed by source on current main. The terminal runtime's probe returns Gone for a Gone
-  host without checking the pinned child (`crates/farhelm-supervisor/src/hosts/terminal.rs:823-837`). The Stop guard
-  checks only the probe's live pid (`service/handlers.rs:867-889`), then reaps with the recorded scope or marker sweep
-  (`handlers.rs:1120-1132`). The Delete guard treats `Gone` like `Dead` (`service/core.rs:13545-13557`), and teardown
-  then roots its sweep at the still-running pinned child (`service/teardown.rs:319-343`). The code itself documents a
-  child that outlives its host: "a child that outlived its host (one that ignored the hangup of a host killed outright)"
-  (`hosts/terminal.rs:764-770`). SPEC.md "Lifecycle operations", 2026-10-01 decision: "a Stop whose click showed an
-  ended agent is refused if the agent is alive again or cannot be confirmed ended, before stopping anything", and a
-  Delete "whose prompt said nothing was alive ... is refused if the agent or any terminal tab is running". Nothing on
-  main has changed these paths since the reviewed commit (later handler commits touch only custom agents). Unverified:
-  that a shipped agent (Claude Code, Codex, a shell) survives its host's hangup in practice; it needs a program that
-  ignores SIGHUP, or a custom agent or wrapper that does. No runtime test was run.
-- Decision: q-gonehost, "When a terminal host is gone but the program it ran is still alive": the maintainer picked
-  "Treat it as alive". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "As long as
-  this does not turn horrifically complicated. If it turns very complicated during execution, the plan must turn it into
-  a follow-up to-do item."
-- Completion criteria: A terminal host that is gone while its main program is still identifiable counts as running for
-  confirmations, Stop and Restart cleanup. Recommendation for reference: fix code. Have both guards consult the retained
-  pinned identity for a Gone runtime: refuse when the program is still running, and also when the process table cannot
-  be read. The spec text already requires the behavior, so this is close to "clearly settled". It is presented because
-  the bucket is highest and the fix can be placed in the probe or at each guard. Size M (two guards plus a test that
-  needs a surviving child after its host ends; likely over 100 lines with tests). Can share a change with 62. Complexity
-  gate (maintainer): if the fix turns very complicated during execution, the executor stops and turns it into a
-  follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate: about 100 lines
-  of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-lifecycle-loses-held-child-after-terminal-loss.md
-
-- Outcome: `fix code`.
-- Assessment: When a session's terminal host dies but the program in it survives, a plain Stop or a Restart does not
-  target that program directly. On a launch without a systemd scope (macOS, or Linux with no usable user manager),
-  cleanup then finds the program only through its environment marker. If the marker cannot be read, Stop reports
-  success, or Restart starts a second run in the same folder, while the old program keeps running. Verified: Partly
-  correct. The omission is confirmed. Stop and Restart derive a root only from the probe's live pid
-  (`service/handlers.rs:867-912`; `service/core.rs:12580-12596`), and the probe ignores the pin for Gone
-  (`hosts/terminal.rs:823-837`). Delete alone uses the pin (`service/teardown.rs:319-343`; SPEC_impl.md "Delete" bullet:
-  "the agent's runtime gives its child as pinned at adoption, checked against the process table whatever the host now
-  says (a departure from 'a root only while the host reports the child alive')"). With a recorded scope, the scope kill
-  still reaches the program, so the gap needs all of: an unscoped launch, a program that survived its host, and an
-  unreadable marker. SPEC.md's unscoped limit covers processes Farhelm "can still identify: those still descended from
-  the session's terminal, and those whose environment marker it can still read". A reparented program is no longer
-  descended from the terminal, so whether a pinned identity counts as "identifiable" is a reading of the spec.
-  Unverified: survival of the hangup in practice (as in 19). No runtime test was run.
-- Decision: q-gonehost, "When a terminal host is gone but the program it ran is still alive": the maintainer picked
-  "Treat it as alive". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "As long as
-  this does not turn horrifically complicated. If it turns very complicated during execution, the plan must turn it into
-  a follow-up to-do item."
-- Completion criteria: A terminal host that is gone while its main program is still identifiable counts as running for
-  confirmations, Stop and Restart cleanup. Recommendation for reference: fix code. Root Stop and Restart at the
-  revalidated pin, as Delete already does, and refuse when the process table is unreadable. Size M. Natural to combine
-  with 19. Complexity gate (maintainer): if the fix turns very complicated during execution, the executor stops and
-  turns it into a follow-up TODO.md entry that explains what is complicated and why, instead of landing it. Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
 
 ## trailing-authorized-stop-report-completion-without-settling-recorded-launch.md
 

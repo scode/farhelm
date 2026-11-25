@@ -29,9 +29,6 @@ consequences.
   submit a fresh checkout before its updated warning is shown, allowing the previous checkout to move to trash without
   the displayed disclosure.
 
-- [`trailing-gone-terminal-ended-confirmation.md`](trailing-gone-terminal-ended-confirmation.md) — When a lost terminal
-  is shown as ended, Stop or Delete can terminate a main program the confirmation did not say it would stop.
-
 - [`tailscale-uninstall-does-not-bind-verified-host.md`](tailscale-uninstall-does-not-bind-verified-host.md) — A
   confirmed uninstall can affect a different Tailscale host if the saved name changes after Farhelm verifies the
   original host.
@@ -123,10 +120,6 @@ consequences.
 - [`trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md`](trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md)
   — A Tensorlake checkout launch can admit a newer recipe size than the one shown when the user confirms, if the same
   named recipe is edited before admission.
-
-- [`trailing-lifecycle-loses-held-child-after-terminal-loss.md`](trailing-lifecycle-loses-held-child-after-terminal-loss.md)
-  — Stop can report success or Restart can start another run while the prior program survives after its terminal host
-  disappears.
 
 - [`trailing-authorized-stop-report-completion-without-settling-recorded-launch.md`](trailing-authorized-stop-report-completion-without-settling-recorded-launch.md)
   — Stop can acknowledge completion of a retained unconfirmed launch without establishing what its recorded
@@ -519,9 +512,6 @@ consequences.
 - [`trailing-list-admission-test-observes-reply-timing-instead-of-list.md`](trailing-list-admission-test-observes-reply-timing-instead-of-list.md)
   — A regression could let a busy supervisor build lists outside its concurrency limit while this test still passes.
 
-- [`trailing-stop-classification-test-pass-without-stop-waiting-for-exit.md`](trailing-stop-classification-test-pass-without-stop-waiting-for-exit.md)
-  — A regression that stops waiting for a dead agent's final error output could escape the Stop test.
-
 - [`trailing-seal-delete-test-cannot-show-delete-reached-directory-admission.md`](trailing-seal-delete-test-cannot-show-delete-reached-directory-admission.md)
   — A regression could let Delete decide to destroy an environment during a concurrent launch without reliably failing
   the existing regression test.
@@ -529,10 +519,6 @@ consequences.
 - [`trailing-borrower-reload-lacks-completed-origin-runtime-handoff-witness.md`](trailing-borrower-reload-lacks-completed-origin-runtime-handoff-witness.md)
   — The borrower test compares status across reload, but can pass without showing the origin terminal was released and
   successfully recovered.
-
-- [`trailing-live-route-conformance-pass-when-terminal-control-skips-target.md`](trailing-live-route-conformance-pass-when-terminal-control-skips-target.md)
-  — Keeping the target terminal alive improves setup, but the reader-progress test can still pass without proving that
-  the target control ran under contention.
 
 - [`trailing-omp-owner-exit-test-overstates-evidence-behind-resume-offer.md`](trailing-omp-owner-exit-test-overstates-evidence-behind-resume-offer.md)
   — The strengthened test establishes that a saved Resume offer survives process exit and supervisor reload. Its
