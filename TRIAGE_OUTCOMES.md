@@ -2073,48 +2073,6 @@
   to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
-## trailing-replace-with-button-does-not-carry-own-rendered-delete.md
-
-- Outcome: `fix code`.
-- Assessment: The Replace with launch button, which confirms the source's deletion, does not carry the delete guard from
-  the frame that drew it. On click it reads the latest presented source-warning snapshot. A delayed click could
-  therefore use a newer, more permissive guard than the one the user saw, though no such route is shown. Verified:
-  confirmed for the binding. `view.rs:2859` passes the generic `Launcher::press`, and `press_at` reads
-  `source_frame.current()` (`view.rs:1341-1355`). SPEC_impl.md 994-999 says handlers carry the drawn data and "use the
-  snapshot that admitted the press". SPEC.md 2251 says launching carries "the precondition matching what the launcher
-  showed at the click". Unverified: a shipped pointer dispatch to an older button after a more permissive snapshot is
-  presented.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code. Capture the `ShownAction` returned by `source_frame.capture`
-  in the button's handler. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
-  the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
-  Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
-## trailing-guarded-plain-replace-live-read-and-spec-contradiction.md
-
-- Outcome: `fix code`.
-- Assessment: On a plain Replace of a YOLO session, the "Replace as guarded instead" answer reads the session's current
-  title and folder when clicked, not what the question showed. If the session left the store just before the click, the
-  answer closes the question and does nothing, with no message. The implementation spec also contradicts itself about
-  which confirmations are frozen. Verified: confirmed. `session_list/replace_yolo.rs:212-246` reads the live row: a
-  missing row returns silently, and the change check covers host and launch only. SPEC_impl.md 989-991 names the
-  launcher's YOLO question as the one unfrozen confirmation, while SPEC_impl.md 5328 ("the visible source title and
-  directory at answer time") adds another. The title carry-over is trivially undone (the 2026-11-21 decision). The
-  working directory is immutable on an honest supervisor.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix spec+code. Reconcile SPEC_impl's prompt section with 5328, and add
-  the existing "Choose Replace again" note on the missing-row branch. Size S. Size gate: about 100 lines of diff (code,
-  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
-  brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## settings-close-can-save-unlisted-drafts.md
 
 - Outcome: `fix code`.

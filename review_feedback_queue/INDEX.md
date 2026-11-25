@@ -481,10 +481,6 @@ consequences.
   — When a default checkout-folder save finishes after the user changes to a new environment and starts editing another
   field, the launcher can move focus back to Repository.
 
-- [`trailing-replace-with-button-does-not-carry-own-rendered-delete.md`](trailing-replace-with-button-does-not-carry-own-rendered-delete.md)
-  — The main Replace with button reads the most recently presented source warning when its callback runs, so the button
-  itself carries no guard from the frame that made it available.
-
 - [`trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md`](trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md)
   — The desktop can offer a sandbox launch for a checkout name that cannot produce a valid directory. The helm can
   create the environment and attempt cleanup before telling the user to fix the name.
@@ -890,12 +886,6 @@ consequences.
   — The integration test for running a custom agent's conversation reporter through the app forwarder during an update
   or uninstall does not actually prove that the forwarder prevented the CLI from starting, so a regression that bypassed
   the lock or failed before locking would still pass.
-
-- [`trailing-guarded-plain-replace-live-read-and-spec-contradiction.md`](trailing-guarded-plain-replace-live-read-and-spec-contradiction.md)
-  — Answering "Replace as guarded instead" on a plain Replace YOLO confirmation reads the session's live store entry at
-  click time rather than what was drawn on screen, so an undrawn update can change the replacement's title or directory,
-  and if the row left the filtered session list right before the press the question closes and does nothing with no
-  notice.
 
 - [`trailing-hidden-trash-button-retains-animation-handles.md`](trailing-hidden-trash-button-retains-animation-handles.md)
   — If the Trash button stops being shown (because the user opens the Hosts panel or marks sessions) while its archive

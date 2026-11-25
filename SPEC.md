@@ -1599,19 +1599,19 @@ mode also offers starting the same launch guarded instead, without YOLO confirma
 the resulting draft still differs from the stored launch. A plain Replace of a saved YOLO agent launch offers **Replace
 as guarded instead** when the agent supports Guarded. This includes older agent launches classified as YOLO because
 their mode is missing or unsupported. The guarded answer uses Replace with to compile the same agent, model, effort and
-wrapper in Guarded, using current workspace trust settings. It keeps the source host, displayed directory and title, and
-the original Delete precondition. It sends no YOLO consent or host-setting write. Custom flags and commands use the YOLO
-answers. The `farhelm` command line has no override: a request from inside a session is an agent's, and agents follow
-their own rule under Agent-spawned sessions, whatever the request claims. A plain restart relaunches the session's own
-stored launch and needs no YOLO confirmation again. The question stays inline and has no header Close: its answers read
-Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the filled one-time YOLO answer. Tab
-follows that same order; Cancel keeps initial focus, except that a plain Replace's question, which arrives after its
-reply, takes focus only if the user has not moved on since answering Replace (see [Keyboard focus](#keyboard-focus)).
-The usual Replace answers, agent clone and inherited spawn copy the stored command. For an older agent launch without
-permission flags this preserves the original command and applies the YOLO gate. Clone, Replace with and Restart with
-compile new choices. For a stored agent launch with a missing or unsupported mode, Clone and Replace with prefill the
-agent's default for a new launch, Guarded when offered. Guarded launches need a host that understands protocol 48 or
-later.
+wrapper in Guarded, using current workspace trust settings. It keeps the source host and directory, uses the source's
+current title, and keeps the original Delete precondition. It sends no YOLO consent or host-setting write. Custom flags
+and commands use the YOLO answers. The `farhelm` command line has no override: a request from inside a session is an
+agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A plain restart
+relaunches the session's own stored launch and needs no YOLO confirmation again. The question stays inline and has no
+header Close: its answers read Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the
+filled one-time YOLO answer. Tab follows that same order; Cancel keeps initial focus, except that a plain Replace's
+question, which arrives after its reply, takes focus only if the user has not moved on since answering Replace (see
+[Keyboard focus](#keyboard-focus)). The usual Replace answers, agent clone and inherited spawn copy the stored command.
+For an older agent launch without permission flags this preserves the original command and applies the YOLO gate. Clone,
+Replace with and Restart with compile new choices. For a stored agent launch with a missing or unsupported mode, Clone
+and Replace with prefill the agent's default for a new launch, Guarded when offered. Guarded launches need a host that
+understands protocol 48 or later.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
