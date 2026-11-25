@@ -135,7 +135,10 @@
 //!   lays it out as one box of that width. The client cannot reproduce the
 //!   emulator's grouping of characters into cells (combining marks, joiners
 //!   and variation selectors as the emulator counts them), so the format never
-//!   asks it to. Spacer cells of wide characters are not sent.
+//!   asks it to. Spacer cells of wide characters are not sent. A spacer an
+//!   edit has left without its wide character is sent as a one-column space
+//!   run with its background (or reverse video), and no link, when it has
+//!   paint to show.
 //! - `style` is `[flags, fg, bg]` or `[flags, fg, bg, underline_color]`
 //!   ([`Style`]); `flags` is the bit set in [`style_flags`]. A color
 //!   ([`Color`]) is `-1` for the default, `0..=255` for a palette index the
