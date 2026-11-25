@@ -579,6 +579,9 @@ type DefaultFolderTarget = (Install, String, FolderDefault, bool);
 pub(crate) struct Launcher {
     pub(super) draft: LaunchDraft,
     source_frame: ActionFrame<SourceConsent>,
+    /// A keyboard event can redraw the launcher and recover focus from a removed chip before the user sees the
+    /// new focus. An Enter in that gap cannot authorize a launch from the unseen frame.
+    custom_chips_frame: ActionFrame<Vec<String>>,
     default_folder_frame: ActionFrame<DefaultFolderTarget>,
     /// The store, read while drawing for the hosts, the source session and the preferences.
     store: Entity<HelmStore>,
@@ -929,6 +932,7 @@ impl Launcher {
             pressed: false,
             source_frame: ActionFrame::default(),
             default_folder_frame: ActionFrame::default(),
+            custom_chips_frame: ActionFrame::default(),
             refused: None,
             folder,
             name,
@@ -1386,6 +1390,9 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.custom_chips_changed(window, cx) {
+            return;
+        }
         self.refresh_custom_capabilities(cx);
         // While the YOLO question's host write is out, its answer owns the launch: a press now would send a create
         // without consent beside the one the answer sends with it.
@@ -1900,6 +1907,7 @@ impl Launcher {
         &mut self,
         model: Option<Vec<AnyElement>>,
         palette: &theme::Palette,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut fields = Vec::new();
@@ -1920,7 +1928,7 @@ impl Launcher {
                 held_harness(harness, label, palette)
             }));
         } else {
-            fields.push(self.harness_choices(palette, cx).into_any_element());
+            fields.push(self.harness_choices(palette, window, cx).into_any_element());
         }
         let custom = harness.is_some_and(LaunchHarness::uses_custom_catalog);
         if !custom && let Some(error) = &self.catalog_error {
@@ -2712,10 +2720,13 @@ impl Render for Launcher {
                 let _ = on_tab_enter.update(cx, |launcher, cx| launcher.press(window, cx));
             })
         });
+        if self.draft.tab != Tab::Agent || self.draft.holds(Field::AgentType) {
+            self.custom_chips_frame.clear();
+        }
         let fields = match self.draft.tab {
             Tab::Agent => {
                 let model = self.model_row(palette, window, cx);
-                self.agent_fields(model, palette, cx)
+                self.agent_fields(model, palette, window, cx)
             }
             Tab::Command => self.command_fields(palette, cx),
         };

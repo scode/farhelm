@@ -208,6 +208,8 @@ linux/launcher-stale-choice--dark.png 33dfa4bb450781357966bb33e093a3f0a1a203e9
 linux/launcher-stale-choice--light.png 38bd58ef785906dd22d1c2a23bf213d17be87d30
 linux/launcher-template-save-after-undo--dark.png 82a4bdfdff178bd250a156022801ef4a22c1491c
 linux/launcher-template-save-after-undo--light.png b9265ec578c47d6c94fce4fb74fd70706596325f
+linux/launcher-unavailable-custom-agent--dark.png 9cd87727c0a27e275a199763eeabcde574e17867
+linux/launcher-unavailable-custom-agent--light.png 471f9e5dd3563f3e2ba7a4de60dc177c5910abe2
 linux/launcher-yolo-question--dark.png 00f054e900816752ab1c74ad1e0def24f6e40492
 linux/launcher-yolo-question--light.png 63ec86c28a2201aa9ef727d85b3b7f1362938b0e
 linux/linux-title-bar--dark.png 46842af44551445cbb6fba4a4be0b6d321874947

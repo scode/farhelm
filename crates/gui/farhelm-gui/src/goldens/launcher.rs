@@ -361,6 +361,7 @@ enum LauncherScene {
     SandboxCheckout,
     RememberedWrapper,
     CustomAgent,
+    UnavailableCustomAgent,
     ShellWrapper,
     ShellWrapperNote,
     StaleChoice,
@@ -431,6 +432,15 @@ pub(super) fn launcher_more_options_setup(state: &SceneState, window: &mut Windo
 /// Draw the registered chips and literal model and effort inputs without requiring a vendor or a launch.
 pub(super) fn launcher_custom_agent_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::CustomAgent, window, cx);
+}
+
+/// A saved draft can keep a registration and its repairable field values after that registration disappears.
+pub(super) fn launcher_unavailable_custom_agent_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::UnavailableCustomAgent, window, cx);
 }
 
 /// Open a Bash launch with the wrapper row expanded and its help visible.
@@ -559,6 +569,12 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
     let mut extra = vec![launcher_templates(scene)];
     if scene == LauncherScene::CustomAgent {
         extra.push(super::custom_agent_state());
+    } else if scene == LauncherScene::UnavailableCustomAgent {
+        extra.push(CollectionState {
+            collection: Collection::CustomAgents,
+            meta: meta(&[]),
+            entries: Vec::new(),
+        });
     }
     if matches!(
         scene,
@@ -684,11 +700,19 @@ fn open_new_with_claude(
     }
     let remembered = scene == LauncherScene::RememberedWrapper;
     draft.edit_folder("/home/user/src/api".into());
-    if scene == LauncherScene::CustomAgent {
+    if matches!(
+        scene,
+        LauncherScene::CustomAgent | LauncherScene::UnavailableCustomAgent
+    ) {
         let fixture = super::custom_agent();
         draft.choose_custom_agent(&fixture, None, None);
-        draft.agent.model = Some("fast-v2".into());
-        draft.agent.custom_effort = "deep_work".into();
+        if scene == LauncherScene::UnavailableCustomAgent {
+            draft.agent.model = Some("Bad Model".into());
+            draft.agent.custom_effort = "Bad Effort".into();
+        } else {
+            draft.agent.model = Some("fast-v2".into());
+            draft.agent.custom_effort = "deep_work".into();
+        }
     } else if matches!(
         scene,
         LauncherScene::ShellWrapper | LauncherScene::ShellWrapperNote
@@ -877,6 +901,24 @@ fn answer_new_reads(
     if scene == LauncherScene::IncompleteTemplate {
         if !window.driver_nodes().iter().any(|node| {
             node.element_id.as_deref() == Some("launcher-banner") && !node.visible_bounds.is_empty()
+        }) {
+            state.after.set(Some(answer_new_reads));
+        }
+        return;
+    }
+    if scene == LauncherScene::UnavailableCustomAgent {
+        // This draft has literal custom fields. Its registry and inline errors, rather than a built-in model hint,
+        // establish that the unavailable selection has reached the screen.
+        if ![
+            "launcher-custom-acme-code",
+            "launcher-custom-model-error",
+            "launcher-custom-effort-error",
+        ]
+        .iter()
+        .all(|id| {
+            window.driver_nodes().iter().any(|node| {
+                node.element_id.as_deref() == Some(*id) && !node.visible_bounds.is_empty()
+            })
         }) {
             state.after.set(Some(answer_new_reads));
         }

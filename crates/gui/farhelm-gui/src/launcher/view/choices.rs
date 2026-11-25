@@ -32,7 +32,8 @@ use gpui::{
 use super::changed::Changed;
 use super::{Launcher, row};
 use crate::components::{
-    Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption, Tier,
+    Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption,
+    TextInputState, Tier,
 };
 use crate::focus::{self, Mark};
 use crate::harness;
@@ -68,6 +69,24 @@ enum HarnessChoice {
 }
 
 impl Launcher {
+    /// Keyboard selection and launch need the same registry as the frame the user saw. The store can move before
+    /// a redraw, or GPUI can redraw to dispatch a key before presenting the resulting focus.
+    pub(super) fn custom_chips_changed(&self, window: &Window, cx: &App) -> bool {
+        focus::last_input_was_keyboard(window, cx)
+            && self.custom_chips_frame.current().is_some_and(|frame| {
+                frame.shown().is_none_or(|shown| {
+                    !self
+                        .store
+                        .read(cx)
+                        .collections()
+                        .ordered::<CustomAgent>()
+                        .into_iter()
+                        .map(|agent| &agent.id)
+                        .eq(shown)
+                })
+            })
+    }
+
     /// The agent-choice edit `edit` happened: its notice replaces the one shown (none clears it), the draft changed,
     /// and an agent switch or escalation it carries takes away or puts up the escalation banner (`escalation`).
     pub(super) fn chose(&mut self, edit: Edit, window: &mut Window, cx: &mut Context<Self>) {
@@ -240,35 +259,33 @@ impl Launcher {
     /// Custom agents take raw contract values and use a fixed YOLO label because the wrapper owns permission handling.
     pub(super) fn custom_agent_fields(&self, palette: &theme::Palette) -> Vec<AnyElement> {
         const HELP: &str = "Lowercase letters, digits, hyphens and underscores. Leave blank to use the agent's default.";
-        let input =
-            |id, row_id, label, field: &crate::components::TextInputState, value: &str, changed| {
-                let error = if value.is_empty() {
-                    None
-                } else {
-                    farhelm_proto::custom_agents::validate_model_or_effort(value).err()
-                };
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .flex_1()
-                    .min_w_0()
-                    .child(row(
-                        row_id,
-                        label,
-                        self.launcher_input(id, field, label, HoverHelp::tooltip(HELP))
-                            .monospace()
-                            .invalid(error.is_some()),
-                        palette,
-                    ))
-                    .children(error.map(|error| {
-                        status_line("launcher-custom-value-error", capitalized(error), palette)
-                    }))
-                    .children(self.changed_marker(changed, palette))
+        let input = |id, row_id, error_id, label, field: &TextInputState, value: &str, changed| {
+            let error = if value.is_empty() {
+                None
+            } else {
+                farhelm_proto::custom_agents::validate_model_or_effort(value).err()
             };
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .flex_1()
+                .min_w_0()
+                .child(row(
+                    row_id,
+                    label,
+                    self.launcher_input(id, field, label, HoverHelp::tooltip(HELP))
+                        .monospace()
+                        .invalid(error.is_some()),
+                    palette,
+                ))
+                .children(error.map(|error| status_line(error_id, capitalized(error), palette)))
+                .children(self.changed_marker(changed, palette))
+        };
         let model = input(
             "launcher-custom-model",
             "launcher-custom-model-row",
+            "launcher-custom-model-error",
             "Model",
             &self.custom_model,
             self.draft.agent.model.as_deref().unwrap_or_default(),
@@ -277,6 +294,7 @@ impl Launcher {
         let effort = input(
             "launcher-custom-effort",
             "launcher-custom-effort-row",
+            "launcher-custom-effort-error",
             "Effort",
             &self.custom_effort,
             &self.draft.agent.custom_effort,
@@ -313,8 +331,9 @@ impl Launcher {
     /// The shell chips and rule can wrap as a unit onto the same line as the last agent chips.
     /// Keep the separate shell IDs used to capture the shell choices in the docs.
     pub(super) fn harness_choices(
-        &self,
+        &mut self,
         palette: &theme::Palette,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let (on_change, on_enter) = (cx.weak_entity(), cx.weak_entity());
@@ -353,35 +372,61 @@ impl Launcher {
             .map(option)
             .fold(chips, RadioGroup::option);
         let custom = self.store.read(cx).collections().ordered::<CustomAgent>();
-        let chips = if custom.is_empty() {
+        self.custom_chips_frame.capture(
+            custom.iter().map(|agent| agent.id.clone()).collect(),
+            (),
+            window,
+        );
+        // Clone, Replace with and saved setups keep their registration ID even when the live registry no longer
+        // offers it. Draw the selected ID so the user knows which choice to repair.
+        let missing = self
+            .draft
+            .agent
+            .custom_agent
+            .as_ref()
+            .filter(|id| !custom.iter().any(|agent| &agent.id == *id));
+        let chips = if custom.is_empty() && missing.is_none() {
             chips
         } else {
             let glyph = harness::glyph(LaunchHarness::Custom);
-            custom.into_iter().fold(
+            let option = |id: &str, name: &str, help: HoverHelp| {
+                let label = HostSentence::new(gpui::SharedString::from(format!(
+                    "launcher-custom-name-{id}"
+                )))
+                .host(&HostText::from_host(name));
+                RadioOption::new("", help, HarnessChoice::Custom(id.to_owned()))
+                    .catalog_label(id.to_owned(), label.into())
+                    .mark(
+                        harness::icon(glyph),
+                        harness::ink(glyph, palette).unwrap_or(palette.fg_1),
+                    )
+            };
+            let options = custom
+                .into_iter()
+                .map(|agent| {
+                    option(
+                        &agent.id,
+                        &agent.display_name,
+                        HoverHelp::tooltip(format!("Use custom agent {}", agent.id)),
+                    )
+                })
+                .chain(missing.into_iter().map(|id| {
+                    option(
+                        id,
+                        id,
+                        HoverHelp::tooltip(
+                            "This custom agent is unavailable. Choose another agent to launch.",
+                        ),
+                    )
+                    .disabled(true)
+                }));
+            options.fold(
                 chips.separated_named_chips(
                     "launcher-custom-row",
                     "launcher-custom",
                     Some("Custom"),
                 ),
-                |chips, agent| {
-                    let label = HostSentence::new(gpui::SharedString::from(format!(
-                        "launcher-custom-name-{}",
-                        agent.id
-                    )))
-                    .host(&HostText::from_host(agent.display_name.as_str()));
-                    chips.option(
-                        RadioOption::new(
-                            "",
-                            HoverHelp::tooltip(format!("Use custom agent {}", agent.id)),
-                            HarnessChoice::Custom(agent.id.clone()),
-                        )
-                        .catalog_label(agent.id.clone(), label.into())
-                        .mark(
-                            harness::icon(glyph),
-                            harness::ink(glyph, palette).unwrap_or(palette.fg_1),
-                        ),
-                    )
-                },
+                RadioGroup::option,
             )
         };
         let chips = shells
@@ -396,11 +441,17 @@ impl Launcher {
                 |id| Some(HarnessChoice::Custom(id.clone())),
             ))
             .on_change(move |harness, window, cx| {
-                let _ = on_change.update(cx, |launcher, cx| match harness {
-                    HarnessChoice::BuiltIn(harness) => {
-                        launcher.choose_harness(*harness, window, cx)
+                let _ = on_change.update(cx, |launcher, cx| {
+                    if !launcher.custom_chips_changed(window, cx) {
+                        match harness {
+                            HarnessChoice::BuiltIn(harness) => {
+                                launcher.choose_harness(*harness, window, cx)
+                            }
+                            HarnessChoice::Custom(id) => {
+                                launcher.choose_custom_agent(id, window, cx)
+                            }
+                        }
                     }
-                    HarnessChoice::Custom(id) => launcher.choose_custom_agent(id, window, cx),
                 });
             })
             .on_enter(move |window, cx| {
