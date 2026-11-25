@@ -38,8 +38,9 @@
 //! follows a hidden open session too, as the old app's "New inherits a filtered selected destination" case did.
 
 use farhelm_helm_client::Collections;
+use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::ui_channel::{
-    HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
+    Availability, Collection, HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
 };
 use std::rc::Rc;
 
@@ -303,10 +304,11 @@ pub fn open_restart_with(session: &str, window: &mut Window, cx: &mut App) -> bo
     let Some(store) = session::current_store(cx) else {
         return false;
     };
-    let Some(row) = store.read(cx).collections().get::<SessionRow>(session) else {
+    let collections = store.read(cx).collections();
+    let Some(row) = collections.get::<SessionRow>(session) else {
         return false;
     };
-    if restart_with_reason(row).is_some()
+    if restart_with_reason_from_catalog(row, collections).is_some()
         || crate::session_list::environment::of_key(session, cx)
             .is_some_and(|host| !host.permits_launch_preparation())
     {
@@ -331,7 +333,39 @@ pub fn restart_with_unavailable(session: &str, cx: &App) -> Option<String> {
     let Some(row) = collections.get::<SessionRow>(session) else {
         return Some("This session is no longer listed".to_owned());
     };
-    restart_with_reason(row)
+    restart_with_reason_from_catalog(row, collections)
+}
+
+/// Stored resume support makes the session eligible. Restart with recompiles an agent launch from the current
+/// registration, so the menu and an open editor also need a usable registration that still offers resumption.
+fn restart_with_reason_from_catalog(row: &SessionRow, collections: &Collections) -> Option<String> {
+    let id = row
+        .info
+        .launch
+        .agent_selection()
+        .and_then(|selection| selection.custom_agent.as_deref());
+    restart_with_reason(row).or_else(|| custom_restart_refusal(id, collections).map(str::to_owned))
+}
+
+/// Command declarations have their own resume text. Call this only for a registered agent launch.
+pub(super) fn custom_restart_refusal(
+    id: Option<&str>,
+    collections: &Collections,
+) -> Option<&'static str> {
+    let id = id?;
+    if !collections
+        .meta(Collection::CustomAgents)
+        .is_some_and(|meta| meta.availability == Availability::Available)
+    {
+        return Some("Custom agent registrations are unavailable. Try again when they load.");
+    }
+    match collections.get::<CustomAgent>(id) {
+        Some(agent) if agent.supports_resumption => None,
+        Some(_) => Some(
+            "This custom agent no longer supports resumption. Enable Supports resumption in Settings to restart it.",
+        ),
+        None => Some("This custom agent is no longer registered. Register it again to restart it."),
+    }
 }
 
 /// Restart with's fallback wording when there is no conversation it can resume and no more specific explanation.
@@ -366,13 +400,13 @@ pub(super) fn restart_with_reason(row: &SessionRow) -> Option<String> {
             }
             // Reporting support and a stored resume command are separate facts: an older agent launch can gain
             // tracking without gaining a resume command, which needs recreating, not a claim about capture.
-            if selection.harness.agent_kind().restart_readiness().is_none() {
-                Some(unsupported_resume_reason(selection.harness))
-            } else if offer == RestartOffer::NoResumeCommand {
+            if offer == RestartOffer::NoResumeCommand || selection.harness.uses_custom_catalog() {
                 Some(
                     "This agent launch has no resume command, so it cannot be restarted; use Clone or Replace with"
                         .to_owned(),
                 )
+            } else if selection.harness.agent_kind().restart_readiness().is_none() {
+                Some(unsupported_resume_reason(selection.harness))
             } else if offer == RestartOffer::NotCaptured {
                 Some(not_captured_reason(info))
             } else {

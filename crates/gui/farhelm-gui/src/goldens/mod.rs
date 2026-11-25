@@ -1400,6 +1400,18 @@ static SCENES: &[Scene] = &[
         setup: launcher_shell_help_setup,
     },
     Scene {
+        name: "launcher-custom-restart-blocked",
+        size: (1080., 1040.),
+        draw: session_lists_then,
+        setup: launcher_custom_restart_blocked_setup,
+    },
+    Scene {
+        name: "launcher-custom-restart-menu",
+        size: (420., 350.),
+        draw: launcher_custom_restart_menu,
+        setup: launcher_custom_restart_menu_setup,
+    },
+    Scene {
         name: "launcher-replace-with",
         size: (1080., 1160.),
         draw: session_lists_then,

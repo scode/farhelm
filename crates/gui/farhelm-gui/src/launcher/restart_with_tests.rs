@@ -8,14 +8,16 @@
 //! conversation captured, so Restart with is offered. `a_stores` replaces a's stored launch where a test needs another.
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use farhelm_proto::ui_channel::SessionRow;
+use farhelm_proto::ui_channel::{
+    Collection, CollectionChanges, CollectionState, KeyedEntry, SessionRow,
+};
 use farhelm_proto::{LaunchEffort, LaunchPermission, SessionInfo};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
 use serde_json::{Value, json};
 
 use super::draft::{LaunchDraft, Mode};
 use super::entry::{open_restart_with, restart_with_unavailable};
-use super::entry_tests::window_with;
+use super::entry_tests::{window_on, window_with};
 use super::folder_default_tests::edit_draft;
 use super::view_tests::{click_in_body, draft, launch_help, name_of, shown_refusal};
 use super::yolo_tests::refuse_for_yolo;
@@ -198,6 +200,13 @@ fn row(edit: impl FnOnce(&mut Value)) -> SessionRow {
 fn restart_with_names_why_it_is_not_offered() {
     use super::entry::restart_with_reason as reason;
     assert_eq!(reason(&row(|_| {})), None);
+    for offer in ["no_resume_command", "no_conversation_reporting"] {
+        assert_eq!(reason(&row(|value| {
+        value["launch"] = json!({"kind": "agent", "selection": {"harness": "custom", "custom_agent": "acme-code"},
+            "start": ["acme-code", "{farhelm_args}"], "resume": null, "custom_reporting": false});
+        value["restart_offer"] = json!(offer);
+    })).as_deref(), Some("This agent launch has no resume command, so it cannot be restarted; use Clone or Replace with"));
+    }
     assert_eq!(
         reason(&row(|value| {
             value["launch"] = json!({"kind": "command", "command": "make watch", "yolo": false, "agent": null,
@@ -224,6 +233,99 @@ fn restart_with_names_why_it_is_not_offered() {
         None,
         "a stored resume command takes a named conversation"
     );
+}
+
+/// A captured restart that could otherwise submit and an uncaptured one that needs a selector both respect the live
+/// registration. The old requirement must stop locking More options, and the menu must agree with the open editor.
+#[gpui::test]
+fn disabling_custom_resumption_updates_restart_with(cx: &mut TestAppContext) {
+    let agent = KeyedEntry {
+        key: "acme-code".into(),
+        value: json!({
+            "id": "acme-code", "display_name": "Acme Code", "command": "acme-code",
+            "supports_resumption": true, "supports_reporting": true,
+        }),
+    };
+    let meta = test_support::meta(&["acme-code"]);
+    let (mut helm, cx) = window_on(
+        cx,
+        Some("a"),
+        super::view_tests::fixture_hosts(&[0, 4, 8, 10]),
+        vec![CollectionState {
+            collection: Collection::CustomAgents,
+            meta: meta.clone(),
+            entries: vec![agent.clone()],
+        }],
+    );
+    let registration = |enabled| {
+        let mut entry = agent.clone();
+        entry.value["supports_resumption"] = json!(enabled);
+        CollectionChanges {
+            collection: Collection::CustomAgents,
+            meta: meta.clone(),
+            upsert: vec![entry],
+            remove: vec![],
+        }
+    };
+    let session = session("a").host(9).status(json!({"state": "idle"})).agent_kind("custom").launch(json!({
+        "kind": "agent", "selection": {"harness": "custom", "custom_agent": "acme-code"},
+        "start": ["acme-code", "{farhelm_args}"], "resume": ["acme-code", "{conversation}", "{farhelm_args}"],
+    }));
+    let mut changes = change(
+        listing_meta(&["a", "b", "c", "d"], 5, false),
+        &[session],
+        &[],
+    );
+    changes.upsert[0].value["host_identity"] = json!("identity9");
+    changes.upsert[0].value["restart_offer"] = json!("not_captured");
+    helm.push(changes.clone());
+    settle(cx);
+    assert_eq!(cx.update(|_, cx| restart_with_unavailable("a", cx)), None);
+    assert!(restart_with(cx, "a"));
+    let before = draft(cx);
+    assert_eq!(before.agent.custom_agent.as_deref(), Some("acme-code"));
+    assert!(before.agent.custom_resumption && before.requires_conversation());
+    assert!(cx.debug_bounds("launcher-conversation-row").is_some());
+    helm.push(registration(false));
+    settle(cx);
+    let reason = cx
+        .update(|_, cx| restart_with_unavailable("a", cx))
+        .expect("the menu refuses");
+    assert!(reason.contains("no longer supports resumption"));
+    assert_eq!(
+        name_of(cx, "launcher-custom-restart-blocked").as_deref(),
+        Some(reason.as_str())
+    );
+    assert!(cx.debug_bounds("launcher-conversation-row").is_none());
+    assert!(cx.debug_bounds("launcher-wrapper-row").is_some());
+    click_in_body(cx, "launcher-more-options");
+    assert!(
+        cx.debug_bounds("launcher-wrapper-row").is_none(),
+        "More options folds again"
+    );
+    test_support::keys(cx, "escape");
+    assert!(!any_open(cx));
+    assert!(!restart_with(cx, "a"));
+
+    changes.upsert[0].value["restart_offer"] = json!("resume");
+    helm.push(changes);
+    helm.push(registration(true));
+    settle(cx);
+    assert!(restart_with(cx, "a"));
+    edit_draft(cx, |draft| {
+        draft.choose_custom_model("fast-v2", None);
+    });
+    assert_eq!(
+        launch_help(cx).as_deref(),
+        Some("Restart: relaunch this session with these settings")
+    );
+    helm.push(registration(false));
+    settle(cx);
+    test_support::click(cx, "launcher-launch");
+    assert!(
+        shown_refusal(cx).is_some_and(|reason| reason.contains("no longer supports resumption"))
+    );
+    assert!(restarts(&mut helm, cx).is_empty());
 }
 
 /// A declared command requires a captured conversation for Restart with. Its greyed action uses the same

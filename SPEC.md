@@ -498,11 +498,11 @@ Registered agents appear in the session launcher's **Custom** group and are sear
 use the ordinary wrapper prefix and templates, accept literal model and effort values of up to 256 bytes from
 `[a-z0-9_-]`, and always count as YOLO. They use screen activity for Running and Idle and have no initial prompt. The
 Command tab can declare a registered agent or generic **Custom**. Either declaration counts as YOLO and carries its own
-command, optional resume command and reporting behavior. The declaration supplies the YOLO answer for its command in
-the desktop app and CLI. A later built-in or undeclared command still uses the explicit answer the user or a template
-set. A template that declares Custom cannot save an explicit No. Existing launches retain their commands and capabilities
-after a registration changes. The session list uses the current display name and falls back to the saved ID when the
-registration is deleted.
+command, optional resume command and reporting behavior. The declaration supplies the YOLO answer for its command in the
+desktop app and CLI. A later built-in or undeclared command still uses the explicit answer the user or a template set. A
+template that declares Custom cannot save an explicit No. Existing launches retain their commands and capabilities after
+a registration changes. Restart with recompiles a custom agent launch using its current registration. The session list
+uses the current display name and falls back to the saved ID when the registration is deleted.
 
 The [custom-agent contract](website/src/content/docs/docs/agents/custom-agent-contract.md) defines the flags and
 reporter behavior for these integrations. It has no stability guarantee yet. Any change to the public contract updates
@@ -1277,11 +1277,11 @@ agent choice is independent of that destination:
   cannot be substituted safely, is refused when saving a launch or a template and again at spawn for an older stored
   command. Farhelm inserts each filled value as a single-quoted word, or one such word per argument for
   `{farhelm_args}`. The command may reference the session's working directory as `{cwd}`. A custom declaration counts as
-  YOLO. Otherwise the user states whether the command bypasses human, classifier, AI-reviewer and sandbox safety
-  checks, and Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what
-  agent it runs, or how to resume it. A command launch may optionally declare the agent type it runs. A declared agent type requires
-  `{farhelm_args}` as a whole argument exactly once in the command, which marks where Farhelm places that agent type's
-  own launch integration arguments (including the conversation-reporting hook, instructions pointer and Codex's
+  YOLO. Otherwise the user states whether the command bypasses human, classifier, AI-reviewer and sandbox safety checks,
+  and Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it
+  runs, or how to resume it. A command launch may optionally declare the agent type it runs. A declared agent type
+  requires `{farhelm_args}` as a whole argument exactly once in the command, which marks where Farhelm places that agent
+  type's own launch integration arguments (including the conversation-reporting hook, instructions pointer and Codex's
   `--no-daemon`, see Durability); it is replaced by nothing for an agent type that takes no such arguments, so the rule
   never depends on which agent type was declared. `{farhelm_args}` without a declared agent type is refused. Farhelm
   passes whatever turns its integration on as arguments, never through the environment: every process the agent starts
@@ -2250,18 +2250,20 @@ submission and focus-return behavior.
   harness or folder, and Clone can change the host. The launcher shows the current settings and marks edited fields, and
   its primary action is inactive until a setting changes or a conversation selector is entered. For an agent launch with
   a stored resume command, it is available even without a captured conversation; then its conversation field is required
-  and explains why. Cursor and OpenCode have no stored resume command, so they do not gain Restart with. Muse launches
-  created before conversation tracking also retain their missing resume command until recreated. The launcher's ordinary
-  controls, templates, validation and Enter rules apply. Its primary action reads "Restart", or "Stop and restart" while
-  the shown agent is working. The form shows the held agent type, host and folder, and the action's accessible name
-  includes them. A working agent is stopped first with the user's confirmation on that action; a live agent in any other
-  status is stopped first without it, as for Restart. The edited launch is validated exactly as a create validates it
-  before anything is stopped, so an invalid edit leaves the agent running and the dialog open with the reason. A refusal
-  leaves the dialog and its edits visible with the reason. The held folder never uses or updates the per-host folder
-  default; its advisory check still applies. Restart with runs the resume command, so an edited start command of a
-  command launch takes effect the next time it is cloned or replaced. Command launches offer this action exactly when
-  Restart is. Its entry in the header's Restart menu remains visible but greyed out otherwise, with a hover tooltip and
-  accessible description explaining why.
+  and explains why. A registered custom agent also needs a current registration that supports resumption. If the
+  registration changes while the launcher is open, the launcher explains why it cannot restart and stops requiring a
+  conversation until the agent can resume again. Cursor and OpenCode have no stored resume command, so they do not gain
+  Restart with. Muse launches created before conversation tracking retain their missing resume command until recreated.
+  The launcher's ordinary controls, templates, validation and Enter rules apply. Its primary action reads "Restart", or
+  "Stop and restart" while the shown agent is working. The form shows the held agent type, host and folder, and the
+  action's accessible name includes them. A working agent is stopped first with the user's confirmation on that action;
+  a live agent in any other status is stopped first without it, as for Restart. The edited launch is validated exactly
+  as a create validates it before anything is stopped, so an invalid edit leaves the agent running and the dialog open
+  with the reason. A refusal leaves the dialog and its edits visible with the reason. The held folder never uses or
+  updates the per-host folder default; its advisory check still applies. Restart with runs the resume command, so an
+  edited start command of a command launch takes effect the next time it is cloned or replaced. Command launches offer
+  this action exactly when Restart is. Its entry in the header's Restart menu remains visible but greyed out otherwise,
+  with a hover tooltip and accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
   fresh-conversation counterpart to restart's resumed one unless the user names a conversation for this start. A session
   in a managed checkout starts on a managed checkout of the same repository, named `<title>-clone` with the first free
@@ -4793,28 +4795,28 @@ split into raw prefix words with quotes and escapes retained, interpreted by Bas
 makes it a command launch. It may add `--agent <type>` as its declared agent type and `--resume-command` to opt into
 Resume. A custom agent declaration supplies the YOLO answer. Otherwise `--yolo`, `--no-yolo` or a template supplies it.
 Templates are applied first, in order, and the other flags then act as further edits, so
-`--template my-codex --model gpt-6-luna` is `my-codex` with a different model. The
-result is validated exactly like a GUI launch, with the same refusals naming the field, and the remembered GUI defaults
-never fill a gap, so the same templates can launch differently from the CLI than from a GUI that preselected a
-remembered permission. A flag required by the verb, such as `--cwd` or the target host, may be omitted when an applied
-template sets that field, and an explicit flag wins over a template. `farhelm spawn` targets its own host, so a template
-that sets a host is refused there. `farhelm agent create` accepts `--gh <owner/repo>` (`--github` is an alias), mutually
-exclusive with `--cwd`, or a template whose destination is a managed checkout. It uses the launcher's checkout root,
-post-clone command, repository spellings, naming and refusals: `--gh acme/web --title "Fix parser"` creates
-`web-fix-parser`; without a title it chooses the next free `web-N`. A template's base name uses the literal title when
-free, otherwise `-2` through `-50`, the same series as the launcher; the approval card shows that resolved title and
-directory. Fixed template names and an agent's own `--title` stay exact, with a taken or over-long title-derived name
-refused without a suffix. A base name's invalid or over-long candidate is also refused. Only previews search: a create
-that loses its approved directory reports the conflict and never submits another create automatically. Keyed recovery
-precedes any new name preview. `farhelm spawn` and `farhelm agent clone` do not request fresh checkouts; spawn refuses a
-checkout template. `--inherit-agent` is exclusive with every launch flag. `--trust` is no longer accepted for create,
-spawn, or template writes. Workspace trust follows the destination policy. A command flag repeated or contradicted
-(`--yolo` with `--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and
-`--profile-id`, and `farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent`
-given something that is not an agent type is refused with the list of agent types. While its retry record is retained, a
-retry under an idempotency key is matched by the request as the agent sent it, not by what that request resolved to.
-Retrying `farhelm agent create` or `farhelm spawn` with the same key, host, template names, flags and spawn placement,
-or `farhelm agent clone` with the same key, source, host and `--cwd`/`--title` overrides (an override given counts as
+`--template my-codex --model gpt-6-luna` is `my-codex` with a different model. The result is validated exactly like a
+GUI launch, with the same refusals naming the field, and the remembered GUI defaults never fill a gap, so the same
+templates can launch differently from the CLI than from a GUI that preselected a remembered permission. A flag required
+by the verb, such as `--cwd` or the target host, may be omitted when an applied template sets that field, and an
+explicit flag wins over a template. `farhelm spawn` targets its own host, so a template that sets a host is refused
+there. `farhelm agent create` accepts `--gh <owner/repo>` (`--github` is an alias), mutually exclusive with `--cwd`, or
+a template whose destination is a managed checkout. It uses the launcher's checkout root, post-clone command, repository
+spellings, naming and refusals: `--gh acme/web --title "Fix parser"` creates `web-fix-parser`; without a title it
+chooses the next free `web-N`. A template's base name uses the literal title when free, otherwise `-2` through `-50`,
+the same series as the launcher; the approval card shows that resolved title and directory. Fixed template names and an
+agent's own `--title` stay exact, with a taken or over-long title-derived name refused without a suffix. A base name's
+invalid or over-long candidate is also refused. Only previews search: a create that loses its approved directory reports
+the conflict and never submits another create automatically. Keyed recovery precedes any new name preview.
+`farhelm spawn` and `farhelm agent clone` do not request fresh checkouts; spawn refuses a checkout template.
+`--inherit-agent` is exclusive with every launch flag. `--trust` is no longer accepted for create, spawn, or template
+writes. Workspace trust follows the destination policy. A command flag repeated or contradicted (`--yolo` with
+`--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
+`farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent` given something that
+is not an agent type is refused with the list of agent types. While its retry record is retained, a retry under an
+idempotency key is matched by the request as the agent sent it, not by what that request resolved to. Retrying
+`farhelm agent create` or `farhelm spawn` with the same key, host, template names, flags and spawn placement, or
+`farhelm agent clone` with the same key, source, host and `--cwd`/`--title` overrides (an override given counts as
 different from one left out), returns the first attempt's session, or the refusal its host recorded, even if a template
 it names or the clone's source was edited in between, for as long as the request still names something the helm can
 resolve. A retry that no longer resolves (a template deleted or edited into something the CLI refuses, an unconnected

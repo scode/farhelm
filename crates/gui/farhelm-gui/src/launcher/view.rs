@@ -1253,6 +1253,12 @@ impl Launcher {
             return Some(Refusal(TEMPLATE_PANEL_OPEN.to_owned()));
         }
         let hosts = self.hosts(cx);
+        if let Some(reason) = self.custom_restart_refusal(cx) {
+            return self
+                .draft
+                .host_refusal(&hosts)
+                .or_else(|| Some(Refusal(reason.to_owned())));
+        }
         if matches!(self.draft.mode, Mode::RestartWith(_)) && self.model_pending(cx) {
             return self
                 .draft
@@ -1276,6 +1282,17 @@ impl Launcher {
         }
         self.draft
             .launch_refusal(target, self.live_launch(cx).as_ref())
+    }
+
+    /// A registration push can change whether this saved agent can restart while the dialog is already open.
+    fn custom_restart_refusal(&self, cx: &App) -> Option<&'static str> {
+        if !matches!(self.draft.mode, Mode::RestartWith(_)) || self.draft.tab != Tab::Agent {
+            return None;
+        }
+        super::entry::custom_restart_refusal(
+            self.draft.agent.custom_agent.as_deref(),
+            self.store.read(cx).collections(),
+        )
     }
 
     /// Whether the source of a Replace with or Restart with has a request in flight under its own key (a Stop, a

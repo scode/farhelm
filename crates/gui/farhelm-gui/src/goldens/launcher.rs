@@ -7,7 +7,7 @@ use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionState, HelmMarker, KeyedEntry, Preferences,
 };
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchTarget, Place};
-use gpui::{App, AppContext as _, Entity, Window, point, px};
+use gpui::{App, AppContext as _, Entity, IntoElement as _, Window, div, point, px};
 use serde_json::json;
 
 use super::{SceneState, fleet, session_list_scene_preferring};
@@ -18,6 +18,7 @@ use crate::launcher::view_tests::fixture_hosts;
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::texts_within;
 use crate::session_list::tests::{listing, preferences_state, session, within};
+use crate::session_pane::header::CaretMenu;
 use crate::test_support::{click_before_redraw, meta, withdraw_presented_choice};
 
 /// Show the temporary capsule with the launcher hidden and the fake's Resume still outstanding.
@@ -645,6 +646,44 @@ pub(super) fn launcher_template_save_after_undo_setup(
     setup(state, LauncherScene::TemplateSaveAfterUndo, window, cx);
 }
 
+/// Show an open Restart with editor after the registration lost resumption and More options was folded.
+pub(super) fn launcher_custom_restart_blocked_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    window.set_driver_enabled(true);
+    setup_custom_restart(state, false, cx);
+}
+
+/// The Restart menu explains the unavailable variant where the user normally opens the launcher.
+pub(super) fn launcher_custom_restart_menu_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    window.set_driver_enabled(true);
+    setup_custom_restart(state, true, cx);
+    let menu = cx.new(|cx| CaretMenu::restart_for_golden("a", cx));
+    state.keep.borrow_mut().push(Box::new(menu));
+}
+
+/// Draw the production menu itself, including the disabled option and its description.
+pub(super) fn launcher_custom_restart_menu(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::AnyElement {
+    super::defer_after(state, window, cx);
+    let keep = state.keep.borrow();
+    keep.iter()
+        .find_map(|kept| kept.downcast_ref::<Entity<CaretMenu>>())
+        .map_or_else(
+            || div().into_any_element(),
+            |menu| menu.clone().into_any_element(),
+        )
+}
+
 /// Keep the source warning and held host visible beside the same form and command pane used by New.
 pub(super) fn launcher_replace_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Replace, window, cx);
@@ -772,6 +811,66 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
     }
     session_list_scene_preferring(state, &rows, preferences_state(preferences), extra, cx);
     state.after.set(Some(open_new_with_claude));
+}
+
+/// Both scenes have a stored resume command, no captured conversation, and a registration without resumption.
+fn setup_custom_restart(state: &SceneState, menu: bool, cx: &mut App) {
+    let row = session("a").host(1).host_name("Local (this machine)").title("Review the launch workflow").agent_kind("custom").launch(json!({
+        "kind": "agent", "selection": {"harness": "custom", "custom_agent": "acme-code"},
+        "start": ["acme-code", "{farhelm_args}"], "resume": ["acme-code", "{conversation}", "{farhelm_args}"],
+    }));
+    let mut listing = crate::session_list::tests::listing(&["a"], &[row]);
+    listing.entries[0].value["restart_offer"] = json!("not_captured");
+    let mut custom = super::custom_agent_state();
+    custom.entries[0].value["supports_resumption"] = json!(false);
+    let preferences = crate::session_list::tests::preferences(&["a"], Some("a"));
+    super::session_list_scene_with_listing(state, listing, preferences, vec![custom], cx);
+    state.after.set(Some(if menu {
+        wait_for_disabled_restart_menu
+    } else {
+        open_custom_restart
+    }));
+}
+
+/// Seed the open editor's post-change state. The menu blocks fresh entry, and the runtime test drives the catalog push.
+fn open_custom_restart(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let draft = crate::session::current_store(cx).and_then(|store| {
+        let row = store
+            .read(cx)
+            .collections()
+            .get::<farhelm_proto::ui_channel::SessionRow>("a")?;
+        crate::launcher::draft::LaunchDraft::restart_with("a", &row.info, Some(row.host))
+    });
+    if let Some(draft) = draft {
+        assert!(entry::open_with(draft, None, window, cx));
+    } else {
+        state.after.set(Some(open_custom_restart));
+    }
+}
+
+/// The frame must expose the disabled option itself, within the shared bounded staging budget.
+fn wait_for_disabled_restart_menu(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    let id = "session-header-restart-options-with";
+    let nodes = window.driver_nodes();
+    if !nodes.iter().any(|node| {
+        node.element_id.as_deref() == Some(id)
+            && !node.flags.click
+            && !node.visible_bounds.is_empty()
+    }) || !texts_within(nodes, id).iter().any(|text| {
+        text.text.contains("This custom agent no longer") && !text.visible_bounds.is_empty()
+    }) {
+        state.after.set(Some(wait_for_disabled_restart_menu));
+    }
 }
 
 /// The empty pane shows saved rows and their real marks and shortcut bindings before a query is entered.

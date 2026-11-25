@@ -1706,7 +1706,7 @@ impl AgentKind {
     }
 
     /// When a session of this kind normally gets a conversation that Restart
-    /// can resume, or `None` for kinds with no conversation reporting.
+    /// can resume. `None` covers kinds with no reporting and custom agents, which do not have a fixed reporting time.
     ///
     /// The single source of these facts for every place that explains a
     /// `not_captured` restart offer while the agent may still report: the
