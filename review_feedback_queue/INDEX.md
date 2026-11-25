@@ -93,9 +93,6 @@ consequences.
 - [`hook-settings-close-hides-opt-out-failure.md`](hook-settings-close-hides-opt-out-failure.md) — Closing Settings
   while an opt-out saves can hide the refusal and leave automatic hook setup active.
 
-- [`wayland-ssh-paste-blocks-window.md`](wayland-ssh-paste-blocks-window.md) — Pasting an SSH answer on Wayland can
-  block the GUI while another application supplies clipboard data.
-
 - [`trailing-replace-drops-late-checkout-warning.md`](trailing-replace-drops-late-checkout-warning.md) — A replacement
   session can start while the warning explaining where the original checkout was left disappears after the reply
   deadline.

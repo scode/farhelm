@@ -64,6 +64,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Make Wayland text-field paste nonblocking.** Pasting into a text field such as an SSH sign-in answer can freeze the
+  window while another app supplies clipboard data. [Terminal experience](SPEC.md#terminal-experience) requires Farhelm
+  to stay responsive during clipboard operations on Wayland. Kit's Paste checks the synchronous read before its async
+  fallback. Give that path an async text-first read on Wayland, reusing Kit's focus, document and selection checks and
+  its atomic undo. Keep the terminal's file-first paste and keep text-field newline handling. The vendored async path
+  currently prefers files and images, so sending both callers through it can lose text from a mixed offer. The split
+  spans the Wayland receive code and the clipboard API used by Kit and the terminal. Cover keyboard and Edit menu paste,
+  mixed offers and a reply that arrives after the target changes.
+
 - **Allocate Tailscale socket folders securely across helm restarts.** On a machine with several accounts, Farhelm can
   lose access to a Tailscale host if its shared SSH socket folder is already occupied. Use a short, private temporary
   directory allocated by the OS. A helm restart can leave earlier SSH masters alive, so retain a trusted way to find
