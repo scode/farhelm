@@ -167,7 +167,8 @@ use crate::AppState;
 use crate::store::TemplateBindings;
 use crate::store::{HostId, SessionKey};
 use crate::workspace_trust::{
-    TrustResolvedLaunch, normalize_launch_workspace_trust, try_without_workspace_trust,
+    ApprovedLaunchTrust, TrustResolvedLaunch, normalize_launch_workspace_trust,
+    try_without_workspace_trust,
 };
 use farhelm_proto::SessionRef;
 
@@ -2288,7 +2289,7 @@ async fn create_checkout_for_agent(
         .github_repo
         .clone()
         .expect("managed destination selected");
-    let launch = normalize_launch_workspace_trust(state, resolution.launch).await?;
+    let launch = ApprovedLaunchTrust::resolve(state, resolution.launch).await?;
     // Fresh intent resolves trust before its original-wrapper check. Keep
     // this order, and carry this exact launch past preview and approval.
     let mut resolution = crate::agent_launch::Resolution {
@@ -2307,7 +2308,7 @@ async fn create_checkout_for_agent(
     crate::yolo_guard::check_agent_wrapper(
         state,
         claim.host,
-        resolution.launch.as_launch(),
+        resolution.launch.mode.as_launch(),
         resolution.agent_wrapper_supplied,
     )
     .await?;
@@ -2429,7 +2430,7 @@ async fn create_checkout_for_agent(
             cwd: preview.binding.cwd.clone(),
             repo: Some(repo.clone()),
             title: resolution.title.clone(),
-            launch: resolution.launch.as_launch().clone(),
+            launch: resolution.launch.mode.as_launch().clone(),
             agent_wrapper_supplied: resolution.agent_wrapper_supplied,
             source: None,
         },
@@ -4626,11 +4627,8 @@ async fn launch_environment_for_agent(
     // will start with, and the launch carrying it is what the card shows and
     // what the create runs: the user approves a fixed command, not one a
     // Settings change during the wait or the build could alter.
-    let launch = crate::workspace_trust::configured_launch_workspace_trust(
-        plan.launch,
-        &state.store.resolve_checkout_config(None).await?,
-    )?;
-    let shown = launch.as_launch().clone();
+    let launch = ApprovedLaunchTrust::resolve(state, plan.launch).await?;
+    let shown = launch.mode.as_launch().clone();
     let mut request = crate::sessions::CreateReq::for_agent_environment(
         launch,
         plan.agent_wrapper_supplied,
@@ -11995,7 +11993,8 @@ mod tests {
     /// approved name/path are the ones dispatched. A keyed replay must return
     /// that child without another preview or card. The same scripted peer
     /// proves that Fixed/explicit titles, non-occupancy errors and the shared
-    /// cap never turn into another automatic create.
+    /// cap never turn into another automatic create. Checkout preparation
+    /// retains trust from before approval so the supervisor can record cleanup.
     #[farhelm_testtrace::test]
     async fn template_base_checkout_names_are_previewed_before_approval_and_replayed() {
         use farhelm_proto::ControlMsg;
@@ -12088,6 +12087,7 @@ mod tests {
                         // choose the directory on the target supervisor.
                         assert!(cwd.is_empty());
                         let checkout = github_checkout.expect("managed payload");
+                        assert!(checkout.claude_trust, "carry the pre-approval trust choice");
                         assert_eq!(checkout.preview.basename, "project-review-2");
                         assert_eq!(checkout.preview.cwd, "/checkouts/project-review-2");
                         let mut child = session("numbered-child", 100);
@@ -12112,6 +12112,9 @@ mod tests {
             .await
             .unwrap();
         h.store.set_checkout_root(None, "/checkouts").await.unwrap();
+        h.store.set_claude_trust(true).await.unwrap();
+        let before_approval = h.store.resolve_checkout_config(None).await.unwrap();
+        assert!(before_approval.claude_trust);
         let _gui = h.manager.ui_seat().hold();
         let fields = TemplateFields {
             name: Some("review".into()),
@@ -12147,6 +12150,9 @@ mod tests {
         assert_eq!(cwd, "/checkouts/project-review-2");
         assert_eq!(repo.as_deref(), Some("owner/project"));
         assert_eq!(previews.lock().unwrap().as_slice(), &["review", "review-2"]);
+        h.store.set_claude_trust(false).await.unwrap();
+        let at_dispatch = h.store.resolve_checkout_config(None).await.unwrap();
+        assert!(!at_dispatch.claude_trust);
         assert_eq!(
             answer_card(&h, "allow").await,
             axum::http::StatusCode::NO_CONTENT
@@ -16088,7 +16094,10 @@ mod tests {
         let approved =
             crate::workspace_trust::retain_stored_launch_workspace_trust(&source).unwrap();
         let request = crate::sessions::CreateReq::for_agent_environment(
-            approved,
+            ApprovedLaunchTrust {
+                mode: approved,
+                claude_after_clone: false,
+            },
             false,
             None,
             Some("copy".into()),

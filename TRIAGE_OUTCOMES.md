@@ -1,33 +1,5 @@
 # Triage outcomes
 
-## trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC_impl.md "Permission prompts for agent actions" (around line 9733): "What a card
-  shows is what an approval does. Launches are resolved fully before the card, and the dispatched launch is the one
-  shown." The code's own contract says the same: `farhelm-helm/src/workspace_trust.rs:109-112` ("Agent-requested
-  launches carry the choice shown on the card through dispatch") and `sessions.rs:1546-1547` ("An agent launch instead
-  retains the choice already shown on its approval card"). The code contradicts it. After approval,
-  `create_fresh_session_resolved` reads Settings again (`sessions.rs:2639`) and builds the checkout resolution with
-  `claude_trust: config.claude_trust` (`sessions.rs:1586`). The approved launch keeps its frozen workspace trust
-  (`resolved_mode`) for a new managed checkout (`create_checkout_for_agent`) and for an agent-requested environment
-  (`launch_environment_for_agent`). The supervisor carries the fresh value into preparation (`service/core.rs:11383`).
-  If the switch went from off to on in between, the checkout is marked trusted even though the card said "Not trusted"
-  (`launch.rs:1986-1999`). From on to off, the shim writes trust for an ordinary folder, with no removal record
-  (`launch.rs:1218-1227`), so archiving never removes it. Toggling trust does not change the configuration revision, so
-  the preview check does not catch it. Verified: confirmed by reading the code.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code. Freeze
-  the pre-approval `claude_trust` alongside `resolved_mode` in both agent paths and use it in place of
-  `config.claude_trust`. Size M; plumbing through two contexts plus tests in both toggle directions likely exceeds ~100
-  lines. A residual question remains outside the clearly settled part: for a non-Claude agent's managed checkout,
-  Claude-trust-after-clone is not shown on the card at all.). Size gate: about 100 lines of diff (code, tests and docs,
-  not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
-  back to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says
-  remains.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
 ## settings-close-can-retry-refused-save.md
 
 - Outcome: `fix code`.
