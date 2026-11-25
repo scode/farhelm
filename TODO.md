@@ -83,6 +83,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   session starts another agent (or before launch), along with the checkout-preparation Claude trust snapshotting and
   docs/tests that existed for that path. Plan: `plans/queue/drop-post-clone-claude-trust.md`.
 
+- **Start several selected sessions at once.** When multiple sessions are selected we need to be able to start sessions
+  if all the marked ones are stopped.
+
 ## Plan follow-ups
 
 - **Bind Tensorlake launch consent to the billed size shown.** A recipe edit under the same name can make a confirmed
