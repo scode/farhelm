@@ -70,6 +70,12 @@ looks for the installed vendor's turn callbacks in the hook log and checks that 
 also gets a fresh supervisor with hooks disabled. Codex still needs its daemon-ownership option, and Goose's Restart
 must keep its reporter disabled even when the session already has a saved conversation.
 
+The `workspace_trust` category launches each agent that offers a trust choice in a fresh directory with that choice and
+never answers a trust question: a trusted launch has to reach the composer on its own. Codex and Pi also get an explicit
+untrusted launch in a second directory. The case then checks the effect where the agent shows it: Codex's process
+carries the trust argument, Pi loads a project extension only when trusted, and Farhelm records the trust in Claude's
+configuration, which the case reads from a private copy (see below).
+
 An agent may save a trust choice for the temporary directory. Claude, the Muse launcher and OMP can update themselves
 during startup, so these cases disable their updaters for the test invocations using an environment variable for Claude
 and Muse and a temporary OMP configuration overlay.
@@ -107,6 +113,12 @@ symlink rather than writing your file; the case copies such a file back afterwar
 confirmed ended and when your real one is unchanged, and prints a `drift:` note naming any it could not, so a replaced
 file (a refreshed login, say) is never dropped without a note. Files the vendor creates new inside the copy's private
 directories are dropped with it.
+
+Claude's workspace trust case uses a private copy too, for a different reason: Farhelm records the trust in Claude's
+configuration file, `~/.claude.json` or the one under `CLAUDE_CONFIG_DIR`, so the case starts Claude with a private home
+holding its own copies of Claude's possible configuration files, with an empty place for their `backups` directory.
+Those copies and any backups Claude writes are discarded with the case, and nothing is copied back. The case fails if
+your real files changed while it ran, which a Claude session of your own running at the same time can cause.
 
 Which files to keep private comes from Farhelm's setup itself, so an agent that gains persistent hooks is covered
 without listing its paths again, as long as they lie under the home directory or Grok's. A guard test
