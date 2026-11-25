@@ -583,12 +583,10 @@ pub(crate) fn draw(
 
 // ---- Acting ----------------------------------------------------------------------------------------------------------
 
-/// The card's Restart, sent at once with no consent to stop a running agent: the card shows only when no agent process
-/// is left (SPEC_impl.md: "Restart is an unconfirmed normal action because no process remains"), even when the status
-/// the helm kept still reads Running because the terminal went missing without a definite new status. Asking "Still
-/// running — restarting stops the agent" there would be false. If an agent is alive after all (a terminal published
-/// since the row was drawn), the supervisor refuses a Restart that carries no consent, so this errs toward stopping
-/// nothing. The shown row supplies the guard while the current row still offers Restart on this card.
+/// The card sends Restart without stop consent. Its missing terminal gives the card no live process to ask about.
+/// The supervisor still checks for a live run, including a terminal published since the row was drawn. Failed cleanup
+/// of a legacy terminal can leave an untracked agent alive, the exception in SPEC.md under Terminal experience.
+/// The shown row supplies the guard while the current row still offers Restart on this card.
 fn restart_from_card(snapshot: Option<&ShownAction<menu::Actionable>>, cx: &mut App) {
     use session_list::environment::{self, Environment};
 

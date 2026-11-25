@@ -113,12 +113,12 @@ include it. See [Grok setup](/docs/agents/grok/#setup).
   [you turned it off](#turning-it-off). Farhelm builds that command itself and knows where the reporter goes. With a
   [wrapper prefix](/docs/agents/agent-wrappers/), the reporter's arguments follow the prefix, and the wrapper must pass
   them and its environment through to the agent. Cursor and OpenCode have none.
-- **A [custom command](/docs/agents/custom-commands/) that declares its agent** gets the declared agent's reporter where
-  `{farhelm_args}` stands, which the command must contain exactly once. Farhelm does not read the rest of the command,
-  so it does not notice a `--settings` of your own for Claude (Claude honors only the last one), Codex hook
-  configuration of your own, Muse's `-c hooks=…` or `-c hooks.…` settings, an `--append-system-prompt` of your own
-  before `{farhelm_args}` for OMP, or a bare `--` before `{farhelm_args}` (after which the flags would become prompt
-  text); those are yours to avoid. A wrapper has to forward the arguments to the agent, as
+- **A [custom command](/docs/agents/custom-commands/) that declares its agent** must contain `{farhelm_args}` exactly
+  once. For an agent that gets its settings on the command line, Farhelm puts the arguments there. Farhelm does not read
+  the rest of the command, so it does not notice a `--settings` of your own for Claude (Claude honors only the last
+  one), Codex hook configuration of your own, Muse's `-c hooks=…` or `-c hooks.…` settings, an `--append-system-prompt`
+  of your own before `{farhelm_args}` for OMP, or a bare `--` before `{farhelm_args}` (after which the flags would
+  become prompt text); those are yours to avoid. A wrapper has to forward the arguments to the agent, as
   [Agent wrappers](/docs/agents/agent-wrappers/) describes.
 - **A custom command with no declared agent** gets no reporter at all, whatever its first word is: Farhelm never decides
   from a command line which agent it runs.

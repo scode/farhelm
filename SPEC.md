@@ -2794,13 +2794,13 @@ buckets the order is the most recent observed START of a work burst: a session p
 waiting into running (both idle-to-running and waiting-to-running count) and when it starts waiting on the user, since a
 question for the user is work the user should see; later output inside that burst, and a question that stays on screen,
 leave the position alone. Only a change the supervisor itself observed between two of its own looks counts: the first
-look after a supervisor restart, a session restart, or a recovery from failed screen captures only establishes where the
-session stands. Idling and completion change the sort bucket. A finished session drops below still-running work within
-its part of the list without its burst key moving, and a session returning to running sorts with running work on that
-same key. Creation time is the stable fallback where an older supervisor has no work-start observation. The
-last-activity time shown in the row and the seen/unseen comparison stay independent of the order: they describe when the
-agent was last working (see Status) and neither moves a row. The sort buckets and the key are authoritative helm and
-supervisor data, so every client agrees without keeping a private rank.
+look after a supervisor or session restart only establishes where the session stands. Idling and completion change the
+sort bucket. A finished session drops below still-running work within its part of the list without its burst key moving,
+and a session returning to running sorts with running work on that same key. Creation time is the stable fallback where
+an older supervisor has no work-start observation. The last-activity time shown in the row and the seen/unseen
+comparison stay independent of the order: they describe when the agent was last working (see Status) and neither moves a
+row. The sort buckets and the key are authoritative helm and supervisor data, so every client agrees without keeping a
+private rank.
 
 A muted session sorts with idle and ended sessions on the work-start key it had when muted. While it is waiting on a
 connected host, it sorts with active work on its real work-start key so the question can promote it. When the wait ends,
@@ -3558,26 +3558,27 @@ whatever the agent renders is what you see. There is no composer, no message abs
 - Selecting text copies it to the system clipboard: a plain drag when the pane has no mouse reporting active, or
   Shift-drag (Option-drag on macOS) to force a local selection when it does — the same modifier xterm itself uses to win
   a selection back from an app that has grabbed the mouse. After the program exits, the wheel, clicks and drags act on
-  the terminal itself even if the program was reporting mouse input. A terminal program's own OSC 52 WRITE also copies
-  to the clipboard, and is the only path that reaches it for a selection an app under mouse reporting makes for itself;
-  an OSC 52 READ is never answered with clipboard contents. A user-initiated paste intentionally sends the pasted
-  content to the selected terminal; it does not authorize a program to query the clipboard. Every completed selection
-  re-copies, even one identical to what is already on the clipboard. When a plain drag goes to a program under mouse
-  reporting and the program copies nothing (no OSC 52 write follows), the terminal shows a notice that the program
-  handles selection itself: use its own copy command, or hold the forcing modifier while dragging. It appears on every
-  such drag, with its bottom edge three terminal rows above the release pointer when it fits inside the terminal's pane
-  and the window. Otherwise its top edge sits three rows below; if neither fits, it falls back to six pixels above,
-  clamped inside the window. It stays centred horizontally on the pointer, clamped inside the window. It stays for 30
-  seconds, or until its × is clicked or the next mouse press in that terminal. Dismissal preserves terminal focus and
-  sends no input to the program; the rest of the notice is pointer-transparent. For a Codex session's agent terminal the
-  notice names Codex's own copy key instead. It is guidance about the program, not a report of a clipboard failure. Any
-  completed program clipboard write, including a primary-selection write, suppresses it during the grace window.
-  Clipboard operations are explicitly best-effort and silent on failure — the operating system's clipboard behavior is
-  outside this system's control — a deliberate, named exception to the Errors and diagnostics section's
-  surface-every-error rule below, not a lapse in it. Farhelm assumes the host's system clipboard works. Copies may be
-  dropped while it is broken, hung or slow. A paste the user starts on macOS may stall the window while the system
-  clipboard supplies its contents. Farhelm must stay responsive during other clipboard operations. On Wayland, keys
-  typed while Farhelm is still fetching pasted text from the system clipboard may reach the terminal before that text.
+  the terminal itself even if the program was reporting mouse input. A terminal program's OSC 52 WRITE to the clipboard
+  selection copies to the system clipboard, the only path there for a selection an app under mouse reporting makes for
+  itself. A primary-selection write leaves the system clipboard alone; an OSC 52 READ is never answered with clipboard
+  contents. A user-initiated paste intentionally sends the pasted content to the selected terminal; it does not
+  authorize a program to query the clipboard. Every completed selection re-copies, even one identical to what is already
+  on the clipboard. When a plain drag goes to a program under mouse reporting and the program copies nothing (no OSC 52
+  write follows), the terminal shows a notice that the program handles selection itself: use its own copy command, or
+  hold the forcing modifier while dragging. It appears on every such drag, with its bottom edge three terminal rows
+  above the release pointer when it fits inside the terminal's pane and the window. Otherwise its top edge sits three
+  rows below; if neither fits, it falls back to six pixels above, clamped inside the window. It stays centred
+  horizontally on the pointer, clamped inside the window. It stays for 30 seconds, or until its × is clicked or the next
+  mouse press in that terminal. Dismissal preserves terminal focus and sends no input to the program; the rest of the
+  notice is pointer-transparent. For a Codex session's agent terminal the notice names Codex's own copy key instead. It
+  is guidance about the program, not a report of a clipboard failure. Any completed OSC 52 write to the clipboard or
+  primary selection suppresses it during the grace window. Clipboard operations are explicitly best-effort and silent on
+  failure — the operating system's clipboard behavior is outside this system's control — a deliberate, named exception
+  to the Errors and diagnostics section's surface-every-error rule below, not a lapse in it. Farhelm assumes the host's
+  system clipboard works. Copies may be dropped while it is broken, hung or slow. A paste the user starts on macOS may
+  stall the window while the system clipboard supplies its contents. Farhelm must stay responsive during other clipboard
+  operations. On Wayland, keys typed while Farhelm is still fetching pasted text from the system clipboard may reach the
+  terminal before that text.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the
@@ -5115,9 +5116,8 @@ interactive login shell once at startup. The app, its helm and a local superviso
 they run by name, including ssh and Linux's `pw-play`. Session shells start from the PATH the app originally inherited.
 A supervisor already running keeps the PATH it started with. If the lookup fails or exceeds five seconds, the app logs a
 warning and uses the PATH it inherited. The user chooses the flags in a custom command, including Muse hook settings
-that can clash with the hooks Farhelm adds. The user also manages unusually large agent settings files. The Codex
-settings merge and one-time Claude settings cleanup read files of at most 1 MiB. A Codex merge can grow a file near that
-size past it. Later merges then refuse the file until the user reduces its size.
+that can clash with the hooks Farhelm adds. The user also manages unusually large agent settings files. The one-time
+Claude and Codex settings cleanups read files of at most 1 MiB.
 
 Steady-state operation between Farhelm's own components uses the desktop app's deliberately local loopback edge between
 its window and its embedded helm, and the helm to each supervisor (local IPC, SSH or Podman exec). User-opened localhost

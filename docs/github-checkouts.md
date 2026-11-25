@@ -90,11 +90,12 @@ When a spare does need building, its background cache refresh performs the same 
 twice. This work stays under the cache lock and uses your login shell without credential prompts. A later launch of the
 same repository can still wait for that lock while background cleanup finishes.
 
-The cache is `<supervisor-state-dir>/repo-cache/<owner>/<name>.git`, outside the working-copy root. It takes roughly the
+The cache is in `<supervisor-state-dir>/repo-cache/<owner>/`, outside the working-copy root. Each rebuild gets a
+`<name>.git:gen-<uuid>` directory, and the `<name>.git:current` file names the generation in use. It takes roughly the
 disk space of one extra repository copy per host. When the supervisor starts, it removes caches unused for more than 30
-days. You can remove a cache directory by hand at any time; existing checkouts do not depend on it, and the next fresh
-checkout downloads it again. Avoid removing it while a checkout is being prepared, since that preparation can fail.
-Leave the sibling `.lock` files in place so simultaneous checkouts continue to take turns on the same lock.
+days. You can remove the selected cache directory by hand. Existing checkouts stay independent, and the next fresh
+checkout downloads the cache again. Avoid removing it while a checkout is being prepared, since that preparation can
+fail. Leave the sibling `.lock` files in place so simultaneous checkouts continue to take turns on the same lock.
 
 ## Prepared checkouts
 

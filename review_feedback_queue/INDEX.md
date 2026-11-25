@@ -285,9 +285,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`template-leave-spec-still-inline.md`](template-leave-spec-still-inline.md) — The implementation spec still describes
-  the Templates leave question as inline, although the app centers it.
-
 - [`legacy-template-can-ask-to-save-automatic-cleanup.md`](legacy-template-can-ask-to-save-automatic-cleanup.md) — A
   legacy template can ask to save when the only remaining change is automatic cleanup of a retired trust field.
 
@@ -566,10 +563,6 @@ consequences.
 - [`terminal-paste-test-misses-first-ack-premise.md`](terminal-paste-test-misses-first-ack-premise.md) — The interrupted
   paste check can pass without demonstrating that the runtime processed the first acknowledgement.
 
-- [`custom-command-spec-misstates-hook-arguments.md`](custom-command-spec-misstates-hook-arguments.md) — The
-  custom-command contract says the launch placeholder supplies reporters for agents whose persistent configuration
-  supplies them.
-
 - [`uninstall-omits-persistent-hook-cleanup.md`](uninstall-omits-persistent-hook-cleanup.md) — Uninstall can leave Grok
   and Antigravity callbacks pointing to the removed Farhelm executable, and the uninstall guidance omits cleanup.
 
@@ -676,9 +669,6 @@ consequences.
 - [`trailing-final-frame-boundary-test-leaves-osc-8-and-file.md`](trailing-final-frame-boundary-test-leaves-osc-8-and-file.md)
   — Existing exit tests would miss a regression that joins a file path or combines OSC 8 labels across the
   retained-history/final-frame boundary.
-
-- [`trailing-osc-52-copy-rule-omits-primary-selection-distinction.md`](trailing-osc-52-copy-rule-omits-primary-selection-distinction.md)
-  — The wording can lead readers to expect a primary-selection write to replace the system clipboard.
 
 - [`trailing-multi-clicking-exit-message-copies-different-row.md`](trailing-multi-clicking-exit-message-copies-different-row.md)
   — A double or triple click on the exit message can replace the clipboard with terminal text from the row above it.
@@ -860,23 +850,9 @@ consequences.
   — The product spec groups a request that was never sent with one that went unanswered, even though an unanswered
   Delete may proceed.
 
-- [`trailing-interrupted-card-guide-still-names-only-host-restart.md`](trailing-interrupted-card-guide-still-names-only-host-restart.md)
-  — The implementation guide describes recovery-card copy that covers one of the two interruption causes.
-
-- [`trailing-work-start-spec-still-says-rename-replaces-sampling-state.md`](trailing-work-start-spec-still-says-rename-replaces-sampling-state.md)
-  — The implementation spec gives conflicting directions about whether a title-only change should preserve the current
-  screen reading.
-
-- [`trailing-interrupted-recovery-guide-still-assumes-no-prior-process-remains.md`](trailing-interrupted-recovery-guide-still-assumes-no-prior-process-remains.md)
-  — The implementation guide justifies Restart without a confirmation by asserting the prior process is gone, although
-  legacy retirement may leave it running.
-
 - [`trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md`](trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md)
   — The test whose contract #4529 repairs would still pass if the supervisor reinstated a blanket host requirement for
   Clone.
-
-- [`trailing-clone-cli-reference-still-omits-environment-exception.md`](trailing-clone-cli-reference-still-omits-environment-exception.md)
-  — The CLI reference tells agents to supply a host for a Clone that the environment contract requires to omit it.
 
 - [`trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md`](trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md)
   — The fixture checks publication after first-stage entry. Its coverage of the ordering relied on by startup recovery
@@ -888,14 +864,6 @@ consequences.
 
 - [`trailing-restart-disposition-documentation-still-promises-no-external-change.md`](trailing-restart-disposition-documentation-still-promises-no-external-change.md)
   — The implementation has contradictory descriptions of whether a failed Restart may have run a replacement.
-
-- [`trailing-work-start-guide-omits-deferral-while-lifecycle-claim-is.md`](trailing-work-start-guide-omits-deferral-while-lifecycle-claim-is.md)
-  — A newly sampled question or work burst can update the badge before the recency key changes, and an observation
-  deferred during relaunch can lose its chance to update the key.
-
-- [`trailing-recent-activity-product-spec-still-promises-retired-capture-recovery.md`](trailing-recent-activity-product-spec-still-promises-retired-capture-recovery.md)
-  — The recent-activity contract tells readers that a recovered screen always starts a fresh ordering baseline after
-  capture failure.
 
 - [`trailing-interrupted-be-superseded-by-inferred-preparation-failure.md`](trailing-interrupted-be-superseded-by-inferred-preparation-failure.md)
   — The protocol docs promise a definitive launch error before Interrupted changes, while the supervisor can reclassify
@@ -1259,19 +1227,10 @@ consequences.
   spaces, control characters, or empty strings) even though Farhelm refuses those same values in the desktop Templates
   editor and whenever the template is applied.
 
-- [`trailing-cli-effort-hyphen-and-spec-drift.md`](trailing-cli-effort-hyphen-and-spec-drift.md) — CLI --effort rejects
-  leading-hyphen custom values as unrecognized flags while --effort=-val succeeds, and SPEC_impl.md still describes
-  closed-set parsing (typo guidance on --effort was separately fixed post-tip in #4752).
-
 - [`trailing-codex-dual-agent-delivery-tests-raw-substring.md`](trailing-codex-dual-agent-delivery-tests-raw-substring.md)
   — Several credential-delivery tests that share one endpoint token between Claude and Codex either check only whether a
   token appears anywhere in the raw combined credentials file after recovery, or check only that `codex_endpoint` is
   absent without verifying `FARHELM_CODEX_ENDPOINT_TOKEN` was also stripped.
-
-- [`trailing-codex-fixture-and-notifications-stale-corridor-comments.md`](trailing-codex-fixture-and-notifications-stale-corridor-comments.md)
-  — Comments in the Codex test fixture and supervisor notification enum still describe the removed two-Codex-image
-  corridor refusal rule and Codex-only ancestor restriction, which can mislead future readers about how Codex process
-  attribution actually works.
 
 - [`trailing-codex-renamed-executable-missing-admission-and-e2e-test.md`](trailing-codex-renamed-executable-missing-admission-and-e2e-test.md)
   — The change that enables Restart to resume Codex sessions launched from renamed or versioned executables adds no
@@ -1334,11 +1293,6 @@ consequences.
   — The integration test for running a custom agent's conversation reporter through the app forwarder during an update
   or uninstall does not actually prove that the forwarder prevented the CLI from starting, so a regression that bypassed
   the lock or failed before locking would still pass.
-
-- [`trailing-docs-github-checkouts-stale-single-dir-cache-path.md`](trailing-docs-github-checkouts-stale-single-dir-cache-path.md)
-  — The repository's managed-checkouts guide still says each host stores a repository's cache at
-  `<supervisor-state-dir>/repo-cache/<owner>/<name>.git`, even though Farhelm now stores caches in separate
-  `<name>.git:gen-<uuid>` directories selected by `<name>.git:current`.
 
 - [`trailing-drift-grok-home-overwritten-by-login-shell-rc.md`](trailing-drift-grok-home-overwritten-by-login-shell-rc.md)
   — If a maintainer configures a custom `GROK_HOME` in their login shell startup files (`~/.profile`, `~/.bashrc`, or
@@ -1507,10 +1461,6 @@ consequences.
   own: one section says it opens only when you press **Answer** (or run a manual action on that host), while the
   keyboard-focus section and the desktop app allow sending an answer to any other host's SSH question to immediately
   open and focus an already-waiting automatic Update Setup question.
-
-- [`trailing-spec-md-security-still-describes-ongoing-codex-merges.md`](trailing-spec-md-security-still-describes-ongoing-codex-merges.md)
-  — The Security section of SPEC.md contradicts the Topology section by still stating that Farhelm performs ongoing
-  Codex settings merges that can grow ~/.codex/config.toml past 1 MiB and cause later merges to refuse the file.
 
 - [`trailing-spec-md-status-contradicts-codex-pin-corrected-text.md`](trailing-spec-md-status-contradicts-codex-pin-corrected-text.md)
   — The Status section of SPEC.md still states the pre-positional wording for Codex pin-correction notifications (a

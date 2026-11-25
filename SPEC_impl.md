@@ -4116,9 +4116,10 @@ no path values are stored in the notice.
   Owning opens run SQLite planner maintenance after schema setup and log page, free-page and WAL sizes. On orderly stop
   the supervisor attempts a truncating WAL checkpoint after its writers drain, with a 250 ms wait for SQLite locks.
 - Host identity: generated once at first run and committed with FULL sync before publication, stored in the db.
-- The interrupted-session surface is a centered neutral card in the empty terminal area: it explains that a host restart
-  paused the session and keeps the terminal absent until the user intentionally chooses Restart or confirms Replace.
-  Restart is an unconfirmed normal action because no process remains; Replace starts as a normal trigger and keeps its
+- The interrupted-session surface is a centered neutral card in the empty terminal area. It explains that a host reboot
+  or a Farhelm update ended the agent and keeps the terminal absent until the user chooses Restart or confirms Replace.
+  Restart starts without confirmation. If cleanup of a legacy terminal failed, a second agent can start beside a
+  surviving one, the exception in SPEC.md under Terminal experience. Replace starts as a normal trigger and keeps its
   destructive confirmation inline. Replace reuses the existing create-then-delete endpoint through the row's Replace
   (`crates/gui/farhelm-gui/src/session_list/replace.rs`) and, on success, opens the new session if the source is still
   the open one, so the fresh conversation becomes visible immediately; refusal remains on the card with the endpoint's
@@ -4240,23 +4241,25 @@ no path values are stored in the notice.
   samples. The first sample that says something about the agent establishes the baseline. A "can't tell" sample keeps
   it. This stops a question that has been on screen for hours from jumping to the top and reading "just now" after a
   supervisor or session restart. Continued work in the same burst, a redraw of the same question, and completion do not
-  advance it. The badge and the ordering read the same stored reading, so they cannot drift apart. The key is
-  milliseconds since the epoch, but allocation is supervisor-local monotonic state rather than a bare clock read:
-  startup seeds it to the greatest effective key across every loaded row (ended rows included), and a start reserves
-  `max(now_ms, previous + 1)` with saturation. This orders same-millisecond bursts and survives a backward clock step on
-  one supervisor. Separate supervisors still have only their wall clocks and the helm's deterministic creation/id/host
-  tie-breakers; this does not claim distributed causality across skewed hosts.
+  advance it. The badge and ordering use the same sampled reading. If a lifecycle operation holds the session, the badge
+  can reflect the new reading before the ordering key is written. The ticker saves the observation for a later visit
+  without allocating a key, so it can keep sampling other sessions. It drops that observation if the run is replaced.
+  The key is milliseconds since the epoch, but allocation is supervisor-local monotonic state rather than a bare clock
+  read: startup seeds it to the greatest effective key across every loaded row (ended rows included), and a start
+  reserves `max(now_ms, previous + 1)` with saturation. This orders same-millisecond bursts and survives a backward
+  clock step on one supervisor. Separate supervisors still have only their wall clocks and the helm's deterministic
+  creation/id/host tie-breakers; this does not claim distributed causality across skewed hosts.
 
-  New sessions start at their creation time in milliseconds. Rename and explicit restart share the same session key,
-  while their new run gets fresh transition evidence, so neither operation itself promotes. A start writes immediately,
-  outside the last-activity minute throttle. Failed writes keep the exact key and retry it on later visits; rename and
-  restart transfer that accepted history into their fresh sampler state under the lifecycle claim, without inheriting
-  old screen evidence. A later proven burst replaces an older pending key. The write holds the session lifecycle claim,
-  checks that the sampled entry is still the published generation, and updates SQLite only where id and generation both
-  match. No activity mutex is held across that write. Schema 17 adds the authoritative supervisor column and backfills
-  schema-16 rows from positive `last_activity_at`, otherwise `created_at`, with bounded integer arithmetic so SQLite
-  cannot promote overflow to REAL. Old helm cache JSON is not migrated: its serde default and creation fallback apply
-  until an authoritative refresh arrives.
+  New sessions start at their creation time in milliseconds. Rename shares the same sampler state and work-start key. An
+  explicit restart keeps the session's accepted work-start history, including a pending key from a failed write, and
+  starts fresh transition evidence for the new run. Neither promotes on its own. A start writes as soon as it can take
+  the lifecycle claim, outside the last-activity minute throttle. Failed writes keep the exact key and retry it on later
+  visits. A later proven burst replaces an older pending key. The write holds the session lifecycle claim, checks that
+  the sampled entry is still the published generation, and updates SQLite only where id and generation both match. No
+  activity mutex is held across that write. Schema 17 adds the authoritative supervisor column and backfills schema-16
+  rows from positive `last_activity_at`, otherwise `created_at`, with bounded integer arithmetic so SQLite cannot
+  promote overflow to REAL. Old helm cache JSON is not migrated: its serde default and creation fallback apply until an
+  authoritative refresh arrives.
 - Agent-kind integrations live in the supervisor as a small trait (`AgentIntegration`; `AgentKind` is the wire enum
   naming the kind itself) for conversation-identity capture; status reading is the separate `ScreenReader` above, so a
   kind can have either without the other. New identities come only from accepted reports. Shared bounded readers in
@@ -7514,7 +7517,7 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   parsing; for a full target with the caller's bare suffix, a read-only Hosts discovery distinguishes the caller's entry
   before the mutation. A discovery failure stops before dispatch and retains read-only failure semantics.
 - `farhelm agent create [--host <name>] [--cwd <dir>] <launch flags> [--title ...] [--idempotency-key ...]` and
-  `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...] [--idempotency-key ...]` — the
+  `farhelm agent clone --source-session <id> [--host <name>] [--cwd <dir>] [--title ...] [--idempotency-key ...]` — the
   in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
   follow: stdout is the new session's id and nothing else, matching `farhelm spawn`'s contract, with one confirmation
   line on stderr (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells).
@@ -7538,14 +7541,14 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   non-final descriptive columns take, because that column is a selector rather than a description and a name cut at 48
   characters is a host an agent can see and can never target. Duplicate names remain separate rows and are refused as
   ambiguous targets. What `create` needs (a folder, a host, a launch, and for a command launch its YOLO assertion) may
-  come from a template, so clap requires none of it and the helm refuses what is still missing, naming the flag;
-  `--source-session` and `--host` are required on clone. The removed `--profile` and `--profile-id` selectors are still
-  parsed, hidden, only so they can be refused naming the launch flags and `--template`, and the retired `--invocation`
-  is parsed, hidden, only to be refused naming `--command` and the YOLO flags. Every free-text value option on both
-  verbs carries `allow_hyphen_values` (`--agent`, `--effort` and `--permissions` do not: each takes a word from a closed
-  set, and an unknown one is refused listing them all), because every one of these values is judged downstream — by the
-  registry, by the target filesystem — and every one of them may legally begin with `-`; refusing such a value locally
-  would be this CLI declining to carry a name the far end would have explained.
+  come from a template, so clap requires none of it and the helm refuses what is still missing, naming the flag; Clone
+  requires `--source-session`. An ordinary source requires `--host`. For a sandbox or container source, omit both
+  `--host` and `--cwd`. The removed `--profile` and `--profile-id` selectors are still parsed, hidden, only so they can
+  be refused naming the launch flags and `--template`, and the retired `--invocation` is parsed, hidden, only to be
+  refused naming `--command` and the YOLO flags. Free-text value options such as `--model` and `--cwd` accept a value
+  beginning with `-` as a separate argument and leave its validation to the target. `--permissions` has a closed set of
+  values. `--agent` accepts built-in names and registered IDs, which start with a letter. For a custom effort beginning
+  with `-`, attach it to the option with `=`, for example `--effort=-fast`.
 - `farhelm agent template create <name> [--cwd <dir>] [--title ...] [--title-kind base|fixed] [--host <name>] <launch flags>`,
   `farhelm agent template edit <name> ...` with the same flags, and `farhelm agent template delete <name>` — an agent's
   template writes (SPEC.md, Agent-spawned sessions). The launch flags are `farhelm agent create`'s; `--template` is
@@ -9393,18 +9396,18 @@ catalog, not another agent table. Model text is unrestricted and suggestions use
 incompatible choices stay visible and refuse save until corrected or removed. Fields need not form a complete launch,
 because another stacked template can supply what they omit.
 
-Opening another row, new, duplicate, close and Escape share a pending departure and the same inline
-save/discard/keep-editing prompt. Save keeps the selected editor and refreshes its baseline; duplicate opens an unsaved
-copy with a free name. A rename saves the new name before deleting the old one, so a failure in between leaves both;
-saving under a name another template already has is refused in the panel rather than overwriting that template. The GPUI
-editor checks a new or changed name against the pushed templates collection, which already holds a save's result when
-its reply arrives (the UI channel pushes a command's changes before its reply); while the helm reports that collection
-unavailable, or before its first snapshot, a new name cannot be proven free and the save is refused. Delete checks the
-stored snapshot, not the unsaved draft, against the existing template shape rules. If it fails, the control says "Delete
-permanently" and deletion clears any Undo; the ordinary save path could not restore that snapshot. Otherwise Delete
-retains the stored template client-side for about ten seconds; undo freshly reads the names before restoring and refuses
-a taken name. The Delete button's handler holds the kind its drawn label said (`DeleteKind` in
-`crates/gui/farhelm-gui/src/templates/editor.rs`), since a GPUI handler belongs to the frame that drew it, so a press
+Opening another row, new, duplicate, close and Escape share a pending departure and the same centered
+save/discard/keep-editing prompt over the dialog. Save keeps the selected editor and refreshes its baseline; duplicate
+opens an unsaved copy with a free name. A rename saves the new name before deleting the old one, so a failure in between
+leaves both; saving under a name another template already has is refused in the panel rather than overwriting that
+template. The GPUI editor checks a new or changed name against the pushed templates collection, which already holds a
+save's result when its reply arrives (the UI channel pushes a command's changes before its reply); while the helm
+reports that collection unavailable, or before its first snapshot, a new name cannot be proven free and the save is
+refused. Delete checks the stored snapshot, not the unsaved draft, against the existing template shape rules. If it
+fails, the control says "Delete permanently" and deletion clears any Undo; the ordinary save path could not restore that
+snapshot. Otherwise Delete retains the stored template client-side for about ten seconds; undo freshly reads the names
+before restoring and refuses a taken name. The Delete button's handler holds the kind its drawn label said (`DeleteKind`
+in `crates/gui/farhelm-gui/src/templates/editor.rs`), since a GPUI handler belongs to the frame that drew it, so a press
 can never carry out a kind whose label the user did not see. A Delete with no usable reply reports that deletion may
 have happened, clears Undo, and refreshes only the template list; helm refusals retain their existing error. This is a
 local stopgap, not lost-reply reconciliation. The notice and its timer belong to this mounted dialog, with a generation
