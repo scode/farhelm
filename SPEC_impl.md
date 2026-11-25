@@ -5392,8 +5392,9 @@ Permission memory and structured launch history still come from the selection th
 selections shape GUI defaults and suggestions. The launcher derives a host's default folder from the same recent-setups
 reply it reads for the target: the `cwd` of the newest launch row with neither a GitHub repository nor a disposable
 environment target. It seeds an untouched folder once per opening or host change, from the first reply for that target,
-so a later re-read (a reconnect) never reseeds. Launch is refused for an untouched folder until that reply arrives, and
-a hidden quick launch waits for it; an unreadable reply falls back to `~`, and a hidden quick launch then shows New with
+so a later re-read (a reconnect) never reseeds. Launch waits for an untouched folder until that reply arrives, except
+that pressing Launch to wake a host uses the default shown when the user pressed it. A hidden quick launch waits for
+history on the current connection. An unreadable reply falls back to `~`, and a hidden quick launch then shows New with
 an explanation instead of launching. Whether the default is still waiting is part of the launcher's draft, so a
 permission Undo, which restores the whole draft from before the switch, restores it too; a restored waiting default
 settles from the reply current at that moment. The launcher has no trust state, segment or search action. Recent setup

@@ -188,6 +188,9 @@ impl Launcher {
                         || launcher.history.asked.as_ref() != Some(&key)
                         || launcher.history_key(cx).as_ref() != Some(&key)
                     {
+                        // A hidden quick launch has no draw to ask about the new connection.
+                        // Give its pending folder wait another pass without using this old answer.
+                        launcher.history_settled_for_quick_launch(cx);
                         return;
                     }
                     launcher.history.root_refresh = RootRefresh::Idle;

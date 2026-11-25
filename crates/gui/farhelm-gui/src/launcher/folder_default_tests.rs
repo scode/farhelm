@@ -214,10 +214,16 @@ fn a_host_change_waits_for_the_new_hosts_folder(cx: &mut TestAppContext) {
 fn a_failed_history_read_settles_on_home(cx: &mut TestAppContext) {
     let (mut helm, cx) = new_without_a_session(cx);
     complete_command(cx);
+    test_support::show_next_frame(cx);
+    assert_eq!(draft(cx).folder_default, FolderDefault::Pending);
+    assert!(super::view_tests::search_focused(cx));
     assert!(answer(&mut helm, cx, None).is_empty());
     let settled = draft(cx);
     assert_eq!(settled.folder.value(), "~");
     assert_eq!(settled.folder_default, FolderDefault::Unread);
+    // The same home is visible in the old frame, but Launch was still waiting for history.
+    cx.simulate_keystrokes("enter");
+    assert!(answer(&mut helm, cx, None).is_empty());
     test_support::click(cx, "launcher-launch");
     let creates = answer(&mut helm, cx, None);
     let [create] = &creates[..] else {
