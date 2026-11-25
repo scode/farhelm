@@ -212,10 +212,15 @@ pub const WAIT_FOR_PREVIEW: &str = "Wait for a current checkout preview before l
 /// Why New waits for the chosen host's launch history before launching into its untouched default folder, the old
 /// launcher's words: the history decides which folder that default is (`LaunchDraft::folder_default`).
 pub const FOLDER_DEFAULT_WAITING: &str = "Wait for this host's last folder before launching";
-/// Why a managed checkout cannot launch on a connected host that reports no installation identity: the helm binds every
-/// checkout preview to that identity, so none can be asked for. The old launcher's words.
+/// Why a managed checkout cannot launch on a host without an installation identity. Even a resumable host needs
+/// this identity to bind the preview to the installation the user chose.
 pub const UNVERIFIED_HOST: &str =
     "The host installation is not verified; a checkout cannot be created";
+
+/// Both the launch check and its folder status require the same recorded installation.
+pub(super) fn has_checkout_identity(host: &HostView) -> bool {
+    host.identity.as_deref().is_some_and(|id| !id.is_empty())
+}
 
 /// An app-written reason a launch cannot start, shared by its button's help and inline refusal.
 pub(super) struct Refusal(pub(super) String);
@@ -415,7 +420,7 @@ impl LaunchDraft {
         let host = self
             .host
             .and_then(|id| target.hosts.iter().find(|host| host.id == id))
-            .filter(|host| host.identity.as_deref().is_some_and(|id| !id.is_empty()));
+            .filter(|host| has_checkout_identity(host));
         let Some(host) = host else {
             return Some(UNVERIFIED_HOST);
         };

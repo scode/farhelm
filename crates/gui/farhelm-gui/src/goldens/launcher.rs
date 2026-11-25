@@ -12,6 +12,7 @@ use super::{SceneState, fleet, session_list_scene_preferring};
 use crate::launcher::draft::DestinationKind;
 use crate::launcher::entry;
 use crate::launcher::environment_tests::{account, built_json, ready_key, recipe_json};
+use crate::launcher::view_tests::fixture_hosts;
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::texts_within;
 use crate::session_list::tests::{listing, preferences_state, session, within};
@@ -34,6 +35,19 @@ pub(super) fn launcher_waking_checkout_setup(
     suspended_launcher_setup(state, window, cx, listing(&[], &[]), open_waking_checkout);
 }
 
+/// Show why the same suspended sandbox cannot allocate a checkout when its identity is missing.
+pub(super) fn unverified_checkout_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let hosts = crate::launcher::checkout_tests::unverified_checkout_hosts();
+    setup_sandbox(
+        state,
+        window,
+        cx,
+        listing(&[], &[]),
+        hosts,
+        open_waking_checkout,
+    );
+}
+
 /// Capture Restart with after the registered sandbox refuses the launcher’s Resume request.
 pub(super) fn launcher_restart_wake_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     let mut rows = listing(&["a"], &[session("a").host(12).cwd("/home/user/src/api")]);
@@ -49,13 +63,23 @@ fn suspended_launcher_setup(
     rows: CollectionState,
     open: super::AfterDrawn,
 ) {
-    use crate::launcher::view_tests::fixture_hosts;
+    setup_sandbox(state, window, cx, rows, fixture_hosts(&[0, 11]), open);
+}
+
+/// Reuse the window and fake setup when only the recorded sandbox identity differs.
+fn setup_sandbox(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+    rows: CollectionState,
+    hosts: CollectionState,
+    open: super::AfterDrawn,
+) {
     use crate::session_list::tests::preferences;
     window.set_driver_enabled(true);
     crate::ticker::set_reduced_motion(true, cx);
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = crate::session::start(handle, events, None, cx);
-    let hosts = fixture_hosts(&[0, 11]);
     helm.connect(vec![rows, preferences(&[], None), hosts]);
     state.lists.borrow_mut().push(cx.new(SessionList::new));
     let mut keep = state.keep.borrow_mut();

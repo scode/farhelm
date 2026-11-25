@@ -225,10 +225,6 @@ consequences.
   — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
   admitted instead of being refused.
 
-- [`trailing-unverified-resumable-host-shows-checkout-allocation-notice.md`](trailing-unverified-resumable-host-shows-checkout-allocation-notice.md)
-  — On a suspended or stopped host without a verified identity, the managed-checkout Folder line promises automatic
-  folder allocation on wake even though Launch is refused as unverified.
-
 - [`trailing-failed-post-wake-checkout-preview-omits-refusal-alert.md`](trailing-failed-post-wake-checkout-preview-omits-refusal-alert.md)
   — When a post-wake checkout preview fails or is superseded, the reopened launcher omits the bordered Not launched
   Role::Alert beside Launch (and shows no error at all when superseded).
@@ -240,10 +236,6 @@ consequences.
 - [`trailing-wake-checkout-tests-omit-replace-with.md`](trailing-wake-checkout-tests-omit-replace-with.md) —
   Managed-checkout wake tests cover only New mode and never test Replace with across wake, post-wake preview, Quick
   Switcher failure release, or retained-recent Enter.
-
-- [`trailing-wake-checkout-tests-omit-unverified-and-stopped-hosts.md`](trailing-wake-checkout-tests-omit-unverified-and-stopped-hosts.md)
-  — Every wake-checkout test uses a verified suspended sandbox, leaving unverified resumable hosts and stopped Podman
-  containers uncovered.
 
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed

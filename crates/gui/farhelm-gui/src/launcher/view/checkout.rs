@@ -69,8 +69,7 @@ use crate::launcher::draft::{
     AgentChoices, CommandChoices, DestinationKind, Field, Mode, Tab, checkout_label,
     repo_identifier,
 };
-use crate::launcher::request::Preview;
-use crate::launcher::request::WAIT_FOR_PREVIEW;
+use crate::launcher::request::{Preview, UNVERIFIED_HOST, WAIT_FOR_PREVIEW, has_checkout_identity};
 use crate::launcher::search::{Scope, repository_empty_message, scoped};
 use crate::operations;
 use crate::session_pane::details::{Checkout as SessionCheckout, checkout_mark};
@@ -284,7 +283,7 @@ impl Launcher {
         }
         let view = self.chosen_host(cx)?;
         let connected = matches!(view.state, HostStateView::Connected { .. });
-        let identified = view.identity.as_deref().is_some_and(|id| !id.is_empty());
+        let identified = has_checkout_identity(view);
         (connected && identified).then(|| view.clone())
     }
 
@@ -750,18 +749,26 @@ impl Launcher {
         self.changed(cx);
     }
 
-    /// A checkout on a resumable installation names its allocation policy before it can obtain an exact path.
-    /// The name entered in the draft still determines what the host will be asked to reserve.
-    fn checkout_allocation_notice(&self, cx: &App) -> Option<&'static str> {
+    /// The Folder status for a resumable destination. A wake can promise an allocation only for an installation
+    /// that can obtain its own preview after reconnecting.
+    fn checkout_wake_notice(&self, cx: &App) -> Option<(&'static str, &'static str)> {
         self.draft.checkout.as_ref()?.repo.as_ref()?;
         let host = self.chosen_host(cx)?;
         if !self.draft.can_wake(host) {
             return None;
         }
-        Some(if self.draft.checkout_title().is_empty() {
-            "The folder is picked automatically when the host is ready"
+        Some(if !has_checkout_identity(host) {
+            ("unverified", UNVERIFIED_HOST)
+        } else if self.draft.checkout_title().is_empty() {
+            (
+                "wake",
+                "The folder is picked automatically when the host is ready",
+            )
         } else {
-            "The folder is named after the session when the host is ready"
+            (
+                "wake",
+                "The folder is named after the session when the host is ready",
+            )
         })
     }
 }
@@ -1068,8 +1075,8 @@ impl Launcher {
                 "environment",
                 "Cloned inside the new environment once it starts",
             )
-        } else if let Some(notice) = self.checkout_allocation_notice(cx) {
-            ("wake", notice)
+        } else if let Some(notice) = self.checkout_wake_notice(cx) {
+            notice
         } else {
             match self.preview_answer(cx) {
                 Some(Ok(preview)) => {
@@ -1123,7 +1130,7 @@ impl Launcher {
             (None, _) => format!("Managed checkout: {} (select a repository)", checkout.query),
             // Checking out on a host without a connection cannot name a path yet.
             (Some(repo), _)
-                if self.draft.target.is_some() || self.checkout_allocation_notice(cx).is_some() =>
+                if self.draft.target.is_some() || self.checkout_wake_notice(cx).is_some() =>
             {
                 checkout_label(repo)
             }
