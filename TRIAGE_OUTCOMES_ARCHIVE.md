@@ -46015,3 +46015,50 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   [draft PR](https://github.com/scode/farhelm/pull/4871/changes). Fixed. The hint requires a structured Claude launch or
   proof that the session was created with a fresh managed checkout. Opening an existing checkout does not inherit that
   provenance. The spec records when the switch and hint apply.
+
+## antigravity-trust-dismissal-lost-during-recovery.md
+
+- Outcome: `other`.
+- Assessment: The user hides an agent's trust hint with ×. If the session's terminal then becomes briefly unavailable
+  and is re-adopted while the same question is still on screen, the hint can come back. Verified: confirmed by source,
+  assuming the unavailable row reaches the GUI. The trust flag is stripped from Unknown rows
+  (`service/status.rs:339-348`, `:417-420`), and the band retires the dismissal on any row without the flag
+  (`trust_band.rs:211-214`). This affects every harness with a trust hint. The consequence is that the user dismisses an
+  informational hint a second time.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: discard. It is rare and costs one extra ×. Size S-M if fixed.
+- Execution: `mktkyotyznlqkxmxuxrvxnzqkmlutkzy`, `plan/triage-hooks-trust-nov24/03-service`,
+  [draft PR](https://github.com/scode/farhelm/pull/4872/changes). No change under the cheap-fix rule. The helm keeps the
+  last known live status while publishing the cleared trust flags. The desktop receives the same evidence for a brief
+  terminal outage and a question that ended on a live screen. Fixing this needs a way to carry the latest screen
+  observation through the helm, with regression coverage across that boundary. A brief outage can still bring back the
+  hint.
+
+## checkout-input-arms-hook-warning-early.md
+
+- Outcome: `fix code`.
+- Assessment: With Grok or Antigravity hook setup on, a fresh managed checkout runs its clone and post-clone command in
+  the session's terminal before the agent starts. If the user presses Enter there (answering a prompt from the
+  preparation) and preparation then runs for more than about a minute, Farhelm warns that the agent never reported its
+  conversation. The agent has not even started yet. The warning is one per launch, so it is used up for that launch.
+  Verified: confirmed by source, conditional on qualifying input during preparation. Setup arms the hooked flag before
+  the terminal starts (`service/core.rs:14810-14814`). The clock starts on any accepted Enter outside a recognized
+  dialog (`service/capture.rs:180-190`, `note_first_input`), with no check that preparation has finished. The tripwire
+  checks only elapsed time, the flag and missing capture (:355-385). SPEC.md "Status" (~:3221-3226) starts the clock "a
+  minute after the first Enter the user sent it". Whether Enter during preparation was "sent" to the launch is a matter
+  of reading the spec. The same mechanism likely applies to every hooked agent in a managed checkout, so the
+  non-first-class harness filter does not clearly apply. Not verified for Claude or Codex.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code. Start the
+  clock only once the shim has handed off to the agent. Size M (shim-to-supervisor phase signal). Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: `mktkyotyznlqkxmxuxrvxnzqkmlutkzy`, `plan/triage-hooks-trust-nov24/03-service`,
+  [draft PR](https://github.com/scode/farhelm/pull/4872/changes). Deferred to TODO.md, Plan follow-ups, “Start the
+  missing-hook warning clock after the agent starts.” The available launch evidence does not reliably establish agent
+  handoff before an Enter is delivered. A robust fix needs generation-bound handoff evidence, its recovery and cleanup
+  rules, and tests of both sides of the input boundary.
