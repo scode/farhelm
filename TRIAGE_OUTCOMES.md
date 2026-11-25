@@ -2222,25 +2222,6 @@
   index entry.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
-## pi-page-describes-wrong-trust-question.md
-
-- Outcome: `fix code`.
-- Assessment: The heading of Pi's Settings page says it is about "Answering the agent's folder-trust questions". Pi's
-  switch actually approves project settings and extensions for each launch, and Farhelm recognizes no trust question
-  from Pi. Verified: confirmed. `settings/frame.rs:126-134` gives every trust-capable agent without hooks the
-  folder-trust description, Pi included. Pi's own switch help says otherwise (`settings/agent_trust.rs:182,219-221`).
-  SPEC.md (~~:1871-1873) says "Pi has a switch but no hint band: its project-resource approval is not currently
-  recognized as a trust question". It also still calls it a "trust switch" (~~:1852). Fixing this means choosing new
-  copy, which is a small wording decision.
-- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
-  Recommendation for reference: fix code. Give Pi its own description, for example "Approving project settings and
-  extensions". Size XS. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
-  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
-  feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
 ## launcher-new-environment-folder-omits-repository-prompt.md
 
 - Outcome: `fix code`.

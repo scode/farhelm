@@ -130,6 +130,16 @@ impl TrustAgent {
         }
     }
 
+    /// Describe what the page's trust switch approves. Pi approves project resources at launch.
+    pub(super) const fn page_description(self) -> &'static str {
+        match self {
+            Self::Pi => "Approving project settings and extensions",
+            Self::Claude | Self::Codex | Self::Muse | Self::Antigravity => {
+                "Answering the agent's folder-trust questions"
+            }
+        }
+    }
+
     /// The agent's name in the failure lines.
     fn name(self) -> &'static str {
         match self {

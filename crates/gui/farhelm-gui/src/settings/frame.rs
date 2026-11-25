@@ -125,13 +125,13 @@ impl Section {
             Self::Recipes => "Software and credentials for new containers and sandboxes",
             Self::Tensorlake => "Cloud sandboxes in your Tensorlake project",
             Self::Agent(harness) => match (
-                TrustAgent::for_harness(*harness).is_some(),
+                TrustAgent::for_harness(*harness),
                 harness.agent_kind().offers_persistent_hooks(),
             ) {
-                (true, true) => "Workspace trust and conversation hooks",
-                (true, false) => "Answering the agent's folder-trust questions",
-                (false, true) => "Conversation hooks for Restart",
-                (false, false) => "",
+                (Some(_), true) => "Workspace trust and conversation hooks",
+                (Some(agent), false) => agent.page_description(),
+                (None, true) => "Conversation hooks for Restart",
+                (None, false) => "",
             },
             Self::Credentials => "Secrets Farhelm hands to hosts for you",
             Self::CustomAgent(id) => return format!("Custom agent · ID {id}").into(),
