@@ -52,6 +52,24 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Finish live Cursor model verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” with
+  both `--model auto` and `--model composer-2.5`. Reproduce with
+  `python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection --harness cursor`. Run with an
+  existing Cursor login and identify the active model field. The older authenticated screen fixture displays a bare
+  label such as `GPT-5.6 Luna 272K Low` beside the composer.
+
+- **Check Codex's GPT-5.6 Terra retirement path.** With `-m gpt-5.6-terra`, Codex 0.172.0 showed “Try new model” and
+  “Use existing model” before it showed the composer. Reproduce with
+  `python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection --harness codex`. Check the resulting
+  model in an isolated CLI configuration if Farhelm still offers GPT-5.6 Terra. The live drift case leaves the account's
+  choice alone.
+
+- **Finish OpenRouter and saved-default model verification.** Goose 1.60.2, Pi 1.6.0 and OMP 19.1.1 opened with an
+  active model when started without `--provider` or `--model`. Compare the active choice with the saved provider and
+  model to catch silent fallbacks. Run the named cases with `OPENROUTER_API_KEY` and verify both fields for
+  `--provider openrouter --model <id>`. Pi 1.6.0 can omit the provider in its footer, including on an OpenRouter-only
+  setup, so that case may need a provider-bearing readout.
+
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
   watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
   Checkout Trash can send up to 2N reads in quick succession. Revisit the choices to stop rechecking after a failed read
@@ -170,12 +188,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   disabled, verify Cursor's default launch without a permission flag ("Agent's own setting"), and send a real prompt to
   Cursor and OpenCode to confirm interactive turns work under Farhelm's terminal host (today both stop at the initial
   TUI or trust screen).
-
-- **Drift tests: model selection across all supporting agents.** Add live model-flag coverage for Cursor (`--model auto`
-  and catalog models) and OpenCode (`--model opencode/<id>`), cover Goose, Pi, and OMP with both
-  `--provider openrouter --model <id>` and no explicit provider, validate current catalog model IDs across Claude,
-  Codex, Antigravity, and Muse (rather than only `haiku` or one model), and verify each CLI actually selects the
-  requested model rather than silently ignoring it. Plan: `plans/queue/drift-model-selection.md`.
 
 - **Drift tests: reasoning effort selection.** Add live coverage for Muse (`--reasoning-effort`) and Goose
   (`GOOSE_THINKING_EFFORT`), which currently have zero drift-test coverage, and exercise non-`low` effort values
