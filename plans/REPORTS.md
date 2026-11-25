@@ -14,3 +14,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`drift-initial-prompt-launch`](reports/drift-initial-prompt-launch.report.md) landed 2026-11-25 in #4787, #4795: Add live launch-time initial prompt delivery drift tests across supporting agents
 - [`drift-named-conversation-starts`](reports/drift-named-conversation-starts.report.md) landed 2026-11-25 in #4786, #4796: Add live one-time named conversation start drift tests across all built-in agents
 - [`drift-capture-timing-hooks`](reports/drift-capture-timing-hooks.report.md) landed 2026-11-25 in #4797, #4806: Add live conversation capture timing, hook payload, and hooks-disabled drift tests
+- [`drift-workspace-trust`](reports/drift-workspace-trust.report.md) landed 2026-11-25 in #4794, #4807: Add live workspace trust pre-trust drift tests across supporting agents
