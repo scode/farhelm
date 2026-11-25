@@ -187,10 +187,6 @@ consequences.
   — The Settings pages for Codex, Muse, Pi, and Antigravity omit that their workspace-trust switch also applies to
   agent-requested launches, which run without an approval card on Always-allow hosts.
 
-- [`trailing-interrupted-uploads-invisible-on-card-or-retired-session.md`](trailing-interrupted-uploads-invisible-on-card-or-retired-session.md)
-  — If an upload is cut off when the open session switches to a recovery, retired, or post-reset unavailable card,
-  neither a terminal message nor a window notice appears until you leave the session (and never if you quit).
-
 - [`trailing-new-container-managed-checkout-stretches-host-block.md`](trailing-new-container-managed-checkout-stretches-host-block.md)
   — Choosing New container and Managed checkout inserts roughly 300 px of empty vertical space below the Container host
   picker because a horizontal flex basis is applied inside a vertical flex column.
@@ -295,9 +291,6 @@ consequences.
 
 - [`antigravity-trust-dismissal-lost-during-recovery.md`](antigravity-trust-dismissal-lost-during-recovery.md) — A
   terminal recovery can bring back an Antigravity trust hint the user already dismissed for the same question.
-
-- [`menu-shortcuts-omitted-from-native-accessibility.md`](menu-shortcuts-omitted-from-native-accessibility.md) — The new
-  menu shortcut labels do not reach the native accessibility shortcut fields.
 
 - [`feedback-external-link-cue-is-visual-only.md`](feedback-external-link-cue-is-visual-only.md) — The feedback dialog’s
   Discord link omits the browser-opening cue from its accessible description.
@@ -1086,11 +1079,6 @@ consequences.
   hiding or erroring its conversation-ID field, and prompting the user to replace a registration that was not actually
   deleted.
 
-- [`trailing-reminder-frame-cfg-test-branch-in-render-path.md`](trailing-reminder-frame-cfg-test-branch-in-render-path.md)
-  — The pending-update reminder screenshot test relies on a test-only compile branch inside the rendering path,
-  violating the project's rule that tests and screenshot captures render through the same production code path that
-  ships.
-
 - [`trailing-repo-cache-sweep-single-error-aborts-all-remaining-repos.md`](trailing-repo-cache-sweep-single-error-aborts-all-remaining-repos.md)
   — When a host's supervisor starts up, if cleaning up an old repository cache directory for one repository fails (for
   example, because a leftover Git process is still writing inside it), startup cleanup stops immediately and skips
@@ -1225,10 +1213,6 @@ consequences.
   confirmation dialog explains the YOLO classification as "Farhelm treats every Custom permission choice as YOLO."
   Because "Custom" is also the name of the Custom permission flags mode, this reads as if the launch used custom
   permission flags rather than a registered custom agent.
-
-- [`trailing-bell-open-announcements-silent-on-read-failure.md`](trailing-bell-open-announcements-silent-on-read-failure.md)
-  — Pressing Open Announcements in the notification bell does nothing visible when the helm read fails: no dialog and no
-  error, only a log line.
 
 - [`trailing-bell-stale-reply-guards-untested.md`](trailing-bell-stale-reply-guards-untested.md) — No test covers the
   bell's guards that stop a late announcements reply from opening the dialog after the user moved on or closed the

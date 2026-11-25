@@ -46,8 +46,8 @@ pub enum Notice {
     /// environment may exist, so the notice says to check Hosts rather than that nothing launched; its launcher waits
     /// with the draft, offered and withdrawn as [`Notice::LaunchNotStarted`] is.
     EnvironmentLaunchUnknown,
-    /// Files whose upload was cut off and whose session is no longer open. The banner outlives the terminal and
-    /// connection that held the upload, so the user sees the result without returning to that session.
+    /// Files whose upload was cut off and whose session has no terminal in the open pane. The banner
+    /// outlives the terminal and connection that held the upload.
     InterruptedUpload(Rc<InterruptedUploads>),
     /// The helm refused an explicit Don't show again after the highlights dialog closed.
     UpgradeHighlightsOptOutFailed,

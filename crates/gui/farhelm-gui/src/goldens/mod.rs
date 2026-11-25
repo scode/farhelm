@@ -739,7 +739,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "session-interrupted-card",
-        size: (1036., 324.),
+        size: (1036., 398.),
         draw: session_interrupted_cards,
         setup: no_setup,
     },
@@ -958,6 +958,12 @@ static SCENES: &[Scene] = &[
         size: (820., 560.),
         draw: session_lists_then,
         setup: notices_alerting_setup,
+    },
+    Scene {
+        name: "notices-announcements-refused",
+        size: (820., 560.),
+        draw: session_lists_then,
+        setup: notices_announcements_refused_setup,
     },
     Scene {
         name: "help-menu",

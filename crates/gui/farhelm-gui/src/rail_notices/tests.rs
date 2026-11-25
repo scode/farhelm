@@ -6,6 +6,7 @@
 //! Trash button reads on its own; the fixtures here answer those reads. Controls are found by their element ids in
 //! GPUI's driver record of the frame.
 
+use farhelm_helm_client::Method;
 use farhelm_helm_client::collections::decode_changes;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::notices::Notice;
@@ -14,9 +15,9 @@ use gpui::{DriverNode, Modifiers, TestAppContext, VisualTestContext, point, px, 
 use serde_json::{Value, json};
 
 use super::{
-    BELL_ID, CLEAR_ID, CLEAR_REFUSAL_ID, CLOSE_ID, COUNT_ID, OPEN_TRASH_ID_PREFIX, PANEL_ID,
-    RETRY_ID_PREFIX, SEND_FEEDBACK_ID_PREFIX, bell_help, bell_ink, bell_label, is_unread,
-    newest_first,
+    ANNOUNCEMENT_REFUSAL_ID, BELL_ID, CLEAR_ID, CLEAR_REFUSAL_ID, CLOSE_ID, COUNT_ID,
+    OPEN_TRASH_ID_PREFIX, PANEL_ID, RETRY_ID_PREFIX, SEND_FEEDBACK_ID_PREFIX, bell_help, bell_ink,
+    bell_label, is_unread, newest_first,
 };
 use crate::hosts::tests::hosts;
 use crate::local_time;
@@ -399,8 +400,8 @@ fn desktop_login_path_notice_explains_the_fallback_and_opens_feedback(cx: &mut T
     assert_eq!(focused_id(cx).as_deref(), Some(BELL_ID));
 }
 
-/// The notice can arrive before its queue push. The action waits for a fresh pending snapshot before acknowledging the
-/// panel frame. Dismissing the dialog records only its visible entries even after a later push.
+/// The notice can arrive before its queue push. A failed read explains the error in the still-open panel. Retrying
+/// waits for a fresh pending snapshot, and dismissing the dialog records only its visible entries.
 #[gpui::test]
 fn network_announcements_open_from_the_bell_and_record_only_the_displayed_batch(
     cx: &mut TestAppContext,
@@ -443,6 +444,23 @@ fn network_announcements_open_from_the_bell_and_record_only_the_displayed_batch(
         node(&frame(cx), PANEL_ID).is_some(),
         "no mark before the pending read"
     );
+    fake.reply(
+        read,
+        503,
+        Some(json!("Announcements are temporarily unavailable.")),
+    );
+    test_support::settle(cx);
+    assert!(
+        node(&frame(cx), PANEL_ID).is_some(),
+        "the refusal keeps the panel open"
+    );
+    assert_eq!(
+        test_support::label(cx, ANNOUNCEMENT_REFUSAL_ID).as_deref(),
+        Some("Could not open announcements: Announcements are temporarily unavailable.")
+    );
+    test_support::click(cx, "rail-notice-open-announcements-1");
+    let (read, _) = test_support::one_command(&mut fake, Method::Get, "/api/announcements");
+    assert!(node(&frame(cx), ANNOUNCEMENT_REFUSAL_ID).is_none());
     fake.reply(
         read,
         200,

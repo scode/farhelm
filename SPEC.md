@@ -3319,7 +3319,8 @@ session bells have separate presentations.
 
 A signed feed that adds entries raises an unread **New announcement** notice for the whole app. Another delivery
 replaces that notice with a new unread one. **Open Announcements** loads the current pending batch and closes the
-popover. Closing the dialog returns focus to the bell. The notice resolves when no announcements remain pending.
+popover. If the read fails, the popover stays open and shows why. Closing the dialog returns focus to the bell. The
+notice resolves when no announcements remain pending.
 
 A host whose session list is cut at the limit gets a notice naming it. Farhelm also raises one app-wide notice when the
 unfiltered merged fleet holds more than 500 sessions and the list shows only 500. Both notices can appear at once. They
@@ -3769,7 +3770,8 @@ position is current when the transfer completes. For a typical screenshot this i
 
 Upload failures must be visible; an attachment must never disappear silently. An upload cut off by leaving its session
 is reported in a notice naming the file and the session, when a nonempty title is available, that stays until dismissed.
-Separate interruptions each get a notice, even if they name the same file in the same session.
+Separate interruptions each get a notice, even if they name the same file in the same session. If the open session
+settles without a terminal, the window also shows its pending upload interruptions.
 
 Confirmed 2026-10-10: the failure guarantee covers Farhelm's own failures and crashes. Whether an attachment survives a
 power loss or system crash right after its upload completed is best effort.

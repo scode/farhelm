@@ -27,8 +27,7 @@ pub(super) struct Reminder {
     due: Option<Due>,
     pub(super) deadline: Option<ticker::Deadline>,
     pub(super) burst: Option<ticker::AnimationTicks>,
-    /// Screenshot captures hold a single frame with the scheduler and input wakes disabled by reduced motion.
-    #[cfg(test)]
+    /// A fixed frame carries its own tick without running the scheduler. The app leaves this unset.
     pub(super) held_frame: Option<u64>,
 }
 
@@ -78,7 +77,6 @@ impl Reminder {
         if !self.ready {
             return None;
         }
-        #[cfg(test)]
         if let Some(tick) = self.held_frame {
             return frame(tick);
         }

@@ -174,6 +174,8 @@ linux/notice-banner--dark.png 9212f1193c905cec2c8ab32435f9e48b944203d6
 linux/notice-banner--light.png b99436e21877a4dc761854893b5504c733af133a
 linux/notices-alerting--dark.png 8196609dfb6dfe58d63d929e33e0c9297be89660
 linux/notices-alerting--light.png 148b2b36f8f0e448492fc864edcef0377912f81e
+linux/notices-announcements-refused--dark.png 7a87fa4fbe17b3b9b9476d7293cf22a6cf7e6593
+linux/notices-announcements-refused--light.png a007380d73a284df8e626ab7b76806199b362c80
 linux/notices-bell-loud--dark.png 5b6cfcd4318496dc113b08bfc6ba5ed0647c77b8
 linux/notices-bell-loud--light.png 1e817cc1b7b57316e718b7c2136404dec2f17d3f
 linux/notices-empty--dark.png b1913b4b726053c28ac2f30d6003297e28e6f9ad
@@ -224,8 +226,8 @@ linux/session-flag-agent-trust-hints--dark.png 536a781ac6c47f86ad17633d6df040795
 linux/session-flag-agent-trust-hints--light.png cdc8594ee44b4ffc577fa93e1c46b2d91ce8ef5c
 linux/session-hook-setup-hint--dark.png f84d39ba519ebb6fc0bb95d169fbf2b13e6d7b43
 linux/session-hook-setup-hint--light.png 22a5eeade8659a735cda2133f23ec0af678c8ed8
-linux/session-interrupted-card--dark.png da13d17b8deb8d0137b2c762a6490e8bd127f9f9
-linux/session-interrupted-card--light.png 8b461f8b923a8bcd46ea2773575af7eeb92ec333
+linux/session-interrupted-card--dark.png c1b53c9a163ea77b59383e2e2440bf68eb544772
+linux/session-interrupted-card--light.png 4dfc2249eef7faa6ca1470de06f14ddfa132211e
 linux/session-list--dark.png e68ab6ac90f6c31a94366e1c525b4cb619be93df
 linux/session-list--light.png 3d5d22c23c786cbe438573843559c36d7001b676
 linux/session-list-compact--dark.png cf67c204da36827ec68931e78d07f677043ff51c
