@@ -4033,13 +4033,8 @@ fn check_cwd_access(cwd: &str) -> anyhow::Result<()> {
 /// rule. Server-DERIVED titles do not come here at all — they are sanitized
 /// instead of refused, for the asymmetry `validate_create` argues out.
 pub(crate) fn ensure_title_printable(title: &str) -> Result<(), RequestError> {
-    if title.chars().any(char::is_control) {
-        return Err(RequestError::new(
-            ErrorKind::InvalidRequest,
-            "title must not contain control characters",
-        ));
-    }
-    Ok(())
+    farhelm_proto::text::check_session_title_printable(title)
+        .map_err(|reason| RequestError::new(ErrorKind::InvalidRequest, reason))
 }
 
 /// Cap on a caller-supplied session id echoed into an error message
@@ -5528,14 +5523,8 @@ impl Supervisor {
         })?;
 
         if let Some(title) = title {
-            ensure_title_printable(title)?;
-            if title.len() > super::handlers::CREATE_FIELD_CAP {
-                return Err(RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    "checkout preview title exceeds the 65536-byte limit",
-                )
-                .into());
-            }
+            farhelm_proto::github_checkout::check_checkout_preview_title(title)
+                .map_err(|reason| RequestError::new(ErrorKind::InvalidRequest, reason))?;
         }
         let canonical_root = sup.resolve_checkout_root(&root).await?;
 

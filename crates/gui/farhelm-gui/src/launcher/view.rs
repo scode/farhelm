@@ -2454,9 +2454,14 @@ impl Render for Launcher {
                     .flex()
                     .flex_col()
                     .gap(px(LABEL_GAP))
-                    .flex_grow_1()
-                    .flex_basis(px(CONTAINER_HOST_MIN_WIDTH))
-                    .min_w(px(CONTAINER_HOST_MIN_WIDTH))
+                    // Folder places this block in a horizontal row. A basis
+                    // in the checkout stack would set its height.
+                    .when(folder.is_some(), |block| {
+                        block
+                            .flex_grow_1()
+                            .flex_basis(px(CONTAINER_HOST_MIN_WIDTH))
+                            .min_w(px(CONTAINER_HOST_MIN_WIDTH))
+                    })
                     .child(row(
                         "launcher-container-host-row",
                         "Container host",

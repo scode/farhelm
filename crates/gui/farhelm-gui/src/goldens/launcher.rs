@@ -127,6 +127,7 @@ enum LauncherScene {
     ManagedCheckout,
     HostMenu,
     Container,
+    ContainerCheckoutRefusal,
     RememberedWrapper,
     CustomAgent,
     ShellWrapper,
@@ -172,6 +173,15 @@ pub(super) fn launcher_host_menu_setup(state: &SceneState, window: &mut Window, 
 /// Take New container through the host menu so the capture shows what replaces an editable folder.
 pub(super) fn launcher_container_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Container, window, cx);
+}
+
+/// Keep the invalid name and selected container checkout available to correct after the helm's refusal.
+pub(super) fn launcher_container_checkout_refusal_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::ContainerCheckoutRefusal, window, cx);
 }
 
 /// Show a wrapper brought in by the actual harness choice, without opening More options to see it.
@@ -320,7 +330,12 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
     if scene == LauncherScene::CustomAgent {
         extra.push(super::custom_agent_state());
     }
-    if matches!(scene, LauncherScene::HostMenu | LauncherScene::Container) {
+    if matches!(
+        scene,
+        LauncherScene::HostMenu
+            | LauncherScene::Container
+            | LauncherScene::ContainerCheckoutRefusal
+    ) {
         // The recipe catalog must already be drawn when the host menu picks New container.
         extra.push(CollectionState {
             collection: Collection::Recipes,
@@ -449,6 +464,13 @@ fn open_new_with_claude(
         draft.choose_host(1, "~".into());
         draft.choose_repository(farhelm_proto::parse_github_repo("acme/widget").unwrap());
         draft.edit_name("widget-3".into());
+    } else if scene == LauncherScene::ContainerCheckoutRefusal {
+        draft.seed_target(farhelm_proto::LaunchTarget::Environment {
+            recipe: "Development".into(),
+            place: farhelm_proto::Place::PodmanHost(1),
+        });
+        draft.choose_repository(farhelm_proto::parse_github_repo("acme/widget").unwrap());
+        draft.edit_name("!!!".into());
     }
     assert!(
         entry::open_with(draft, None, window, cx),
@@ -541,7 +563,19 @@ fn answer_new_reads(
         .find_map(|kept| kept.downcast_mut::<FakeHelm>())
         .expect("the New scene keeps its fake helm");
     let mut repository_answered = false;
+    let mut checkout_refused = false;
     for command in helm.commands() {
+        if scene == LauncherScene::ContainerCheckoutRefusal
+            && command.path == "/api/environment-sessions"
+        {
+            assert!(!checkout_refused, "one press sends one environment create");
+            let body = command.body.expect("the launch names its checkout");
+            assert_eq!(body["request"]["github_checkout"]["title"], json!("!!!"));
+            let reason = farhelm_proto::github_checkout::NameError::EmptySlug.to_string();
+            helm.reply(command.id, 400, Some(json!(reason)));
+            checkout_refused = true;
+            continue;
+        }
         if scene == LauncherScene::RepositoryRefusal && command.path == "/api/github-repositories" {
             helm.reply(
                 command.id,
@@ -588,6 +622,11 @@ fn answer_new_reads(
             None
         };
         helm.reply(command.id, 200, body);
+    }
+    if checkout_refused {
+        // Finishing the drained batch keeps any later reads answerable.
+        state.after.set(Some(wait_for_container_checkout_refusal));
+        return;
     }
     if scene == LauncherScene::IncompleteTemplate {
         if !window.driver_nodes().iter().any(|node| {
@@ -658,6 +697,14 @@ fn answer_new_reads(
     );
     if !catalog_drawn || (shows_templates && !catalog_template) {
         state.after.set(Some(answer_new_reads));
+    } else if scene == LauncherScene::ContainerCheckoutRefusal {
+        assert!(
+            !nodes
+                .iter()
+                .any(|node| node.element_id.as_deref() == Some("launcher-refusal"))
+        );
+        assert!(click_control(window, cx, "launcher-launch"));
+        state.after.set(Some(answer_new_reads));
     } else if environment {
         state.after.set(Some(open_host_menu));
     } else if scene == LauncherScene::RememberedWrapper {
@@ -727,6 +774,40 @@ fn answer_new_reads(
             hover_launcher_help(state, "launcher-shells-Bash", window, cx);
         }
     }
+}
+
+/// The restored checkout must keep the host and repository close enough to
+/// edit together. A fixed width basis used as a height once pushed them apart.
+fn wait_for_container_checkout_refusal(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    let nodes = window.driver_nodes();
+    let find = |id| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+    };
+    let Some(alert) = find("launcher-refusal").filter(|alert| !alert.visible_bounds.is_empty())
+    else {
+        state.after.set(Some(wait_for_container_checkout_refusal));
+        return;
+    };
+    let reason = farhelm_proto::github_checkout::NameError::EmptySlug;
+    assert_eq!(
+        alert.label.as_deref(),
+        Some(format!("Not launched. {reason}").as_str())
+    );
+    let host = find("launcher-container-host-row").expect("the container host is still shown");
+    let repo = find("launcher-repository-row").expect("the managed checkout is still shown");
+    assert!(!host.visible_bounds.is_empty() && !repo.visible_bounds.is_empty());
+    let gap = repo.bounds.top() - host.bounds.bottom();
+    assert!(
+        gap >= px(0.) && gap <= px(72.),
+        "the place note and row gap fit within 72 px, got {gap:?}"
+    );
 }
 
 /// Start the permission-changing fill only after the previous template named itself on the form.
@@ -1168,6 +1249,12 @@ fn wait_for_container(
             Some("Development"),
             "the fixture recipe was available when New container was picked"
         );
+        assert!(window.driver_nodes().iter().any(|node| {
+            node.element_id.as_deref() == Some("launcher-environment-notice")
+                && node.label.as_deref()
+                    == Some("Deleting the last session removes this container and its files.")
+                && !node.visible_bounds.is_empty()
+        }));
     } else {
         state.after.set(Some(wait_for_container));
     }

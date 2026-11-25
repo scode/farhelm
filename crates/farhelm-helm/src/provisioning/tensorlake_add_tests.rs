@@ -726,6 +726,37 @@ async fn recipe_session_preflight_never_builds_a_missing_software_snapshot() {
         assert_eq!(f.harness.store.list_hosts().await.unwrap().len(), 1);
         assert!(f.backend_events().is_empty());
     }
+    // A locally invalid checkout must answer with its own reason before the
+    // missing snapshot can be mistaken for the cause of refusal.
+    for (outer, inner, reason) in [
+        (None, Some("!!!"), "the name contains no usable characters"),
+        (
+            Some("Review\nnotes"),
+            None,
+            "title must not contain control characters",
+        ),
+    ] {
+        let response = f
+            .session_launch_request(serde_json::json!({
+                "recipe": "test-recipe", "confirmed": true,
+                "request": {
+                    "cwd": "", "title": outer, "command": {"command": "true", "yolo": false},
+                    "github_checkout": {"repo": "acme/project", "title": inner}
+                }
+            }))
+            .await;
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert!(
+            std::str::from_utf8(&body).unwrap().starts_with(reason),
+            "{body:?}"
+        );
+    }
+    assert_eq!(f.harness.store.list_hosts().await.unwrap().len(), 1);
+    assert!(f.model().sandboxes.is_empty());
+    assert!(f.backend_events().is_empty());
 }
 
 /// Drive the owned setup task through a live scripted supervisor, rather than

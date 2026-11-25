@@ -106,10 +106,6 @@ consequences.
   — The Settings pages for Codex, Muse, Pi, and Antigravity omit that their workspace-trust switch also applies to
   agent-requested launches, which run without an approval card on Always-allow hosts.
 
-- [`trailing-new-container-managed-checkout-stretches-host-block.md`](trailing-new-container-managed-checkout-stretches-host-block.md)
-  — Choosing New container and Managed checkout inserts roughly 300 px of empty vertical space below the Container host
-  picker because a horizontal flex basis is applied inside a vertical flex column.
-
 - [`trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md`](trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md)
   — After adopting a reinstalled or recycled container host, Farhelm can fail new container launches for up to 5 minutes
   with a misleading moved-destination error and lock out another entry for the old machine across restarts.
@@ -198,9 +194,6 @@ consequences.
 - [`app-settings-shared-upgrade-option-has-local-heading.md`](app-settings-shared-upgrade-option-has-local-heading.md) —
   The App heading says This Mac even though it contains a helm-shared highlights setting.
 
-- [`podman-launch-lifetime-notice-hidden.md`](podman-launch-lifetime-notice-hidden.md) — The launcher only explains in
-  Host help that deleting the last session removes a new container and its files.
-
 - [`exited-shell-suspend-confirmation-wording.md`](exited-shell-suspend-confirmation-wording.md) — Stop and suspend can
   still tell users it will stop a shell that has already exited.
 
@@ -241,10 +234,6 @@ consequences.
 - [`trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md`](trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md)
   — The no-default fixture checks numbering after a preview conflict and a successful create, leaving the specific
   create-time lost-race cleanup unasserted.
-
-- [`trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md`](trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md)
-  — The desktop can offer a sandbox launch for a checkout name that cannot produce a valid directory. The helm can
-  create the environment and attempt cleanup before telling the user to fix the name.
 
 - [`trailing-borrower-classification-test-does-not-establish-checkout-membership.md`](trailing-borrower-classification-test-does-not-establish-checkout-membership.md)
   — This borrower classification case can pass if its second session never joins the managed checkout.
