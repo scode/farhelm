@@ -2901,6 +2901,11 @@
       "reference": null
     },
     {
+      "golden": "launcher-container-checkout-refusal",
+      "title": "New container after the helm refused its checkout name, with the name and the container checkout kept to correct",
+      "reference": null
+    },
+    {
       "golden": "launcher-more-options",
       "title": "New session with a saved wrapper prefix visible in the folded More options row",
       "reference": null
