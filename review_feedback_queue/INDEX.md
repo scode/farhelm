@@ -337,9 +337,6 @@ consequences.
   — Existing assertions would miss a regression where prompt absence on a first Delete results in an ordinary error
   instead of opening Delete anyway.
 
-- [`trailing-one-create-test-skip-already-readable-duplicate.md`](trailing-one-create-test-skip-already-readable-duplicate.md)
-  — The test can pass with a duplicate request already waiting on the scripted supervisor stream when the successful
-  launch returns.
 
 - [`trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md`](trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md)
   — The no-default fixture checks numbering after a preview conflict and a successful create, leaving the specific
@@ -358,17 +355,9 @@ consequences.
 
 
 
-- [`trailing-landing-removed-ambiguous-create-refusal-marker-assertion.md`](trailing-landing-removed-ambiguous-create-refusal-marker-assertion.md)
-  — The regression still checks that the session and its retry key are retained, but it stopped checking whether the
-  client is wrongly told to discard that key.
 
 
-- [`trailing-alternate-screen-stop-waits-on-output-written-before-term.md`](trailing-alternate-screen-stop-waits-on-output-written-before-term.md)
-  — The test can fail even when Farhelm correctly keeps the frame of a program killed before it restored the primary
-  screen.
 
-- [`trailing-failed-restart-annotation-test-accepts-errors-before-restoration-is.md`](trailing-failed-restart-annotation-test-accepts-errors-before-restoration-is.md)
-  — The regression can pass without proving a failed relaunch restores the user's stopped status.
 
 
 
@@ -394,20 +383,12 @@ consequences.
   — When no repository has been selected for a new environment, the Folder row says cloning will happen and omits its
   invitation to select a repository.
 
-- [`sqlite-planner-test-misses-stale-statistics.md`](sqlite-planner-test-misses-stale-statistics.md) — The startup
-  maintenance test can pass if Farhelm still creates missing SQLite statistics but stops refreshing stale ones.
 
 - [`remote-probe-absence-test-does-not-witness-proxy.md`](remote-probe-absence-test-does-not-witness-proxy.md) — The
   remote probe regression test can pass through the missing-program path both times, without checking how it handles the
   stand-in's exit.
 
-- [`host-lifecycle-test-misses-other-host-control.md`](host-lifecycle-test-misses-other-host-control.md) — The test
-  checks that a launch leaves another host available through a helper. It can pass even if the other host’s actual menu
-  is disabled.
 
-- [`inline-resume-test-misses-disabled-control-state.md`](inline-resume-test-misses-disabled-control-state.md) — The
-  inline Resume test can pass when the button looks and announces itself as enabled while its click handler refuses the
-  request.
 
 - [`environment-launch-history-test-bypasses-origin-handoff.md`](environment-launch-history-test-bypasses-origin-handoff.md)
   — The launch-history regression test can pass if an agent-requested environment starts becoming the desktop’s default
@@ -537,9 +518,6 @@ consequences.
   spaces, control characters, or empty strings) even though Farhelm refuses those same values in the desktop Templates
   editor and whenever the template is applied.
 
-- [`trailing-codex-renamed-executable-missing-admission-and-e2e-test.md`](trailing-codex-renamed-executable-missing-admission-and-e2e-test.md)
-  — The change that enables Restart to resume Codex sessions launched from renamed or versioned executables adds no
-  admission or end-to-end test using a renamed Codex executable.
 
 - [`trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md`](trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md)
   — The end-to-end test that claims to verify a custom agent parent can correct a child-first conversation report would
@@ -648,10 +626,6 @@ consequences.
   hiding or erroring its conversation-ID field, and prompting the user to replace a registration that was not actually
   deleted.
 
-- [`trailing-repo-cache-sweep-single-error-aborts-all-remaining-repos.md`](trailing-repo-cache-sweep-single-error-aborts-all-remaining-repos.md)
-  — When a host's supervisor starts up, if cleaning up an old repository cache directory for one repository fails (for
-  example, because a leftover Git process is still writing inside it), startup cleanup stops immediately and skips
-  cleaning up caches and prepared checkouts for every other repository on that host until the supervisor restarts again.
 
 - [`trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md`](trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md)
   — When you open Restart with on an existing custom-agent session after turning off "Supports resumption" for that

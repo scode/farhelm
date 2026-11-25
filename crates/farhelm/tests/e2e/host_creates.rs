@@ -1466,6 +1466,11 @@ async fn an_unusable_host_that_cannot_be_ended_keeps_the_launching_record() {
         message.contains("may still be running at") && message.contains("launching record"),
         "{message}"
     );
+    // The client must keep its retry key while the supervisor retains the launch.
+    assert!(
+        !message.contains("the create was durably refused without retaining a session"),
+        "{message}"
+    );
     assert!(!process_is_gone(listener), "the listener was left alone");
     let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await

@@ -239,7 +239,11 @@ async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
     }
     let refused = h.client.restart_session(&session.id, false).await;
     std::fs::set_permissions(&launch_dir, original).expect("restore the launch dir");
-    refused.expect_err("a launch spec that cannot be written fails the restart");
+    let error = refused.expect_err("a launch spec that cannot be written fails the restart");
+    assert!(
+        format!("{error:#}").contains("publishing this restart's launch spec"),
+        "the failure must come after claiming the replacement generation: {error:#}"
+    );
 
     let after = listed(&h.client, &session.id).await;
     assert!(

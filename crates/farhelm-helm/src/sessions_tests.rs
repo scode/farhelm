@@ -600,8 +600,10 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
         let mut creates = 0;
         loop {
             let frame = tokio::select! {
-                _ = &mut finished => break,
+                // Count a duplicate already readable when the create completes.
+                biased;
                 frame = next_control_frame(&mut reader) => frame,
+                _ = &mut finished => break,
             };
             let reply = match parse_control(&frame).unwrap() {
                 ControlMsg::GithubRepoSearch { req_id, root, .. } => {

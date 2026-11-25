@@ -294,7 +294,7 @@ async fn assert_resident_launcher(h: &Harness, id: &str, transcript: &[u8]) {
 }
 
 /// Conversation capture and Restart work through a launcher that remains alive.
-/// The child reports through real hooks, its descendants cannot replace the
+/// The renamed child reports through real hooks, its descendants cannot replace the
 /// admitted conversation, and resumed history proves Restart used the saved
 /// target through the configured launcher rather than launching fresh.
 #[farhelm_testtrace::test]
@@ -309,7 +309,8 @@ async fn resident_codex_launcher_captures_and_resumes_its_child() {
     std::fs::create_dir(&launcher_dir).unwrap();
     std::fs::create_dir(&child_dir).unwrap();
     let launcher = native_codex_image(&launcher_dir);
-    let child = native_codex_image(&child_dir);
+    let child = child_dir.join("codex-versioned");
+    std::fs::rename(native_codex_image(&child_dir), &child).expect("use a versioned executable");
     let session = launch_pin_fixture(
         &h,
         work.path(),
@@ -328,6 +329,10 @@ async fn resident_codex_launcher_captures_and_resumes_its_child() {
         .unwrap();
     let mut seen = replay;
     wait_for_marker_line(&mut stream, &mut seen, 0, "CODEX-CONVERSATION READY:").await;
+    assert_eq!(
+        complete_marker(&String::from_utf8_lossy(&seen), "CODEX-KERNEL-EXE:"),
+        Some("codex-versioned")
+    );
     wait_for_marker_line(&mut stream, &mut seen, 0, "CODEX-LAUNCHER:").await;
     assert_resident_launcher(&h, &session.id, &seen).await;
     let root = marker_id(&seen, "CODEX-CONVERSATION READY:");

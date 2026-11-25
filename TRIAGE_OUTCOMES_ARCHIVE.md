@@ -45563,3 +45563,178 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   fixture. The small resume assertion does not establish the pause boundary. Change `pnzppsyrknyusuoumuzsympkxwkxszoy`,
   bookmark `plan/triage-supervisor-nov24/05-cheap-fixes-1`,
   [PR #4879](https://github.com/scode/farhelm/pull/4879/changes).
+
+## trailing-one-create-test-skip-already-readable-duplicate.md
+
+- Outcome: `other`.
+- Assessment: A helm test checks that the new-session dialog's exact-preview flow sends only one create to the host. Its
+  stand-in host stops counting as soon as the first create succeeds. If a duplicate create is already waiting at that
+  moment, it can go uncounted, so the test could miss the very retry bug it guards against. Verified: Confirmed.
+  sessions_tests.rs:602-605 uses an unbiased `tokio::select!` between `finished` and the next frame, and the counter
+  increments only when the frame branch wins (:645-656). A duplicate the helm has not yet written would be missed either
+  way. No product bug is claimed.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code — add `biased;` with the frame branch first (or drain
+  ready frames before stopping); size S. Or discard, if test gaps are being dropped.
+- Execution: Fixed. The scripted supervisor counts ready control frames before accepting the test's completion signal.
+  Change `muowvwszzooqqwxzvvqzunvsnkqnxoxm`, bookmark `plan/triage-supervisor-nov24/06-cheap-fixes-2`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4881/changes).
+
+## trailing-landing-removed-ambiguous-create-refusal-marker-assertion.md
+
+- Outcome: `other`.
+- Assessment: When a new session's terminal host cannot be confirmed ended, Farhelm keeps the session, and its retry key
+  must stay usable. A test checked that the error does not tell the client to throw that key away. A later landing fix
+  removed that check, saying the test could never see that message. That premise is wrong, so the regression is no
+  longer guarded. Verified: Confirmed. #4552 (4fc89689) removed the assertion, saying "Only the helm writes that text,
+  and the test talks to the supervisor directly". But the harness client is `farhelm_helm::SupervisorClient`
+  (harness.rs:25), whose request handler adds the `SettledCreateUnaccepted` context (client.rs:3035) that carries that
+  exact text (lib.rs:1915). The test formats the error with `{error:#}` (host_creates.rs:1452), so the context would
+  show. No wrong reply is established.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code — restore the one assertion near
+  host_creates.rs:1456; size S.
+- Execution: Fixed. The client error for a retained ambiguous launch must leave the retry key usable, independently of
+  the stored reservation check. Change `muowvwszzooqqwxzvvqzunvsnkqnxoxm`, bookmark
+  `plan/triage-supervisor-nov24/06-cheap-fixes-2`. [Draft PR](https://github.com/scode/farhelm/pull/4881/changes).
+
+## trailing-alternate-screen-stop-waits-on-output-written-before-term.md
+
+- Outcome: `other`.
+- Assessment: A test draws a full-screen frame with a fake agent, then stops it and expects the agent to leave the
+  alternate screen cleanly. The test sends Stop as soon as it sees the frame. The fake agent installs its signal handler
+  after drawing that frame, so Stop can land before the handler exists, and the test then fails even though Farhelm
+  behaved correctly. Verified: Confirmed. session_lifecycle.rs:3761-3764 waits for "ALT-SCREEN APP" and then stops. The
+  fixture writes that line (fake_agent.rs:1853), and its own comment (:1859-1867) says the handler must be live before
+  the ready marker that tests should wait on. The test asserts the frame is gone (:3778). This is a latent flake. None
+  has been observed.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code — wait for the fixture's post-handler ready marker
+  before Stop; size S.
+- Execution: Discarded because main already waits for the fixture to install its exit handler and checks that both
+  alternate-screen labels appear before Stop. [PR #4862](https://github.com/scode/farhelm/pull/4862/changes). Change
+  `muowvwszzooqqwxzvvqzunvsnkqnxoxm`, bookmark `plan/triage-supervisor-nov24/06-cheap-fixes-2`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4881/changes).
+
+## trailing-failed-restart-annotation-test-accepts-errors-before-restoration-is.md
+
+- Outcome: `other`.
+- Assessment: A test checks that a failed Restart puts back the "stopped by user" status. It accepts any Restart error.
+  An early refusal that never touched the session would pass just as well, so the test does not prove the restore
+  happened. Verified: Confirmed. restart_under_concurrency.rs:240-254 uses `expect_err` and checks only the status and
+  annotation afterwards. It never checks that the generation advanced or that the error came from writing the launch
+  spec.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code — assert the error names the spec write, or that the
+  row's generation advanced; size S.
+- Execution: Fixed. The stopped-status test requires the failure to come from publishing the replacement launch spec,
+  after the new generation was claimed. Change `muowvwszzooqqwxzvvqzunvsnkqnxoxm`, bookmark
+  `plan/triage-supervisor-nov24/06-cheap-fixes-2`. [Draft PR](https://github.com/scode/farhelm/pull/4881/changes).
+
+## sqlite-planner-test-misses-stale-statistics.md
+
+- Outcome: `other`.
+- Assessment: When the supervisor opens its database, it runs SQLite's planner maintenance. The test covers only a
+  database that has no statistics yet. It would not catch a regression where maintenance stops refreshing statistics
+  that already exist but are stale. Verified: confirmed. `crates/farhelm-supervisor/src/db.rs:404-435` asserts
+  `sqlite_stat1` is absent before maintenance. `maintain_on_owning_open` (:158) runs a fixed `PRAGMA optimize=0x10002`,
+  so whether stale statistics get refreshed is SQLite's own heuristic, not Farhelm's logic.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard. The refresh decision belongs to SQLite, and a
+  stale-statistics fixture would mostly test SQLite. Size S-M if fixed.
+- Execution: No change. Farhelm calls SQLite's fixed optimize command at open. Whether to refresh a specific stale table
+  is SQLite's policy. The existing test still establishes that Farhelm invokes maintenance. Change
+  `muowvwszzooqqwxzvvqzunvsnkqnxoxm`, bookmark `plan/triage-supervisor-nov24/06-cheap-fixes-2`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4881/changes).
+
+## host-lifecycle-test-misses-other-host-control.md
+
+- Outcome: `other`.
+- Assessment: While a new session is launching on one sandbox host, that host's Suspend and Resume controls are
+  disabled, and other hosts' controls should stay available. The test checks the other host only through an internal
+  helper, not through that host's actual menu, so a menu that was wrongly disabled would pass. Verified: confirmed.
+  `crates/gui/farhelm-gui/src/hosts/environment_tests.rs:1178-1181` calls `host_lifecycle_refusal(5, cx)` directly, and
+  the only menu opened is host 4's. Partial nearby coverage: `a_launch_elsewhere_does_not_hold_suspend` (:1154-1165)
+  drives a real Suspend while a launch targets no panel host. It does not cover a launch to a different host in the same
+  panel. Shipped `lifecycle.rs:93-126` derives the disabled state per host from `launch_refusal`.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard. The per-host refusal is the only input to the
+  control, and a nearby test drives the real menu. Size S if fixed.
+- Execution: Fixed. Open the other host's actual menu and check that its Suspend item accepts activation during the
+  launch. Change `muowvwszzooqqwxzvvqzunvsnkqnxoxm`, bookmark `plan/triage-supervisor-nov24/06-cheap-fixes-2`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4881/changes).
+
+## inline-resume-test-misses-disabled-control-state.md
+
+- Outcome: `other`.
+- Assessment: In the same scenario, a suspended host's inline Resume button must look and announce itself as unavailable
+  while a launch to it is in progress. The test checks the hover help and that clicking sends nothing. It does not check
+  that the button is drawn or announced as disabled. Verified: confirmed. `environment_tests.rs:1199-1210` checks only
+  `hover_help` and the absence of a resume command. Shipped `crates/gui/farhelm-gui/src/hosts/lifecycle.rs:116` sets
+  `.disabled(!enabled || launch_refusal.is_some())` from the same refusal that picks the help text.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard. The disabled flag and the help text come from one
+  value. Size S if fixed.
+- Execution: Fixed within the test gate. Rendered inline Resume has neither an activation target nor a focus target
+  while the launch is pending. Explicit accessibility disabled-state coverage would require a product change. Change
+  `muowvwszzooqqwxzvvqzunvsnkqnxoxm`, bookmark `plan/triage-supervisor-nov24/06-cheap-fixes-2`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4881/changes).
+
+## trailing-codex-renamed-executable-missing-admission-and-e2e-test.md
+
+- Outcome: `other`.
+- Assessment: The fix that lets Restart resume Codex sessions started from a renamed or versioned executable has only a
+  unit test of the shared rule. No supervisor admission test or end-to-end test uses a renamed Codex executable.
+  Verified: Confirmed as a coverage gap; the shipped code works. Grok got an end-to-end test of this kind in #4725.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard under Q11 (an end-to-end test is not cheap). If the
+  maintainer wants parity with Grok: fix code, size M.
+- Execution: Fixed. The existing resident launcher fixture gives its reporting child a versioned native executable and
+  verifies the kernel basename before checking hook capture, Restart, and history recall. Change
+  `muowvwszzooqqwxzvvqzunvsnkqnxoxm`, bookmark `plan/triage-supervisor-nov24/06-cheap-fixes-2`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4881/changes).
+
+## trailing-repo-cache-sweep-single-error-aborts-all-remaining-repos.md
+
+- Outcome: `other`.
+- Assessment: At supervisor startup, Farhelm cleans up old repository caches and prepared checkouts. If removing one
+  repository's old cache generation fails (for example because a leftover git process still writes in it), the sweep
+  stops and skips every remaining repository until the next restart. Only disk space is affected; sessions still start.
+  Verified: Confirmed. `crates/farhelm-supervisor/src/repo_cache.rs:218,283` propagate with `?`. SPEC_impl.md "Owned
+  checkout admission and lifetime" (3744) says "A sweep failure is logged and leaves unused caches for a later startup.
+  Sessions can still start." That accepts leftover caches after a failure but does not say one repository's failure
+  should skip the others or their spare cleanup, so it is not explicit coverage.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code. Log and continue for each path and each repository, as the spare sweep already does. Size S.
+- Execution: No change. The sweep mixes safe independent debris removals with selector and directory-sync failures that
+  have to stop cleanup of that repository. Isolating those errors and lock failures, with a reproducible failure fixture
+  that proves later repositories are still visited and selected data is retained, exceeds the 30-line polish gate.
+  Change `muowvwszzooqqwxzvvqzunvsnkqnxoxm`, bookmark `plan/triage-supervisor-nov24/06-cheap-fixes-2`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4881/changes).
