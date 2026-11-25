@@ -147,9 +147,12 @@ pub(super) fn terminal_styles_setup(state: &SceneState, _: &mut Window, cx: &mut
 /// The last column of the first colored row is a separate padding run. Its background must meet the grid's edge.
 /// The following row starts with a two-cell lightning glyph from the bundled font, so no fallback font is needed.
 /// The selection crosses the wrap and leaves the last cell's background clear.
-/// The last two rows show the same glyph after erasing its right half. A new color clips the glyph at one column.
-/// When the erase leaves the same color, the glyph still has both columns to draw in.
+/// The next two rows show an undecorated glyph after erasing its right half. A new color clips it at one column.
+/// When the erase leaves the same color, the glyph still has both columns to draw in. The last three rows cover
+/// edited spacers left with a green background and a right-half erase that leaves its column free of reverse video
+/// and underline even though the background color matches.
 pub(super) fn terminal_wide_glyphs_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use farhelm_grid_model::style_flags as f;
     const HEAD: &str = "wide character wraps here";
     const GREEN: i64 = 0x12a_6f62;
     const RED: i64 = 0x197_4640;
@@ -172,10 +175,25 @@ pub(super) fn terminal_wide_glyphs_setup(state: &SceneState, _: &mut Window, cx:
             run(0, 2, "⚡", 0, -1, GREEN),
             run(3, 15, "same background", 0, -1, -1),
         ]),
+        screen_row(4, vec![
+            run(0, 2, "bc", 0, -1, GREEN),
+            run(2, 1, " ", 0, -1, GREEN),
+            run(4, 19, "shifted wrap spacer", 0, -1, -1),
+        ]),
+        screen_row(5, vec![
+            run(0, 2, "a ", 0, -1, GREEN),
+            run(2, 1, " ", 0, -1, GREEN),
+            run(4, 15, "orphaned spacer", 0, -1, -1),
+        ]),
+        screen_row(6, vec![
+            run(0, 1, "⚡", f::INVERSE | f::UNDERLINE, -1, GREEN),
+            run(1, 1, " ", 0, -1, GREEN),
+            run(3, 17, "erased right half", 0, -1, -1),
+        ]),
     ]);
     let cursor = serde_json::json!({"x":0,"y":0,"visible":false,"shape":"block","blink":false});
     let view = terminal_view(
-        grid_output(width + 1, 4, screen, cursor),
+        grid_output(width + 1, 7, screen, cursor),
         CursorPhase {
             focused: false,
             on: false,

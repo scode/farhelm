@@ -20655,8 +20655,8 @@ pub(crate) mod tests {
         assert_restart_window_listing(true).await;
     }
 
-    /// Check the same restart window with a working terminal and with a
-    /// retained terminal whose host went away after the cached listing.
+    /// Check the restart window with a working terminal and with a retained terminal whose host went away after the
+    /// cached listing. Restart's final reply must also report a lost replacement host even if its input row is stale.
     async fn assert_restart_window_listing(terminal_lost: bool) {
         let (reached_tx, reached_rx) = tokio::sync::oneshot::channel::<()>();
         let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
@@ -20749,7 +20749,7 @@ pub(crate) mod tests {
         );
 
         release_tx.send(()).expect("release the restart window");
-        tokio::time::timeout(std::time::Duration::from_secs(30), restart)
+        let published = tokio::time::timeout(std::time::Duration::from_secs(30), restart)
             .await
             .expect("the restart finishes once released")
             .expect("restart task")
@@ -20769,6 +20769,25 @@ pub(crate) mod tests {
                 .is_empty(),
             "the held row is dropped when the restart republishes the session"
         );
+
+        // The reply's input can predate a host loss while metadata or old-host cleanup finishes.
+        // Use the existing reply projection with a stale row from this real restart.
+        assert!(
+            !published.terminal_missing,
+            "the replacement was listed with a terminal"
+        );
+        let host = sup
+            .agent_host_for_test(&created.id)
+            .await
+            .expect("replacement host");
+        assert!(host.shutdown().await.expect("end replacement host").ended);
+        assert!(matches!(host.liveness(), crate::hosts::Liveness::Gone));
+        let reply = sup
+            .restart_reply(published)
+            .await
+            .map_err(|failure| failure.error)
+            .expect("describe the restarted session");
+        assert!(reply.terminal_missing, "a late host loss reaches the reply");
     }
 
     /// Named Goose Restart with must retire the old capture everywhere, but
@@ -24496,8 +24515,9 @@ await new Promise(() => {});
 
     /// An admitted capture outlives its owner and a supervisor reload:
     /// after the runtime and reporter are gone and the supervisor is
-    /// reopened over the same state dir, the `Resume` offer stands on
-    /// the durable binding and the verified file alone.
+    /// reopened over the same state dir, the stored binding keeps the
+    /// `Resume` offer available. Restart checks the conversation file
+    /// when the user acts on that offer.
     #[farhelm_testtrace::test]
     async fn omp_accepted_capture_survives_owner_exit_and_reload() {
         let mut fixture = OmpAdmission::launch().await;
@@ -37513,6 +37533,18 @@ exit 1
                 .unwrap();
             let should_error = !matches!(evidence, "ready" | "borrower");
             assert_eq!(observed.sentinel.is_some(), should_error, "{evidence}");
+            if !should_error {
+                assert!(
+                    matches!(
+                        observed.transition,
+                        Some(Transition::ObservedExit {
+                            exit_code: None,
+                            stopped_before_start: false
+                        })
+                    ),
+                    "{evidence}: a vanished terminal should propose an ordinary exit"
+                );
+            }
             if let Some(detail) = observed.sentinel {
                 assert!(detail.contains("checkout preparation"), "{detail}");
             }
@@ -37536,6 +37568,18 @@ exit 1
                 should_error,
                 "{evidence}: {outcome:?}"
             );
+            if !should_error {
+                assert!(
+                    matches!(
+                        outcome,
+                        LastOutcome::Exited {
+                            exit_code: None,
+                            annotation: None
+                        }
+                    ),
+                    "{evidence}: {outcome:?}"
+                );
+            }
             assert_eq!(
                 sup.store.session(&info.id).await.unwrap().unwrap().outcome,
                 outcome

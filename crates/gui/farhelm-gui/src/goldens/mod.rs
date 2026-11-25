@@ -727,7 +727,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "terminal-wide-glyphs",
-        size: (340., 150.),
+        size: (340., 192.),
         draw: terminals,
         setup: terminal_wide_glyphs_setup,
     },
