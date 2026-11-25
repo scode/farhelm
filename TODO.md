@@ -306,7 +306,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Always suppress workspace trust prompts in per-session sandboxes where supported.** Workspace trust makes no sense
   for a fresh per-session sandbox; suppress it automatically whenever the agent supports pre-trusting, rather than
-  requiring the user to discover per-agent trust switches in Settings → Agents.
+  requiring the user to discover per-agent trust switches in Settings → Agents. Plan:
+  `plans/queue/sandbox-auto-trust-and-claude-onboarding.md`.
 
 - **Skip Claude Code's first-run setup on new Tensorlake hosts.** Decided by the maintainer on 2026-11-07, answering the
   settings-credentials plan's block: Farhelm delivers a selected Claude subscription to a Tensorlake host but writes no
@@ -314,15 +315,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (its theme chooser and onboarding), which the user goes through once. Claude Code 2.1.318 stopped there in a fresh
   home and also checks a separate onboarding-completion setting. The fix the maintainer deferred: have Farhelm write the
   smallest set of non-secret first-run settings Claude needs, found by an isolated probe, keeping the user's other
-  settings and the normal agent home, and check it with a valid subscription login.
+  settings and the normal agent home, and check it with a valid subscription login. Plan:
+  `plans/queue/sandbox-auto-trust-and-claude-onboarding.md`.
 
 - **Fix Managed checkout repository suggestions for new sandboxes.** When `New sandbox` + `Managed checkout` is
   selected, repository suggestions scan an existing connected host (such as Local) rather than using the recipe's
-  configured GitHub token.
+  configured GitHub token. Plan: `plans/queue/global-checkout-repo-history.md`.
 
 - **Hide unrelated Podman status noise on Tensorlake recipe cards.** Because Managed Ubuntu is shared with Podman,
   recipe cards show a local Podman check/error line and a `Rebuild` button right above the Tensorlake status lines even
-  when the user is only using Tensorlake.
+  when the user is only using Tensorlake. Plan: `plans/queue/hide-unconfigured-podman-recipe-status.md`.
 
 - **Investigate Tensorlake's ssh gateway leaving forwarded channels open, and report it if it is a bug.** Through the
   gateway, an ssh client holding a remote-forwarded connection never learned that the sandbox side was gone: the sandbox
