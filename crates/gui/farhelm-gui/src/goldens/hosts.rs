@@ -835,6 +835,32 @@ pub(super) fn host_update_running_hosts_panel_setup(
     );
 }
 
+/// The Mac acquired the desktop app before Update could write anything. Hosts shows why the first step did not run.
+pub(super) fn host_mac_update_app_refusal_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::hosts::tests::{connecting, hosts, progress, reference_hosts, run};
+    use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus, StepStatus};
+    let reason = "remote setup, Update and uninstall are not supported on a Mac with the Farhelm desktop app installed; update Farhelm from the desktop app on that Mac";
+    let mut listed = reference_hosts();
+    listed[1].state = connecting(1, None);
+    let mut update = run(2, ProvisioningOperation::Update, RunStatus::Failed);
+    let mut first = crate::hosts::progress::tests::step("Create directories", StepStatus::Failed);
+    first.message = Some(reason.to_owned());
+    update.steps = std::iter::once(first)
+        .chain(
+            [
+                "Upload the farhelm binary",
+                "Install the farhelm binary",
+                "Write the per-user launchd job",
+                "Restart the supervisor",
+                "Connect to the supervisor",
+            ]
+            .map(|name| crate::hosts::progress::tests::step(name, StepStatus::Pending)),
+        )
+        .collect();
+    update.message = Some(reason.to_owned());
+    hosts_panel_scene_with(state, vec![hosts(&listed), progress(&[update])], true, cx);
+}
+
 /// `dev@new-box`'s setup at its third of nine steps, for the progress card scenes: the reference screens' new host and
 /// steps (`host_setup_scene`'s), the first two completed, the third running with an explanation, the host connecting at
 /// attempt 3 after `error`, and `message` as the run's own message. Motion is reduced, so the running step's ring holds

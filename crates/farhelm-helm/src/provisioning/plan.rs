@@ -501,12 +501,22 @@ pub(crate) struct ProvisioningPlan {
     /// Distribution spelling for the confirmation. Reach validates it before
     /// using it as plan text, and provisioning gates on capabilities.
     pub(super) host_distro_id: String,
-    /// The approved native target. A confirmed Mac setup with no answering
-    /// supervisor revalidates that it would still install on this target.
+    /// The approved native target. Mac Setup and Update revalidate it when no supervisor answers.
     pub(super) host_arch: PayloadTarget,
 }
 
 impl ProvisioningPlan {
+    /// A Mac install may use its frozen paths and launchd domain only on the inspected login.
+    pub(super) fn matches_mac_reach(&self, reach: &Reach) -> bool {
+        let domain = self.actions.iter().find_map(|action| match action {
+            ProvisioningAction::StartLaunchAgent { domain, .. } => Some(domain),
+            _ => None,
+        });
+        self.host_arch == reach.arch
+            && self.host_home == reach.home
+            && domain == reach.launchd_domain.as_ref()
+    }
+
     /// Describe exactly the actions the run will carry out, in run order.
     ///
     /// The heading names the destination, distribution, and architecture so

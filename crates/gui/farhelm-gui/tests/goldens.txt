@@ -80,6 +80,8 @@ linux/host-add-tensorlake-recipe-editor--dark.png 5418d67c9d3995f64f9e61c1d515ed
 linux/host-add-tensorlake-recipe-editor--light.png e863ed12c5de74229066a6f1355721cc5192ab7b
 linux/host-filter-empty--dark.png 8e10ac4c78c1be230f29f076ef516ad8044dc586
 linux/host-filter-empty--light.png d922587bdcfd480f0c26736e73533f8c830670f1
+linux/host-mac-update-app-refusal--dark.png bd4efb48f65406069fb81758454e10f69e737f1b
+linux/host-mac-update-app-refusal--light.png a111305c9d26d633f4f0c43eb06e0fc9a5576573
 linux/host-menu--dark.png 0eeffa8e3b48ffac2acbfdca2b64d34c9b66faa4
 linux/host-menu--light.png 7757d0883bd301d7aee2cc2a5654d63c394369a9
 linux/host-menu-waiting-container--dark.png 8679f5224ff562d1604169ffab2b2f375e6ab786

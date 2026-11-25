@@ -5672,11 +5672,11 @@ mod tests {
         );
     }
 
-    /// A setup confirmation authorizes the Mac login that planning inspected.
+    /// Setup and Update authorize the Mac login that planning inspected.
     /// Refuse if the app now owns the next launch or the same SSH name reaches
     /// a different launchd user.
     #[farhelm_testtrace::test]
-    async fn confirmed_mac_setup_refuses_a_new_app_or_changed_target() {
+    async fn confirmed_mac_provisioning_refuses_a_new_app_or_changed_target() {
         for app_installed in [true, false] {
             let harness = harness().await;
             let root = tempfile::tempdir().unwrap();
@@ -5706,21 +5706,34 @@ mod tests {
                 panic!("setup without an app must return a plan");
             };
             assert_eq!(plan.host_arch, PayloadTarget::MacosAarch64);
+            let store = &harness.store;
+            let host = store
+                .add_ssh_host("update-mac.example", None, None)
+                .await
+                .unwrap();
+            let update = service.plan_update(host).await.unwrap();
+            assert_eq!(update.plan.host_arch, PayloadTarget::MacosAarch64);
             let (current, expected) = if app_installed {
                 let reason = "Farhelm desktop app is installed";
                 (ReachOutcome::Manual(reason.into()), reason)
             } else {
                 reach.launchd_domain = Some("user/502".into());
-                (ReachOutcome::Supported(reach), "Mac setup target changed")
+                (ReachOutcome::Supported(reach), "target changed")
             };
             *backend.reach.lock().unwrap() = current;
-            let accepted = service
+            let setup = service
                 .start_add(ProvisionRequest { probe_id })
                 .await
                 .unwrap();
-            let view = wait_finished(&service, accepted.host_id).await;
-            assert_eq!(view.status, RunStatus::Failed);
-            assert!(view.message.unwrap().contains(expected));
+            let request = ProvisionRequest {
+                probe_id: update.probe_id,
+            };
+            let update = service.start_update(host, request).await.unwrap();
+            for accepted in [setup, update] {
+                let view = wait_finished(&service, accepted.host_id).await;
+                assert_eq!(view.status, RunStatus::Failed);
+                assert!(view.message.unwrap().contains(expected));
+            }
             assert!(backend.operations.lock().unwrap().is_empty());
         }
     }

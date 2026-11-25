@@ -312,10 +312,6 @@ consequences.
 - [`pi-page-describes-wrong-trust-question.md`](pi-page-describes-wrong-trust-question.md) — Pi’s Settings description
   promises folder-trust behavior even though the setting approves project resources.
 
-- [`trailing-mac-update-miss-app-installed-before-run-admission.md`](trailing-mac-update-miss-app-installed-before-run-admission.md)
-  — Installing the desktop app after Update's reach check but before the run is accepted can leave a separately
-  installed launchd service where Update should refuse.
-
 - [`trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md`](trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md)
   — The new test would still pass if a future edit broke automatic Trash refresh after Replace removes its source.
 
