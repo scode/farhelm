@@ -17,8 +17,8 @@
 //!   moved-on rule as a refusal (behind the notice if the user moved on).
 //! - **The answers.** Cancel ("create no sandbox and keep the launcher open") sends nothing and leaves the launcher and
 //!   its draft as they were. "Create and launch" submits the same draft once more, with consent, which sends exactly
-//!   one create with `confirmed` set. Focus starts on Cancel, the harmless answer (SPEC.md, "Opening and closing": "A
-//!   risky action that cannot be undone starts on Cancel"; the old question started on Create and launch). A
+//!   one create with `confirmed` set and the size shown in the question. Focus starts on Cancel, the harmless answer
+//!   required by SPEC.md, "Opening and closing". A
 //!   "Tensorlake pricing" link sits between the words and the answers ([`crate::prompt::Question::link`]).
 //! - **Consent is for one create.** Create and launch's consent is an argument of the one submit it makes; any later
 //!   submit asks again, a press after the helm refused that create included, as the old launcher's did.
@@ -30,7 +30,7 @@
 //! - **Retired by an edit.** Any edit of the draft takes the question away (`Launcher::changed`), as it does the YOLO
 //!   question's: it asked about the draft as it was.
 
-use farhelm_proto::session_requests::EnvironmentCreateBody;
+use farhelm_proto::{recipes::RecipeSize, session_requests::EnvironmentCreateBody};
 use gpui::{Context, Window};
 
 use super::Launcher;
@@ -46,12 +46,13 @@ use crate::prompt::{self, Answer, Inline, Question};
 const SKIP_SPENT: &str = "the skip setting was used by an earlier create";
 
 /// What the question is about, frozen as it is worded: the recipe's name and the provider's words for it, its size
-/// included, as the catalog held them at the press. The answer launches the launcher's draft, which cannot have
-/// changed meanwhile, since an edit retires the question.
+/// included, as the catalog held them at the press. Keep the typed size alongside the wording so a catalog update
+/// cannot change what this answer authorizes. A draft edit retires the question.
 #[derive(Clone, Debug)]
 pub(in crate::launcher) struct SandboxAsk {
     recipe: HostText,
     words: CreationQuestion,
+    size: RecipeSize,
 }
 
 /// The question's state in the launcher: what it asks about, and the question once asked (`None` while the launcher is
@@ -64,8 +65,8 @@ pub(in crate::launcher) struct SandboxState {
 impl Launcher {
     /// At a submit that would send `body`, a new environment's create, decide whether the creation question comes
     /// first. Returns `true` when it does: the question is set up (and asked now if the launcher is shown, for the
-    /// user's action at `mark`), and the caller sends nothing. Otherwise `body` goes out, `confirmed` only when
-    /// `consent` says this submit is Create and launch's. A create sent unconfirmed only because of the account's skip
+    /// user's action at `mark`), and the caller sends nothing. The Create and launch answer carries `confirmed_size`
+    /// for this submit, so the outgoing body records exactly the size the user saw. A create sent on the account's skip
     /// setting spends it for this launcher ([`Launcher::sandbox_skip_spent`]), so a later submit asks.
     ///
     /// `recipes` is the catalog the submit checked the draft against; the draft's refusal check has already passed, so
@@ -74,13 +75,14 @@ impl Launcher {
         &mut self,
         body: &mut EnvironmentCreateBody,
         recipes: &Recipes,
-        consent: bool,
+        confirmed_size: Option<RecipeSize>,
         mark: &Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if consent {
+        if let Some(size) = confirmed_size {
             body.confirmed = true;
+            body.confirmed_size = Some(size);
             return false;
         }
         let Recipes::Listed(listed) = recipes else {
@@ -106,6 +108,7 @@ impl Launcher {
             ask: SandboxAsk {
                 recipe: HostText::from_host(recipe.name.as_str()),
                 words,
+                size: recipe.size,
             },
             inline: None,
         });
@@ -135,11 +138,11 @@ impl Launcher {
         state.inline = Some(prompt::ask_inline(
             question(&state.ask),
             mark,
-            move |_: SandboxAsk, window, cx| {
+            move |ask: SandboxAsk, window, cx| {
                 // The answer is the press the launch's moved-on check counts from.
                 let mark = Mark::take(cx);
                 let _ = launcher.update(cx, |launcher, cx| {
-                    launcher.submit(false, true, Default::default(), mark, window, cx)
+                    launcher.submit(false, Some(ask.size), Default::default(), mark, window, cx)
                 });
             },
             window,

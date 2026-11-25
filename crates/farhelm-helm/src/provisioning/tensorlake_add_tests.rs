@@ -143,10 +143,20 @@ impl Fixture {
     /// Keep malformed launch cases on the real route as well: a service-only
     /// rejection would not establish that HTTP admission precedes billing.
     async fn session_launch_request(&self, body: serde_json::Value) -> axum::response::Response {
+        self.session_launch_at("/api/sandbox-sessions", body).await
+    }
+
+    /// Route both spellings through the same fake account when comparing their
+    /// confirmation requirements.
+    async fn session_launch_at(
+        &self,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> axum::response::Response {
         use tower::ServiceExt as _;
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sandbox-sessions")
+            .uri(uri)
             .header("host", "127.0.0.1:7433")
             .header("content-type", "application/json")
             .body(axum::body::Body::from(body.to_string()))
@@ -164,7 +174,11 @@ impl Fixture {
     /// launch is admitted that reply is all the route answers; the outcome
     /// arrives on the run ([`Self::launch_outcome`]).
     async fn admitted(&self, confirmed: bool) -> (HostId, String) {
-        let response = self.session_launch(confirmed).await;
+        Self::accepted_run(self.session_launch(confirmed).await).await
+    }
+
+    /// Read the run identity returned by either route after admission.
+    async fn accepted_run(response: axum::response::Response) -> (HostId, String) {
         let status = response.status();
         let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
             .await
@@ -542,6 +556,95 @@ impl Fixture {
     }
 }
 
+/// A same-name edit can change what the answer would buy. Both routes reject
+/// a stale explicit size before reserving a host or calling the provider.
+/// The current route also refuses a historical confirmation flag by itself.
+#[farhelm_testtrace::test]
+async fn recipe_session_consent_refuses_stale_size_before_allocating() {
+    use axum::http::StatusCode;
+    use serde_json::json;
+
+    let mut f = fixture(false).await;
+    f.bind_session_launch().await;
+    let (displayed, _) = f
+        .harness
+        .store
+        .tensorlake_recipe_row("test-recipe")
+        .await
+        .unwrap()
+        .unwrap();
+    let mut edit = crate::tensorlake::recipes::tests_support::save();
+    edit.base = displayed.base;
+    edit.size = displayed.size;
+    edit.size.cpus += 1;
+    let revised_size = edit.size;
+    f.harness
+        .store
+        .update_tensorlake_recipe("test-recipe".into(), edit)
+        .await
+        .unwrap()
+        .unwrap();
+    let (revised, build) = f
+        .harness
+        .store
+        .tensorlake_recipe_row("test-recipe")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        build.snapshot.is_some(),
+        "the edit keeps the built snapshot"
+    );
+    assert_eq!(revised.size, revised_size);
+    assert_ne!(revised.size, displayed.size);
+    let host_ids = || async {
+        f.harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect::<Vec<_>>()
+    };
+    let hosts_before = host_ids().await;
+    let api_events = f.root.path().join("api/events.jsonl");
+    assert!(
+        !api_events.exists(),
+        "the fixture has not contacted Tensorlake"
+    );
+    assert!(f.model().sandboxes.is_empty());
+    let mut unbound = json!({
+        "recipe": "test-recipe", "confirmed": true,
+        "place": {"kind": "tensorlake_account"},
+        "request": { "cwd": "~", "command": { "command": "true", "yolo": false } },
+    });
+    let response = f
+        .session_launch_at("/api/environment-sessions", unbound.clone())
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    unbound["confirmed_size"] = json!(displayed.size);
+    let response = f
+        .session_launch_at("/api/environment-sessions", unbound.clone())
+        .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    unbound.as_object_mut().unwrap().remove("place");
+    let response = f.session_launch_request(unbound).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let refusal = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    assert_eq!(
+        refusal.as_ref(),
+        b"The sandbox size changed. Review the updated size before launching."
+    );
+    assert_eq!(host_ids().await, hosts_before);
+    assert!(f.service.runs().await.runs.is_empty());
+    assert!(f.model().sandboxes.is_empty());
+    assert!(!api_events.exists(), "no provider calls happened");
+    assert!(f.backend_events().is_empty(), "no setup ran");
+}
+
 /// A fresh checkpoint skips preparation's SSH-access check, so protected
 /// session admission must independently retain the local-key prerequisite.
 /// Missing or unreadable keys cannot create a billed sandbox or regenerate a
@@ -799,7 +902,26 @@ async fn recipe_session_task_publishes_success_and_cleans_a_connected_create_fai
             *f.service.run_end_gate.lock().unwrap() = Some(Arc::clone(&gate));
         }
         f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
-        let (host, run) = f.admitted(true).await;
+        let (host, run) = if fails {
+            f.admitted(true).await
+        } else {
+            // Keep a successful modern-route launch alongside the legacy
+            // case. A size matching the recipe must reach actual creation.
+            let (recipe, _) = f
+                .harness
+                .store
+                .tensorlake_recipe_row("test-recipe")
+                .await
+                .unwrap()
+                .unwrap();
+            let body = serde_json::json!({
+                "recipe": "test-recipe", "confirmed": true, "confirmed_size": recipe.size,
+                "place": {"kind": "tensorlake_account"},
+                "request": { "cwd": "~", "command": { "command": "true", "yolo": false } },
+            });
+            let response = f.session_launch_at("/api/environment-sessions", body).await;
+            Fixture::accepted_run(response).await
+        };
         f.wait_for_backend("wait-tensorlake-ssh").await;
         assert!(
             f.model().live_sandboxes().len() == 1,

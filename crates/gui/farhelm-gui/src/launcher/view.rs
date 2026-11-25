@@ -51,6 +51,7 @@ use std::time::Duration;
 
 use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::launcher::LaunchCatalogModel;
+use farhelm_proto::recipes::RecipeSize;
 use farhelm_proto::ui_channel::{
     HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
 };
@@ -1432,7 +1433,7 @@ impl Launcher {
             }
             _ => SourceConsent::default(),
         };
-        self.submit(false, false, source, mark, window, cx);
+        self.submit(false, None, source, mark, window, cx);
     }
 
     /// The request a press would send now, with `confirm_yolo` as the user's answer to the YOLO question, or `None`
@@ -1489,14 +1490,13 @@ impl Launcher {
     }
 
     /// [`Launcher::press`], with `confirm_yolo` saying whether the user consented to a YOLO launch on a host that asks
-    /// first (the YOLO question's answers, `yolo_question`), and `confirm_sandbox` whether they answered "Create a
-    /// sandbox for this session?" with Create and launch (`sandbox_question`), each for this one submit; a plain press
-    /// never consents. `source` carries the warning's permission across any wait. `mark` is the answer the reply's
-    /// moved-on check counts from ([`launch::start`]).
+    /// first (the YOLO question's answers, `yolo_question`), and `confirmed_size` the size they agreed to in the sandbox
+    /// question (`sandbox_question`). Both permissions last for this submit. `source` carries the warning's permission
+    /// across any wait. `mark` is the answer the reply's moved-on check counts from ([`launch::start`]).
     fn submit(
         &mut self,
         confirm_yolo: bool,
-        confirm_sandbox: bool,
+        confirmed_size: Option<RecipeSize>,
         source: SourceConsent,
         mark: Mark,
         window: &mut Window,
@@ -1516,7 +1516,7 @@ impl Launcher {
         // A billed environment asks first ("Create a sandbox for this session?"), and its answer submits again.
         let recipes = Recipes::for_draft(&self.draft, self.store.read(cx).collections());
         if let Some(Request::Environment(body)) = request.as_mut()
-            && self.hold_for_creation_question(body, &recipes, confirm_sandbox, &mark, window, cx)
+            && self.hold_for_creation_question(body, &recipes, confirmed_size, &mark, window, cx)
         {
             return;
         }

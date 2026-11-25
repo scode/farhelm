@@ -13688,33 +13688,49 @@ mod client_bodies {
     fn an_environment_create_body_decodes_into_the_helms_request() {
         use super::super::sandbox::EnvironmentCreateRequest;
         use farhelm_proto::launcher::TemplateNameKind;
+        use farhelm_proto::recipes::RecipeSize;
         use farhelm_proto::session_requests::EnvironmentCreateBody;
-        for (place, confirmed, name_kind) in [
+        for (place, confirmed_size, name_kind) in [
             (
                 farhelm_proto::Place::TensorlakeAccount,
-                true,
+                Some(RecipeSize {
+                    cpus: 2,
+                    memory_gb: 4,
+                    disk_gb: 20,
+                }),
                 Some(TemplateNameKind::Fixed),
             ),
-            (farhelm_proto::Place::PodmanHost(4), false, None),
+            (farhelm_proto::Place::PodmanHost(4), None, None),
         ] {
             let body = EnvironmentCreateBody {
                 recipe: "rust".into(),
                 place,
-                confirmed,
+                confirmed: confirmed_size.is_some(),
+                confirmed_size,
                 name_kind,
                 request: create(None, Some(command())),
             };
+            assert_eq!(
+                serde_json::to_value(&body)
+                    .unwrap()
+                    .get("confirmed_size")
+                    .is_some(),
+                confirmed_size.is_some(),
+                "an unconfirmed body can still be read by an older helm"
+            );
             let req: EnvironmentCreateRequest = decode(&body);
             let EnvironmentCreateBody {
                 recipe,
                 place,
                 confirmed,
+                confirmed_size,
                 name_kind,
                 request,
             } = &body;
             assert_eq!(&req.recipe, recipe);
             assert_eq!(&req.place, place);
             assert_eq!(&req.confirmed, confirmed);
+            assert_eq!(&req.confirmed_size, confirmed_size);
             assert_eq!(&req.name_kind, name_kind);
             assert_create_decodes(request, &req.request);
         }

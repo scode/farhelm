@@ -84,19 +84,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
-- **Bind Tensorlake launch consent to the billed size shown.** A recipe edit under the same name can make a confirmed
-  new sandbox bill for a different CPU, memory or disk size. The launcher's `sandbox_question.rs` freezes the words,
-  then sends only the recipe, place and a confirmation flag. Carry the displayed `RecipeSize` from that actual answer
-  through `POST /api/environment-sessions`. Compare it against the same definition that `start_session_environment` uses
-  to register the host, before registration or provider calls. When the size differs, refuse with the launch draft
-  available so the user can review the new size. A check of the desktop catalog alone leaves a race before admission.
-  Specify this route's precondition in [Sandbox sessions](SPEC.md#sandbox-sessions) and SPEC_impl.md under “Questions:
-  the prompt”. Settle compatibility for older clients and the legacy sandbox route carrying only `confirmed`. If an
-  older helm refuses the new size field, keep the refusal and require a helm that can check it. Preserve the deliberate
-  skip setting and ordinary container launches. Test a same-name edit after the prompt, prove no allocation on a
-  mismatch, and review the refusal in both appearances. The protocol, validation and visual work exceed this triage
-  item's size gate. Plan: `plans/queue/recipe-card-and-billed-size-fixes.md`.
-
 - **Keep checkout notices after an agent Delete times out.** If an approved agent Delete outlasts the supervisor's reply
   budget and then leaves a checkout on disk, keep the checkout path and reason in the notices bell. The target host's
   result reaches `agent_delete` in `crates/farhelm-helm/src/agent_requests.rs`, while the asking connection's actual

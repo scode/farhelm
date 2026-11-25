@@ -14,6 +14,7 @@
 //! [`whole_environment_delete_carries_on`], [`retry_environment_delete`]).
 
 use super::*;
+use farhelm_proto::recipes::RecipeSize;
 
 /// Recipe placement has its own endpoint so an older helm cannot silently
 /// ignore it and create the session on its ordinary default host.
@@ -23,26 +24,30 @@ pub(crate) struct SandboxCreateRequest {
     recipe: String,
     #[serde(default)]
     confirmed: bool,
+    #[serde(default)]
+    confirmed_size: Option<RecipeSize>,
     name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
     request: CreateReq,
 }
 
 /// `POST /api/sandbox-sessions`: the legacy spelling of an environment create
-/// at the Tensorlake account. It answers exactly as
-/// [`create_environment_session`] does, accepted form included.
+/// at the Tensorlake account. Older callers can confirm without sending a
+/// size. A size sent by either route is checked before provisioning.
 pub(crate) async fn create_sandbox_session(
     State(state): State<Arc<AppState>>,
     axum::Json(request): axum::Json<SandboxCreateRequest>,
 ) -> axum::response::Response {
-    create_environment_session(
-        State(state),
-        axum::Json(EnvironmentCreateRequest {
+    admit_environment_session(
+        state,
+        EnvironmentCreateRequest {
             recipe: request.recipe,
             place: farhelm_proto::Place::TensorlakeAccount,
             confirmed: request.confirmed,
+            confirmed_size: request.confirmed_size,
             name_kind: request.name_kind,
             request: request.request,
-        }),
+        },
+        false,
     )
     .await
 }
@@ -61,6 +66,8 @@ pub(crate) struct EnvironmentCreateRequest {
     pub(super) place: farhelm_proto::Place,
     #[serde(default)]
     pub(super) confirmed: bool,
+    #[serde(default)]
+    pub(super) confirmed_size: Option<RecipeSize>,
     pub(super) name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
     pub(super) request: CreateReq,
 }
@@ -82,15 +89,30 @@ pub(crate) struct EnvironmentCreateRequest {
 /// behind.
 ///
 /// What is refused before admission is an ordinary error reply with nothing
-/// registered: an unconfirmed billed create, a body the route cannot read, a
-/// recipe or place that is missing or cannot run the launch. The launch task
-/// is the helm's, so neither its result nor its cleanup depends on the client
-/// that asked.
+/// registered. Examples include missing or stale consent, an unreadable
+/// request, and an unavailable recipe or place. The helm owns launch and
+/// cleanup after admission, so both survive a client disconnect.
 pub(crate) async fn create_environment_session(
     State(state): State<Arc<AppState>>,
     axum::Json(request): axum::Json<EnvironmentCreateRequest>,
 ) -> axum::response::Response {
+    admit_environment_session(state, request, true).await
+}
+
+/// Share the same launch admission and progress reply across both routes.
+/// The modern route requires the size with explicit consent. The legacy
+/// route accepts historical callers that sent only a confirmation flag.
+async fn admit_environment_session(
+    state: Arc<AppState>,
+    request: EnvironmentCreateRequest,
+    require_confirmed_size: bool,
+) -> axum::response::Response {
     let result = crate::run_owned(async move {
+        if require_confirmed_size && request.confirmed && request.confirmed_size.is_none() {
+            return Err(invalid_request(
+                "confirm the sandbox size before launching".into(),
+            ));
+        }
         if request.place.provider().asks_before_creating()
             && !request.confirmed
             && !state.tensorlake.settings().await?.create_without_asking
@@ -106,6 +128,7 @@ pub(crate) async fn create_environment_session(
                 request.place,
                 request.request,
                 request.name_kind,
+                request.confirmed_size,
             )
             .await
     })

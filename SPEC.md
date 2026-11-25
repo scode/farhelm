@@ -1679,9 +1679,11 @@ otherwise, including when the recipe's GitHub token is used for a private clone.
 home, without Browse or recent folders.
 
 Launching asks **Create a sandbox for this session?**, naming recipe, CPU, memory and disk, linking Tensorlake pricing,
-and explaining suspension, the idle timeout and irreversible file deletion. Cancel creates nothing; **Create and
-launch** proceeds. Only **Create Tensorlake sandboxes without asking** skips this question. Recipe templates, their
-quick launches and Clone use the same launch and confirmation path.
+and explaining suspension, the idle timeout and irreversible file deletion. Cancel creates nothing. **Create and
+launch** confirms the size shown in the question. If the size changed, the helm refuses before registering or creating
+the sandbox. The launcher keeps the draft, and the next press asks with the updated size. Only **Create Tensorlake
+sandboxes without asking** skips this question. Recipe templates, their quick launches and Clone use the same launch and
+confirmation path.
 
 The helm records the session-owned host and a name beginning `farhelm-sess-<helm tag>-` before creating the sandbox. It
 ensures a fresh prepared snapshot, creates the named sandbox with a 30-minute idle timeout and automatic resume off,

@@ -335,6 +335,8 @@ impl ProvisioningService {
     /// session. The row and reserved name precede provider I/O; client loss
     /// does not cancel setup or confirmed cleanup of this new resource. The
     /// task ends its run even if it panics ([`Self::end_panicked_launch`]).
+    /// When the caller supplied a confirmed size, check it against the same
+    /// definition this launch uses for registration and provider work.
     pub(crate) async fn start_session_environment(
         self: Arc<Self>,
         state: Arc<crate::AppState>,
@@ -342,6 +344,7 @@ impl ProvisioningService {
         place: farhelm_proto::Place,
         mut request: crate::sessions::CreateReq,
         name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
+        confirmed_size: Option<farhelm_proto::recipes::RecipeSize>,
     ) -> anyhow::Result<(
         RunAccepted,
         tokio::sync::oneshot::Receiver<anyhow::Result<farhelm_proto::SessionInfo>>,
@@ -356,6 +359,11 @@ impl ProvisioningService {
             .tensorlake_recipe_row(&recipe)
             .await?
             .ok_or_else(|| refused("the recipe no longer exists"))?;
+        if confirmed_size.is_some_and(|size| size != definition.size) {
+            return Err(refused(
+                "The sandbox size changed. Review the updated size before launching.",
+            ));
+        }
         anyhow::ensure!(
             definition.base.supports(place.provider()),
             "this recipe's base cannot run at the selected place"
