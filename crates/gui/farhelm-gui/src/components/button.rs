@@ -545,9 +545,8 @@ impl Button {
         self
     }
 
-    /// The button widens or narrows a region in place, and `expanded` says whether the region is expanded now: the
-    /// `aria-expanded` of [`Button::expanded`], without its open look, since nothing opens over the page. The host
-    /// rail's Expand control, whose old button reported `aria-expanded` and kept the rail's quiet look either way.
+    /// Report `aria-expanded` on controls that keep their usual fill when they open, such as the host rail's Expand
+    /// button and the launcher's Host picker. [`Button::expanded`] also applies the pressed look.
     pub fn discloses(mut self, expanded: bool) -> Self {
         self.expanded = Some(expanded);
         self.open_look = false;

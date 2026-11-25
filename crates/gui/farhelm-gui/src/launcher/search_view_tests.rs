@@ -1072,7 +1072,7 @@ fn enter_on_a_withdrawn_empty_pane_template_cannot_launch(cx: &mut TestAppContex
 }
 
 /// Taking a template from the empty command field applies its edits once and keeps the editor ready for a query.
-/// The same source mark remains while the form is edited and clears on Reset choices.
+/// The source mark remains while editing, but only the row that Enter would choose reports being selected.
 #[gpui::test]
 fn the_empty_field_can_apply_a_template_and_reset_its_source(cx: &mut TestAppContext) {
     let (mut helm, cx) = new_launcher_with_templates(cx, None);
@@ -1095,7 +1095,12 @@ fn the_empty_field_can_apply_a_template_and_reset_its_source(cx: &mut TestAppCon
         name_of(cx, "launcher-provenance-label").as_deref(),
         Some("From a template: partial")
     );
-    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(true));
+    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(false));
+    test_support::click(cx, "launcher-search-row");
+    assert!(search_focused(cx));
+    keys(cx, "down down");
+    assert_eq!(selected_state(cx, "launcher-template-go"), Some(true));
+    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(false));
     assert!(super::recents_view_tests::creates(&mut helm, cx).is_empty());
     test_support::click(cx, "launcher-reset");
     assert_eq!(name_of(cx, "launcher-provenance-label"), None);
@@ -1250,8 +1255,8 @@ fn a_tl_row_that_escalates_raises_the_banner(cx: &mut TestAppContext) {
         Some("Permission changed: Guarded → YOLO, because OpenCode does not support Guarded.")
     );
     assert_eq!(
-        selected_state(cx, "launcher-template-to-opencode"),
-        Some(true)
+        name_of(cx, "launcher-provenance-label").as_deref(),
+        Some("From a template: to-opencode")
     );
     test_support::click(cx, "launcher-escalation-undo");
     assert_eq!(

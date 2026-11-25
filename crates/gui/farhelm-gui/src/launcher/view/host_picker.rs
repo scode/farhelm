@@ -465,8 +465,6 @@ impl Launcher {
                     .flex_none()
                     .text_color(theme::color(palette.fg_1)),
             );
-        // No expanded look: the old button looked the same open or closed, and the pressed look would put the mark and
-        // the chevron on the accent fill.
         let help = if let Some(provider) = environment {
             HoverHelp::tooltip(format!("{label}. {}", provider.launch_help()))
         } else if let Some(host) = &chosen {
@@ -481,6 +479,8 @@ impl Launcher {
         let button = Button::new("launcher-host", label, help, Role::ComboBox)
             .content(content)
             .tier(Tier::Ghost)
+            // Report whether the list is open without painting its host mark and chevron on an accent fill.
+            .discloses(self.host_list_open(window, cx))
             .focus(&self.host_focus)
             .on_key_down(move |event, window, cx| {
                 let _ = on_key.update(cx, |launcher, cx| launcher.host_key(event, window, cx));
