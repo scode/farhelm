@@ -207,9 +207,6 @@ consequences.
 - [`unavailable-antigravity-trust-switch-announced-as-off.md`](unavailable-antigravity-trust-switch-announced-as-off.md)
   — Accessibility metadata reports an unread trust setting as off without marking its switch unavailable.
 
-- [`antigravity-trust-dismissal-lost-during-recovery.md`](antigravity-trust-dismissal-lost-during-recovery.md) — A
-  terminal recovery can bring back an Antigravity trust hint the user already dismissed for the same question.
-
 - [`settings-close-save-can-hide-notification-refusal.md`](settings-close-save-can-hide-notification-refusal.md) — Save
   and Close can take the user to Notifications while leaving the relevant error below the viewport.
 
@@ -281,9 +278,6 @@ consequences.
 
 - [`hook-setup-accepts-nonutf8-config-path.md`](hook-setup-accepts-nonutf8-config-path.md) — Persistent hook setup can
   write to a non-UTF-8 configuration path and report success even though the path contract calls for refusing it.
-
-- [`checkout-input-arms-hook-warning-early.md`](checkout-input-arms-hook-warning-early.md) — Enter during managed
-  checkout preparation can make Farhelm warn about a missing hook report before the agent starts.
 
 - [`environment-delete-title-unreachable-by-keyboard.md`](environment-delete-title-unreachable-by-keyboard.md) — A long
   target title can clip in an environment Delete confirmation where keyboard paging reaches the warning but cannot
