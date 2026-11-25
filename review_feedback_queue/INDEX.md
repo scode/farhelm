@@ -336,9 +336,6 @@ consequences.
 - [`resume-off-command-gets-hook-warning.md`](resume-off-command-gets-hook-warning.md) — A command launch with Resume
   off can get a misleading silent-hook warning that an arriving report does not clear.
 
-- [`terminal-paste-test-misses-first-ack-premise.md`](terminal-paste-test-misses-first-ack-premise.md) — The interrupted
-  paste check can pass without demonstrating that the runtime processed the first acknowledgement.
-
 - [`uninstall-omits-persistent-hook-cleanup.md`](uninstall-omits-persistent-hook-cleanup.md) — Uninstall can leave Grok
   and Antigravity callbacks pointing to the removed Farhelm executable, and the uninstall guidance omits cleanup.
 
