@@ -45226,3 +45226,52 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. Both warnings for a potentially invalid cleanup ID use escaped formatting. Change
   `zvqtpqlvvnyyukxxvwuluzoxxxkwplor`, bookmark `plan/triage-supervisor-nov24/01-service`,
   [PR #4868](https://github.com/scode/farhelm/pull/4868/changes).
+
+## trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md
+
+- Outcome: `other`.
+- Assessment: Farhelm promises that when it stops or deletes a Bash or Zsh session, the shell gets a hangup so it can
+  save its history. The tests check that the hangup signal is sent and that Delete succeeds. None checks that a typed
+  command actually ends up in the history file. Verified: Confirmed as a coverage gap. sweep.rs:3553-3587 asserts a
+  SIGHUP exit with a fake manager. The real-Bash end-to-end test (crates/farhelm/tests/e2e/host_creates.rs, the
+  startup/evaluated-input/Delete case the reviewer cites) does not read history. I found no history assertion anywhere.
+  Actual Bash or Zsh history behavior was not observed.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — the signal-level tests cover Farhelm's side of the
+  promise, and a real-history end-to-end test depends on the shell's configuration and costs more than it buys; size M
+  if kept.
+- Execution: Fixed. The interactive Bash test verifies that a command evaluated before session deletion is saved to the
+  shell's private history file by the Delete reply. Change `stpwpvzqmyxtmoztswxqwlzpnyqzqklv`, bookmark
+  `plan/triage-supervisor-nov24/02-sweep`, [PR #4874](https://github.com/scode/farhelm/pull/4874/changes).
+
+## trailing-delete-skips-hangup-for-live-tab-it-knows-only.md
+
+- Outcome: `fix code`.
+- Assessment: When you delete an agent session that has terminal tabs open, the tab shells should get a hangup so Bash
+  or Zsh can save their history. On hosts without systemd scopes, Delete hangs up only the processes whose Farhelm
+  marker it can read. macOS 26+ hides that marker for Apple's own binaries, and that includes the default `/bin/zsh`. So
+  deleting an agent session with zsh tabs open on a current Mac can kill those shells outright, without the hangup.
+  Verified: Confirmed in source, and the route may be more ordinary than the reviewer said. With a non-shell main
+  launch, Delete's whole-session sweep hangs up only marker-carrying tab processes (sweep.rs:1198-1206, from
+  `snapshot_proc` :484-495). Pinned tab roots are swept but never hung up. Tab hosts are ended only after the sweep
+  (teardown.rs:530-560). The tab helper execs the user's shell directly (launch.rs:1307-1325), and
+  SPEC_impl.md:4993-4995 records that macOS 26+ withholds the environment of platform binaries. SPEC_impl.md:4878 says
+  "The sweep sends SIGTERM, with SIGHUP as well for tab shells", and SPEC.md:2151-2152 promises the hangup for Delete.
+  Stop's tab closes are unaffected: the tab target hangs up everything (:1199). On Linux with scopes, the tab unit gets
+  a scope SIGHUP (:1898). Not verified: that interactive zsh ignores SIGTERM (bash does), and that the history is
+  actually lost on a real Mac. The fix has more than one shape (hang up only the pinned roots, or their whole subtree),
+  so it is not clearly settled.
+- Decision: q-hangup, "Shell history hangup on degraded cleanup paths": the maintainer picked "Fix only the Mac tab
+  case". (2026-11-24 fewest-questions triage page (main c38b93552), second pass.) The history-saving hangup is a
+  courtesy on rare degraded cleanup paths; the macOS 26+ tab case is fixed because it may happen on every such Delete.
+- Completion criteria: Add the tab shells Farhelm already tracks (pinned tab roots) to Delete's hangup set, with a unit
+  test of a marker-invisible pinned tab. Recommendation for reference: fix code — add the pinned tab roots to Delete's
+  hangup set, with a unit test of a marker-invisible pinned tab; size S–M. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
+  brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. Delete hangs up the tab shells identified by their terminal hosts when their environment markers are
+  unavailable. Change `stpwpvzqmyxtmoztswxqwlzpnyqzqklv`, bookmark `plan/triage-supervisor-nov24/02-sweep`,
+  [PR #4874](https://github.com/scode/farhelm/pull/4874/changes).

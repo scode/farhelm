@@ -221,12 +221,20 @@ pub(crate) async fn end_runtime(host: &HostTerminal, pid: u32) {
 
 // ---- Creates --------------------------------------------------------------------
 
-/// A first-class Bash launch must reach a live interactive shell. Its
-/// private startup file and evaluated input distinguish it from the shim.
+/// A first-class Bash launch reaches a live interactive shell whose history
+/// can be saved on Delete. Its private startup file and evaluated input
+/// distinguish it from the shim.
 #[farhelm_testtrace::test]
-async fn a_structured_bash_session_takes_input() {
+async fn a_structured_bash_session_takes_input_and_saves_history_on_delete() {
     let home = farhelm_teststate::tempdir().unwrap();
-    std::fs::write(home.path().join(".bashrc"), "echo BASH-SESSION-READY\n").unwrap();
+    let history = home.path().join("session-history");
+    std::fs::write(
+        home.path().join(".bashrc"),
+        "unset HISTCONTROL HISTIGNORE PROMPT_COMMAND\n\
+         HISTFILE=\"$HOME/session-history\"\nHISTSIZE=100\nHISTFILESIZE=100\n\
+         set -o history\necho BASH-SESSION-READY\n",
+    )
+    .unwrap();
     let seams = crate::host_tabs::tab_seams(home.path());
     let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
     let selection = serde_json::from_str(r#"{"harness":"bash"}"#).unwrap();
@@ -236,10 +244,14 @@ async fn a_structured_bash_session_takes_input() {
     let id = creating.await.unwrap().id;
     let (channel, mut seen, mut rx) = client.attach_live(&id, 80, 24).await.unwrap();
     wait_for(&mut rx, &mut seen, "BASH-SESSION-READY", 15).await;
-    let input = b"echo BASH-ANSWER-$((40+2))\r".to_vec();
+    let command = "echo BASH-ANSWER-$((40+2))";
+    let input = format!("{command}\r").into_bytes();
     client.send_keys(channel, input).await;
     wait_for(&mut rx, &mut seen, "BASH-ANSWER-42", 15).await;
+    assert!(!history.try_exists().unwrap(), "history is saved on exit");
     client.delete_session(&id).await.unwrap();
+    let saved = std::fs::read_to_string(history).expect("Bash saved its history during Delete");
+    assert!(saved.lines().any(|line| line == command), "{saved:?}");
 }
 
 /// A create starts its agent in a host and records it as a

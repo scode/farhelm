@@ -19,6 +19,7 @@
 
 use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::stopped_before_start;
+use crate::hosts::terminal::ProcessRoot;
 use crate::procs::{self, ProcessState};
 use crate::store::Transition;
 use std::collections::{HashMap, HashSet};
@@ -261,9 +262,9 @@ pub(crate) enum SweepTarget {
     /// pane's PPID closure (supplied by the caller), this session's agent
     /// marker, and the legacy bucket.
     AgentOnly,
-    /// Every process carrying the session marker, tabs included: what
-    /// `DeleteSession` claims.
-    WholeSession,
+    /// Delete claims every process carrying the session marker. Its pinned
+    /// tab children get a hangup even when their markers are unreadable.
+    WholeSession(HashSet<ProcessRoot>),
     /// One tab's own processes: what `CloseTab` claims. Selection requires
     /// the session marker AND that tab's exact minted id — never a tab
     /// marker on its own, which would let a process of an unrelated
@@ -306,7 +307,7 @@ impl SweepTarget {
         }
         match self {
             SweepTarget::AgentOnly => markers.agent || (!markers.any_agent && !markers.any_tab),
-            SweepTarget::WholeSession => true,
+            SweepTarget::WholeSession(_) => true,
             SweepTarget::Tab(_) => markers.tab,
         }
     }
@@ -771,7 +772,14 @@ fn signal_sweep(
     signalled.sort_unstable();
     let signalled_count = signalled.len();
     signalled.truncate(32);
-    info!(session = %session_id, tab = ?target.selects_tab(), target = ?target, signal,
+    // The target can carry all of Delete's pinned tabs. Keep the diagnostic
+    // bounded by logging the operation and the capped recipient sample.
+    let label = match target {
+        SweepTarget::AgentOnly => "AgentOnly",
+        SweepTarget::WholeSession(_) => "WholeSession",
+        SweepTarget::Tab(_) => "Tab",
+    };
+    info!(session = %session_id, tab = ?target.selects_tab(), target = label, signal,
         signalled_count, pids = ?signalled, truncated = signalled_count > signalled.len(),
         errors = errors.len(), "process-tree sweep signal completed");
     errors
@@ -1078,7 +1086,7 @@ async fn poll_until_gone(
 /// 1. Enumerate (PPID closure from the `roots` if any, unioned with the
 ///    environment-marker scan for `session_id`) and SIGTERM the result;
 ///    shell selections get SIGHUP as well. For a whole agent session,
-///    only the tab-marked processes get the terminal's hangup.
+///    tab-marked processes and pinned tab shells get the terminal's hangup.
 /// 2. After a grace period — bounded by [`KILL_GRACE`], ended early only
 ///    once EVERY pid round 1 signalled is confirmed gone (see
 ///    [`poll_until_gone`] for why the root alone dying is not enough) —
@@ -1100,12 +1108,9 @@ async fn poll_until_gone(
 ///    first), then poll until every one of them has actually disappeared
 ///    (see [`confirm_gone`]).
 ///
-/// `target` says WHICH of the session's processes this sweep claims —
-/// the agent's with tabs subtracted, the whole session, or one tab (see
-/// [`SweepTarget`], and PLAN_M4.md item 2 for why the split exists at
-/// all). It changes only which processes the marker scan admits as roots
-/// and which the closure may expand through; the five-phase escalation
-/// below is identical for all three.
+/// `target` selects the marker roots and the initial hangup recipients.
+/// See [`SweepTarget`] for the agent, whole session and tab selections and
+/// PLAN_M4.md item 2 for why they differ. The later cleanup phases are shared.
 ///
 /// `roots` are pane processes' `(pid, starttime)` pairs as their caller
 /// validated them: usually the one pane the operation is about, every live
@@ -1200,7 +1205,10 @@ async fn kill_process_tree_with_grace(
         _ => found
             .identities
             .iter()
-            .filter(|(pid, _)| found.hangup.contains(pid))
+            .filter(|&(&pid, &start)| {
+                found.hangup.contains(&pid)
+                    || matches!(target, SweepTarget::WholeSession(tabs) if tabs.contains(&ProcessRoot { pid, start }))
+            })
             .map(|(&pid, &starttime)| (pid, starttime))
             .collect(),
     };
@@ -2633,7 +2641,7 @@ mod tests {
              exclusion-only selection left open"
         );
 
-        let delete = SweepTarget::WholeSession;
+        let delete = SweepTarget::WholeSession(HashSet::new());
         assert!(delete.claims(&agent_launch) && delete.claims(&tab_launch));
         assert!(delete.claims(&legacy));
 
@@ -3497,7 +3505,10 @@ mod tests {
         let tab_id = uuid::Uuid::new_v4().to_string();
         let grace = Duration::from_secs(5);
 
-        for target in [SweepTarget::Tab(tab_id.clone()), SweepTarget::WholeSession] {
+        for target in [
+            SweepTarget::Tab(tab_id.clone()),
+            SweepTarget::WholeSession(HashSet::new()),
+        ] {
             let mut shell = crate::procs::sleeper::spawn(&[
                 (crate::launch::SESSION_ID_ENV_VAR, &session_id),
                 (crate::launch::TAB_ID_ENV_VAR, &tab_id),
@@ -3546,6 +3557,39 @@ mod tests {
         }
     }
 
+    /// Delete can identify a tab from its host even when macOS hides the shell's
+    /// environment. A markerless tab that ignores SIGTERM must die by hangup.
+    #[farhelm_testtrace::test]
+    async fn delete_hangs_up_a_pinned_tab_shell_without_markers() {
+        use std::os::unix::process::ExitStatusExt as _;
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut shell = FixtureChild(crate::procs::sleeper::spawn(&[(
+            crate::procs::sleeper::SLEEPER_IGNORE_TERM_ENV,
+            "1",
+        )]));
+        let pid = shell.0.id();
+        let (_, start, state) = procs::read_process(pid)
+            .unwrap()
+            .expect("read the tab shell");
+        assert_eq!(state, ProcessState::Running, "the tab shell is alive");
+        let target = SweepTarget::WholeSession(HashSet::from([ProcessRoot { pid, start }]));
+        assert!(
+            !environ_markers_of(pid, &id, &target).is_some_and(|markers| target.claims(&markers))
+        );
+        reap_process_tree(
+            &crate::scope::ScopeManager::disabled(),
+            ScopeUnits::default(),
+            [(pid, start)],
+            &id,
+            &target,
+            ScopeKillFailure::Refuse,
+        )
+        .await
+        .expect("Delete confirms the tab shell is gone");
+        assert_eq!(shell.0.wait().unwrap().signal(), Some(libc::SIGHUP));
+    }
+
     /// The saved shell choice must reach both mechanisms. A scope can retire
     /// at the hangup without a portable walk, and an unscoped shell must
     /// still receive the same signal before forced cleanup.
@@ -3577,7 +3621,7 @@ mod tests {
         reap(
             &crate::scope::ScopeManager::disabled(),
             None,
-            &SweepTarget::WholeSession,
+            &SweepTarget::WholeSession(HashSet::new()),
         )
         .await
         .expect("the unscoped shell must be reaped");
