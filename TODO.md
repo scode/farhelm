@@ -69,11 +69,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching
   indicators come later and should fit the layout. Plan: `plans/queue/welcome-empty-state.md`.
 
-- **Remove GPT-5.6 models from the catalog.** OpenAI is retiring the GPT-5.6 models (Codex 0.172.0 already interrupts
-  `gpt-5.6-terra` with a retirement prompt). Remove the `gpt-5.6-*` entries from Farhelm's model catalog across Codex,
-  OpenRouter (Goose, Pi, OMP), and OpenCode, along with SPEC.md and tests. Plan:
-  `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
-
 - **Deduplicate OpenCode's conversation lookup in the drift tests.** `initial_prompt` and `named_conversation` each look
   up the test conversation in OpenCode's session list by folder path, and the two copies disagree on symlink resolution
   and verdict (`COULD NOT RUN` vs `FAILED`). Share one helper so both categories behave the same way. Plan:
@@ -528,12 +523,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   places `--conversation` after `--`, where it is a positional argument. Keep the settings and conversation options
   before the delimiter, preserving stored Custom words and workspace-trust edits. The `permission_modes` drift case
   reports this boundary before it would start the wrong conversation.
-
-- **Check Codex's GPT-5.6 Terra retirement path.** With `-m gpt-5.6-terra`, Codex 0.172.0 showed “Try new model” and
-  “Use existing model” before it showed the composer. Reproduce with
-  `python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection --harness codex`. Check the resulting
-  model in an isolated CLI configuration if Farhelm still offers GPT-5.6 Terra. The live drift case leaves the account's
-  choice alone. Plan: `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
 
 - **Finish OpenRouter and saved-default model verification.** Goose 1.60.2, Pi 1.6.0 and OMP 19.1.1 opened with an
   active model when started without `--provider` or `--model`. Compare the active choice with the saved provider and

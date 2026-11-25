@@ -67,7 +67,6 @@ pub const CATALOG_FAMILIES: &[&str] = &[
     "neon",
     "sol",
     "spark",
-    "terra",
 ];
 
 /// Recognize reserved family words even before the catalog has arrived. Ownership still comes from its rows.

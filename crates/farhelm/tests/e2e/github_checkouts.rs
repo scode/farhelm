@@ -1269,7 +1269,7 @@ fn assert_process_argv(case: &AcceptedCase, argv: &str) {
         }
         Selector::Structured(selection) => {
             assert_eq!(selection.harness, LaunchHarness::Codex);
-            assert!(words.windows(2).any(|pair| pair == ["-m", "gpt-5.6-terra"]));
+            assert!(words.windows(2).any(|pair| pair == ["-m", "gpt-6.2-sol"]));
             assert!(
                 words
                     .iter()
@@ -1475,7 +1475,7 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
                 custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Codex,
-                model: Some("gpt-5.6-terra".into()),
+                model: Some("gpt-6.2-sol".into()),
                 effort: Some(LaunchEffort::High.into()),
                 permissions: Some(LaunchPermission::Yolo),
                 wrapper_prefix: None,
