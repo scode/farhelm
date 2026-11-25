@@ -175,7 +175,8 @@ complete uninstall. `stdio_proxy_pids` identifies the subset tied to an SSH
 connection, which may exit when Remove forgets that connection. Keep only the
 PIDs in both lists. Farhelm's own processes run as this user, so links this
 user cannot read are skipped. A missing command line leaves the PID in the
-full list without assigning the proxy role.
+full list without assigning the proxy role unless its executable has also
+disappeared since the first read.
 
 `session_ids` are the kept database's session ids, read read-only, so an
 uninstall that emptied or replaced the database cannot pass as one that kept
@@ -221,6 +222,16 @@ the data; an unreadable database reads as None.
                 with (entry / 'cmdline').open('rb') as command:
                     argv = command.read(4096).split(b'\0', 3)
             except OSError:
+                argv = []
+            if not argv or argv == [b'']:
+                # Keep unknown live processes visible to Uninstall. Remove can
+                # close a proxy while we scan it, so confirm it is gone first.
+                try:
+                    os.readlink(entry / 'exe')
+                except FileNotFoundError:
+                    running.pop()
+                except OSError:
+                    pass
                 continue
             if len(argv) == 4 and argv[1:3] == [b'internal', b'stdio']:
                 stdio_proxies.append(pid)

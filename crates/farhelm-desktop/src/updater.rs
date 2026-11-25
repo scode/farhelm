@@ -1856,7 +1856,7 @@ mod tests {
 
     // ---- Restart to update ----
 
-    /// Spec: the opener's environment explicitly excludes the test override
+    /// Spec: the opener's environment explicitly excludes the test overrides
     /// and the reopen marker, even when the parent app inherited them. The
     /// marker belongs to the one app a reopen started (design, section 1:
     /// at most once); the instance Restart to update opens is not that one.
@@ -1864,9 +1864,13 @@ mod tests {
     /// in the test process; native LaunchServices forwarding still needs the
     /// Mac release test.
     #[farhelm_testtrace::test]
-    fn the_relaunch_command_removes_the_latest_override() {
+    fn the_relaunch_command_removes_launch_only_settings() {
         let command = relaunch_command(1, Path::new("bundle"), Path::new("opener"), 0, None);
-        for removed in [LATEST_OVERRIDE_ENV, super::super::bundle::REOPENED_ENV] {
+        for removed in [
+            LATEST_OVERRIDE_ENV,
+            crate::ANNOUNCEMENTS_PATH_ENV,
+            super::super::bundle::REOPENED_ENV,
+        ] {
             assert!(
                 command
                     .get_envs()

@@ -300,17 +300,11 @@ consequences.
 - [`antigravity-trust-dismissal-lost-during-recovery.md`](antigravity-trust-dismissal-lost-during-recovery.md) — A
   terminal recovery can bring back an Antigravity trust hint the user already dismissed for the same question.
 
-- [`docs-shots-share-host-details-state.md`](docs-shots-share-host-details-state.md) — A docs screenshot can show
-  different host row details depending on which other shots run on the same worker.
-
 - [`menu-shortcuts-omitted-from-native-accessibility.md`](menu-shortcuts-omitted-from-native-accessibility.md) — The new
   menu shortcut labels do not reach the native accessibility shortcut fields.
 
 - [`feedback-external-link-cue-is-visual-only.md`](feedback-external-link-cue-is-visual-only.md) — The feedback dialog’s
   Discord link omits the browser-opening cue from its accessible description.
-
-- [`upgrade-highlights-feed-can-outgrow-desktop-reader.md`](upgrade-highlights-feed-can-outgrow-desktop-reader.md) — The
-  cumulative highlights feed can exceed the desktop reader’s limit while still passing the release promotion check.
 
 - [`upgrade-highlights-can-open-after-sign-in.md`](upgrade-highlights-can-open-after-sign-in.md) — Upgrade highlights
   can take focus after a startup SSH question has already opened and closed.
@@ -430,9 +424,6 @@ consequences.
 - [`terminal-prehello-test-misses-output-loss.md`](terminal-prehello-test-misses-output-loss.md) — The terminal
   lifecycle test checks a substring and can pass when other expected output is missing at exit.
 
-- [`capture-stop-retry-can-lose-starting-host.md`](capture-stop-retry-can-lose-starting-host.md) — Retrying cleanup
-  after an interrupted capture start can remove the recovery directory before the host finishes starting.
-
 - [`agent-settings-search-omits-agent-name.md`](agent-settings-search-omits-agent-name.md) — Settings search can give
   different agents' pages or hook controls the same accessible name.
 
@@ -459,9 +450,6 @@ consequences.
 
 - [`hook-recovery-text-omits-direction-isolation.md`](hook-recovery-text-omits-direction-isolation.md) — Restart and
   recovery text escape host-supplied hook errors without isolating their text direction.
-
-- [`container-golden-stays-on-loading.md`](container-golden-stays-on-loading.md) — The new-container golden settles on a
-  loading status because its fixture never supplies the build result.
 
 - [`launcher-loses-hook-offer-on-tab-switch.md`](launcher-loses-hook-offer-on-tab-switch.md) — Switching tabs during the
   hook settings read can suppress the setup offer while retaining the chosen agent.
@@ -630,10 +618,6 @@ consequences.
   — The desktop can offer a sandbox launch for a checkout name that cannot produce a valid directory. The helm can
   create the environment and attempt cleanup before telling the user to fix the name.
 
-- [`trailing-empty-highlights-release-path-lacks-consumer-test.md`](trailing-empty-highlights-release-path-lacks-consumer-test.md)
-  — The release checker accepts a version with every entry in All changes. The generator, desktop reader and dialog lack
-  an assertion that this release remains usable.
-
 - [`trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md`](trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md)
   — The tests can pass without showing that a command typed in Bash or Zsh is saved when Farhelm stops the session.
 
@@ -752,12 +736,6 @@ consequences.
   — A busy or refused Don't show again click can attach its error to a different session if selection moved after the
   hint was drawn.
 
-- [`deflake-sweep-fixtures-inherit-git-hooks.md`](deflake-sweep-fixtures-inherit-git-hooks.md) — The deflake sweep-base
-  tests can fail before evaluating the base when a developer's configured Git hook refuses a fixture commit.
-
-- [`deflake-base-refusal-test-misses-run-state.md`](deflake-base-refusal-test-misses-run-state.md) — The sweep-base
-  tests can pass even if an unsupported revision creates run state before deflake refuses it.
-
 - [`launcher-preview-path-no-longer-copyable.md`](launcher-preview-path-no-longer-copyable.md) — The compact
   managed-checkout row shows the exact planned folder without the selection and copy control available before the layout
   change.
@@ -797,10 +775,6 @@ consequences.
   — The prepared Tensorlake Add test can pass if Farhelm releases the chosen snapshot for retirement while the new
   sandbox is still starting.
 
-- [`trailing-test-worker-relative-checkout-breaks-lock-isolation.md`](trailing-test-worker-relative-checkout-breaks-lock-isolation.md)
-  — Passing a relative --checkout . or .. places remote state in the wrong parent directory, bypasses worker-wide
-  bootstrap and active locks, and forces a full re-bootstrap every run.
-
 - [`trailing-shortcuts-chord-opens-during-terminal-ime.md`](trailing-shortcuts-chord-opens-during-terminal-ime.md) —
   Pressing the Keyboard shortcuts chord while an input method is composing in a focused terminal still opens the
   overview dialog instead of ignoring composition.
@@ -824,10 +798,6 @@ consequences.
 - [`trailing-tensorlake-setup-rerun-omits-suspended-and-sealed-refusal.md`](trailing-tensorlake-setup-rerun-omits-suspended-and-sealed-refusal.md)
   — Rerunning setup on a suspended or sealed Tensorlake host still offers the setup confirmation instead of refusing up
   front, and confirming on a suspended host temporarily overwrites Suspended with a failed setup run.
-
-- [`trailing-tensorlake-rust-tests-summary-head-60-evicts-count.md`](trailing-tensorlake-rust-tests-summary-head-60-evicts-count.md)
-  — When a passing Tensorlake Rust shard emits 60 or more SKIPPED lines, head -60 evicts nextest's Summary line, causing
-  the runner to fail the passing shard and leave its sandbox retained.
 
 - [`trailing-ssh-setup-existing-tensorlake-mutates-before-lock.md`](trailing-ssh-setup-existing-tensorlake-mutates-before-lock.md)
   — Confirming an SSH-targeted setup plan on an existing Tensorlake host that became suspended can overwrite saved paths
@@ -925,10 +895,6 @@ consequences.
   — If a host leaves or empties while its 'Delete all on' confirmation is open in Trash, the invisible confirmation
   keeps all other hosts' Delete/Retry buttons disabled and swallows the first Close or Escape.
 
-- [`trailing-mac-reboot-shell-discards-command-status-tag.md`](trailing-mac-reboot-shell-discards-command-status-tag.md)
-  — The manual macOS reboot test helper ignores the wrapped exit-status tag on SSH commands, so a lossy SSH server can
-  make a failed reboot look successful and stall for 30 minutes.
-
 - [`trailing-resolve-remote-status-clears-local-transport-signal.md`](trailing-resolve-remote-status-clears-local-transport-signal.md)
   — If the local SSH or Podman client process is killed by a signal after stderr delivers the status record, Farhelm
   discards the signal termination and can treat truncated stdout as exit 0.
@@ -996,11 +962,6 @@ consequences.
   host that already has an automatic-update sign-in waiting and answers that shared prompt with automatic updates still
   turned on (the default setting), allowing a race between the automatic update resuming and the user's manual Update or
   Uninstall to go undetected.
-
-- [`trailing-brick-test-exiting-stdio-proxy-mid-scan-fails-remove.md`](trailing-brick-test-exiting-stdio-proxy-mid-scan-fails-remove.md)
-  — During the brick test's Linux remote Remove check, if the closing SSH stdio proxy exits between two `/proc` reads
-  while taking the post-Remove snapshot, the probe keeps its PID in `farhelm_pids` without recognizing it as a stdio
-  proxy.
 
 - [`trailing-check-template-shape-allows-custom-agent-yolo-false.md`](trailing-check-template-shape-allows-custom-agent-yolo-false.md)
   — Both the CLI and the desktop Templates editor allow saving a Command launch template that declares a custom agent
@@ -1169,10 +1130,6 @@ consequences.
   actions menu header and the quick switcher's agent column, instead of the custom agent's current display name (or its
   saved ID after the registration is deleted).
 
-- [`trailing-session-toolbar-golden-height-clips-on-macos.md`](trailing-session-toolbar-golden-height-clips-on-macos.md)
-  — The screenshot golden for the session toolbar is sized only for Linux's 30-pixel top row, so capturing it on macOS
-  clips the top and bottom of the taller 48-pixel title-band rows without failing its readiness check.
-
 - [`trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md`](trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md)
   — When a custom agent is deleted externally while the user has unsaved edits, the 'This registration was deleted.
   Register it again to keep these edits.' banner is omitted from the accessibility tree so assistive technology never
@@ -1290,10 +1247,6 @@ consequences.
   confirmation dialog explains the YOLO classification as "Farhelm treats every Custom permission choice as YOLO."
   Because "Custom" is also the name of the Custom permission flags mode, this reads as if the launch used custom
   permission flags rather than a registered custom agent.
-
-- [`trailing-announcement-override-survives-app-relaunch.md`](trailing-announcement-override-survives-app-relaunch.md) —
-  An app started with the brick-test announcement feed override keeps it after Restart to update or a bundle reopen, so
-  it keeps polling the test feed.
 
 - [`trailing-bell-open-announcements-silent-on-read-failure.md`](trailing-bell-open-announcements-silent-on-read-failure.md)
   — Pressing Open Announcements in the notification bell does nothing visible when the helm read fails: no dialog and no

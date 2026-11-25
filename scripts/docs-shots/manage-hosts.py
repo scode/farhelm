@@ -41,10 +41,20 @@ def app_settings(bridge):
 
 
 def details(bridge):
-    """Show the host list with Details switched on, which only changes what the list shows, not a setting."""
+    """Expand the hosts for this capture and restore the compact rows for the rest of the shared run."""
     bridge.click("id:hosts-panel-toggle")
     bridge.click("id:host-details-toggle")
-    bridge.wait(f"id:host-detail-{{host:{REMOTE}}}-0")
+
+    def restore_compact_rows():
+        """Hiding Hosts leaves Details on, so reset the toggle while Hosts is still open."""
+        bridge.click("id:host-details-toggle")
+
+    try:
+        bridge.wait(f"id:host-detail-{{host:{REMOTE}}}-0")
+    except Exception:
+        restore_compact_rows()
+        raise
+    return restore_compact_rows
 
 
 SHOTS = [

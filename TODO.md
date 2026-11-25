@@ -64,6 +64,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Show the settled build status in the New container golden.** The fake helm supplies the Development recipe but never
+  supplies its build state on the selected Container host. The scene stops waiting when the Recipe field is drawn, which
+  permits a picture of the interim status or an unavailable host. Stage a ready container host and a build place for
+  that exact host and recipe. Wait for the settled note to be drawn before comparing either appearance. The reference
+  images must move with the fixture. Refresh them on the current launcher and recipe-host behavior, then inspect the
+  full comparison for unrelated differences before publishing the new references.
+
 - **Require a committed hook report after Restart in the drift checks.** The Codex, Antigravity and Grok cases can see a
   new acknowledged callback and the old stored resume identity even when the callback was a stale no-op. Require
   evidence that the resumed generation committed the report. Carry the generation and identity in the witness used by

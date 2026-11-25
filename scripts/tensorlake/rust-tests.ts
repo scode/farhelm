@@ -28,6 +28,7 @@
  */
 import $ from "jsr:@david/dax@0.50.1";
 import { parseArgs } from "jsr:@std/cli@1.0.32/parse-args";
+import { TextLineStream } from "jsr:@std/streams@1.2.0/text-line-stream";
 import { create, freeNames, HOME, retainSandbox, snapshotRows, sweep, uploadChunked } from "./sandbox-tests.ts";
 
 const HERE = import.meta.dirname!;
@@ -110,13 +111,21 @@ async function stage(
   }
 }
 
-/** Each partition may select zero tests. The existing worker summary includes nextest's final count on both new
- * and reused staging snapshots. A success without a summary cannot establish that tests ran. */
-function completedTests(summary: string) {
-  const clean = summary.replace(/\x1b\[[0-9;]*m/g, "");
-  const count = clean.match(/^\s*Summary[ \t]+\[[^\]\n]+\][ \t]+(\d+) tests? run:/m)?.[1];
-  if (count === undefined) throw new Error("shard finished without nextest's completed test count");
-  return Number(count);
+/** Each partition may select zero tests. A successful exit without nextest's final count does not establish that
+ * tests ran. The bounded excerpt on older staging snapshots can omit the count, and sorting it loses the order of
+ * the lines. Read the retained console a line at a time because an entire shard's output can be large. */
+async function completedTests(consolePath: string) {
+  const file = await Deno.open(consolePath);
+  const lines = file.readable.pipeThrough(new TextDecoderStream()).pipeThrough(new TextLineStream());
+  // nextest prints its final summary after the tests' output, which can include other nextest commands.
+  let lastCount;
+  for await (const line of lines) {
+    const clean = line.replace(/\x1b\[[0-9;]*m/g, "");
+    const match = clean.match(/^[ \t]*Summary[ \t]+\[[^\]\n]+\][ \t]+(\d+) tests? run:/);
+    if (match) lastCount = Number(match[1]);
+  }
+  if (lastCount !== undefined) return lastCount;
+  throw new Error("shard finished without nextest's completed test count");
 }
 
 /** One partition on its own clone. Keep a failed shard's run directories with its console and summary. If any
@@ -162,7 +171,7 @@ async function shard(
       await $`tl sbx exec ${name} sh -c ${archiveRuns} sh ${remote}/runs.tar.gz`;
       await $`tl sbx cp ${name}:${remote}/runs.tar.gz ${dir}/runs.tar.gz`.quiet();
     }
-    const tests = code === 0 ? completedTests(summary) : 0;
+    const tests = code === 0 ? await completedTests(`${dir}/console.log`) : 0;
     collected = true;
     if (code !== 0) throw new Error(`${name}: shard exited ${code}. Evidence in ${dir}`);
     console.log(`shard${k} (${name}): ${tests} tests run`);
@@ -299,7 +308,8 @@ case "$2" in
         elif [ "$MODE" = empty ] || [ "\${3%%:*}" = review2 ]; then
           printf 'exit: 0\\n    Summary [0.001s] 0 tests run: 0 passed\\n' >"$4"
         else
-          printf 'exit: 0\\n    Summary [0.001s] 1 test run: 1 passed\\n' >"$4"
+          # Older staging snapshots can lose the nextest count from a crowded excerpt.
+          printf 'exit: 0\\nSKIPPED: fixture diagnostics filled the excerpt\\n' >"$4"
         fi ;;
       */console.log)
         if [ "$MODE" = failed ] && [ "\${3%%:*}" = review3 ]; then
@@ -313,7 +323,14 @@ case "$2" in
           sleep 0.1
           grep -qx 'terminate review3' "$FAKE_ROOT/events" && exit 2
         fi
-        printf '%s\\n' "$3" >>"$FAKE_ROOT/events"; touch "$4" ;;
+        printf '%s\\n' "$3" >>"$FAKE_ROOT/events"
+        printf 'diagnostic mentions Summary [0.001s] 0 tests run: 0 passed\\n' >"$4"
+        printf '    Summary [0.001s] 0 tests run: 0 passed\\n' >>"$4"
+        if [ "$MODE" = empty ] || [ "\${3%%:*}" = review2 ]; then
+          printf '    Summary [0.001s] 0 tests run: 0 passed\\n' >>"$4"
+        else
+          printf '    \\033[1mSummary\\033[0m [0.001s] 1 test run: 1 passed\\n' >>"$4"
+        fi ;;
       */runs.tar.gz) exit 1 ;;
       *) exit 2 ;;
     esac ;;
@@ -360,7 +377,11 @@ esac
       return { code: result.code, output, events: await Deno.readTextFile(`${scratch}/events`) };
     };
     const mixed = await run("mixed");
-    if (mixed.code !== 0 || !mixed.output.includes("ALL SHARDS PASSED") || !mixed.output.includes("0 tests run")) {
+    if (
+      mixed.code !== 0 || !mixed.output.includes("ALL SHARDS PASSED") ||
+      !mixed.output.includes("shard1 (review2): 0 tests run") ||
+      !mixed.output.includes("shard2 (review3): 1 tests run")
+    ) {
       throw new Error(mixed.output);
     }
     const empty = await run("empty");
