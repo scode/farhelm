@@ -20,8 +20,9 @@ and the desktop app's and GPUI crates' tests. The Linux workspace selection incl
 with rootless Podman and its offline Ubuntu image prepared before execution. The GPUI smoke runs the debug app through
 its automation bridge on a private headless Mutter display with Mesa's software renderer. Its recorder output goes to
 the same failure evidence collection as the other release tests. The gate lives inside the build jobs rather than in a
-`plan-jobs` workflow because dist 0.32 lets a failed plan job SKIP the build jobs, and its `host` job accepts a skip; a
-failure inside a build job is the only kind it refuses.
+`plan-jobs` workflow because dist 0.32 lets a failed plan job skip the build jobs, and its `host` job accepts a skip. A
+gate failure inside the build job gives `host` a failed dependency directly. Farhelm's added artifact handoff checks
+also block publication when the required outputs are missing.
 
 The artifact downloader can succeed with the artifacts GitHub listed at that instant. Platform builds fetch the plan by
 name. The checksum and host jobs require the plan, all three build manifests, all four archives and their sidecars

@@ -4,8 +4,8 @@
 #
 # This file is NOT a workflow. It is a bare YAML list of GitHub Actions steps
 # that only dist reads, at `dist generate` time, inlining them into the
-# generated workflow — so a change here does nothing until `dist init --yes`
-# regenerates `release.yml`, the same rule as every other dist setting.
+# generated workflow. Regenerate `release.yml` with
+# `python3 releasing/generate-workflow.py` and the pinned dist on PATH.
 #
 # It sits in `.github/` rather than `.github/workflows/` because GitHub tries
 # to parse everything at the top level of the workflows directory as a
@@ -19,10 +19,10 @@
 # generated graph treats a skipped artifact job as acceptable — `host` runs
 # when `build-local-artifacts` is `success` OR `skipped` — so a failed
 # dependency UPSTREAM of the build jobs (a `plan-jobs` entry, which is what
-# this project used first) makes them skip, and the release is then created
-# with none of its payloads. A failure INSIDE a build job is a job failure,
-# which `host` does reject. So the gate runs here, in the job whose result
-# actually gates publication.
+# this project used first) makes them skip. Farhelm's artifact handoff
+# check would still block publication when their outputs are missing.
+# Keeping the gate inside a build job gives a direct build failure,
+# which `host` rejects before reaching the handoff.
 #
 # The steps are ordered cheapest-refusal-first: the tag shape, then the tests,
 # then the things only a release build needs.

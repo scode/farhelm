@@ -288,9 +288,6 @@ consequences.
 - [`legacy-template-can-ask-to-save-automatic-cleanup.md`](legacy-template-can-ask-to-save-automatic-cleanup.md) — A
   legacy template can ask to save when the only remaining change is automatic cleanup of a retired trust field.
 
-- [`sealed-container-delete-spec-conflicts.md`](sealed-container-delete-spec-conflicts.md) — The product and
-  implementation specs disagree about where a late sealed container deletion failure is reported.
-
 - [`tensorlake-key-clear-spec-misstates-leftover-refresh.md`](tensorlake-key-clear-spec-misstates-leftover-refresh.md) —
   The implementation spec says clearing the Tensorlake API key refreshes the leftovers list. The app clears and
   invalidates that list instead.
@@ -339,9 +336,6 @@ consequences.
 
 - [`upgrade-highlights-opt-out-refusal-is-hidden.md`](upgrade-highlights-opt-out-refusal-is-hidden.md) — A refused Don’t
   show again save can close the highlights dialog without telling the user.
-
-- [`release-gate-regeneration-guidance-stale.md`](release-gate-regeneration-guidance-stale.md) — The release workflow’s
-  maintainer instructions can leave the generated workflow stale for the next tag.
 
 - [`settings-close-save-can-hide-notification-refusal.md`](settings-close-save-can-hide-notification-refusal.md) — Save
   and Close can take the user to Notifications while leaving the relevant error below the viewport.
@@ -396,13 +390,6 @@ consequences.
 
 - [`launcher-incomplete-template-banner-misplaced.md`](launcher-incomplete-template-banner-misplaced.md) — The
   incomplete-template message appears below the form and asks the user to complete the form below it.
-
-- [`quick-launch-placement-contract-omits-local-host.md`](quick-launch-placement-contract-omits-local-host.md) — The
-  spec promises New's placement defaults, while quick launch beside a disposable session deliberately defaults to the
-  helm's own host.
-
-- [`launcher-tab-order-omits-command-message.md`](launcher-tab-order-omits-command-message.md) — The specified Tab order
-  omits a command-message stop that can appear before the form.
 
 - [`podman-launch-lifetime-notice-hidden.md`](podman-launch-lifetime-notice-hidden.md) — The launcher only explains in
   Host help that deleting the last session removes a new container and its files.
@@ -688,11 +675,6 @@ consequences.
   — If a replay reveals the exit frame before its history is delivered, the viewer can browse that frame and then jump
   to old history without a scroll request. An already stored selection may be dropped or name different rows.
 
-- [`trailing-registered-all-numeric-ssh-names-bypass-first-label-shortening.md`](trailing-registered-all-numeric-ssh-names-bypass-first-label-shortening.md)
-  — A multi-label numeric SSH name with too many components to be IPv4 can be saved in a host's Destination field. The
-  collapsed rail then uses the whole spelling in its short caption and can truncate it. Hover help still has the full
-  name.
-
 - [`trailing-all-phase-fixture-does-not-compare-managers-phase-strings.md`](trailing-all-phase-fixture-does-not-compare-managers-phase-strings.md)
   — The strengthened fixture catches client/wire phase drift. A manager-only rename for a phase can still pass this
   fixture.
@@ -740,9 +722,6 @@ consequences.
 
 - [`trailing-delete-scope-comment-describes-old-stop-behavior.md`](trailing-delete-scope-comment-describes-old-stop-behavior.md)
   — The cleanup source misstates what happens to terminal tabs when a session is stopped.
-
-- [`trailing-exited-session-skips-portable-sweep.md`](trailing-exited-session-skips-portable-sweep.md) — After a program
-  exits and its scope disappears, Stop, Restart and Delete can skip the fallback search for its remaining jobs.
 
 - [`trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md`](trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md)
   — The tests can pass without showing that a command typed in Bash or Zsh is saved when Farhelm stops the session.
@@ -861,13 +840,6 @@ consequences.
 - [`trailing-migration-comments-reboot-classification-remains-disputed.md`](trailing-migration-comments-reboot-classification-remains-disputed.md)
   — The migration wording may imply that a Launching row avoids the interruption assigned to Running rows. The ensuing
   reboot classification gap remains unverified.
-
-- [`trailing-restart-disposition-documentation-still-promises-no-external-change.md`](trailing-restart-disposition-documentation-still-promises-no-external-change.md)
-  — The implementation has contradictory descriptions of whether a failed Restart may have run a replacement.
-
-- [`trailing-interrupted-be-superseded-by-inferred-preparation-failure.md`](trailing-interrupted-be-superseded-by-inferred-preparation-failure.md)
-  — The protocol docs promise a definitive launch error before Interrupted changes, while the supervisor can reclassify
-  from missing or unreadable preparation evidence.
 
 - [`trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md`](trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md)
   — The product requires restricted sessions to be denied this operation. The independent inspection did not establish
@@ -1452,20 +1424,11 @@ consequences.
   registered custom agent from the Settings sidebar, even though each registered custom agent is its own Settings
   section.
 
-- [`trailing-spec-impl-contradiction-orphan-discovery-local-read-bounds.md`](trailing-spec-impl-contradiction-orphan-discovery-local-read-bounds.md)
-  — The implementation specification contradicts itself about whether listing Tensorlake sandboxes not on this helm
-  bounds its local database reads, which can mislead future changes to discovery timeouts.
-
 - [`trailing-spec-md-contradicts-send-handoff-auto-opening-auto-update-popover.md`](trailing-spec-md-contradicts-send-handoff-auto-opening-auto-update-popover.md)
   — The product specification contradicts itself on when an automatic host update's SSH sign-in popover can open on its
   own: one section says it opens only when you press **Answer** (or run a manual action on that host), while the
   keyboard-focus section and the desktop app allow sending an answer to any other host's SSH question to immediately
   open and focus an already-waiting automatic Update Setup question.
-
-- [`trailing-spec-md-status-contradicts-codex-pin-corrected-text.md`](trailing-spec-md-status-contradicts-codex-pin-corrected-text.md)
-  — The Status section of SPEC.md still states the pre-positional wording for Codex pin-correction notifications (a
-  nested process of that agent, "would have resumed", and "the agent process that started it"), contradicting the
-  updated Codex notification text shipped in #4728.
 
 - [`trailing-specs-and-core-omit-grok-and-custom-from-pin-correction-lists.md`](trailing-specs-and-core-omit-grok-and-custom-from-pin-correction-lists.md)
   — The product and implementation specs still list only Claude, Codex, Muse, and Antigravity for pin-correction
@@ -1494,12 +1457,6 @@ consequences.
 - [`trailing-templates-editor-allows-generic-custom-on-agent-template.md`](trailing-templates-editor-allows-generic-custom-on-agent-template.md)
   — Switching a Command template with generic 'Custom' to an Agent template shows 'Custom (not offered)' in the Agent
   type dropdown, yet the editor still allows saving it without an error.
-
-- [`trailing-tensorlake-add-tests-misleading-codex-null-docstring.md`](trailing-tensorlake-add-tests-misleading-codex-null-docstring.md)
-  — A test docstring in Tensorlake setup tests inaccurately claims a fresh host leaves its Codex cleanup stamp unset
-  because it has no earlier Codex settings write, when in fact a fresh host records `Cleared` as soon as Codex
-  reconciliation runs (on connect) and only stays `null` here because setup skips Codex reconciliation before the
-  protocol-87 hello.
 
 - [`trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md`](trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md)
   — When you replace your saved Tensorlake API key with a different key in Settings without clicking Clear first, the

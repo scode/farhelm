@@ -1125,9 +1125,10 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
 /// Codex modes need setup's credential step even without any API endpoint.
 /// Subscription seeds before the host connection becomes usable; None still
 /// reports a failed removal of the managed launch credentials as a warning
-/// while connection continues. A fresh host has no earlier Codex settings
-/// write, so neither mode reads the agent settings or records a Codex
-/// settings cleanup: only an earlier endpoint write ever calls for one.
+/// while connection continues. Both leave the Codex legacy-cleanup stamp
+/// unset during setup because reconciliation waits for a compatible
+/// supervisor connection (protocol 87) that can receive the extended
+/// launch-credential snapshot with Codex endpoint settings.
 #[farhelm_testtrace::test]
 async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
     use farhelm_proto::credentials::{CreateCredential, CredentialKind};

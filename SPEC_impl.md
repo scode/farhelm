@@ -4929,15 +4929,15 @@ no path values are stored in the notice.
 
   When the conditions for scope-only cleanup do not hold, the reaper runs the existing portable sweep unchanged. A named
   scope must be observed live before signalling and confirmed collected afterwards; an already-gone or initially
-  unconfirmed scope keeps the sweep. Deleting a session whose agent or a tab already exited, a Stop or Restart after the
-  agent exited therefore always sweep. Scope-name provenance and containment completeness are separate inputs: a guessed
-  name that is absent does not prove that a target was scoped. An unscoped launch, an unscoped tab or unavailable
-  selection keeps the sweep required even when optional scope names are added. Delete combines the agent's and every
-  tab's selection, including what each host's tag records, so a scoped agent cannot hide an unscoped tab's cleanup
-  requirement. It also keeps the sweep when discovery is incomplete: no agent terminal, or an agent host past generation
-  zero, means historical unscoped tab jobs may remain. A systemd glob can supply scope handles in those cases, but
-  cannot prove that no such jobs exist. Existing discovery errors still refuse Delete; a successful empty listing does
-  not acquire that new meaning.
+  unconfirmed scope keeps the sweep. Agent or tab exit on its own does not decide the cleanup path. If the recorded
+  scope remains live when Stop, Restart or Delete begins, collecting it can still meet the scope-only rule. Scope-name
+  provenance and containment completeness are separate inputs: a guessed name that is absent does not prove that a
+  target was scoped. An unscoped launch, an unscoped tab or unavailable selection keeps the sweep required even when
+  optional scope names are added. Delete combines the agent's and every tab's selection, including what each host's tag
+  records, so a scoped agent cannot hide an unscoped tab's cleanup requirement. It also keeps the sweep when discovery
+  is incomplete: no agent terminal, or an agent host past generation zero, means historical unscoped tab jobs may
+  remain. A systemd glob can supply scope handles in those cases, but cannot prove that no such jobs exist. Existing
+  discovery errors still refuse Delete; a successful empty listing does not acquire that new meaning.
 
   A host at generation zero cannot have migrated from tmux. A later-generation host may belong to a session that had old
   tmux tabs before an earlier release's Restart moved it into a host, so Delete conservatively keeps the sweep; host
@@ -6644,9 +6644,9 @@ malformed JSON included, use fixed messages. POST `/api/tensorlake/test` lists e
 key and answers the count, a 400 without a key, or a 502 with the classified failure. It stops listing at the UI
 channel's host reply bound, 20 seconds after the request arrived (the stored key's read counts against it, but nothing
 bounds that local read itself), and a listing cut off there is a transport failure saying Tensorlake did not answer
-within that time; the listing of leftover sandboxes is cut off the same way (see "The UI channel"), and its ownership
-reads come after the listing and are not bounded either, so that a sandbox created during the listing, whose name its
-host recorded first, is never shown as not on this helm.
+within that time. Listing leftover sandboxes puts the stored key, provider listing and local ownership reads under one
+reply deadline (see "The UI channel"). It reads ownership after the provider listing, so a sandbox created during the
+listing, whose name its host recorded first, is never shown as not on this helm.
 
 The REST client is a `TensorlakeApi` trait with one implementation per caller: reqwest against
 `https://api.tensorlake.ai` in production, the same client pointed at a loopback stub in unit tests, an offline

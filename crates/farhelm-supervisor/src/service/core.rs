@@ -2796,18 +2796,16 @@ impl Reserved {
 /// The first two decide whether the previous run's outcome may be put back
 /// (`SessionStore::abort_relaunch`). Restoring "exited, stopped by user"
 /// over a session that may have a live agent under its new generation would
-/// be a worse lie than the honest `Launching` that reload knows how to
-/// reconcile — so only failures that PROVED nothing spawned are
-/// `Definitive`, and every ambiguity (including every failure to probe one)
-/// stays on the safe side.
+/// hide that live run from reload. `Definitive` requires proof that no
+/// replacement remains, either because it never started or because its
+/// cleanup was confirmed. An inconclusive probe keeps `Launching`.
 ///
 /// [`RelaunchDisposition::Published`] is a different kind of answer
 /// entirely and is the reason this is an enum rather than a `bool`. See its
 /// own docs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RelaunchDisposition {
-    /// Nothing outside this process changed: the previous outcome is still
-    /// the truth about this session and may be restored.
+    /// No replacement remains. The previous session outcome may be restored.
     Definitive,
     /// An agent may be running under the new generation; the durable
     /// `Launching` record stays and reload reconciles it.
@@ -13023,14 +13021,10 @@ impl Supervisor {
                 // ambiguous one the new generation's stands, because an
                 // agent may genuinely be running in its scope.
                 //
-                // Note what the derivation then names on the definitive
-                // path: the ABANDONED generation's unit, which by
-                // construction was never created (that is what makes the
-                // failure definitive), so a later stop finds no unit. That
-                // absent handle does not conceal a lost kill — the
-                // PREVIOUS run's own scope was already reaped before this
-                // generation was ever opened, by the stop or the leftover
-                // reap the restart performs first.
+                // On the definitive path this still names the abandoned
+                // generation. Its scope either was never created or has
+                // been collected. The previous run's scope was reaped
+                // before the replacement generation was opened.
                 let scope = launch_scope_unit(
                     &id,
                     claim.generation,
@@ -13042,9 +13036,8 @@ impl Supervisor {
                 );
                 let mut launch_boot_ended = false;
                 if definitive {
-                    // Nothing outside this process changed, so the previous
-                    // run's outcome is still the truth about this session —
-                    // annotation, exit code and all.
+                    // Confirmed absence of the replacement makes the
+                    // previous run's outcome safe to restore.
                     match self
                         .store
                         .abort_relaunch(&id, claim.generation, &claim.prior)

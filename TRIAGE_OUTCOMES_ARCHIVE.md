@@ -40543,3 +40543,236 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Corrected the specification or supporting text in jj change `ytksvvtm`, bookmark
   `plan/triage-spec-text-nov24/02-text-corrections-1`, draft PR
   [#4800](https://github.com/scode/farhelm/pull/4800/changes).
+
+## trailing-tensorlake-add-tests-misleading-codex-null-docstring.md
+
+- Outcome: `fix code`.
+- Assessment: A Tensorlake setup test's docstring gives the wrong reason why the host records no Codex settings cleanup
+  during setup. The real reason is that setup defers Codex work until the supervisor connects, not that a fresh host
+  never needs one. The test also never checks that the agent settings were not read. Users are not affected. Verified:
+  confirmed. The docstring is at `crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:1126-1130`. Setup
+  resolves no Codex endpoint (`credential_delivery.rs:796-799`, `DeliveryPhase::Setup => None`), and a fresh host that
+  reaches reconciliation records `Cleared` without a stamp (`credential_delivery.rs:1145`, matching SPEC_impl's "records
+  Cleared directly"). The `read-agent-settings` negative assertion is absent.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code — reword the
+  docstring and add the one negative assertion. The user's docstring rules treat a wrong "why" as worse than none; size
+  S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## trailing-spec-impl-contradiction-orphan-discovery-local-read-bounds.md
+
+- Outcome: `fix spec`.
+- Assessment: The implementation spec contradicts itself about whether listing leftover Tensorlake sandboxes bounds its
+  local reads. One section says those reads are unbounded, and a later section and the code say they share the reply
+  deadline. Users are not affected; the risk is misleading a future change. Verified: confirmed.
+  `SPEC_impl.md:6639-6641` ("its ownership reads come after the listing and are not bounded either") conflicts with
+  `SPEC_impl.md:7225` ("Discovery's reads of the local key, the provider, and local ownership use the same reply
+  deadline") and with `crates/farhelm-helm/src/tensorlake/orphans.rs:126-133`, where both reads use
+  `timeout_at(reply_by, …)`. The old sentence's purpose (a sandbox created during the listing is never shown as a
+  leftover) still holds, because ownership is still read after listing and a timeout fails the discovery. This is a
+  spec-only edit, so it does not fit the "clearly settled → fix code" rule.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec — scope the
+  unbounded-read clause to `POST /api/tensorlake/test` and keep the ordering rationale; size S. Remove the feedback file
+  and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## sealed-container-delete-spec-conflicts.md
+
+- Outcome: `fix spec`.
+- Assessment: The product spec gives two different answers for where a late failure of a whole-container Delete is
+  reported. The per-session Delete paragraph says a container that was already known to be sealed shows as being
+  deleted, with the reason and Retry. The host-level paragraph (Host Delete container, and Settings → Containers Delete
+  of a leftover with a host row) says the reason reaches only the helm's log. Verified: Confirmed in the spec text.
+  SPEC.md "Container sessions" about line 5490 has the known-seal exception. About line 5541-5543 ("…if that deletion
+  fails after the reply, the host stays listed and the reason reaches only the helm's log") does not. The code follows
+  the exception: `hosts.rs:1349-1357` takes `finish_seal_locked` when the host is sealed. The sandbox wording (SPEC.md
+  about line 1735) already includes the exception.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec — add the
+  known-seal exception to the host-level paragraph. Size S. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## quick-launch-placement-contract-omits-local-host.md
+
+- Outcome: `fix spec`.
+- Assessment: Quick launch beside an open sandbox or container session deliberately starts the template on this machine
+  rather than in a new environment of the same recipe, which New would preselect. SPEC.md says quick launch "uses
+  exactly New's defaults", and "Sandbox sessions" says "New and quick-switcher creation preselect its recipe". Verified:
+  confirmed as a wording mismatch. `launcher/entry.rs:24-34` records the 2026-11-16 launcher-area decision. SPEC.md
+  1367-1368 and 1676-1678 do not describe the exception.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. State the
+  quick-launch exception, and check whether the switcher's "Quick launch:" row falls under "quick-switcher creation".
+  Size S. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## trailing-spec-md-status-contradicts-codex-pin-corrected-text.md
+
+- Outcome: `fix spec`.
+- Assessment: SPEC.md's wording for the "conversation corrected" notification ("would have resumed", "the agent process
+  that started it") no longer matches the Codex notification text shipped in #4728 ("could have resumed", "one of that
+  process's ancestors"). Verified: Confirmed. SPEC.md 3229 and 4157/4191 keep the old phrasing, and
+  `notifications.rs:211-213` has the new text. The shipped text is the intended one per the reviewer, and the spec was
+  not updated with it.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec. Align the
+  pin-correction wording with positional attribution. Size S. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## trailing-registered-all-numeric-ssh-names-bypass-first-label-shortening.md
+
+- Outcome: `fix spec`.
+- Assessment: A host saved under an all-digits-and-dots name with too many parts to be an IP address (such as
+  `1.2.3.4.5`) shows the whole string as its short name in the collapsed rail instead of just `1`. It is display only.
+  Verified: Confirmed. `farhelm-proto/src/host_name.rs:44-52` keeps any digit-and-dot spelling whole. SPEC.md "short
+  name" says "IP addresses stay whole, including abbreviated IPv4 spellings", and `1.2.3.4.5` is not an IP address. But
+  this exact behavior was chosen in triage. The archived abbreviated-ipv4-short-label-scope-ambiguity.md completion
+  criteria say "keeping an all-digits-and-dots destination whole; no real DNS name has an all-numeric top-level label"
+  (PR #4493). The archive is not a coverage source, so this is not covered-spec.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec XS (align the
+  SPEC.md wording with the decided rule), or discard. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## trailing-interrupted-be-superseded-by-inferred-preparation-failure.md
+
+- Outcome: `fix code`.
+- Assessment: The protocol's description of the "Interrupted" status says it lasts until the user acts or Farhelm finds
+  a definitive launch error. The supervisor can also change it to an error inferred from missing, unreadable or
+  incomplete checkout-preparation evidence. That fits the product rule never to repeat an uncertain checkout
+  preparation, but the protocol text understates it. Verified: confirmed. `crates/farhelm-proto/src/lib.rs:867-870`
+  ("until the user acts or the supervisor finds a definitive launch error"). `service/status.rs:514-535` produces the
+  preparation details, and :641-670 turns them into `SentinelError { inferred: true }`. `store.rs:507-525` accepts a
+  sentinel error over `Interrupted` whether or not it is inferred. Behavior agrees with SPEC.md (checkout preparation is
+  not repeated automatically).
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code (protocol doc
+  comment only). Name the proved shim failure and the accepted preparation inference separately. Size S. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## release-gate-regeneration-guidance-stale.md
+
+- Outcome: `fix code`.
+- Assessment: The comment on the release build gate tells maintainers to regenerate the release workflow with
+  `dist init --yes`. The project now regenerates through its own wrapper script, and `dist init` skips CI generation
+  under the current `allow-dirty = ["ci"]`. Following the comment would leave the workflow stale, and the next tag's
+  plan check would fail. The same comment and `releasing/.agents/workflow.md` also say that a skipped build could
+  publish an empty release. That is no longer true, because the artifact handoff checks refuse missing artifacts.
+  Verified: Confirmed. `.github/dist-build-setup.yml:7` still says `dist init --yes`, and lines 16-25 still say "the
+  release is then created with none of its payloads". `dist-workspace.toml:225` has `allow-dirty = ["ci"]`. The wrapper
+  is `releasing/generate-workflow.py`. `.github/workflows/release.yml:429-542` runs
+  `releasing/check-artifact-handoff.sh` before publishing. The cargo-dist internals the finding cites were not re-read.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code (comments
+  only). Point both places at `releasing/generate-workflow.py` and describe the handoff gate. Size S. Run
+  `generate-workflow.py --check` afterwards, since the setup file is spliced into the workflow. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## launcher-tab-order-omits-command-message.md
+
+- Outcome: `fix spec`.
+- Assessment: When the command field shows a message (a template refusal, a held-field refusal, a repository note), Tab
+  stops on a scrollable message box in the header. The launcher's documented Tab order does not list that stop.
+  Verified: confirmed. `search.rs:775-791` wraps the notices in a `ScrollBox`, which always has a stop
+  (`components/scroll_box.rs:10-15`). SPEC.md 1515 lists the order without it, and the general rule in "Reaching
+  everything by keyboard" (3888-3889) implies it.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec (one clause),
+  or discard. Size S. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## trailing-exited-session-skips-portable-sweep.md
+
+- Outcome: `fix spec`.
+- Assessment: After a session's program exits, its systemd scope can stay alive because of a leftover background job.
+  Stop, Restart or Delete then signals the scope, confirms it is gone, and skips the machine-wide fallback search. The
+  implementation spec says these cases "always sweep". SPEC.md's own rule allows skipping the search here, and no job
+  outside the accepted containment limits is shown to survive. Verified: The mismatch with SPEC_impl is confirmed.
+  SPEC_impl.md "Cleanup" (scope-only paragraph): "an already-gone or initially unconfirmed scope keeps the sweep.
+  Deleting a session whose agent or a tab already exited, a Stop or Restart after the agent exited therefore always
+  sweep." The code (`service/handlers.rs:1120-1132`, `core.rs` Restart branch, `teardown.rs`) passes the recorded scope
+  without forcing the sweep, and the reaper skips it for a scope observed live and then confirmed collected. SPEC.md
+  "Lifecycle operations" allows exactly that: "Farhelm omits the machine-wide sweep only when containment is established
+  for every target, ... every named scope is observed live then confirmed gone, and no explicitly identified process
+  remains alive afterwards." The "therefore" in SPEC_impl only follows when an exited program's scope is already gone.
+  The user consequence is none beyond the limits SPEC.md accepts. Not clearly settled: either the spec or the code could
+  change.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix spec (narrow the
+  SPEC_impl sentence to scopes already gone at cleanup). SPEC.md accepts the behavior, and forcing the sweep re-adds the
+  cost that the 2026-11-08 decision removed. Size S. Remove the feedback file and its index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
+
+## trailing-restart-disposition-documentation-still-promises-no-external-change.md
+
+- Outcome: `fix code`.
+- Assessment: Inside the supervisor, a failed Restart is classified to decide whether the session's previous state may
+  be restored. The comments defining that classification say a "definitive" failure means nothing ran outside the
+  supervisor. The current code also treats a replacement that briefly ran and was confirmed cleaned up as definitive.
+  That is what the implementation spec describes, so only the comments are out of date. Verified: confirmed.
+  `service/core.rs:2793-2812` ("only failures that PROVED nothing spawned are `Definitive`", "Nothing outside this
+  process changed"). The same applies to :13021-13033 ("never created (that is what makes the failure definitive)") and
+  :13045. Meanwhile `service/core/host_restart.rs:764-791` returns `definitive` after "The start's child may have run
+  for a moment" once the end and the sweep are confirmed. SPEC_impl.md (Terminal host, Restart: "The supervisor confirms
+  any replacement host has ended … and sweeps the replacement's process tree … After definitive unwind the supervisor
+  tries to restore the previous outcome") matches the code. Shipped behavior matches the spec, so this is not clearly
+  settled in the sense of code contradicting spec; it is comment drift.
+- Decision: q-text, "Spec, docs and code comments that describe behavior the code no longer has": the maintainer picked
+  "Correct the text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the spec, doc, help or comment prose so it matches the accepted current behavior, as the
+  Assessment describes; no behavior change beyond the text itself. Recommendation for reference: fix code (comments
+  only). Restate "Definitive" as "no replacement remains (absent or confirmed cleaned up)" at the three sites. Size S.
+  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Corrected the specification or supporting text in jj change `zxqwwymopxzwprlzuksktkwwkvzuuyxm`, bookmark
+  `plan/triage-spec-text-nov24/03-text-corrections-2`, draft PR
+  [#4802](https://github.com/scode/farhelm/pull/4802/changes).
