@@ -131,6 +131,7 @@ impl SystemBackend {
     /// Read in 32 KiB chunks so the normal 64 KiB command-output budget
     /// stays intact. The measured sizes before and after reading must agree
     /// with the number of bytes read. Edits that preserve the size can pass.
+    /// Refuse non-regular destinations so sizing cannot wait on a pipe or device.
     pub(super) async fn read_agent_file(
         &self,
         target: &ProvisioningTarget,
@@ -143,8 +144,9 @@ impl SystemBackend {
                 "",
             )
         };
-        let size_script =
-            format!("if [ ! -e {path} ] && [ ! -L {path} ]; then exit 75; fi; wc -c < {path}");
+        let size_script = format!(
+            "if [ ! -e {path} ] && [ ! -L {path} ]; then exit 75; fi; [ -f {path} ] || exit 78; wc -c < {path}"
+        );
         let size = self
             .run_shell(target, &size_script, COMMAND_TIMEOUT)
             .await

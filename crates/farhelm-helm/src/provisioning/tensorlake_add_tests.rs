@@ -490,6 +490,8 @@ impl Fixture {
                     event["event"].as_str(),
                     Some(
                         "read-agent-settings"
+                            | "read-claude-onboarding"
+                            | "write-claude-onboarding"
                             | "wrote-claude-settings"
                             | "wrote-agent-credentials"
                             | "remove-agent-credentials"
@@ -1208,6 +1210,8 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
         let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
         f.assert_host_delivery(accepted.host_id, "remove-agent-credentials")
             .await;
+        f.assert_host_delivery(accepted.host_id, "write-claude-onboarding")
+            .await;
         assert!(
             !events.contains("fictional-setup-codex-secret")
                 && !events.contains("fictional-private-diagnostic")
@@ -1227,6 +1231,7 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
             .await
             .unwrap();
         let record: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(record["claude_onboarding_seeded"], true, "{record}");
         assert!(record["codex"].is_null(), "{record}");
         if subscription {
             let auth = record["codex_auth"].as_array().unwrap();

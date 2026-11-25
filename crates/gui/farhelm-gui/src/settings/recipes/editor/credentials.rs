@@ -108,7 +108,7 @@ impl Agent {
                 login_missing: "The selected Claude login is unavailable. Choose another login.",
                 help: "Subscription uses a Claude setup-token from Settings → Credentials. Farhelm supplies the recipe's \
                        credentials to new sessions and terminals on this host. Restart a running session to pick up a \
-                       replacement. Claude may show its first-run setup on a new host.",
+                       replacement.",
             },
             Agent::Codex => AgentWords {
                 label: "Codex",

@@ -5,7 +5,7 @@
 //! but has not published Connected yet. Only nonsecret bindings are retained;
 //! pending recipe edits wait for the next setup or connection.
 
-use super::backend::{COMMAND_TIMEOUT, ProvisioningBackend};
+use super::backend::{COMMAND_TIMEOUT, ExpectedSettings, ProvisioningBackend};
 use super::plan::{DirectorySpec, ProvisioningTarget};
 use crate::feed::FleetEvents;
 use crate::store::{HelmStore, HostId, HostRow};
@@ -144,6 +144,10 @@ struct Record {
     /// The installed launch environment's own stamp. A failed upload can
     /// retry without reopening settled legacy settings.
     claude_environment: Option<EndpointStamp>,
+    /// Successful first-run setup belongs to the host, independently of its
+    /// changing credential choices. Reconnects must leave later user edits alone.
+    #[serde(default)]
+    claude_onboarding_seeded: bool,
     /// Legacy settings ownership remains separate from successful endpoint file delivery.
     codex: Option<EndpointStamp>,
     codex_environment: Option<EndpointStamp>,
@@ -157,6 +161,8 @@ struct Record {
 /// while a pending cleanup holds only the entry that depends on it.
 #[derive(Debug, Default)]
 struct DeliveryWarnings {
+    /// The host can still receive credentials when Claude's first-run settings could not be seeded.
+    claude_onboarding: Option<String>,
     /// A launch lookup failed, so the pass left the combined file, both launch stamps and both legacy settings
     /// files as they were.
     lookup_aborted: bool,
@@ -214,7 +220,11 @@ impl DeliveryError {
 impl DeliveryWarnings {
     /// Host details and setup errors can report all affected slots from one pass.
     fn message(&self) -> Option<String> {
-        self.message_for(true, true, true)
+        match (&self.claude_onboarding, self.message_for(true, true, true)) {
+            (Some(onboarding), Some(credentials)) => Some(format!("{onboarding}. {credentials}")),
+            (Some(onboarding), None) => Some(onboarding.clone()),
+            (None, credentials) => credentials,
+        }
     }
 
     /// The host and save reply share wording, but a save selects only the slots it needed.
@@ -536,14 +546,24 @@ impl CredentialDelivery {
     pub(crate) async fn connect(&self, row: &HostRow, events: &FleetEvents) {
         let entry = self.entry(row);
         let attempt = entry.begin();
-        let result = timeout_at(Instant::now() + self.budget, async {
+        let deadline = Instant::now() + self.budget;
+        let result = timeout_at(deadline, async {
             let guard = Arc::clone(&entry.serial).lock_owned().await;
-            let bindings = self.read_bindings(row).await?;
-            entry.live.lock().unwrap().binding = Some((row.clone(), bindings.clone()));
-            self.apply(row, bindings, None, DeliveryPhase::Connected, guard)
-                .await
-                .map(|warnings| warnings.message())
-                .map_err(|error| error.message())
+            let bindings = self.read_bindings(row).await;
+            if let Ok(bindings) = &bindings {
+                entry.live.lock().unwrap().binding = Some((row.clone(), bindings.clone()));
+            }
+            self.apply(
+                row,
+                bindings,
+                None,
+                DeliveryPhase::Connected,
+                deadline,
+                guard,
+            )
+            .await
+            .map(|warnings| warnings.message())
+            .map_err(|error| error.message())
         })
         .await
         .unwrap_or_else(|_| Err(TIMED_OUT.into()));
@@ -561,13 +581,15 @@ impl CredentialDelivery {
     ) -> Result<(), String> {
         let entry = self.entry(row);
         let attempt = entry.begin();
-        let result = timeout_at(Instant::now() + self.budget, async {
+        let deadline = Instant::now() + self.budget;
+        let result = timeout_at(deadline, async {
             let guard = Arc::clone(&entry.serial).lock_owned().await;
             self.apply(
                 row,
-                Bindings::from_recipe(recipe),
+                Ok(Bindings::from_recipe(recipe)),
                 Some(home.to_path_buf()),
                 DeliveryPhase::Setup,
+                deadline,
                 guard,
             )
             .await
@@ -723,7 +745,10 @@ impl CredentialDelivery {
                 let uses_codex = bindings.uses_codex_endpoint(name);
                 let uses_codex_login = bindings.uses_codex_login(name);
                 let uses_github = bindings.uses_github(name);
-                match self.apply(&row, bindings, None, DeliveryPhase::Connected, guard).await {
+                match self
+                    .apply(&row, Ok(bindings), None, DeliveryPhase::Connected, deadline, guard)
+                    .await
+                {
                     Ok(warnings) => {
                         let failure = warnings.push_failure(uses_claude, uses_codex, uses_codex_login);
                         (warnings.message(), failure)
@@ -772,15 +797,16 @@ impl CredentialDelivery {
     }
 
     /// Resolve revisions under the host lock and record each successful file
-    /// before attempting the next. Equal fingerprints perform no SSH at all.
+    /// before attempting the next. Settled steps avoid further SSH.
     /// A lookup or legacy cleanup warning can leave launch credentials pending
     /// while independent Codex login and GitHub deliveries finish.
     async fn apply(
         &self,
         row: &HostRow,
-        bindings: Bindings,
+        bindings: Result<Bindings, String>,
         home: Option<PathBuf>,
         phase: DeliveryPhase,
+        deadline: Instant,
         mut guard: OwnedMutexGuard<()>,
     ) -> Result<DeliveryWarnings, DeliveryError> {
         let mut record = self.read_record(row).await?;
@@ -803,6 +829,41 @@ impl CredentialDelivery {
                     .into());
             }
         };
+        // The first-run configuration is independent of recipe credential
+        // lookup. Reserve the bulk of the delivery budget for credentials so a
+        // slow settings read cannot consume the entire pass.
+        let mut claude_onboarding = None;
+        if !record.claude_onboarding_seeded {
+            let seed_deadline = deadline - (self.budget - self.budget / 3);
+            let seed = if Instant::now() < seed_deadline {
+                timeout_at(
+                    seed_deadline,
+                    self.seed_claude_onboarding(row, &target, &record),
+                )
+                .await
+                .unwrap_or_else(|_| Err("the settings update timed out".into()))
+            } else {
+                Err("the settings update timed out".into())
+            };
+            match seed {
+                Ok(()) => {
+                    record.claude_onboarding_seeded = true;
+                    guard = self.write_record(row, &record, guard).await?;
+                }
+                Err(reason) => {
+                    claude_onboarding =
+                        Some(format!("Claude Code first-run setup is pending ({reason})"));
+                }
+            }
+        }
+        let delivery_failure = |reason: String| DeliveryError {
+            warnings: DeliveryWarnings {
+                claude_onboarding: claude_onboarding.clone(),
+                ..DeliveryWarnings::default()
+            },
+            ..reason.into()
+        };
+        let bindings = bindings.map_err(delivery_failure)?;
         // Endpoint values are resolved inside the same lease and lock as the snapshot they replace.
         let claude = if let Some(login) = bindings.claude_login_credential {
             self.resolve_claude_login(login).await
@@ -815,7 +876,9 @@ impl CredentialDelivery {
         };
         let (next_guard, mut warnings) = self
             .apply_agent_environment(row, &target, &mut record, claude, codex, guard)
-            .await?;
+            .await
+            .map_err(delivery_failure)?;
+        warnings.claude_onboarding = claude_onboarding;
         guard = next_guard;
         let later_result = async {
             if let Some(name) = bindings.codex_login_credential {
@@ -843,6 +906,36 @@ impl CredentialDelivery {
                 warnings,
             }),
         }
+    }
+
+    /// Use the login's physical home for the disposable host's inherited trust key.
+    /// Claude compares the canonical project path and inherits home trust below it.
+    async fn seed_claude_onboarding(
+        &self,
+        row: &HostRow,
+        target: &ProvisioningTarget,
+        record: &Record,
+    ) -> Result<(), String> {
+        let owned = row.is_session_owned();
+        let home = match (owned, &record.home) {
+            (false, Some(home)) => home.clone(),
+            _ => self.settings_home(target).await?,
+        };
+        let trust_home = if owned {
+            if home.parent().is_none() {
+                return Err("the disposable host's home cannot be the filesystem root".into());
+            }
+            Some(
+                home.to_str()
+                    .ok_or("the disposable host's home is not UTF-8")?,
+            )
+        } else {
+            None
+        };
+        self.merge_settings(target, &home, ".claude.json", true, |bytes| {
+            super::agent_endpoints::seed_claude_onboarding(bytes, trust_home)
+        })
+        .await
     }
 
     /// Seed a selected login independently of the launch credentials. Once a launch lookup has stalled that file,
@@ -1010,7 +1103,7 @@ impl CredentialDelivery {
                         lookup_aborted: true,
                         claude: claude.err(),
                         codex: codex.err(),
-                        codex_login_lookup_failed: false,
+                        ..DeliveryWarnings::default()
                     },
                 ));
             }
@@ -1157,7 +1250,10 @@ impl CredentialDelivery {
                 LegacySettings::Claude => super::agent_endpoints::clear_claude,
                 LegacySettings::Codex => super::agent_endpoints::clear_codex,
             };
-            if let Err(reason) = self.merge_settings(target, &directory, file, merge).await {
+            if let Err(reason) = self
+                .merge_settings(target, &directory, file, false, merge)
+                .await
+            {
                 return Ok((guard, Some(cleanup_pending(name, &reason))));
             }
         }
@@ -1166,7 +1262,7 @@ impl CredentialDelivery {
         Ok((guard, None))
     }
 
-    /// Probe only for a stamped settings migration or a Subscription seed. An endpoint snapshot has no home dependency.
+    /// Recover the login home for vendor-owned settings or a Subscription seed.
     async fn settings_home(&self, target: &ProvisioningTarget) -> Result<PathBuf, String> {
         let backend = self
             .backend
@@ -1186,6 +1282,7 @@ impl CredentialDelivery {
         target: &ProvisioningTarget,
         directory: &Path,
         file: &str,
+        regular_only: bool,
         merge: impl Fn(Option<&[u8]>) -> Result<Option<Vec<u8>>, String>,
     ) -> Result<(), String> {
         let backend = self
@@ -1224,7 +1321,10 @@ impl CredentialDelivery {
                     &path,
                     &temporary,
                     0o600,
-                    Some(expected.as_deref()),
+                    Some(ExpectedSettings {
+                        hash: expected.as_deref(),
+                        regular_only,
+                    }),
                 )
                 .await
             {

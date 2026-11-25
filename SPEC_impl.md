@@ -6801,19 +6801,26 @@ adopt copied state later. The Tensorlake executor instead uses an explicit admis
 that write records both coordinates together and imports no discovered identity.
 
 The one-time legacy cleanup reads settings up to 1 MiB and streams the merged result through backend stdin into a
-mode-0600 atomic install. Claude's cleanup requires JSON and any existing `env` to be objects. Farhelm leaves onboarding
-and first-run metadata to Claude. For Codex, `toml_edit` removes only a `farhelm` selection in `model_provider` and the
-provider's `experimental_bearer_token`, preserving the table, unrelated keys and comments. Missing or already clean
-files settle the cleanup as well. The copied-state check and install-coordinate admission precede credential delivery.
-Codex cleanup happens after a compatible connection, including in None and Subscription modes. Parse and read failures
-omit contents and parser details so tokens stay out of progress. Delivery converges at Add, connection and credential
-replacement. Update relies on reconnection to apply recipe changes. Failures are nonfatal warnings. The shared SSH
-uploader sets `umask 077` before creating its temporary, so even an existing mode-0755 agent directory cannot expose
-tokens during upload or after interruption. Its finishing command applies the requested final mode. Before replacing
-agent settings it compares the destination with the bytes read (or expected absence); a mismatch re-reads and merges
-once, then warns without recording delivery if it conflicts again, leaving the latest file for the next connection's
-retry. A save that lands between that final comparison and the replacement can still be overwritten, because the two are
-separate steps on the host; closing that gap would need a lock the agents themselves honor, so it is accepted.
+mode-0600 atomic install. Claude's cleanup requires JSON and any existing `env` to be objects. For Codex, `toml_edit`
+removes only a `farhelm` selection in `model_provider` and the provider's `experimental_bearer_token`, preserving the
+table, unrelated keys and comments. Missing or already clean files settle the cleanup as well. The copied-state check
+and install-coordinate admission precede credential delivery. Codex cleanup happens after a compatible connection,
+including in None and Subscription modes. Parse and read failures omit contents and parser details so tokens stay out of
+progress. Delivery converges at Add, connection and credential replacement. Update relies on reconnection to apply
+recipe changes. Failures are nonfatal warnings. The shared SSH uploader sets `umask 077` before creating its temporary,
+so even an existing mode-0755 agent directory cannot expose tokens during upload or after interruption. Its finishing
+command applies the requested final mode. Before replacing agent settings it compares the destination with the bytes
+read (or expected absence); a mismatch re-reads and merges once, then warns without recording delivery if it conflicts
+again, leaving the latest file for the next connection's retry. A save that lands between that final comparison and the
+replacement can still be overwritten, because the two are separate steps on the host; closing that gap would need a lock
+the agents themselves honor, so it is accepted.
+
+On a recipe host, an independent delivery slot uses that installer to add `hasCompletedOnboarding: true` to
+`~/.claude.json` if missing. For a disposable session host it also adds the missing `hasTrustDialogAccepted: true` to
+the project for the physical login home. Claude inherits that trust in descendants. Existing keys and the home
+directory's permissions are preserved. An install or an already satisfied document settles the host's slot. A failure
+warns and retries on reconnection. The seed uses the first third of the existing delivery deadline, so a slow settings
+update leaves time for credentials. This seed leaves symlinked and non-regular destinations in place.
 
 The credential ownership rule in SPEC.md applies to image and user settings. A bearer in an unstamped Codex config stays
 under the image or user's ownership. Custom headers and helpers also remain in place. A gateway needing extra headers

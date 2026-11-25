@@ -340,8 +340,8 @@ linux/settings-recipe-editor-delete--dark.png 85e36e3ddf9778d2ce352c4b79fb6691f0
 linux/settings-recipe-editor-delete--light.png 38a4b40ee0682b4a73265a55d3ef939b18ad5d22
 linux/settings-recipe-editor-delete-anyway--dark.png fe7e5c79542bd0c92577ee4b9ba5f22d5f3facaf
 linux/settings-recipe-editor-delete-anyway--light.png 0d4e6c1ebc4cd44b7b89bb10562cd787a50a8637
-linux/settings-recipe-editor-end--dark.png 740e7e946aa8de2460cbff7ced2e0caea49f14f7
-linux/settings-recipe-editor-end--light.png 8e582b40773f0a29bdee88f3830645f8f5ac0194
+linux/settings-recipe-editor-end--dark.png d5ce256bf502c25d798f07b1d0c3c98b4048b0b9
+linux/settings-recipe-editor-end--light.png be2cc25b6e29ba7872ca56d592140d624062c876
 linux/settings-recipe-editor-middle--dark.png 778a4a5da4c55948a4cb78645d6e31f3f6d7d8ff
 linux/settings-recipe-editor-middle--light.png 67a2fa0f780a47cb08e5c2dddbe67b77d55790a0
 linux/settings-recipes--dark.png acd7b6de9c1d4d6e295a30a42df3f8aa5e042df7

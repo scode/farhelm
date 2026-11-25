@@ -19,6 +19,146 @@ const CODEX_FIRST: &str =
     r#"{"tokens":{"refresh_token":"fictional-codex-seed"},"vendor_field":true}"#;
 const CODEX_REFRESHED: &str = r#"{"tokens":{"refresh_token":"fictional-codex-refreshed"}}"#;
 
+/// A broken first-run document must leave the current credentials usable.
+/// Reconnection retries the seed once the user repairs the file, then leaves later edits alone.
+#[farhelm_testtrace::test]
+async fn claude_onboarding_retries_without_interrupting_credentials() {
+    let f = Fixture::new(false).await;
+    assert!(
+        !f.row.is_session_owned(),
+        "premise: a persistent recipe host"
+    );
+    let config = f.home.join(".claude.json");
+    let broken = br#"{"private-fixture-marker":"#;
+    tokio::fs::write(&config, broken).await.unwrap();
+    let _lease = f.delivery.enter(&f.row);
+
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.snapshot().await.env["ANTHROPIC_AUTH_TOKEN"], FIRST);
+    assert_eq!(
+        f.delivery.warning(f.row.id).as_deref(),
+        Some("Claude Code first-run setup is pending (~/.claude.json must be a JSON object)")
+    );
+    assert_eq!(tokio::fs::read(&config).await.unwrap(), broken);
+    assert!(
+        !f.delivery
+            .read_record(&f.row)
+            .await
+            .unwrap()
+            .claude_onboarding_seeded
+    );
+
+    tokio::fs::write(&config, br#"{"theme":"light","custom":{"keep":true}}"#)
+        .await
+        .unwrap();
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    assert!(
+        f.delivery
+            .read_record(&f.row)
+            .await
+            .unwrap()
+            .claude_onboarding_seeded
+    );
+    let seeded =
+        serde_json::from_slice::<serde_json::Value>(&tokio::fs::read(&config).await.unwrap())
+            .unwrap();
+    assert_eq!(
+        seeded,
+        serde_json::json!({"theme":"light","custom":{"keep":true},"hasCompletedOnboarding":true})
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            tokio::fs::metadata(&config)
+                .await
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    let user_edit = br#"{"theme":"light","hasCompletedOnboarding":false}"#;
+    tokio::fs::write(&config, user_edit).await.unwrap();
+    let operations = f.operations();
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(
+        f.operations(),
+        operations,
+        "a stamped host needs no settings I/O"
+    );
+    assert_eq!(tokio::fs::read(&config).await.unwrap(), user_edit);
+}
+
+/// A real session-owned row gets inherited home trust even in Claude's None mode.
+/// Other image projects and their recorded decisions must survive the one-time seed.
+#[farhelm_testtrace::test]
+async fn disposable_claude_onboarding_adds_only_the_home_trust_key() {
+    let mut f = Fixture::new(false).await;
+    f.select_claude(None, false).await;
+    let sandbox = "sandbox-fixture";
+    let id = f
+        .store
+        .register_session_sandbox(crate::store::NewTensorlakeHost {
+            destination: crate::tensorlake::ssh::destination(sandbox),
+            entry: crate::store::NewHostEntry::new(Some("Disposable fixture")).unwrap(),
+            sandbox: sandbox.into(),
+            recipe: "recipe".into(),
+            resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                cpus: 1,
+                memory_gb: 1,
+                disk_gb: 10,
+            },
+        })
+        .await
+        .unwrap();
+    f.row = f
+        .store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == id)
+        .unwrap();
+    f.admit().await;
+    assert!(
+        f.row.is_session_owned(),
+        "premise: the store registered a disposable sandbox"
+    );
+    let config = f.home.join(".claude.json");
+    let home = f.home.to_str().unwrap();
+    let mut image = serde_json::json!({
+        "hasCompletedOnboarding": false,
+        "projects": {
+            (home): {"note":"keep"},
+            "/fixture/another": {"hasTrustDialogAccepted":false}
+        }
+    });
+    tokio::fs::write(&config, serde_json::to_vec(&image).unwrap())
+        .await
+        .unwrap();
+    let _lease = f.delivery.enter(&f.row);
+
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    assert!(
+        f.delivery
+            .read_record(&f.row)
+            .await
+            .unwrap()
+            .claude_onboarding_seeded
+    );
+    image["projects"][home]["hasTrustDialogAccepted"] = true.into();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&tokio::fs::read(config).await.unwrap())
+            .unwrap(),
+        image
+    );
+}
+
 /// Both providers resolve current named selections and retain home/stamps in
 /// the same guarded record. A Podman row has no legacy Tensorlake binding,
 /// which catches a hook that silently rejects containers before delivery.
@@ -475,9 +615,12 @@ async fn claude_subscription_reconciles_modes_replacements_and_reconnects() {
         tokio::fs::read(&settings_path).await.unwrap(),
         image_settings
     );
-    assert!(
-        !f.home.join(".claude.json").exists(),
-        "Farhelm writes no onboarding metadata"
+    let onboarding: serde_json::Value =
+        serde_json::from_slice(&tokio::fs::read(f.home.join(".claude.json")).await.unwrap())
+            .unwrap();
+    assert_eq!(
+        onboarding,
+        serde_json::json!({"hasCompletedOnboarding": true})
     );
     assert_eq!(
         std::fs::metadata(f.claude_path())
@@ -1571,9 +1714,10 @@ async fn unchanged_reconnect_uses_durable_stamps_without_remote_work() {
     tokio::fs::write(&path, settings).await.unwrap();
     drop(lease);
     let before = f.operations();
-    assert!(
-        !before.iter().any(|op| op == "read-home"),
-        "a fresh host can receive launch credentials without a home lookup"
+    assert_eq!(
+        before.iter().filter(|op| *op == "read-home").count(),
+        1,
+        "only first-run setup needs a home lookup"
     );
     let restarted = CredentialDelivery::new(f.store.clone(), f.backend.clone());
     let _lease = restarted.enter(&f.row);
@@ -2024,9 +2168,10 @@ async fn tokenless_codex_waits_for_hello_and_keeps_unstamped_settings() {
     f.delivery
         .apply(
             &f.row,
-            bindings,
+            Ok(bindings),
             Some(f.home.clone()),
             DeliveryPhase::Setup,
+            Instant::now() + f.delivery.budget,
             guard,
         )
         .await
@@ -2094,7 +2239,19 @@ async fn backend_failures_leave_saved_values_and_safe_warnings() {
         let _lease = f.delivery.enter(&f.row);
         *f.backend.fail.lock().unwrap() = Some(operation.into());
         f.delivery.connect(&f.row, &f.events).await;
-        assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(reason));
+        let host_warning = match operation {
+            "read-home" => format!(
+                "Claude Code first-run setup is pending (could not read the sandbox's home directory). {reason}"
+            ),
+            "create-directories" => format!(
+                "Claude Code first-run setup is pending (could not prepare the agent settings directory). {reason}"
+            ),
+            _ => reason.into(),
+        };
+        assert_eq!(
+            f.delivery.warning(f.row.id).as_deref(),
+            Some(host_warning.as_str())
+        );
         if operation == "read-home" {
             let snapshot = f.snapshot().await;
             assert_eq!(snapshot.env["ANTHROPIC_AUTH_TOKEN"], FIRST);

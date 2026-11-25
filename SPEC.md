@@ -571,8 +571,11 @@ but saves only the selected choice. Claude Subscription supplies `CLAUDE_CODE_OA
 `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`. Farhelm stores those variables in a private file in the host's
 supervisor state directory and reads it for each new process it starts, including terminal tabs and Restart. The upgrade
 makes a one-time cleanup of the three legacy keys in `~/.claude/settings.json` when a previous Farhelm delivery stamped
-that file. Claude may show its own first-run setup once on a new host, which the user completes. Farhelm leaves that
-first-run and onboarding metadata to Claude.
+that file. Farhelm adds Claude Code's missing first-run setting to its default `~/.claude.json` once on each host made
+from a recipe, in all three credential modes. This lets Claude skip its introductory setup when it has credentials.
+Existing choices take precedence. For disposable session hosts, setup also seeds the missing home workspace trust entry
+so Claude can inherit it in checkouts below home. A recipe that selects a different Claude config file can provide its
+own first-run choices there.
 
 Codex API endpoint supplies its provider when Farhelm starts or resumes a Codex session, including Restart and opening a
 saved conversation by ID. The provider still uses the ID `farhelm`. Its optional bearer is kept in the private state

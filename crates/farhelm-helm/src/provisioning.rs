@@ -617,7 +617,12 @@ mod tests {
             _target: &ProvisioningTarget,
             path: &Path,
         ) -> Result<Option<Vec<u8>>, BackendFailure> {
-            self.record("read-agent-settings")?;
+            let event = if path.ends_with(".claude.json") {
+                "read-claude-onboarding"
+            } else {
+                "read-agent-settings"
+            };
+            self.record(event)?;
             if !self.stateful.load(std::sync::atomic::Ordering::SeqCst) {
                 return Ok(None);
             }
@@ -742,7 +747,7 @@ mod tests {
             destination: &Path,
             _temporary: &Path,
             mode: u32,
-            expected: Option<Option<&str>>,
+            expected: Option<ExpectedSettings<'_>>,
         ) -> Result<ActionOutcome, BackendFailure> {
             // A refused install must leave the fixture's previous bytes intact,
             // just as an unsuccessful atomic replacement does on the host.
@@ -750,12 +755,21 @@ mod tests {
                 "wrote-agent-credentials"
             } else if destination.ends_with(".claude/settings.json") {
                 "write-legacy-claude-settings"
+            } else if destination.ends_with(".claude.json") {
+                "write-claude-onboarding"
             } else {
                 "write-unit"
             };
             let outcome = self.record(event)?;
             if self.stateful.load(std::sync::atomic::Ordering::SeqCst) {
                 if let Some(expected) = expected {
+                    if expected.regular_only
+                        && tokio::fs::symlink_metadata(destination)
+                            .await
+                            .is_ok_and(|metadata| !metadata.is_file())
+                    {
+                        return Err(BackendFailure::new(super::backend::DESTINATION_CHANGED, ""));
+                    }
                     let current = match tokio::fs::read(destination).await {
                         Ok(bytes) => Some(bytes),
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -766,7 +780,7 @@ mod tests {
                             ));
                         }
                     };
-                    if current.as_deref().map(hex_sha256).as_deref() != expected {
+                    if current.as_deref().map(hex_sha256).as_deref() != expected.hash {
                         return Err(BackendFailure::new(super::backend::DESTINATION_CHANGED, ""));
                     }
                 }
@@ -11739,7 +11753,10 @@ master.touch()
                         &path,
                         &temporary,
                         0o600,
-                        Some(expected.as_deref()),
+                        Some(ExpectedSettings {
+                            hash: expected.as_deref(),
+                            regular_only: false,
+                        }),
                     )
                     .await
                     .unwrap_err();
@@ -11755,11 +11772,66 @@ master.touch()
                     &path,
                     &temporary,
                     0o600,
-                    Some(Some(&current)),
+                    Some(ExpectedSettings {
+                        hash: Some(&current),
+                        regular_only: false,
+                    }),
                 )
                 .await
                 .unwrap();
             assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), "new");
+        }
+    }
+
+    /// Checking the linked bytes would let a replacement destroy the image's
+    /// settings alias even when those bytes match. Both transports must keep
+    /// the alias and its target together.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn conditional_settings_install_preserves_a_matching_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("image-settings.json");
+        let path = root.path().join("settings.json");
+        let temporary = root.path().join(".settings.json.farhelm-tmp-run");
+        tokio::fs::write(&source, "old").await.unwrap();
+        std::os::unix::fs::symlink(&source, &path).unwrap();
+        let expected = hex_sha256(b"old");
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(ScriptedTransferLauncher {
+                temporary: temporary.clone(),
+                bytes: "new",
+                exit_status: 0,
+                edit: None,
+            }),
+            runtime_units: false,
+            one_shot: false,
+            helm_store: None,
+            fail_before_rename: false,
+        };
+        let remote = ProvisioningTarget::ssh("scripted.example");
+        for target in [&remote, &ProvisioningTarget::Local] {
+            assert_eq!(tokio::fs::read_link(&path).await.unwrap(), source);
+            assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), "old");
+            let error = backend
+                .install_bytes_checked(
+                    target,
+                    b"new",
+                    &path,
+                    &temporary,
+                    0o600,
+                    Some(ExpectedSettings {
+                        hash: Some(&expected),
+                        regular_only: true,
+                    }),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.context, super::backend::DESTINATION_CHANGED);
+            assert_eq!(tokio::fs::read_link(&path).await.unwrap(), source);
+            assert_eq!(tokio::fs::read_to_string(&source).await.unwrap(), "old");
+            assert!(!temporary.exists());
         }
     }
 

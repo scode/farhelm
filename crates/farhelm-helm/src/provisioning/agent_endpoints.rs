@@ -1,4 +1,4 @@
-//! Compose private launch credentials and remove keys written by the legacy settings delivery.
+//! Compose private launch credentials and merge the small set of settings Farhelm manages.
 //!
 //! These functions return bytes only. The backend writes them through stdin,
 //! never argv, and parse errors deliberately omit the input and parser detail:
@@ -8,6 +8,7 @@ use crate::tensorlake::recipes::ResolvedEndpoint;
 use farhelm_supervisor::recipe_credentials::{
     CODEX_ENDPOINT_TOKEN_ENV, CodexEndpoint, RecipeCredentials,
 };
+use serde_json::{Map, Value};
 
 /// Compose Claude's part of a new snapshot. Its modes have distinct keys, so a mode change drops every key from
 /// the previous mode. A tokenless Claude endpoint retains the empty token value the old settings writer assigned.
@@ -53,6 +54,46 @@ pub(super) fn add_codex_endpoint(
             .env
             .insert(CODEX_ENDPOINT_TOKEN_ENV.into(), token);
     }
+}
+
+/// Skip Claude's first-run walkthrough on recipe hosts. Home trust is seeded
+/// only for a disposable host, where its scope includes child checkouts.
+/// Image settings and user decisions take precedence, including explicit false values.
+pub(super) fn seed_claude_onboarding(
+    bytes: Option<&[u8]>,
+    trusted_home: Option<&str>,
+) -> Result<Option<Vec<u8>>, String> {
+    let mut config: Map<String, Value> = match bytes {
+        Some(bytes) => serde_json::from_slice(bytes)
+            .map_err(|_| "~/.claude.json must be a JSON object".to_string())?,
+        None => Map::new(),
+    };
+    let mut changed = false;
+    if !config.contains_key("hasCompletedOnboarding") {
+        config.insert("hasCompletedOnboarding".into(), Value::Bool(true));
+        changed = true;
+    }
+    if let Some(home) = trusted_home {
+        let projects = config
+            .entry("projects")
+            .or_insert_with(|| Value::Object(Map::new()))
+            .as_object_mut()
+            .ok_or("the projects in ~/.claude.json must be an object")?;
+        let project = projects
+            .entry(home)
+            .or_insert_with(|| Value::Object(Map::new()))
+            .as_object_mut()
+            .ok_or("the home project in ~/.claude.json must be an object")?;
+        if !project.contains_key("hasTrustDialogAccepted") {
+            project.insert("hasTrustDialogAccepted".into(), Value::Bool(true));
+            changed = true;
+        }
+    }
+    changed
+        .then(|| {
+            serde_json::to_vec_pretty(&config).map_err(|_| "could not encode ~/.claude.json".into())
+        })
+        .transpose()
 }
 
 /// Remove the three keys an earlier Farhelm could write. Callers establish

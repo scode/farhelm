@@ -327,6 +327,15 @@ pub(crate) struct BackendFailure {
 /// Internal refusal identity, assigned from the final guard rather than peer text.
 pub(super) const DESTINATION_CHANGED: &str = "destination changed before replacement";
 
+/// Snapshot of a settings destination before merging its bytes. The Claude
+/// first-run file may be linked by the recipe image, so it needs a physical
+/// file at the selected path before replacement is allowed.
+#[derive(Clone, Copy)]
+pub(crate) struct ExpectedSettings<'a> {
+    pub(super) hash: Option<&'a str>,
+    pub(super) regular_only: bool,
+}
+
 impl std::fmt::Display for BackendFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.rendered())
@@ -410,8 +419,8 @@ pub(crate) trait ProvisioningBackend: Send + Sync {
             "",
         ))
     }
-    /// Recover only the login home for legacy host bindings. Unlike sandbox
-    /// preparation, this must never start services or alter the host.
+    /// Recover the physical login home for agent settings. Claude keys its
+    /// project state by canonical paths. This probe never changes the host.
     async fn host_home(&self, _target: &ProvisioningTarget) -> Result<PathBuf, BackendFailure> {
         Err(BackendFailure::new(
             "this backend cannot read the sandbox home",
@@ -522,8 +531,8 @@ pub(crate) trait ProvisioningBackend: Send + Sync {
         self.install_bytes_checked(target, content, destination, temporary, mode, None)
             .await
     }
-    /// `None` is unconditional; `Some(None)` requires absence, and `Some(Some(hash))`
-    /// requires those old bytes at the final rename boundary. A refusal preserves the file.
+    /// No expectation is unconditional. An expectation requires either absence
+    /// or the old bytes at the final rename boundary and can forbid replacing links.
     async fn install_bytes_checked(
         &self,
         target: &ProvisioningTarget,
@@ -531,7 +540,7 @@ pub(crate) trait ProvisioningBackend: Send + Sync {
         destination: &Path,
         temporary: &Path,
         mode: u32,
-        expected: Option<Option<&str>>,
+        expected: Option<ExpectedSettings<'_>>,
     ) -> Result<ActionOutcome, BackendFailure>;
     async fn daemon_reload(
         &self,
@@ -1290,9 +1299,10 @@ impl SystemBackend {
                         ));
                     }
                     if let Some(expected) = expected {
-                        // Absence includes symlinks: a dangling link is still an editor's
-                        // destination, while unreadable metadata remains an ordinary error.
                         let present = match tokio::fs::symlink_metadata(destination).await {
+                            Ok(metadata) if expected.regular_only && !metadata.is_file() => {
+                                return Err(BackendFailure::new(DESTINATION_CHANGED, ""));
+                            }
                             Ok(_) => true,
                             Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
                             Err(error) => {
@@ -1303,8 +1313,8 @@ impl SystemBackend {
                             }
                         };
                         let current = self.metadata_on_target(target, destination).await?;
-                        if current.as_ref().map(|file| file.hash.as_str()) != expected
-                            || (expected.is_none() && present)
+                        if current.as_ref().map(|file| file.hash.as_str()) != expected.hash
+                            || (expected.hash.is_none() && present)
                         {
                             return Err(BackendFailure::new(DESTINATION_CHANGED, ""));
                         }
@@ -1328,17 +1338,23 @@ impl SystemBackend {
                     // use 78 so delivery never retries an ordinary transport or I/O error.
                     let generation_guard = match expected {
                         None => String::new(),
-                        Some(None) => format!(
+                        Some(ExpectedSettings { hash: None, .. }) => format!(
                             "[ ! -e {dest} ] && [ ! -L {dest} ] || exit 79; ",
                             dest = shell_path(destination)?
                         ),
-                        Some(Some(hash)) => format!(
-                            "if [ ! -e {dest} ] && [ ! -L {dest} ]; then exit 79; fi; \
-                             old=$({sha}) || exit 78; [ \"${{old%% *}}\" = {hash} ] || exit 79; ",
-                            dest = shell_path(destination)?,
-                            sha = remote_sha256sum(&shell_path(destination)?),
-                            hash = crate::ssh::shell_quote(hash)
-                        ),
+                        Some(ExpectedSettings { hash: Some(hash), regular_only }) => {
+                            let dest = shell_path(destination)?;
+                            let path_guard = if regular_only {
+                                format!("[ -f {dest} ] && [ ! -L {dest} ] || exit 79; ")
+                            } else {
+                                format!("if [ ! -e {dest} ] && [ ! -L {dest} ]; then exit 79; fi; ")
+                            };
+                            format!(
+                                "{path_guard}old=$({sha}) || exit 78; [ \"${{old%% *}}\" = {hash} ] || exit 79; ",
+                                sha = remote_sha256sum(&dest),
+                                hash = crate::ssh::shell_quote(hash)
+                            )
+                        }
                     };
                     // Keep the checksum input on stdin. GNU coreutils escapes
                     // backslashes and newlines in argument-based output; the
@@ -1919,7 +1935,7 @@ struct InstallDestination<'a> {
     mode: u32,
     description: &'a str,
     /// Same three-state contract as `ProvisioningBackend::install_bytes_checked`.
-    expected: Option<Option<&'a str>>,
+    expected: Option<ExpectedSettings<'a>>,
 }
 
 /// Why a child stream stopped before EOF. The retained prefix is bounded and
@@ -2563,7 +2579,11 @@ impl ProvisioningBackend for SystemBackend {
     async fn host_home(&self, target: &ProvisioningTarget) -> Result<PathBuf, BackendFailure> {
         let failure = || BackendFailure::new("could not read the sandbox home", "");
         let output = self
-            .run_shell(target, "printf '%s' \"$HOME\"", COMMAND_TIMEOUT)
+            .run_shell(
+                target,
+                "case \"$HOME\" in /*) cd -P -- \"$HOME\" && printf '%s' \"$PWD\" ;; *) exit 1 ;; esac",
+                COMMAND_TIMEOUT,
+            )
             .await
             .map_err(|error| error.redacted(failure()))?;
         if output.code != Some(0) {
@@ -3105,7 +3125,7 @@ impl ProvisioningBackend for SystemBackend {
         destination: &Path,
         temporary: &Path,
         mode: u32,
-        expected: Option<Option<&str>>,
+        expected: Option<ExpectedSettings<'_>>,
     ) -> Result<ActionOutcome, BackendFailure> {
         use std::io::Write;
         let mut file = tempfile::NamedTempFile::new().map_err(|error| {
