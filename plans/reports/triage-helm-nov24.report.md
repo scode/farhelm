@@ -120,3 +120,114 @@ reviewed again and cleared. The delivery report passed a cold read after the out
 evidence were clarified. The visual review checked the affected desktop views in light and dark. The updated screenshot
 references cover remote errors, setup refusal, SSH address guidance, Mac Update refusal, and combined credential
 warnings. The consent and launcher focus checks used unchanged captures plus behavioral tests for the input sequencing.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round, through its fourteen PRs and the landing fix
+[#4882](https://github.com/scode/farhelm/pull/4882/changes). Between the point main was at when the executor finished
+(`eec1fdeb`, which already held the launcher and terminal triage plans) and the landing, main gained only plans queue
+commits, so nothing else could interact with this plan.
+
+The landing's review read the whole combined diff against SPEC.md and SPEC_impl.md and found no bug in what it checked:
+setup now takes the host's setup lock before it saves any install paths, and refuses a suspended host under that lock;
+Update on a remote Mac checks again for the desktop app when it finds no supervisor; a local SSH or Podman client killed
+by a signal now fails the step even when the remote side reported success; each credential save reports only the
+failures that affected it, while Hosts keeps every warning; an agent's Stop and Create, and checkout creates and clones,
+stay on the connection the user approved; and Add host, Re-run and Remove use the confirmation choice that was on
+screen. The plan also changed how a Tailscale address the helm cannot use is refused; the review followed every route
+that reports it (adding a host, editing its address, turning Tailscale on, setup and agent requests) and each still
+answers it as the user's mistake, with the format guidance, not as an internal error.
+
+#### Fixes made while landing
+
+- **Nine screenshot scenes missing from the screenshot batch's scene list.** The batch that compares the desktop app
+  with the old app's reference pictures keeps a list of every screenshot test scene, and its own test fails when one is
+  missing. This plan added two scenes (a Mac Update refusal after the desktop app appeared, and the Tailscale address
+  guidance in host settings) without listing them, and the launcher triage plan, which I landed two rounds ago, had
+  added seven the same way. I did not run that test in that round, so it has failed on main since then. #4882 lists all
+  nine.
+- **A split SPEC.md paragraph.** When the plan added a sentence about the remote Mac's final setup check to the
+  "Confirmed 2026-09-28" decision about how remote hosts get a supervisor, the rewrap left a blank line in the middle,
+  so the rule that setup and Update may treat their installed layout as their own became a paragraph of its own and no
+  longer read as part of that dated decision. No words were lost. #4882 removes the blank line.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the plan's PRs rebased onto main as it stood at the start of the landing (`23324f7b`); the rebased stack's top commit
+was `3d4e48e0`. The only later change is the landing fix [#4882](https://github.com/scode/farhelm/pull/4882/changes),
+which adds nine entries to the screenshot scene list and rejoins one SPEC.md paragraph; after it I ran the scene list's
+test and `dprint check` again, and both passed. That final tree is what main now holds outside the plans queue.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `b19e646e-9baf-4173-bcfc-867820afae8e`): all 8653 tests passed, with no runtime skip. The plan changed the helm's
+  provisioning, credential delivery, agent requests, host store and sessions, which the helm's own tests and the
+  end-to-end tests both exercise, and the desktop app's Hosts views, so the whole suite was the narrowest run that
+  covered them.
+- `cargo nextest run --locked -p farhelm-desktop`, the desktop app's own tests, on the test worker (recorder run
+  `ac495b45-e6d6-4a6d-8329-bd8751a68c69`): all 184 passed.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and the desktop app's
+  two clippy runs (`-p farhelm-desktop --all-targets`, with and without `--features agent`), on the test worker: passed.
+- The desktop app's end-to-end smoke (`scripts/gui-e2e-smoke.py`, recorder run `6b706bfb-c22a-4e42-ab81-83e361389ce9`),
+  on the test worker: 50 steps passed, one skipped, the paste step that headless Linux cannot run. It drives Hosts, Add
+  host, the host menu's Remove, Update and Uninstall, and the agent approval cards, which the plan changed.
+- `python3 scripts/check-gui-goldens.py`, the full comparison of the app's screenshot tests against their published
+  reference pictures, locally (recorder run `7a95a315-33b7-491c-9691-c544ac125a7c`): every scene matched, the plan's new
+  and changed Hosts scenes included.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, the screenshot batch's tests, which include a check that its scene
+  list names every scene in the screenshot tests' manifest, locally: failed on the stack (recorder run
+  `be915cfa-f195-4a8f-a18d-b624235e1902`), on nine unlisted scenes, two of them this plan's; passed with the landing fix
+  (`d43bd3a1-0070-4f34-aa7a-58ec727af303`, 47 tests).
+- `cargo fmt --all -- --check`, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no
+  errors; one warning, about an old citation in the triage archive, already on main), `dprint check` and
+  `python -B scripts/check-test-sleeps.py`, locally: passed.
+
+Reused: none. The report's own runs covered the same code before the rebase, and everything they covered ran again
+above.
+
+Skipped: `scripts/gui-lifecycle.py`, the end-to-end run that starts, quits and relaunches the desktop app, since nothing
+in its startup, quit or window handling changed; the workspace doctests, since no documentation example changed; live
+setup or Update against a real remote host or Mac, and a real Tailscale network, which no test in this repository
+provides beyond the stand-ins the suites above use; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+Nothing became untrue at landing. One claim is broader than the code: the report says Hosts actions now use the target
+and confirmation choice shown when you act, and one Remove button still does not (the second item below).
+
+#### Things you should know that the report does not say
+
+The landing's review counted no blockers, one should-fix (the first item below) and six small points, and judged the
+stack sound to land.
+
+- **The fix that keeps an approved agent Create on the approved connection has no test that would catch its removal.**
+  When you allow an agent's request to create a session, the plan now refuses the create if the host's connection was
+  replaced between your approval and the create being sent, rather than creating it over the new connection. The code
+  does that, and the review traced it, but the two tests near it build the create by hand and never go through the
+  approval, so removing the one-line fix would leave every test passing. The agent Stop request has a smaller gap of the
+  same kind: a test shows Stop refuses a changed connection, but none shows the agent's Stop passes the card's
+  connection along. The triage asked for a test. I did not write one at landing, since a test of that timing needs a
+  fixture that replaces the connection mid-request and is more than a landing fix should take on. I recommend a
+  follow-up that adds it; the review's sketch: a create that does not pin a trusted workspace folder, the connection
+  replaced between the approval and the create being sent, expecting a refusal and no session on either connection.
+- **The refusal dialog's Remove still reads the "Remove hosts without asking" setting at the click.** The plan fixed
+  this for the host menu: its Remove now asks or skips the question as the screen said when the user pressed it. The
+  Remove button in the dialog that explains why Update or Uninstall was refused still reads the setting when pressed, so
+  if the setting is turned on elsewhere while that dialog is open (for example by "Remove, don't ask again" on another
+  host), its Remove forgets the host without asking. It predates this plan and its triage outcome named only the menu. A
+  follow-up would capture the choice when the dialog is drawn.
+- **A refused setup confirmation now needs a new probe.** Setup confirmation now refuses at once while another operation
+  holds the host (a retarget, a rename, Suspend or Resume, Remove), and that refusal discards the proposal the probe
+  made (the install paths and steps shown for confirmation), so the user starts again from the probe. Before,
+  confirmation could save its install paths while one of those operations was changing the host; SPEC_impl.md's rules
+  for Update and Tensorlake reruns already refuse the same way. The code's own description of the confirmation step
+  still says the proposal is kept for a later confirmation, which is now true only of the older "a setup is already
+  running" refusal; that comment is worth correcting when the code is next touched.
+- **Small wording, documentation and test points the review noticed, none needing action on its own.** SPEC.md's
+  credential paragraph now says a save reports a failure "when delivery to a selected slot failed"; "slot" is never
+  defined there. The code's description of how the helm sorts errors into the user's mistakes and internal failures does
+  not mention the new Tailscale address check. The test of the Tailscale address guidance covers turning Tailscale on,
+  though its name suggests it also covers adding a host and editing its address (they share the same error handling).
+  The test that agent Stop refuses on a changed connection sits inside the test of an ordinary Stop.
