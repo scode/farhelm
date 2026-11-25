@@ -172,6 +172,10 @@ linux/launcher-custom-recents--dark.png b7b1ebef63d31884445d463240d1b2fee4320ae2
 linux/launcher-custom-recents--light.png f7114855536042dabde382a2aba390f47c72e1ec
 linux/launcher-custom-recents-narrow--dark.png 32e17debabace9b93691c06fbe25781eb0f41e14
 linux/launcher-custom-recents-narrow--light.png dc9014071089cef1ee3f4a36595fbcd90488cdd8
+linux/launcher-custom-restart-blocked--dark.png 4aa79a18ed285a01b17d7096e06ea965727cc9f1
+linux/launcher-custom-restart-blocked--light.png 14180326aa37b44d1371aa76e77d953250284360
+linux/launcher-custom-restart-menu--dark.png fa561eb67a67f94ee348cb1833bb11f10e959864
+linux/launcher-custom-restart-menu--light.png 02c8ed6aea26a0c1b3fad0412c59824fa022ad51
 linux/launcher-custom-yolo-question--dark.png 463406bc6c92649059c9252454eee57040d23084
 linux/launcher-custom-yolo-question--light.png 2459b49e26b86957b68ba41a64fc41d0ee428235
 linux/launcher-deleted-custom-quick-launch--dark.png b8559e790b1a86933ce4c25cc878fb8d70023b18

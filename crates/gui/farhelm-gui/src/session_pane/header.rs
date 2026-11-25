@@ -1425,6 +1425,20 @@ pub(crate) struct CaretMenu {
     action: ActionFrame<menu::Actionable, [bool; 2]>,
 }
 
+#[cfg(test)]
+impl CaretMenu {
+    /// Draw the real Restart menu for a pushed session without a toolbar or a live activation target.
+    pub(crate) fn restart_for_golden(key: &str, cx: &mut App) -> Self {
+        Self {
+            pane: WeakEntity::new_invalid(),
+            key: key.to_owned(),
+            split: Split::Restart,
+            items: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
+            action: ActionFrame::default(),
+        }
+    }
+}
+
 /// The old `.header-action-menu`'s width.
 const CARET_MENU_WIDTH: f32 = 260.;
 

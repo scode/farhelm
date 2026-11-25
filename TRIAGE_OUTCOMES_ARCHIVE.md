@@ -48580,3 +48580,77 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   the feedback file and its index entry.
 - Execution: Fixed. The confirmation explains that the custom declaration supplies YOLO, naming the registration or its saved ID when present. Change `lqzvxlmsxwttpmrsmsxvsossrnnywrqu`, bookmark `plan/triage-custom-agents-nov24/05b-launch-names`,
   https://github.com/scode/farhelm/pull/4935/changes.
+
+## trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md
+
+- Outcome: `fix code`.
+- Assessment: For a custom agent session whose registration did not enable resumption, the greyed-out Restart with entry
+  says "Custom sessions can't be resumed". The accurate explanation is that this launch has no resume command, so the
+  user should use Clone or Replace with. Verified: Confirmed. `restart_readiness` returns `None` for Custom ("The custom
+  agent's caller decides when to report", `crates/farhelm-proto/src/lib.rs:1749-1750`), against its own doc ("`None` for
+  kinds with no conversation reporting", `lib.rs:1718-1719`). `restart_with_reason` checks that first
+  (`crates/gui/farhelm-gui/src/launcher/entry.rs: 369-370`). SPEC.md 2213-2214 requires a tooltip "explaining why". The
+  trigger is common for these sessions, so the rare-glitch filter does not match.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code. Check `NoResumeCommand` before the readiness shortcut, and correct the doc.
+  Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: Fixed. Restart with names the missing stored resume command and points to Clone or Replace with. Change `nwooxklrkoswozmnsszzwszsoqryltwr`, bookmark `plan/triage-custom-agents-nov24/05c-custom-restart-ui`,
+  https://github.com/scode/farhelm/pull/4941/changes.
+
+## trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Restart with can open on a custom-agent session that has no captured conversation, after that agent's
+  registration turned off resumption (or was deleted). "More options" is then forced open and marked "A setting here is
+  required or needs attention", but it contains no conversation field and no explanation, only the wrapper prefix.
+  Verified: Confirmed. In `crates/gui/farhelm-gui/src/launcher/view/more_options.rs:33-43`, `required` forces
+  `must_open` while `offered` is `None` because `offers_conversation` needs `custom_resumption`
+  (`launcher/request.rs:536-541`). SPEC.md:2201-2203 says Restart with "is available even without a captured
+  conversation; then its conversation field is required and explains why". SPEC.md:497 says "Existing launches retain
+  their commands and capabilities after a registration changes". The draft instead refreshes capabilities from the
+  current catalog (`draft.rs:235-237`), so the right behavior depends on which rule wins.
+- Decision: q-restartreg, "Restart with after a custom agent's registration changed": the maintainer picked "Follow the
+  current registration". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "I think this
+  is what users would actually expect. But if this means that it's very, very complicated to implement, please push back
+  on me."
+- Completion criteria: Change SPEC.md so a custom agent's registration change applies to Restart with (replacing
+  "Existing launches retain their commands and capabilities after a registration changes" for that case), and make the
+  launcher's prompts and disabled reasons follow the current registration. If this turns out very complicated, stop and
+  push back to the maintainer instead of landing it. Recommendation for reference: fix code — decide together with 522;
+  at minimum show why the restart is unavailable instead of an empty forced-open panel; size S. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. The open launcher explains the current registration's refusal and makes More options foldable again. Change `nwooxklrkoswozmnsszzwszsoqryltwr`, bookmark `plan/triage-custom-agents-nov24/05c-custom-restart-ui`,
+  https://github.com/scode/farhelm/pull/4941/changes.
+
+## trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Restart with can be opened on a custom-agent session after the user turned off "Supports resumption" for
+  that agent. With no captured conversation, it says "Enter a conversation to restart" but hides the field. With a
+  captured conversation, an edit enables Restart, and the helm or supervisor then rejects the request. Verified:
+  Confirmed for the GUI. `restart_refusal` (`crates/gui/farhelm-gui/src/launcher/request.rs:380-382`) asks for a
+  conversation that `offers_conversation` (:536-541) hides. `agent_refusal` (:324-372) never checks `custom_resumption`.
+  The later server-side rejection (helm `compile_custom` uses the current registration; the supervisor refuses in
+  `restart_session_named`) is the reviewer's trace, and I did not confirm the exact message. It hinges on the same
+  conflict as 516: SPEC.md:497 ("Existing launches retain their commands and capabilities after a registration changes")
+  versus the draft's refresh from the current catalog.
+- Decision: q-restartreg, "Restart with after a custom agent's registration changed": the maintainer picked "Follow the
+  current registration". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "I think this
+  is what users would actually expect. But if this means that it's very, very complicated to implement, please push back
+  on me."
+- Completion criteria: Change SPEC.md so a custom agent's registration change applies to Restart with (replacing
+  "Existing launches retain their commands and capabilities after a registration changes" for that case), and make the
+  launcher's prompts and disabled reasons follow the current registration. If this turns out very complicated, stop and
+  push back to the maintainer instead of landing it. Recommendation for reference: fix code — refuse up front with "This
+  custom agent no longer supports resumption" (or follow stored capabilities if that is the answer); size S. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. The menu, open launcher and submit check the current registration before asking for a conversation or offering Restart with. Change `nwooxklrkoswozmnsszzwszsoqryltwr`, bookmark `plan/triage-custom-agents-nov24/05c-custom-restart-ui`,
+  https://github.com/scode/farhelm/pull/4941/changes.

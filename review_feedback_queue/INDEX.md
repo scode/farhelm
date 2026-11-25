@@ -177,11 +177,6 @@ consequences.
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
   failure above it, and leaves the launch refusal stuck even after an in-flight toggle succeeds.
 
-- [`trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md`](trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md)
-  — For a registered custom agent session created without session resumption enabled, the disabled Restart with menu
-  item tells the user "Custom sessions can't be resumed" instead of explaining that this launch has no stored resume
-  command and pointing them to Clone or Replace with.
-
 - [`trailing-custom-agent-settings-busy-save-button-and-saw-saved-restore.md`](trailing-custom-agent-settings-busy-save-button-and-saw-saved-restore.md)
   — While a custom-agent save is in flight, a pushed catalog update can disable the busy Save button (causing it to drop
   keyboard focus) or overwrite the fields being saved with a subsequent external update.
@@ -191,21 +186,9 @@ consequences.
   single 'Custom agent' and jumps Settings to whichever custom-agent draft sorts first rather than staying on the page
   the user was viewing.
 
-- [`trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md`](trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md)
-  — In Restart with for a custom-agent session that has no captured conversation, if the custom agent's registration has
-  resumption disabled (or is deleted), the More options disclosure is locked open with "A setting here is required or
-  needs attention", yet shows neither the conversation field nor any error inside it.
-
 - [`trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md`](trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md)
   — A registered custom agent with a long display name produces a chip in the session launcher's Custom group that
   cannot shrink or ellipsize to the dialog width, overflowing and getting clipped at the right edge of the launcher.
-
-- [`trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md`](trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md)
-  — When you open Restart with on an existing custom-agent session after turning off "Supports resumption" for that
-  custom agent in Settings, the launcher gives contradictory or broken behavior: if the session has no captured
-  conversation, it tells you "Enter a conversation to restart" even though it hides the Conversation ID input and cannot
-  resume; if the session has a captured conversation, Restart stays enabled and submits a request that the
-  helm/supervisor then rejects.
 
 - [`trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md`](trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md)
   — Sessions launched with a registered custom agent show the generic label "Custom agent" in both the session row's

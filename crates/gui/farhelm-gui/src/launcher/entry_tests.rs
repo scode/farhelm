@@ -98,7 +98,7 @@ pub(super) fn window_with<'a>(
 }
 
 /// [`window_with`] over the hosts collection `hosts`, with `more` collections in the helm's first snapshot.
-fn window_on<'a>(
+pub(super) fn window_on<'a>(
     cx: &'a mut TestAppContext,
     selected: Option<&str>,
     hosts: CollectionState,

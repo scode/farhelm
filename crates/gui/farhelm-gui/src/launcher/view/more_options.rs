@@ -30,17 +30,25 @@ impl Launcher {
         palette: &theme::Palette,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        let blocker = self.custom_restart_refusal(cx);
         let offered = harness.filter(|harness| {
-            self.draft.offers_conversation()
-                || (harness.uses_custom_catalog() && !self.draft.conversation.is_empty())
+            blocker.is_none()
+                && (self.draft.offers_conversation()
+                    || (harness.uses_custom_catalog() && !self.draft.conversation.is_empty()))
         });
         let label = offered.map(conversation_label);
-        let required = self.draft.requires_conversation();
-        let conversation_error = self.draft.conversation_error();
+        let (required, conversation_error) = self.conversation_attention(blocker);
         let wrapper_error = self.draft.wrapper_error();
         let must_open = required || conversation_error.is_some() || wrapper_error.is_some();
         self.more_options_open |= must_open;
-        let mut fields = vec![self.more_options_toggle(label, must_open, palette, cx)];
+        let mut fields = Vec::new();
+        if let Some(reason) = blocker {
+            fields.push(
+                choices::status_line("launcher-custom-restart-blocked", reason, palette)
+                    .into_any_element(),
+            );
+        }
+        fields.push(self.more_options_toggle(label, must_open, palette, cx));
         if !self.more_options_open {
             return fields;
         }
@@ -233,13 +241,22 @@ impl Launcher {
             .into_any_element()
     }
 
+    /// Keep a conversation error or requirement only while the current registration can use the field.
+    fn conversation_attention(&self, blocker: Option<&str>) -> (bool, Option<String>) {
+        if blocker.is_some() {
+            return (false, None);
+        }
+        (
+            self.draft.requires_conversation(),
+            self.draft.conversation_error(),
+        )
+    }
+
     /// A press can arrive before a redraw following a draft edit. Recheck whether folding would hide a field
     /// that needs attention, and leave the draft's values and any launch refusal alone.
     fn toggle_more_options(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        if self.draft.requires_conversation()
-            || self.draft.conversation_error().is_some()
-            || self.draft.wrapper_error().is_some()
-        {
+        let (required, error) = self.conversation_attention(self.custom_restart_refusal(cx));
+        if required || error.is_some() || self.draft.wrapper_error().is_some() {
             return;
         }
         self.more_options_open = !self.more_options_open;
