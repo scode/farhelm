@@ -6,6 +6,7 @@ use super::*;
 use crate::provisioning::tests::FakeBackend;
 use farhelm_proto::credentials::{CreateCredential, CredentialKind, SaveCredential};
 use farhelm_proto::tensorlake::recipes::EndpointSave;
+use farhelm_supervisor::recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
@@ -184,7 +185,13 @@ impl Fixture {
 
     /// Decode the file delivered for the next spawn, so a token shared by Claude and Codex cannot mask a missing slot.
     async fn snapshot(&self) -> RecipeCredentials {
-        serde_json::from_slice(&tokio::fs::read(self.claude_path()).await.unwrap()).unwrap()
+        let snapshot: RecipeCredentials =
+            serde_json::from_slice(&tokio::fs::read(self.claude_path()).await.unwrap()).unwrap();
+        // The supervisor rejects a Codex bearer with no matching endpoint flag, including when cleanup withheld it.
+        let endpoint = snapshot.codex_endpoint.as_ref();
+        let has_bearer = snapshot.env.contains_key(CODEX_ENDPOINT_TOKEN_ENV);
+        assert_eq!(endpoint.is_some_and(|entry| entry.has_token), has_bearer);
+        snapshot
     }
 
     /// Registration uses the real recipe/reference store; no supervisor or
@@ -631,7 +638,10 @@ async fn stamped_claude_cleanup_gates_only_its_launch_environment() {
             .is_empty()
     );
     assert_eq!(f.delivery.warning(f.row.id), None);
-    assert!(f.claude().await.contains(THIRD));
+    let env = f.snapshot().await.env;
+    assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], THIRD);
+    assert_eq!(env["ANTHROPIC_BASE_URL"], "https://first.example/v1");
+    assert_eq!(env[CODEX_ENDPOINT_TOKEN_ENV], THIRD);
     assert_eq!(tokio::fs::read(&settings).await.unwrap(), user_edit);
 }
 
@@ -1355,7 +1365,7 @@ async fn endpoint_lookup_failures_preserve_the_shared_file_and_fail_dependent_pu
 /// available. Setup reports the failed Claude lookup to its caller, which shows it on
 /// the setup step.
 #[farhelm_testtrace::test]
-async fn claude_lookup_failure_allows_codex_login_rotation_and_refuses_setup() {
+async fn claude_lookup_failure_allows_codex_login_rotation_and_reports_a_setup_notice() {
     const CLAUDE_LOGIN: &str = "sk-ant-oat01-fictional-claude-first";
     const WARNING: &str = "could not resolve the recipe's Claude login";
     let f = Fixture::new(false).await;
@@ -1929,11 +1939,12 @@ async fn codex_cleanup_failure_preserves_the_claude_slot() {
         .unwrap();
     let _lease = f.delivery.enter(&f.row);
     f.delivery.connect(&f.row, &f.events).await;
-    assert!(f.claude().await.contains(FIRST));
+    let snapshot = f.snapshot().await;
+    assert_eq!(snapshot.env["ANTHROPIC_AUTH_TOKEN"], FIRST);
     let record = f.delivery.read_record(&f.row).await.unwrap();
     assert!(record.claude_environment.is_some() && record.codex_environment.is_none());
     assert!(matches!(record.codex, Some(EndpointStamp::Endpoint { .. })));
-    assert!(f.snapshot().await.codex_endpoint.is_none());
+    assert!(snapshot.codex_endpoint.is_none());
     let warning = f.delivery.warning(f.row.id).unwrap();
     assert!(!warning.contains("fictional-private-marker"));
     assert_eq!(
@@ -2111,7 +2122,9 @@ async fn backend_failures_leave_saved_values_and_safe_warnings() {
                 .is_empty()
         );
         assert_eq!(f.delivery.warning(f.row.id), None);
-        assert!(f.claude().await.contains(SECOND));
+        let env = f.snapshot().await.env;
+        assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], SECOND);
+        assert_eq!(env[CODEX_ENDPOINT_TOKEN_ENV], SECOND);
     }
 }
 

@@ -226,9 +226,6 @@ consequences.
 - [`sound-preview-overlay-blocks-settings-switch.md`](sound-preview-overlay-blocks-settings-switch.md) — The Play
   overlay leaves parts of its sound switch row unclickable.
 
-- [`staged-host-update-controls-promise-unattended-installs.md`](staged-host-update-controls-promise-unattended-installs.md)
-  — Host update controls can still promise automatic installation while a staged build requires a manual update.
-
 - [`sound-preview-regression-misses-separate-mappings.md`](sound-preview-regression-misses-separate-mappings.md) — The
   preview test exercises one sound and can miss a wrong mapping on the three other Play controls.
 
@@ -580,10 +577,6 @@ consequences.
   — Primary Suspend and Stop and suspend actions still wait up to 20 seconds behind any slow host on the ordered channel
   lane because their pre-flight session activity check was left on Lane::Ordered.
 
-- [`trailing-ensure-hosts-skips-tailscale-validation-for-registered.md`](trailing-ensure-hosts-skips-tailscale-validation-for-registered.md)
-  — An invalid Tailscale destination in --ensure-hosts is silently accepted when already registered and fails without
-  the entry index or Tailscale format guidance when new.
-
 - [`trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md`](trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md)
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
   failure above it, and leaves the launch refusal stuck even after an in-flight toggle succeeds.
@@ -602,11 +595,6 @@ consequences.
   — Saving a custom-agent launch template from the CLI or API accepts invalid model values (such as uppercase letters,
   spaces, control characters, or empty strings) even though Farhelm refuses those same values in the desktop Templates
   editor and whenever the template is applied.
-
-- [`trailing-codex-dual-agent-delivery-tests-raw-substring.md`](trailing-codex-dual-agent-delivery-tests-raw-substring.md)
-  — Several credential-delivery tests that share one endpoint token between Claude and Codex either check only whether a
-  token appears anywhere in the raw combined credentials file after recovery, or check only that `codex_endpoint` is
-  absent without verifying `FARHELM_CODEX_ENDPOINT_TOKEN` was also stripped.
 
 - [`trailing-codex-renamed-executable-missing-admission-and-e2e-test.md`](trailing-codex-renamed-executable-missing-admission-and-e2e-test.md)
   — The change that enables Restart to resume Codex sessions launched from renamed or versioned executables adds no
@@ -827,6 +815,3 @@ consequences.
   confirmation dialog explains the YOLO classification as "Farhelm treats every Custom permission choice as YOLO."
   Because "Custom" is also the name of the Custom permission flags mode, this reads as if the launch used custom
   permission flags rather than a registered custom agent.
-
-- [`trailing-credential-test-name-says-setup-refuses.md`](trailing-credential-test-name-says-setup-refuses.md) — A test
-  name says a failed Claude credential lookup makes host setup fail, while setup actually completes with a notice.
