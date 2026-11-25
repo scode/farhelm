@@ -216,6 +216,7 @@ fn auth_block(text: &str) -> Option<&'static str> {
         "sign in to continue",
         "log in to continue",
         "please log in",
+        "press any key to log in",
         "not logged in",
         "not authenticated",
         "authentication failed",
@@ -330,13 +331,24 @@ impl<'a> Terminal<'a> {
         id: &str,
         turned: bool,
     ) -> Result<Self, DriftError> {
+        Self::attach_with_width(sup, client, id, turned, COLS).await
+    }
+
+    /// Model verification can widen the attach to keep long model IDs visible beside CLI notices.
+    async fn attach_with_width(
+        sup: &Supervisor,
+        client: &'a SupervisorClient,
+        id: &str,
+        turned: bool,
+        cols: u16,
+    ) -> Result<Self, DriftError> {
         let host = sup
             .agent_host_for_test(id)
             .await
             .ok_or_else(|| anyhow::anyhow!("no terminal host for {id}"))?;
         let (channel, mut stream) =
             client
-                .attach_at_boundary(id, COLS, ROWS)
+                .attach_at_boundary(id, cols, ROWS)
                 .await
                 .map_err(|error| {
                     let screen = host.screen_tail(SCREEN_BYTES).to_lowercase();
@@ -851,6 +863,7 @@ macro_rules! drift_cases {
 }
 
 mod base;
+mod model_selection;
 
 #[cfg(test)]
 mod tests {

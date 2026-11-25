@@ -12,6 +12,7 @@ python3 -B scripts/run-harness-drift.py --list --category base --harness codex
 python3 -B scripts/run-harness-drift.py --harness codex --harness claude
 python3 -B scripts/run-harness-drift.py
 python3 -B scripts/run-harness-drift.py --no-upgrade --harness grok
+python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection
 python3 -B scripts/run-harness-drift.py --upgrade-only
 ```
 
@@ -31,6 +32,13 @@ then stops the session, records how many hook reports were accepted, and uses Re
 The resumed agent must recall the code word in a second reply. Farhelm must also accept a new hook report that leaves
 the original resume arguments intact. The launch-only base cases check that the interactive screen or workspace trust
 prompt opens. Every category has up to 720 seconds per harness, including startup, checks and cleanup.
+
+The `model_selection` category launches the current catalog models and checks which model the agent shows as active.
+Goose, Pi and OMP also start without provider or model flags and check that the agent shows an active model. Their
+explicit OpenRouter models need `OPENROUTER_API_KEY`. The no-flag check still runs without it.
+
+A Codex retirement prompt can appear before the composer opens. The affected model is reported as unavailable when the
+prompt asks the user to choose between keeping it and switching to its replacement.
 
 An agent may save a trust choice for the temporary directory. The Muse launcher and OMP can update themselves during
 startup, so these cases disable their updaters for the test invocations using a launcher variable and a temporary OMP
