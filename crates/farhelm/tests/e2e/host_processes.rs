@@ -617,6 +617,11 @@ async fn a_host_agent_survives(signal: libc::c_int) {
     let row = stack.row(&session.id).await;
     assert_eq!(row.outcome, LastOutcome::Running);
     assert_eq!(row.terminal_kind, TerminalKind::Host);
+    assert_eq!(
+        std::ffi::OsStr::new(&row.terminal_address),
+        socket.file_name().expect("the host socket has a name"),
+        "the next supervisor must be able to find the same host from disk"
+    );
     drop(viewer);
     drop(client);
     stack.finish().await;
@@ -634,7 +639,7 @@ async fn a_host_agent_survives(signal: libc::c_int) {
 /// process still serves the socket; the next supervisor's grid stream of the
 /// session shows the agent's ready line and the line echoed before the
 /// restart, a line typed now is echoed, the same host process serves the
-/// socket, and the row is still a running host row.
+/// socket, and the running row still names that socket for the next recovery.
 #[farhelm_testtrace::test]
 async fn a_host_agent_survives_an_orderly_supervisor_restart() {
     a_host_agent_survives(libc::SIGTERM).await;

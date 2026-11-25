@@ -45408,3 +45408,158 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. A retry retains the gone current host's launch record until it confirms the process sweep, including
   the recorded scope. Change `ntpzktpvqnotnkrwznnuswpywtrnmtkl`, bookmark `plan/triage-supervisor-nov24/04-other-fixes`,
   [PR #4878](https://github.com/scode/farhelm/pull/4878/changes).
+
+## trailing-real-supervisor-restart-assertions-leave-recovered-socket-identity-unchecked.md
+
+- Outcome: `other`.
+- Assessment: This is the end-to-end test where a real supervisor process is stopped (orderly or killed) and a new one
+  takes over a running agent. The test checks that the same terminal host process survives and that the session still
+  takes input. It never checks that the session's saved record still names that host's socket. A regression that wrote a
+  wrong address while the live connection still worked would pass. No user-visible bug is claimed. Verified: confirmed.
+  `crates/farhelm/tests/e2e/host_processes.rs:569-623` reads the socket from the row before the restart (`host_socket`,
+  :183-195). After the restart it checks `host_process(&socket) == Some(host)`, the outcome and the kind (:612-619), but
+  never `row.terminal_address`. The file has not changed since fcb6fa5e4. The in-process restart tests compare the
+  durable address (the reviewer cites `host_restarts.rs:351-372`; I did not re-read it).
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard. The in-process restart tests already cover the
+  durable address, so this adds little. Size S (one assertion) if fixed.
+- Execution: Fixed. After SIGTERM and SIGKILL recovery, the persisted address must still name the terminal host whose
+  process survived. Change `pnzppsyrknyusuoumuzsympkxwkxszoy`, bookmark `plan/triage-supervisor-nov24/05-cheap-fixes-1`,
+  [PR #4879](https://github.com/scode/farhelm/pull/4879/changes).
+
+## trailing-strengthened-stop-tree-test-permits-cleanup-after-success-reply.md
+
+- Outcome: `other`.
+- Assessment: Stop must not report success until the agent's processes are confirmed gone. The test for Stop on an agent
+  with a hangup-immune grandchild waits up to the full wait budget, after Stop replies, for both processes to disappear.
+  So it would still pass if Stop replied early and the cleanup finished afterwards. Verified: confirmed.
+  `crates/farhelm/tests/e2e/host_terminals.rs:302-304` calls `stop_session` and then `wait_until_pid_gone` (which polls,
+  `harness.rs:2498-2511`) for the child and the grandchild. SPEC.md (Session operations, "Confirmed 2026-09-28: when
+  Farhelm cannot confirm that the cleanup an operation needs has finished, the operation fails visibly instead of
+  reporting success") requires confirmed cleanup before success. `process_is_gone` counts a zombie as gone, so an
+  immediate assertion would not trip on a process that is waiting to be reaped. No premature reply was observed.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code. The test's own spec line claims "Stop succeeds; both
+  processes go", and the fix is to assert `process_is_gone` right after the reply and keep polling only for the exit
+  record. Size S.
+- Execution: Fixed. The child and grandchild must already be gone when Stop replies. Only the exit record can arrive
+  later. Change `pnzppsyrknyusuoumuzsympkxwkxszoy`, bookmark `plan/triage-supervisor-nov24/05-cheap-fixes-1`,
+  [PR #4879](https://github.com/scode/farhelm/pull/4879/changes).
+
+## trailing-restart-gap-open-tab-checks-survivors-but-never-witnesses.md
+
+- Outcome: `other`.
+- Assessment: Opening a terminal tab on a session whose agent terminal is gone (the restart gap) must be refused before
+  anything starts. The test checks the refusal and that no tab record or host process is left afterwards. A launch that
+  started and was cleaned up before the reply would leave the same empty state. Verified: confirmed as a gap.
+  `crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:75-107` only checks state after the refusal. Shipped code refuses at
+  the gate before any tab startup (`service/core.rs:13955-13975`, the `restart_first` refusal for `None` or
+  `Liveness::Gone`). This matches SPEC_impl.md.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard. Reading the code shows the gate refuses first, and
+  counting launch attempts needs a seam threaded into an end-to-end test. Size S-M if fixed.
+- Execution: Fixed. The replacement supervisor counts any spec handoff on Open Tab. The restart-gap refusal must leave
+  the count at zero. Change `pnzppsyrknyusuoumuzsympkxwkxszoy`, bookmark
+  `plan/triage-supervisor-nov24/05-cheap-fixes-1`, [PR #4879](https://github.com/scode/farhelm/pull/4879/changes).
+
+## trailing-restart-ordering-witness-record-gone-without-reading-old-pid.md
+
+- Outcome: `other`.
+- Assessment: The test that proves Restart stops the old agent's whole process tree before the new host starts uses a
+  wrapper script. The script records whether the old PIDs were alive when the new host began. If it cannot read a PID
+  file, it records "gone", so a broken fixture read would count as proof that the old tree had stopped. Verified:
+  confirmed. `crates/farhelm/tests/e2e/host_terminals.rs:359-368` uses `pid=$(cat "$file" 2>/dev/null)`. With an empty
+  `pid`, both `ps -p ""` and `kill -0 ""` fail, and the script records " gone". Before the Restart, the test verifies
+  the fixture PIDs (`hangup_immune_tree`, :394), and the files stay in place, so the read fails only if they disappear
+  between those steps. No failed read was observed.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard. The failure needs the fixture's own PID files to
+  vanish mid-test. Size S if fixed (fail the wrapper on an empty or invalid PID and arm it only for the Restart's
+  start).
+- Execution: Fixed. The replacement's start must successfully read and record the two exact fixture PIDs. A failed read
+  cannot count as gone. Change `pnzppsyrknyusuoumuzsympkxwkxszoy`, bookmark
+  `plan/triage-supervisor-nov24/05-cheap-fixes-1`, [PR #4879](https://github.com/scode/farhelm/pull/4879/changes).
+
+## trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md
+
+- Outcome: `other`.
+- Assessment: Suppose a session's only systemd scope belongs to a terminal tab, and systemd cannot list it. Delete is
+  supposed to refuse and keep the session. The product code does that. No test drives that path through Delete itself:
+  the nearby tests either start from the agent's scope or call the later cleanup step directly. Verified: Confirmed as a
+  coverage gap. teardown.rs:427-447 refuses with `TabScopeEnumeration` when a recorded scope exists and listing fails.
+  The direct reaper test is sweep.rs:3734. The fake scope manager's listing always succeeds (the reviewer cites
+  scope.rs:1072-1087; I did not re-read it). No product failure.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — the product path is correct, and the test needs a
+  new fake listing-failure seam; size M if kept.
+- Execution: No change. Delete already refuses when enumeration fails for a recorded scope. Its fake scope manager can
+  re-probe and fail kills but cannot report a listing failure. The tab-only Delete fixture and listing-failure seam are
+  beyond the small test gate. Change `pnzppsyrknyusuoumuzsympkxwkxszoy`, bookmark
+  `plan/triage-supervisor-nov24/05-cheap-fixes-1`, [PR #4879](https://github.com/scode/farhelm/pull/4879/changes).
+
+## trailing-delete-level-tests-miss-retained-gone-host-refusal.md
+
+- Outcome: `other`.
+- Assessment: If a terminal host looks gone but its adopted process is verifiably still alive, Delete should refuse and
+  keep the session and its launch record. The code does that. No test drives that case through Delete. The tests cover
+  Close and other Delete branches instead. Verified: Confirmed as a coverage gap. teardown.rs:556-560 returns an error
+  from ending the host before the row is removed. The reviewer's list of existing tests matches what is there. No
+  product failure.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — the product path is correct, and the shared refusal
+  is already tested through Close; size M if kept.
+- Execution: Fixed. The existing held Gone tab with a live adopted process now also drives unconditional Delete and
+  verifies the refusal retains the row, entry and record. Change `pnzppsyrknyusuoumuzsympkxwkxszoy`, bookmark
+  `plan/triage-supervisor-nov24/05-cheap-fixes-1`, [PR #4879](https://github.com/scode/farhelm/pull/4879/changes).
+
+## trailing-tab-resume-pass-without-receiving-flood-output.md
+
+- Outcome: `other`.
+- Assessment: An end-to-end test pauses one tab's output, floods it, checks that the agent still responds, and then
+  resumes the tab. Its final check looks for "FLOOD-". The echoed command already contains that text, so the check can
+  pass even if no output produced during the pause ever arrives. Verified: Confirmed. terminal_tabs.rs:1532-1536 says so
+  in its own comment. This overlaps 333 (same test).
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code — wait for a marker that the echo cannot contain (for
+  example, `FLOOD-199999`, or a trailing printed sentinel); size S. Combine with 333.
+- Execution: Fixed. The resumed tab must receive the final numbered flood line, which cannot appear in the shell's input
+  echo. Change `pnzppsyrknyusuoumuzsympkxwkxszoy`, bookmark `plan/triage-supervisor-nov24/05-cheap-fixes-1`,
+  [PR #4879](https://github.com/scode/farhelm/pull/4879/changes).
+
+## trailing-paused-tab-test-pass-without-exercising-pause.md
+
+- Outcome: `other`.
+- Assessment: The same paused-tab test never shows that the paused tab actually stopped receiving output. It only looks
+  at the tab after resuming. The client's pause sends no acknowledgement, and queued text counts. Verified: Confirmed.
+  terminal_tabs.rs:1503-1536 has no check during the pause. It is the same test as 332.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: fix code, together with 332 — size S–M. Or discard both.
+- Execution: No change. A reliable pause observation needs separate evidence that the producer wrote while the sender
+  was parked. The end-to-end client has no pause acknowledgment, and the sender's parked witness is an internal unit
+  fixture. The small resume assertion does not establish the pause boundary. Change `pnzppsyrknyusuoumuzsympkxwkxszoy`,
+  bookmark `plan/triage-supervisor-nov24/05-cheap-fixes-1`,
+  [PR #4879](https://github.com/scode/farhelm/pull/4879/changes).

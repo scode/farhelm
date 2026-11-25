@@ -1529,11 +1529,10 @@ async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
         "the agent must have been round-tripped several times while the tab was stalled"
     );
 
-    // After resume, check for the flood marker. The echoed command can
-    // also contain this prefix, so the check alone cannot prove delivery
-    // of a flood record.
+    // Check produced output after Resume. The input echo contains the
+    // format string, so only the producer supplies the final numbered line.
     h.client.resume_output(tab_chan).await;
-    wait_for(&mut tab_rx, &mut tab_seen, "FLOOD-", 30).await;
+    wait_for(&mut tab_rx, &mut tab_seen, "FLOOD-199999", 30).await;
 }
 
 /// A tab's launch evaluates the environment at OPEN time, so an rc-file

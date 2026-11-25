@@ -4247,7 +4247,8 @@ async fn delete_never_signals_an_unrecorded_placeholders_unreadable_socket() {
 /// treat the lost socket as confirmation. Closing the tab fails saying
 /// the host could not be confirmed
 /// ended; the tab is still in the session's cell, marked as a failed end
-/// with a retry time; and its record is still there.
+/// with a retry time; and its record is still there. An unconditional
+/// Delete also refuses and keeps the row, entry and record.
 #[farhelm_testtrace::test]
 async fn closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first() {
     let state = StateDir::new();
@@ -4332,6 +4333,19 @@ async fn closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first() {
         "the tab is kept and marked for a retry: {kept:?}"
     );
     assert!(record.exists(), "the tab's record is kept");
+    // Delete must make the same host-end check through the retained tab,
+    // and leave the session and record available when that check fails.
+    let refused = refusal(
+        delete_s1(&sup, farhelm_proto::DeleteGuard::Unconditional).await,
+        "a Gone tab host's adopted process still runs",
+    );
+    assert!(
+        refused.contains("could not confirm that this session's terminal hosts ended"),
+        "{refused}"
+    );
+    assert!(sup.store.session("s1").await.unwrap().is_some());
+    assert!(sup.sessions.lock().await.contains_key("s1"));
+    assert!(record.exists(), "Delete keeps the record on refusal");
 }
 
 // ---- Restart seeds -------------------------------------------------------------------
