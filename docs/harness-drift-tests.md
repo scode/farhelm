@@ -52,11 +52,12 @@ The `permission_modes` category opens the CLI with the launcher's approval choic
 indicator where the integration reads one. Tracked agents complete one text turn with Custom permission flags. The test
 checks that Restart keeps those arguments in order and that the new process reaches its composer.
 
-The `named_conversation` category seeds vendor conversations in its test workspaces and checks that a launch with an
-explicit ID or file recalls the seed. Pi and OMP exercise both absolute and relative file paths. The Goose case uses
-named Restart on a session that already holds a capture and checks that the relaunch clears it. Goose 1.60.2 can then
-report the selected conversation through the reporter it persisted when that conversation was created. The case reports
-this as a failure because plain Restart becomes available again after the named Restart.
+The `named_conversation` category seeds a conversation from each test workspace, kept in the vendor's own store like any
+other, and checks that a launch with an explicit ID or file recalls the seed. Pi and OMP exercise both absolute and
+relative file paths. The Goose case uses named Restart on a session that already holds a capture and checks that the
+relaunch clears it. Goose 1.60.2 can then report the selected conversation through the reporter it persisted when that
+conversation was created. The case reports this as a failure because plain Restart becomes available again after the
+named Restart.
 
 The `initial_prompt` category starts each agent that accepts a launch prompt with a two-line prompt whose first line
 begins with `--`, checks that the process received it as one argument, and checks the reply, which needs both lines. For

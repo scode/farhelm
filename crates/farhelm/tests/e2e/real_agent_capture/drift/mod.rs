@@ -566,8 +566,9 @@ impl TurnExpectation<'_> {
     }
 }
 
-/// A reply starts a line after any answer bullet. Goose and OMP can add prose after "OK", so match the word at
-/// a boundary. The prompt echo can mention the same word later in a line and supplies no reply evidence.
+/// A reply starts a line after any answer bullet, in any casing. Goose and OMP can add prose after "OK", so
+/// match the word at a boundary. The prompt echo can mention the same word later in a line and supplies no reply
+/// evidence.
 fn reply_on_screen(text: &str, reply: &str) -> bool {
     text.lines().map(str::trim).any(|line| {
         let line = line
