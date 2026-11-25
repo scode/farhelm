@@ -867,7 +867,9 @@ pub enum SessionStatus {
     /// A reboot or retirement of a legacy tmux terminal interrupted a
     /// session recorded as launching, running or stopping. The terminal
     /// can no longer report how the program ended. This outcome persists
-    /// until the user acts or the supervisor finds a definitive launch error.
+    /// until the user acts or the supervisor replaces it with a launch error.
+    /// The error can come from a confirmed shim failure or from missing,
+    /// unreadable or incomplete managed-checkout preparation evidence.
     Interrupted,
 }
 

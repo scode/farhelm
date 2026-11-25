@@ -306,11 +306,12 @@ identity and sessions. If the host still owns Podman resources, its SSH route is
 Whenever a surface uses a host's **short name**, it derives it from that host alone: an explicit alias exactly as
 stored, otherwise `Local` for the local host, otherwise the first label of its SSH hostname. For that last case it
 removes `ssh://`, a user prefix through the last `@`, brackets, and a port only in an SSH URI or after a bracketed
-address. In SSH URIs the port can be a service name or empty, and a trailing slash is removed. IP addresses stay whole,
-including abbreviated IPv4 spellings and IPv6 scope suffixes. A dot-less name stays as it is. A leading dot keeps the
-whole remainder. Short names may coincide. They are display only, never a host-resolution key, and deriving one never
-stores an alias or changes the helm's display name. If the derived form is empty, the UI shows the full display name
-instead, including for a newer host kind with no destination.
+address. In SSH URIs the port can be a service name or empty, and a trailing slash is removed. All-digit-and-dot
+destinations stay whole, including abbreviated IPv4 spellings. IPv6 addresses also stay whole, including any scope
+suffix. A dot-less name stays as it is. A leading dot keeps the whole remainder. Short names may coincide. They are
+display only, never a host-resolution key, and deriving one never stores an alias or changes the helm's display name. If
+the derived form is empty, the UI shows the full display name instead, including for a newer host kind with no
+destination.
 
 The add host dialog takes an optional alias beside the destination, and the host is added with it. Adding a destination
 that is already a host entry is refused, naming that entry, before anything contacts the destination: it is almost
@@ -1369,12 +1370,13 @@ agent choice is independent of that destination:
   saving a template, the chord is consumed without changing the draft. Applying by shortcut leaves focus and search text
   alone, unless its edits remove the focused control, when focus returns to the launcher's search. Other visible dialogs
   keep the keyboard. A hidden quick-launch launcher still consumes the chord without applying it. Applying it directly
-  uses exactly New's defaults and ordinary launch path: the open session's host, else this machine, and New's default
-  folder for that host (Working directory above), with the template overriding only its own fields. Success selects the
-  created session only if the user has pressed no key or pointer button since dispatch or their last answer to the
-  launcher, under the launch-completion rules below. When New was never shown and success selects its session, the
-  rename dialog opens over it while its agent is already starting, unless Settings' on-by-default **Name sessions on
-  quick launch** choice is off. This applies to the bolt shortcut, number shortcuts, composed sequences, the
+  uses New's ordinary launch path and working-directory default for the destination host. It defaults to the open
+  session's original host if it is still listed there and that host is ordinary. Otherwise it defaults to this machine,
+  including beside a sandbox or container session. The template can override placement and the other fields it supplies.
+  Success selects the created session only if the user has pressed no key or pointer button since dispatch or their last
+  answer to the launcher, under the launch-completion rules below. When New was never shown and success selects its
+  session, the rename dialog opens over it while its agent is already starting, unless Settings' on-by-default **Name
+  sessions on quick launch** choice is off. This applies to the bolt shortcut, number shortcuts, composed sequences, the
   quick-switcher row and the Cmd+J template list, even when a template supplied the name. The actual created name is
   focused and fully selected. Enter with the name unchanged or Escape keeps it without sending a rename; a changed name
   uses ordinary rename. Closing returns to the new terminal, which takes no input while the dialog is open. A launch
@@ -1516,12 +1518,13 @@ at the bottom of the Agent form. The folded row names the fields and shows a pil
 prefix in the terminal font. With both empty it says "none set". It opens and stays open while a field inside is
 required, refused or invalid. After a correction, the user can close it once no field needs attention. The footer's
 actions sit on the right. Cancel comes first, then quiet Reset choices and Save as template where offered. The main
-action comes last with a Return key cap. Its accessible name keeps the operation and target. Tab follows the command
-field, Close, the visible body controls, then the footer actions. More options is a Tab stop, with its editors following
-it when expanded. New, Clone and Replace with open with focus in the command field. Restart with opens on Cancel.
-Refusals, destructive warnings and the inline YOLO question remain adjacent to the actions in a bounded scroll region,
-so long content cannot displace those actions. The save-as-template panel remains inline in the scrolling body. Project
-registration (associating metadata with a directory) is optional convenience and never a prerequisite.
+action comes last with a Return key cap. Its accessible name keeps the operation and target. Tab visits the command
+field, Close, Command field messages when present, the visible body controls, then the footer actions. More options is a
+Tab stop, with its editors following it when expanded. New, Clone and Replace with open with focus in the command field.
+Restart with opens on Cancel. Refusals, destructive warnings and the inline YOLO question remain adjacent to the actions
+in a bounded scroll region, so long content cannot displace those actions. The save-as-template panel remains inline in
+the scrolling body. Project registration (associating metadata with a directory) is optional convenience and never a
+prerequisite.
 
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
@@ -1680,9 +1683,10 @@ are mutually exclusive, and missing recipes are inapplicable. A recipe with a no
 targets the recipe for a fresh sandbox with the source's launch and repository intent, never a copy of its disk.
 Restart, Restart with, Replace and Replace with stay in the existing sandbox. Recent setups restore the recipe and
 place, obtaining a fresh environment. Save as template from an environment launch and bulk Suspend/Resume/Stop and
-suspend remain deferred. When a sandbox session is open, New and quick-switcher creation preselect its recipe for a new
-sandbox and use the new sandbox's home Folder default, never the disposable host or its old folder. A missing recipe
-stays unavailable rather than silently choosing another host. The normal creation confirmation still applies.
+suspend remain deferred. When a sandbox session is open, New (including the quick switcher's New row) preselects its
+recipe for a new sandbox and uses the new sandbox's home Folder default, never the disposable host or its old folder.
+The quick switcher's Quick launch row uses the quick-launch placement rule above. A missing recipe stays unavailable
+rather than silently choosing another host. The normal creation confirmation still applies.
 
 Replace creates its replacement before removing the old session. That internal source removal is session-only and never
 destroys the sandbox or files. A failed or ambiguous Replace preserves the existing sandbox, reports what is known, and
@@ -3233,25 +3237,27 @@ as long as the first turn, so their silence proves nothing and is not reported);
 conversation hook to, unless the user turned hooks off for that agent themselves; a Codex or Grok conversation record
 that Restart finds missing, which withdraws the resume offer; and an OMP launch whose conversation reporter does not
 match the running Farhelm, the one refused conversation report that notifies; and a Claude, Codex, Muse or Antigravity
-launch whose first conversation report came from a nested process of that agent, corrected when a recorded ancestor
-reports. That correction says which conversation a Restart before now would have resumed and that Farhelm now follows
-the conversation of the agent process that started it, without claiming no further ancestor can correct it. Every other
-refused report (from a subagent, from an agent process the session's agent started itself, overtaken by a relaunch or
-delete, or turned away by a passing error) is the system working and never notifies. A launch that still carries a
-conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. For Grok and
-Antigravity, the silent-hook timer starts only when Farhelm verified its own hook files for that launch. After a
-supervisor restart, a launch that received the hook starts its silent-hook clock at the next qualifying Enter; launches
-stored before this behavior was introduced stay unchecked. Each notification says what happened and what the user can do
-about it, or, when nothing can be done, what they lose; it never points at a log. The silent-conversation-hook warning
-names the agent and when it normally reports its conversation, using the same timing as Restart's explanation. It says
-Restart cannot resume until that report arrives. For agents whose hooks are passed as launch arguments, the warning asks
-users of custom commands to check that they pass on `{farhelm_args}`. Grok and Antigravity's warning invites feedback
-from the help (?) menu, as it does for ordinary launches of the other agents. There is at most one notification of each
-such problem per launch of the session's agent. The warning that the agent never reported its conversation and the
-warning that Restart stopped offering to resume are marked resolved when Restart can resume that launch's conversation
-again, including after a supervisor restart. The other session-tracking kinds and notifications from earlier launches
-stay as they are. If a resolved problem returns in the same launch, its existing notification reopens at the top as new
-and unread, even if the user had cleared it; repeated checks while it remains unresolved do not repeat it.
+launch whose selected conversation is corrected by a report from a recorded ancestor of the process that reported it.
+For Codex, the notice says a Restart before now could have resumed the earlier conversation and that Farhelm now follows
+the conversation reported by one of that process's ancestors. The Claude, Muse and Antigravity notices describe what
+Restart would have resumed and name the agent process now followed. A higher recorded ancestor can still correct the
+choice. Every other refused report (from a subagent, from an agent process the session's agent started itself, overtaken
+by a relaunch or delete, or turned away by a passing error) is the system working and never notifies. A launch that
+still carries a conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. For
+Grok and Antigravity, the silent-hook timer starts only when Farhelm verified its own hook files for that launch. After
+a supervisor restart, a launch that received the hook starts its silent-hook clock at the next qualifying Enter;
+launches stored before this behavior was introduced stay unchecked. Each notification says what happened and what the
+user can do about it, or, when nothing can be done, what they lose; it never points at a log. The
+silent-conversation-hook warning names the agent and when it normally reports its conversation, using the same timing as
+Restart's explanation. It says Restart cannot resume until that report arrives. For agents whose hooks are passed as
+launch arguments, the warning asks users of custom commands to check that they pass on `{farhelm_args}`. Grok and
+Antigravity's warning invites feedback from the help (?) menu, as it does for ordinary launches of the other agents.
+There is at most one notification of each such problem per launch of the session's agent. The warning that the agent
+never reported its conversation and the warning that Restart stopped offering to resume are marked resolved when Restart
+can resume that launch's conversation again, including after a supervisor restart. The other session-tracking kinds and
+notifications from earlier launches stay as they are. If a resolved problem returns in the same launch, its existing
+notification reopens at the top as new and unread, even if the user had cleared it; repeated checks while it remains
+unresolved do not repeat it.
 
 Earlier releases gave a session in which something still ran in an old terminal the old-terminal warning: it asked for
 the session to be restarted, replaced, stopped or deleted as soon as possible, because an upcoming release would
@@ -4166,7 +4172,7 @@ narrow shell trampolines. Renamed Codex executables and resident launchers above
 selection from a descendant leaves the pinned process's conversation in place. A shell or a nested Codex can report
 first if the session has no pin. If a recorded ancestor later reports a verified conversation, Farhelm corrects the pin
 and resume target to that ancestor and posts a notification once per launch, explaining what a Restart before correction
-would have resumed. An ancestor's source-less `Stop` can make this correction too; an unverified record changes nothing,
+could have resumed. An ancestor's source-less `Stop` can make this correction too; an unverified record changes nothing,
 and a not-yet-resumable ancestor `Stop` is acknowledged without effect. A dead pin is released for a new Codex whose
 ancestry does not include the pinned process, after considering ancestor correction; a descendant whose report still
 contains the pinned process stays refused even after that process exits. The pin survives a supervisor restart but
@@ -5545,15 +5551,15 @@ explains that new sessions use the previous image. Superseded Farhelm-built imag
 them. Recipe deletion cleans up the place's owned images. User-owned base images are retained, and a checkpoint image
 Farhelm manages cannot be used as a recipe base. Settings → Containers shows probe status per host and a refreshable
 **Containers not on this helm** list with confirmed Delete and retryable failure, following the sandbox-leftovers
-pattern except that a failed Delete's reason shows only while Settings stays open: the helm keeps no record of it, so
-after reopening the leftover is listed again with no reason, and a reply that arrives after Settings closed is not
-shown. The list asks every container host at once, and a listing or Delete that waits on a container host for more than
-20 seconds says the host did not answer in time. Such a Delete carries on, and the list shows whether the container is
-gone when it is read again. Deleting a container's own host (Host-level Delete container, or Containers' Delete of a
-leftover that has a host row) answers the same way: the host leaves Hosts once its container is deleted, and if that
-deletion fails after the reply, the host stays listed and the reason reaches only the helm's log. These replies follow
-the rule that every host-waiting route the GUI sends is bounded. There is no Add host → Podman, Docker support or macOS
-container host support.
+pattern. A failed Delete's reason in this list lasts only for the current Settings opening. Hosts keeps its own reason
+and Retry for a known sealed host under the rule below. The list asks every container host at once, and a listing or
+Delete that waits on a container host for more than 20 seconds says the host did not answer in time. Such a Delete
+carries on, and the list shows whether the container is gone when it is read again. Deleting a container's own host
+(Host-level Delete container, or Containers' Delete of a leftover that has a host row) answers the same way. The host
+leaves Hosts once its container is deleted. If deletion fails after the reply, a container already known to be sealed
+when Delete began stays listed as being deleted with the reason and Retry. Any other container stays listed in its
+ordinary state, with the reason in the helm's log. These replies follow the rule that every host-waiting route the GUI
+sends is bounded. There is no Add host → Podman, Docker support or macOS container host support.
 
 ### Retired containerized sessions
 

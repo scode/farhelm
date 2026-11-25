@@ -26,8 +26,8 @@
 //! ([`default_folder`]). An open session on a host that a sandbox or container owns lends New no host, since such a
 //! host is no place for an unrelated session (the host picker leaves it out too): New's prefill takes the helm's own
 //! host, and New opened by the user ([`open_new`], [`open_new_named`]) preselects, once as it opens, the recipe and
-//! place of that session's environment for a fresh one (SPEC.md, "Sandbox sessions": "New and quick-switcher creation
-//! preselect its recipe for a new sandbox and use the new sandbox's home Folder default"), as the old launcher did for
+//! place of that session's environment for a fresh one (SPEC.md, "Sandbox sessions"), including when the user picks
+//! the quick switcher's New row, as the old launcher did for
 //! New opened without a prefill. A quick launch, which builds on [`new_prefill`], keeps its template's choices and
 //! New's defaults instead: preselecting there would send a template that names no placement into a fresh container
 //! beside a container session, its folder dropped for the container's home (decided by the launcher area on
@@ -168,9 +168,9 @@ pub(crate) fn open_launcher(window: &Window, cx: &App) -> Option<Entity<Launcher
     shown.launcher.upgrade()
 }
 
-/// New's draft as [`open_new`] would open it, built without opening anything: for a quick launch, which applies its
-/// templates to New's prefill and then starts it unseen or opens it (SPEC.md, "Quick launch": "Applying it directly
-/// uses exactly New's defaults and ordinary launch path"; `crate::templates::dispatch`). Read from the store alone, so
+/// New's ordinary host and folder defaults for a quick launch. The template can set an environment explicitly,
+/// while the open environment seeds a fresh recipe only when the user opens New. See SPEC.md, "Quick launch",
+/// and `crate::templates::dispatch` for applying the template and dispatching. Read from the store alone, so
 /// it is ready at once. `None` without a UI session. Unlike [`open_new`] it never brings back a refused launch waiting
 /// behind its notice and checks nothing about whether New may open; the caller decides that.
 pub fn new_prefill(cx: &App) -> Option<LaunchDraft> {
