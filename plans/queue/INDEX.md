@@ -9,7 +9,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight ebbb4a] `triage-bookkeeping-nov24.md` — execute the 50 discard outcomes from the 2026-11-24 triage
 - [in-flight 8adc40] `triage-spec-text-nov24.md` — write the 2026-11-24 triage's text corrections and new spec principles into SPEC.md, SPEC_impl.md, docs and comments
 - [pending] `triage-tooling-nov24.md` — execute the 2026-11-24 triage outcomes for maintainer tooling and test infrastructure, in grouped PRs
-- [pending] `triage-custom-agents-nov24.md` — execute the 2026-11-24 triage outcomes for registered custom agents, in grouped PRs
+- [in-flight 2b20d7] `triage-custom-agents-nov24.md` — execute the 2026-11-24 triage outcomes for registered custom agents, in grouped PRs
 - [pending] `triage-launcher-nov24.md` — execute the 2026-11-24 triage outcomes for the session launcher and templates, in grouped PRs
 - [pending] `triage-settings-nov24.md` — execute the 2026-11-24 triage outcomes for the Settings dialog, in grouped PRs
 - [pending] `triage-sessions-ui-nov24.md` — execute the 2026-11-24 triage outcomes for the session list, notices and window chrome, in grouped PRs
