@@ -503,6 +503,8 @@ enum TrashOpen {
     /// The dialog open and, once its measured reads are answered too, asking to delete everything on the host (`Some`,
     /// its "Delete all on") or on every reachable host (`None`, Delete all).
     Asking(Option<i64>),
+    /// Lose the host after opening its question, as a registry update can do while Trash stays open.
+    HostLeaves(i64),
 }
 
 /// The reference screens' three hosts, all connected, with a Trash button over them that reads each host's trash and
@@ -530,6 +532,7 @@ fn trash_scene(
     // The question waits for the dialog's own measured reads: a host being read offers nothing to delete.
     let ask = Cell::new(match open {
         TrashOpen::Asking(host) => Some(host),
+        TrashOpen::HostLeaves(host) => Some(Some(host)),
         TrashOpen::Button | TrashOpen::Dialog => None,
     });
     let watch = cx.observe(&button, move |button, cx| {
@@ -551,11 +554,22 @@ fn trash_scene(
             if let Some(host) = ask.get().filter(|_| ready) {
                 ask.set(None);
                 let dialog = button.read(cx).dialog_view();
-                let _ = window.update(cx, |_, window, cx| {
-                    if let Some(dialog) = dialog {
-                        dialog.update(cx, |dialog, cx| dialog.ask(host, window, cx));
-                    }
-                });
+                let asked = window
+                    .update(cx, |_, window, cx| {
+                        dialog.is_some_and(|dialog| {
+                            dialog.update(cx, |dialog, cx| dialog.ask(host, window, cx))
+                        })
+                    })
+                    .unwrap_or(false);
+                if let TrashOpen::HostLeaves(gone) = open {
+                    assert!(asked, "the host confirmation opened before removal");
+                    let helm = answering.clone();
+                    cx.defer(move |_| {
+                        let mut kept = crate::hosts::tests::reference_hosts();
+                        kept.retain(|host| host.id != gone);
+                        crate::trash::dialog::tests::drop_host(&mut helm.borrow_mut(), &kept, gone);
+                    });
+                }
             }
             return;
         }
@@ -666,4 +680,13 @@ pub(super) fn checkout_trash_confirm_host_setup(
         window,
         cx,
     );
+}
+
+/// Keep the dialog open after build-box vanishes, with the remaining archive controls available.
+pub(super) fn checkout_trash_after_host_leaves_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    trash_scene(state, trash_reference, TrashOpen::HostLeaves(2), window, cx);
 }

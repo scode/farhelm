@@ -109,7 +109,7 @@ fn one_delete(helm: &mut FakeHelm) -> (u64, Value) {
 }
 
 /// Push the hosts collection without host `gone`, keeping `kept`, as a readable registry that dropped it.
-fn drop_host(helm: &mut FakeHelm, kept: &[HostView], gone: i64) {
+pub(crate) fn drop_host(helm: &mut FakeHelm, kept: &[HostView], gone: i64) {
     let keys: Vec<String> = kept.iter().map(|host| HostView::key(host.id)).collect();
     let order: Vec<&str> = keys.iter().map(String::as_str).collect();
     helm.push(CollectionChanges {
@@ -852,6 +852,48 @@ fn a_hosts_delete_all_asks_inside_its_card_and_deletes_only_there(cx: &mut TestA
             json!({ "host": 2, "expected_incarnation": 1, "ids": ["c"] })
         )]
     );
+}
+
+/// A host confirmation must release the remaining controls after its targets disappear, including when a notice keeps
+/// the host's card visible. A stale question would hold Deletes and consume the first attempt to close the dialog.
+#[gpui::test]
+fn a_host_question_releases_trash_when_its_targets_are_gone(cx: &mut TestAppContext) {
+    for (remove_host, keep_notice) in [(false, false), (false, true), (true, false)] {
+        let (mut helm, _, cx) = opened(cx);
+        test_support::click(cx, "trash-host-delete-2");
+        assert!(cx.debug_bounds("trash-host-confirmation-2").is_some());
+        assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+        assert!(!enabled(&frame(cx), "trash-entry-delete-1-a"));
+
+        if remove_host {
+            drop_host(&mut helm, &[local(), down()], 2);
+        } else {
+            push_hosts(&mut helm, &[local(), epoch(remote(), 1), down()]);
+            test_support::settle(cx);
+            assert!(
+                cx.debug_bounds("trash-host-confirmation-2").is_some(),
+                "a pending refresh keeps the question"
+            );
+            let mut empty = listing(&[], false);
+            if keep_notice {
+                empty["notice_error"] = json!("The notification bell could not be updated");
+            }
+            answer_reads(&mut helm, |_| empty.clone());
+        }
+        test_support::settle(cx);
+        test_support::advance(cx, SETTLE);
+        let nodes = frame(cx);
+        assert_eq!(node(&nodes, "trash-host-2").is_some(), keep_notice);
+        assert!(cx.debug_bounds("trash-host-confirmation-2").is_none());
+        assert!(enabled(&nodes, "trash-entry-delete-1-a"));
+        assert!(deletes(&take(&mut helm)).is_empty());
+        if remove_host {
+            test_support::keys(cx, "escape");
+        } else {
+            test_support::click(cx, "trash-close");
+        }
+        assert!(!test_support::any_open(cx), "one action closes Trash");
+    }
 }
 
 /// Why this matters: Delete all must not offer a partial cleanup as if it were everything (SPEC.md: "The global action

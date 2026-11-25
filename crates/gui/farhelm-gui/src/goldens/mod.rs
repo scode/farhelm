@@ -1846,6 +1846,12 @@ static SCENES: &[Scene] = &[
         setup: checkout_trash_confirm_host_setup,
     },
     Scene {
+        name: "checkout-trash-after-host-leaves",
+        size: (760., 720.),
+        draw: trash_scenes,
+        setup: checkout_trash_after_host_leaves_setup,
+    },
+    Scene {
         name: "session-order-menu",
         size: (420., 418.),
         draw: session_lists_then,
