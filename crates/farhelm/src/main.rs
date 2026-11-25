@@ -192,7 +192,7 @@ enum CustomAgentCmd {
 /// IS their stdout — those act on a session the caller already named, so
 /// there is no new identifier to hand back.
 ///
-/// Every value-taking option on the CREATING verbs carries
+/// Free-text options on the CREATING verbs carry
 /// `allow_hyphen_values`, and that is a rule about where the values are
 /// judged rather than a per-flag convenience. A host name, a directory, an
 /// invocation, a title and an idempotency key are all plain strings that
@@ -1061,7 +1061,7 @@ struct LaunchFlags {
     #[arg(long, value_name = "ID", allow_hyphen_values = true)]
     model: Option<String>,
     /// Reasoning effort for an agent launch, or `default`.
-    #[arg(long, value_name = "LEVEL", value_parser = parse_effort)]
+    #[arg(long, value_name = "LEVEL", allow_hyphen_values = true, value_parser = parse_effort)]
     effort: Option<Choice<farhelm_proto::LaunchEffortValue>>,
     /// Permission mode for an agent launch (guarded, yolo, approve,
     /// smart_approve, chat), where supported. `default` remains an alias for
@@ -3745,6 +3745,39 @@ mod tests {
             )))
         );
         assert_eq!(conversation.as_deref(), Some("conv-1"));
+    }
+
+    /// Clap used to reject `-fast` as an unknown option unless joined to `--effort` with `=`. The separate value
+    /// must now reach the create request verbatim, with any following option still parsed on its own.
+    #[farhelm_testtrace::test]
+    fn custom_create_accepts_a_separate_hyphen_leading_effort() {
+        let Cmd::Agent { command } = Cli::try_parse_from([
+            "farhelm",
+            "agent",
+            "create",
+            "--agent",
+            "acme-code",
+            "--effort",
+            "-fast",
+            "--model",
+            "local",
+        ])
+        .unwrap()
+        .command
+        else {
+            panic!("agent create")
+        };
+        let Some(farhelm_proto::AgentVerb::Create { edits, .. }) = command.verb() else {
+            panic!("create intent")
+        };
+        assert_eq!(edits.custom_agent, Some(Some("acme-code".into())));
+        assert_eq!(
+            edits.effort,
+            Some(Some(farhelm_proto::LaunchEffortValue::Custom(
+                "-fast".into()
+            )))
+        );
+        assert_eq!(edits.model, Some(Some("local".into())));
     }
 
     /// Guarded is explicit intent, while the old default spelling remains

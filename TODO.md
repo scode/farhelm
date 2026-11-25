@@ -86,12 +86,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   an affected repository on selector or directory-sync failures, and add a test proving later repositories are still
   cleaned while selected caches stay intact. Plan: `plans/queue/tensorlake-setup-and-repo-cache-fixes.md`.
 
-- **Accept leading-hyphen custom `--effort` values as a separate argument.** `farhelm agent create --effort -fast` (with
-  a space) is rejected by clap as an unknown flag even though custom agents allow `[a-z0-9_-]` effort values and
-  `--model` already sets `allow_hyphen_values = true` (`crates/farhelm/src/main.rs`). Add `allow_hyphen_values = true`
-  to `--effort` (matching `--model` and the `SPEC_impl.md` free-text option rule), add a parse test, and update
-  `SPEC_impl.md` to drop the `--effort=-fast` workaround. Plan: `plans/queue/agent-catalog-cli-and-drift-cleanups.md`.
-
 - **Assert that Tensorlake host setup never reads agent settings.** In
   `crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs`,
   `codex_subscription_and_none_enter_setup_without_an_endpoint` checks that no Codex settings cleanup was recorded

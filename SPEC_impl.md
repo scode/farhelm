@@ -7608,10 +7608,9 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   requires `--source-session`. An ordinary source requires `--host`. For a sandbox or container source, omit both
   `--host` and `--cwd`. The removed `--profile` and `--profile-id` selectors are still parsed, hidden, only so they can
   be refused naming the launch flags and `--template`, and the retired `--invocation` is parsed, hidden, only to be
-  refused naming `--command` and the YOLO flags. Free-text value options such as `--model` and `--cwd` accept a value
-  beginning with `-` as a separate argument and leave its validation to the target. `--permissions` has a closed set of
-  values. `--agent` accepts built-in names and registered IDs, which start with a letter. For a custom effort beginning
-  with `-`, attach it to the option with `=`, for example `--effort=-fast`.
+  refused naming `--command` and the YOLO flags. Free-text value options such as `--model`, `--effort`, and `--cwd`
+  accept a value beginning with `-` as a separate argument and leave its validation to the target. `--permissions` has a
+  closed set of values. `--agent` accepts built-in names and registered IDs, which start with a letter.
 - `farhelm agent template create <name> [--cwd <dir>] [--title ...] [--title-kind base|fixed] [--host <name>] <launch flags>`,
   `farhelm agent template edit <name> ...` with the same flags, and `farhelm agent template delete <name>` — an agent's
   template writes (SPEC.md, Agent-spawned sessions). The launch flags are `farhelm agent create`'s; `--template` is
