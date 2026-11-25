@@ -561,6 +561,70 @@ fn a_generic_custom_command_template_cannot_be_saved_on_the_agent_tab(cx: &mut T
     assert!(saves(&mut helm).is_empty());
 }
 
+/// A literal effort can stack onto a custom agent. On a built-in template it stays visible until the user resets it.
+#[gpui::test]
+fn a_literal_effort_can_be_saved_without_an_agent_or_cleared_on_a_built_in(
+    cx: &mut TestAppContext,
+) {
+    let with_effort = |name, agent| {
+        template(
+            name,
+            TemplateFields {
+                kind: Some(LauncherKind::Agent),
+                agent,
+                effort: Some(Some("deep_focus".to_owned().into())),
+                ..TemplateFields::default()
+            },
+        )
+    };
+    let (mut helm, cx) = open_header(
+        cx,
+        &[
+            with_effort("effort-only", None),
+            with_effort("codex-effort", Some(LaunchHarness::Codex)),
+        ],
+        None,
+    );
+    open_editor(&mut helm, "template-open-effort-only", cx);
+    assert_eq!(draft(cx).fields.agent, None);
+    assert_eq!(
+        test_support::label(cx, "templates-retained-effort").as_deref(),
+        Some("deep_focus")
+    );
+    assert!(!drawn(cx, "templates-effort-refusal"));
+    click(cx, "templates-add");
+    click(cx, "templates-add-model");
+    click(cx, "templates-save");
+    let sent = helm.commands();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].path, "/api/templates/effort-only");
+    assert_eq!(
+        sent[0].body.as_ref().expect("template body")["effort"],
+        "deep_focus"
+    );
+    helm.reply(sent[0].id, 200, None);
+    settle(cx);
+    click(cx, "template-open-codex-effort");
+    assert_eq!(
+        test_support::label(cx, "templates-retained-effort").as_deref(),
+        Some("deep_focus")
+    );
+    assert!(drawn(cx, "templates-effort-refusal"));
+    assert_eq!(value_of(cx, "templates-effort"), "Choose a replacement");
+    click(cx, "templates-effort");
+    click(cx, "templates-effort-option-0");
+    assert_eq!(draft(cx).fields.effort, Some(None));
+    assert!(!drawn(cx, "templates-effort-refusal"));
+    click(cx, "templates-save");
+    assert_eq!(
+        saves(&mut helm),
+        [(
+            "/api/templates/codex-effort".into(),
+            json!({"kind":"agent", "agent":"codex", "effort":null})
+        )]
+    );
+}
+
 /// A name holding invisible formatting is host text the editor cannot show raw (SPEC.md: "Invisible formatting is
 /// shown escaped and read-only, retaining its raw value through unrelated saves"). Specified: the field shows the
 /// escapes with the old hint, and an unrelated save writes under the raw name. Replacing the name is

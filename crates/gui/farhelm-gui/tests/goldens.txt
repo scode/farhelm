@@ -452,6 +452,10 @@ linux/template-launcher--dark.png 2b33f9c101ebcb0bc734fc13ab7b8902e5c4a875
 linux/template-launcher--light.png 1ae0a718426175401f28b8bfef3cd6308f3e48a0
 linux/template-leave-question--dark.png 6a012d242788d9f8c8db3d9a76196498e0c9b62d
 linux/template-leave-question--light.png 95f9f2643b79c43f78f808b63e0d32a6f0bb916c
+linux/template-literal-effort--dark.png ef805c6d80522433d4c429f2cef41d7313c86ea3
+linux/template-literal-effort--light.png 52d7e74037fe886ac5efece53a73d5cc4751ea94
+linux/template-literal-effort-refusal--dark.png 05b189529ef73cb1e85fbd86688335ae15b197c4
+linux/template-literal-effort-refusal--light.png 32bc0ba42b7adbf53a669f529d17f8ea6db2b70e
 linux/template-number-menu--dark.png b743ee016487ba2a0bd615651d07f4925c3ade9f
 linux/template-number-menu--light.png ccbe7b15a0086bcffc48854a44fd8f1bea781982
 linux/template-shell-permissions--dark.png 32a94990a65e8a9b5fc02635cd2e589fa545d364

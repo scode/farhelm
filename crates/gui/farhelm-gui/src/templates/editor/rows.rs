@@ -29,11 +29,13 @@ use farhelm_proto::launcher::{
 };
 use farhelm_proto::recipes::RecipeView;
 use farhelm_proto::ui_channel::HostView;
-use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchTarget};
+use farhelm_proto::{
+    LaunchEffort, LaunchEffortValue, LaunchHarness, LaunchPermission, LaunchTarget,
+};
 use gpui::{
     AnyElement, Context, Div, ElementId, InteractiveElement as _, IntoElement, ParentElement as _,
     Role, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
-    div, px,
+    div, prelude::FluentBuilder as _, px,
 };
 use serde::Serialize;
 
@@ -324,18 +326,30 @@ impl Rows<'_> {
                 self.text_row(field, "Leave blank to use this custom agent's default. Use lowercase letters, digits, hyphens and underscores.")
             }
             Field::Effort => {
-                let options = effort_options(fields, self.catalog);
-                let chosen = fields.effort.as_ref().and_then(Option::as_ref).and_then(|value| value.known());
-                vec![self.choice(
+                let effort = fields.effort.as_ref().and_then(Option::as_ref);
+                let literal = match effort {
+                    Some(LaunchEffortValue::Custom(value)) => Some(value),
+                    _ => None,
+                };
+                let mut controls = vec![self.choice(
                     field,
-                    options,
-                    chosen,
+                    effort_options(fields, self.catalog),
+                    literal.is_none().then_some(effort.and_then(LaunchEffortValue::known)),
                     |editor, effort: Option<LaunchEffort>, window, cx| {
                         editor.edit(window, cx, |editor| {
                             editor.draft.fields.effort = Some(effort.map(Into::into))
                         })
                     },
-                )]
+                )];
+                // A stored literal is not a preset. Keep its full accessible spelling separate from the picker.
+                if let Some(value) = literal {
+                    let name = HostSentence::new("templates-retained-effort").mono(&HostText::from_host(value.as_str()));
+                    controls.push(div().flex().min_w_0().gap(px(4.)).text_size(metrics::TEXT_SM)
+                        .child(div().min_w_0().truncate().child(name))
+                        .children(fields.agent.is_some().then(|| div().flex_none().child("(not offered)")))
+                        .into_any_element());
+                }
+                controls
             }
             Field::Permissions => self.permissions(),
             Field::Yolo if fields.agent.is_some_and(LaunchHarness::uses_custom_catalog) => vec![
@@ -349,7 +363,7 @@ impl Rows<'_> {
                         (false, "Keeps safety checks".to_owned()),
                         (true, "YOLO".to_owned()),
                     ],
-                    fields.yolo.unwrap_or(false),
+                    Some(fields.yolo.unwrap_or(false)),
                     |editor, yolo, window, cx| {
                         editor.edit(window, cx, |editor| editor.draft.fields.yolo = Some(yolo))
                     },
@@ -432,22 +446,25 @@ impl Rows<'_> {
     }
 
     /// A choice among `options` for `field` (the old `Choice`): segments for two to five options, a select for more,
-    /// with a stored value no option offers kept as "<value> (not offered)". `set` makes the user's choice.
+    /// with a stored value no option offers kept as "<value> (not offered)". An absent choice opens a replacement
+    /// selector when a field displays its stored value separately. `set` makes the user's choice.
     fn choice<V: Clone + PartialEq + Serialize + 'static>(
         &self,
         field: Field,
         mut options: Vec<(V, String)>,
-        chosen: V,
+        chosen: Option<V>,
         set: fn(&mut Editor, V, &mut Window, &mut Context<TemplatesDialog>),
     ) -> AnyElement {
-        if !options.iter().any(|(value, _)| *value == chosen) {
-            options.push((chosen.clone(), format!("{} (not offered)", word(&chosen))));
+        if let Some(chosen) = &chosen
+            && !options.iter().any(|(value, _)| value == chosen)
+        {
+            options.push((chosen.clone(), format!("{} (not offered)", word(chosen))));
         }
         let label = field.label();
         let help = HoverHelp::tooltip(format!("{label}: the value this template applies"));
         let id = format!("templates-{}", field.key());
         let weak = self.weak.clone();
-        let control = if (2..=MAX_SEGMENTS).contains(&options.len()) {
+        let control = if chosen.is_some() && (2..=MAX_SEGMENTS).contains(&options.len()) {
             options
                 .into_iter()
                 .fold(
@@ -456,7 +473,7 @@ impl Rows<'_> {
                         group.option(RadioOption::new(text, help.clone(), value))
                     },
                 )
-                .chosen(Some(chosen))
+                .chosen(chosen)
                 .on_change(move |value, window, cx| {
                     let value = value.clone();
                     with_editor(&weak, window, cx, |editor, window, cx| {
@@ -467,9 +484,7 @@ impl Rows<'_> {
         } else {
             let chosen_key = options
                 .iter()
-                .position(|(value, _)| *value == chosen)
-                .unwrap_or_default()
-                .to_string();
+                .position(|(value, _)| Some(value) == chosen.as_ref());
             let entries: Vec<SelectOption> = options
                 .iter()
                 .enumerate()
@@ -480,7 +495,8 @@ impl Rows<'_> {
             let values: Vec<V> = options.into_iter().map(|(value, _)| value).collect();
             Select::new(id, label, help, Role::ComboBox)
                 .options(entries)
-                .chosen(chosen_key)
+                .placeholder("Choose a replacement")
+                .when_some(chosen_key, |select, index| select.chosen(index.to_string()))
                 .on_choose(move |key, window, cx| {
                     let Some(value) = key
                         .parse::<usize>()
@@ -609,7 +625,7 @@ impl Rows<'_> {
         let mut controls = vec![self.choice(
             Field::Permissions,
             options,
-            fields.permissions.flatten(),
+            Some(fields.permissions.flatten()),
             |editor, permission: Option<LaunchPermission>, window, cx| {
                 editor.choose_permissions(permission, window, cx)
             },

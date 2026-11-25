@@ -48404,3 +48404,28 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: Fixed by retaining the generic Custom choice and refusing saves on the Agent tab until it is replaced or removed. Change `soqkwlyulrqvvqoxrwtrqynqsrkqkoss`, bookmark `plan/triage-custom-agents-nov24/04-templates`,
   https://github.com/scode/farhelm/pull/4920/changes.
+
+## trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md
+
+- Outcome: `fix code`.
+- Assessment: In Templates, a template that sets a custom-agent effort word without an agent type cannot be saved from
+  the editor or from Save as template, although the helm accepts it. This kind of template is meant to stack onto a
+  custom agent template. When such an effort sits on a template with no agent or a built-in one, Effort displays
+  "Default" above the refusal. When Effort is a dropdown, choosing Default does not clear it. Verified: Confirmed.
+  `Field::refusal` refuses any non-built-in effort when the agent is not custom
+  (`crates/gui/farhelm-gui/src/templates/fields.rs:281-293`). `check_template_shape` deliberately accepts it for
+  agentless templates (`crates/farhelm-proto/src/launcher.rs:579-594`, comment "A modifier with no agent can acquire its
+  harness from an earlier template"). The effort row collapses a custom value to `known()` = None, which matches
+  "Default" (`templates/editor/rows.rs:326-338`). SPEC.md 1338 ("Incompatible fields stay visible and prevent saving")
+  supports showing the real value. Whether agentless custom effort should be savable from the GUI is not stated.
+- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
+  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
+  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
+  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
+  Recommendation for reference: fix code. Accept a valid agentless custom effort, and show a stored custom value as
+  "<value> (not offered)". Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
+  the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
+  Remove the feedback file and its index entry.
+- Execution: Fixed by accepting agentless literal effort and showing and clearing incompatible stored choices. Change `nylsvvlwwlvvotkoortmwrskomouuovo`, bookmark `plan/triage-custom-agents-nov24/04b-template-literal-effort`,
+  https://github.com/scode/farhelm/pull/4924/changes.

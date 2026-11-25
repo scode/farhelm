@@ -1163,6 +1163,18 @@ static SCENES: &[Scene] = &[
         setup: template_generic_agent_refusal_setup,
     },
     Scene {
+        name: "template-literal-effort",
+        size: (1010., 940.),
+        draw: empty,
+        setup: template_literal_effort_setup,
+    },
+    Scene {
+        name: "template-literal-effort-refusal",
+        size: (1010., 940.),
+        draw: empty,
+        setup: template_literal_effort_refusal_setup,
+    },
+    Scene {
         name: "template-invalid-custom-model",
         size: (1010., 940.),
         draw: empty,
