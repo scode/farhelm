@@ -2130,8 +2130,8 @@ safely, for any reason (its folder or root no longer matching what was recorded,
 earlier move attempt being impossible to establish), Delete still removes the session, releases the checkout from
 Farhelm's management, and leaves the folder where it is. That outcome must never be silent: Delete completes with a
 visible notice that the checkout was not archived, naming the path left behind and, where known, why. Wherever Delete's
-result is shown, the notice is shown with it. If the reply timed out before Delete finished, its checkout notice appears
-in the navigation rail's notices bell once the host reports the outcome.
+result is shown, the notice is shown with it. If Delete or Replace has already answered with a timeout, the checkout
+notice appears in the navigation rail's notices bell once the host reports the outcome of the removal.
 
 Repository suggestions come from successful Managed checkout launches across the helm, newest repository first. The same
 history is available for any destination, including new environments and hosts that are offline. Removing a host or its

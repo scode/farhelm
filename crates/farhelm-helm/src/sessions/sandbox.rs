@@ -243,17 +243,23 @@ pub(super) async fn delete_environment_session(
         },
     };
     let id = key.session_id.as_str();
+    let mut receiver = None;
     let reply = tokio::time::timeout(
         ENVIRONMENT_DELETE_REPLY_DEADLINE,
-        client.delete_session_or_seal(id),
+        client.delete_session_or_seal(id, &mut receiver),
     )
     .await;
     match reply {
-        Err(_elapsed) => Err(anyhow::Error::new(EnvironmentUnasked(
-            "this environment's own Farhelm did not answer in time; Farhelm cannot tell whether \
-             the session was deleted"
-                .into(),
-        ))),
+        Err(_elapsed) => {
+            if let Some(receiver) = receiver {
+                observe_expired_delete_notice(state, key.clone(), receiver);
+            }
+            Err(anyhow::Error::new(EnvironmentUnasked(
+                "this environment's own Farhelm did not answer in time; Farhelm cannot tell whether \
+                 the session was deleted"
+                    .into(),
+            )))
+        }
         Ok(Err(error)) => {
             if !crate::error_kind_is_a_supervisor_reply(&error) {
                 // The request was not sent, or its connection ended before
@@ -286,6 +292,29 @@ pub(super) async fn delete_environment_session(
             Ok(farhelm_proto::SessionDeleteOutcome::default())
         }
     }
+}
+
+/// Keep the checkout location if the original non-final Delete answers after
+/// its inner deadline. The wait ends on reply or connection close and owns
+/// only the notice write. A late seal belongs to the listing-driven finisher.
+fn observe_expired_delete_notice(
+    state: &AppState,
+    key: store::SessionKey,
+    receiver: tokio::sync::oneshot::Receiver<farhelm_proto::ControlMsg>,
+) {
+    let store = state.store.clone();
+    let events = Arc::clone(state.manager.events());
+    tokio::spawn(async move {
+        if let Ok(farhelm_proto::ControlMsg::SessionDeletedOrSealed {
+            outcome: farhelm_proto::SealOutcome::Deleted { .. },
+            notice: Some(detail),
+            ..
+        }) = receiver.await
+            && let Err(error) = store.record_late_delete(key, detail, events).await
+        {
+            warn!(%error, "could not record the late Delete notice");
+        }
+    });
 }
 
 /// How often the finisher looks again at sealed hosts it could not start on

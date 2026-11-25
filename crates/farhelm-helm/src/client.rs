@@ -2967,6 +2967,18 @@ impl SupervisorClient {
     /// the difference between a free retry and one that can stop a session
     /// somebody has since restarted. Both used to be one untyped string.
     async fn request(&self, req_id: u64, msg: ControlMsg) -> anyhow::Result<ControlMsg> {
+        self.request_with_receiver(req_id, msg, &mut None).await
+    }
+
+    /// Keep the correlated receiver with its caller once the writer owns the
+    /// frame. Cancelling before enqueue leaves the slot empty. Cancelling the
+    /// wait after enqueue lets the caller still consume that request's reply.
+    async fn request_with_receiver(
+        &self,
+        req_id: u64,
+        msg: ControlMsg,
+        receiver: &mut Option<oneshot::Receiver<ControlMsg>>,
+    ) -> anyhow::Result<ControlMsg> {
         // Record `req_id` as ISSUED before anything can reach the wire.
         //
         // [`Self::dispatch`] rejects a reply naming an id past `next_req` as
@@ -3013,7 +3025,8 @@ impl SupervisorClient {
         // Everything from here on is POST-ENQUEUE: the sender being dropped
         // means `fail_all` ran, or the whole connection went, with this
         // frame already in the writer's hands.
-        let reply = rx
+        let reply = receiver
+            .insert(rx)
             .await
             .map_err(|_| anyhow::Error::new(SupervisorTransportError::SentUnanswered))?;
         // Matched by value, not `if let ... = &reply`: an owned `message`
@@ -3879,19 +3892,23 @@ impl SupervisorClient {
     ///
     /// Like every request here this waits as long as the connection lives;
     /// the caller bounds it. `Ok` carries the supervisor's own outcome and
-    /// any notice about what its teardown could not finish.
+    /// any notice about what its teardown could not finish. If the caller's
+    /// deadline interrupts the wait, `receiver` can still receive the reply
+    /// to a request that was sent.
     pub(crate) async fn delete_session_or_seal(
         &self,
         id: &str,
+        receiver: &mut Option<oneshot::Receiver<ControlMsg>>,
     ) -> anyhow::Result<(farhelm_proto::SealOutcome, Option<String>)> {
         let req_id = self.req_id();
         match self
-            .request(
+            .request_with_receiver(
                 req_id,
                 ControlMsg::DeleteSessionOrSeal {
                     req_id,
                     session_id: id.to_string(),
                 },
+                receiver,
             )
             .await?
         {
