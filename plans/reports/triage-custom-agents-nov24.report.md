@@ -175,3 +175,114 @@ reviewer finding because the existing banner says “Custom” even when the sel
 banner wording outside the escalation change. The reviewed change covers the pill outline and when the banner retires.
 The session menu screenshot also shows synthetic age stamps from its fixture, which are separate from the labels this
 plan fixes.
+
+### Landing
+
+#### What landed with it
+
+Three plans landed this round, in this order: this one, through its 28 PRs and the landing fix
+[#4969](https://github.com/scode/farhelm/pull/4969/changes); then the agent catalog and drift test cleanups (#4945,
+#4951, #4954, #4956, #4959); then private Tailscale SSH socket folders (#4957, #4962). Since this plan's PRs were
+written, main gained the environment triage, the sandbox workspace trust plan and other launcher work, all landed in the
+previous rounds.
+
+Rebasing onto them conflicted in two launcher files, which I merged by hand, keeping both sides:
+
+- **The launcher.** This plan and the environment triage each added a guard that refuses a Launch press that would act
+  on a launcher state not yet shown on screen: this plan's covers a custom agent chip whose registration was deleted,
+  main's covers a default folder that changed. Both are kept; Launch checks the folder guard first, then the chip guard.
+- **The launcher's screenshot scenes.** The environment triage changed the shared setup for scenes of a suspended
+  sandbox; this plan adds a scene of a deleted custom agent's quick launch and an empty custom agents list to the same
+  setup. The deleted custom agent quick launch scene now uses main's setup with the same sidebar sessions as before, and
+  every suspended sandbox scene, main's newer ones included, now loads the empty custom agents list. The full screenshot
+  comparison passed on the result, so their pictures are unchanged.
+
+The triage ledgers and the review queue's index conflicted as usual; I kept both sides, and the review confirmed that
+all 51 lines removed from the review queue's index match the 51 finding files the plan deleted, and no line main added
+was lost. A file-by-file comparison confirmed every other file's change is exactly what the executor pushed. Before
+rebasing I removed stale copies of the round's commits that an earlier fetch, made while the executors were pushing, had
+left in the landing checkout; they were older revisions of the same commits and never part of what landed.
+
+The landing's review read the three plans against main and each other and found no broken interaction: a refused custom
+Restart with is caught before the host wakes, main's "Restart error." wording covers the custom refusals too, the custom
+agent check runs before the supervisor stops the agent, and a custom command always counts as YOLO, so hosts that ask
+before YOLO launches still ask. It counted no blockers, no should-fix items and four small points across the three
+plans; this plan's is in the last section.
+
+#### Fixes made while landing
+
+- **24 new screenshots were missing from the screenshot scene list.** The plan added golden pictures of its custom agent
+  launcher, Settings, template and quick switcher states, but not their entries in the scene list of the screenshot
+  batch tool (the side-by-side page of the app's screens next to the old app's), so that tool's test failed. #4969 adds
+  them.
+- **Formatting.** The plan's new triage archive entries had unwrapped lines, which the Markdown formatter's check
+  rejects; my merge left one extra blank line in the triage ledger and one call in the launcher's golden scene setup
+  longer than rustfmt allows. #4969 reformats all three and changes no words or code.
+
+#### Checks
+
+This round landed three plans in queue order: the custom agents triage, the agent catalog and drift test cleanups, and
+private Tailscale SSH socket folders. All the checks below ran once on the three plans' PRs stacked in that order on
+main as it stood at the start of the landing (`f6ec0f51`), with the conflict resolutions described in the Landing
+section of the custom agents triage report; the stack's top commit was `30ae8ef5`. Worker runs were on a separate arm64
+Linux test worker; the rest ran locally on x86_64 Linux. The only later change is the landing fix
+[#4969](https://github.com/scode/farhelm/pull/4969/changes), inserted after the custom agents plan's last PR, which adds
+24 screenshot scene list entries and reformats two triage ledgers and one call in the launcher's golden scene setup;
+after it I ran the screenshot batch tool's test (recorder run `18834801-a217-426a-aea5-61f735104753`),
+`cargo fmt --all -- --check`, `dprint check` and the changelog check again, and all passed. That final tree is what main
+now holds outside the plans queue, apart from what main gained while the custom agents plan was merging: two TODO.md
+entries, a SPEC_impl.md note and new review queue findings, none of which touches code the checks covered.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `40997676-1b25-42dd-a283-44987367a22e`): all 8701 tests passed, with no runtime skip. The plans changed the launcher,
+  Settings, templates, the quick switcher and Restart in the GUI, the helm's custom agent registry, templates and
+  launches, the CLI, the supervisor's Goose restart, the drift tests, and the helm's Tailscale SSH connections; the
+  whole suite was the narrowest run that covered them and their callers.
+- The desktop app's tests, `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run
+  `c1000071-3994-42e2-ad73-d85b8866e537`): all 184 passed.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings`, on the test worker: passed.
+- The desktop app's end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run
+  `9e8e8c24-edac-4e59-9429-c8ab9f3211cb`): 50 steps passed, one skipped by design on Linux (paste).
+- The desktop app's screenshot comparison, `python3 scripts/check-gui-goldens.py`, all scenes, locally (recorder run
+  `4fc1cb5d-72d7-4edd-870c-909f63840e93`): passed, including the custom agents plan's 24 new scenes and main's sandbox
+  scenes whose setup the landing merged with the custom agents plan's.
+- The screenshot batch tool's test, `python3 -B scripts/test-gui-screenshot-batch.py`, locally: failed on the stack
+  (recorder run `8e6013bf-03ee-48d3-9544-f2e4cb90d9eb`) because the 24 new scenes were not in its scene list, and passed
+  with the landing fix.
+- The docs website build, `bun install --frozen-lockfile && bun run build` in `website/`, locally: passed. Two docs
+  pages changed (Start a session, and Stop, restart and resume), both in the agent catalog plan.
+- `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no errors; one warning, about an
+  old citation in the triage archive, already on main) and `python -B scripts/check-test-sleeps.py`, locally: passed.
+  `cargo fmt --all -- --check` and `dprint check`, locally: failed on the stack as described in the custom agents triage
+  report's Landing section, and passed with the landing fix.
+- `bash -n scripts/test-install-sh.sh` and `shellcheck scripts/install.sh scripts/test-install-sh.sh`, locally: passed.
+  The custom agents plan added cases to the installer test.
+
+Reused: the custom agents plan's run of the installer test,
+`bash scripts/test-install-sh.sh --farhelm target/debug/farhelm` (recorder run `242fd8fd`, at the executor's revision
+`cb9cef98`), which covers the cases the plan added for a custom conversation report while an update holds the installed
+version. Nothing it exercises changed since: main changed neither the installer nor the CLI since the custom agents
+plan's base; that plan's later CLI change is in template flags, and the agent catalog plan's only CLI change is how
+`--effort` reads its value, neither of which the installer test's conversation report path uses. Also reused: the agent
+catalog plan's live Goose named Create and Restart drift run at its executor's revision (recorder run `5e4a1a9a`), which
+spends vendor turns and was not repeated; nothing that landed since that plan's base touches Goose's support code. The
+executors' other runs were focused selections that the runs above cover again.
+
+Skipped: real agent and drift runs, which spend vendor turns and run only when asked; a real Tailscale network, which
+the tests replace with stand-ins; the workspace doctests, since no documentation example changed; a Mac run, so the
+macOS limit on socket path length (which the Tailscale plan's socket folder names are sized for) and the macOS installer
+are covered only by tests that run on Linux; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+- Nothing. The report's formatting claims covered the Rust code and the edited specs and TODO, not the triage archive
+  entries that failed `dprint`; the long Rust line came from the landing's own merge.
+
+#### Things you should know that the report does not say
+
+- **Writing a template from the CLI with a custom command still refuses to save until you pass `--yolo` or
+  `--no-yolo`.** `--no-yolo` is then always refused for a custom agent, since a custom command always counts as YOLO, so
+  the hint offers an option that cannot work; the desktop app saves the same template without asking. Say if you want a
+  TODO entry for dropping the question in the CLI.
