@@ -205,11 +205,6 @@ consequences.
   spaces, control characters, or empty strings) even though Farhelm refuses those same values in the desktop Templates
   editor and whenever the template is applied.
 
-- [`trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md`](trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md)
-  — The end-to-end test that claims to verify a custom agent parent can correct a child-first conversation report would
-  still pass even if custom-agent ancestor correction and its user-facing correction notification were completely
-  broken.
-
 - [`trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md`](trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md)
   — For a registered custom agent session created without session resumption enabled, the disabled Restart with menu
   item tells the user "Custom sessions can't be resumed" instead of explaining that this launch has no stored resume
@@ -242,11 +237,6 @@ consequences.
   — The Settings test for custom-agent lifecycle locks in an unhelpful navigation jump that kicks the user off their
   draft page when an external delete arrives mid-save, and only exercises Delete on a clean draft, missing the bug where
   confirming Delete on a modified custom agent leaves a ghost entry in the Settings sidebar.
-
-- [`trailing-custom-report-forwarder-lock-test-lacks-witness.md`](trailing-custom-report-forwarder-lock-test-lacks-witness.md)
-  — The integration test for running a custom agent's conversation reporter through the app forwarder during an update
-  or uninstall does not actually prove that the forwarder prevented the CLI from starting, so a regression that bypassed
-  the lock or failed before locking would still pass.
 
 - [`trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md`](trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md)
   — When switching from a safer agent (such as Guarded Claude or Codex) to a registered custom agent (which always
@@ -312,10 +302,6 @@ consequences.
   — A launch template on the Agent tab that selects the generic Custom agent type without naming a registered custom
   agent ID can be marked as the quick-launch template (⚡) or treated as ready to quick-launch, even though Farhelm
   cannot launch an Agent-tab custom session without a registered agent ID.
-
-- [`trailing-supervisor-positional-pin-tests-omit-custom-agent.md`](trailing-supervisor-positional-pin-tests-omit-custom-agent.md)
-  — Custom agents share the supervisor's positional process-pin admission, ancestor-correction notification, and
-  named-restart capture-clearing code, but none of those supervisor behaviors are tested for custom agents.
 
 - [`trailing-template-apply-custom-to-custom-misses-switched-agent.md`](trailing-template-apply-custom-to-custom-misses-switched-agent.md)
   — If you switch in the launcher from a guarded agent (like Codex) to a custom agent — raising the red

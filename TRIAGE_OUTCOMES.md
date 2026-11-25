@@ -266,25 +266,6 @@
   record which way it went. Recommendation for reference: discard (or fix code) — coverage only; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md
-
-- Outcome: `other`.
-- Assessment: An end-to-end test is meant to prove that when a custom agent's child process reports a conversation
-  first, the parent's later report corrects it. The child exits before the parent reports, so the test would also pass
-  if the correction were broken and an ordinary dead-process release accepted the parent instead. It never checks the
-  correction notice. Verified: Confirmed by inspection.
-  `custom_agent_positional_report_corrects_to_the_parent_and_restarts_it`
-  (`crates/farhelm/tests/e2e/hook_identity.rs:2215`) asserts no notifications. `NotificationKind::CustomPinCorrected`
-  appears in no test (`crates/farhelm-supervisor/src/service/notifications.rs:98`; grep finds no test use). Whether
-  `ReportPin::judge` takes the release path here was not run.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code (test only). Keep the child alive across the parent's
-  report, and assert the correction notice. Size S.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## trailing-custom-agent-settings-test-locks-in-kick-and-misses-dirty-delete.md
 
 - Outcome: `other`.
@@ -298,24 +279,6 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: other. Add the dirty-delete case as part of 81's fix, and
   discard the rest. Size S.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## trailing-custom-report-forwarder-lock-test-lacks-witness.md
-
-- Outcome: `other`.
-- Assessment: This is a maintainer test of the installed `farhelm` command (the forwarder). It checks that while an
-  update or uninstall holds a version, a custom agent's conversation report still exits quietly. The test cannot tell
-  "blocked by the lock" apart from "the real CLI ran and quietly did nothing", or from "the forwarder failed early".
-  Verified: Confirmed. `crates/farhelm/tests/version_lock_forwarder.rs:254-295` runs the forwarder with a cleared
-  environment and no session variables. In that case `run_custom_report` exits silently with `no-credential`
-  (`crates/farhelm/src/hook.rs:314-338`), and the forwarder's `trap 'exit 0' 0` (`scripts/install.sh:352-358`) hides an
-  early failure. The only assertions are exit 0, no output, and that the lock is still held. No shipped bug.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code — add session variables and assert no report file or
-  log while locked, then a positive run once unlocked; size S.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## trailing-settings-custom-agent-duplicate-host-sentence-id.md
@@ -334,22 +297,6 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — no user-visible effect (or fix code with a slot
   prefix, size S).
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## trailing-supervisor-positional-pin-tests-omit-custom-agent.md
-
-- Outcome: `other`.
-- Assessment: Custom agents share the supervisor's process-pin admission, ancestor correction with its notice, and the
-  clearing of the old capture when a named Restart with turns reporting off. No supervisor test exercises any of these
-  for custom agents. Verified: Confirmed. A grep finds no test references to `CustomPinCorrected`,
-  `custom_pin_corrected` or `CUSTOM_PIN_CORRECTED_TEXT`. The `PinCase` fixtures cover Claude, Muse and Antigravity only.
-  No bug is shown.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: fix code — add a CUSTOM `PinCase` and a capture-clearing test;
-  size M.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
 ## settings-footer-can-save-the-wrong-page.md
