@@ -4,13 +4,14 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
 use farhelm_proto::tensorlake::SshKeyStatus;
 use farhelm_proto::ui_channel::{Collection, CollectionState, HelmMarker, KeyedEntry, Preferences};
-use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
+use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchTarget, Place};
 use gpui::{App, AppContext as _, Entity, Window, point, px};
 use serde_json::json;
 
 use super::{SceneState, fleet, session_list_scene_preferring};
+use crate::launcher::draft::DestinationKind;
 use crate::launcher::entry;
-use crate::launcher::environment_tests::{account, recipe_json};
+use crate::launcher::environment_tests::{account, built_json, ready_key, recipe_json};
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::texts_within;
 use crate::session_list::tests::{preferences_state, session};
@@ -128,6 +129,7 @@ enum LauncherScene {
     HostMenu,
     Container,
     ContainerCheckoutRefusal,
+    SandboxCheckout,
     RememberedWrapper,
     CustomAgent,
     ShellWrapper,
@@ -181,6 +183,15 @@ pub(super) fn launcher_container_checkout_refusal_setup(
     cx: &mut App,
 ) {
     setup(state, LauncherScene::ContainerCheckoutRefusal, window, cx);
+}
+
+/// Show the shared Folder invitation alongside the sandbox recipe and empty Repository field.
+pub(super) fn launcher_sandbox_checkout_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::SandboxCheckout, window, cx);
 }
 
 /// Show a wrapper brought in by the actual harness choice, without opening More options to see it.
@@ -325,14 +336,21 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
         LauncherScene::HostMenu
             | LauncherScene::Container
             | LauncherScene::ContainerCheckoutRefusal
+            | LauncherScene::SandboxCheckout
     ) {
-        // The recipe catalog must already be drawn when the host menu picks New container.
+        // A sandbox needs a built snapshot for its recipe to be available. The host-menu fixtures also
+        // use the catalog when picking New container.
+        let recipe = if scene == LauncherScene::SandboxCheckout {
+            built_json("Development")
+        } else {
+            recipe_json("Development", json!({ "kind": "tensorlake_ubuntu" }))
+        };
         extra.push(CollectionState {
             collection: Collection::Recipes,
             meta: meta(&["Development"]),
             entries: vec![KeyedEntry {
                 key: "Development".into(),
-                value: recipe_json("Development", json!({ "kind": "tensorlake_ubuntu" })),
+                value: recipe,
             }],
         });
     }
@@ -455,12 +473,19 @@ fn open_new_with_claude(
         draft.choose_repository(farhelm_proto::parse_github_repo("acme/widget").unwrap());
         draft.edit_name("widget-3".into());
     } else if scene == LauncherScene::ContainerCheckoutRefusal {
-        draft.seed_target(farhelm_proto::LaunchTarget::Environment {
+        draft.seed_target(LaunchTarget::Environment {
             recipe: "Development".into(),
-            place: farhelm_proto::Place::PodmanHost(1),
+            place: Place::PodmanHost(1),
         });
         draft.choose_repository(farhelm_proto::parse_github_repo("acme/widget").unwrap());
         draft.edit_name("!!!".into());
+    } else if scene == LauncherScene::SandboxCheckout {
+        // The interaction test takes this same destination through the live host menu.
+        draft.choose_placement(Some(LaunchTarget::Environment {
+            recipe: "Development".into(),
+            place: Place::TensorlakeAccount,
+        }));
+        draft.choose_destination(DestinationKind::Checkout);
     }
     assert!(
         entry::open_with(draft, None, window, cx),
@@ -578,6 +603,11 @@ fn answer_new_reads(
             Some(
                 json!([{ "id": "sonnet", "harness": "claude", "efforts": ["low", "medium", "high"] }]),
             )
+        } else if command.path == "/api/tensorlake" && scene == LauncherScene::SandboxCheckout {
+            Some(json!(account(
+                true,
+                ready_key("tl sbx ssh keys add --name fixture 'ssh-ed25519 AAAA fixture'")
+            )))
         } else if command.path == "/api/tensorlake" && environment {
             Some(json!(account(true, SshKeyStatus::NotCreated)))
         } else if command.path.starts_with("/api/launch-history") {
@@ -675,6 +705,17 @@ fn answer_new_reads(
         );
         assert!(click_control(window, cx, "launcher-launch"));
         state.after.set(Some(answer_new_reads));
+    } else if scene == LauncherScene::SandboxCheckout {
+        // The registration note is drawn with the ready account. Wait for it so the capture
+        // includes the recipe without a loading reason and uses the settled destination layout.
+        if nodes
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some("launcher-registration-words"))
+        {
+            assert_unselected_sandbox_checkout(window);
+        } else {
+            state.after.set(Some(answer_new_reads));
+        }
     } else if environment {
         state.after.set(Some(open_host_menu));
     } else if scene == LauncherScene::RememberedWrapper {
@@ -1206,6 +1247,43 @@ fn wait_for_container(
     } else {
         state.after.set(Some(wait_for_container));
     }
+}
+
+/// The capture must contain the recipe and the whole Folder invitation in the same frame. The driver's text bounds
+/// catch a status line that exists in the layout but is clipped below the scrolling form.
+fn assert_unselected_sandbox_checkout(window: &Window) {
+    let nodes = window.driver_nodes();
+    assert!(
+        nodes.iter().any(|node| {
+            node.element_id.as_deref() == Some("launcher-repository-row")
+                && !node.visible_bounds.is_empty()
+        }),
+        "the Repository field is visible with Managed checkout selected"
+    );
+    let recipe = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-recipe"))
+        .expect("a new sandbox has a Recipe field");
+    assert_eq!(
+        recipe.value.as_deref(),
+        Some("Development · 2 CPUs · 4 GB memory")
+    );
+    let recipe_lines = texts_within(nodes, "launcher-recipe");
+    assert!(
+        recipe_lines.iter().any(|line| {
+            line.text.starts_with("Development") && !line.visible_bounds.is_empty()
+        }),
+        "Managed checkout shows the Development sandbox recipe. Painted lines: {recipe_lines:?}"
+    );
+    let lines = texts_within(nodes, "launcher-preview");
+    assert!(
+        lines.iter().any(|line| {
+            line.text.as_ref() == "Select a repository"
+                && !line.visible_bounds.is_empty()
+                && line.visible_bounds == line.bounds
+        }),
+        "the Folder status shows the whole repository invitation. Painted lines: {lines:?}"
+    );
 }
 
 fn click_control(window: &mut Window, cx: &mut App, id: &str) -> bool {

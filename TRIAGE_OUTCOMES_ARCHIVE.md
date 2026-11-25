@@ -47041,3 +47041,23 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   for a presented warning about the actual checkout, and the same consent must survive a host wake and preview. Change
   `mmmzpmvxqllvsmmvvrtvzrrqzkwuznqt`, bookmark `plan/triage-environments-nov24/01-launcher-1`.
   [Draft PR](https://github.com/scode/farhelm/pull/4886/changes).
+
+## launcher-new-environment-folder-omits-repository-prompt.md
+
+- Outcome: `fix code`.
+- Assessment: When launching into a new sandbox or container with Managed checkout but no repository chosen yet, the
+  Folder line says the repository will be cloned inside the new environment, and does not ask the user to select a
+  repository. Verified: confirmed. `checkout_folder_detail` tests `draft.target.is_some()` before
+  `checkout.repo.is_none()` (`launcher/view/checkout.rs:1254-1266`). Launch is still refused with the select-repository
+  reason (`request.rs:405-407`), and the summary says "(select a repository)" (`checkout.rs:1314-1318`), so nothing
+  wrong is launched.
+- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
+  Recommendation for reference: fix code (swap the two branches). Size S. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
+  brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. The Folder status asks for a repository until one is chosen, then describes the fresh clone in the
+  new environment. Change `osyrqywurzrtmwpymmsolxqxwnqwlzux`, bookmark
+  `plan/triage-environments-nov24/01b-checkout-repository-prompt`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4891/changes).

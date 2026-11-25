@@ -1894,6 +1894,7 @@ fn checkout_wake_during_folder_save(cx: &mut TestAppContext, save_before_wake: b
 }
 
 /// A new sandbox uses the same repository history even when the currently selected host needs a checkout folder.
+/// Its Folder line offers that choice before it can say where the clone will go.
 #[gpui::test]
 fn new_sandbox_uses_global_repositories_without_the_source_hosts_checkout_folder(
     cx: &mut TestAppContext,
@@ -1934,6 +1935,12 @@ fn new_sandbox_uses_global_repositories_without_the_source_hosts_checkout_folder
     pick_host_menu_row(cx, "launcher-host-option-New sandbox");
     assert!(draft(cx).target.is_some());
     assert_eq!(draft(cx).destination_kind(), DestinationKind::Checkout);
+    assert_folder_status(
+        cx,
+        "launcher-preview-unselected",
+        "launcher-preview-message",
+        "Select a repository",
+    );
     click_in_body(cx, "launcher-repository");
     assert!(read(cx, |launcher, window, cx| launcher
         .repository_focused(window, cx)));
@@ -1942,6 +1949,13 @@ fn new_sandbox_uses_global_repositories_without_the_source_hosts_checkout_folder
     assert!(
         to(&sent(&mut helm, cx), REPOSITORIES).is_empty(),
         "switching to New sandbox does not read again"
+    );
+    test_support::click(cx, "launcher-repository-option-acme/bar");
+    assert_folder_status(
+        cx,
+        "launcher-preview-environment",
+        "launcher-preview-message",
+        "Cloned inside the new environment once it starts",
     );
 }
 

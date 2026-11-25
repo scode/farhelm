@@ -1049,25 +1049,25 @@ impl Launcher {
             .into_any_element()
     }
 
-    /// A new environment acquires its path when it connects. A resumable host allocates after wake. In both cases
-    /// configuration or a preview from a previous connection cannot supply a path for this line.
+    /// A checkout needs a repository before any folder can be promised. New environments allocate after they connect,
+    /// and resumable hosts allocate after wake. A preview from a previous connection supplies neither path.
     fn checkout_folder_detail(
         &self,
         palette: &theme::Palette,
         cx: &App,
     ) -> (&'static str, HostSentence, theme::Token, gpui::Pixels) {
-        let (state, words) = if self.draft.target.is_some() {
-            (
-                "environment",
-                "Cloned inside the new environment once it starts",
-            )
-        } else if self
+        let (state, words) = if self
             .draft
             .checkout
             .as_ref()
             .is_none_or(|checkout| checkout.repo.is_none())
         {
             ("unselected", "Select a repository")
+        } else if self.draft.target.is_some() {
+            (
+                "environment",
+                "Cloned inside the new environment once it starts",
+            )
         } else if let Some(notice) = self.checkout_allocation_notice(cx) {
             ("wake", notice)
         } else {
