@@ -70,7 +70,8 @@ struct SettingsFixture {
     tensorlake_key: bool,
     /// The query entered after opening, for results and empty search scenes.
     search: Option<&'static str>,
-    custom_agent: bool,
+    /// An available catalog can be empty after deletion. Omitting it represents a snapshot without the collection.
+    custom_agents: Option<CollectionState>,
 }
 
 /// `entries` as a pushed collection's first snapshot, each filed under the key `key` gives it, in their order.
@@ -112,7 +113,7 @@ fn settings_scene_with(
         container_leftover,
         tensorlake_key,
         search,
-        custom_agent,
+        custom_agents,
     } = fixture;
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -138,9 +139,7 @@ fn settings_scene_with(
     if !hosts.is_empty() {
         snapshot.push(crate::hosts::tests::hosts(&hosts));
     }
-    if custom_agent {
-        snapshot.push(super::custom_agent_state());
-    }
+    snapshot.extend(custom_agents);
     helm.connect(snapshot);
     // The dialog reads the row from the store, which the snapshot reaches after this setup returns: open once the
     // connection has a UI session, and only once.
@@ -187,6 +186,29 @@ pub(super) fn settings_custom_agent_setup(state: &SceneState, window: &mut Windo
     stage_scroll_end(state, false);
 }
 
+/// Draw the blank Add page that Settings shows after deleting its last custom agent.
+/// The lifecycle test drives the delete itself and verifies that the old draft is absent.
+pub(super) fn settings_custom_agent_empty_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    settings_scene_with(
+        state,
+        crate::settings::Section::AddCustomAgent,
+        SettingsFixture {
+            custom_agents: Some(CollectionState {
+                collection: Collection::CustomAgents,
+                meta: test_support::meta(&[]),
+                entries: Vec::new(),
+            }),
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+}
+
 /// Use the bundled-font spelling in screenshots. The Settings test checks the actual right-to-left text isolates.
 pub(super) fn settings_custom_agent_nav_tooltip_setup(
     state: &SceneState,
@@ -208,7 +230,7 @@ fn open_custom_agent(state: &SceneState, window: &mut Window, cx: &mut App) {
         state,
         crate::settings::Section::CustomAgent("acme-code".into()),
         SettingsFixture {
-            custom_agent: true,
+            custom_agents: Some(super::custom_agent_state()),
             ..SettingsFixture::default()
         },
         window,
