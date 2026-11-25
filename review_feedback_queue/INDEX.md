@@ -42,9 +42,6 @@ consequences.
 - [`settings-close-can-miss-detached-credential-save.md`](settings-close-can-miss-detached-credential-save.md) —
   Settings can close without waiting for a credential save whose editor is already closed.
 
-- [`settings-close-can-retry-refused-save.md`](settings-close-can-retry-refused-save.md) — Save and Close can miss one
-  pending refusal and retry the rejected draft without a new decision.
-
 - [`settings-close-can-hide-credential-delivery-warnings.md`](settings-close-can-hide-credential-delivery-warnings.md) —
   Save and Close can hide which hosts failed to receive a saved credential replacement.
 
