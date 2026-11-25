@@ -2442,10 +2442,15 @@ an exited agent stays viewable with its scrollback — because a tab's shell exi
 A shell that dies before the tab's open completes still refuses the open loudly, with the shell's last words as the
 error.
 
-For as long as the app runs, the session view remembers the last terminal you chose in each session. It shows the main
-terminal if you chose it or if the remembered tab is gone or unavailable to attach. The main tab is **Shell** when the
-session is known to run Bash or Zsh, and **Agent** otherwise. The main terminal is available while the tab list loads.
-The remembered tab opens when it arrives if you have yet to press a key or click.
+Closing the active shell tab, including when its shell exits or another client closes it, selects the nearest surviving
+tab to its left in opening order. The main terminal takes over when there is no earlier tab. Closing a tab that is
+already in the background leaves the active terminal in place. The fallback takes focus if the closed terminal held it.
+An open question or dialog keeps its focus.
+
+For as long as the app runs, the session view remembers your selection in each session, including the choice after a tab
+closes. It shows the main terminal if you chose it or if the remembered tab is gone or unavailable to attach. The main
+tab is **Shell** when the session is known to run Bash or Zsh, and **Agent** otherwise. The main terminal is available
+while the tab list loads. The remembered tab opens when it arrives if you have yet to press a key or click.
 
 When a reachable host reports that a session has no agent terminal, the pane shows its metadata and a recovery card. The
 card explains the missing terminal and offers Restart when the session can resume, plus Replace (or Replace with for a
@@ -3949,7 +3954,8 @@ These came out of the walkthrough and are worth keeping as acceptance cases, bec
   focus when the terminal arrives.
 - The user's session is deleted from the command line or by an agent while they type in it. The next session is selected
   and its terminal takes the rest of their typing (the terminal is home).
-- A shell tab exits on its own while the user types in it. The session's agent tab takes focus.
+- A shell tab exits on its own while the user types in it. The nearest earlier surviving tab takes focus, or the
+  session's main terminal if there is none.
 - An agent asks to add a host while the user types in a terminal or fills in the launcher. A notice offers the request;
   nothing opens until the user opens it.
 - Escape typed into a terminal while a question waits on that session goes to the terminal's program, not to the

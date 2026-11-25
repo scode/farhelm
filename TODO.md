@@ -51,10 +51,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Remember the order tabs were opened in.** Remember order of tabs being open. So if you have an agent open, then you
-  open a terminal, then you open a second terminal, then you close the second terminal, the first terminal should be
-  made active - not the agent. Plan: `plans/queue/tab-close-activation-order.md`.
-
 - **Give Cmd+K, Cmd+J and Cmd+L the session launcher's look.** The quick switcher, the template list and Rename are
   plain and untuned; Cmd+L in particular wraps one short field in a tall header and a lot of empty space. Restyle them
   as direction 1, "Launcher sibling", in
