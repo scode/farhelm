@@ -1153,7 +1153,7 @@ impl Editor {
             _ if quick_launch_eligible(&self.draft.fields) => {
                 "Not the quick launch. The ⚡ in the list makes it one.".to_owned()
             }
-            _ => "Can't be the quick launch: an agent launch needs an agent; a command launch needs a nonblank command."
+            _ => "Can't be the quick launch. Agent needs a built-in or registered custom agent. Command needs a nonblank command."
                 .to_owned(),
         };
         div()

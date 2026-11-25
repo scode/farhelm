@@ -3228,7 +3228,7 @@ fn apply_template_shortcuts(
         && !farhelm_proto::launcher::quick_launch_eligible(fields)
     {
         return Err(
-            "⚡ needs an agent for an agent launch or a nonblank command for a command launch"
+            "⚡ needs a built-in or registered custom agent for an agent launch, or a nonblank command for a command launch"
                 .into(),
         );
     }
@@ -13384,7 +13384,7 @@ mod tests {
                 &before,
             )
             .unwrap_err(),
-            "⚡ needs an agent for an agent launch or a nonblank command for a command launch"
+            "⚡ needs a built-in or registered custom agent for an agent launch, or a nonblank command for a command launch"
         );
         let empty_command_with_agent = TemplateFields {
             kind: Some(LauncherKind::Command),
@@ -13395,7 +13395,7 @@ mod tests {
         assert_eq!(
             apply_template_shortcuts("new", &empty_command_with_agent, &edit, false, &before,)
                 .unwrap_err(),
-            "⚡ needs an agent for an agent launch or a nonblank command for a command launch"
+            "⚡ needs a built-in or registered custom agent for an agent launch, or a nonblank command for a command launch"
         );
         let already_marked = TemplateBindings {
             quick_launch: Some("new".into()),

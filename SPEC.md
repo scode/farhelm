@@ -1417,6 +1417,9 @@ agent choice is independent of that destination:
   takes effect at once. Templates' hover and a separate quick-switcher row advertise the chord and marked name. An agent
   may set or clear the mark through `farhelm agent template create` or `edit`, behind a template approval card. The helm
   applies the same eligibility rule to an agent's write as the Templates editor does.
+
+  A custom agent launch needs a registration ID to qualify for direct launch or the quick-launch mark.
+
 - Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit on
   macOS, or Ctrl+Shift+digit on Linux, starts its template through the same direct launch path as quick launch, and
   applies it to an open session launcher draft under the same focus, ordering and refusal rules as the ⚡ chord. It
@@ -4874,6 +4877,8 @@ written, if that template changed or appeared while the card waited. This is the
 templates (Concepts), and it exists because an approval covers exactly what the card showed. A write that changes ⚡ or
 a key also refuses if the mark or any number-key binding changed while its card waited; the template and bindings are
 written together or neither is written. Template deletion keeps clearing its bindings through the shared delete path.
+
+An agent-launch template that chooses Custom needs a registration ID to hold ⚡ after a write.
 
 `farhelm agent agents` lists the built-in types followed by the helm's registered custom agents in ID order. Each entry
 gives the ID to pass as `--agent`, its kind and display name, and whether the launch accepts an existing conversation

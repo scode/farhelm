@@ -439,6 +439,7 @@ enum LauncherScene {
     CustomEffortDefault,
     UnavailableCustomAgent,
     RenamedCustomSearch,
+    IncompleteCustomQuickLaunch,
     CustomRecents,
     NarrowCustomRecents,
     ShellWrapper,
@@ -466,6 +467,20 @@ impl LauncherScene {
     fn custom_recents(self) -> bool {
         matches!(self, Self::CustomRecents | Self::NarrowCustomRecents)
     }
+}
+
+/// A saved mark can outlive its registration choice. Its shortcut opens New with the partial template applied.
+pub(super) fn launcher_incomplete_custom_quick_launch_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(
+        state,
+        LauncherScene::IncompleteCustomQuickLaunch,
+        window,
+        cx,
+    );
 }
 
 /// Show New with a chosen agent, so the screenshot covers the model, effort and permission controls and the prompt.
@@ -685,11 +700,24 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
         );
     }
     let mut extra = vec![launcher_templates(scene)];
+    if scene == LauncherScene::IncompleteCustomQuickLaunch {
+        let name = "custom-work";
+        preferences.quick_launch_template = Some(name.into());
+        extra[0] = CollectionState {
+            collection: Collection::Templates,
+            meta: meta(&[name]),
+            entries: vec![KeyedEntry {
+                key: name.into(),
+                value: json!({"name": name, "fields": {"agent": "custom", "custom_agent": null}}),
+            }],
+        };
+    }
     if matches!(
         scene,
         LauncherScene::CustomAgent
             | LauncherScene::CustomEffortDefault
             | LauncherScene::RenamedCustomSearch
+            | LauncherScene::IncompleteCustomQuickLaunch
     ) || scene.custom_recents()
     {
         extra.push(super::custom_agent_state());
@@ -800,6 +828,12 @@ fn open_new_with_claude(
     if scene == LauncherScene::IncompleteTemplate {
         use crate::templates::dispatch::{Origin, Reference, dispatch};
         dispatch(Origin::NumberKey, &[Reference::Key("1".into())], window, cx);
+        state.after.set(Some(answer_new_reads));
+        return;
+    }
+    if scene == LauncherScene::IncompleteCustomQuickLaunch {
+        use crate::templates::dispatch::{Origin, Reference, dispatch};
+        dispatch(Origin::Mark, &[Reference::Mark], window, cx);
         state.after.set(Some(answer_new_reads));
         return;
     }
@@ -970,6 +1004,12 @@ fn answer_new_reads(
     let checkout_awaits_replies = scene == LauncherScene::ManagedCheckout && !commands.is_empty();
     let mut checkout_refused = false;
     for command in commands {
+        if scene == LauncherScene::IncompleteCustomQuickLaunch {
+            assert_ne!(
+                command.path, "/api/sessions",
+                "the incomplete shortcut opens New"
+            );
+        }
         if scene == LauncherScene::ContainerCheckoutRefusal
             && command.path == "/api/environment-sessions"
         {
@@ -1035,6 +1075,24 @@ fn answer_new_reads(
         if !window.driver_nodes().iter().any(|node| {
             node.element_id.as_deref() == Some("launcher-banner") && !node.visible_bounds.is_empty()
         }) {
+            state.after.set(Some(answer_new_reads));
+        }
+        return;
+    }
+    if scene == LauncherScene::IncompleteCustomQuickLaunch {
+        // The fields above the notice show that the shortcut applied Custom and left the registration for the user.
+        let nodes = window.driver_nodes();
+        let visible = |id| {
+            nodes.iter().find(|node| {
+                node.element_id.as_deref() == Some(id) && !node.visible_bounds.is_empty()
+            })
+        };
+        let banner = visible("launcher-banner").and_then(|node| node.label.as_deref());
+        if banner != Some("custom-work needs more choices before it can launch. Complete it above.")
+            || visible("launcher-custom-model-row").is_none()
+            || !visible("launcher-custom-acme-code")
+                .is_some_and(|chip| chip.toggled == Some(gpui::Toggled::False))
+        {
             state.after.set(Some(answer_new_reads));
         }
         return;

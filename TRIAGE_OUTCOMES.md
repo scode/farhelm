@@ -932,26 +932,6 @@
   the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md
-
-- Outcome: `fix code`.
-- Assessment: A launch template can choose the generic Custom agent type for an Agent launch without naming a registered
-  agent, for example via `farhelm agent template create foo --agent custom --quick-launch`. Such a template can still
-  take the quick-launch mark (⚡). Pressing it then fails right away ("select a registered custom agent") instead of
-  opening New with the "needs more choices" banner. Verified: Confirmed. `crates/farhelm-proto/src/launcher.rs:417-438`
-  returns `agent.is_some()` for Agent launches. The helm always refuses an Agent launch of Custom without an ID
-  (`farhelm-helm/src/sessions.rs`, per the reviewer). SPEC.md:4800 ("⚡ needs a template that chooses an agent ...") is
-  met literally. Whether generic Custom "supplies what its active launch kind needs" (SPEC.md:1379-1380) is a reading.
-- Decision: q-custom, "Registered custom agents as first-class agent types": the maintainer picked "Yes, everywhere a
-  built-in agent is handled". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Treat each registered custom agent as its own agent type wherever a built-in agent is handled:
-  name it by display name (falling back to its ID), match it in search, keep per-registration memory, make template
-  saves refuse what can never apply, and treat a catalog that is not loaded as its own state rather than "deleted".
-  Recommendation for reference: fix code — track the custom ID in the eligibility fold; size S. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
 ## trailing-template-apply-custom-to-custom-misses-switched-agent.md
 
 - Outcome: `fix code`.

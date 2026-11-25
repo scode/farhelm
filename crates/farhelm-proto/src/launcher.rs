@@ -410,8 +410,9 @@ pub fn quick_launch_eligible(fields: &TemplateFields) -> bool {
 ///
 /// Like a fresh New draft, the fold starts on Agent with no selected agent.
 /// Each supplied kind or command replaces its previous value; an agent choice
-/// updates the agent draft only while Agent is active. An agent declared for a
-/// command cannot fill that draft. Dormant choices survive later tab switches.
+/// updates the agent draft only while Agent is active. A custom agent choice
+/// needs a registration ID on that tab. Dormant choices survive tab switches,
+/// and a command's declared registration cannot complete the agent draft.
 /// This knows no catalog or hosts: applying every template and validating the
 /// resulting launch remain the launcher's and helm's responsibility.
 pub fn stacked_quick_launch_eligible<'t>(
@@ -419,20 +420,31 @@ pub fn stacked_quick_launch_eligible<'t>(
 ) -> bool {
     let mut kind = LauncherKind::Agent;
     let mut agent = None;
+    let mut has_custom_agent = false;
     let mut command = None;
     for fields in templates {
         if let Some(next) = fields.kind {
             kind = next;
         }
-        if kind == LauncherKind::Agent && fields.agent.is_some() {
-            agent = fields.agent;
+        if kind == LauncherKind::Agent {
+            if let Some(next) = fields.agent {
+                agent = Some(next);
+                has_custom_agent &= next.uses_custom_catalog();
+            }
+            if agent.is_some_and(LaunchHarness::uses_custom_catalog)
+                && let Some(id) = &fields.custom_agent
+            {
+                has_custom_agent = id.is_some();
+            }
         }
         if let Some(next) = &fields.command {
             command = Some(next);
         }
     }
     match kind {
-        LauncherKind::Agent => agent.is_some(),
+        LauncherKind::Agent => {
+            agent.is_some_and(|agent| !agent.uses_custom_catalog() || has_custom_agent)
+        }
         LauncherKind::Command => command.is_some_and(|command| !command.trim().is_empty()),
     }
 }
@@ -1396,6 +1408,30 @@ mod tests {
             &command,
             &agent_tab,
             &command_tab,
+        ]));
+
+        // The Agent tab needs its own registration. Omission preserves it and an explicit null clears it.
+        let custom = |custom_agent| TemplateFields {
+            agent: Some(LaunchHarness::Custom),
+            custom_agent,
+            ..Default::default()
+        };
+        let bare = custom(None);
+        let registered = custom(Some(Some("acme-code".into())));
+        let cleared = custom(Some(None));
+        assert!(!quick_launch_eligible(&bare));
+        assert!(quick_launch_eligible(&registered));
+        assert!(stacked_quick_launch_eligible([&registered, &bare]));
+        assert!(!stacked_quick_launch_eligible([&registered, &cleared]));
+        assert!(!stacked_quick_launch_eligible([&registered, &agent, &bare]));
+        let command_registration = TemplateFields {
+            kind: command_tab.kind,
+            ..registered.clone()
+        };
+        assert!(!stacked_quick_launch_eligible([
+            &bare,
+            &command_registration,
+            &agent_tab
         ]));
     }
 

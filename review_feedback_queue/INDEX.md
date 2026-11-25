@@ -293,11 +293,6 @@ consequences.
   registered custom agent from the Settings sidebar, even though each registered custom agent is its own Settings
   section.
 
-- [`trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md`](trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md)
-  — A launch template on the Agent tab that selects the generic Custom agent type without naming a registered custom
-  agent ID can be marked as the quick-launch template (⚡) or treated as ready to quick-launch, even though Farhelm
-  cannot launch an Agent-tab custom session without a registered agent ID.
-
 - [`trailing-template-apply-custom-to-custom-misses-switched-agent.md`](trailing-template-apply-custom-to-custom-misses-switched-agent.md)
   — If you switch in the launcher from a guarded agent (like Codex) to a custom agent — raising the red
   permission-escalation banner with Undo — and then apply a launch template that selects a different custom agent, the
