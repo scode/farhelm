@@ -420,7 +420,7 @@ fn session_recovery_cards(
             launcher_wait: None,
             step: 0,
         };
-        div()
+        let card = div()
             .w(px(500.))
             .h(px(300.))
             .child(crate::session_pane::card::draw(
@@ -428,7 +428,26 @@ fn session_recovery_cards(
                 gpui::WeakEntity::new_invalid(),
                 window,
                 cx,
-            ))
+            ));
+        if terminal_missing || offer != "resume" {
+            return card;
+        }
+        // Show the interruption above one card's pane, using the same banner as the main view.
+        use crate::host_text::HostText;
+        use crate::notices::{InterruptedUploads, Notice};
+        let upload = InterruptedUploads::new(
+            Some(HostText::from_host("Build artifacts")),
+            vec![HostText::from_host("build-log.txt")],
+            true,
+        );
+        div()
+            .w(px(500.))
+            .flex()
+            .flex_col()
+            .child(crate::main_view::banner(Notice::InterruptedUpload(
+                std::rc::Rc::new(upload),
+            )))
+            .child(card)
     });
     div()
         .flex()

@@ -376,6 +376,9 @@ impl SessionPane {
         let mut observing = vec![
             cx.observe_global_in::<LocalState>(window, Self::sync),
             cx.observe_global_in::<Chosen>(window, Self::sync),
+            cx.observe_global_in::<crate::terminal::Carried>(window, |pane, _, cx| {
+                pane.report_unmounted_uploads(false, cx);
+            }),
         ];
         // The pane follows the connection, not the store: what it mounts depends on the UI session and the selection,
         // and on the store only for the open session's recovery card and reason, whether its row's host is
@@ -527,6 +530,21 @@ impl SessionPane {
         };
         focus::set_home(home.as_ref(), window, cx);
         self.act_on_choice(window, cx);
+        self.report_unmounted_uploads(true, cx);
+    }
+
+    /// Promote interruptions if this connected pane settled without a terminal. Only sync may interpret an absent
+    /// mount as a failed attempt because a render can initialize the state before sync tries to mount anything.
+    fn report_unmounted_uploads(&self, synced: bool, cx: &mut App) {
+        if let Some(key) = local_state::selected(cx)
+            && self.mounted.read(cx).is_some_and(|mount| {
+                mount
+                    .as_ref()
+                    .map_or(synced, |mount| mount.key == key && mount.set.is_none())
+            })
+        {
+            crate::terminal::post_window_uploads(Some(&key), cx);
+        }
     }
 
     /// The session shortcuts can reach the main view before the terminal sees their keys. Ask the shown terminal

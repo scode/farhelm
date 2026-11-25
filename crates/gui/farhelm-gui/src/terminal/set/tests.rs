@@ -1265,6 +1265,42 @@ fn leaving_during_tab_restore_posts_the_pending_upload_notice(cx: &mut TestAppCo
     );
 }
 
+/// A recovery card can replace the shell while its session stays selected. The pending upload then needs a window
+/// banner because no terminal will show it.
+#[gpui::test]
+fn a_recovery_card_reports_the_selected_sessions_interrupted_upload(cx: &mut TestAppContext) {
+    let (mut transfers, handle) = FakeTransfers::new();
+    let mut window = open_with_transfers(cx, snapshot(&["t1"]), Some(handle));
+    let answer = pending_upload_in_first_tab(&mut window, &mut transfers);
+    let mut interrupted = row("a", &["t1"]);
+    interrupted.value["status"] = json!({"state": "interrupted"});
+    window.helm.push(CollectionChanges {
+        collection: Collection::Sessions,
+        meta: listing_meta(&["a", "b"], 2, false),
+        upsert: vec![interrupted],
+        remove: Vec::new(),
+    });
+    settle(window.cx);
+    assert_eq!(
+        window
+            .cx
+            .update(|_, cx| crate::local_state::selected(cx))
+            .as_deref(),
+        Some("a")
+    );
+    assert!(answer.abandoned());
+    let posted = window.cx.update(|_, cx| notices::posted(cx));
+    let [Notice::InterruptedUpload(upload)] = posted.as_slice() else {
+        panic!("expected an interrupted upload above the recovery card: {posted:?}");
+    };
+    let dismiss = format!("notice-dismiss-interrupted-upload-{}", upload.key());
+    assert_eq!(
+        test_support::label(window.cx, &dismiss).as_deref(),
+        Some("Dismiss")
+    );
+    assert!(test_support::drawn(window.cx, "session-interrupted-card"));
+}
+
 /// Leaving a session reports its shell's interrupted upload in a banner right away. Restoring the shell
 /// keeps the banner and has no second interruption to show in the strip.
 #[gpui::test]

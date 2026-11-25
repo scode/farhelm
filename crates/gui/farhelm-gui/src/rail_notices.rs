@@ -84,6 +84,8 @@ pub(crate) const CLOSE_ID: &str = "rail-notices-close";
 
 /// The id of the line that shows a refused Clear resolved.
 pub(crate) const CLEAR_REFUSAL_ID: &str = "rail-notices-clear-refusal";
+/// The id of the line that shows why the pending announcements could not be read.
+pub(crate) const ANNOUNCEMENT_REFUSAL_ID: &str = "rail-notices-announcement-refusal";
 
 /// The id prefixes of a notice's entry, its Retry now and its Open Trash; the rest is the notice's id.
 pub(crate) const ENTRY_ID_PREFIX: &str = "rail-notice-";
@@ -166,7 +168,7 @@ pub struct NoticesButton {
     anchor: Option<Anchor>,
     /// The panel this bell opened last; checked with the layer manager whenever it is read, so a panel closed some other
     /// way (Escape, a press outside, focus leaving, a reset) needs no bookkeeping here.
-    panel: Option<LayerId>,
+    panel: Option<(LayerId, WeakEntity<NoticesPanel>)>,
     /// The Trash, whose dialog and Retry the trash cleanup notice's actions use.
     trash: WeakEntity<TrashButton>,
     /// The host rail's expansion, the session list's, read as the bell draws: expanded, the bell is a row with its
@@ -195,6 +197,8 @@ impl NoticesButton {
     /// The panel this bell opened, if it is still open.
     fn open_panel(&self, window: &Window, cx: &App) -> Option<LayerId> {
         self.panel
+            .as_ref()
+            .map(|(id, _)| *id)
             .filter(|panel| layers::is_open(*panel, window, cx))
     }
 
@@ -213,6 +217,7 @@ impl NoticesButton {
         let button = cx.weak_entity();
         let (bell, trash) = (self.focus.clone(), self.trash.clone());
         let view = cx.new(|cx| NoticesPanel::new(button, bell, trash, cx));
+        let weak_view = view.downgrade();
         let container = view.read(cx).container.clone();
         // The layer holds the view's only strong handle, so its release, which sends the read mark, is the panel's
         // close, whatever closed it. Focus starts on the panel itself, as the old panel took focus (`tabindex: -1`), so
@@ -221,8 +226,18 @@ impl NoticesButton {
         let popover = Popover::menu(view, container.clone(), anchor.beside(), container)
             .returns_to(ReturnTo::Control(self.focus.clone()))
             .tab_through();
-        self.panel = layers::open_popover(popover, &mark, window, cx);
+        self.panel = layers::open_popover(popover, &mark, window, cx).map(|id| (id, weak_view));
         cx.notify();
+    }
+
+    /// Capture the real panel's retry state without running a read in the renderer.
+    #[cfg(test)]
+    pub(crate) fn stage_announcement_refusal(&self, reason: &str, cx: &mut App) {
+        let (_, view) = self
+            .panel
+            .as_ref()
+            .expect("the captured bell panel is open");
+        NoticesPanel::announcement_refused(view, Some(HostText::from_host(reason)), cx);
     }
 
     /// Close the panel if it is still open, which returns focus to the bell.
@@ -238,13 +253,24 @@ impl NoticesButton {
     /// pushes are independent, so the visible notice can be newer than the
     /// window's cached queue. A delayed reply belongs to the panel that asked.
     fn open_announcements(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(panel) = self.open_panel(window, cx) else {
+        let Some((panel, view)) = &self.panel else {
             return;
         };
+        let panel = *panel;
+        if !layers::is_open(panel, window, cx) {
+            return;
+        }
         let mark = Mark::take(cx);
         let button = cx.weak_entity();
         let window = window.window_handle();
-        crate::announcements::read_pending(cx, move |pending, cx| {
+        NoticesPanel::announcement_refused(view, None, cx);
+        let original = view.clone();
+        let sent = crate::announcements::read_pending(cx, move |answer, cx| {
+            // Ordered replies let a successful retry clear a refusal even if the dialog stays closed.
+            NoticesPanel::announcement_refused(&original, answer.as_ref().err().cloned(), cx);
+            let Ok(pending) = answer else {
+                return;
+            };
             if pending.is_empty() || crate::focus::has_moved_on(&mark, cx) {
                 return;
             }
@@ -261,6 +287,10 @@ impl NoticesButton {
                 }
             });
         });
+        if !sent {
+            let words = HostText::from_host("The connection to the helm is unavailable.");
+            NoticesPanel::announcement_refused(view, Some(words), cx);
+        }
     }
 }
 
@@ -357,6 +387,8 @@ struct NoticesPanel {
     clearing: bool,
     /// The helm's words for the last refused Clear resolved, until the next one.
     refusal: Option<HostText>,
+    /// This panel's Open Announcements refusal. A press clears it, and replies update it in command order.
+    announcement_refusal: Option<HostText>,
     /// Sends the read mark when the view is released, which is when the panel closes.
     _mark_on_close: Subscription,
 }
@@ -378,6 +410,7 @@ impl NoticesPanel {
             resolved_shown: Vec::new(),
             clearing: false,
             refusal: None,
+            announcement_refusal: None,
             // Kept in the view: GPUI takes an entity's release callbacks before it drops the entity.
             _mark_on_close: cx.on_release(|panel: &mut NoticesPanel, cx| {
                 let ids = std::mem::take(&mut panel.unread_shown);
@@ -388,6 +421,14 @@ impl NoticesPanel {
                 });
             }),
         }
+    }
+
+    /// Update the panel that issued the read. A panel reopened while it was pending has its own state.
+    fn announcement_refused(panel: &WeakEntity<Self>, refusal: Option<HostText>, cx: &mut App) {
+        let _ = panel.update(cx, |panel, cx| {
+            panel.announcement_refusal = refusal;
+            cx.notify();
+        });
     }
 
     /// Clear resolved was pressed: remove the resolved notices the last frame drew. The helm pushes what is left
@@ -545,14 +586,24 @@ impl Render for NoticesPanel {
         });
         panel
             .children(state.map(|state| div().flex_none().mx(px(12.)).my(px(10.)).child(state)))
-            .children(self.refusal.as_ref().map(|refusal| {
-                div()
-                    .flex_none()
-                    .mx(px(12.))
-                    .my(px(10.))
-                    .text_color(theme::color(palette.danger_strong))
-                    .child(HostSentence::new(CLEAR_REFUSAL_ID).host(refusal))
-            }))
+            .children(
+                self.refusal
+                    .iter()
+                    .map(|refusal| HostSentence::new(CLEAR_REFUSAL_ID).host(refusal))
+                    .chain(self.announcement_refusal.iter().map(|refusal| {
+                        HostSentence::new(ANNOUNCEMENT_REFUSAL_ID)
+                            .text("Could not open announcements: ")
+                            .host(refusal)
+                    }))
+                    .map(|sentence| {
+                        div()
+                            .flex_none()
+                            .mx(px(12.))
+                            .my(px(10.))
+                            .text_color(theme::color(palette.danger_strong))
+                            .child(sentence)
+                    }),
+            )
             .child(focus::scroll_region(body, &self.scroll))
             // `.rail-notices-footer`: Clear resolved and Close at the two ends, under a hairline.
             .child(

@@ -147,6 +147,28 @@ pub(super) fn notices_alerting_setup(state: &SceneState, _: &mut Window, cx: &mu
     rail_notices_scene(state, &[alerting_notice()], true, cx);
 }
 
+/// A refused read leaves the Notifications panel open with its original action available for a retry.
+pub(super) fn notices_announcements_refused_setup(
+    state: &SceneState,
+    _: &mut Window,
+    cx: &mut App,
+) {
+    let notice = serde_json::json!({
+        "id": 1, "host": null, "raised_at": 1, "read": false, "resolved": false,
+        "content": { "kind": "new_announcement" }
+    });
+    rail_notices_scene(state, &[notice], false, cx);
+    state.after.set(Some(|list, _, window, cx| {
+        list.read(cx)
+            .notices_button()
+            .clone()
+            .update(cx, |bell, cx| {
+                bell.toggle(window, cx);
+                bell.stage_announcement_refusal("Announcements are temporarily unavailable.", cx);
+            });
+    }));
+}
+
 /// The rail with that unread notice and the panel closed: the bell filled, in the strong red, with its count "1" over
 /// its corner, the look nothing else pictures (the open bell wears the open look's inverse ink instead).
 pub(super) fn notices_bell_loud_setup(state: &SceneState, _: &mut Window, cx: &mut App) {

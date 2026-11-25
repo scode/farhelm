@@ -2654,7 +2654,7 @@
     },
     {
       "golden": "session-interrupted-card",
-      "title": "The interrupted card in place of an interrupted session's terminal: Restart and Replace for a session that can resume, Replace alone and why for one whose conversation was never captured (compared with the old stylesheet; there is no reference picture)",
+      "title": "Recovery cards for interrupted sessions, with an interrupted upload notice above the resumable session",
       "reference": null
     },
     {
@@ -2760,6 +2760,11 @@
       "golden": "notices-alerting",
       "title": "The rail's notices panel with one unread trash cleanup notice, Retry now unavailable beside Open Trash",
       "reference": "notices-alerting"
+    },
+    {
+      "golden": "notices-announcements-refused",
+      "title": "The Notifications panel keeps the announcement action available while showing why the read failed",
+      "reference": null
     },
     {
       "golden": "help-menu",

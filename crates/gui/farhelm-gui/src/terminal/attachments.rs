@@ -359,13 +359,13 @@ impl Uploaded {
 /// The old app kept a pane's messages on its status element, which outlived the terminal a reconnect or a restart
 /// remounted into it (SPEC.md: an attachment must never disappear silently). Here a terminal goes away whole when its
 /// session is closed, its tab closes or the window's connection resets. Lines that were already shown wait for that
-/// session's next terminal. An interrupted upload either follows the still-open session to its next terminal or
-/// becomes a notice when the selection moves on. A reset keeps the selection through its disconnected window.
+/// session's next terminal. An interrupted upload becomes a window notice when the selection moves on or the
+/// selected pane settles without a terminal set. A reset keeps the selection through its disconnected window.
 ///
-/// A store that proves a session is gone can prune its already-shown lines ([`prune_carried`]). The app-wide
-/// observer owns interrupted entries, so an incomplete or filtered listing cannot hide these uploads.
+/// A store that proves a session is gone can prune its already-shown lines ([`prune_carried`]). Pending
+/// interruptions are promoted by the selection and pane observers, independently of listing completeness.
 #[derive(Default)]
-pub(super) struct Carried(HashMap<String, CarriedLines>);
+pub(crate) struct Carried(HashMap<String, CarriedLines>);
 
 impl Global for Carried {}
 
@@ -392,29 +392,33 @@ struct Interrupted {
 /// Watch uploads and selection for the app's lifetime, even while the window has no terminals.
 pub(crate) fn install_carried(cx: &mut App) {
     cx.set_global(Carried::default());
-    cx.observe_global::<Carried>(post_departed_uploads).detach();
-    cx.observe_global::<LocalState>(post_departed_uploads)
+    cx.observe_global::<Carried>(|cx| post_window_uploads(None, cx))
+        .detach();
+    cx.observe_global::<LocalState>(|cx| post_window_uploads(None, cx))
         .detach();
 }
 
-/// Move interruptions from departed sessions to the notice center. The terminal can still take its older strip lines.
-fn post_departed_uploads(cx: &mut App) {
+/// Promote departures and interruptions for the pane's selected session when it confirms there is no terminal set.
+pub(crate) fn post_window_uploads(unmounted: Option<&str>, cx: &mut App) {
     let selected = local_state::selected(cx);
     let Some(carried) = cx.try_global::<Carried>() else {
         return;
     };
-    let departed: Vec<_> = carried
+    let sessions: Vec<_> = carried
         .0
         .iter()
-        .filter(|(key, entry)| selected.as_ref() != Some(*key) && !entry.interrupted.is_empty())
+        .filter(|(key, entry)| {
+            (selected.as_ref() != Some(*key) || unmounted == Some(key.as_str()))
+                && !entry.interrupted.is_empty()
+        })
         .map(|(key, _)| key.clone())
         .collect();
-    if departed.is_empty() {
+    if sessions.is_empty() {
         return;
     }
     let mut notices_to_post = Vec::new();
     let carried = cx.global_mut::<Carried>();
-    for key in departed {
+    for key in sessions {
         let Some(entry) = carried.0.get_mut(&key) else {
             continue;
         };

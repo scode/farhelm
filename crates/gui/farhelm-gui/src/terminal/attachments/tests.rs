@@ -1189,11 +1189,11 @@ fn interrupted_upload_batches_use_the_first_nonempty_title(cx: &mut TestAppConte
                 ..CarriedLines::default()
             },
         )])));
-        post_departed_uploads(cx);
+        post_window_uploads(None, cx);
         assert!(notices::posted(cx).is_empty(), "the session is still selected");
 
         assert!(local_state::select("next", cx));
-        post_departed_uploads(cx);
+        post_window_uploads(None, cx);
         let notices = notices::posted(cx);
         assert_eq!(notices.len(), 2);
         assert_eq!(

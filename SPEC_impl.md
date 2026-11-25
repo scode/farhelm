@@ -499,11 +499,11 @@ it builds a terminal for that tab within the attach cap. Choosing Agent clears t
 keeps its entry because a short snapshot can omit a tab that is still open. Tab ids are never reused, so an old entry
 cannot select a different tab. The terminal's shown attachment failures and pending upload interruptions survive in
 `Carried` (`crates/gui/farhelm-gui/src/terminal/attachments.rs`). For a session that stays open, the new set gives them
-to its shown terminal once it knows which tab to restore. If the selection moves on or clears, an app-wide observer
-posts the interruptions to the notice center, including when a filtered listing cannot prove the session gone or there
-is no terminal. Each notice names the original files and session title and says whether the upload was sent. Once
-posted, those interruptions are out of `Carried` so the user sees them once. A complete listing that proves the session
-gone still prunes its already-shown failures when a terminal's attachments check the store. The window itself, its size
+to its shown terminal once it knows which tab to restore. The notice center gets the interruptions when the selection
+moves on or when a connected pane settles without a terminal set, including when a filtered listing cannot prove the
+session gone. Each notice names the original files and session title and says whether the upload was sent. Once posted,
+those interruptions are out of `Carried` so the user sees them once. A complete listing that proves the session gone
+still prunes its already-shown failures when a terminal's attachments check the store. The window itself, its size
 included, is not part of the UI session and is untouched. The settings the old app kept per device (appearance, sidebar
 width, host rail, status sounds, terminal text size) become helm preferences in the new app, so they return with the new
 snapshot like the rest of the helm's state (maintainer decision, 2026-11-13). SPEC.md no longer calls the sidebar width,

@@ -562,27 +562,6 @@
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
-## trailing-reminder-frame-cfg-test-branch-in-render-path.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC_impl.md, "GPUI cookbook: traps", "A `cfg(test)` branch in production code tests a
-  program that does not ship" (SPEC_impl.md:1624-1635): "Rule: pass the dependency in, so the production path reads it
-  the same way in every build and a test hands it a different one … A test-only setter for such a value … are not
-  branches. … In a render path it must not change what is drawn or done, or the frame a test checks differs from the one
-  the app draws." The code contradicts this. `crates/gui/farhelm-gui/src/update_readout/view/reminder.rs:31-32` gates
-  the `held_frame` field with `#[cfg(test)]`, and lines 81-84 add a `#[cfg(test)]` early return in `Reminder::frame`,
-  which the render path calls and which changes the drawn frame. The fix follows directly from the rule and its sibling
-  pattern (`step_hold`, `update_readout/view.rs:156-160,232-238`): make the field and its read unconditional (always
-  `None` in the app) and keep only `holding_reminder` (`view.rs:671-676`) under `cfg(test)`. No comment explains the
-  gate as a deliberate choice. Verified: Confirmed by reading the code (unchanged since 5b1cfcdb0).
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code. Size S
-  (about 5 lines, no test change, well under 100).). Size gate: about 100 lines of diff (code, tests and docs, not
-  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
-  to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
-
 ## trailing-settings-custom-agent-nav-tooltip-omits-bidi-isolation.md
 
 - Outcome: `fix code`.
@@ -656,27 +635,6 @@
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## trailing-bell-open-announcements-silent-on-read-failure.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md, "Errors and diagnostics" (4944): "Every failed operation surfaces a concrete,
-  actionable error in the client." Its best-effort exceptions name only "the automatic announcement check and recording
-  a dismissed batch", not the user-pressed bell action. SPEC.md 3304 says Open Announcements "loads the current pending
-  batch and closes the popover." Current code: `crates/gui/farhelm-gui/src/announcements.rs:140-155` only logs a failed
-  read, returns with nothing if the path cannot be built, and ignores whether the read was sent.
-  `rail_notices.rs:240-264` therefore leaves the panel open with no message. The fix follows the panel's existing
-  pattern for Clear resolved, which keeps the refusal and shows it in the panel (`rail_notices.rs:359,394-409,548-554`).
-  Verified: Confirmed for the error path. The empty-batch path was already narrowed out at recording under "Rare,
-  self-correcting glitches", so it is out of scope.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code. Show
-  the refusal in the panel when the read fails or was not sent. Size S to M (about 30-70 lines including a test; under
-  100).). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-link-disclosure-module-doc-soft-seam.md
 
@@ -3479,24 +3437,6 @@
   feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
 
-## menu-shortcuts-omitted-from-native-accessibility.md
-
-- Outcome: `other`.
-- Assessment: Menu items show their keyboard shortcut as a small chip. Farhelm passes the shortcut to the accessibility
-  layer as shortcut metadata, but the pinned macOS and Linux accessibility adapters never hand that field to screen
-  readers, so the shortcut may not be announced. Verified: Confirmed by the reviewer's source trace, which matches what
-  I could check: `components/menu_item.rs:325-327` sets `aria_label` plus `aria_keyshortcuts`, and Cargo.lock pins
-  `accesskit_macos` 0.26.3 and `accesskit_atspi_common` 0.19.1. I did not re-read the adapter sources. The cause is
-  library behavior, not a Farhelm omission. No spec rule requires the shortcut to be announced (SPEC.md 1401-1402 covers
-  only the number-key menu's names).
-- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
-  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard. The cause is upstream; the workaround (repeating the chord in the description) needs a design choice. If
-  kept, adding the chord to the accessible description is size S.
-- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
-
 ## update-accessible-names-can-collide-across-host-kinds.md
 
 - Outcome: `other`.
@@ -5544,26 +5484,6 @@
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## trailing-interrupted-uploads-invisible-on-card-or-retired-session.md
-
-- Outcome: `fix code`.
-- Assessment: You paste or drop a file into the open session, and while it uploads the session loses its terminal (a
-  host reboot or update puts it on its recovery card, a container session is retired, or a reconnect lands on an
-  unreachable host). The interrupted upload is then reported nowhere until you open another session. If you quit first,
-  or the session is a retired container that never gets a terminal again, it is never reported. Verified: Confirmed.
-  `crates/gui/farhelm-gui/src/terminal/attachments.rs:401-441` posts held interruptions only for sessions that are not
-  selected (`:409`). `session_pane.rs:436-463` drops the terminal set, or mounts none, while the session stays selected
-  (card, retired or unavailable). No commits since the reviewed commit touch this. SPEC.md "Attachments" (3752): "Upload
-  failures must be visible; an attachment must never disappear silently." SPEC_impl.md "One failure path: the reset"
-  covers only a session that stays open with a new terminal set, or a selection that moves on.
-- Decision: q-upload, "Interrupted uploads must never disappear silently": the maintainer picked "Fix all three".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: No interrupted upload disappears silently. Recommendation for reference: fix code. Post held
-  interruptions to the notice center when the selected session has no terminal set. Size S. Size gate: about 100 lines
-  of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-sessions-ui-nov24.md` ``.
 
 ## trailing-claude-trust-relative-config-dir-persists-relative-lock.md
 

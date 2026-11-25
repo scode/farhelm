@@ -44,6 +44,7 @@ use gpui::{
 
 use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::focus::{Mark, ReturnTo};
+use crate::host_text::HostText;
 use crate::layers::{self, Dialog, DismissHook, Dismissal, LayerId, MainAction};
 use crate::session;
 use crate::theme::{self, metrics};
@@ -136,22 +137,25 @@ pub(crate) fn open_pending(
 
 /// Read an action snapshot from the helm. A bell notice can be visible before
 /// its queue push arrives. The read belongs to this click and never updates
-/// the window's cached queue.
-pub(crate) fn read_pending(cx: &mut App, then: impl FnOnce(Vec<Announcement>, &mut App) + 'static) {
+/// the window's cached queue. Return whether it was sent so the panel can report a refusal either way.
+pub(crate) fn read_pending(
+    cx: &mut App,
+    then: impl FnOnce(Result<Vec<Announcement>, HostText>, &mut App) + 'static,
+) -> bool {
     let Ok(path) = ApiPath::api(&["announcements"]) else {
-        return;
+        return false;
     };
     crate::operations::read(
         path,
         "GET /api/announcements",
         cx,
-        move |answer, cx| match answer {
-            Ok(AnnouncementQueue { pending, .. }) => then(pending, cx),
-            Err(words) => {
-                tracing::warn!(reason = %words.raw(), "could not load pending announcements")
+        move |answer: Result<AnnouncementQueue, HostText>, cx| {
+            if let Err(words) = &answer {
+                tracing::warn!(reason = %words.raw(), "could not load pending announcements");
             }
+            then(answer.map(|queue| queue.pending), cx);
         },
-    );
+    )
 }
 
 /// Open the freshly read batch after the notification popover closes.
