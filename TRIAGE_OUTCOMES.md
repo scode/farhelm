@@ -600,4 +600,3 @@
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-

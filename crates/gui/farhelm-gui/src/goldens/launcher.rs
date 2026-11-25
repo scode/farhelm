@@ -44,7 +44,13 @@ pub(super) fn launcher_deleted_quick_launch_setup(
     window: &mut Window,
     cx: &mut App,
 ) {
-    suspended_launcher_setup(state, window, cx, listing(&[], &[]), prepare_deleted_shortcut);
+    suspended_launcher_setup(
+        state,
+        window,
+        cx,
+        listing(&[], &[]),
+        prepare_deleted_shortcut,
+    );
 }
 
 /// Show why the same suspended sandbox cannot allocate a checkout when its identity is missing.

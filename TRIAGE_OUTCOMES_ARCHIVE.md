@@ -47753,7 +47753,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   when the chosen custom agent became the draft's. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed withdrawn-chip Enter so it cannot launch a different draft. Change `tvluvktsqvtnsvulpptvyypzpymlowxv`, bookmark `plan/triage-custom-agents-nov24/01-launcher-1`,
+- Execution: Fixed withdrawn-chip Enter so it cannot launch a different draft. Change
+  `tvluvktsqvtnsvulpptvyypzpymlowxv`, bookmark `plan/triage-custom-agents-nov24/01-launcher-1`,
   https://github.com/scode/farhelm/pull/4810/changes.
 
 ## trailing-launcher-agent-tab-omits-deleted-selected-custom-agent-chip.md
@@ -47775,8 +47776,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: fix code — add a retained, unavailable chip like the Command tab's; size S–M. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed by showing the unavailable selection under its saved ID. Change `tvluvktsqvtnsvulpptvyypzpymlowxv`, bookmark `plan/triage-custom-agents-nov24/01-launcher-1`,
-  https://github.com/scode/farhelm/pull/4810/changes.
+- Execution: Fixed by showing the unavailable selection under its saved ID. Change `tvluvktsqvtnsvulpptvyypzpymlowxv`,
+  bookmark `plan/triage-custom-agents-nov24/01-launcher-1`, https://github.com/scode/farhelm/pull/4810/changes.
 
 ## trailing-custom-agent-model-effort-error-duplicate-element-id.md
 
@@ -47793,7 +47794,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code. Use distinct model and effort error IDs. Size S.
-- Execution: Fixed as a small accessibility change with separate Model and Effort status IDs. Change `tvluvktsqvtnsvulpptvyypzpymlowxv`, bookmark `plan/triage-custom-agents-nov24/01-launcher-1`,
+- Execution: Fixed as a small accessibility change with separate Model and Effort status IDs. Change
+  `tvluvktsqvtnsvulpptvyypzpymlowxv`, bookmark `plan/triage-custom-agents-nov24/01-launcher-1`,
   https://github.com/scode/farhelm/pull/4810/changes.
 
 ## trailing-launcher-recents-display-literal-custom-instead-of-agent-name.md
@@ -47816,7 +47818,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: Fixed the visible and accessible name in the command pane and narrow search. Change `rzotlqtwnowmkpmpmpnlklnmqyzwptlz`, bookmark `plan/triage-custom-agents-nov24/02-launcher-2`,
+- Execution: Fixed the visible and accessible name in the command pane and narrow search. Change
+  `rzotlqtwnowmkpmpmpnlklnmqyzwptlz`, bookmark `plan/triage-custom-agents-nov24/02-launcher-2`,
   https://github.com/scode/farhelm/pull/4817/changes.
 
 ## trailing-launcher-search-recents-omits-custom-agent-id-and-name.md
@@ -47836,8 +47839,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: fix code — add the ID and current display name to the matched words; size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed search by saved registration ID and current display name. Change `rzotlqtwnowmkpmpmpnlklnmqyzwptlz`, bookmark `plan/triage-custom-agents-nov24/02-launcher-2`,
-  https://github.com/scode/farhelm/pull/4817/changes.
+- Execution: Fixed search by saved registration ID and current display name. Change `rzotlqtwnowmkpmpmpnlklnmqyzwptlz`,
+  bookmark `plan/triage-custom-agents-nov24/02-launcher-2`, https://github.com/scode/farhelm/pull/4817/changes.
 
 ## launcher-keyboard-recents-hide-custom-flags.md
 
@@ -47857,7 +47860,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   flag words to the details line. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: Deferred to the TODO.md entry “Show Custom approval flags in keyboard-highlighted Recent setups.” A complete keyboard reveal needs scrolling without changing the highlight. Change `vnpmwptlszvrqxmvxovwtzllollvrwpl`, bookmark `plan/triage-custom-agents-nov24/02b-launcher-recent-flags`,
+- Execution: Deferred to the TODO.md entry “Show Custom approval flags in keyboard-highlighted Recent setups.” A
+  complete keyboard reveal needs scrolling without changing the highlight. Change `vnpmwptlszvrqxmvxovwtzllollvrwpl`,
+  bookmark `plan/triage-custom-agents-nov24/02b-launcher-recent-flags`,
   https://github.com/scode/farhelm/pull/4820/changes.
 
 ## trailing-launcher-search-effort-default-misses-custom-effort.md
@@ -47876,7 +47881,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: Fixed by clearing the active custom effort when choosing Default in search. Change `tuntrtszupnwookpkyoklqlvtkstqkzo`, bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`,
+- Execution: Fixed by clearing the active custom effort when choosing Default in search. Change
+  `tuntrtszupnwookpkyoklqlvtkstqkzo`, bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`,
   https://github.com/scode/farhelm/pull/4824/changes.
 
 ## trailing-launcher-choose-effort-omits-sync-fields.md
@@ -47893,8 +47899,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   sibling item's fix (`sync_fields` alongside clearing `custom_effort`) and remove this item with it. Size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed by synchronizing the effort field with that search choice. Change `tuntrtszupnwookpkyoklqlvtkstqkzo`, bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`,
-  https://github.com/scode/farhelm/pull/4824/changes.
+- Execution: Fixed by synchronizing the effort field with that search choice. Change `tuntrtszupnwookpkyoklqlvtkstqkzo`,
+  bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`, https://github.com/scode/farhelm/pull/4824/changes.
 
 ## trailing-custom-agent-draft-retains-stale-builtin-effort.md
 
@@ -47916,8 +47922,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   effective value. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: Fixed by keeping only the effort the selected agent exposes. Change `tuntrtszupnwookpkyoklqlvtkstqkzo`, bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`,
-  https://github.com/scode/farhelm/pull/4824/changes.
+- Execution: Fixed by keeping only the effort the selected agent exposes. Change `tuntrtszupnwookpkyoklqlvtkstqkzo`,
+  bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`, https://github.com/scode/farhelm/pull/4824/changes.
 
 ## trailing-template-replay-drops-custom-agent-effort-switching-to-builtin.md
 
@@ -47939,7 +47945,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: Fixed by reconciling the visible effort when a template switches agents. Change `tuntrtszupnwookpkyoklqlvtkstqkzo`, bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`,
+- Execution: Fixed by reconciling the visible effort when a template switches agents. Change
+  `tuntrtszupnwookpkyoklqlvtkstqkzo`, bookmark `plan/triage-custom-agents-nov24/02c-launcher-effort`,
   https://github.com/scode/farhelm/pull/4824/changes.
 
 ## trailing-launcher-search-custom-agent-rename-refused-as-stale.md
@@ -47960,7 +47967,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   the ID-only arm and a test; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: Fixed by tracking the highlighted registration by its saved ID. Change `mswpzswnvttoroumnpzomlyqtpsstzpz`, bookmark `plan/triage-custom-agents-nov24/02d-launcher-registration`,
+- Execution: Fixed by tracking the highlighted registration by its saved ID. Change `mswpzswnvttoroumnpzomlyqtpsstzpz`,
+  bookmark `plan/triage-custom-agents-nov24/02d-launcher-registration`,
   https://github.com/scode/farhelm/pull/4827/changes.
 
 ## trailing-unseen-quick-launch-deleted-custom-agent-wakes-suspended-host.md
@@ -47983,7 +47991,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: fix code — refresh capabilities in `prepared` before waking; size S. Size gate: about
   100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over
   that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed by checking the current registration before a quick launch wakes a host. Change `mswpzswnvttoroumnpzomlyqtpsstzpz`, bookmark `plan/triage-custom-agents-nov24/02d-launcher-registration`,
+- Execution: Fixed by checking the current registration before a quick launch wakes a host. Change
+  `mswpzswnvttoroumnpzomlyqtpsstzpz`, bookmark `plan/triage-custom-agents-nov24/02d-launcher-registration`,
   https://github.com/scode/farhelm/pull/4827/changes.
 
 ## trailing-refresh-custom-capabilities-treats-unloaded-collection-as-deleted.md
@@ -48008,8 +48017,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   S–M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: Deferred to TODO.md, “Distinguish unread custom agent registrations from deletion.” The prototype exceeded the triage size gate. Change `utwzwwztypsouuvpsnuzywrqvrvpmmpy`, bookmark `plan/triage-custom-agents-nov24/02e-launcher-catalog`,
-  https://github.com/scode/farhelm/pull/4830/changes.
+- Execution: Deferred to TODO.md, “Distinguish unread custom agent registrations from deletion.” The prototype exceeded
+  the triage size gate. Change `utwzwwztypsouuvpsnuzywrqvrvpmmpy`, bookmark
+  `plan/triage-custom-agents-nov24/02e-launcher-catalog`, https://github.com/scode/farhelm/pull/4830/changes.
 
 ## trailing-unknown-agent-typo-fails-with-misleading-custom-flag-error.md
 
@@ -48029,7 +48039,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: Fixed by checking an explicit custom agent ID before applying its launch flags. Change `yrttukwvswwwqmvuoonrulxowyzstnll`, bookmark `plan/triage-custom-agents-nov24/02f-cli-agent-name`,
+- Execution: Fixed by checking an explicit custom agent ID before applying its launch flags. Change
+  `yrttukwvswwwqmvuoonrulxowyzstnll`, bookmark `plan/triage-custom-agents-nov24/02f-cli-agent-name`,
   https://github.com/scode/farhelm/pull/4834/changes.
 
 ## trailing-custom-agent-ancestor-correction-test-misses-pin-correction.md
@@ -48049,8 +48060,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code (test only). Keep the child alive across the parent's
   report, and assert the correction notice. Size S.
-- Execution: Discarded as already covered on main by #4805. Its correction notice distinguishes ancestor correction from releasing a dead pin. Change `vusmlnmtxmvklrklpmkklsuwzwqqoqmm`, bookmark `plan/triage-custom-agents-nov24/02g-custom-report-tests`,
-  https://github.com/scode/farhelm/pull/4835/changes.
+- Execution: Discarded as already covered on main by #4805. Its correction notice distinguishes ancestor correction from
+  releasing a dead pin. Change `vusmlnmtxmvklrklpmkklsuwzwqqoqmm`, bookmark
+  `plan/triage-custom-agents-nov24/02g-custom-report-tests`, https://github.com/scode/farhelm/pull/4835/changes.
 
 ## trailing-custom-report-forwarder-lock-test-lacks-witness.md
 
@@ -48068,7 +48080,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code — add session variables and assert no report file or
   log while locked, then a positive run once unlocked; size S.
-- Execution: Fixed by checking that a busy version leaves the callback unstarted and a successful claim starts it. Change `vusmlnmtxmvklrklpmkklsuwzwqqoqmm`, bookmark `plan/triage-custom-agents-nov24/02g-custom-report-tests`,
+- Execution: Fixed by checking that a busy version leaves the callback unstarted and a successful claim starts it.
+  Change `vusmlnmtxmvklrklpmkklsuwzwqqoqmm`, bookmark `plan/triage-custom-agents-nov24/02g-custom-report-tests`,
   https://github.com/scode/farhelm/pull/4835/changes.
 
 ## trailing-supervisor-positional-pin-tests-omit-custom-agent.md
@@ -48085,8 +48098,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: fix code — add a CUSTOM `PinCase` and a capture-clearing test;
   size M.
-- Execution: No change. The fixture and named-restart case exceed the cheap-test limit. The end-to-end correction notice is covered on main by #4805. Change `vusmlnmtxmvklrklpmkklsuwzwqqoqmm`, bookmark `plan/triage-custom-agents-nov24/02g-custom-report-tests`,
-  https://github.com/scode/farhelm/pull/4835/changes.
+- Execution: No change. The fixture and named-restart case exceed the cheap-test limit. The end-to-end correction notice
+  is covered on main by #4805. Change `vusmlnmtxmvklrklpmkklsuwzwqqoqmm`, bookmark
+  `plan/triage-custom-agents-nov24/02g-custom-report-tests`, https://github.com/scode/farhelm/pull/4835/changes.
 
 ## trailing-ui-channel-tests-omit-custom-agents-mutation-round-trip.md
 
@@ -48105,7 +48119,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   custom agents to the round-trip test; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: Fixed by including a registered custom agent in the per-collection JSON round-trip test. Change `szrmzlxvlnmlzzlonlvwpoyqqnkxsrvz`, bookmark `plan/triage-custom-agents-nov24/02h-custom-agent-round-trip`,
+- Execution: Fixed by including a registered custom agent in the per-collection JSON round-trip test. Change
+  `szrmzlxvlnmlzzlonlvwpoyqqnkxsrvz`, bookmark `plan/triage-custom-agents-nov24/02h-custom-agent-round-trip`,
   https://github.com/scode/farhelm/pull/4838/changes.
 
 ## trailing-check-template-shape-skips-validate-model-on-custom-agent.md
@@ -48126,7 +48141,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: fix code. Apply the model check alongside the existing effort check. Size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed by checking an explicit custom model at save time with the grammar used at launch. Change `rlqmnpnoqtprwxzknkpxuuqxtyltrnvy`, bookmark `plan/triage-custom-agents-nov24/02i-template-model-check`,
+- Execution: Fixed by checking an explicit custom model at save time with the grammar used at launch. Change
+  `rlqmnpnoqtprwxzknkpxuuqxtyltrnvy`, bookmark `plan/triage-custom-agents-nov24/02i-template-model-check`,
   https://github.com/scode/farhelm/pull/4846/changes.
 
 ## trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md
@@ -48147,8 +48163,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: fix code — track the custom ID in the eligibility fold; size S. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed by requiring a custom registration for direct agent launches, while retaining incomplete templates for manual completion. Change `muxoornzxtsusqurtzmzttlooqqtwpku`, bookmark `plan/triage-custom-agents-nov24/02j-custom-quick-launch`,
-  https://github.com/scode/farhelm/pull/4853/changes.
+- Execution: Fixed by requiring a custom registration for direct agent launches, while retaining incomplete templates
+  for manual completion. Change `muxoornzxtsusqurtzmzttlooqqtwpku`, bookmark
+  `plan/triage-custom-agents-nov24/02j-custom-quick-launch`, https://github.com/scode/farhelm/pull/4853/changes.
 
 ## trailing-custom-agent-settings-launch-preview-breaks-bidi-isolation.md
 
@@ -48166,7 +48183,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: Fixed by isolating the configured command separately from the flag hints in both previews. Change `zvwnqzstptklmwxyymykyropktvrvput`, bookmark `plan/triage-custom-agents-nov24/03-settings-text-direction`,
+- Execution: Fixed by isolating the configured command separately from the flag hints in both previews. Change
+  `zvwnqzstptklmwxyymykyropktvrvput`, bookmark `plan/triage-custom-agents-nov24/03-settings-text-direction`,
   https://github.com/scode/farhelm/pull/4890/changes.
 
 ## trailing-settings-custom-agent-nav-tooltip-omits-bidi-isolation.md
@@ -48185,7 +48203,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item
   back to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says
   remains.
-- Execution: Fixed by drawing the sidebar tooltip as an isolated sentence around the registered name. Change `zvwnqzstptklmwxyymykyropktvrvput`, bookmark `plan/triage-custom-agents-nov24/03-settings-text-direction`,
+- Execution: Fixed by drawing the sidebar tooltip as an isolated sentence around the registered name. Change
+  `zvwnqzstptklmwxyymykyropktvrvput`, bookmark `plan/triage-custom-agents-nov24/03-settings-text-direction`,
   https://github.com/scode/farhelm/pull/4890/changes.
 
 ## trailing-settings-custom-agent-duplicate-host-sentence-id.md
@@ -48204,8 +48223,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — no user-visible effect (or fix code with a slot
   prefix, size S).
-- Execution: No change under the cheap-test rule. The duplicate ID is confined to flat automation lookups and has no user-facing behavior for a test to guard. Change `zvwnqzstptklmwxyymykyropktvrvput`, bookmark `plan/triage-custom-agents-nov24/03-settings-text-direction`,
-  https://github.com/scode/farhelm/pull/4890/changes.
+- Execution: No change under the cheap-test rule. The duplicate ID is confined to flat automation lookups and has no
+  user-facing behavior for a test to guard. Change `zvwnqzstptklmwxyymykyropktvrvput`, bookmark
+  `plan/triage-custom-agents-nov24/03-settings-text-direction`, https://github.com/scode/farhelm/pull/4890/changes.
 
 ## trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md
 
@@ -48221,7 +48241,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: fix code — render it through `choices::outcome_line`; size S. Size gate: about 100 lines
   of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed by exposing the retained draft’s existing recovery notice as a named accessibility status. Change `qzlpovwkznzsxsvrnvsxrxzxstpwztux`, bookmark `plan/triage-custom-agents-nov24/03b-settings-deletion-status`,
+- Execution: Fixed by exposing the retained draft’s existing recovery notice as a named accessibility status. Change
+  `qzlpovwkznzsxsvrnvsxrxzxstpwztux`, bookmark `plan/triage-custom-agents-nov24/03b-settings-deletion-status`,
   https://github.com/scode/farhelm/pull/4893/changes.
 
 ## trailing-custom-agent-settings-delete-dirty-leaves-ghost-draft.md
@@ -48244,8 +48265,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   itself, and add the dirty-delete test (487's second half). Size S. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed by retiring the matching editor on confirmed Delete, even when the catalog push and reply precede a redraw. Change `nonvumwrykqvlmmyymxynyrzstvpuquw`, bookmark `plan/triage-custom-agents-nov24/03c-settings-delete-draft`,
-  https://github.com/scode/farhelm/pull/4899/changes.
+- Execution: Fixed by retiring the matching editor on confirmed Delete, even when the catalog push and reply precede a
+  redraw. Change `nonvumwrykqvlmmyymxynyrzstvpuquw`, bookmark
+  `plan/triage-custom-agents-nov24/03c-settings-delete-draft`, https://github.com/scode/farhelm/pull/4899/changes.
 
 ## trailing-custom-agent-settings-test-locks-in-kick-and-misses-dirty-delete.md
 
@@ -48260,8 +48282,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: other. Add the dirty-delete case as part of 81's fix, and
   discard the rest. Size S.
-- Execution: Added the intentional dirty-delete regression to the existing lifecycle test. Its external-delete behavior remains as decided in triage. Change `nonvumwrykqvlmmyymxynyrzstvpuquw`, bookmark `plan/triage-custom-agents-nov24/03c-settings-delete-draft`,
-  https://github.com/scode/farhelm/pull/4899/changes.
+- Execution: Added the intentional dirty-delete regression to the existing lifecycle test. Its external-delete behavior
+  remains as decided in triage. Change `nonvumwrykqvlmmyymxynyrzstvpuquw`, bookmark
+  `plan/triage-custom-agents-nov24/03c-settings-delete-draft`, https://github.com/scode/farhelm/pull/4899/changes.
 
 ## trailing-custom-agent-settings-delete-confirmation-bypasses-ask-inline.md
 
@@ -48285,8 +48308,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   recipe editor does, which also settles 79. Size M (about 60-120 lines with tests, so it may exceed 100). Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Deferred through the size gate to TODO.md, “Use the shared Delete confirmation for custom agents in Settings”. Change `oosrpxytknnnlrmsxoymuzsnovtykwrm`, bookmark `plan/triage-custom-agents-nov24/03d-settings-delete-question`,
-  https://github.com/scode/farhelm/pull/4903/changes.
+- Execution: Deferred through the size gate to TODO.md, “Use the shared Delete confirmation for custom agents in
+  Settings”. Change `oosrpxytknnnlrmsxoymuzsnovtykwrm`, bookmark
+  `plan/triage-custom-agents-nov24/03d-settings-delete-question`, https://github.com/scode/farhelm/pull/4903/changes.
 
 ## trailing-custom-agent-settings-save-delete-collapses-retired-and-missing-store.md
 
@@ -48309,7 +48333,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: Fixed with the shared busy reason and distinct helm reset and disconnected notices. Change `rtuwltqruymwquntnylmosonuwlllqvy`, bookmark `plan/triage-custom-agents-nov24/03e-settings-write-refusals`,
+- Execution: Fixed with the shared busy reason and distinct helm reset and disconnected notices. Change
+  `rtuwltqruymwquntnylmosonuwlllqvy`, bookmark `plan/triage-custom-agents-nov24/03e-settings-write-refusals`,
   https://github.com/scode/farhelm/pull/4906/changes.
 
 ## trailing-custom-agent-settings-omits-per-field-unsaved-dots.md
@@ -48328,7 +48353,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
   part the Assessment says remains.
-- Execution: Fixed with shared markers driven by each field’s saved value. Change `qymwnnlpmvzyqxkzvwpkvrtpzqxlksys`, bookmark `plan/triage-custom-agents-nov24/03f-settings-field-markers`,
+- Execution: Fixed with shared markers driven by each field’s saved value. Change `qymwnnlpmvzyqxkzvwpkvrtpzqxlksys`,
+  bookmark `plan/triage-custom-agents-nov24/03f-settings-field-markers`,
   https://github.com/scode/farhelm/pull/4912/changes.
 
 ## trailing-settings-heading-lacks-min-w-0-and-truncate-for-long-custom-agent-name.md
@@ -48343,8 +48369,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — add `min_w_0` and `truncate`; size S.
-- Execution: Fixed within the polish budget, with single-line truncation and a golden that exercises a long registration. Change `qymwnnlpmvzyqxkzvwpkvrtpzqxlksys`, bookmark `plan/triage-custom-agents-nov24/03f-settings-field-markers`,
-  https://github.com/scode/farhelm/pull/4912/changes.
+- Execution: Fixed within the polish budget, with single-line truncation and a golden that exercises a long
+  registration. Change `qymwnnlpmvzyqxkzvwpkvrtpzqxlksys`, bookmark
+  `plan/triage-custom-agents-nov24/03f-settings-field-markers`, https://github.com/scode/farhelm/pull/4912/changes.
 
 ## trailing-settings-custom-agents-unavailable-collection-silently-appears-empty.md
 
@@ -48363,7 +48390,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: fix code — show the helm's error as a failure line, as Recipes does; size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed with an accessible error while preserving the last catalog and open editor. Change `nrvwmxqmrvsmtoktpyznzrsqvrvkqlop`, bookmark `plan/triage-custom-agents-nov24/03g-settings-catalog-error`,
+- Execution: Fixed with an accessible error while preserving the last catalog and open editor. Change
+  `nrvwmxqmrvsmtoktpyznzrsqvrvkqlop`, bookmark `plan/triage-custom-agents-nov24/03g-settings-catalog-error`,
   https://github.com/scode/farhelm/pull/4915/changes.
 
 ## trailing-settings-search-omits-registered-custom-agent-sections.md
@@ -48384,7 +48412,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   M (likely under 100 lines). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: Fixed using pushed registrations as Settings search entries with stable IDs, isolated names and a body target for Add. Change `oyloxnummnwytuxsrsrukuxqunmnppqs`, bookmark `plan/triage-custom-agents-nov24/03h-settings-custom-agent-search`,
+- Execution: Fixed using pushed registrations as Settings search entries with stable IDs, isolated names and a body
+  target for Add. Change `oyloxnummnwytuxsrsrukuxqunmnppqs`, bookmark
+  `plan/triage-custom-agents-nov24/03h-settings-custom-agent-search`,
   https://github.com/scode/farhelm/pull/4919/changes.
 
 ## trailing-templates-editor-allows-generic-custom-on-agent-template.md
@@ -48402,7 +48432,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   the refusal and an editor test; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: Fixed by retaining the generic Custom choice and refusing saves on the Agent tab until it is replaced or removed. Change `soqkwlyulrqvvqoxrwtrqynqsrkqkoss`, bookmark `plan/triage-custom-agents-nov24/04-templates`,
+- Execution: Fixed by retaining the generic Custom choice and refusing saves on the Agent tab until it is replaced or
+  removed. Change `soqkwlyulrqvvqoxrwtrqynqsrkqkoss`, bookmark `plan/triage-custom-agents-nov24/04-templates`,
   https://github.com/scode/farhelm/pull/4920/changes.
 
 ## trailing-templates-editor-hides-custom-effort-and-refuses-agentless-modifier.md
@@ -48427,7 +48458,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   "<value> (not offered)". Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry.
-- Execution: Fixed by accepting agentless literal effort and showing and clearing incompatible stored choices. Change `nylsvvlwwlvvotkoortmwrskomouuovo`, bookmark `plan/triage-custom-agents-nov24/04b-template-literal-effort`,
+- Execution: Fixed by accepting agentless literal effort and showing and clearing incompatible stored choices. Change
+  `nylsvvlwwlvvotkoortmwrskomouuovo`, bookmark `plan/triage-custom-agents-nov24/04b-template-literal-effort`,
   https://github.com/scode/farhelm/pull/4924/changes.
 
 ## trailing-templates-editor-hides-custom-yolo-control-and-saves-false.md
@@ -48449,7 +48481,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: fix code, together with 469 and 450. Size S-M. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed. Approvals stays optional, and a retained No can be removed or replaced with the valid answer. Change `rvnylwsovspxmrovotzyskqyvpxzsnps`, bookmark `plan/triage-custom-agents-nov24/04c-custom-command-yolo`,
+- Execution: Fixed. Approvals stays optional, and a retained No can be removed or replaced with the valid answer. Change
+  `rvnylwsovspxmrovotzyskqyvpxzsnps`, bookmark `plan/triage-custom-agents-nov24/04c-custom-command-yolo`,
   https://github.com/scode/farhelm/pull/4930/changes.
 
 ## trailing-apply-template-custom-command-yolo-diverges-from-gui.md
@@ -48473,8 +48506,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   the GUI agree. Size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: Fixed. The desktop and CLI classify a custom command the same way and preserve the explicit answer for later built-in commands. Change `rvnylwsovspxmrovotzyskqyvpxzsnps`, bookmark `plan/triage-custom-agents-nov24/04c-custom-command-yolo`,
-  https://github.com/scode/farhelm/pull/4930/changes.
+- Execution: Fixed. The desktop and CLI classify a custom command the same way and preserve the explicit answer for
+  later built-in commands. Change `rvnylwsovspxmrovotzyskqyvpxzsnps`, bookmark
+  `plan/triage-custom-agents-nov24/04c-custom-command-yolo`, https://github.com/scode/farhelm/pull/4930/changes.
 
 ## trailing-check-template-shape-allows-custom-agent-yolo-false.md
 
@@ -48494,7 +48528,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: Fixed. Every save path rejects an explicit No on a command template that names Custom. Change `rvnylwsovspxmrovotzyskqyvpxzsnps`, bookmark `plan/triage-custom-agents-nov24/04c-custom-command-yolo`,
+- Execution: Fixed. Every save path rejects an explicit No on a command template that names Custom. Change
+  `rvnylwsovspxmrovotzyskqyvpxzsnps`, bookmark `plan/triage-custom-agents-nov24/04c-custom-command-yolo`,
   https://github.com/scode/farhelm/pull/4930/changes.
 
 ## trailing-launcher-custom-agent-yolo-pill-omits-escalation-outline.md
@@ -48516,7 +48551,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry,
   or narrow it to any part the Assessment says remains.
-- Execution: Fixed. The custom agent’s fixed YOLO pill gets the ordinary escalation outline. Change `svvwokklqksuznzqmzzltswputuzuusq`, bookmark `plan/triage-custom-agents-nov24/05-custom-escalation`,
+- Execution: Fixed. The custom agent’s fixed YOLO pill gets the ordinary escalation outline. Change
+  `svvwokklqksuznzqmzzltswputuzuusq`, bookmark `plan/triage-custom-agents-nov24/05-custom-escalation`,
   https://github.com/scode/farhelm/pull/4932/changes.
 
 ## trailing-template-apply-custom-to-custom-misses-switched-agent.md
@@ -48537,7 +48573,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: fix code — also compare `custom_agent`; size S. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed. Applying a template that changes the registration retires the earlier escalation and its Undo. Change `svvwokklqksuznzqmzzltswputuzuusq`, bookmark `plan/triage-custom-agents-nov24/05-custom-escalation`,
+- Execution: Fixed. Applying a template that changes the registration retires the earlier escalation and its Undo.
+  Change `svvwokklqksuznzqmzzltswputuzuusq`, bookmark `plan/triage-custom-agents-nov24/05-custom-escalation`,
   https://github.com/scode/farhelm/pull/4932/changes.
 
 ## trailing-launcher-target-names-command-custom-agent-outside-restart-with.md
@@ -48558,8 +48595,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   maintainer prefers); size S. Discard is reasonable too. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed. The Command main action names any declared agent in every mode, using the display name or saved ID for a registration. Change `lqzvxlmsxwttpmrsmsxvsossrnnywrqu`, bookmark `plan/triage-custom-agents-nov24/05b-launch-names`,
-  https://github.com/scode/farhelm/pull/4935/changes.
+- Execution: Fixed. The Command main action names any declared agent in every mode, using the display name or saved ID
+  for a registration. Change `lqzvxlmsxwttpmrsmsxvsossrnnywrqu`, bookmark
+  `plan/triage-custom-agents-nov24/05b-launch-names`, https://github.com/scode/farhelm/pull/4935/changes.
 
 ## trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md
 
@@ -48578,8 +48616,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   launch as YOLO."; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: Fixed. The confirmation explains that the custom declaration supplies YOLO, naming the registration or its saved ID when present. Change `lqzvxlmsxwttpmrsmsxvsossrnnywrqu`, bookmark `plan/triage-custom-agents-nov24/05b-launch-names`,
-  https://github.com/scode/farhelm/pull/4935/changes.
+- Execution: Fixed. The confirmation explains that the custom declaration supplies YOLO, naming the registration or its
+  saved ID when present. Change `lqzvxlmsxwttpmrsmsxvsossrnnywrqu`, bookmark
+  `plan/triage-custom-agents-nov24/05b-launch-names`, https://github.com/scode/farhelm/pull/4935/changes.
 
 ## trailing-custom-agent-restart-readiness-none-misreports-no-resume-command.md
 
@@ -48600,7 +48639,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: Fixed. Restart with names the missing stored resume command and points to Clone or Replace with. Change `nwooxklrkoswozmnsszzwszsoqryltwr`, bookmark `plan/triage-custom-agents-nov24/05c-custom-restart-ui`,
+- Execution: Fixed. Restart with names the missing stored resume command and points to Clone or Replace with. Change
+  `nwooxklrkoswozmnsszzwszsoqryltwr`, bookmark `plan/triage-custom-agents-nov24/05c-custom-restart-ui`,
   https://github.com/scode/farhelm/pull/4941/changes.
 
 ## trailing-more-options-locked-open-without-field-on-custom-restart-no-resumption.md
@@ -48626,7 +48666,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   at minimum show why the restart is unavailable instead of an empty forced-open panel; size S. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed. The open launcher explains the current registration's refusal and makes More options foldable again. Change `nwooxklrkoswozmnsszzwszsoqryltwr`, bookmark `plan/triage-custom-agents-nov24/05c-custom-restart-ui`,
+- Execution: Fixed. The open launcher explains the current registration's refusal and makes More options foldable again.
+  Change `nwooxklrkoswozmnsszzwszsoqryltwr`, bookmark `plan/triage-custom-agents-nov24/05c-custom-restart-ui`,
   https://github.com/scode/farhelm/pull/4941/changes.
 
 ## trailing-restart-with-mishandles-custom-agent-with-resumption-disabled.md
@@ -48652,8 +48693,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   custom agent no longer supports resumption" (or follow stored capabilities if that is the answer); size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed. The menu, open launcher and submit check the current registration before asking for a conversation or offering Restart with. Change `nwooxklrkoswozmnsszzwszsoqryltwr`, bookmark `plan/triage-custom-agents-nov24/05c-custom-restart-ui`,
-  https://github.com/scode/farhelm/pull/4941/changes.
+- Execution: Fixed. The menu, open launcher and submit check the current registration before asking for a conversation
+  or offering Restart with. Change `nwooxklrkoswozmnsszzwszsoqryltwr`, bookmark
+  `plan/triage-custom-agents-nov24/05c-custom-restart-ui`, https://github.com/scode/farhelm/pull/4941/changes.
 
 ## trailing-custom-agent-tilde-command-kills-live-agent-before-failing.md
 
@@ -48678,8 +48720,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: Fixed. Create, retry and restart check the executable’s home expansion before allocating a checkout or stopping a running agent. Change `qypvsostqnromlqxvkxwuznuvlkwpvqx`, bookmark `plan/triage-custom-agents-nov24/06-custom-restart-preflight`,
-  https://github.com/scode/farhelm/pull/4946/changes.
+- Execution: Fixed. Create, retry and restart check the executable’s home expansion before allocating a checkout or
+  stopping a running agent. Change `qypvsostqnromlqxvkxwuznuvlkwpvqx`, bookmark
+  `plan/triage-custom-agents-nov24/06-custom-restart-preflight`, https://github.com/scode/farhelm/pull/4946/changes.
 
 ## trailing-restart-with-custom-reporting-and-offer-use-stale-row-launch.md
 
@@ -48702,7 +48745,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   new launch with the generation bump, or pass it into publication. Size M. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Deferred to TODO.md, Plan follow-ups, “Publish Restart with settings with the replacement generation.” The generation transaction, abort recovery and publication must agree before startup reports can be admitted. Change `qypvsostqnromlqxvkxwuznuvlkwpvqx`, bookmark `plan/triage-custom-agents-nov24/06-custom-restart-preflight`,
+- Execution: Deferred to TODO.md, Plan follow-ups, “Publish Restart with settings with the replacement generation.” The
+  generation transaction, abort recovery and publication must agree before startup reports can be admitted. Change
+  `qypvsostqnromlqxvkxwuznuvlkwpvqx`, bookmark `plan/triage-custom-agents-nov24/06-custom-restart-preflight`,
   https://github.com/scode/farhelm/pull/4946/changes.
 
 ## trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md
@@ -48723,7 +48768,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: fix code — pass collections into `agent_name` and use `custom_name`; size S. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Fixed. The session menu and quick switcher show the current display name or the saved ID. Change `ztpytunoxrmwtozwknpqtupowquymzrv`, bookmark `plan/triage-custom-agents-nov24/07-custom-agent-labels`,
+- Execution: Fixed. The session menu and quick switcher show the current display name or the saved ID. Change
+  `ztpytunoxrmwtozwknpqtupowquymzrv`, bookmark `plan/triage-custom-agents-nov24/07-custom-agent-labels`,
   https://github.com/scode/farhelm/pull/4950/changes.
 
 ## trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md
@@ -48739,7 +48785,8 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
   way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
   for reference: fix code — truncate chip labels; size S.
-- Execution: Fixed. The custom chip stays inside its row and ellipsizes the painted name while retaining its accessible label. Change `ztpytunoxrmwtozwknpqtupowquymzrv`, bookmark `plan/triage-custom-agents-nov24/07-custom-agent-labels`,
+- Execution: Fixed. The custom chip stays inside its row and ellipsizes the painted name while retaining its accessible
+  label. Change `ztpytunoxrmwtozwknpqtupowquymzrv`, bookmark `plan/triage-custom-agents-nov24/07-custom-agent-labels`,
   https://github.com/scode/farhelm/pull/4950/changes.
 
 ## trailing-custom-agents-share-one-remembered-wrapper-prefix.md
@@ -48764,7 +48811,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   spec only, to say custom agents share one memory. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: Deferred to TODO.md, Plan follow-ups, “Keep wrapper defaults per custom agent registration.” Store and push per-registration memory without assigning the old shared preference to a particular agent. Change `ousrrqmnkkvkvtrssztlunlrprprypwz`, bookmark `plan/triage-custom-agents-nov24/08-wrapper-memory-follow-up`,
+- Execution: Deferred to TODO.md, Plan follow-ups, “Keep wrapper defaults per custom agent registration.” Store and push
+  per-registration memory without assigning the old shared preference to a particular agent. Change
+  `ousrrqmnkkvkvtrssztlunlrprprypwz`, bookmark `plan/triage-custom-agents-nov24/08-wrapper-memory-follow-up`,
   https://github.com/scode/farhelm/pull/4952/changes.
 
 ## trailing-custom-to-custom-switch-retains-previous-wrapper-prefix.md
@@ -48785,7 +48834,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Recommendation for reference: Fold into 83's decision. Size S on top of 83. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: Deferred to TODO.md, Plan follow-ups, “Keep wrapper defaults per custom agent registration.” Use the new registration's default on chip, search and template changes, while preserving a template's explicit prefix. Change `ousrrqmnkkvkvtrssztlunlrprprypwz`, bookmark `plan/triage-custom-agents-nov24/08-wrapper-memory-follow-up`,
+- Execution: Deferred to TODO.md, Plan follow-ups, “Keep wrapper defaults per custom agent registration.” Use the new
+  registration's default on chip, search and template changes, while preserving a template's explicit prefix. Change
+  `ousrrqmnkkvkvtrssztlunlrprprypwz`, bookmark `plan/triage-custom-agents-nov24/08-wrapper-memory-follow-up`,
   https://github.com/scode/farhelm/pull/4952/changes.
 
 ## trailing-delete-custom-agent-leaks-remembered-wrapper-prefix.md
@@ -48805,5 +48856,7 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: Deferred to TODO.md, Plan follow-ups, “Keep wrapper defaults per custom agent registration.” Prune the deleted registration's default atomically and keep an accepted but delayed launch from restoring it. Change `ousrrqmnkkvkvtrssztlunlrprprypwz`, bookmark `plan/triage-custom-agents-nov24/08-wrapper-memory-follow-up`,
+- Execution: Deferred to TODO.md, Plan follow-ups, “Keep wrapper defaults per custom agent registration.” Prune the
+  deleted registration's default atomically and keep an accepted but delayed launch from restoring it. Change
+  `ousrrqmnkkvkvtrssztlunlrprprypwz`, bookmark `plan/triage-custom-agents-nov24/08-wrapper-memory-follow-up`,
   https://github.com/scode/farhelm/pull/4952/changes.
