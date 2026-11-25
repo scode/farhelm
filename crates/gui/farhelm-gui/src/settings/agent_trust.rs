@@ -228,12 +228,12 @@ impl TrustAgent {
     fn mechanism(self) -> &'static str {
         match self {
             TrustAgent::Claude => {
-                "Before Claude starts, Farhelm marks the folder trusted in Claude's settings file on the session's \
-                 host. This applies in folders you choose and in managed checkouts, including launches an agent requests. \
-                 It also applies to a checkout Farhelm clones for another agent. Farhelm skips your home directory and \
-                 its parents, including /. Claude's trust covers everything inside those directories, so Claude may \
-                 still ask there. New, Clone, Restart with and \
-                 Replace with use this setting. Restart and Replace keep the session's saved launch."
+                "When you choose Claude Code as the agent, Farhelm marks the folder trusted in Claude's settings file \
+                 before it starts. It does the same for a fresh managed checkout, including one created for another \
+                 agent. Farhelm skips your home directory and its parents, including /. Claude's trust covers \
+                 everything inside those directories, so Claude may \
+                 still ask there. New, Clone, Restart with and Replace with use the current setting for those launches. \
+                 Restart and Replace keep the session's saved launch."
             }
             TrustAgent::Codex => {
                 "In folders you choose and in managed checkouts, Farhelm passes a trust option to Codex for that \
@@ -312,23 +312,26 @@ impl TrustAgent {
         }
     }
 
-    /// The agent whose own trust question is on the session's agent screen now, by the session's pushed `info`, for the
-    /// trust hint band (`crate::session_pane::trust_band`); `None` while no agent with a hint asks.
+    /// The agent whose current question can be answered by a Farhelm trust setting, for the terminal hint.
     ///
-    /// Claude is named by its own flag, `claude_trust_prompt`, whatever the launch, as the band has read it since it
-    /// was built: the supervisor sets that flag only from Claude's screen reader. Codex, Muse and Antigravity share the
-    /// harness-neutral `workspace_trust_prompt`, which says that a question is up but not whose, so the session's
-    /// structured launch names the agent (`TrustAgent::for_harness`). A command or legacy launch names no harness and
-    /// borrows no agent's switch or dismissal, as in the old app (`TrustAgent::for_session` in `workspace_trust.rs` at
-    /// `24bc0580`). An agent without a hint (Pi) is never named.
+    /// Claude's reader supplies its own flag. The edit applies to structured Claude launches and during fresh checkout
+    /// preparation. Launch provenance identifies a session created from a fresh clone. Checkout membership also
+    /// includes later sessions opened in the same folder.
+    ///
+    /// Codex, Muse and Antigravity share the neutral question flag. The structured launch names the setting they use.
+    /// Pi's project approval has no recognized question.
     pub(crate) fn asking(info: &SessionInfo) -> Option<TrustAgent> {
-        if info.claude_trust_prompt {
+        let agent = info
+            .launch
+            .agent_selection()
+            .and_then(|selection| Self::for_harness(selection.harness));
+        if info.claude_trust_prompt && (info.github_repo.is_some() || agent == Some(Self::Claude)) {
             return Some(TrustAgent::Claude);
         }
         if !info.workspace_trust_prompt {
             return None;
         }
-        let agent = Self::for_harness(info.launch.agent_selection()?.harness)?;
+        let agent = agent?;
         match agent {
             Self::Codex | Self::Muse | Self::Antigravity => Some(agent),
             // Claude uses its own flag above. Pi offers a switch without a hint.

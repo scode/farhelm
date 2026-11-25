@@ -392,11 +392,12 @@ Plain **Restart** and **Replace** reuse the trust carried by the saved launch. S
 [Stop, restart, and resume](/docs/using/stop-restart-resume/) for those actions. Muse's YOLO mode grants trust regardless
 of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
 
-On the **Claude Code** page, you can **Answer Claude's "trust this folder?"**. The switch is off by default and applies
-in directories you choose and in managed checkouts on every host. Farhelm skips your home directory and its parents,
-including the filesystem root, because Claude's trust would cover everything inside. It also skips the edit if it
-cannot resolve your home directory on the session's host. The session shows a terminal note and Claude may ask as
-usual. Farhelm also adds Claude trust to new checkouts that start with another agent while the switch is on.
+On the **Claude Code** page, you can **Answer Claude's "trust this folder?"**. The switch is off by default. It applies
+when you choose Claude Code in the **Agent** tab, when an agent asks to start a Claude Code session, or when Farhelm
+creates a fresh managed checkout. Farhelm skips your home directory and its parents, including the filesystem root,
+because Claude's trust would cover everything inside. It also skips the edit if it cannot resolve your home directory on
+the session's host. The session shows a terminal note and Claude may ask as usual. Farhelm also adds Claude trust to new
+checkouts that start with another agent while the switch is on.
 
 Farhelm edits the Claude settings that the login shell selects on the session's host, normally `~/.claude.json`.
 A wrapper that changes the directory or selects a different Claude configuration can still leave Claude asking.
@@ -406,13 +407,13 @@ A Claude session exiting at the same instant can lose either program's update, a
 the file works. Read the caution in Settings before turning it on. Trust lets the repository's Claude hooks and commands
 run, as when you answer Yes.
 
-When Claude, Codex, Muse or Antigravity asks its trust question, a note appears above the terminal if that agent's
-switch is off. Its **Settings** button (**Settings and caveats** for
-Claude) opens the agent's Settings page at its trust switch. × hides the note
+When Claude, Codex, Muse or Antigravity asks its trust question in a session started from the **Agent** tab, a note
+appears above the terminal if that agent's switch is off. Claude's note can also appear when another agent starts a
+Claude Code session or when you start the session with a fresh managed checkout. Its **Settings** button
+(**Settings and caveats** for Claude) opens the agent's Settings page at its trust switch. × hides the note
 until the question leaves the screen, and **Don't show again** stops that agent's note for every session, leaving the
 other agents' notes alone. To bring one back, turn on the hint switch on the agent's page. You still answer
-the current question in the terminal. Pi has a trust switch without a hint. The Codex, Muse and Antigravity hints
-apply to sessions started from the **Agent** tab.
+the current question in the terminal. Pi has a trust switch without a hint.
 
 ## When a launch fails
 

@@ -76,9 +76,11 @@ const ANTIGRAVITY: Agent = Agent {
     asking: antigravity_asking,
 };
 
-/// The session filed under `key` at Claude's question, in the helm fixture's managed checkout, whatever its launch.
+/// A structured Claude session in the helm fixture's fresh managed checkout, at Claude's question.
 fn claude_asking(key: &'static str) -> Fixture {
-    session(key).at_claude_trust_question()
+    session(key)
+        .launch(launched("claude"))
+        .at_claude_trust_question()
 }
 
 /// An ordinary directory at Codex's own workspace-trust question.
@@ -433,8 +435,8 @@ fn the_band_reads_trust_then_shows_above_the_terminal_without_taking_focus(
     assert!(trust.reads().is_empty(), "one read");
 }
 
-/// Claude shows the hint in ordinary folders. Selecting a shell tab hides
-/// the agent's question and its hint until the agent terminal returns.
+/// A structured Claude launch can use the Settings switch in an ordinary folder. Selecting a shell tab
+/// hides the agent's question and its hint until the agent terminal returns.
 #[gpui::test]
 fn a_plain_folders_agent_terminal_shows_the_claude_band(cx: &mut TestAppContext) {
     let agent = Agent {
@@ -447,6 +449,7 @@ fn a_plain_folders_agent_terminal_shows_the_claude_band(cx: &mut TestAppContext)
         row.info.working_copy.is_none(),
         "premise: ordinary directory"
     );
+    assert!(row.info.github_repo.is_none(), "premise: no fresh checkout");
     let mut trust = open_as(cx, agent);
     trust.shown();
     push(
@@ -764,10 +767,8 @@ const FLAG: &str = "Farhelm can answer it through a command-line flag. It's off 
 
 /// The agent the band names decides whose switch it advertises and whose dismissal it stores, so a session must never
 /// borrow another agent's: the harness-neutral question flag says only that some agent asks (the old
-/// `TrustAgent::for_session`). Specified (`TrustAgent::asking`): Claude's own flag names Claude whatever the launch;
-/// without it, the neutral flag names Codex, Muse or Antigravity for a structured launch of that harness, and no agent for every
-/// other harness (Pi, whose approval is not a recognized question, and Claude, whose question has its own flag), for a
-/// command launch declaring Codex, or for a legacy session stored as Codex; with neither flag, no agent.
+/// `TrustAgent::for_session`). Claude's flag names Claude in the fixture's fresh managed checkout. The neutral flag
+/// names Codex, Muse or Antigravity only for a structured launch of that harness.
 #[test]
 fn only_a_sessions_own_launch_names_the_agent_asking() {
     let flagged = [
@@ -814,6 +815,38 @@ fn only_a_sessions_own_launch_names_the_agent_asking() {
                 TrustAgent::asking(&row.info),
                 expected,
                 "{launch} with the Claude flag {claude} and the neutral flag {workspace}"
+            );
+        }
+    }
+}
+
+/// A Command or legacy Claude session can use the settings edit after a fresh clone. A borrower in the same
+/// checkout and a session in an ordinary folder both answer Claude's question directly.
+#[test]
+fn claude_command_and_legacy_hints_require_fresh_checkout_provenance() {
+    for launch in [
+        json!({"kind": "command", "command": "claude", "yolo": false, "agent": "claude", "resume": null}),
+        json!({"kind": "legacy", "invocation": "claude", "agent_kind": "claude", "resume_template": null}),
+    ] {
+        let fresh = session("a").launch(launch).at_claude_trust_question();
+        let borrower = fresh.clone().not_launched_as_checkout();
+        for (fixture, member, expected) in [
+            (fresh, true, Some(TrustAgent::Claude)),
+            (borrower.clone(), true, None),
+            (borrower.unmanaged(), false, None),
+        ] {
+            let info = serde_json::from_value::<SessionRow>(fixture.entry().value)
+                .unwrap()
+                .info;
+            assert!(info.claude_trust_prompt);
+            assert!(info.launch.agent_selection().is_none());
+            assert_eq!(info.working_copy.is_some(), member);
+            assert_eq!(info.github_repo.is_some(), expected.is_some());
+            assert_eq!(
+                TrustAgent::asking(&info),
+                expected,
+                "{:?}, checkout membership {member}",
+                info.launch.launch_kind()
             );
         }
     }

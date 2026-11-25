@@ -45989,3 +45989,29 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: `pvwlxvyrwyspqvnnkupqmylqukktknzy`, `plan/triage-hooks-trust-nov24/02b-pi-settings`,
   [draft PR](https://github.com/scode/farhelm/pull/4866/changes). Fixed. Pi's Settings heading describes its approval of
   project settings and extensions.
+
+## trailing-claude-trust-hint-shows-on-command-and-legacy-ordinary-dirs.md
+
+- Outcome: `fix spec+code`.
+- Assessment: When Claude asks "trust this folder?" in a session started from the Command tab (or an old legacy session)
+  in an ordinary folder, Farhelm still shows the hint saying it can answer this for you in Settings. Turning that switch
+  on does nothing for such launches. Farhelm only applies Claude trust for structured Claude launches, or after cloning
+  a new managed checkout. Verified: confirmed. `settings/agent_trust.rs:299-302` names Claude whenever
+  `claude_trust_prompt` is set. Its docstring (:293-298) says this is deliberate ("whatever the launch, as the band has
+  read it since it was built"). The supervisor applies trust only for a structured selection with trust on
+  (`service/core.rs:14776-14779`). SPEC.md (~~:1842-1844) shows the band whenever Claude's question is visible, the
+  setting is off and the hint is not dismissed, with no launch-kind condition. SPEC.md (~~:1820-1821) lists which
+  launches read the setting without settling Command launches. So the code follows the spec's words, and the open
+  question is whether the spec should change.
+- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
+  Recommendation for reference: fix spec+code. Show Claude's hint only for structured Claude launches or fresh managed
+  checkouts, as Codex, Muse and Antigravity already do, and update the deliberate docstring and the test at
+  `session_pane/trust_band_tests.rs` (`only_a_sessions_own_launch_names_the_agent_asking`). Size S. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: `oqrukmznkmrxzzszwltkrtwtpzuqqprp`, `plan/triage-hooks-trust-nov24/02c-claude-hint`,
+  [draft PR](https://github.com/scode/farhelm/pull/4871/changes). Fixed. The hint requires a structured Claude launch or
+  proof that the session was created with a fresh managed checkout. Opening an existing checkout does not inherit that
+  provenance. The spec records when the switch and hint apply.

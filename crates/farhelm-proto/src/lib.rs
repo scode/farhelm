@@ -1031,7 +1031,7 @@ pub struct SessionInfo {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub workspace_trust_prompt: bool,
     /// Current sampled Claude trust dialog, used only for an informational
-    /// managed-checkout hint. This stays Claude-only for older UIs that do not
+    /// hint on eligible launches. This stays Claude-only for older UIs that do not
     /// check the harness. Missing evidence and older stored rows mean false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub claude_trust_prompt: bool,

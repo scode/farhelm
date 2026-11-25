@@ -306,8 +306,8 @@ linux/settings-checkouts-capped--dark.png 02b4bad188e635a5305fc57e15cdda545ed867
 linux/settings-checkouts-capped--light.png 7df476b76bd33519b97967bb0d365afa04ead236
 linux/settings-checkouts-edited--dark.png 2b469c00727ca7cc77bd58e0e25b098a0046749c
 linux/settings-checkouts-edited--light.png 0a5f95bc4523c76433e10e08de1bd7ceb264b14a
-linux/settings-claude--dark.png 33a0ab4d80d6a5a0d3979f8328a9b7496ed40905
-linux/settings-claude--light.png 4effd766788ca874ac862e620d1483266d4b4ccc
+linux/settings-claude--dark.png 2e2b29949c50f5a355ba94df26d8b023bce0ba95
+linux/settings-claude--light.png 66e14d7540db2811eefe989c73708b7ac8857370
 linux/settings-codex--dark.png dd271c8763930feea21db3252766d2d87f3e6067
 linux/settings-codex--light.png 7ca2c8950e3e14616d480c52991fa30f3a39687c
 linux/settings-containers--dark.png 302bed2b59cec3f0d98135ec12b64455db15c25e
