@@ -42897,3 +42897,37 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: `nymkpvykrskskmxptolmwkxrprrrmtsp`, `plan/triage-launcher-nov24/01-launcher-1`,
   [draft PR](https://github.com/scode/farhelm/pull/4812/changes). Fixed as listed. Escape dismisses open results before
   the Save as template panel.
+
+## launcher-held-host-name-clipped.md
+
+- Outcome: `other`.
+- Assessment: In Replace with and Restart with, the host is fixed and shown as plain text. A long name or status suffix
+  is cut off, and there is no hover or other visual way to read the full name, so look-alike hosts are hard to tell
+  apart. Verified: confirmed. `launcher/view/host_picker.rs:386-398` truncates the held value with no `HoverHelp`. The
+  accessible name still carries the full text. SPEC.md 1503 ("Held values show as text") does not require full
+  visibility. No wrong-target route.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code. Add hover help carrying the full escaped name. Size S.
+- Execution: `zzmusxqnlrqxzzlmxknupkvnmzruttsr`, `plan/triage-launcher-nov24/01b-launcher-help`,
+  [draft PR](https://github.com/scode/farhelm/pull/4814/changes). Fixed. Hover help shows the escaped host name. The
+  shared tooltip height still bounds extremely long SSH destinations without a Farhelm alias.
+
+## launcher-shell-group-unlabelled.md
+
+- Outcome: `other`.
+- Assessment: The Agent tab separates Bash and Zsh from the agent chips with a visual rule only. Screen readers hear no
+  "Shells" grouping or shell-specific description. Verified: confirmed. `launcher/view/choices.rs:313-385` draws the
+  separated chips with no group name. SPEC.md 1116 ("a Shells group after the agent chips") and 1507 ("a rule before
+  Bash and Zsh") are both met visually. Nothing requires an accessible group label. Real screen-reader phrasing is
+  unverified.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard, or fix code with an aria label on the shells row. Size S.
+- Execution: `zzmusxqnlrqxzzlmxknupkvnmzruttsr`, `plan/triage-launcher-nov24/01b-launcher-help`,
+  [draft PR](https://github.com/scode/farhelm/pull/4814/changes). Fixed using a shell-specific accessible description on
+  each shell chip.

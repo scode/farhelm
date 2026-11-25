@@ -135,11 +135,17 @@ enum LauncherScene {
     StaleChoice,
     Results,
     Restart,
+    HeldHostHelp,
+    ShellHelp,
     Replace,
     Narrow,
     Yolo,
     HookSetup,
 }
+
+/// The held address truncates this name. The tooltip needs to show its distinguishing suffix.
+const HELD_HOST_NAME: &str =
+    "Integration build host for the production migration and release checks";
 
 /// Show New with a chosen agent, so the screenshot covers the model, effort and permission controls and the prompt.
 pub(super) fn launcher_new_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
@@ -208,6 +214,16 @@ pub(super) fn launcher_restart_setup(state: &SceneState, window: &mut Window, cx
     setup(state, LauncherScene::Restart, window, cx);
 }
 
+/// A held host's full name must stay legible in help even when its address segment clips it.
+pub(super) fn launcher_held_host_help_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    setup(state, LauncherScene::HeldHostHelp, window, cx);
+}
+
+/// The shell chip's help identifies it as a shell at the point where the user chooses it.
+pub(super) fn launcher_shell_help_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    setup(state, LauncherScene::ShellHelp, window, cx);
+}
+
 /// Keep the source warning and held host visible beside the same form and command pane used by New.
 pub(super) fn launcher_replace_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Replace, window, cx);
@@ -237,11 +253,16 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
     state.keep.borrow_mut().push(Box::new(scene));
     window.set_driver_enabled(true);
     let mut rows = fleet();
-    if scene == LauncherScene::Restart {
+    if matches!(scene, LauncherScene::Restart | LauncherScene::HeldHostHelp) {
         // The stored resume command makes Restart with available even before a conversation has been captured.
+        let host_name = if scene == LauncherScene::HeldHostHelp {
+            HELD_HOST_NAME
+        } else {
+            "Local (this machine)"
+        };
         rows[0] = session("a")
             .host(1)
-            .host_name("Local (this machine)")
+            .host_name(host_name)
             .title("Review the launch workflow")
             .cwd("/home/user/src/api")
             .launch(json!({
@@ -346,8 +367,11 @@ fn open_new_with_claude(
         return;
     };
     let scene = launcher_scene(state);
-    if matches!(scene, LauncherScene::Restart | LauncherScene::Replace) {
-        let open = if scene == LauncherScene::Restart {
+    if matches!(
+        scene,
+        LauncherScene::Restart | LauncherScene::HeldHostHelp | LauncherScene::Replace
+    ) {
+        let open = if matches!(scene, LauncherScene::Restart | LauncherScene::HeldHostHelp) {
             entry::open_restart_with
         } else {
             entry::open_replace_with
@@ -621,7 +645,7 @@ fn answer_new_reads(
         };
         if scene == LauncherScene::Results {
             state.after.set(Some(apply_fixture_setup));
-        } else if scene == LauncherScene::Restart {
+        } else if matches!(scene, LauncherScene::Restart | LauncherScene::HeldHostHelp) {
             assert!(
                 !recent.flags.click,
                 "a held recent row stays in the pane and cannot apply"
@@ -632,8 +656,47 @@ fn answer_new_reads(
                     && node.label.as_deref() == Some("Agent: Claude")),
                 "Restart names the fixed harness without an editable harness control"
             );
+            if scene == LauncherScene::HeldHostHelp {
+                assert!(nodes.iter().any(|node| {
+                    node.element_id.as_deref() == Some("launcher-host-name")
+                        && node.label.as_deref() == Some(HELD_HOST_NAME)
+                }));
+                hover_launcher_help(state, "launcher-host-held", window, cx);
+            }
+        } else if scene == LauncherScene::ShellHelp {
+            hover_launcher_help(state, "launcher-shells-Bash", window, cx);
         }
     }
+}
+
+/// Dispatch the hover before arming the next draw. Its deferred update must replace the warming tooltip first.
+fn hover_launcher_help(state: &SceneState, id: &str, window: &mut Window, cx: &mut App) {
+    let bounds = window
+        .driver_nodes()
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(id) && !node.visible_bounds.is_empty())
+        .unwrap_or_else(|| panic!("{id} is visible before the hover"))
+        .visible_bounds;
+    let at = point(bounds.right() - bounds.size.width / 8., bounds.center().y);
+    super::rest_pointer_at(state, at, window, cx);
+    state.after.set(Some(check_launcher_help));
+    window.refresh();
+}
+
+/// Capture only after the addressed control has replaced the fixture's warming tooltip.
+fn check_launcher_help(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let expected = if launcher_scene(state) == LauncherScene::HeldHostHelp {
+        HELD_HOST_NAME
+    } else {
+        "Use Bash as the session shell"
+    };
+    let shown = crate::layers::shown_tooltip(window, cx).expect("the launcher tooltip is showing");
+    assert_eq!(shown.text.as_ref(), expected);
 }
 
 /// Pick Grok after the catalog, then wait for the question from the setting's off reply.

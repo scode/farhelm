@@ -134,6 +134,8 @@ linux/launcher-command-results--dark.png 965a5d43af4b19d2779d487585376a242d06208
 linux/launcher-command-results--light.png dade16fe9dabf49d7ce14f393e305601e35a6441
 linux/launcher-custom-agent--dark.png 9bbf7bac08c2fb6dfe24916badb28f9f9cf7d49c
 linux/launcher-custom-agent--light.png fe0bdd62e33fabca11a9556d0c431351749fbcbe
+linux/launcher-held-host-help--dark.png 097f5b560a99fcf67386ec892d757e07c6713e06
+linux/launcher-held-host-help--light.png 19ce524f9b9ed6139de961cdd2b2e626a7a0ec9a
 linux/launcher-hook-setup--dark.png e2da2eaf5eddb2649daab8f6cc50987e0b6a3c49
 linux/launcher-hook-setup--light.png c44c6bbee52b9d65f8319378a4066e676f1e6dc1
 linux/launcher-host-menu--dark.png 136751a18fb7c316d2aedac88818b0436ee16369
@@ -158,6 +160,8 @@ linux/launcher-restart-with--dark.png 372d3a1de95bd15ca063397546331e03ec78a39a
 linux/launcher-restart-with--light.png 077860ed2e1b328482534617f1b2752e1b3e8e12
 linux/launcher-resuming-host--dark.png 899bc088087e9ffa021d7dc4d23f523015872e7d
 linux/launcher-resuming-host--light.png 36550fef105396d674e5b891e5005db51bbc39c3
+linux/launcher-shell-help--dark.png beaceac42f1ffb1251c7b71057201970b14c8848
+linux/launcher-shell-help--light.png 33d43f180a9f0fa2317d24f02c91ecbb9c82ddf2
 linux/launcher-shell-wrapper--dark.png e659cb3c707b551a4806948844b33b7728d97128
 linux/launcher-shell-wrapper--light.png ac6bc4a6b9486e8959149a4d5fc26ae8293dc3dd
 linux/launcher-shell-wrapper-note--dark.png f5aa8d0c76c524e8cd941a882df2b1681898c7e6
