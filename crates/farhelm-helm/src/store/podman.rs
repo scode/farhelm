@@ -375,7 +375,8 @@ fn referenced_place_reason(conn: &Connection, host: HostId) -> anyhow::Result<Op
 }
 
 impl HelmStore {
-    /// Settle a probe's claim only for the host entry and destination it dialed.
+    /// Settle a probe's claim only while the entry and its connection
+    /// coordinates still identify the host the probe checked.
     /// A live supervisor identity must agree with its durable claim for a
     /// twin to take an unused place claim. A prior supervisor identity
     /// protects the incumbent unless its exact registry configuration has
@@ -395,9 +396,9 @@ impl HelmStore {
         self.conn.call("container place claim task panicked", move |conn| {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let owns_supervisor: Option<bool> = tx.query_row(
-                "SELECT host_identity IS NOT NULL AND host_identity IS ?4
-                        AND remote_farhelm IS ?5 AND remote_state_dir IS ?6 FROM hosts
+                "SELECT host_identity IS NOT NULL AND host_identity IS ?4 FROM hosts
                  WHERE id = ?1 AND entry_uuid = ?2 AND destination IS ?3
+                   AND remote_farhelm IS ?5 AND remote_state_dir IS ?6
                    AND tailscale IS ?7 AND tensorlake_sandbox IS NULL AND environment_provider IS NULL",
                 rusqlite::params![host, entry, dialed_as.destination, verified_supervisor,
                     dialed_as.remote_farhelm, dialed_as.remote_state_dir, dialed_as.tailscale],
