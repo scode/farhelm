@@ -119,3 +119,103 @@ units passed independent Opus high review in light and dark after the tooltip, t
 corrections. The reviewed pictures are in the reference manifest. The narrower review units separate delayed consent,
 visual help, the template editor, picker accessibility, guarded Replace, and permission wording so the related behavior
 stays reviewable one commit at a time.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round, through its twelve PRs and the landing fix
+[#4856](https://github.com/scode/farhelm/pull/4856/changes). Between the point main was at when the executor finished
+(`6c3b5091`) and the landing, main gained only plans queue commits, so nothing else could interact with this plan.
+
+The landing's review read the whole combined diff against SPEC.md and SPEC_impl.md. It found the code sound in these
+respects: the Replace with and Restart with buttons, and the hook setup and permanent YOLO answers, act on the warning
+and launch the user was shown; the Templates editor's Delete and its leave question stay tied to the template they were
+shown for; the changes to shared dialog, button and list-row code keep what other parts of the app rely on; and each new
+test fails on the code from before this plan. The one exception to those respects is the first item under "Things you
+should know"; the smaller items there are wording and feedback gaps.
+
+#### Fixes made while landing
+
+- **A cut-off sentence in SPEC.md.** One of this plan's own PRs, #4814, added "Hover help shows the held host's name."
+  to the launcher's description in SPEC.md. Rewrapping that paragraph lost the second half of its last sentence, so it
+  ended at "Project registration (associating" and dropped the rule that registering a project is optional and never a
+  prerequisite. #4856 restores it. No code depended on it. Main carried the cut-off text only for the minutes between
+  #4814's merge and #4856's.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the plan's PRs rebased onto main as it stood at the start of the landing (`a64b1ffe`); the rebased stack's top commit
+was `c51a68f9`. The only later change is the landing fix [#4856](https://github.com/scode/farhelm/pull/4856/changes),
+which restores half a sentence of SPEC.md and changes nothing else, so the only check I ran again was `dprint check` on
+SPEC.md, which passed. That final tree is what main now holds outside the plans queue.
+
+- `cargo nextest run --locked -p farhelm-gui -p farhelm-desktop -p farhelm-supervisor -p farhelm --lib --bins` with a
+  filter of `package(farhelm-gui) | package(farhelm-desktop)` plus the two tests
+  `validate_agent_verb_bounds_the_creating_verbs` and `the_yolo_override_is_refused_under_both_names`, on the test
+  worker (recorder run `274a7a97-44d8-435d-bb69-3c0e30e3b34f`): all 3574 selected tests passed, with no runtime skip.
+  That is every unit test of the desktop app's interface and of the desktop app itself, plus the only two tests the plan
+  changed elsewhere: a supervisor test the plan widened to cover an agent's Clone request that leaves out the host
+  (supervisor code unchanged), and the test of the `farhelm` command's refusal of the retired `--confirm-yolo` flag,
+  whose message the plan reworded.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and the desktop app's
+  two clippy runs (`-p farhelm-desktop --all-targets`, with and without `--features agent`), on the test worker: passed.
+- The desktop app's end-to-end smoke (`scripts/gui-e2e-smoke.py`, recorder run `6fb38093-0b60-4e1c-8056-5f2b84d53eb5`),
+  on the test worker: 50 steps passed, one skipped, the paste step that headless Linux cannot run. It drives the
+  launcher, Replace with its YOLO question, and the dialogs whose Escape and focus handling the plan changed.
+- `python3 scripts/check-gui-goldens.py`, the full comparison of the app's screenshot tests against their published
+  reference pictures, locally (recorder run `d6e05ada-d584-4ff2-9df3-4a1fd05389e9`): every scene matched, the plan's new
+  and changed launcher, Templates and approval card scenes included.
+- `cargo fmt --all -- --check`, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no
+  errors; one warning, about an old citation in the triage archive, already on main), `dprint check` and
+  `python -B scripts/check-test-sleeps.py`, locally: passed.
+
+Reused: none. The report's own runs covered the same code before the rebase, and everything they covered ran again
+above.
+
+Skipped: `scripts/gui-lifecycle.py`, the end-to-end run that starts, quits and relaunches the desktop app, since nothing
+in its startup, quit or window handling changed; the rest of the workspace Rust suite, since outside the desktop app the
+plan changed only the two tests above, the `--confirm-yolo` refusal message (whose test ran) and the specs; a Mac run,
+since no change is macOS-specific; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+Nothing. The report's checks ran on the plan's PRs before the landing, and the ones above ran on the same code after a
+rebase that brought in only plans queue commits; the spec fix after them changed only SPEC.md text. The report's
+statement that the launcher now checks the action it showed before acting never covered the New and Clone case in the
+first item below.
+
+#### Things you should know that the report does not say
+
+- **In New and Clone, a very fast Enter after a template changes the folder can now launch; I recommend a follow-up.**
+  Say the Folder list is open with a row highlighted by the arrow keys, and a template is then applied that changes the
+  folder: by its number key, or a template press that was queued while the template list was still loading and applies
+  once it loads. The plan now clears the highlight, so it cannot point at a folder that no longer matches. If Enter
+  arrives before the window has drawn that change, there is no highlighted row, and Enter launches the session with the
+  template's choices. Before this plan the highlight kept its position in the new folder list, so the same Enter
+  selected whichever folder now sat there and launched nothing. So in that narrow timing this is a regression from a
+  harmless wrong selection to a launch the user has not seen. It needs the Enter to land within one screen refresh of
+  the template's change. Your triage decision for keys that act on something other than what was shown was "fix the
+  harmful ones, accept the harmless ones", and it counts a launch as harmful, so this goes against that decision, if
+  only in a timing few users will hit. The landing review found it after the checks had passed. I landed the plan rather
+  than hold the 31 review findings it fixed for it, because the fix needs new code and tests and its own checks. The
+  follow-up I recommend: have the folder list ignore Enter until the cleared highlight has been drawn, in every mode,
+  the way it already does in Replace with.
+- **A stale answer to the launcher's YOLO question that turns on "Start YOLO sessions without asking" now closes
+  silently.** If the launch behind the question changed between drawing it and the click (a host reconnect, say), that
+  answer now neither saves the host setting nor starts the launch, as the plan intended, but the question closes without
+  saying why. The user can press Launch again and be asked afresh. I see no need for a follow-up unless you want the
+  question to say why it closed.
+- **This plan's new Templates list label for an unavailable permission mode reads differently from the rest.** A
+  template whose permission mode its agent does not offer now leads its summary with the bare mode name, "Approve (not
+  offered)", while every other template shows "Approvals" before the mode. The approval card is not affected, since its
+  row is already labeled. A small wording follow-up would put "Approvals" before it too.
+- **One changelog draft promises a note the user may not see.** The draft for the Replace warning fix covers the answer
+  that replaces a YOLO session with a guarded (asks-before-acting) one. It says Farhelm leaves a note on the session
+  being replaced when that session has left the session list by the time the user answers. Since the list no longer
+  shows that session, the user usually will not see the note. Release curation may want to soften the sentence.
+- **Part of one review finding is no longer recorded.** The finding about holding Escape down (so it repeats) discarding
+  the launcher's draft named two places this happens: the launcher with an empty command field, and the question the
+  launcher asks before setting up an agent's hooks. The plan fixed the first and archived the finding as fixed, so a
+  held Escape on the hook setup question is now recorded nowhere. Ask for a TODO entry if you want it tracked.
