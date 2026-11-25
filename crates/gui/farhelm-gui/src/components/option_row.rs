@@ -24,8 +24,8 @@
 //! row, its show-all switch, which rested in `--fg-1`) and `var(--on-fill)` with the selection, and the row's content
 //! inherits that ink. Content that draws its own color keeps it, as in the old sheet, whose selected rules for such
 //! parts were rules of their own: a host's colored mark, the switcher's quieter columns (`--on-accent-dim`), its match
-//! marks. Their owners still pick those for the selected row. The row also tells assistive technology through its own
-//! selected state, since the row is the option.
+//! marks. Their owners still pick those for the selected row. The row reports the same selection to assistive
+//! technology unless its owner distinguishes the two through [`OptionRow::accessible_selection`].
 //!
 //! It paints the old row's box: a one-pixel edge, the small radius, 9 by 10 pixels of padding, transparent at rest
 //! with the control hover fill under the pointer, and on the selected row the solid accent fill with its accent edge,
@@ -77,6 +77,7 @@ pub struct OptionRow {
     help: HoverHelp,
     role: Role,
     selected: bool,
+    accessible_selection: Option<bool>,
     disabled: bool,
     compact: bool,
     children: Vec<AnyElement>,
@@ -101,6 +102,7 @@ impl OptionRow {
                 .ring_radius(metrics::RADIUS_SM - px(1.)),
             role,
             selected: false,
+            accessible_selection: None,
             disabled: false,
             compact: false,
             children: Vec::new(),
@@ -118,6 +120,12 @@ impl OptionRow {
     /// reported selected. See the module docs for which content keeps its own color.
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// Report the keyboard selection when the owner also uses the accent fill to mark an applied choice.
+    pub(crate) fn accessible_selection(mut self, selected: bool) -> Self {
+        self.accessible_selection = Some(selected);
         self
     }
 
@@ -174,7 +182,7 @@ impl RenderOnce for OptionRow {
             .debug_selector(|| self.id.to_string())
             .role(self.role)
             .aria_label(self.label.clone())
-            .aria_selected(self.selected)
+            .aria_selected(self.accessible_selection.unwrap_or(self.selected))
             .w_full()
             .min_w_0()
             .flex()

@@ -306,17 +306,11 @@ consequences.
 - [`podman-launch-lifetime-notice-hidden.md`](podman-launch-lifetime-notice-hidden.md) — The launcher only explains in
   Host help that deleting the last session removes a new container and its files.
 
-- [`launcher-host-picker-omits-expanded-state.md`](launcher-host-picker-omits-expanded-state.md) — The Host picker gives
-  assistive technology no way to tell whether Enter selects a destination or tries to launch.
-
 - [`launcher-recent-accepts-modified-return.md`](launcher-recent-accepts-modified-return.md) — The new launcher accepts
   modified Return on highlighted recent setups in addition to the displayed Return shortcut.
 
 - [`launcher-highlights-escape-notation.md`](launcher-highlights-escape-notation.md) — The launcher can underline the
   escape notation displayed for a path even when that notation was absent from the matching path.
-
-- [`launcher-announces-two-selected-setups.md`](launcher-announces-two-selected-setups.md) — The launcher can report
-  both the setup that filled the form and the current keyboard target as selected.
 
 - [`exited-shell-suspend-confirmation-wording.md`](exited-shell-suspend-confirmation-wording.md) — Stop and suspend can
   still tell users it will stop a shell that has already exited.

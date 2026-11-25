@@ -43410,3 +43410,37 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: `qpmvknrynwmlswuplsvqryrtzwyqrwzl`, `plan/triage-launcher-nov24/06-other-fixes`,
   [draft PR](https://github.com/scode/farhelm/pull/4839/changes). Fixed. The first departure opens the only leave
   question. Save and Discard require the editor that question asked about.
+
+## launcher-host-picker-omits-expanded-state.md
+
+- Outcome: `other`.
+- Assessment: The Host picker does not tell assistive technology whether its list is open, and Enter means "pick this
+  host or environment" when it is open and "launch" when it is closed. Verified: confirmed. `host_picker.rs:470-479`
+  builds the `Role::ComboBox` button without `.expanded(..)`, which exists in `components/button.rs:540-545`. No spec
+  rule requires it.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code. Pass the live open state to `.expanded()`; the review says this keeps the trigger's look as
+  `Button::discloses` does, which was not checked. Size S.
+- Execution: `urtmtvrqnxnkxqlmruyxqpyzoqoyrkrv`, `plan/triage-launcher-nov24/06b-picker-accessibility`,
+  [draft PR](https://github.com/scode/farhelm/pull/4841/changes). Fixed. The Host button reports the live list's open
+  state without changing its appearance.
+
+## launcher-announces-two-selected-setups.md
+
+- Outcome: `other`.
+- Assessment: In the launcher's list of recent setups and templates, the row that filled the form stays marked. While
+  you arrow to another row, assistive technology is told two rows are selected, though Enter acts on only one. Verified:
+  Confirmed. `start.rs:276`: `selected = active || source == key`, passed to both `.selected` and aria-selected. The
+  persistent source mark is required by SPEC.md (launcher list: "The row that filled the form remains marked"). How a
+  screen reader reads it is unverified.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code S. Keep the source mark visual or in the description; aria-selected only for the active row.
+- Execution: `urtmtvrqnxnkxqlmruyxqpyzoqoyrkrv`, `plan/triage-launcher-nov24/06b-picker-accessibility`,
+  [draft PR](https://github.com/scode/farhelm/pull/4841/changes). Fixed. The applied setup stays marked visually. Only
+  the active keyboard choice reports that it is selected.

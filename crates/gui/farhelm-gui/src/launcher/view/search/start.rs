@@ -335,6 +335,7 @@ impl Launcher {
                 OptionRow::new(id, label, help, Role::ListBoxOption)
                     .compact()
                     .selected(selected)
+                    .accessible_selection(active)
                     .disabled(disabled)
                     .child(contents)
                     .on_click(move |_, window, cx| {
