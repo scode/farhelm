@@ -352,12 +352,7 @@ consequences.
   — The desktop can offer a sandbox launch for a checkout name that cannot produce a valid directory. The helm can
   create the environment and attempt cleanup before telling the user to fix the name.
 
-- [`trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md`](trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md)
-  — The tests can pass without showing that a command typed in Bash or Zsh is saved when Farhelm stops the session.
 
-- [`trailing-delete-skips-hangup-for-live-tab-it-knows-only.md`](trailing-delete-skips-hangup-for-live-tab-it-knows-only.md)
-  — Deleting a non-shell session can forcibly terminate a known terminal tab without giving its shell the tab's graceful
-  hangup.
 
 - [`trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md`](trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md)
   — The existing assertions can miss a regression where Delete skips an inaccessible scope belonging to a terminal tab.

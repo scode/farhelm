@@ -4910,6 +4910,9 @@ no path values are stored in the notice.
   gets one re-probe: a unit its durable row says was scoped, and a tab whose host's tag records that it was opened in a
   scope.
 
+  Delete also hangs up tab shells identified by their terminal hosts, even when the process table hides their
+  environment markers.
+
   The shared reaper also reads direct scope membership before any scope signal to give Podman a chance to finish its own
   bookkeeping. It recognizes main `conmon` processes by their executable name and cleanup arguments. It checks the
   effective user's ownership of the process, its start time and its current cgroup before using the full container ID

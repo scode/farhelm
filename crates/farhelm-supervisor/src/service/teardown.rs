@@ -60,7 +60,7 @@
 use super::connection::notify_detached;
 use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::remove_launch_artifacts_for_session;
-use super::session_hosts::SessionHosts;
+use super::session_hosts::{HostSweepRoots, SessionHosts};
 use super::sweep::{ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree};
 use super::terminals::{ActiveAttach, AttachmentKey, join_forwarder};
 use super::uploads::abort_session_uploads;
@@ -119,7 +119,7 @@ pub(crate) struct PreparedTeardown<'a> {
     deleting: super::core::DeleteInProgress<'a>,
     root_identity: Option<(u32, u64)>,
     hosts: SessionHosts,
-    host_roots: Vec<(u32, u64)>,
+    host_roots: HostSweepRoots,
     units: ScopeUnits,
     container_runtime: Option<crate::container::ContainerRuntime>,
 }
@@ -526,12 +526,18 @@ impl Supervisor {
             container.revoke().map_err(TeardownError::Sweep)?;
             container.remove().await.map_err(TeardownError::Sweep)?;
         }
+        let target = SweepTarget::WholeSession(host_roots.tabs.iter().copied().collect());
+        let roots = host_roots
+            .agents
+            .into_iter()
+            .chain(host_roots.tabs)
+            .map(|root| (root.pid, root.start));
         let reaped = reap_process_tree(
             &self.seams.scopes,
             units.with_main_launch(&entry.info.launch),
-            root_identity.into_iter().chain(host_roots),
+            root_identity.into_iter().chain(roots),
             session_id,
-            &SweepTarget::WholeSession,
+            &target,
             ScopeKillFailure::Refuse,
         )
         .await

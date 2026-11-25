@@ -126,7 +126,7 @@ use tracing::debug;
 
 use super::core::{AtRecordedSocket, HostTab, Supervisor, read_launch_record};
 use crate::hosts::stop::{HostOutcome, StopLimits, shut_down, signal};
-use crate::hosts::terminal::{Child, pin_child};
+use crate::hosts::terminal::{Child, ProcessRoot, pin_child};
 use crate::hosts::{
     ConnectError, HostConnection, HostName, HostProcess, HostRole, HostTag, HostTerminal, Liveness,
 };
@@ -207,6 +207,13 @@ pub(crate) struct SessionHosts {
     /// share, so that the sweep and the rest of the teardown between the
     /// two are never charged to either.
     budget: Duration,
+}
+
+/// All pinned host children seed Delete's process sweep. Tab children also get a shell hangup.
+#[derive(Default)]
+pub(super) struct HostSweepRoots {
+    pub(super) agents: Vec<ProcessRoot>,
+    pub(super) tabs: Vec<ProcessRoot>,
 }
 
 impl Supervisor {
@@ -503,15 +510,16 @@ impl SessionHosts {
     /// A tab runtime's child is a root as its runtime pinned it at
     /// adoption, checked against the process table whatever the host now
     /// says, as the agent runtime's is (the teardown's reasoning there).
+    /// Preserve the tab role even when the process table hides its marker.
     ///
     /// An error when a host stops answering, or says its child runs while
     /// the child cannot be read: a child that may still run without a root
     /// is unexamined, and the caller refuses rather than sweep without it.
-    pub(crate) async fn sweep_roots(&mut self) -> anyhow::Result<Vec<(u32, u64)>> {
-        let mut roots = Vec::new();
+    pub(super) async fn sweep_roots(&mut self) -> anyhow::Result<HostSweepRoots> {
+        let mut roots = HostSweepRoots::default();
         for tab in self.tabs.iter().chain(&self.placeholder_tabs) {
             match tab.host.status().pinned_child_root() {
-                Ok(Some(root)) => roots.push((root.pid, root.start)),
+                Ok(Some(root)) => roots.tabs.push(root),
                 Ok(None) => {}
                 Err(why) => anyhow::bail!(
                     "could not read the child of terminal tab {}'s host before deleting ({why}); \
@@ -522,7 +530,10 @@ impl SessionHosts {
         }
         for host in &mut self.hosts {
             let RecordedHost::Ours {
-                socket, connection, ..
+                socket,
+                connection,
+                tag,
+                ..
             } = host
             else {
                 continue;
@@ -534,7 +545,10 @@ impl SessionHosts {
                 )
             })?;
             match child {
-                Child::Running(root) => roots.push((root.pid, root.start)),
+                Child::Running(root) => match &tag.role {
+                    HostRole::Agent { .. } => roots.agents.push(root),
+                    HostRole::Tab { .. } => roots.tabs.push(root),
+                },
                 Child::Reaped => {}
                 Child::Unpinned => anyhow::bail!(
                     "the terminal host at {} says its child {} runs, but the child could not \
