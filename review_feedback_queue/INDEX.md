@@ -158,9 +158,6 @@ consequences.
 - [`app-settings-shared-upgrade-option-has-local-heading.md`](app-settings-shared-upgrade-option-has-local-heading.md) —
   The App heading says This Mac even though it contains a helm-shared highlights setting.
 
-- [`exited-shell-suspend-confirmation-wording.md`](exited-shell-suspend-confirmation-wording.md) — Stop and suspend can
-  still tell users it will stop a shell that has already exited.
-
 - [`agent-settings-search-omits-agent-name.md`](agent-settings-search-omits-agent-name.md) — Settings search can give
   different agents' pages or hook controls the same accessible name.
 
@@ -224,10 +221,6 @@ consequences.
 - [`trailing-host-scoped-trash-confirmation-stays-open-invisibly.md`](trailing-host-scoped-trash-confirmation-stays-open-invisibly.md)
   — If a host leaves or empties while its 'Delete all on' confirmation is open in Trash, the invisible confirmation
   keeps all other hosts' Delete/Retry buttons disabled and swallows the first Close or Escape.
-
-- [`trailing-suspend-read-activity-still-uses-ordered-lane.md`](trailing-suspend-read-activity-still-uses-ordered-lane.md)
-  — Primary Suspend and Stop and suspend actions still wait up to 20 seconds behind any slow host on the ordered channel
-  lane because their pre-flight session activity check was left on Lane::Ordered.
 
 - [`trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md`](trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md)
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
