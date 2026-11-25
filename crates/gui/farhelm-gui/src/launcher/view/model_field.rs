@@ -230,9 +230,13 @@ impl Launcher {
                     self.catalog.as_deref(),
                     wrapper.as_deref(),
                 );
+                let picked_agent = edit.switched_agent;
                 self.model_field.error = None;
                 self.close_model_list(window, cx);
                 self.chose(edit, window, cx);
+                if picked_agent {
+                    self.check_hook_question(window, cx);
+                }
             }
         }
         cx.notify();

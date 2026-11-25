@@ -19,6 +19,7 @@ use crate::session;
 /// A read and its resulting question share the pick number. A slow reply cannot answer a later pick of the same agent.
 pub(super) struct HookQuestion {
     agent: HookAgent,
+    tab: Tab,
     pick: u64,
     inline: Option<Inline<HookAnswer>>,
 }
@@ -45,6 +46,14 @@ impl HookQuestion {
     }
 }
 
+/// Each tab retains its own agent choice while another tab is active.
+fn offer_slot(tab: Tab) -> usize {
+    match tab {
+        Tab::Agent => 0,
+        Tab::Command => 1,
+    }
+}
+
 impl Launcher {
     fn hook_agent(&self) -> Option<HookAgent> {
         let harness = match self.draft.tab {
@@ -63,8 +72,20 @@ impl Launcher {
             == Some(true)
     }
 
+    /// Recheck an unanswered offer when a tab brings back the same agent. Old replies stay retired.
+    pub(super) fn switch_tab(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<Self>) {
+        let previous = self.draft.tab;
+        self.draft.choose_tab(tab);
+        self.changed(cx);
+        if self.draft.tab != previous && self.hook_offer_on_return[offer_slot(tab)].is_some() {
+            self.check_hook_question(window, cx);
+        }
+    }
+
     /// Check once per explicit choice. A failed read leaves ordinary launching available and never offers a write.
     pub(super) fn check_hook_question(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab = self.draft.tab;
+        self.hook_offer_on_return[offer_slot(tab)] = None;
         self.hook_question = None;
         let Some(agent) = self
             .hook_agent()
@@ -76,6 +97,7 @@ impl Launcher {
         let pick = self.hook_pick;
         self.hook_question = Some(HookQuestion {
             agent,
+            tab,
             pick,
             inline: None,
         });
@@ -113,17 +135,27 @@ impl Launcher {
         cx.notify();
     }
 
-    /// Keep a question while its agent is being configured. Once its answer starts a write, an edit retires that
-    /// answer's launch continuation, even when it leaves the agent unchanged.
+    /// Keep a question with its original tab and agent. A tab change can preserve an unanswered offer, including
+    /// when search changes tabs. An edit retires an answered question's launch continuation during its write.
     pub(super) fn retire_hook_answer(&mut self, cx: &App) {
-        if self
-            .hook_question
-            .as_ref()
-            .is_some_and(|state| Some(state.agent) != self.hook_agent())
-            || self.hook_write_in_flight(cx)
-        {
-            self.hook_question = None;
+        let agent = self.hook_agent();
+        let parked = &mut self.hook_offer_on_return[offer_slot(self.draft.tab)];
+        // Restoring a different agent from recents replaces the choice that owned the parked offer.
+        if *parked != agent {
+            *parked = None;
         }
+        let Some(question) = self.hook_question.as_ref() else {
+            return;
+        };
+        let writing = self.hook_write_in_flight(cx);
+        let same_tab = question.tab == self.draft.tab;
+        if same_tab && Some(question.agent) == agent && !writing {
+            return;
+        }
+        if !same_tab && !writing && self.hook_answer_pending(cx) {
+            self.hook_offer_on_return[offer_slot(question.tab)] = Some(question.agent);
+        }
+        self.hook_question = None;
     }
 
     pub(super) fn hook_inline(&self, cx: &App) -> Option<&Inline<HookAnswer>> {
