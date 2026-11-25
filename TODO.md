@@ -51,6 +51,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
+- **Remember the order tabs were opened in.** Remember order of tabs being open. So if you have an agent open, then you
+  open a terminal, then you open a second terminal, then you close the second terminal, the first terminal should be
+  made active - not the agent.
+
 ## Plan follow-ups
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
