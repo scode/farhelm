@@ -64,6 +64,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Require a committed hook report after Restart in the drift checks.** The Codex, Antigravity and Grok cases can see a
+  new acknowledged callback and the old stored resume identity even when the callback was a stale no-op. Require
+  evidence that the resumed generation committed the report. Carry the generation and identity in the witness used by
+  the drift tests, and cover an acknowledged same-identity no-op and a valid resumed report. The supervisor emits
+  `acked` for committed and ignored callbacks. The drift matcher needs a distinct commit witness from supervisor
+  admission or a new resume pin bound to the resumed generation.
+
 - **Bind the brick test's reopen samples to an app relaunch.** The bonus checkpoint currently checks that the remote
   process and its counter survived between samples. The samples can come from the same app lifetime. Require this
   attempt's before sample, a witnessed quit and fresh app identity, then the after sample. Carry that ordering through

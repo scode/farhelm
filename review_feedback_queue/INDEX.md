@@ -372,12 +372,6 @@ consequences.
 - [`launcher-shell-group-unlabelled.md`](launcher-shell-group-unlabelled.md) — The launcher separates Bash and Zsh from
   agent choices with a divider that exposes no accessible Shells label.
 
-- [`container-comparison-targets-removed-control.md`](container-comparison-targets-removed-control.md) — The container
-  comparison scene targets the removed Runs on control and cannot reach the new Host menu route.
-
-- [`launcher-comparison-heading-selector-case.md`](launcher-comparison-heading-selector-case.md) — Launcher comparison
-  scenes wait for mixed-case heading text while the launcher paints it in uppercase.
-
 - [`launcher-host-picker-omits-expanded-state.md`](launcher-host-picker-omits-expanded-state.md) — The Host picker gives
   assistive technology no way to tell whether Enter selects a destination or tries to launch.
 
@@ -803,25 +797,9 @@ consequences.
   — The prepared Tensorlake Add test can pass if Farhelm releases the chosen snapshot for retirement while the new
   sandbox is still starting.
 
-- [`trailing-drift-turn2-hook-check-passes-on-noop-stop-ack.md`](trailing-drift-turn2-hook-check-passes-on-noop-stop-ack.md)
-  — The opt-in Codex and Antigravity drift tests can pass after Restart even when Turn-2 hook verification did not
-  commit, because an ignored Stop callback still logs an ack carrying Turn 1's conversation ID.
-
-- [`trailing-test-worker-stop-during-prep-mutates-and-prunes.md`](trailing-test-worker-stop-during-prep-mutates-and-prunes.md)
-  — A stop requested after worker admission during preparation still overwrites the remote checkout, evicts an older
-  retained run, and publishes an empty finished directory.
-
 - [`trailing-test-worker-relative-checkout-breaks-lock-isolation.md`](trailing-test-worker-relative-checkout-breaks-lock-isolation.md)
   — Passing a relative --checkout . or .. places remote state in the wrong parent directory, bypasses worker-wide
   bootstrap and active locks, and forces a full re-bootstrap every run.
-
-- [`trailing-test-worker-collect-discards-recorded-exit-status.md`](trailing-test-worker-collect-discards-recorded-exit-status.md)
-  — Collecting a test-worker run later discards the worker's authoritative exit status, so invocation.txt cannot
-  distinguish a pass, failure, or forced kill (137).
-
-- [`trailing-test-worker-status-hides-bootstrap-lock.md`](trailing-test-worker-status-hides-bootstrap-lock.md) — When a
-  test-worker run times out waiting for worker bootstrap and tells the caller to check status, status never reports an
-  active standalone or cross-checkout bootstrap.
 
 - [`trailing-shortcuts-chord-opens-during-terminal-ime.md`](trailing-shortcuts-chord-opens-during-terminal-ime.md) —
   Pressing the Keyboard shortcuts chord while an input method is composing in a focused terminal still opens the
@@ -1024,11 +1002,6 @@ consequences.
   while taking the post-Remove snapshot, the probe keeps its PID in `farhelm_pids` without recognizing it as a stdio
   proxy.
 
-- [`trailing-brick-test-unavailable-retry-p2-stale-dict.md`](trailing-brick-test-unavailable-retry-p2-stale-dict.md) —
-  The brick-test coordinator unit test meant to guard against retrying a P2 live feedback send never actually tests P2;
-  it tests P1 twice because it edits a detached in-memory copy of the workflow state after the first iteration reloads
-  from disk.
-
 - [`trailing-check-template-shape-allows-custom-agent-yolo-false.md`](trailing-check-template-shape-allows-custom-agent-yolo-false.md)
   — Both the CLI and the desktop Templates editor allow saving a Command launch template that declares a custom agent
   with YOLO turned off, creating a saved template that Farhelm always refuses when you try to apply it (and in the
@@ -1101,23 +1074,6 @@ consequences.
   — The integration test for running a custom agent's conversation reporter through the app forwarder during an update
   or uninstall does not actually prove that the forwarder prevented the CLI from starting, so a regression that bypassed
   the lock or failed before locking would still pass.
-
-- [`trailing-drift-grok-home-overwritten-by-login-shell-rc.md`](trailing-drift-grok-home-overwritten-by-login-shell-rc.md)
-  — If a maintainer configures a custom `GROK_HOME` in their login shell startup files (`~/.profile`, `~/.bashrc`, or
-  `~/.zshrc`), the Grok drift test launches Grok against the maintainer's real `GROK_HOME` instead of the private mirror
-  — silently exercising whatever hook file is in the real configuration (or failing to capture) rather than the hook
-  file installed by the build under test.
-
-- [`trailing-drift-private-config-copy-back-aborts-first-error.md`](trailing-drift-private-config-copy-back-aborts-first-error.md)
-  — If copying back one rewritten file during drift-test cleanup fails (for instance, because a symlinked dotfile
-  resolves to a read-only location or setting permissions/renaming fails), cleanup aborts immediately: any staged
-  temporary file is left behind in the maintainer's real directory, other rewritten files (such as a refreshed login
-  token) are dropped instead of copied back, and the final check that real hook files were untouched is skipped.
-
-- [`trailing-grok-drift-test-uses-hook-witness-fresh-after-noop-acks.md`](trailing-grok-drift-test-uses-hook-witness-fresh-after-noop-acks.md)
-  — The opt-in real-agent drift test for Grok can now accept a quietly ignored turn callback on the resumed turn as
-  proof that the restarted Grok session reported its conversation, instead of verifying that the acknowledged report
-  actually matched the resumed conversation.
 
 - [`trailing-guarded-plain-replace-live-read-and-spec-contradiction.md`](trailing-guarded-plain-replace-live-read-and-spec-contradiction.md)
   — Answering "Replace as guarded instead" on a plain Replace YOLO confirmation reads the session's live store entry at
@@ -1346,18 +1302,6 @@ consequences.
 - [`trailing-bell-stale-reply-guards-untested.md`](trailing-bell-stale-reply-guards-untested.md) — No test covers the
   bell's guards that stop a late announcements reply from opening the dialog after the user moved on or closed the
   popover.
-
-- [`trailing-brick-test-announcement-override-check-untested.md`](trailing-brick-test-announcement-override-check-untested.md)
-  — The brick test's check that only the staged launch used the test announcement feed could stop working without any
-  unit test failing.
-
-- [`trailing-brick-test-missing-announcement-feed-reported-as-candidate-failure.md`](trailing-brick-test-missing-announcement-feed-reported-as-candidate-failure.md)
-  — When the standing test announcement files are missing, the brick test reports the candidate's announcements check as
-  failed, though the app never ran.
-
-- [`trailing-brick-test-announcement-check-has-no-delivery-wait.md`](trailing-brick-test-announcement-check-has-no-delivery-wait.md)
-  — The brick test inspects the bell without waiting for the feed download, and one transient fetch error means no retry
-  for 12 hours, so a network blip can show up as a candidate failure.
 
 - [`trailing-credential-test-name-says-setup-refuses.md`](trailing-credential-test-name-says-setup-refuses.md) — A test
   name says a failed Claude credential lookup makes host setup fail, while setup actually completes with a notice.

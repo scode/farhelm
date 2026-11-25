@@ -385,7 +385,7 @@ signature receipt was accepted.
                     self.assertEqual(report['p0']['verdict'], 'could not run')
                     self.assertEqual(report['automation']['verdict'], 'fail')
 
-    def drive_pair(self, pass_id, tester=None):
+    def drive_pair(self, pass_id, tester=None, *, timeout=1200):
         """Drive one owned modeled pair through native import with a controlled public default.
 
 This composes the real scheduler and receipt gates across all P0 fixtures;
@@ -394,7 +394,7 @@ neither the update endpoint nor the native capture is a live product oracle.
         self.fixture.prepare(pass_id)
         self.run.tester = tester or self.execute_fixture
         with mock.patch('brick_test.download', return_value=b'v0.24.0'):
-            self.run.test(pass_id, source=self.source)
+            self.run.test(pass_id, source=self.source, timeout=timeout)
 
     def finish_preceding_pairs(self):
         """Retain valid native P0 evidence before the installer pair, the last one, runs its P0, P1 and P2."""
@@ -712,10 +712,14 @@ scheduler before the send and leaves the pair live for the maintainer.
             self.seen.append(envelope)
             if envelope['check_id'] == 'p2-announcements':
                 self.assertNotIn('feedback_authorized', envelope['context'])
+                self.assertEqual(envelope['timeout_seconds'], 240)
+                self.assertIn('for up to 60 seconds', envelope['instructions'])
+                self.assertIn('In either case, finish the staged launch', envelope['instructions'])
+                self.assertIn('report could-not-run with what the bell showed', envelope['instructions'])
                 return self.archive(controller, envelope, 'fail', detail=detail)
             return self.archive(controller, envelope)
 
-        self.drive_pair('p0-installer-upgrade', missing_feed)
+        self.drive_pair('p0-installer-upgrade', missing_feed, timeout=30)
         with self.run.locked():
             report = self.run.report()
             self.assertEqual((report['p0']['verdict'], report['p1']['verdict']), ('pass', 'pass'))

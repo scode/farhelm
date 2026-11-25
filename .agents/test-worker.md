@@ -61,7 +61,8 @@ sudo.
   controller retains whatever the workload wrote before it was killed.
 - `test-worker.sh status` shows the checkout's lock holder and its recent summaries.
 - `test-worker.sh collect --out <dir> <id>` retrieves a finished run after a client disconnect or copy failure. Use the
-  invocation id printed at startup. Collection reports when the run is still active or its evidence is gone.
+  invocation id printed at startup. Successful collection stamps and returns the workload's original exit status. When
+  collection itself refuses or fails, the stamp names that error.
 
 A full build of the workspace with the GUI and its tests takes about 55 GB of `target/` on the worker, and incremental
 builds only add to it, so every run (`rust`, `gui` and `run` alike) starts by holding its checkout to its own share of
@@ -82,8 +83,9 @@ say they ran on the test worker, with its architecture.
 The command prints the summary from its worker. Each invocation has its own evidence. The driver clears the harness's
 prior archive, summary and logs from a reused output directory and writes `invocation.txt` with the source commit and
 result. A refused request leaves its own stamp and copies no evidence. If the copy fails, the driver reports it and the
-status returned by the worker. The worker retains the newest 20 invocation directories per checkout under its tree lock.
-That lock also guards sweeping day-old abandoned stages, and each upload holds the stage lock while it writes.
+status returned by the worker. The worker retains the newest 20 completed workload directories per checkout under its
+tree lock. Stop before a workload starts leaves the existing history in place. That lock also guards sweeping day-old
+abandoned stages, and each upload holds the stage lock while it writes.
 
 Only one client can own a local output directory at a time. A concurrent request for that same directory fails before
 changing its files, so its stamp and artifacts always come from one invocation.

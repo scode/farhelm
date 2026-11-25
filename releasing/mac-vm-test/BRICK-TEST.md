@@ -613,7 +613,10 @@ with the missing filename, independent of the other checks. An unreachable origi
 guest launches only the candidate app with `FARHELM_ANNOUNCEMENTS_PATH=announcements-test.json`. That launch reserves
 the pending batch for the bell so a fast fetch cannot open it automatically. Capture the rail notice with its action,
 the announcement the action opens, and the same entry in Help history after dismissal. A normal relaunch must leave the
-override unset.
+override unset. The tester gives the bell up to 60 seconds to show the test notice. If it never arrives, record could
+not run with the elapsed wait and the last observed bell state. Either transient delivery trouble or a candidate failure
+could leave the bell empty. The announcement checkpoint has a 240-second minimum budget for the delivery window and both
+app launches.
 
 The bonus checkpoint names retain RECIPE's broader acceptance obligations:
 
