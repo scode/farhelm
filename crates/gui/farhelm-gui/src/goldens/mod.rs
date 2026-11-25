@@ -800,7 +800,14 @@ static SCENES: &[Scene] = &[
     Scene {
         name: "session-toolbar",
         // macOS needs room for two 48-point title bands, the 12-point gap, and 24 points of padding.
-        size: (1428., if crate::desktop::title_band::ON { 140. } else { 104. }),
+        size: (
+            1428.,
+            if crate::desktop::title_band::ON {
+                140.
+            } else {
+                104.
+            },
+        ),
         draw: session_toolbar,
         setup: session_toolbar_setup,
     },

@@ -1177,16 +1177,14 @@ systemd or SSH substrate ran.
   stand-ins, including cancellation without a failing drift verdict. It also checks the once-per-harness upgrade step
   (`scripts/harness_upgrades.py`): a recipe for every drift case's binary, versions around each updater, stdin closed,
   the fallback installer only after a failed updater, HTTPS throughout the download, and a failed upgrade failing the
-  run. Run it when the runner or upgrade recipes change. Seconds and zero vendor turns.
-
-  The non-ignored e2e tests in `real_agent_capture::drift::tests` check the reply and recall lines, fresh accepted hook
-  evidence, matching resume arguments and captured conversation selectors without starting a vendor CLI. The base module
-  pins which harnesses it covers. Tests in `real_agent_capture::drift::private_config::tests` check the private copy of
-  a vendor's configuration (hook files and the directories above them private, everything else linked, rewritten files
-  copied back only over an unchanged original) and guard that every agent with global hook files has a drift profile and
-  hook paths that copy can hold. Run both with
-  `cargo nextest run -p farhelm --test e2e -E 'test(/^real_agent_capture::drift::/)'` when the drift test or persistent
-  hook setup changes.
+  run. Run it when the runner or upgrade recipes change. Seconds and zero vendor turns. The non-ignored e2e tests in
+  `real_agent_capture::drift::tests` check the reply and recall lines, fresh accepted hook evidence, matching resume
+  arguments and captured conversation selectors without starting a vendor CLI. The base module pins which harnesses it
+  covers. Tests in `real_agent_capture::drift::private_config::tests` check the private copy of a vendor's configuration
+  (hook files and the directories above them private, everything else linked, rewritten files copied back only over an
+  unchanged original) and guard that every agent with global hook files has a drift profile and hook paths that copy can
+  hold. Run both with `cargo nextest run -p farhelm --test e2e -E 'test(/^real_agent_capture::drift::/)'` when the drift
+  test or persistent hook setup changes.
 - `python3 -B scripts/run-harness-drift.py` — manual, opt-in Linux checks. The default `base` category checks agent
   launch flags, conversation reports and Restart. Select categories with repeatable `--category` or pass
   `--category all`, optionally filtered by `--harness`. It upgrades each selected CLI once (`--no-upgrade` skips that).
