@@ -173,16 +173,8 @@ consequences.
 - [`launcher-keyboard-recents-hide-custom-flags.md`](launcher-keyboard-recents-hide-custom-flags.md) — Keyboard users
   can no longer reveal the custom permission flags that distinguish otherwise identical recent setups.
 
-- [`environment-delete-title-unreachable-by-keyboard.md`](environment-delete-title-unreachable-by-keyboard.md) — A long
-  target title can clip in an environment Delete confirmation where keyboard paging reaches the warning but cannot
-  reveal the full title.
-
 - [`trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md`](trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md)
   — The new test would still pass if a future edit broke automatic Trash refresh after Replace removes its source.
-
-- [`trailing-timed-out-agent-delete-lose-late-checkout-warning.md`](trailing-timed-out-agent-delete-lose-late-checkout-warning.md)
-  — An approved agent Delete can leave a checkout behind after its relay has timed out, with no warning in the app's
-  notice history.
 
 - [`trailing-borrower-classification-test-does-not-establish-checkout-membership.md`](trailing-borrower-classification-test-does-not-establish-checkout-membership.md)
   — This borrower classification case can pass if its second session never joins the managed checkout.

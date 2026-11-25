@@ -47577,3 +47577,51 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   outcome's size gate. Change `uxqmkrvrsxnrowsqwrqosxokptqnmylz`, bookmark
   `plan/triage-environments-nov24/07b-tensorlake-consent-follow-up`.
   [Draft PR](https://github.com/scode/farhelm/pull/4947/changes).
+
+## environment-delete-title-unreachable-by-keyboard.md
+
+- Outcome: `other`.
+- Assessment: The Delete confirmation for a session in a sandbox or container shows its warning, then the quoted session
+  title. With a very long title, part of the title is clipped. Keyboard paging from the answers scrolls the warning, not
+  the title, so a sighted keyboard user cannot reveal the full title. A screen reader gets the full text. Verified:
+  confirmed by source. In an anchored question, Page Up/Down/Home/End scroll only the first host-value line
+  (`prompt.rs:105-108, 1103-1123`). In the environment Delete question that line is the consequence, which carries the
+  environment's name (`session_list/delete.rs:172-189`, `session_list/environment_delete.rs:189-199`). The title is the
+  second host-value line and scrolls only by wheel. SPEC_impl.md:1034-1036 says a host-value line "(a quoted session
+  title) gives up the height and scrolls, with the wheel and with Page Up, Page Down, Home and End from the answers, so
+  the keyboard reaches it". "First host-value line" was a recorded deliberate choice (`prompt.rs:108`, 2026-11-16), so
+  this is not clearly settled. The "Dialog explanations out of view" filter excludes keyboard-unreachable content.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 20 lines or less; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (page the title line, or every host-value line). Size S-M.
+- Execution: No change under the accessibility size gate. Paging the title in place of the warning would make the
+  warning impossible to read in full by keyboard if it clips. Keeping both reachable requires a shared prompt change and
+  a regression beyond the about-20-line allowance. Change `xunskkvuwmnnrnvytlyznpqoyyvszrzl`, bookmark
+  `plan/triage-environments-nov24/07c-delete-dispositions`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4948/changes).
+
+## trailing-timed-out-agent-delete-lose-late-checkout-warning.md
+
+- Outcome: `fix code`.
+- Assessment: When an agent asks Farhelm to delete a session and the user approves, a slow teardown can outlast the
+  agent's request. If that teardown then leaves the checkout on disk, the notice naming it reaches neither the agent nor
+  the notices bell. It survives only in the host's internal logs. Verified: confirmed by source (no runtime check).
+  `agent_delete` calls `do_delete_session` or `delete_session_within_environment` directly and returns the reply
+  (`agent_requests.rs:2898-2938`). There is no late-notice collector like the desktop Delete's
+  (`sessions.rs:4099-4135`). The relay's timed-out retention discards the outcome (per reviewer,
+  `service/agent_relay.rs`; not re-read). SPEC.md:2088-2095 states the late-notice rule for Delete. Whether it covers
+  agent Delete is a reading; SPEC.md:4332-4338 gives agent Delete the UI's notices.
+- Decision: q-latenotice, "Late "checkout left behind" notices": the maintainer picked "Every route reaches the bell".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: A late "checkout left behind" notice from any route that removes a session reaches the notices
+  bell. Recommendation for reference: fix code if item 59's answer is yes. Share the late-notice recording. Size M. Size
+  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Deferred to “Keep checkout notices after an agent Delete times out” in TODO.md, “Plan follow-ups”. The
+  agent relay owns a different deadline from the helm's UI and host reply bounds. Tying the notice to the actual relay
+  result while preserving late reply and fence handling exceeds the size gate. Change
+  `xunskkvuwmnnrnvytlyznpqoyyvszrzl`, bookmark `plan/triage-environments-nov24/07c-delete-dispositions`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4948/changes).
