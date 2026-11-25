@@ -4,14 +4,15 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Fifteen buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to
+Sixteen buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to
 remove — the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses
 duplicate review triage within each item's stated scope; "plan decisions to revisit" holds the calls made while a plan
 ran or landed, often on the maintainer's behalf when a plan blocked, each recording the alternative; "immediate" is what
 should be planned right away, ahead of everything in "near term", and the todo planning flow selects its entries by
 default; "plan follow-ups" holds the entries that came out of plans (follow-ups asked for in review, leftovers from
 reports and landing notes), kept apart from the rest of the work; "near term" is what should be picked up next after
-those; "linux support" holds Linux desktop app installation, packaging, and Linux-specific feature work; "mid term" is
+those; "linux support" holds Linux desktop app installation, packaging, and Linux-specific feature work; "tensorlake"
+holds Tensorlake sandbox work, split into "v1" (the first non-experimental release) and "v2" (later); "mid term" is
 wanted after the near-term work, sooner than "maybe later"; "doc todo" holds documentation work; "tricky bugs" retains
 unresolved bug reports and their investigation findings; "deflake" gathers test and harness reliability work, including
 CI execution and restoring gates; "broken tests" records tests that fail deterministically, with the failure and the
@@ -159,28 +160,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Then sweep the repository once more for tmux, xterm.js, pane and old-terminal mentions and remove or reword whatever
   is left that does not belong to "phase 3". Recorded by the maintainer on 2026-11-18 from the plan's review.
 
-### Tensorlake
-
-- **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
-  approval.
-
-- **Investigate Tensorlake's ssh gateway leaving forwarded channels open, and report it if it is a bug.** Through the
-  gateway, an ssh client holding a remote-forwarded connection never learned that the sandbox side was gone: the sandbox
-  side was torn down within half a second, but the local ssh and its connection to the local service were still up 185
-  seconds later, with keep-alives on or off, while an ordinary OpenSSH server ended the same setup in about 1.3 seconds
-  and the gateway did end a connection with no forwarded channel open. Confirm what the gateway does (including whether
-  it relays a forwarded channel's close in the ordinary case where only the sandbox-side client hangs up), and if it is
-  a gateway bug, send Tensorlake a report with the minimal reproduction. Everything known so far, measured and inferred
-  kept apart, is in `lore/2026-11-07-tensorlake-gateway-forwarded-channels.md`.
-
-- **Skip Claude Code's first-run setup on new Tensorlake hosts.** Decided by the maintainer on 2026-11-07, answering the
-  settings-credentials plan's block: Farhelm delivers a selected Claude subscription to a Tensorlake host but writes no
-  other Claude configuration, so the first Claude session on a fresh host can stop at Claude Code's own first-run setup
-  (its theme chooser and onboarding), which the user goes through once. Claude Code 2.1.318 stopped there in a fresh
-  home and also checks a separate onboarding-completion setting. The fix the maintainer deferred: have Farhelm write the
-  smallest set of non-secret first-run settings Claude needs, found by an isolated probe, keeping the user's other
-  settings and the normal agent home, and check it with a valid subscription login.
-
 ### Drift test feature coverage
 
 - **Drift tests: base launch, Codex process isolation, and Cursor/OpenCode interactive turns.** Verify that Codex's
@@ -300,6 +279,129 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - In a real GNOME session the drawn title bar's drag, double-click maximize and Minimize are untested (headless Mutter
     has no pointer drag and no visible minimize), and a close the compositor asks for (Alt+F4) reaches the app by
     another path than the drawn Close button, also untested.
+
+## Tensorlake
+
+### v1
+
+- **Holistic Tensorlake onboarding, Settings structure, and setup wizard.** Rework setup, onboarding, and Settings
+  together rather than patching individual forms: consider a separate top-level tab system in Settings (with Tensorlake
+  on its own tab and most existing settings under a General tab) and/or a Tensorlake setup wizard. Cover the six-stop
+  first-time setup flow (Settings → Tensorlake → external `tl sbx ssh keys add` → Credentials → Recipes → Build snapshot
+  → New session), starter recipe and inline credential creation in the recipe editor, fixing the crowded Settings →
+  Tensorlake viewport (where the experimental banner and plaintext storage box hide the SSH key card below the fold, and
+  removing/replacing the experimental warning for v1), and removing the duplicated Tensorlake API key form from the top
+  of Settings → Credentials.
+
+- **Discoverability of Tensorlake sandboxes before setup.** The welcome card mentions only Mac and SSH Linux boxes, and
+  the session launcher hides `New sandbox` entirely until a Tensorlake API key is saved. Surface Tensorlake as a clear
+  option before setup is complete.
+
+- **Remove the permanent SSH key registration command block from the session launcher.** Push SSH key registration
+  exclusively into Tensorlake setup in Settings and/or the setup wizard, and make it easy to jump there from the
+  launcher instead of repeating the full `tl sbx ssh keys add` block on every launch (which currently pushes the Agent
+  section below the fold when Managed checkout is selected).
+
+- **Handle unbuilt recipes in the session launcher.** Saving a recipe does not build a snapshot, and the launcher then
+  disables it as `No snapshot yet` with no inline Build button or link to Recipes (whereas
+  `Add host → Tensorlake sandbox` accepts an unbuilt recipe and builds and prepares it automatically).
+
+- **Eliminate or surface the two-stage Build + hidden 1-minute Prepare stall.** Even after clicking `Build snapshot`,
+  the first launch (and every 24 h or after a Farhelm update) stalls for about a minute on `Prepare snapshot`, with no
+  combined Build + Prepare or explicit "Prepare now" action.
+
+- **Hide unrelated Podman status noise on Tensorlake recipe cards.** Because Managed Ubuntu is shared with Podman,
+  recipe cards show a local Podman check/error line and a `Rebuild` button right above the Tensorlake status lines even
+  when the user is only using Tensorlake.
+
+- **Align launcher agent selection with sandbox recipes.** Managed Ubuntu currently installs only Claude Code and Codex
+  while the launcher presents all ten built-in agents as selectable. Design the UX for recipe-dependent harnesses —
+  likely supporting installing the harness the user picks on demand.
+
+- **Fix Managed checkout repository suggestions for new sandboxes.** When `New sandbox` + `Managed checkout` is
+  selected, repository suggestions scan an existing connected host (such as Local) rather than using the recipe's
+  configured GitHub token.
+
+- **Always suppress workspace trust prompts in per-session sandboxes where supported.** Workspace trust makes no sense
+  for a fresh per-session sandbox; suppress it automatically whenever the agent supports pre-trusting, rather than
+  requiring the user to discover per-agent trust switches in Settings → Agents.
+
+- **Skip Claude Code's first-run setup on new Tensorlake hosts.** Decided by the maintainer on 2026-11-07, answering the
+  settings-credentials plan's block: Farhelm delivers a selected Claude subscription to a Tensorlake host but writes no
+  other Claude configuration, so the first Claude session on a fresh host can stop at Claude Code's own first-run setup
+  (its theme chooser and onboarding), which the user goes through once. Claude Code 2.1.318 stopped there in a fresh
+  home and also checks a separate onboarding-completion setting. The fix the maintainer deferred: have Farhelm write the
+  smallest set of non-secret first-run settings Claude needs, found by an isolated probe, keeping the user's other
+  settings and the normal agent home, and check it with a valid subscription login.
+
+- **Replace plain Stop on per-session sandboxes with Stop and suspend.** Plain Stop currently stops the agent
+  immediately with no warning when no extra terminal tabs are open, leaving the sandbox running and billing. Plain Stop
+  on a per-session sandbox is mostly confusing; drop it in favor of only offering Stop and suspend.
+
+- **Auto-suspend forgotten sandbox sessions.** A sandbox session bills its CPU and memory for as long as its sandbox
+  runs. While the helm is connected, Tensorlake's idle timeout never fires, because the helm's connection counts as
+  activity. A session the user forgot about therefore keeps billing until they suspend or delete it. The maintainer
+  accepted that for the first version on 2026-11-08 and wants an automatic suspend for v1, for example after the agent
+  has been idle for a while. The rule and its default are to be decided when this is picked up.
+
+- **At-a-glance visibility into running/billing per-session sandboxes and Hosts panel polish.** Per-session sandboxes
+  are omitted from the host rail, leaving no quick count or indicator in the main window of running/billing sandboxes
+  without opening Hosts. Inside Hosts, replace or clean up raw `farhelm-sess-…` names and the generic
+  `Settings: Edit this host's connection` menu entry.
+
+- **Unify standalone sandbox hosts (`Add host`) and per-session sandboxes (`New sandbox`).** Reconcile the subtle
+  differences between the two Tensorlake flows (auto-build vs. refuse-if-unbuilt, 24 h vs. 30 min idle timeout, rail
+  icon vs. hidden, five-step creation plan vs. inline confirmation).
+
+- **Sandbox-session conveniences: Save as template and bulk Suspend / Resume / Stop and suspend.** Restore
+  `Save as template` in the launcher footer for sandbox launches (currently omitted, forcing manual rebuild in the
+  Templates dialog), and support bulk Suspend, Resume, and Stop and suspend in the session list.
+
+- **Recipe maintenance friction.** Address immutable recipe names, deletion blocked by suspended sandboxes, and disk
+  shrinks below the existing snapshot size failing until a manual snapshot rebuild.
+
+- **Investigate Tensorlake's ssh gateway leaving forwarded channels open, and report it if it is a bug.** Through the
+  gateway, an ssh client holding a remote-forwarded connection never learned that the sandbox side was gone: the sandbox
+  side was torn down within half a second, but the local ssh and its connection to the local service were still up 185
+  seconds later, with keep-alives on or off, while an ordinary OpenSSH server ended the same setup in about 1.3 seconds
+  and the gateway did end a connection with no forwarded channel open. Confirm what the gateway does (including whether
+  it relays a forwarded channel's close in the ordinary case where only the sandbox-side client hangs up), and if it is
+  a gateway bug, send Tensorlake a report with the minimal reproduction. Everything known so far, measured and inferred
+  kept apart, is in `lore/2026-11-07-tensorlake-gateway-forwarded-channels.md`.
+
+- **Codex Subscription rotating refresh-token conflict across concurrent sandboxes (separate credential track).**
+  Launching multiple per-session sandboxes from a recipe using Codex Subscription copies the same `auth.json` into each
+  sandbox, so the first to rotate its refresh token invalidates the others. Keep in v1, but leave out of the initial UX
+  planning pass (credentials are a separate track; focus first on sandboxes working smoothly with an API endpoint / load
+  balancer).
+
+### v2
+
+- **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
+  approval.
+
+- **Live resize of Tensorlake hosts.** A host is created at its recipe's size, and a recipe's size change affects only
+  hosts created afterwards. Tensorlake can resize a running sandbox in place (CAS image format only): it takes one to
+  two seconds and keeps processes running; CPUs go up and down, but memory never shrinks below what the sandbox booted
+  with, so a sandbox meant to flex has to boot small. Let the user resize a Tensorlake host (or apply its recipe's
+  current size) without recreating it. Phase 1 left this out deliberately.
+
+- **Live resize for sandbox sessions.** Let a session's sandbox boot small and grow on demand, preserving its running
+  processes. Build on "Live resize of Tensorlake hosts" above; expose it from the session's controls. The first version
+  launches at the recipe's size and offers no resize control.
+
+- **Per-repository warm snapshots for sandbox sessions.** Build on a recipe's prepared snapshot, then refresh each
+  checkout with an incremental `git fetch` when a session starts. Decide how these snapshots are refreshed. Keep using
+  the recipe's GitHub token delivery to each sandbox for private repositories. Design records:
+  `lore/2026-11-03-tensorlake-sandbox-hosts-design.md` ("Phase 2, as far as it was thought through", plus the measured
+  platform facts) and `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md`.
+
+- **Possibly: shared scratch volumes for sandbox sessions.** Explore Tensorlake cloud volumes as scratch space shared by
+  sandbox sessions.
+
+- **Possibly: fork a warm sandbox session.** Explore a memory checkpoint or live copy that preserves running processes.
+  A copied supervisor retains its identity and the sandbox's boot ID, so an independent fork needs an explicit answer to
+  that ownership problem. Ordinary Clone starts a fresh sandbox from the recipe instead.
 
 ## Mid term
 
@@ -422,42 +524,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Command and control drop-down on Command-backtick.** command and control bound to `` command-` `` (drops down)
 
 - **Agent-operable config through command and control.** agent operable config through command and control
-
-### Tensorlake
-
-- **Live resize of Tensorlake hosts.** A host is created at its recipe's size, and a recipe's size change affects only
-  hosts created afterwards. Tensorlake can resize a running sandbox in place (CAS image format only): it takes one to
-  two seconds and keeps processes running; CPUs go up and down, but memory never shrinks below what the sandbox booted
-  with, so a sandbox meant to flex has to boot small. Let the user resize a Tensorlake host (or apply its recipe's
-  current size) without recreating it. Phase 1 left this out deliberately.
-
-- **Per-repository warm snapshots for sandbox sessions.** Build on a recipe's prepared snapshot, then refresh each
-  checkout with an incremental `git fetch` when a session starts. Decide how these snapshots are refreshed. Keep using
-  the recipe's GitHub token delivery to each sandbox for private repositories. Design records:
-  `lore/2026-11-03-tensorlake-sandbox-hosts-design.md` ("Phase 2, as far as it was thought through", plus the measured
-  platform facts) and `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md`.
-
-- **Live resize for sandbox sessions.** Let a session's sandbox boot small and grow on demand, preserving its running
-  processes. Build on "Live resize of Tensorlake hosts" above; expose it from the session's controls. The first version
-  launches at the recipe's size and offers no resize control.
-
-- **Possibly: shared scratch volumes for sandbox sessions.** Explore Tensorlake cloud volumes as scratch space shared by
-  sandbox sessions.
-
-- **Possibly: fork a warm sandbox session.** Explore a memory checkpoint or live copy that preserves running processes.
-  A copied supervisor retains its identity and the sandbox's boot ID, so an independent fork needs an explicit answer to
-  that ownership problem. Ordinary Clone starts a fresh sandbox from the recipe instead.
-
-- **Sandbox-session conveniences left out of the first version.** Recipe recent setups, Save as template from a sandbox
-  launch, and bulk Suspend, Resume and Stop and suspend. The maintainer deferred these when simplifying the first
-  version on 2026-11-09. Sandbox launches record no recent setups, and Save as template is unavailable for a recipe or
-  session-owned host target; recipe templates and individual lifecycle controls are supported.
-
-- **Auto-suspend forgotten sandbox sessions.** A sandbox session bills its CPU and memory for as long as its sandbox
-  runs. While the helm is connected, Tensorlake's idle timeout never fires, because the helm's connection counts as
-  activity. A session the user forgot about therefore keeps billing until they suspend or delete it. The maintainer
-  accepted that for the first version on 2026-11-08 and wants an automatic suspend later, for example after the agent
-  has been idle for a while. The rule and its default are to be decided when this is picked up.
 
 - **A UI activity log that feedback can include.** Keep a timestamped log of what the UI did (dialogs, focus, shortcuts,
   requests to the helm and how long they took), and add an "Include application logs" checkbox to Send feedback. The
