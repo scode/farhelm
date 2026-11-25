@@ -56,8 +56,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
   started with `cursor-agent -- "$prompt"`, where the prompt starts with `--` and includes a newline. Run
   `python3 -B scripts/run-harness-drift.py --no-upgrade --category initial_prompt --harness cursor` with an existing
-  Cursor login. Verify the fresh turn and find the test conversation's ID so the check can exercise
-  `cursor-agent --resume "$id" -- "$prompt"` too.
+  Cursor login. Verify the fresh turn, then give the case a conversation ID it can resume with
+  `cursor-agent --resume "$id" -- "$prompt"`: Cursor's resume list is interactive, but `cursor-agent create-chat`
+  returns a new chat ID before the first turn. As it stands, the named step can only report COULD NOT RUN for Cursor.
 
 - **Verify launch prompts when reopening OpenCode conversations.** OpenCode 1.19.6 answered the fresh launch prompt.
   `opencode --session "$id" "--prompt=$prompt"` reopened that conversation and showed the earlier reply and an empty
