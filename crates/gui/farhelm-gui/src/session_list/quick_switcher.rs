@@ -1288,7 +1288,7 @@ fn section_heading(
         (None, _, true, _) => ("Recent sessions", None),
         (None, _, false, _) => ("Sessions", None),
     };
-    command_heading_with_count("quick-switcher-heading", label, count, palette)
+    command_heading_with_count("quick-switcher-heading", label, count, palette).into_any_element()
 }
 
 /// The empty field teaches the commands whose meaning would otherwise be hidden in the result rows.

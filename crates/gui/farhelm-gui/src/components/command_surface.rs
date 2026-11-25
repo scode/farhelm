@@ -4,7 +4,7 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
-    SharedString, StatefulInteractiveElement as _, Styled as _, div, px, svg,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, div, px, svg,
 };
 
 use super::{Role, TextInput};
@@ -54,22 +54,27 @@ pub(crate) fn command_heading(
     label: &str,
     palette: &Palette,
 ) -> AnyElement {
-    command_heading_with_count(id, label, None, palette)
+    command_heading_with_count(id, label, None, palette).into_any_element()
 }
 
-/// Keep the count quiet and out of the uppercase label's typography. It follows the label in reading order.
+/// Keep the count quiet and out of the uppercase label's typography. Include it in the accessible name so it
+/// follows the label in reading order. A caller can promote the row to a heading when it begins a document section.
 pub(crate) fn command_heading_with_count(
     id: impl Into<SharedString>,
     label: &str,
     count: Option<String>,
     palette: &Palette,
-) -> AnyElement {
+) -> Stateful<Div> {
     let id = id.into();
+    let name = match &count {
+        Some(count) => format!("{label}, {count}"),
+        None => label.to_owned(),
+    };
     div()
         .id(id.clone())
         .debug_selector(move || id.to_string())
         .role(Role::Label)
-        .aria_label(label.to_owned())
+        .aria_label(name)
         .pt(px(4.))
         .px(px(6.))
         .pb(px(1.))
@@ -84,7 +89,6 @@ pub(crate) fn command_heading_with_count(
                 .items_center()
                 .child(div().font_weight(FontWeight::NORMAL).child(count))
         })
-        .into_any_element()
 }
 
 /// The contents of an option row. A large result list supplies the measured text width so repeated layout probes

@@ -18,3 +18,23 @@ pub(crate) fn key_chip(keys: impl Into<SharedString>, ink: Token, palette: &Pale
         .text_color(theme::color(ink))
         .child(keys.into())
 }
+
+/// The main dialog action can show Enter beside its visible verb. The button retains its own accessible name and
+/// key binding. The caller chooses the chip ink to match the action's enabled or unavailable state.
+pub(crate) fn return_key_content(
+    verb: impl Into<SharedString>,
+    ink: Token,
+    palette: &Palette,
+) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .child(verb.into())
+        .child(
+            key_chip("⏎", ink, palette)
+                .px(px(4.))
+                .py(px(0.))
+                .border_color(theme::color(ink)),
+        )
+}

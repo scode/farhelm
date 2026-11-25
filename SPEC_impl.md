@@ -8099,10 +8099,13 @@ request. If newer highlights are due, it uses the updater's worker-side streamin
 `https://farhelm.io/whats-new.json` with a 2 MiB cap, a ten-second deadline and a client that follows no redirects. The
 website generates version 1 of this feed from finalized changelog sections. The reader requires the running release in
 the result, selects stable releases in range, and permits screenshot links to the official Release notes page. The
-window receives plain, bold and code text runs. A reset during the read or a change to either shared preference retires
-that answer. A focus-taking layer opened during the read retires an answer that would show highlights, even if the layer
-already closed. A failed check leaves the saved record available for a later launch. If the explicit opt-out save fails,
-the notice center posts the refusal after the dialog closes.
+window receives plain, bold and code text runs. A leading bold run ending in `.`, `?` or `!` with text after it is the
+headline. The window uses the shared command dialog components and keeps wrapping body text and inline styles on both
+older and newly curated entries. It counts displayed highlights by category in the header and uses the feed's full
+change totals beside the individual release labels. A reset during the read or a change to either shared preference
+retires that answer. A focus-taking layer opened during the read retires an answer that would show highlights, even if
+the layer already closed. A failed check leaves the saved record available for a later launch. If the explicit opt-out
+save fails, the notice center posts the refusal after the dialog closes.
 
 The latest stable version is found with a plain GET of `https://get.farhelm.io/latest` (https only, at most 256 bytes,
 the probe's 30-second timeout): exactly one line, `v` and a stable release version, a final newline allowed. A

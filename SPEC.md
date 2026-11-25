@@ -922,10 +922,12 @@ from main, to the desktop app on Linux, or to remote hosts. Remote hosts have th
 **Update remote hosts automatically** setting described under Topology.
 
 After an upgrade to a stable release, the installed Mac app can show **What's new in Farhelm** when the window starts,
-after Welcome and any pending Announcements. It names the releases shown, newest first, with their dates and highlights
-in the release notes' categories. **See screenshot** opens the entry on the Release notes page in the browser when it
-has a screenshot. The footer gives the total number of changes across those releases, highlighted or not. **All release
-notes** opens the full page, leaving the dialog open.
+after Welcome and any pending Announcements. The header shows the last release whose highlights were seen or skipped and
+the running release, or just the running release when no record exists. Its category marks and counts describe the
+highlights in the dialog. Releases appear newest first, each with its date and the total changes in that release. Each
+highlight has a category mark, a headline when the release notes provide one, and the full entry text. **Screenshot**
+opens the entry on the Release notes page in the browser when it has a screenshot. **All release notes** opens the full
+page, leaving the dialog open.
 
 The helm records the last release whose highlights were shown or skipped. A new helm starts at the release that created
 it. An older helm with no record starts with the running release's highlights. Otherwise the app asks for the finalized

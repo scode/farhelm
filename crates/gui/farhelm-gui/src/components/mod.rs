@@ -85,7 +85,7 @@ pub use dialog::DialogFrame;
 pub(crate) use dialog::dialog_shadow;
 pub use divider::{Divider, DividerDrag, DividerGrip, DividerStep};
 pub use gpui::Role;
-pub(crate) use key_chip::key_chip;
+pub(crate) use key_chip::{key_chip, return_key_content};
 pub use list_row::ListRow;
 pub use mark_toggle::MarkToggle;
 pub use menu_header::MenuHeader;

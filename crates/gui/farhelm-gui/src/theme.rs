@@ -158,6 +158,8 @@ pub struct Palette {
     pub border_dialog: Token,
     /// `--ok`: running, connected.
     pub ok: Token,
+    /// A wash of the positive ink behind the Added mark in upgrade highlights.
+    pub ok_badge_bg: Token,
     /// `--warn`: the amber label tone.
     pub warn: Token,
     /// `--warn-bright`: amber prose, which needs more lift than a label does; a question's consequence lines.
@@ -294,6 +296,7 @@ pub const DARK: Palette = Palette {
     border_row: rgb_token(0x303846),
     border_dialog: rgb_token(0x59667c),
     ok: rgb_token(0x7fcf9a),
+    ok_badge_bg: rgba_token(0x7fcf9a24),
     warn: rgb_token(0xe5bb6e),
     warn_bright: rgb_token(0xead09b),
     warn_bg: rgb_token(0x3d3424),
@@ -389,6 +392,7 @@ pub const LIGHT: Palette = Palette {
     border_row: rgb_token(0xd8deea),
     border_dialog: rgb_token(0xb8c2d3),
     ok: rgb_token(0x276a43),
+    ok_badge_bg: rgba_token(0x276a4324),
     warn: rgb_token(0x79531b),
     warn_bright: rgb_token(0x694719),
     warn_bg: rgb_token(0xfff0d2),
