@@ -76,6 +76,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   banner and status, so its terminal can confirm the launch and reply. Verifying the effective provider effort for Goose
   needs other evidence.
 
+- **Keep Goose from offering plain Restart after a named Restart.** Farhelm cleared the previous capture, and Goose
+  1.60.2 recalled the selected conversation. The selected conversation's persisted reporter registered it during launch
+  and made plain Restart available again. The live check reported
+  `captured conversation = true, Restart offer = Resume`. Reproduce with
+  `python3 -B scripts/run-harness-drift.py --no-upgrade --category named_conversation --harness goose`. Check both named
+  Create and named Restart. Normal Goose Restart still needs its persisted reporter.
+
 - **Finish live Cursor model and permission verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log
   in...” with both `--model auto` and `--model composer-2.5`. Reproduce with
   `python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection --harness cursor`. Run with an
@@ -198,11 +205,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   disabled, verify Cursor's default launch without a permission flag ("Agent's own setting"), and send a real prompt to
   Cursor and OpenCode to confirm interactive turns work under Farhelm's terminal host (today both stop at the initial
   TUI or trust screen).
-
-- **Drift tests: one-time named conversation starts.** Cover starting a session on a named conversation ID or file
-  across all ten agents — especially Cursor's `--resume <chat-id>` and OpenCode's `--session <session-id>`, which have
-  no drift coverage today — plus relative and absolute session file paths on Pi and OMP, verifying capture on tracked
-  agents and Goose clearing prior capture. Plan: `plans/queue/drift-named-conversation-starts.md`.
 
 - **Drift tests: conversation capture timing, Stop/UserPromptSubmit hooks, and hooks-disabled mode.** Verify
   `restart_readiness` timing (pre-prompt on Claude and Goose, first-prompt on Codex, Muse, Grok, and Antigravity,
