@@ -405,10 +405,6 @@ consequences.
   — No child-process test verifies the launch shim skips .claude.json in HOME, pins_approval_cwd has no direct unit
   test, and trust-independence tests never turn Antigravity trust on.
 
-- [`trailing-claude-trust-hint-shows-on-command-and-legacy-ordinary-dirs.md`](trailing-claude-trust-hint-shows-on-command-and-legacy-ordinary-dirs.md)
-  — When Claude asks about folder trust in a Command or legacy launch inside an ordinary folder, Farhelm shows the
-  Settings trust hint banner even though the Settings switch does not apply to those launches.
-
 - [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
   — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
   agent-credentials and Codex config targets unverified before and after retry.

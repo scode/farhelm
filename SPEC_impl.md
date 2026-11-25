@@ -3677,6 +3677,8 @@ false. Listing and rename read the same sample cell. The hint requires the agent
 setting, and neither dismissal. The band stays mounted while hidden so a local × lasts until the question actually
 leaves the screen; its flow row lets the existing terminal resize observer fit it.
 
+Claude's hint covers structured Claude launches and sessions with fresh checkout provenance (`SessionInfo.github_repo`).
+
 Helm schema 57 adds independent `codex_trust`, `muse_trust` and `pi_trust` checkout settings. Schema 93 adds
 `antigravity_trust` and its nullable hint dismissal alongside the existing per-agent preferences. Each switch defaults
 off and leaves the path-preview revision unchanged. The protected `GET`/`PUT /api/checkout-agent-trust/{harness}`
