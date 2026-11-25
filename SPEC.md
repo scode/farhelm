@@ -409,8 +409,9 @@ The Suspend confirmation is titled **Suspend &lt;host&gt;?**, with its explanati
 resources use the normal subdued details styling in Hosts.
 
 The session launcher shows its own **Resuming** preparation through the provider call and reconnection, including quick
-launch. It says the session starts when the host is ready. A failed preparation says the session was not launched. A
-host another surface is suspending or resuming remains unavailable for a new launch.
+launch. It says the session starts when the host is ready. A failed preparation uses the launcher's refusal alert with
+**Restart error.** for Restart with and **Not launched.** for other launches. A host another surface is suspending or
+resuming remains unavailable for a new launch.
 
 Environment supervisor connections use a two-minute input-silence limit. The helm sends a lightweight heartbeat every 30
 seconds independently of session refreshes or storage work. If the helm vanishes while the gateway keeps its connection

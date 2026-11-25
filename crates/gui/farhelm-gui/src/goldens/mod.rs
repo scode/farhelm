@@ -1286,6 +1286,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_restart_setup,
     },
     Scene {
+        name: "launcher-restart-wake-refusal",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_restart_wake_setup,
+    },
+    Scene {
         name: "launcher-held-host-help",
         size: (1080., 1160.),
         draw: session_lists_then,
