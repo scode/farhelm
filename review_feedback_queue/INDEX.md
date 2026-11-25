@@ -225,10 +225,6 @@ consequences.
   — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
   admitted instead of being refused.
 
-- [`trailing-failed-post-wake-checkout-preview-omits-refusal-alert.md`](trailing-failed-post-wake-checkout-preview-omits-refusal-alert.md)
-  — When a post-wake checkout preview fails or is superseded, the reopened launcher omits the bordered Not launched
-  Role::Alert beside Launch (and shows no error at all when superseded).
-
 - [`trailing-wake-folder-tests-omit-timeouts-removal-and-replace.md`](trailing-wake-folder-tests-omit-timeouts-removal-and-replace.md)
   — The folder-wake test suite never asserts that the 60-second connection or busy-retry timeouts fire, that host
   removal or retarget cancels wake, or that Replace with submits with its frozen delete guard.

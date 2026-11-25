@@ -48,6 +48,15 @@ pub(super) fn unverified_checkout_setup(state: &SceneState, window: &mut Window,
     );
 }
 
+/// Show a failed preview from the sandbox's fresh connection in the restored launcher.
+pub(super) fn failed_checkout_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    state.keep.borrow_mut().push(Box::new(FailCheckoutPreview));
+    suspended_launcher_setup(state, window, cx, listing(&[], &[]), open_waking_checkout);
+}
+
+/// The failure scene continues past the shared suspended-checkout form and actually presses Launch.
+struct FailCheckoutPreview;
+
 /// Capture Restart with after the registered sandbox refuses the launcher’s Resume request.
 pub(super) fn launcher_restart_wake_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     let mut rows = listing(&["a"], &[session("a").host(12).cwd("/home/user/src/api")]);
@@ -185,6 +194,72 @@ fn open_waking_checkout(
     });
     let mark = crate::focus::Mark::take(cx);
     assert!(crate::launcher::view::open(draft, &mark, window, cx).is_some());
+    if state
+        .keep
+        .borrow()
+        .iter()
+        .any(|scene| scene.is::<FailCheckoutPreview>())
+    {
+        state.after.set(Some(|_, state, window, cx| {
+            assert!(click_control(window, cx, "launcher-launch"));
+            assert!(crate::launcher::launch::waking(cx));
+            state.after.set(Some(fail_checkout_preview));
+        }));
+    }
+}
+
+/// A successful Resume leads to a refused preview. No create may escape while the launcher comes back.
+fn fail_checkout_preview(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    use crate::hosts::tests::connected_with;
+    use crate::launcher::wake_tests::push_host;
+    use farhelm_proto::ui_channel::HostView;
+    let mut keep = state.keep.borrow_mut();
+    let helm = keep
+        .iter_mut()
+        .find_map(|item| item.downcast_mut::<FakeHelm>())
+        .unwrap();
+    const WHY: &str = "The checkout folder is unavailable";
+    let mut host: HostView =
+        serde_json::from_value(fixture_hosts(&[11]).entries.remove(0).value).unwrap();
+    let fresh = host.incarnation + 1;
+    for command in helm.commands() {
+        match command.path.as_str() {
+            "/api/hosts/12/resume" => {
+                helm.reply(command.id, 200, None);
+                let identity = host.identity.as_deref().expect("verified fixture host");
+                let connection = connected_with("0.40.0", identity, 1);
+                push_host(helm, &mut host, connection);
+            }
+            "/api/github-checkout-preview" => {
+                let body = command.body.expect("checkout preview request");
+                assert_eq!(body["host"], host.id);
+                assert_eq!(body["expected_incarnation"], fresh);
+                helm.reply(command.id, 409, Some(json!(WHY)));
+            }
+            "/api/sessions" => panic!("failed preview cannot send create"),
+            _ => helm.reply(command.id, 200, None),
+        }
+    }
+    let nodes = window.driver_nodes();
+    let Some(alert) = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-refusal"))
+    else {
+        state.after.set(Some(fail_checkout_preview));
+        return;
+    };
+    assert_eq!(alert.role, Some(gpui::Role::Alert));
+    assert_eq!(
+        alert.label.as_deref(),
+        Some(format!("Not launched. {WHY}").as_str())
+    );
+    let lines = texts_within(nodes, "launcher-checkout-wake-refusal");
+    assert!(!lines.is_empty() && lines.iter().all(|line| line.visible_bounds == line.bounds));
 }
 
 /// A complete existing-host command draft, once the fake has published the chosen host's suspension.

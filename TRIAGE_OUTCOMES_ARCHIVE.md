@@ -47246,3 +47246,34 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   checkout test with a late failure takes a new lifecycle fixture and exceeds the test-only size gate. Change
   `uyquwstnswrxqxwxrlwqpnmovpvzylwy`, bookmark `plan/triage-environments-nov24/02b-unverified-checkout-wake`.
   [Draft PR](https://github.com/scode/farhelm/pull/4918/changes).
+
+## trailing-failed-post-wake-checkout-preview-omits-refusal-alert.md
+
+- Outcome: `fix code`.
+- Assessment: When you launch a managed checkout on a suspended host and the checkout preview fails after the host comes
+  back (for example, the typed name is already taken), the launcher reopens with the reason only on the Folder line, as
+  a polite status. There is no bordered "Not launched." alert beside Launch, and screen readers get no alert. When the
+  preview was instead replaced by a newer one, the launcher reopens showing the new folder and no alert. Verified:
+  partly correct. Confirmed that `settle_waiting_launch`
+  (`crates/gui/farhelm-gui/src/launcher/view/checkout.rs:541-590`) calls `reveal_prepared` without a refusal, and that
+  the taken-name test (`launcher/checkout_tests.rs:2560-2584`) only asserts `launcher-preview-error`. The failed-preview
+  case conflicts with the reading of `SPEC.md:408` ("A failed preparation says the session was not launched") and
+  `SPEC.md:1610-1612` (every refused launch gets the alert). The superseded-preview case is deliberate: the doc comment
+  at `checkout.rs:528-534` cites SPEC.md's "never submits automatically or silently chooses another directory" and says
+  the user is shown the new folder and decides. Whether a failed post-wake preview counts as a "refused launch" is a
+  reading of the spec.
+- Decision: q-wake, "What waking a host at launch must guarantee": the maintainer picked "Never wedge, fail fast, word
+  per provider". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "Wait, another
+  complexity gate. If this turns complicated, the executor must stop and turn it into a follow-up to the item explaining
+  what's complicated and why."
+- Completion criteria: Launch-time waking never wedges, fails fast and words failures per provider. Recommendation for
+  reference: fix code — record the failed preview's reason as the launcher refusal (keep the superseded case as is) and
+  assert `shown_refusal` in the taken-name test; size S–M. Complexity gate (maintainer): if the fix turns very
+  complicated during execution, the executor stops and turns it into a follow-up TODO.md entry that explains what is
+  complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. A failed preview for the held wake supplies its reason to the launch refusal alert. A superseded
+  preview still brings back the form for a new choice. Change `lystsvyvrkwmswmrlkrxyynmtxqvmsvo`, bookmark
+  `plan/triage-environments-nov24/02c-checkout-wake-preview-refusal`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4922/changes).

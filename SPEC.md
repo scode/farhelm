@@ -1950,6 +1950,9 @@ still needs another click on Launch for the newly shown path.
 For a recipe-target launch, Farhelm validates the display title and first checkout directory name before starting the
 environment.
 
+If a managed-checkout preview failure ends a launch's wake preparation, the launcher reopens with a refusal alert that
+gives the preview's reason.
+
 Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no repository ignore
 an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
 remains unnamed. Whenever a checkout launch is unnamed, the name field shows the `repo-N` it will get as placeholder

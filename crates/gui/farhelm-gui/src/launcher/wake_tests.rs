@@ -70,6 +70,12 @@ pub(crate) fn push(
     host: &mut HostView,
     state: HostStateView,
 ) {
+    push_host(helm, host, state);
+    settle(cx);
+}
+
+/// Share the host update with screenshot fixtures, which settle via their own frame loop.
+pub(crate) fn push_host(helm: &mut FakeHelm, host: &mut HostView, state: HostStateView) {
     if matches!(state, HostStateView::Connected { .. }) {
         host.incarnation += 1;
     }
@@ -83,7 +89,6 @@ pub(crate) fn push(
         }],
         remove: Vec::new(),
     });
-    settle(cx);
 }
 
 /// A visible New press on the home folder uses that folder on the fresh connection. The accepted Resume can
