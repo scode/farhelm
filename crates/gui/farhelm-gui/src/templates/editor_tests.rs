@@ -537,6 +537,30 @@ fn a_field_that_no_longer_fits_stays_and_refuses_saving(cx: &mut TestAppContext)
     assert!(saves(&mut helm).is_empty());
 }
 
+/// Keep the generic declaration visible after a switch and refuse saving it until the template fits the Agent tab.
+#[gpui::test]
+fn a_generic_custom_command_template_cannot_be_saved_on_the_agent_tab(cx: &mut TestAppContext) {
+    let generic = template(
+        "generic",
+        TemplateFields {
+            kind: Some(LauncherKind::Command),
+            agent: Some(LaunchHarness::Custom),
+            custom_agent: Some(None),
+            ..TemplateFields::default()
+        },
+    );
+    let (mut helm, cx) = open_header(cx, &[generic], None);
+    open_editor(&mut helm, "template-open-generic", cx);
+    assert!(!drawn(cx, "templates-agent-refusal"));
+    click(cx, "templates-switch-Agent");
+    assert_eq!(draft(cx).fields.agent, Some(LaunchHarness::Custom));
+    assert!(drawn(cx, "templates-agent-refusal"));
+    assert!(painted(cx).contains("Custom (not offered)"));
+    click(cx, "templates-save");
+    assert!(painted(cx).contains("Agent type: Generic Custom is only for Command templates"));
+    assert!(saves(&mut helm).is_empty());
+}
+
 /// A name holding invisible formatting is host text the editor cannot show raw (SPEC.md: "Invisible formatting is
 /// shown escaped and read-only, retaining its raw value through unrelated saves"). Specified: the field shows the
 /// escapes with the old hint, and an unrelated save writes under the raw name. Replacing the name is

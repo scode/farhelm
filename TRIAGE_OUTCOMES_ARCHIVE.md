@@ -48386,3 +48386,21 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   the feedback file and its index entry.
 - Execution: Fixed using pushed registrations as Settings search entries with stable IDs, isolated names and a body target for Add. Change `oyloxnummnwytuxsrsrukuxqunmnppqs`, bookmark `plan/triage-custom-agents-nov24/03h-settings-custom-agent-search`,
   https://github.com/scode/farhelm/pull/4919/changes.
+
+## trailing-templates-editor-allows-generic-custom-on-agent-template.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC.md, "Templates" (line 1338): "Incompatible fields stay visible and prevent saving
+  until corrected or removed." On an Agent template, the editor itself marks generic Custom as incompatible: it offers
+  generic Custom only for Command templates (`templates/editor/rows.rs:302-304`) and labels it "Custom (not offered)"
+  otherwise (:313-317). Yet `Field::refusal` (`templates/fields.rs:229-295`) does not refuse it, so Save succeeds. The
+  fix follows directly, mirroring the existing refusal for a shell agent on a Command template (`fields.rs:237-242`).
+  Verified: Confirmed by reading the code.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code — add
+  the refusal and an editor test; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
+- Execution: Fixed by retaining the generic Custom choice and refusing saves on the Agent tab until it is replaced or removed. Change `soqkwlyulrqvvqoxrwtrqynqsrkqkoss`, bookmark `plan/triage-custom-agents-nov24/04-templates`,
+  https://github.com/scode/farhelm/pull/4920/changes.

@@ -1157,6 +1157,12 @@ static SCENES: &[Scene] = &[
         setup: template_editor_setup,
     },
     Scene {
+        name: "template-generic-agent-refusal",
+        size: (900., 720.),
+        draw: empty,
+        setup: template_generic_agent_refusal_setup,
+    },
+    Scene {
         name: "template-invalid-custom-model",
         size: (1010., 940.),
         draw: empty,
