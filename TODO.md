@@ -176,6 +176,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Recipe Delete now handles historical records with no resources. Preventing those records at the admission boundary
   also needs a way to show the outcome of an already accepted Rebuild.
 
+  Recheck admission when launch preparation or Rebuild starts, before each new helper's base pull, and before each
+  helper create. Dispatch from the route and Podman executable that passed the final check. A separate runtime lookup
+  can wait on another probe and accept a capable engine even after the ordinary Farhelm connection refuses new work.
+  Keep that runtime path for existing resources. Check for cancellation when the admission and pull waits settle. Clear
+  the helper's name and start marker if admission refuses or cancellation arrives before the create is sent. Keep the
+  existing recovery rules if a create might have been sent. Test a refusal while the final route is resolving and one
+  after a successful pull. Confirm both leave no create and clear the reservation, and cleanup of older work can still
+  run. See “Verify container hosts before trusting results or sending private input” for the shared requirements on
+  connection proof and cached observations.
+
 - **Verify container hosts before trusting results or sending private input.** Each provider command for a claimed
   container host must verify the recorded machine and account on the connection that will run it, before executing or
   accepting an engine result. Use a proof tied to that authenticated endpoint. A token sent with the command does not

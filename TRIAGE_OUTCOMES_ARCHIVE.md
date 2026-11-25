@@ -46586,3 +46586,32 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   already accepted. The first write also needs to be bound to the host that passed admission. Change
   `uznltwqsoqxoxqmxwqwyxwlzovmonlzy`, bookmark `plan/triage-podman-nov24/05a-removed-place-recipe`,
   [PR #4888](https://github.com/scode/farhelm/pull/4888/changes).
+
+## trailing-podman-build-prepare-uses-runtime-seam-bypassing-admission.md
+
+- Outcome: `fix code`.
+- Assessment: When a container host's Farhelm connection becomes refused (duplicate, changed or unverified installation)
+  after a launch or Rebuild has started, later build and preparation stages still start new image-building containers on
+  that host. The machine and account are still verified, so the work stays on the right machine and account. Verified:
+  Confirmed by reading. `software()` (`build.rs:162`) and `prepare_images_owned` take their observation from
+  `self.place()`, that is `runtime()`, which ignores freshness, cached refusals and ordinary refusals. `prepare_images`
+  calls `fresh()` only when `rebuild` (`build.rs:291-293`). The admission check happens once at the start. SPEC.md
+  "Container sessions" ("A Farhelm connection refusal for a duplicate, changed or unverified installation also prevents
+  new work through that host") does not say whether later stages of work already admitted count as new work. Whether
+  they do is a matter of reading the spec.
+- Decision: q-podid, "How far the container-host identity check reaches": the maintainer picked "Every command and
+  cached result". (2026-11-24 fewest-questions triage page (main c38b93552).) Maintainer's comment: "If it turns very
+  complicated, the executor must abort and turn this into a to-do item for a follow-up. Explaining what is complicated."
+- Completion criteria: Apply the container-host identity check to every command sent to a container host, including
+  against a hostile endpoint (the nonce must not be echoable), and drop capabilities and claims learned from an
+  unverified machine. Recommendation for reference: fix code — check admission inside `prepare_images` every time and
+  before each new helper. Size S-M. Discard is defensible. Complexity gate (maintainer): if the fix turns very
+  complicated during execution, the executor stops and turns it into a follow-up TODO.md entry that explains what is
+  complicated and why, instead of landing it. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to TODO.md under Plan follow-ups, “Show container recipe admission failures before recording build
+  ownership.” Checking at the start of each helper still leaves a runtime route lookup before dispatch. The full change
+  needs to bind dispatch to verified admission, distinguish the unsent reservation from a lost create result, and cover
+  cancellation and refusals during both waits. Change `pzxlysnulspmllyyzvmowkzynvqvmppm`, bookmark
+  `plan/triage-podman-nov24/05b-helper-admission`, [PR #4889](https://github.com/scode/farhelm/pull/4889/changes).
