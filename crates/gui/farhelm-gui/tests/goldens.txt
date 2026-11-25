@@ -152,6 +152,8 @@ linux/launcher-checkout-on-suspended-host--dark.png 109aafeb89367ff0f3bbe7c122e6
 linux/launcher-checkout-on-suspended-host--light.png 262ac4523edf287d9dbaed7d10ef6ae464612681
 linux/launcher-checkout-on-unverified-host--dark.png aa6085c19ced16d8acb8b4041a85ff9073f131f8
 linux/launcher-checkout-on-unverified-host--light.png e95da7a6b059377761d4d7a73151cafcc4012734
+linux/launcher-checkout-preview-wake-refusal--dark.png 0d5d571f1acae93aed946f6b526407608d8a3fc0
+linux/launcher-checkout-preview-wake-refusal--light.png a821ef37731fc9aef47750ed102ef73dfdea5b23
 linux/launcher-command-results--dark.png 965a5d43af4b19d2779d487585376a242d06208c
 linux/launcher-command-results--light.png dade16fe9dabf49d7ce14f393e305601e35a6441
 linux/launcher-container-checkout-refusal--dark.png 78cbc4f5c96d1600931a32262aec8f98338462ce

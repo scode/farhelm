@@ -431,9 +431,8 @@ impl Launcher {
     /// name moving on after a taken folder, a newer configuration revision, a save in the inline setup) drops it, since
     /// its folder is one the user has not seen yet (SPEC.md: Launch "never submits automatically or silently chooses
     /// another directory"), as does a failed preview. A ready one starts it with its mark, if its launcher is still
-    /// showing or was never shown. A quick launch that does not start comes back to be seen, with the failed preview's
-    /// line or the new preview, as any quick launch that did not start does. The old launcher's guarded submit compared
-    /// the whole preview identity the same way.
+    /// showing or was never shown. A failed preview for the held wake also brings back the launch refusal alert,
+    /// using the failure from that preview. A superseded preview comes back for a new choice.
     ///
     /// A launch held out of sight follows its own numbered name. When the preview it waits for came back taken and
     /// the taken-name rule moved the name to its next candidate, with all other inputs intact, it waits for that
@@ -443,6 +442,8 @@ impl Launcher {
         let Some(entity) = launcher.upgrade() else {
             return;
         };
+        let after_wake =
+            super::super::launch::waking(cx) && super::super::launch::still_preparing(&entity, cx);
         let settled = entity.update(cx, |launcher, cx| {
             let armed = launcher.checkout.armed.as_ref()?;
             let renamed = launcher.preview_key(cx).filter(|key| {
@@ -460,16 +461,24 @@ impl Launcher {
                 return None;
             }
             let armed = launcher.checkout.armed.as_ref()?;
-            let start = if launcher.preview_key(cx).as_ref() != Some(&armed.key) {
-                false
+            let (start, refusal) = if launcher.preview_key(cx).as_ref() != Some(&armed.key) {
+                (false, None)
             } else {
-                match launcher.checkout_preview(cx) {
-                    Preview::Waiting => return None,
-                    Preview::Failed => false,
-                    Preview::Ready(_) => true,
+                match launcher.checkout.preview.answer_for(&armed.key) {
+                    None => return None,
+                    Some(Ok(_)) => (true, None),
+                    Some(Err(words)) => (
+                        false,
+                        after_wake.then(|| {
+                            HostSentence::new("launcher-checkout-wake-refusal").host(words)
+                        }),
+                    ),
                 }
             };
             let armed = launcher.checkout.armed.take()?;
+            if let Some(refusal) = refusal {
+                launcher.wake_refused(refusal, cx);
+            }
             let start = start && (armed.held_out_of_sight || launcher.layer.is_some());
             Some((start, armed))
         });

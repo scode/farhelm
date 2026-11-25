@@ -1202,6 +1202,12 @@ static SCENES: &[Scene] = &[
         setup: unverified_checkout_setup,
     },
     Scene {
+        name: "launcher-checkout-preview-wake-refusal",
+        size: (1080., 900.),
+        draw: session_lists_then,
+        setup: failed_checkout_setup,
+    },
+    Scene {
         name: "launcher-managed-checkout",
         size: (1080., 1160.),
         draw: session_lists_then,

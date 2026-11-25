@@ -2737,6 +2737,7 @@ fn a_woken_checkout_with_a_taken_typed_name_returns_to_the_form(cx: &mut TestApp
     let preview = hold_woken_preview(&mut helm, cx, &host, "taken");
     preview.reply(&mut helm, 409, json!(TAKEN));
     settle(cx);
+    assert_eq!(shown_refusal(cx).unwrap(), format!("Not launched. {TAKEN}"));
     assert_eq!(
         name_of(cx, "launcher-preview-error").as_deref(),
         Some(TAKEN)
