@@ -1262,11 +1262,6 @@ consequences.
   and if the row left the filtered session list right before the press the question closes and does nothing with no
   notice.
 
-- [`trailing-harness-upgrades-https-redirect-downgrade.md`](trailing-harness-upgrades-https-redirect-downgrade.md) — The
-  drift runner's fallback installer downloader follows HTTPS-to-HTTP/FTP redirects before piping to bash (other by
-  established-route rule because neither hardcoded HTTPS URL is known to redirect; would cross into highest if a
-  redirect downgrade is reached).
-
 - [`trailing-harness-upgrades-orphans-updater-grandchildren.md`](trailing-harness-upgrades-orphans-updater-grandchildren.md)
   — If a vendor agent updater or fallback shell installer hangs until its timeout, or the drift runner is stopped with
   SIGTERM during the upgrade phase, only the top-level shell/wrapper process is killed while its download or extraction

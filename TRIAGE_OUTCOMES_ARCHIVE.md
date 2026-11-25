@@ -40970,3 +40970,27 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Corrected the specification or supporting text in jj change `oqomnmyknxoxnrnvuwryxmrlotoquunm`, bookmark
   `plan/triage-spec-text-nov24/04-text-corrections-3`, draft PR
   [#4805](https://github.com/scode/farhelm/pull/4805/changes).
+
+## trailing-harness-upgrades-https-redirect-downgrade.md
+
+- Outcome: `fix code`.
+- Assessment: Before a drift run, the runner upgrades each agent CLI. For Goose and Cursor it can fall back to
+  downloading the vendor's install script and running it with bash on the maintainer's machine. The download follows
+  redirects from HTTPS to plain HTTP or FTP. An attacker on the network could only exploit this if the vendor's HTTPS
+  address ever redirected to plain HTTP, and could then run code on the maintainer's workstation. Verified: Confirmed by
+  source. `run_installer` uses plain `urllib.request.urlopen` and `bash install.sh`
+  (`scripts/harness_upgrades.py:143-151`, URLs at lines 62 and 79). The stdlib follows `https`→`http`/`ftp` redirects.
+  Not established: that either URL redirects through a non-HTTPS hop. Without that, an attacker would need to control
+  the HTTPS endpoint itself, and then needs no downgrade. The "Harm whose route is not established in shipped code"
+  filter would fit, but the unestablished consequence is potentially `highest` (remote code execution on the
+  maintainer's workstation), so FILTER.md requires the independent drop check before dropping. It is not dropped here.
+- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code. Refuse
+  non-HTTPS redirects and check `response.geturl()` before writing the script. The documented `curl … | bash` for Cursor
+  follows no redirects at all. Size S (about 15 lines plus a stand-in test). Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
+  brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. Fallback installer downloads require HTTPS at the starting URL, every redirect and the final
+  response. Change `yskvurusyqwzyynxvxonrqvywmwssxwr`, bookmark `plan/triage-tooling-nov24/01-other-fixes`,
+  [PR #4801](https://github.com/scode/farhelm/pull/4801/changes).
