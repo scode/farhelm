@@ -121,3 +121,97 @@ Stop work to confirmed cleanup paths, strengthened the process and output witnes
 changes into the three follow-up entries. The first Hosts run (`bd61f176-5a49-42b9-9346-7df2519f0448`) failed because
 the controls do not set the accessibility flag used by the assertion. The exact Hosts rerun at `d6eb80a0` checked the
 real click and focus targets and passed (`4f979881-a7a8-4e80-989e-5f2cbce1f603`).
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round, through its six PRs and the landing fix
+[#4887](https://github.com/scode/farhelm/pull/4887/changes). Since the executor based it, main gained the last five PRs
+of the helm triage plan, which landed in the previous round: credential delivery failures scoped to the saved credential
+(#4873), launcher focus after a checkout folder save (#4867), a TODO entry deferring a Wayland paste fix (#4869), a
+credential test (#4876), and the screenshot scene list (#4882). None of them touches the supervisor, its cleanup or
+recovery code, or the tests this plan changed, and the landing's review found no interaction. Rebasing onto them
+conflicted only in the triage ledgers and the review queue's index, where both plans had moved different outcomes to the
+archive; I kept both sides, and a script check confirmed the index matches the findings on disk and no outcome is in
+both the ledger and the archive.
+
+The landing's review read the whole diff against SPEC.md and SPEC_impl.md and found no bug: Delete's new hangup for tab
+shells reaches only shells the cleanup was already going to end, matched by their recorded process identity, so a reused
+process number never gets it; a session whose terminal host's socket vanished keeps its unavailable terminal only while
+its host or agent is confirmed alive or cannot be checked; a retried Restart keeps the current launch's record until the
+cleanup of its processes and their systemd scope is confirmed, across supervisor restarts too; and a malformed session
+id is now escaped in the restart cleanup's log lines. It counted no blockers, two should-fix test gaps and six small
+points.
+
+#### Fixes made while landing
+
+- **Blank lines left in the review queue's index.** Each of the plan's PRs removed the index entries of the findings it
+  settled but left the blank line that had separated each entry, so the index of open review findings collected 31 extra
+  blank lines and the Markdown formatter's check failed on it. #4887 removes them and changes nothing else. Main carried
+  the extra lines only for the minutes between the plan's first merge and #4887's.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the plan's PRs rebased onto main as it stood at the start of the landing (`8db5ba50`), with the ledger and index
+conflict resolutions; the rebased stack's top commit was `7d8e6e4f`. The only later change is the landing fix
+[#4887](https://github.com/scode/farhelm/pull/4887/changes), which removes blank lines from the review queue's index;
+after it I ran `dprint check` again, and it passed. That final tree is what main now holds outside the plans queue.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `f167b978-868f-4932-9a57-7a3c6af2ec6d`): all 8655 tests passed, with no runtime skip. The plan changed the
+  supervisor's service core, cleanup, teardown and terminal host recovery, and many of the end-to-end tests that drive
+  them, plus one helm test and one test of the desktop app's Hosts views; the whole suite was the narrowest run that
+  covered them.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `cargo fmt --all -- --check`, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (no
+  errors; one warning, about an old citation in the triage archive, already on main) and
+  `python -B scripts/check-test-sleeps.py`, locally: passed. `dprint check`, locally: failed on the review queue's
+  index, as above, and passed with the landing fix.
+
+Reused: none. The report's own runs covered the same code before the rebase, and everything they covered ran again
+above.
+
+Skipped: the desktop app's screenshot comparison and end-to-end smoke, the tests and two clippy runs of the desktop
+app's outer shell (which the workspace suite leaves out), since the plan changed nothing the desktop app draws or does;
+its one change on that side is a test of the Hosts views in the app's interface code, which the workspace suite ran; the
+workspace doctests, since no documentation example changed; a Mac run, though the tab hangup fix is aimed at macOS 26
+and later (its new test runs on Linux with a shell that hides the marker the same way); and CI, which runs only on
+demand.
+
+#### What the report says that is no longer true
+
+- The report lists the Markdown formatter's check among the checks that passed. The blank lines above are in the plan's
+  own PRs as the executor last pushed them, before the landing rebased anything (the same 31, growing PR by PR), so that
+  check fails on the plan's final revision and cannot have run on it.
+
+#### Things you should know that the report does not say
+
+- **Two of the plan's new rules are not fully covered by tests; I recommend a follow-up for both.** The code is correct
+  today, by the review's reading.
+  - Delete now hangs up tab shells that hide Farhelm's marker (zsh on macOS 26 and later does), so they can save their
+    history before they are ended. The new test calls the cleanup step directly. The one end-to-end test with such a tab
+    shell makes the shell ignore hangups, so it cannot tell a hangup from a kill; if Delete stopped passing the tab
+    shells along, every test would still pass. The review's sketch: a tab shell that writes a file when hung up, then a
+    Delete, then a check for the file.
+  - A session whose host's socket vanished while the host still runs now keeps its terminal as unavailable rather than
+    dropping it. The new test covers keeping it; nothing covers dropping it once the host and agent have really ended.
+    If that half broke, a session whose host had ended would stay unavailable for good, with Stop and Restart refused
+    until Delete. About ten lines in the same test would cover it.
+- **A session whose host lost its socket but is still running now stays unavailable until the host ends.** Stop and
+  Restart are refused for it meanwhile, since Farhelm cannot confirm what the host is doing; Delete still works. That is
+  what SPEC.md's rule that what cannot be examined counts as unconfirmed asks for, but the plan's changelog draft
+  describes this fix in internal terms and leaves the visible change out, so release curation should add it.
+- **One finding closed without a change is now recorded nowhere.** The cleanup of cached repository copies stops at the
+  first repository whose cleanup fails, skipping the others. The plan closed that finding without a fix, within your
+  triage decision that allowed closing the remaining small items, because the fix and its test would have gone over
+  their size limit of about 30 lines: per the report, a real fix must tell a leftover that can be cleaned up later apart
+  from a failed move of the selected cache. It has no queue or TODO entry now. Ask for one if you want it tracked.
+- **Small wording and comment points the review noticed.** One SPEC_impl.md paragraph on Restart uses "earlier launch
+  record" in two senses two sentences apart. The new SPEC_impl.md paragraph about Delete's hangup sits among the
+  paragraphs on systemd scopes rather than next to the one about hangups. A code comment on Restart's consent check
+  still says the records are removed on that path. In the cleanup code, one comment does not mention the new tab hangup
+  and a rewritten one dropped the note that the cleanup's target limits which processes it may follow. One of the new
+  TODO.md entries is not separated from the one before it by a blank line, as its neighbors are.
