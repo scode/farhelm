@@ -225,10 +225,6 @@ consequences.
   — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
   admitted instead of being refused.
 
-- [`trailing-wake-drops-one-time-yolo-confirmation.md`](trailing-wake-drops-one-time-yolo-confirmation.md) — If a host
-  suspends while the launcher's YOLO confirmation is open, clicking Start YOLO session anyway wakes the host but forgets
-  the confirmation and re-asks YOLO once connected.
-
 - [`trailing-restart-with-wake-refusal-hardcodes-not-launched.md`](trailing-restart-with-wake-refusal-hardcodes-not-launched.md)
   — When Restart with fails while waking a suspended or stopped host, the alert says Not launched instead of Restart
   error, and Restart with wake is untested across launcher tests.
