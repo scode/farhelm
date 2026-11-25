@@ -267,12 +267,6 @@ consequences.
 - [`hook-hint-dismissal-survives-next-launch.md`](hook-hint-dismissal-survives-next-launch.md) — Dismissing a hook hint
   for one run can hide the hint on a later run of the same session.
 
-- [`hook-hint-dismissal-survives-ui-reset.md`](hook-hint-dismissal-survives-ui-reset.md) — A local hook hint dismissal
-  can survive reconnect even though the UI reset is supposed to clear it.
-
-- [`hook-hint-dismissal-reply-loss-hides-all-hints.md`](hook-hint-dismissal-reply-loss-hides-all-hints.md) — A lost
-  dismissal reply can hide every hint for that agent until the window closes.
-
 - [`hook-hint-can-repaint-old-dismissal-error.md`](hook-hint-can-repaint-old-dismissal-error.md) — An old dismissal
   error can reappear after Settings has successfully restored the hint.
 
