@@ -153,3 +153,76 @@ Each draft passed the required independent Sol code review and a fresh reading o
 findings were addressed in each draft, including the difference between a Delete that was never sent and one that went
 unanswered, vendor-owned login files, foreground conversation corrections, and the scope of the launcher-only Suspend
 and Resume hold.
+
+### Landing
+
+#### What landed with it
+
+Two plans landed this round: drift-instructions-delivery first, a new live drift test category that touches none of this
+plan's files, then this one through [#4799](https://github.com/scode/farhelm/pull/4799/changes),
+[#4800](https://github.com/scode/farhelm/pull/4800/changes), [#4802](https://github.com/scode/farhelm/pull/4802/changes)
+and [#4805](https://github.com/scode/farhelm/pull/4805/changes). Since this plan was based, main gained the previous
+rounds' drift work, the hook log's new event field with its website paragraph, and the other November 24 triage plan,
+which archived 50 discarded findings. None of those changes the spec text or code this plan edits; the hook log
+paragraph and this plan's edit to the same website page are in different passages. The rebase conflicted only in the
+triage ledgers and the review queue's index, where both plans had removed different findings and appended different
+decisions to the archive; I kept both sides, and a script check then confirmed the index matches the findings on disk
+and no decision is in both the ledger and the archive.
+
+#### Fixes made while landing
+
+None.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. This round landed two
+plans, drift-instructions-delivery and triage-spec-text-nov24. Both reports' checks ran before their stacks were rebased
+onto the drift and triage changes that landed meanwhile, so the landing ran its checks on the two plans stacked together
+on main, with the rebase's conflict resolutions in them (`140e156e`):
+
+- `cargo nextest run --locked -p farhelm --test e2e` filtered to `real_agent_capture::drift::` and `hook_identity::`, on
+  the test worker (recorder run `ea45d013-8e11-4428-86d3-84882969acf9`): all 67 passed, with no runtime skip. These are
+  the drift tests that need no vendor CLI and every hook identity test, which includes the two that check the rewritten
+  conversation notices.
+- `cargo nextest run --locked -p farhelm-supervisor --lib` filtered to `core::vendor::`, `claude_pin` and
+  `notifications::`, on the test worker (recorder run `34e4e046-fe01-45e1-b5b3-85f228cd1827`): all 17 passed. The notice
+  texts live in those modules.
+- `python3 -B scripts/run-harness-drift.py --list --category all`, on the test worker: it listed every category's cases,
+  the six new instructions delivery cases included, starting no agent.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `python3 releasing/generate-workflow.py --check` (the release workflow's source file changed), the website build
+  (`bun run build` in `website`), `python3 releasing/check-changelog.py format`, `cargo fmt --all -- --check`,
+  `python -B scripts/check-test-sleeps.py` (in its pinned interpreter), `dprint check`,
+  `python3 scripts/check-agents-md.py` (no errors; one warning, about an old citation in the triage archive, already on
+  main) and `python3 -B scripts/test-run-harness-drift.py` (recorder run `1d1aca37-53b3-415f-9350-5c808cf57091`, all 18
+  passed), locally: passed.
+
+Reused: the executor's live run of the instructions delivery category against the installed agents, recorded in its
+report; the rebase changed how the category reaches the shared launch helper, not what it launches.
+
+Skipped: the live drift cases themselves, since they spend vendor turns, need the vendor logins and are opt-in by
+design; the rest of the workspace Rust suite and the desktop checks, since the only behavior change in either plan is
+the text of two notices, which the tests above cover; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+Nothing. The checks the report lists ran before the rebase; the ones above ran after it.
+
+#### Things you should know that the report does not say
+
+- **The landing's review agreed with the spec changes it sampled.** It spot-checked about ten of them against the code
+  and found them matching, and confirmed that the change to the release workflow's source file is comments only, which
+  do not reach the generated workflow.
+- **Two decisions corrected text and left a suggested code change undone**, as their recorded decision ("correct the
+  text") allows. For the command line's `--effort`, a value starting with a hyphen given as a separate word
+  (`farhelm agent create --effort -fast`) is still rejected; the report mentions this one. For the Tensorlake host setup
+  tests, a misleading test comment was corrected, but the suggested extra check that setup never reads the agent's
+  settings was not added. Either could be a small follow-up.
+- **Two spec sentences this plan wrote are looser than the code.** The quick launch rule says it uses the open session's
+  original host "if that host is ordinary", where the code means the same installation and not a sandbox or container.
+  The rewritten sandbox Delete paragraph dropped "Delete does not guess"; the rule that Delete never resumes the sandbox
+  is still stated elsewhere in the spec.
+- **A queued finding about the Hosts menu's setup rerun still cites a finding this plan removed** (a stale host retry
+  continuing a sandbox Delete). That decision is in the triage archive, and the queue's rules do not require updating
+  the citation.
