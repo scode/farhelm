@@ -319,10 +319,6 @@ consequences.
 - [`trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md`](trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md)
   — The new test would still pass if a future edit broke automatic Trash refresh after Replace removes its source.
 
-- [`trailing-agent-create-host-help-omits-supported-hostless-launches.md`](trailing-agent-create-host-help-omits-supported-hostless-launches.md)
-  — Agent create's Host help can send callers looking for an unnecessary flag when a template launches a recipe or their
-  session is already inside a Farhelm environment.
-
 - [`trailing-timed-out-agent-delete-lose-late-checkout-warning.md`](trailing-timed-out-agent-delete-lose-late-checkout-warning.md)
   — An approved agent Delete can leave a checkout behind after its relay has timed out, with no warning in the app's
   notice history.
@@ -783,12 +779,6 @@ consequences.
   — Searching in Settings for a registered custom agent's display name or ID always returns no matches and hides every
   registered custom agent from the Settings sidebar, even though each registered custom agent is its own Settings
   section.
-
-- [`trailing-spec-md-contradicts-send-handoff-auto-opening-auto-update-popover.md`](trailing-spec-md-contradicts-send-handoff-auto-opening-auto-update-popover.md)
-  — The product specification contradicts itself on when an automatic host update's SSH sign-in popover can open on its
-  own: one section says it opens only when you press **Answer** (or run a manual action on that host), while the
-  keyboard-focus section and the desktop app allow sending an answer to any other host's SSH question to immediately
-  open and focus an already-waiting automatic Update Setup question.
 
 - [`trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md`](trailing-stacked-quick-launch-eligible-accepts-custom-agent-without-id.md)
   — A launch template on the Agent tab that selects the generic Custom agent type without naming a registered custom

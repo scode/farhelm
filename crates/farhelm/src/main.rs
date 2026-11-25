@@ -362,8 +362,9 @@ enum AgentCmd {
         #[arg(long, value_name = "ID", conflicts_with_all = ["gh", "recipe"])]
         conversation: Option<String>,
         /// Host to create on, by the name `farhelm agent hosts` shows.
-        /// Required unless a template sets the host or --recipe is given,
-        /// and always with `--idempotency-key`.
+        /// Required for a fleet host unless a template names it. Omit it
+        /// for a recipe launch, including through a template. An agent in
+        /// a sandbox or container can omit it to create there.
         #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
         host: Option<String>,
         /// Create the session in a new sandbox or container built from this
@@ -422,7 +423,8 @@ enum AgentCmd {
         /// Display title; omitted derives one from the directory.
         #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
         title: Option<String>,
-        /// Retry key: the same key creates the session only once. Needs `--host`.
+        /// Retry key for creating the session only once. Fleet creates need
+        /// an explicit `--host`. Recipe launches do not accept retry keys.
         #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
         idempotency_key: Option<String>,
         /// Removed: an agent cannot override the YOLO confirmation (SPEC.md,
