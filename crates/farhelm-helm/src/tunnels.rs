@@ -1762,6 +1762,7 @@ mod tests {
     fn ownership_checks_preserve_identityless_recovery_without_retargeting() {
         let original = SessionClaim {
             host: 1,
+            is_session_owned: false,
             entry_uuid: "00000000-0000-4000-8000-000000000001".into(),
             incarnation: 1,
             identity: Some("one".into()),

@@ -234,6 +234,7 @@ pub(super) async fn delete_environment_session(
     };
     let claim = crate::manager::SessionClaim {
         host: key.host,
+        is_session_owned: status.is_session_owned,
         entry_uuid: status.entry_uuid.clone(),
         incarnation: status.incarnation,
         identity: match &status.state {

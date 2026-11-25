@@ -11,12 +11,31 @@ use farhelm_proto::{LaunchSelection, SessionLaunch};
 
 /// A launch whose workspace-trust policy has been chosen for this operation.
 ///
-/// New compositions use destination Settings; plain Replace deliberately keeps
+/// New compositions use the destination policy; plain Replace deliberately keeps
 /// the stored choice. Neither policy proves YOLO approval or current liveness.
 /// The private payload prevents routes from treating an arbitrary raw launch as
 /// resolved, or replacing the launch after its trust choice was approved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TrustResolvedLaunch(SessionLaunch);
+
+/// Keep workspace trust scoped to the destination that will run the launch.
+/// A recipe approval can choose `Disposable` before the host exists.
+#[derive(Clone, Copy)]
+pub(crate) enum TrustDestination {
+    HostSettings,
+    Disposable,
+}
+
+impl TrustDestination {
+    /// Ownership comes from the helm's registered host or confined agent scope.
+    pub(crate) fn for_host(session_owned: bool) -> Self {
+        if session_owned {
+            Self::Disposable
+        } else {
+            Self::HostSettings
+        }
+    }
+}
 
 impl TrustResolvedLaunch {
     /// Inspect the fixed launch for guards, card contents and bookkeeping.
@@ -68,10 +87,14 @@ pub(crate) struct ApprovedLaunchTrust {
 
 impl ApprovedLaunchTrust {
     /// Resolve both choices from one snapshot before approval or provisioning can wait.
-    pub(crate) async fn resolve(state: &AppState, launch: SessionLaunch) -> anyhow::Result<Self> {
+    pub(crate) async fn resolve(
+        state: &AppState,
+        launch: SessionLaunch,
+        destination: TrustDestination,
+    ) -> anyhow::Result<Self> {
         let config = state.store.resolve_checkout_config(None).await?;
         Ok(Self {
-            mode: configured_launch_workspace_trust(launch, &config)?,
+            mode: configured_launch_workspace_trust(launch, &config, destination)?,
             claude_after_clone: config.claude_trust,
         })
     }
@@ -100,28 +123,31 @@ pub(crate) fn try_without_workspace_trust(
     }
 }
 
-/// Apply current Settings to a new composition. A supported launch uses its
-/// agent's switch in every directory. Commands and unsupported agents keep
-/// their words without reading Settings.
+/// Apply the destination's policy to a new composition. Disposable sessions
+/// always trust where supported. Commands keep their literal words.
 pub(crate) async fn normalize_launch_workspace_trust(
     state: &AppState,
     launch: SessionLaunch,
+    destination: TrustDestination,
 ) -> anyhow::Result<TrustResolvedLaunch> {
     let launch = match try_without_workspace_trust(launch) {
         Ok(resolved) => return Ok(resolved),
         Err(launch) => launch,
     };
     let config = state.store.resolve_checkout_config(None).await?;
-    configured_launch_workspace_trust(launch, &config)
+    configured_launch_workspace_trust(launch, &config, destination)
 }
 
-/// The setting can contribute trust only when it does not override the
-/// user's own Antigravity settings in Custom flags.
+/// Automatic trust must preserve an explicit settings file in Custom flags,
+/// even on a disposable host.
 fn trust_enabled_for_selection(
     selection: &LaunchSelection,
     config: &crate::checkout_config::ResolvedCheckoutConfig,
+    destination: TrustDestination,
 ) -> bool {
-    launches::workspace_trust_enabled(selection.harness, config)
+    selection.harness.offers_workspace_trust()
+        && (matches!(destination, TrustDestination::Disposable)
+            || launches::workspace_trust_enabled(selection.harness, config))
         && !launches::workspace_trust_blocked_by_selection(selection)
 }
 
@@ -132,10 +158,11 @@ fn trust_enabled_for_selection(
 pub(crate) fn configured_launch_workspace_trust(
     launch: SessionLaunch,
     config: &crate::checkout_config::ResolvedCheckoutConfig,
+    destination: TrustDestination,
 ) -> anyhow::Result<TrustResolvedLaunch> {
-    let trust = launch
-        .agent_selection()
-        .and_then(|selection| trust_enabled_for_selection(selection, config).then_some(true));
+    let trust = launch.agent_selection().and_then(|selection| {
+        trust_enabled_for_selection(selection, config, destination).then_some(true)
+    });
     launches::with_workspace_trust(launch, trust)
         .map(TrustResolvedLaunch)
         .map_err(invalid_request)
@@ -162,6 +189,61 @@ pub(crate) fn retain_stored_launch_workspace_trust(
 mod tests {
     use super::*;
     use farhelm_proto::{CommandLaunch, LaunchHarness, LaunchSelection};
+
+    /// A disposable destination grants only supported trust with all Settings
+    /// switches off. The same input on a persistent recipe host needs its setting.
+    #[test]
+    fn disposable_launches_grant_each_supported_harness_trust() {
+        let config = crate::checkout_config::ResolvedCheckoutConfig {
+            keep_spare: false,
+            claude_trust: false,
+            codex_trust: false,
+            muse_trust: false,
+            pi_trust: false,
+            antigravity_trust: false,
+            root: None,
+            post_clone: None,
+            config_revision: 0,
+        };
+        let supported = [
+            LaunchHarness::Claude,
+            LaunchHarness::Codex,
+            LaunchHarness::Muse,
+            LaunchHarness::Pi,
+            LaunchHarness::Antigravity,
+        ];
+        for harness in LaunchHarness::BUILT_INS.iter().copied() {
+            let bare = launches::compile(LaunchSelection {
+                custom_agent: None,
+                harness,
+                model: None,
+                effort: None,
+                permissions: None,
+                permission_flags: None,
+                wrapper_prefix: None,
+                container: None,
+                workspace_trust: None,
+            })
+            .unwrap();
+            let installed = configured_launch_workspace_trust(
+                bare.clone(),
+                &config,
+                TrustDestination::for_host(false),
+            )
+            .unwrap()
+            .into_launch();
+            assert_eq!(installed, bare, "{harness:?}");
+            let disposable =
+                configured_launch_workspace_trust(bare, &config, TrustDestination::for_host(true))
+                    .unwrap()
+                    .into_launch();
+            assert_eq!(
+                disposable.agent_selection().unwrap().workspace_trust,
+                supported.contains(&harness).then_some(true),
+                "{harness:?}",
+            );
+        }
+    }
 
     /// Command text is literal even when its declared harness supports trust.
     /// The synchronous constructor needs no Settings or destination inputs and
@@ -252,9 +334,24 @@ mod tests {
                 workspace_trust: None,
             };
             let bare = launches::compile(selection.clone()).unwrap();
-            let resolved = configured_launch_workspace_trust(bare.clone(), &config)
+            let resolved = configured_launch_workspace_trust(
+                bare.clone(),
+                &config,
+                TrustDestination::Disposable,
+            )
+            .unwrap()
+            .into_launch();
+            assert_eq!(
+                configured_launch_workspace_trust(
+                    bare.clone(),
+                    &config,
+                    TrustDestination::HostSettings
+                )
                 .unwrap()
-                .into_launch();
+                .into_launch(),
+                resolved,
+                "custom settings also take precedence over a host switch",
+            );
             assert_eq!(
                 resolved.agent_selection().unwrap().workspace_trust,
                 expected

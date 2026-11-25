@@ -3904,6 +3904,7 @@ mod tests {
         // The claim a mutation would have captured, taken now.
         let stale = crate::manager::SessionClaim {
             host,
+            is_session_owned: false,
             entry_uuid: harness.manager.status(host).expect("connected").entry_uuid,
             incarnation: harness.manager.status(host).expect("connected").incarnation,
             identity: Some("identity-reborn".to_string()),

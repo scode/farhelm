@@ -4690,8 +4690,8 @@ printf 'AGENT-RAN\n'
         }
     }
 
-    /// With a writable Claude config override, the shim still starts the agent and leaves that config alone
-    /// when HOME is unusable or the launch would trust HOME itself.
+    /// The shim leaves home trust alone and starts the agent. An untrusted or
+    /// unusable home still warns, and an exact pre-trusted home starts quietly.
     #[farhelm_testtrace::test]
     fn plain_claude_launch_skips_trust_when_home_is_unusable_or_is_the_working_directory() {
         let fixture = build_d1_fixture(None);
@@ -4745,6 +4745,31 @@ printf 'AGENT-RAN\n'
             );
             assert_eq!(std::fs::read_to_string(&config).unwrap(), "{}");
         }
+
+        let canonical = std::fs::canonicalize(&project).unwrap();
+        let seeded = serde_json::to_vec(&serde_json::json!({
+            "projects": {
+                (canonical.to_str().unwrap()): {"hasTrustDialogAccepted": true}
+            }
+        }))
+        .unwrap();
+        std::fs::write(&config, &seeded).unwrap();
+        std::fs::write(&fixture.spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+        let (report, terminal, status) = fixture.run_written_shim_in_child(
+            None,
+            &[
+                ("HOME", project.as_os_str()),
+                ("CLAUDE_CONFIG_DIR", config_dir.as_os_str()),
+            ],
+            &["CLAUDE_CODE_CUSTOM_OAUTH_URL"],
+        );
+        assert!(
+            status.success() && report.is_empty(),
+            "{terminal}\n{report}"
+        );
+        assert!(terminal.contains("AGENT-RAN"), "{terminal}");
+        assert!(!terminal.contains("Claude may ask"), "{terminal}");
+        assert_eq!(std::fs::read(&config).unwrap(), seeded);
     }
 
     /// Nothing the shim starts sees a `TMUX` or `TMUX_PANE` it inherited.

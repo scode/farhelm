@@ -1,5 +1,5 @@
-//! Each agent's Settings page holds its all-hosts opt-in for answering workspace-trust questions, which applies in any
-//! directory, as Antigravity's always has. Agents with a discovery hint
+//! Each agent's Settings page holds its opt-in for answering workspace-trust questions on installed and persistent
+//! hosts. Disposable session hosts grant supported trust during launch composition. Agents with a discovery hint
 //! have a separate switch that restores or dismisses it.
 //!
 //! SPEC.md, "Managed checkouts" (the Agent trust paragraphs). Ported from the old app's `ClaudeTrustSettings`
@@ -232,8 +232,9 @@ impl TrustAgent {
                  before it starts. It does the same for a fresh managed checkout, including one created for another \
                  agent. Farhelm skips your home directory and its parents, including /. Claude's trust covers \
                  everything inside those directories, so Claude may \
-                 still ask there. New, Clone, Restart with and Replace with use the current setting for those launches. \
-                 Restart and Replace keep the session's saved launch."
+                 still ask there. On installed hosts, New, Clone, Restart with and Replace with use this setting. \
+                 Sandbox and container sessions apply workspace trust automatically. The setting also controls the \
+                 separate trust edit after a managed clone. Restart and Replace keep the session's saved launch."
             }
             TrustAgent::Codex => {
                 "In folders you choose and in managed checkouts, Farhelm passes a trust option to Codex for that \
@@ -263,7 +264,8 @@ impl TrustAgent {
             TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi | TrustAgent::Antigravity => {
                 let mut paragraphs = vec![
                     format!(
-                        "{} New, Clone, Restart with and Replace with use this setting. Restart and Replace keep the \
+                        "{} On installed hosts, New, Clone, Restart with and Replace with use this setting. Sandbox \
+                         and container sessions apply workspace trust automatically. Restart and Replace keep the \
                          session's saved launch.",
                         self.mechanism()
                     ),

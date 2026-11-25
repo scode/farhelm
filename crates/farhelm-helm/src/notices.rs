@@ -705,6 +705,7 @@ pub(crate) mod tests {
         let host = rest_harness::local_id(store).await;
         manager::SessionClaim {
             host,
+            is_session_owned: false,
             entry_uuid: store.entry_uuid_of(host).await.unwrap().unwrap(),
             incarnation: 1,
             identity: None,
@@ -1197,6 +1198,7 @@ pub(crate) mod tests {
             .forget_session(
                 &manager::SessionClaim {
                     host: local,
+                    is_session_owned: false,
                     entry_uuid: status.entry_uuid,
                     incarnation: status.incarnation,
                     identity: None,

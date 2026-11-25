@@ -1198,7 +1198,7 @@ agent choice is independent of that destination:
   remembered. The last wrapper prefix from a successful user agent launch is remembered per agent type, helm-wide; a
   launch without one clears that agent's remembered prefix. Switching agent types loads the new type's remembered
   prefix. Agent-origin launches and command launches do not change this memory. Workspace trust for Codex, Muse and Pi
-  comes from separate off-by-default Settings switches that apply in any directory (below). There is no per-launch trust
+  comes from the destination policy and separate off-by-default Settings switches (below). There is no per-launch trust
   choice, and the old remembered trust value is neither read nor written. Those switches add per-launch trust arguments.
   Claude's separate switch edits its own configuration as described below. Without an override, Codex, Muse, Claude, and
   Cursor may still ask for directory trust (Cursor even with `--force`). Farhelm does not send answers to their terminal
@@ -1612,19 +1612,19 @@ mode also offers starting the same launch guarded instead, without YOLO confirma
 the resulting draft still differs from the stored launch. A plain Replace of a saved YOLO agent launch offers **Replace
 as guarded instead** when the agent supports Guarded. This includes older agent launches classified as YOLO because
 their mode is missing or unsupported. The guarded answer uses Replace with to compile the same agent, model, effort and
-wrapper in Guarded, using current workspace trust settings. It keeps the source host and directory, uses the source's
-current title, and keeps the original Delete precondition. It sends no YOLO consent or host-setting write. Custom flags
-and commands use the YOLO answers. The `farhelm` command line has no override: a request from inside a session is an
-agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A plain restart
-relaunches the session's own stored launch and needs no YOLO confirmation again. The question stays inline and has no
-header Close: its answers read Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the
-filled one-time YOLO answer. Tab follows that same order; Cancel keeps initial focus, except that a plain Replace's
-question, which arrives after its reply, takes focus only if the user has not moved on since answering Replace (see
-[Keyboard focus](#keyboard-focus)). The usual Replace answers, agent clone and inherited spawn copy the stored command.
-For an older agent launch without permission flags this preserves the original command and applies the YOLO gate. Clone,
-Replace with and Restart with compile new choices. For a stored agent launch with a missing or unsupported mode, Clone
-and Replace with prefill the agent's default for a new launch, Guarded when offered. Guarded launches need a host that
-understands protocol 48 or later.
+wrapper in Guarded, using the destination's workspace trust policy. It keeps the source host and directory, uses the
+source's current title, and keeps the original Delete precondition. It sends no YOLO consent or host-setting write.
+Custom flags and commands use the YOLO answers. The `farhelm` command line has no override: a request from inside a
+session is an agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A
+plain restart relaunches the session's own stored launch and needs no YOLO confirmation again. The question stays inline
+and has no header Close: its answers read Cancel, the guarded option when offered, the outlined permanent YOLO answer,
+then the filled one-time YOLO answer. Tab follows that same order; Cancel keeps initial focus, except that a plain
+Replace's question, which arrives after its reply, takes focus only if the user has not moved on since answering Replace
+(see [Keyboard focus](#keyboard-focus)). The usual Replace answers, agent clone and inherited spawn copy the stored
+command. For an older agent launch without permission flags this preserves the original command and applies the YOLO
+gate. Clone, Replace with and Restart with compile new choices. For a stored agent launch with a missing or unsupported
+mode, Clone and Replace with prefill the agent's default for a new launch, Guarded when offered. Guarded launches need a
+host that understands protocol 48 or later.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
@@ -1843,12 +1843,16 @@ resolution changed since preview is still refused. `~` expands there, using the 
 override restores inheritance; an empty hook override disables the inherited hook. Configuration changes affect new
 attempts, not an already accepted attempt or its retries.
 
-Settings offers an off-by-default, all-hosts choice under **Agents → Claude Code** to answer Claude's "trust this
-folder?" for structured Claude launches in any directory. New, Clone, Restart with, Replace with and agent-requested
-launches read it. Plain Restart and the Replace answers that reuse the saved command keep the stored choice. **Replace
-as guarded instead** reads Settings as Replace with does. On a new managed checkout the same switch also enables trust
-after clone and its post-clone command, including checkouts initially started with another agent. Changing the switch
-does not invalidate an already displayed path preview.
+New, Clone, Restart with, Replace with and agent-requested launches use the destination's workspace trust policy.
+Structured launches in a session's own sandbox or container automatically trust where supported by Claude Code, Codex,
+Muse, Pi and Antigravity. Custom settings flags still take precedence. Local, SSH and persistent recipe hosts follow
+Settings. Plain Restart and the Replace answers that reuse the saved command keep the stored choice. **Replace as
+guarded instead** uses the same policy as Replace with.
+
+Settings offers an off-by-default choice under **Agents → Claude Code** to answer Claude's "trust this folder?" for
+structured Claude launches in any directory outside the home checks below. On a new managed checkout the same switch
+also enables trust after clone and its post-clone command, including checkouts initially started with another agent.
+Changing the switch does not invalidate an already displayed path preview.
 
 The help leads with the mechanism: Claude has no supported switch, so Farhelm edits its settings file (normally
 `~/.claude.json`), which also holds sign-in, settings and per-directory state. It changes only that directory's trust
@@ -1859,11 +1863,12 @@ launch or Delete never fails because this edit failed. The caution explains that
 either writer's update, future Claude versions may change the file or locking without notice, and Farhelm cannot promise
 continued safety. Farhelm waits on Claude's advisory lock and never takes over a stale one. A writer stalled past
 Claude's stale-lock threshold can still lose an update in either direction when another writer takes over. This is an
-accepted trade-off of editing Claude's file. Trust allows repository hooks and commands just as answering Yes does.
-Farhelm skips the edit in the session's home directory and all of its parents, including the filesystem root. Claude
-treats a trusted directory as covering every directory inside it. Farhelm also skips the edit when the login shell
-supplies no usable absolute home directory or sets `CLAUDE_CONFIG_DIR` to a relative path. The session still starts and
-Claude may ask as usual. The mechanism is explicitly opt-in and best effort.
+accepted trade-off of editing Claude's file. Trust allows repository hooks and commands just as answering Yes does. The
+launch-time editor protects the session's home directory and its parents, including the filesystem root. If the selected
+config already trusts the exact home directory, a launch there requires no edit or warning. Claude inherits trust in
+directories beneath a trusted project. Farhelm also skips the edit when the login shell supplies no usable absolute home
+directory or sets `CLAUDE_CONFIG_DIR` to a relative path. The session still starts and Claude may ask as usual. The edit
+on installed hosts is explicitly opt-in and best effort.
 
 Farhelm offers Claude's trust hint for a structured Claude launch or a session created from a fresh managed checkout.
 
@@ -1877,23 +1882,18 @@ opened. A failed Don't show again save restores the band with an adjacent error 
 leaving the session drops the error. If the corrective settings read also fails, only the save error appears until trust
 is known to be off again, without the normal explanation or its actions. A stored dismissal also drops the error.
 
-The Settings pages for Codex, Muse and Pi each offer their own off-by-default, all-hosts trust switch. New, Clone,
-Restart with, Replace with and agent-requested launches apply the current setting in any directory. An inherited spawn
-reads Settings under the same rule as Clone. Codex receives a per-launch trusted directory override, Muse receives
-`--trust-workspace`, and Pi receives `--approve` for project settings and extensions. The agent keeps its saved
+The Settings pages for Codex, Muse and Pi each offer their own off-by-default trust switch for installed hosts. An
+inherited spawn uses the same destination policy as Clone. Codex receives a per-launch trusted directory override, Muse
+receives `--trust-workspace`, and Pi receives `--approve` for project settings and extensions. The agent keeps its saved
 configuration. The help explains that the repository's hooks, settings and commands may run as if the user had approved
-them. Plain Restart and the Replace answers that reuse the saved command keep the stored launch. **Replace as guarded
-instead** reads Settings as Replace with does. An accepted fresh-checkout retry retains its original trust choice. An
-ordinary keyed retry whose resolved launch changes may refuse the reused key. This includes a retry across the
-workspace-trust upgrade if the original attempt used a symlink and stored its canonical path.
+them. An accepted fresh-checkout retry retains its original trust choice. An ordinary keyed retry whose resolved launch
+changes may refuse the reused key. This includes a retry across the workspace-trust upgrade if the original attempt used
+a symlink and stored its canonical path.
 
-Antigravity has its own off-by-default, all-hosts switch. It applies to newly composed Antigravity agent launches in
-ordinary directories, managed checkouts and disposable environments. The per-launch `--settings` argument names the
+Antigravity has its own off-by-default switch for installed hosts. The per-launch `--settings` argument names the
 canonical working directory on the session's host when it can be resolved and represented as text. Otherwise it uses the
 submitted path. It replaces the saved trust list for that process and leaves the settings file alone. Custom permission
-options supplying `--settings` or `--settings=...` take precedence. Plain Restart and the Replace answers that reuse the
-saved command keep the stored launch. **Replace as guarded instead** reads Settings as Replace with does. Literal
-Command launches supply their own arguments.
+options supplying `--settings` or `--settings=...` take precedence. Literal Command launches supply their own arguments.
 
 Codex, Muse and Antigravity show the same nonmodal discovery hint while their recognized trust question is current in
 the agent terminal, their switch is off, and their own hint has not been dismissed. The hint names the agent, offers
@@ -4467,8 +4467,8 @@ The CLI's contract, since agents will script against it: on success it prints th
 zero, and success means the session exists — a child whose agent then fails to launch still exists, in error or exited
 status. Precondition failures exit nonzero with a message on stderr. `--cwd` is required, and the launch is either
 `--inherit-agent` or the launch flags shared with `farhelm agent create` below. `--inherit-agent` explicitly reuses the
-asking session's stored launch, which the session's own supervisor supplies. The helm recomputes workspace trust from
-current Settings. The launch flags are resolved by the helm, which owns templates and composes agent launches. Either is
+asking session's stored launch, which the session's own supervisor supplies. The helm recomputes workspace trust for
+that destination. The launch flags are resolved by the helm, which owns templates and composes agent launches. Either is
 refused with a remedy when no helm is connected. The title is generated when omitted. An optional idempotency key makes
 retries safe: re-running spawn with the same key after a timeout or ambiguous outcome returns the existing child rather
 than creating another. Keys are scoped to the asking session on its host and live as long as the child session does: the
@@ -4788,13 +4788,13 @@ refused without a suffix. A base name's invalid or over-long candidate is also r
 that loses its approved directory reports the conflict and never submits another create automatically. Keyed recovery
 precedes any new name preview. `farhelm spawn` and `farhelm agent clone` do not request fresh checkouts; spawn refuses a
 checkout template. `--inherit-agent` is exclusive with every launch flag. `--trust` is no longer accepted for create,
-spawn, or template writes. Workspace trust follows Settings. A command flag repeated or contradicted (`--yolo` with
-`--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
-`farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent` given something that
-is not an agent type is refused with the list of agent types. While its retry record is retained, a retry under an
-idempotency key is matched by the request as the agent sent it, not by what that request resolved to. Retrying
-`farhelm agent create` or `farhelm spawn` with the same key, host, template names, flags and spawn placement, or
-`farhelm agent clone` with the same key, source, host and `--cwd`/`--title` overrides (an override given counts as
+spawn, or template writes. Workspace trust follows the destination policy. A command flag repeated or contradicted
+(`--yolo` with `--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and
+`--profile-id`, and `farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent`
+given something that is not an agent type is refused with the list of agent types. While its retry record is retained, a
+retry under an idempotency key is matched by the request as the agent sent it, not by what that request resolved to.
+Retrying `farhelm agent create` or `farhelm spawn` with the same key, host, template names, flags and spawn placement,
+or `farhelm agent clone` with the same key, source, host and `--cwd`/`--title` overrides (an override given counts as
 different from one left out), returns the first attempt's session, or the refusal its host recorded, even if a template
 it names or the clone's source was edited in between, for as long as the request still names something the helm can
 resolve. A retry that no longer resolves (a template deleted or edited into something the CLI refuses, an unconnected
@@ -4812,7 +4812,7 @@ idempotency key because the key's record lives only on the host the first attemp
 template could change between an attempt and its retry. A host name that comes to mean another machine between the two
 (hosts renamed or reassigned) is a known, accepted gap: the retry is then a new create on that machine and starts a
 second session, with every check a fresh create gets. `farhelm agent clone` copies its explicitly selected source's
-stored launch onto an explicitly named host, changing only workspace trust, which follows current Settings. Clone
+stored launch onto an explicitly named host, changing only workspace trust, which follows the destination policy. Clone
 carries no translation between hosts: a command written for one machine may name a binary that is absent, a different
 build, or one that takes different flags on another.
 

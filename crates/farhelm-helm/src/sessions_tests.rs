@@ -508,33 +508,36 @@ async fn a_recipe_checkout_uses_its_environment_home_without_setup() {
     assert_new_environment_checkout(None, "/environment-home").await;
 }
 
-/// Register the same session-owned host that provisioning publishes. The
-/// caller supplies a protocol peer to verify what travels over that route.
+/// Register a recipe host through the same routes as provisioning. The
+/// caller can exercise both ownership policies against a scripted supervisor.
 async fn environment_checkout_harness(
     peer: tokio::io::DuplexStream,
     sessions: Vec<farhelm_proto::SessionInfo>,
+    session_owned: bool,
 ) -> (rest_harness::Harness, store::HostId) {
     let h = rest_harness::idle_helm().await;
-    let owned = h
-        .store
-        .register_session_sandbox(store::NewTensorlakeHost {
-            destination: crate::tensorlake::ssh::destination("farhelm-sess-checkout"),
-            entry: store::NewHostEntry::new(Some("Checkout sandbox")).unwrap(),
-            sandbox: "farhelm-sess-checkout".into(),
-            recipe: "dev".into(),
-            resources: farhelm_proto::tensorlake::recipes::RecipeSize {
-                cpus: 1,
-                memory_gb: 1,
-                disk_gb: 10,
-            },
-        })
-        .await
-        .unwrap();
+    let new = store::NewTensorlakeHost {
+        destination: crate::tensorlake::ssh::destination("farhelm-sess-checkout"),
+        entry: store::NewHostEntry::new(Some("Checkout sandbox")).unwrap(),
+        sandbox: "farhelm-sess-checkout".into(),
+        recipe: "dev".into(),
+        resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+            cpus: 1,
+            memory_gb: 1,
+            disk_gb: 10,
+        },
+    };
+    let host = if session_owned {
+        h.store.register_session_sandbox(new).await
+    } else {
+        h.store.register_tensorlake_host(new).await
+    }
+    .unwrap();
     h.store
-        .admit_tensorlake_install(owned, "/fixture/farhelm", "/fixture/state")
+        .admit_tensorlake_install(host, "/fixture/farhelm", "/fixture/state")
         .await
         .unwrap();
-    h.fleet.edit(owned, |script| {
+    h.fleet.edit(host, |script| {
         *script = rest_harness::HostScript {
             identity: Some("fresh-recipe-install".into()),
             sessions,
@@ -542,7 +545,7 @@ async fn environment_checkout_harness(
             ..rest_harness::HostScript::default()
         }
     });
-    (h, owned)
+    (h, host)
 }
 
 /// Read the next control frame a scripted environment peer receives.
@@ -568,13 +571,14 @@ async fn next_control_frame<R: tokio::io::AsyncRead + Unpin>(
 
 /// Exercise the real preview/name retry and one accepted create with both
 /// an inherited default and the home fallback, on a registered environment.
+/// The actual Create must carry trust for the new host with Codex Settings off.
 async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_root: &'static str) {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::launcher::TemplateNameKind;
 
     let (client_side, peer) = tokio::io::duplex(64 * 1024);
-    let (h, owned) = environment_checkout_harness(client_side, Vec::new()).await;
+    let (h, owned) = environment_checkout_harness(client_side, Vec::new(), true).await;
     if let Some(root) = root {
         h.store.set_checkout_root(None, root).await.unwrap();
     }
@@ -639,6 +643,7 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
                 ControlMsg::CreateSession {
                     req_id,
                     title,
+                    launch,
                     github_checkout,
                     ..
                 } => {
@@ -648,6 +653,10 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
                         "preview search must never retry session creation"
                     );
                     assert_eq!(title.as_deref(), Some("review-2"));
+                    let launch = launch.expect("a structured Codex launch");
+                    let selection = launch.agent_selection().expect("Codex selection");
+                    assert_eq!(selection.harness, farhelm_proto::LaunchHarness::Codex);
+                    assert_eq!(selection.workspace_trust, Some(true));
                     let checkout = github_checkout.expect("exact managed-checkout admission");
                     assert_eq!(checkout.root, requested_root);
                     assert_eq!(
@@ -658,6 +667,7 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
                     let mut session = rest_harness::session("recipe-child", 100);
                     session.title = title.unwrap();
                     session.cwd = checkout.preview.cwd;
+                    session.launch = launch;
                     ControlMsg::SessionCreated { req_id, session }
                 }
                 other => panic!("unexpected initial launch request: {other:?}"),
@@ -669,6 +679,13 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
     h.manager.sync_registry().await.unwrap();
     h.await_refreshed(owned).await;
     assert!(h.manager.status(owned).unwrap().is_session_owned);
+    assert!(
+        !h.store
+            .resolve_checkout_config(None)
+            .await
+            .unwrap()
+            .codex_trust
+    );
     let refused = super::create_target(&h.state, Some(owned))
         .err()
         .expect("owned destination refused");
@@ -681,7 +698,7 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
     );
     assert!(refused.to_string().contains("Choose the recipe"));
     let mut request: super::CreateReq = serde_json::from_value(serde_json::json!({
-        "cwd": "", "title": "review", "command": { "command": "true", "yolo": false },
+        "cwd": "", "title": "review", "launch": { "harness": "codex", "permissions": "guarded" },
         "github_checkout": { "repo": "acme/project", "title": "review" },
     }))
     .unwrap();
@@ -720,7 +737,7 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
 
     let (client, peer) = tokio::io::duplex(64 * 1024);
     let (h, host) =
-        environment_checkout_harness(client, vec![rest_harness::session("source", 1)]).await;
+        environment_checkout_harness(client, vec![rest_harness::session("source", 1)], true).await;
     assert!(
         h.store
             .resolve_checkout_config(None)
@@ -6647,17 +6664,30 @@ enum TrustComposeSurface {
     ReplaceWith,
 }
 
+/// Exercise both registered Tensorlake roles as well as ordinary local routing.
+#[derive(Clone, Copy)]
+enum TrustFixtureHost {
+    Local,
+    PersistentSandbox,
+    DisposableSandbox,
+}
+
 /// Exercise the real routes with an ordinary directory. The peer expects the
 /// mutation first to catch a reintroduced ownership lookup. Both the reusable
 /// launch and named start carry the trust choice from Settings.
 async fn assert_workspace_trust_dispatch(
     surface: TrustComposeSurface,
     harness_kind: farhelm_proto::LaunchHarness,
+    target: TrustFixtureHost,
 ) {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, LaunchPermission, LaunchSelection};
 
-    for enabled in [false, true] {
+    let owned = matches!(target, TrustFixtureHost::DisposableSandbox);
+    // With the switch off, a disposable launch must carry the trust choice
+    // even when the submitted selection also declines it.
+    let settings_cases: &[bool] = if owned { &[false] } else { &[false, true] };
+    for &enabled in settings_cases {
         let selection = LaunchSelection {
             custom_agent: None,
             harness: harness_kind,
@@ -6667,10 +6697,10 @@ async fn assert_workspace_trust_dispatch(
             permission_flags: None,
             wrapper_prefix: None,
             container: None,
-            workspace_trust: Some(!enabled),
+            workspace_trust: Some(!enabled && !owned),
         };
         let mut final_selection = selection.clone();
-        final_selection.workspace_trust = enabled.then_some(true);
+        final_selection.workspace_trust = (enabled || owned).then_some(true);
         let expected = crate::launches::compile(final_selection).unwrap();
         let expected_named =
             crate::launches::named_start(&expected, "named-target".into()).unwrap();
@@ -6686,7 +6716,11 @@ async fn assert_workspace_trust_dispatch(
             "premise: the source is a plain folder"
         );
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+        let (harness, host) = if matches!(target, TrustFixtureHost::Local) {
+            spliced_replace_harness(client_side, vec![source]).await
+        } else {
+            environment_checkout_harness(client_side, vec![source], owned).await
+        };
         let fleet = harness.fleet.clone();
         let peer = tokio::spawn(async move {
             let (r, w) = tokio::io::split(peer_side);
@@ -6695,7 +6729,7 @@ async fn assert_workspace_trust_dispatch(
             handshake(&mut reader, &mut writer, "supervisor")
                 .await
                 .unwrap();
-            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let message = parse_control(&next_control_frame(&mut reader).await).unwrap();
             let (req_id, launch, named_start, restarting) = match message {
                 ControlMsg::CreateSession {
                     req_id,
@@ -6735,7 +6769,7 @@ async fn assert_workspace_trust_dispatch(
             result.cwd = if restarting { "/source" } else { destination }.into();
             result.invocation = launch.display_command();
             result.launch = launch;
-            fleet.edit(local, |script| {
+            fleet.edit(host, |script| {
                 script.sessions.retain(|session| session.id != result.id);
                 script.sessions.push(result.clone());
             });
@@ -6754,7 +6788,7 @@ async fn assert_workspace_trust_dispatch(
                 .await
                 .unwrap();
             if matches!(surface, TrustComposeSurface::ReplaceWith) {
-                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let message = parse_control(&next_control_frame(&mut reader).await).unwrap();
                 let ControlMsg::DeleteSession {
                     req_id, session_id, ..
                 } = message
@@ -6762,7 +6796,7 @@ async fn assert_workspace_trust_dispatch(
                     panic!("replacement must delete only after the normalized create: {message:?}");
                 };
                 assert_eq!(session_id, "source");
-                fleet.edit(local, |script| {
+                fleet.edit(host, |script| {
                     script.sessions.retain(|session| session.id != "source")
                 });
                 writer
@@ -6775,7 +6809,10 @@ async fn assert_workspace_trust_dispatch(
                     .unwrap();
             }
         });
-        harness.await_refreshed(local).await;
+        if !matches!(target, TrustFixtureHost::Local) {
+            harness.manager.sync_registry().await.unwrap();
+        }
+        harness.await_refreshed(host).await;
         harness
             .store
             .set_agent_trust(harness_kind, enabled)
@@ -6788,26 +6825,28 @@ async fn assert_workspace_trust_dispatch(
             ),
             enabled
         );
-        let live = harness.manager.status(local).unwrap();
+        let live = harness.manager.status(host).unwrap();
+        assert_eq!(live.is_session_owned, owned);
         assert!(
             live.client.is_some(),
             "fixture requires a connected destination"
         );
         let create = serde_json::json!({
-            "cwd": "/destination", "launch": selection, "conversation": "named-target"
+            "host": host, "cwd": "/destination", "launch": selection, "conversation": "named-target"
         });
-        let (route, body): (&str, _) = match surface {
-            TrustComposeSurface::Create => ("/api/sessions", create),
+        let source_ref = farhelm_proto::SessionRef::new(&live.entry_uuid, "source").unwrap();
+        let (route, body) = match surface {
+            TrustComposeSurface::Create => ("/api/sessions".to_owned(), create),
             TrustComposeSurface::RestartWith => (
-                &harness.local_session_uri("/api/sessions/source/restart"),
+                format!("/api/sessions/{source_ref}/restart"),
                 serde_json::json!({"with": selection, "conversation": "named-target"}),
             ),
             TrustComposeSurface::ReplaceWith => (
-                &harness.local_session_uri("/api/sessions/source/replace"),
+                format!("/api/sessions/{source_ref}/replace"),
                 serde_json::json!({"with": create}),
             ),
         };
-        let (status, text) = post_text(&harness, route, body).await;
+        let (status, text) = post_text(&harness, &route, body).await;
         assert_eq!(status, axum::http::StatusCode::OK, "{surface:?}: {text}");
         tokio::time::timeout(Duration::from_secs(10), peer)
             .await
@@ -6823,11 +6862,13 @@ async fn create_normalizes_workspace_trust_at_destination_dispatch() {
     assert_workspace_trust_dispatch(
         TrustComposeSurface::Create,
         farhelm_proto::LaunchHarness::Codex,
+        TrustFixtureHost::Local,
     )
     .await;
     assert_workspace_trust_dispatch(
         TrustComposeSurface::Create,
         farhelm_proto::LaunchHarness::Claude,
+        TrustFixtureHost::Local,
     )
     .await;
 }
@@ -6839,11 +6880,13 @@ async fn restart_with_normalizes_workspace_trust_before_named_resume() {
     assert_workspace_trust_dispatch(
         TrustComposeSurface::RestartWith,
         farhelm_proto::LaunchHarness::Codex,
+        TrustFixtureHost::Local,
     )
     .await;
     assert_workspace_trust_dispatch(
         TrustComposeSurface::RestartWith,
         farhelm_proto::LaunchHarness::Claude,
+        TrustFixtureHost::Local,
     )
     .await;
 }
@@ -6855,11 +6898,43 @@ async fn replace_with_normalizes_workspace_trust_before_create_and_delete() {
     assert_workspace_trust_dispatch(
         TrustComposeSurface::ReplaceWith,
         farhelm_proto::LaunchHarness::Codex,
+        TrustFixtureHost::Local,
     )
     .await;
     assert_workspace_trust_dispatch(
         TrustComposeSurface::ReplaceWith,
         farhelm_proto::LaunchHarness::Claude,
+        TrustFixtureHost::Local,
+    )
+    .await;
+}
+
+/// A Tensorlake host added for continued use follows Settings even though
+/// disposable sessions can use the same recipe and provider.
+#[farhelm_testtrace::test]
+async fn a_persistent_sandbox_uses_its_workspace_trust_setting() {
+    assert_workspace_trust_dispatch(
+        TrustComposeSurface::Create,
+        farhelm_proto::LaunchHarness::Claude,
+        TrustFixtureHost::PersistentSandbox,
+    )
+    .await;
+}
+
+/// New launch choices take the source host's disposable trust policy even
+/// when the original launch and the current setting both decline trust.
+#[farhelm_testtrace::test]
+async fn disposable_restart_with_and_replace_with_apply_workspace_trust() {
+    assert_workspace_trust_dispatch(
+        TrustComposeSurface::RestartWith,
+        farhelm_proto::LaunchHarness::Codex,
+        TrustFixtureHost::DisposableSandbox,
+    )
+    .await;
+    assert_workspace_trust_dispatch(
+        TrustComposeSurface::ReplaceWith,
+        farhelm_proto::LaunchHarness::Claude,
+        TrustFixtureHost::DisposableSandbox,
     )
     .await;
 }

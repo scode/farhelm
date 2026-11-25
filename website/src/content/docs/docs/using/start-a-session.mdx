@@ -380,24 +380,30 @@ like FAT: Farhelm does not detect such changes.
 
 ## Workspace trust
 
-Codex, Muse Code and Pi have their own trust switches under **Settings → Agents**, all off by default. Each applies in
-directories you choose and in managed checkouts on any host. Enabling one lets the repository's hooks, settings and
+Farhelm grants workspace trust when you start a sandbox session or container session with Claude Code, Codex, Muse
+Code, Pi or Antigravity. Your custom Antigravity settings still take precedence. On installed hosts and hosts you
+create with **Add host**, trust follows **Settings → Agents**.
+
+Codex, Muse Code and Pi have their own trust switches, all off by default. Each applies to directories you choose
+and to managed checkouts. Enabling one lets the repository's hooks, settings and
 commands run as if you had approved them. Farhelm passes an argument for the launch and the agent keeps its saved
 configuration. The switches apply to the launcher's **Agent** tab. [Custom commands](/docs/agents/custom-commands/)
 supply their own arguments.
 
 See [Antigravity workspace trust](/docs/agents/antigravity/#workspace-trust) for that agent's switch.
 
-The current setting applies when you start a session or use **Clone**, **Restart with** or **Replace with**.
+The destination's trust policy applies when you start a session or use **Clone**, **Restart with** or **Replace with**.
 Plain **Restart** and **Replace** reuse the trust carried by the saved launch. See
 [Stop, restart, and resume](/docs/using/stop-restart-resume/) for those actions. Muse's YOLO mode grants trust regardless
 of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
 
 On the **Claude Code** page, you can **Answer Claude's "trust this folder?"**. The switch is off by default. It applies
 when you choose Claude Code in the **Agent** tab, when an agent asks to start a Claude Code session, or when Farhelm
-creates a fresh managed checkout. Farhelm skips your home directory and its parents, including the filesystem root,
-because Claude's trust would cover everything inside. It also skips the edit if it cannot resolve your home directory on
-the session's host. The session shows a terminal note and Claude may ask as usual. Farhelm also adds Claude trust to new
+creates a fresh managed checkout. Farhelm protects your home directory and its parents, including the filesystem root,
+because Claude's trust would cover everything inside. In a sandbox or container session, the default Claude config
+can already trust the disposable host's home. A launch there uses that entry. A different Claude config or an existing
+choice to leave home untrusted can still leave the question visible. If Farhelm cannot resolve your home
+directory on the session's host, the terminal shows a note and Claude may ask as usual. Farhelm also adds Claude trust to new
 checkouts that start with another agent while the switch is on.
 
 Farhelm edits the Claude settings that the login shell selects on the session's host, normally `~/.claude.json`.

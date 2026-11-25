@@ -167,7 +167,7 @@ use crate::AppState;
 use crate::store::TemplateBindings;
 use crate::store::{HostId, SessionKey};
 use crate::workspace_trust::{
-    ApprovedLaunchTrust, TrustResolvedLaunch, normalize_launch_workspace_trust,
+    ApprovedLaunchTrust, TrustDestination, TrustResolvedLaunch, normalize_launch_workspace_trust,
     try_without_workspace_trust,
 };
 use farhelm_proto::SessionRef;
@@ -2131,7 +2131,12 @@ async fn create_for_agent(
             // approval and dispatch, so a Settings change while the card waits
             // cannot silently change what the user approved. If the path is
             // checked here, keep that earlier connection through dispatch.
-            let launch = normalize_launch_workspace_trust(state, launch).await?;
+            // A confined create can only land on its own disposable host.
+            // Fleet host names and template destinations exclude those rows.
+            let destination = TrustDestination::for_host(
+                matches!(scope, AgentScope::Environment(host) if host == resolved.host),
+            );
+            let launch = normalize_launch_workspace_trust(state, launch, destination).await?;
             if launch.pins_approval_cwd() {
                 let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
                 composition_incarnation = Some(claim.incarnation);
@@ -2289,7 +2294,12 @@ async fn create_checkout_for_agent(
         .github_repo
         .clone()
         .expect("managed destination selected");
-    let launch = ApprovedLaunchTrust::resolve(state, resolution.launch).await?;
+    let launch = ApprovedLaunchTrust::resolve(
+        state,
+        resolution.launch,
+        TrustDestination::for_host(claim.is_session_owned),
+    )
+    .await?;
     // Fresh intent resolves trust before its original-wrapper check. Keep
     // this order, and carry this exact launch past preview and approval.
     let mut resolution = crate::agent_launch::Resolution {
@@ -4084,7 +4094,12 @@ async fn clone_for_agent(
         .agent_selection()
         .is_some_and(|selection| selection.wrapper_prefix.is_some());
     crate::yolo_guard::check_agent_wrapper(state, host, &mode, agent_wrapper_supplied).await?;
-    let mode = normalize_launch_workspace_trust(state, mode).await?;
+    let mode = normalize_launch_workspace_trust(
+        state,
+        mode,
+        TrustDestination::for_host(claim.is_session_owned),
+    )
+    .await?;
     mode.pin_trusted_approval_cwd(&client, &mut cwd)
         .await
         .context(ReadOnlyPhase("checking the clone folder for approval"))?;
@@ -4623,11 +4638,10 @@ async fn launch_environment_for_agent(
     saved
         .require_launch_source(place)
         .map_err(|error| crate::sessions::invalid_request(format!("{error:#}")))?;
-    // Workspace trust is decided now, from the Settings the new environment
-    // will start with, and the launch carrying it is what the card shows and
-    // what the create runs: the user approves a fixed command, not one a
-    // Settings change during the wait or the build could alter.
-    let launch = ApprovedLaunchTrust::resolve(state, plan.launch).await?;
+    // The card and dispatch share one launch. The destination is already
+    // known to be disposable even though the host has not been registered.
+    let launch =
+        ApprovedLaunchTrust::resolve(state, plan.launch, TrustDestination::Disposable).await?;
     let shown = launch.mode.as_launch().clone();
     let mut request = crate::sessions::CreateReq::for_agent_environment(
         launch,
@@ -4742,6 +4756,7 @@ async fn launch_environment_for_agent(
         Ok((claim, _)) => claim,
         Err(_) => crate::manager::SessionClaim {
             host: accepted.host_id,
+            is_session_owned: true,
             entry_uuid: crate::hosts::registry_row(state, accepted.host_id)
                 .await?
                 .entry_uuid,
@@ -6228,6 +6243,7 @@ mod tests {
         // reply carries the real name and asserts freshness.
         let fresh_claim = crate::manager::SessionClaim {
             host: local,
+            is_session_owned: false,
             entry_uuid: h.manager.status(local).unwrap().entry_uuid,
             incarnation: live_incarnation,
             identity: None,
@@ -6246,6 +6262,7 @@ mod tests {
         // than whatever now occupies the row, and marks itself stale.
         let retargeted_claim = crate::manager::SessionClaim {
             host: local,
+            is_session_owned: false,
             entry_uuid: h.manager.status(local).unwrap().entry_uuid,
             incarnation: live_incarnation + 1,
             identity: None,
@@ -6267,6 +6284,7 @@ mod tests {
         // the same honest answer rather than a silently different one.
         let missing_host_claim = crate::manager::SessionClaim {
             host: local + 9999,
+            is_session_owned: false,
             entry_uuid: h.manager.status(local).unwrap().entry_uuid,
             incarnation: live_incarnation,
             identity: None,
@@ -11375,9 +11393,13 @@ mod tests {
             .await
             .unwrap();
         let (claim, client) = crate::sessions::host_client(&h.state, resolved.host).unwrap();
-        let launch = normalize_launch_workspace_trust(&h.state, resolved.resolution.launch)
-            .await
-            .unwrap();
+        let launch = normalize_launch_workspace_trust(
+            &h.state,
+            resolved.resolution.launch,
+            TrustDestination::HostSettings,
+        )
+        .await
+        .unwrap();
         launch
             .pin_trusted_approval_cwd(&client, &mut resolved.resolution.cwd)
             .await
@@ -15865,6 +15887,7 @@ mod tests {
     fn a_launch_reply_is_qualified_once_by_its_own_entry() {
         let claim = crate::manager::SessionClaim {
             host: 7,
+            is_session_owned: false,
             entry_uuid: "11111111-1111-4111-8111-111111111111".into(),
             incarnation: 1,
             identity: None,
@@ -16032,6 +16055,15 @@ mod tests {
             *stored = selection.clone();
         }
         assert!(
+            !h.store
+                .resolve_checkout_config(None)
+                .await
+                .unwrap()
+                .codex_trust
+        );
+        let expected =
+            crate::launches::with_workspace_trust(historical.clone(), Some(true)).unwrap();
+        assert!(
             crate::sessions::resolve_launch_request(
                 farhelm_proto::LaunchRequest::Agent {
                     selection: selection.clone()
@@ -16079,8 +16111,8 @@ mod tests {
             panic!("an environment launch card, got {:?}", card.action)
         };
         assert_eq!(
-            launch, &historical,
-            "the card shows the stored launch, uncompiled"
+            launch, &expected,
+            "the recipe card adds disposable trust before the host exists and keeps historical choices"
         );
         assert_eq!(
             answer_card(&h, "deny").await,
@@ -16092,12 +16124,11 @@ mod tests {
         // planted environment: what the supervisor is asked to run is the
         // approved launch itself.
         let approved =
-            crate::workspace_trust::retain_stored_launch_workspace_trust(&source).unwrap();
+            ApprovedLaunchTrust::resolve(&h.state, historical, TrustDestination::Disposable)
+                .await
+                .unwrap();
         let request = crate::sessions::CreateReq::for_agent_environment(
-            ApprovedLaunchTrust {
-                mode: approved,
-                claude_after_clone: false,
-            },
+            approved,
             false,
             None,
             Some("copy".into()),
@@ -16108,8 +16139,8 @@ mod tests {
             crate::sessions::create_in_session_sandbox(&h.state, owned, request, None)
                 .await
                 .unwrap();
-        assert_eq!(created_session.launch, historical);
-        assert_eq!(*created.lock().unwrap(), [Some(historical)]);
+        assert_eq!(created_session.launch, expected);
+        assert_eq!(*created.lock().unwrap(), [Some(expected)]);
     }
 
     /// Spec: an environment clone acts on its source read only while the same

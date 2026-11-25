@@ -96,9 +96,10 @@ impl Environment {
 }
 
 /// Resolve the same canonical project key for checking scope and writing trust.
-/// Claude extends trust to descendants, so trust for home or an ancestor would survive the launch and cover other
-/// projects. Require a resolvable home even with a config override. The caller can persist the resulting removal
-/// record before editing so a crash still leaves cleanup evidence. An absent vendor config stays absent.
+/// Claude extends trust to descendants, so this editor never grants trust to
+/// home or an ancestor. An exact home entry seeded during disposable host
+/// setup can already satisfy the launch without producing an edit or cleanup
+/// record. Require a resolvable home even with a config override.
 pub(crate) fn resolve(
     environment: &Environment,
     cwd: &Path,
@@ -106,6 +107,12 @@ pub(crate) fn resolve(
     let folder = fs::canonicalize(cwd).context("could not resolve the session folder")?;
     let home = fs::canonicalize(&environment.home).context("could not resolve HOME")?;
     ensure!(home.is_dir(), "HOME does not name a directory");
+    if folder == home
+        && home.parent().is_some()
+        && home_already_trusted(environment, &home).unwrap_or(false)
+    {
+        return Ok(None);
+    }
     ensure!(
         folder.parent().is_some() && !home.starts_with(&folder),
         "the session folder is your home directory or a folder above it, and Claude's trust would cover everything inside it"
@@ -130,6 +137,44 @@ pub(crate) fn resolve(
             .context("checkout path is not UTF-8")?
             .to_string(),
     }))
+}
+
+/// Recognize only the exact physical home entry in Claude's chosen config.
+/// An unavailable or unreadable file cannot prove that Claude will skip its question.
+fn home_already_trusted(environment: &Environment, home: &Path) -> anyhow::Result<bool> {
+    let path = fs::canonicalize(environment.config_path())?;
+    let (document, _) = read_config(&path)?;
+    let key = home.to_str().context("HOME is not UTF-8")?;
+    Ok(document
+        .get("projects")
+        .and_then(|projects| projects.get(key))
+        .and_then(|project| project.get("hasTrustDialogAccepted"))
+        == Some(&Value::Bool(true)))
+}
+
+/// Read the canonical target without following a replacement symlink or opening
+/// a FIFO in blocking mode. Editors use its identity for the final rename.
+fn read_config(path: &Path) -> anyhow::Result<(Value, fs::Metadata)> {
+    const CONFIG_CAP: u64 = 16 * 1024 * 1024;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    ensure!(
+        metadata.is_file() && metadata.len() <= CONFIG_CAP,
+        "Claude config is not a bounded regular file"
+    );
+    let mut bytes = Vec::new();
+    file.take(CONFIG_CAP + 1).read_to_end(&mut bytes)?;
+    ensure!(
+        bytes.len() as u64 <= CONFIG_CAP,
+        "Claude config grew beyond read limit"
+    );
+    // The workspace's float_roundtrip feature preserves vendor-owned doubles
+    // when the caller changes one field and writes the document back.
+    let document = serde_json::from_slice(&bytes).context("Claude config is not JSON")?;
+    Ok((document, metadata))
 }
 
 /// Own one mkdir lock, never removing or stealing somebody else's stale lock.
@@ -234,29 +279,7 @@ fn edit_with_retry(
         return Ok(());
     }
     let lock = ConfigLock::acquire(&record.lock_path, budget, wait)?;
-    // Read the recorded canonical target under the lock. O_NOFOLLOW refuses
-    // a replacement symlink at that target; the selected alias stays intact.
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(&record.config_path)?;
-    let metadata = file.metadata()?;
-    ensure!(
-        metadata.is_file() && metadata.len() <= 16 * 1024 * 1024,
-        "Claude config is not a bounded regular file"
-    );
-    let mut bytes = Vec::new();
-    Read::by_ref(&mut file)
-        .take(16 * 1024 * 1024 + 1)
-        .read_to_end(&mut bytes)?;
-    ensure!(
-        bytes.len() <= 16 * 1024 * 1024,
-        "Claude config grew beyond read limit"
-    );
-    // The workspace's float_roundtrip feature preserves the double values
-    // Claude reads when this whole-document write touches only its trust key.
-    let mut document: Value =
-        serde_json::from_slice(&bytes).context("Claude config is not JSON")?;
+    let (mut document, metadata) = read_config(&record.config_path)?;
     let object = document
         .as_object_mut()
         .context("Claude config is not an object")?;
@@ -591,6 +614,41 @@ mod tests {
                 fs::canonicalize(project).unwrap()
             );
         }
+    }
+
+    /// A seeded home can start without the false trust warning. The supervisor
+    /// acknowledges those exact bytes without creating a lock or a cleanup
+    /// record, and still refuses a request to edit a home ancestor.
+    #[farhelm_testtrace::test]
+    fn an_already_trusted_canonical_home_needs_no_edit() {
+        let root = tempfile::tempdir().unwrap();
+        let parent = fs::canonicalize(root.path()).unwrap();
+        let home = parent.join("home");
+        fs::create_dir(&home).unwrap();
+        let alias = parent.join("home-alias");
+        std::os::unix::fs::symlink(&home, &alias).unwrap();
+        let env = Environment {
+            home: alias.clone(),
+            config_dir: None,
+            custom_oauth: false,
+        };
+        let config = home.join(".claude.json");
+        assert!(
+            resolve(&env, &alias).is_err(),
+            "premise: missing config still warns"
+        );
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "projects": {
+                (home.to_str().unwrap()): {"hasTrustDialogAccepted": true},
+                (parent.to_str().unwrap()): {"hasTrustDialogAccepted": true},
+            }
+        }))
+        .unwrap();
+        fs::write(&config, &bytes).unwrap();
+        assert!(resolve(&env, &alias).unwrap().is_none());
+        assert!(resolve(&env, &parent).is_err());
+        assert_eq!(fs::read(config).unwrap(), bytes);
+        assert!(!home.join(".claude.json.lock").exists());
     }
 
     /// A configured directory must locate the same config and lock during
