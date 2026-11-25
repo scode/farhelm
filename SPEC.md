@@ -1806,10 +1806,13 @@ The user-facing name is managed checkout: a repository clone Farhelm made for a 
 directory the user supplied. Interfaces do not assume GitHub will remain the only repository source: wherever a
 repository is selected or requested, its source is explicit, such as the launcher's `gh:` prefix or the CLI's `--gh`
 flag. Session rows with a current checkout association show a branch glyph and the repository in place of the directory.
-Compact rows put the glyph after the name. Its tooltip names the repository and actual checkout path and explains that
-the directory moves to the trash when its last session is deleted. The session view shows the same mark beside its
-directory. Sessions using another session's checkout, including its subdirectories, carry the mark too; requesting a
-checkout at launch does not establish current membership.
+Compact rows put the glyph after the name. Its tooltip names the repository and actual checkout path. On an ordinary
+host, it explains that the directory moves to the trash when its last session is deleted. The session view shows the
+same mark beside its directory. Sessions using another session's checkout, including its subdirectories, carry the mark
+too; requesting a checkout at launch does not establish current membership.
+
+On a session-owned sandbox or container the checkout tooltip explains permanent removal on Delete. The launcher says the
+same for a fresh checkout inside an existing session-owned environment.
 
 The launcher and template editor use the same segmented destination control: folder or managed checkout, with a folder
 glyph or branch glyph. Selecting managed checkout reveals a repository field and explains the directory's lifetime.

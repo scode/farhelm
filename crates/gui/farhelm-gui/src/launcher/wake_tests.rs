@@ -198,6 +198,30 @@ fn a_busy_wake_retries_then_fails_on_a_new_suspension(cx: &mut TestAppContext) {
     assert!(label(cx, "launch-wake").is_none());
 }
 
+/// Provider work pauses the deadline. A host that then stays Connecting gives the draft back after one minute.
+#[gpui::test]
+fn a_folder_wake_releases_the_draft_after_the_connection_deadline(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = open(cx);
+    let resume = press(&mut helm, cx);
+    helm.reply(resume.id, 200, None);
+    let resuming = changing(LifecycleDirection::Resuming);
+    push(&mut helm, cx, &mut host, resuming);
+    advance(cx, Duration::from_secs(60));
+    let connecting = crate::hosts::tests::connecting(1, None);
+    push(&mut helm, cx, &mut host, connecting);
+    advance(cx, Duration::from_secs(59));
+    assert!(label(cx, "launch-wake").is_some());
+    advance(cx, Duration::from_secs(1));
+    let reason =
+        "The host resumed but did not connect within 60 seconds; try again when it connects";
+    assert_eq!(
+        shown_refusal(cx).unwrap(),
+        format!("Not launched. {reason}")
+    );
+    assert!(label(cx, "launch-wake").is_none());
+    assert!(wake_commands(&mut helm, cx).is_empty());
+}
+
 /// An ordinary Resume refusal is preparation failure. Matching a status or busy-looking prose alone would retry
 /// the wrong rejection and could subsequently launch an unwanted session.
 #[gpui::test]

@@ -182,6 +182,8 @@ linux/launcher-new-container--dark.png 8d2486e578d07b0affdda4bc00a0ecac249d7340
 linux/launcher-new-container--light.png b80dfca4019253a0fd024aa90a571f8105269ce2
 linux/launcher-new-sandbox-checkout--dark.png 780d91c87bf28e4c57f491b16f6e7667ca14b061
 linux/launcher-new-sandbox-checkout--light.png 18d3b755107b493be317d9b7885e6ae30a32a3f8
+linux/launcher-replace-checkout-in-sandbox--dark.png df192030b7fe57147939cfe17d29828e72db6735
+linux/launcher-replace-checkout-in-sandbox--light.png eda7f68d7dcd76795b95d4bd3270ad067c5ecf6b
 linux/launcher-replace-typed-recent--dark.png 3d2bea617746751dfc87fc0265406f387ced2bbb
 linux/launcher-replace-typed-recent--light.png bd0041c6fb7087614d158b8ad384b475869450dd
 linux/launcher-replace-with--dark.png 6963005db3c2776b2617eacec108dd5f5bfae107
