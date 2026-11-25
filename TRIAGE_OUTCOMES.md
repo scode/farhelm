@@ -132,27 +132,6 @@
   file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md
-
-- Outcome: `fix code`.
-- Assessment: In Settings → Custom agents, the user clicks Delete on an edited agent, which shows the delete
-  confirmation. They then close Settings and choose Save in "Save changes before closing?". The save silently does
-  nothing. Settings stays open on that page with no error, and the remaining unsaved forms are not saved either.
-  Verified: Confirmed. `Editor::save` returns `false` when `confirm_delete` is set, without setting an error
-  (`crates/gui/farhelm-gui/src/settings/custom_agents.rs:316-318`). The close batch treats that as a failure and reveals
-  the page (`settings/editing.rs:425-470`). SPEC.md 2575 says "The first failure keeps Settings open and shows the
-  affected page with its error". Here there is no error. Not executed.
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code. Either have Save clear the open confirmation and proceed, or
-  refuse with an error. There are two reasonable shapes, which is why this is not clearly settled. The fix is subsumed
-  if 80 moves the confirmation to the prompt. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
-  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
-  to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## trailing-custom-agent-settings-busy-save-button-and-saw-saved-restore.md
 
 - Outcome: `fix code`.

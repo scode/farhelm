@@ -78,6 +78,8 @@ struct SettingsFixture {
     custom_agent_save_refusal: bool,
     /// Fill the Add form before measuring the five dirty fields.
     custom_agent_dirty_add: bool,
+    /// Show the Save refusal while the existing registration's Delete confirmation owns the footer.
+    custom_agent_close_delete_refusal: bool,
 }
 
 /// `entries` as a pushed collection's first snapshot, each filed under the key `key` gives it, in their order.
@@ -122,6 +124,7 @@ fn settings_scene_with(
         custom_agents,
         custom_agent_save_refusal,
         custom_agent_dirty_add,
+        custom_agent_close_delete_refusal,
     } = fixture;
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -177,6 +180,9 @@ fn settings_scene_with(
             }
             if custom_agent_dirty_add {
                 crate::settings::stage_custom_agent_draft(window, cx);
+            }
+            if custom_agent_close_delete_refusal {
+                crate::settings::show_close_delete_refusal_for_golden(window, cx);
             }
             if let Some(query) = search {
                 crate::settings::search_for_opened(query, window, cx);
@@ -352,6 +358,26 @@ pub(super) fn settings_custom_agent_nav_tooltip(
         });
     }
     div().into_any_element()
+}
+
+/// Show the blocked close's explanation alongside the still-open Cancel and Delete controls.
+pub(super) fn settings_custom_agent_close_delete_refusal_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    settings_scene_with(
+        state,
+        crate::settings::Section::CustomAgent("acme-code".into()),
+        SettingsFixture {
+            custom_agents: Some(super::custom_agent_state()),
+            custom_agent_close_delete_refusal: true,
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+    stage_scroll_end(state, false);
 }
 
 /// A later section in the same opening receives the same fake configuration as if it were the first.

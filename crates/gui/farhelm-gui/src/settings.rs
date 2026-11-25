@@ -75,7 +75,9 @@ mod credential_tests;
 mod credentials;
 mod custom_agents;
 #[cfg(test)]
-pub(crate) use custom_agents::{stage_custom_agent_draft, stage_custom_agent_save_refusal};
+pub(crate) use custom_agents::{
+    show_close_delete_refusal_for_golden, stage_custom_agent_draft, stage_custom_agent_save_refusal,
+};
 mod editing;
 #[cfg(test)]
 pub(crate) use editing::{stage_held_close, stage_ntfy_refusal, stage_settled_key_conflict};

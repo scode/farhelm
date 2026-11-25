@@ -43,11 +43,6 @@ consequences.
   — The Settings pages for Codex, Muse, Pi, and Antigravity omit that their workspace-trust switch also applies to
   agent-requested launches, which run without an approval card on Always-allow hosts.
 
-- [`trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md`](trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md)
-  — If a user edits a custom agent, clicks Delete to show the confirmation buttons, and then closes Settings and chooses
-  Save in the 'Save changes before closing?' dialog, saving silently fails without displaying any error and leaves
-  Settings stuck open on the delete confirmation (and leaves any remaining dirty Settings forms unsaved).
-
 - [`trailing-replace-with-recent-named-fill-enter-replaces.md`](trailing-replace-with-recent-named-fill-enter-replaces.md)
   — In Replace with, a screen reader announces a highlighted recent setup as "Fill from recent setup" while Enter on it
   replaces and deletes the source session; highest if the "⏎ Replace" key cap is not announced with it.
