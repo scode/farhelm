@@ -97,6 +97,9 @@ pub trait HostTransport: Send + Sync + 'static {
     /// and a new session on it hangs rather than failing. A container borrows
     /// its place's master, which this operation must leave open.
     ///
+    /// Park or retire an old Tailscale route first. Releasing it can remove
+    /// its private socket directory once the directory is empty.
+    ///
     /// The default does nothing, which is right for every transport that
     /// keeps no shared connections (the scripted test peers).
     fn release_shared_connections<'a>(
@@ -223,6 +226,7 @@ impl SystemTransport {
 
     /// Retire every generation of this destination. Looking up the daemon's
     /// current view could miss a master that used previous keys or a different proxy.
+    /// The caller has already parked or retired the route before empty directories can be removed.
     async fn exit_tailscale_masters(&self, host: HostId, destination: &str) {
         let sockets = match crate::ssh::tailscale::shared_sockets(&self.state_dir, destination) {
             Ok(sockets) => sockets,
@@ -232,8 +236,8 @@ impl SystemTransport {
             }
         };
         let released = tokio::time::timeout(RELEASE_TIMEOUT * 2, async {
-            for socket in sockets {
-                match crate::ssh::ssh_exact_control_exit_args(destination, &socket) {
+            for socket in &sockets.paths {
+                match crate::ssh::ssh_exact_control_exit_args(destination, socket) {
                     Ok(args) => self.exit_master(host, args).await,
                     Err(error) => warn!(host, %error, "could not build the ssh -O exit command"),
                 }
@@ -243,6 +247,7 @@ impl SystemTransport {
         if released.is_err() {
             warn!(host, "timed out retiring Tailscale SSH masters");
         }
+        sockets.remove_empty_directories();
     }
 }
 

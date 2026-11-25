@@ -10,7 +10,8 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     ffi::OsStr,
-    io::Write,
+    fs,
+    io::{Read, Write},
     net::IpAddr,
     os::unix::{
         ffi::OsStrExt as _,
@@ -18,10 +19,19 @@ use std::{
     },
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Mutex,
     time::Duration,
 };
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
+const CONTROL_DIR_PREFIX: &str = "fhs-";
+const CONTROL_DIR_RANDOM_BYTES: usize = 10;
+const CONTROL_DIR_BASENAME_LEN: usize = CONTROL_DIR_PREFIX.len() + CONTROL_DIR_RANDOM_BYTES;
+const CONTROL_DIR_RECORD: &str = "control-dir";
+
+/// A state directory has one serving helm. Serializing allocation here gives concurrent dials the same on-disk
+/// rendezvous without introducing a lockfile that would live inside a directory the last host can remove.
+static CONTROL_DIR_ALLOCATION: Mutex<()> = Mutex::new(());
 
 /// One prepared peer. Every SSH invocation for it uses the address selected with its advertised keys.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +107,8 @@ impl TailscaleSshAccess {
         let (state, runtime, destination) =
             (state.to_owned(), runtime.to_owned(), destination.to_owned());
         let control_dir = tokio::task::spawn_blocking(move || {
-            write_known_hosts(&path, &contents)?;
+            write_private_file(&path, &contents)
+                .context("Could not publish Tailscale host keys")?;
             control_directory(&state, &runtime, &destination)
         })
         .await
@@ -153,9 +164,8 @@ fn short_digest<'a>(fields: impl IntoIterator<Item = &'a [u8]>) -> String {
     URL_SAFE_NO_PAD.encode(&hash.finalize()[..12])
 }
 
-/// Each destination owns its generations in one short directory. Use a
-/// stable name so retirement can find every generation across helm restarts.
-fn control_directory_path(
+/// Compute the pre-upgrade rendezvous for this destination only. New connections never create it.
+fn legacy_control_directory(
     state: &Path,
     runtime: &Path,
     destination: &str,
@@ -173,29 +183,81 @@ fn control_directory_path(
     Ok(runtime.join(format!("fhs-{scope}")))
 }
 
-/// The shared temporary directory cannot introduce a foreign socket or directory symlink.
+/// Keep the OS-allocated private directory across ordinary helm restarts so earlier masters can still be retired.
+/// The record holds only the basename. When the runtime directory is wiped, the next prepare allocates a new
+/// directory and replaces the record.
 fn control_directory(state: &Path, runtime: &Path, destination: &str) -> anyhow::Result<PathBuf> {
-    let path = control_directory_path(state, runtime, destination)?;
-    match std::fs::DirBuilder::new().mode(0o700).create(&path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(error) => {
-            return Err(error).with_context(|| {
-                format!(
-                    "Could not create Farhelm's Tailscale socket directory at {}",
-                    path.display()
-                )
-            });
-        }
+    let _allocation = CONTROL_DIR_ALLOCATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let record = known_hosts_dir(state, destination)?.join(CONTROL_DIR_RECORD);
+    if let Some(path) = recorded_control_directory(&record, runtime)? {
+        return Ok(path);
     }
-    let metadata = path.symlink_metadata().with_context(|| {
-        format!(
-            "Could not inspect Farhelm's Tailscale socket directory at {}",
-            path.display()
-        )
-    })?;
-    require_private_control_directory(&path, &metadata)?;
-    Ok(path)
+    let dir = tempfile::Builder::new()
+        .prefix(CONTROL_DIR_PREFIX)
+        .rand_bytes(CONTROL_DIR_RANDOM_BYTES)
+        .permissions(fs::Permissions::from_mode(0o700))
+        .tempdir_in(runtime)
+        .context("Could not allocate Farhelm's private Tailscale socket directory")?;
+    require_private_control_directory(dir.path(), &dir.path().symlink_metadata()?)?;
+    let basename = dir
+        .path()
+        .file_name()
+        .and_then(OsStr::to_str)
+        .context("Tailscale socket directory basename must be UTF-8")?;
+    write_private_file(&record, basename)
+        .context("Could not record Farhelm's Tailscale socket directory")?;
+    // Leave cleanup with retirement once the basename is published. Until then TempDir owns failed allocations.
+    Ok(dir.keep())
+}
+
+/// Treat stale or malformed records as absent. The record cannot introduce a path outside the runtime root,
+/// name a pre-upgrade directory, or ask SSH to use a directory we would refuse in the ordinary preparation path.
+fn recorded_control_directory(record: &Path, runtime: &Path) -> anyhow::Result<Option<PathBuf>> {
+    let metadata = match record.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).context("inspecting the Tailscale socket directory record");
+        }
+    };
+    if !metadata.is_file() || metadata.len() != CONTROL_DIR_BASENAME_LEN as u64 {
+        return Ok(None);
+    }
+    let mut basename = Vec::new();
+    let read = fs::File::open(record).and_then(|file| {
+        file.take(CONTROL_DIR_BASENAME_LEN as u64 + 1)
+            .read_to_end(&mut basename)
+    });
+    if let Err(error) = read {
+        if matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+        ) {
+            return Ok(None);
+        }
+        return Err(error).context("reading the Tailscale socket directory record");
+    }
+    let Some(path) = std::str::from_utf8(&basename)
+        .ok()
+        .filter(|name| {
+            name.len() == CONTROL_DIR_BASENAME_LEN
+                && name
+                    .strip_prefix(CONTROL_DIR_PREFIX)
+                    .is_some_and(|suffix| suffix.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+        })
+        .map(|name| runtime.join(name))
+    else {
+        return Ok(None);
+    };
+    Ok(is_private_control_directory(&path).then_some(path))
+}
+
+/// Inspect the directory itself. A symlink to a directory with the right owner and mode is still a foreign route.
+fn is_private_control_directory(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|metadata| require_private_control_directory(path, &metadata).is_ok())
 }
 
 fn require_private_control_directory(
@@ -212,23 +274,66 @@ fn require_private_control_directory(
     Ok(())
 }
 
-/// Enumerate published mux sockets without resolving current Tailscale status.
-/// A fresh lookup could select different keys, address or proxy and miss the active master.
-pub(crate) fn shared_sockets(state: &Path, destination: &str) -> anyhow::Result<Vec<PathBuf>> {
-    sockets_in(&control_directory_path(
-        state,
-        Path::new("/tmp"),
-        destination,
-    )?)
+/// The exact directories inspected for this retirement, including empty ones. A failed exit leaves its socket
+/// in place, so the directory can be removed only if the kernel confirms it is empty.
+pub(crate) struct SharedSockets {
+    pub(crate) paths: Vec<PathBuf>,
+    directories: Vec<PathBuf>,
+}
+
+impl SharedSockets {
+    /// Retire empty directories after asking their masters to exit. Keep an entry if it stopped being private.
+    ///
+    /// Callers park or replace the old route first. An empty directory can still be named by a prepared command.
+    pub(crate) fn remove_empty_directories(self) {
+        for directory in self.directories {
+            if is_private_control_directory(&directory) {
+                let _ = fs::remove_dir(directory);
+            }
+        }
+    }
+}
+
+/// Find published mux sockets without asking the daemon for its current address or keys. That lookup could miss
+/// masters from earlier generations, and scanning the runtime root could pick up another destination's masters.
+pub(crate) fn shared_sockets(state: &Path, destination: &str) -> anyhow::Result<SharedSockets> {
+    shared_sockets_at(state, Path::new("/tmp"), destination)
+}
+
+fn shared_sockets_at(
+    state: &Path,
+    runtime: &Path,
+    destination: &str,
+) -> anyhow::Result<SharedSockets> {
+    let record = known_hosts_dir(state, destination)?.join(CONTROL_DIR_RECORD);
+    let recorded = match recorded_control_directory(&record, runtime) {
+        Ok(recorded) => recorded,
+        Err(error) => {
+            tracing::warn!(%error, "could not read the Tailscale socket directory record");
+            None
+        }
+    };
+    let legacy = legacy_control_directory(state, runtime, destination)?;
+    let mut shared = SharedSockets {
+        paths: Vec::new(),
+        directories: Vec::new(),
+    };
+    for directory in recorded.into_iter().chain(Some(legacy)) {
+        if !is_private_control_directory(&directory) {
+            continue;
+        }
+        match sockets_in(&directory) {
+            Ok(sockets) => {
+                shared.paths.extend(sockets);
+                shared.directories.push(directory);
+            }
+            Err(error) => tracing::warn!(%error, "could not inspect a Tailscale socket directory"),
+        }
+    }
+    Ok(shared)
 }
 
 fn sockets_in(directory: &Path) -> anyhow::Result<Vec<PathBuf>> {
-    let metadata = match directory.symlink_metadata() {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error).context("inspecting the Tailscale socket directory"),
-    };
-    require_private_control_directory(directory, &metadata)?;
     let mut sockets = Vec::new();
     for entry in std::fs::read_dir(directory)? {
         let entry = entry?;
@@ -452,25 +557,25 @@ fn key_lines(address: IpAddr, keys: &[String]) -> anyhow::Result<String> {
     Ok(entries.concat())
 }
 
-/// Publish a complete new key set in one rename. OpenSSH can open the file while a key rotation is preparing.
-fn write_known_hosts(path: &Path, contents: &str) -> anyhow::Result<()> {
+/// Publish the complete destination record or key snapshot in one rename inside the private state directory.
+fn write_private_file(path: &Path, contents: &str) -> anyhow::Result<()> {
     let parent = path
         .parent()
-        .context("Tailscale known_hosts has no parent directory")?;
+        .context("Tailscale destination file has no parent directory")?;
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(parent)
-        .context("Could not create Farhelm's Tailscale key directory")?;
+        .context("Could not create Farhelm's Tailscale destination directory")?;
     let mut file = tempfile::NamedTempFile::new_in(parent)
-        .context("Could not create Farhelm's Tailscale known_hosts file")?;
+        .context("Could not create Farhelm's private Tailscale file")?;
     file.as_file()
         .set_permissions(std::fs::Permissions::from_mode(0o600))
-        .context("Could not restrict Farhelm's Tailscale known_hosts file")?;
+        .context("Could not restrict Farhelm's private Tailscale file")?;
     file.write_all(contents.as_bytes())
-        .context("Could not write the Tailscale host keys")?;
+        .context("Could not write Farhelm's private Tailscale file")?;
     file.persist(path)
-        .context("Could not replace Farhelm's Tailscale known_hosts file")?;
+        .context("Could not replace Farhelm's private Tailscale file")?;
     Ok(())
 }
 
@@ -627,11 +732,31 @@ mod tests {
         assert!(error.to_string().contains("Tailscale is not running"));
         assert!(!state.exists());
 
+        // The wrong mode models a pre-upgrade directory occupied by another account without requiring root.
+        fs::create_dir(&state).unwrap();
+        let legacy = legacy_control_directory(&state, dir.path(), dest).unwrap();
+        fs::create_dir(&legacy).unwrap();
+        fs::set_permissions(&legacy, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!is_private_control_directory(&legacy));
+
         install_fixture(FIXTURE);
         let direct = TailscaleSshAccess::prepare_with(&program, &state, dir.path(), dest)
             .await
             .unwrap();
         assert_eq!(direct.proxy, "ProxyCommand=none");
+        assert_ne!(direct.control_dir, legacy);
+        assert!(is_private_control_directory(&direct.control_dir));
+        let record = known_hosts_dir(&state, dest)
+            .unwrap()
+            .join(CONTROL_DIR_RECORD);
+        let basename = fs::read_to_string(record).unwrap();
+        assert_eq!(dir.path().join(&basename), direct.control_dir);
+        assert_eq!(basename.len(), CONTROL_DIR_BASENAME_LEN);
+        let socket = format!("t{}%C", direct.socket_scope);
+        assert!(
+            super::super::control_socket_named(&Path::new("/tmp").join(basename), &socket, 103)
+                .is_some()
+        );
         assert_eq!(std::fs::read_to_string(&old_path).unwrap(), before);
         assert_eq!(
             old_path.metadata().unwrap().permissions().mode() & 0o777,
@@ -664,22 +789,73 @@ mod tests {
         assert!(proxy_option(Path::new("/example/line\nbreak/tailscale")).is_err());
     }
 
-    /// A predictable rendezvous in the system temporary directory must be a directory owned by the helm account.
+    /// A restart can reuse only a valid record and private directory. Reboot, changed permissions or a symlink
+    /// must cause a fresh allocation instead of making the destination unavailable or redirecting a connection.
     #[farhelm_testtrace::test]
-    fn refuses_an_unsafe_shared_socket_directory() {
+    fn reallocates_missing_or_non_private_socket_directory() {
         let state = tempfile::tempdir().unwrap();
         let runtime = tempfile::tempdir().unwrap();
-        let control_dir = control_directory(state.path(), runtime.path(), "peer").unwrap();
+        let prepare = || control_directory(state.path(), runtime.path(), "peer").unwrap();
+        let initial = prepare();
+        assert_eq!(prepare(), initial);
+        fs::remove_dir(&initial).unwrap();
+        assert!(!initial.exists());
+        let after_reboot = prepare();
+        assert_ne!(after_reboot, initial);
+        fs::set_permissions(&after_reboot, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!is_private_control_directory(&after_reboot));
+        let after_mode_change = prepare();
+        assert_ne!(after_mode_change, after_reboot);
+        fs::remove_dir(&after_mode_change).unwrap();
+        std::os::unix::fs::symlink(&initial, &after_mode_change).unwrap();
+        fs::create_dir(&initial).unwrap();
+        fs::set_permissions(&initial, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(is_private_control_directory(&initial));
+        assert!(after_mode_change.is_dir());
+        let after_link = prepare();
+        assert_ne!(after_link, after_mode_change);
+        assert_eq!(prepare(), after_link);
+    }
+
+    /// A persisted name is just one bounded basename under the runtime root. Retiring an invalid record must
+    /// leave other private directories alone, and the next prepare replaces it with a usable record.
+    #[farhelm_testtrace::test]
+    fn rejects_malformed_control_directory_records() {
+        let state = tempfile::tempdir().unwrap();
+        let fixture = tempfile::tempdir().unwrap();
+        let runtime = fixture.path().join("runtime");
+        let record = known_hosts_dir(state.path(), "peer")
+            .unwrap()
+            .join(CONTROL_DIR_RECORD);
+        for invalid in [
+            "../foo",
+            "bad-0123456789",
+            "fhs-01234567890",
+            "fhs-0123/56789",
+            "fhs-0123%56789",
+        ] {
+            fs::create_dir_all(&runtime).unwrap();
+            let invalid_directory = runtime.join(invalid);
+            fs::create_dir_all(&invalid_directory).unwrap();
+            fs::set_permissions(&invalid_directory, fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(is_private_control_directory(&invalid_directory));
+            write_private_file(&record, invalid).unwrap();
+            assert!(
+                recorded_control_directory(&record, &runtime)
+                    .unwrap()
+                    .is_none(),
+                "{invalid}"
+            );
+            let shared = shared_sockets_at(state.path(), &runtime, "peer").unwrap();
+            assert!(shared.paths.is_empty());
+            shared.remove_empty_directories();
+            assert!(invalid_directory.is_dir());
+        }
+        let fresh = control_directory(state.path(), &runtime, "peer").unwrap();
         assert_eq!(
-            control_directory(state.path(), runtime.path(), "peer").unwrap(),
-            control_dir
+            recorded_control_directory(&record, &runtime).unwrap(),
+            Some(fresh)
         );
-        std::fs::set_permissions(&control_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let error = control_directory(state.path(), runtime.path(), "peer").unwrap_err();
-        assert!(error.to_string().contains(control_dir.to_str().unwrap()));
-        std::fs::remove_dir(&control_dir).unwrap();
-        std::os::unix::fs::symlink(state.path(), &control_dir).unwrap();
-        assert!(control_directory(state.path(), runtime.path(), "peer").is_err());
     }
 
     /// Teardown finds prior key and network generations without asking the
@@ -691,20 +867,134 @@ mod tests {
         let runtime = tempfile::tempdir_in("/tmp").unwrap();
         let owned = control_directory(state.path(), runtime.path(), "peer").unwrap();
         let other = control_directory(state.path(), runtime.path(), "other").unwrap();
+        let legacy = legacy_control_directory(state.path(), runtime.path(), "peer").unwrap();
+        fs::create_dir(&legacy).unwrap();
+        fs::set_permissions(&legacy, fs::Permissions::from_mode(0o700)).unwrap();
         let digest = "0".repeat(super::super::EXPANDED_TOKEN);
         let socket = |root: &Path, scope: &str| root.join(format!("{scope}{digest}"));
         let first = socket(&owned, "taaaaaaaaaaaaaaaa");
         let second = socket(&owned, "qbbbbbbbbbbbbbbbb");
         let unrelated = socket(&other, "taaaaaaaaaaaaaaaa");
-        let _listeners = [&first, &second, &unrelated]
+        let earlier = socket(&legacy, "teeeeeeeeeeeeeeee");
+        let listeners = [&first, &second, &earlier]
             .map(|path| std::os::unix::net::UnixListener::bind(path).unwrap());
+        let _unrelated = std::os::unix::net::UnixListener::bind(&unrelated).unwrap();
         let not_a_socket = socket(&owned, "tcccccccccccccccc");
         std::fs::write(&not_a_socket, b"not a mux socket").unwrap();
         let temporary = socket(&owned, "tdddddddddddddddd").with_extension("tmp");
-        let _temporary = std::os::unix::net::UnixListener::bind(&temporary).unwrap();
-        let mut observed = sockets_in(&owned).unwrap();
-        observed.sort();
-        assert_eq!(observed, [second, first]);
+        let temporary_listener = std::os::unix::net::UnixListener::bind(&temporary).unwrap();
+        let mut observed = shared_sockets_at(state.path(), runtime.path(), "peer").unwrap();
+        observed.paths.sort();
+        let mut expected = [second.clone(), first.clone(), earlier.clone()];
+        expected.sort();
+        assert_eq!(observed.paths, expected);
+        assert!(unrelated.exists());
+
+        // A live or unrecognized entry prevents non-recursive cleanup. An invalid legacy directory stays untouched.
+        observed.remove_empty_directories();
+        assert!(owned.exists());
+        assert!(legacy.exists());
+        fs::set_permissions(&legacy, fs::Permissions::from_mode(0o755)).unwrap();
+        let observed = shared_sockets_at(state.path(), runtime.path(), "peer").unwrap();
+        assert_eq!(observed.paths.len(), 2);
+        assert!(!observed.paths.contains(&earlier));
+        drop((listeners, temporary_listener));
+        for entry in [&first, &second, &earlier, &not_a_socket, &temporary] {
+            fs::remove_file(entry).unwrap();
+        }
+        observed.remove_empty_directories();
+        assert!(!owned.exists());
+        assert!(legacy.exists());
+        assert!(other.exists());
+        fs::set_permissions(&legacy, fs::Permissions::from_mode(0o700)).unwrap();
+        shared_sockets_at(state.path(), runtime.path(), "peer")
+            .unwrap()
+            .remove_empty_directories();
+        assert!(!legacy.exists());
+    }
+
+    /// A fresh transport after a helm restart must issue exit against the exact recorded and pre-upgrade masters.
+    /// Stand-in SSH reports its commands without connecting anywhere, and the live fixture sockets must remain.
+    #[farhelm_testtrace::test]
+    async fn fresh_transport_retires_persisted_and_legacy_tailscale_masters() {
+        use crate::{
+            store::HelmStore,
+            transport::{HostTransport, SystemTransport},
+        };
+
+        let state = tempfile::tempdir_in("/tmp").unwrap();
+        let destination = "user@peer";
+        let store = HelmStore::open_fixture(&state.path().join("helm.db"))
+            .await
+            .unwrap();
+        let host = store
+            .add_ssh_host_with_mode(destination, None, None, true)
+            .await
+            .unwrap();
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(row.ssh_access(), Some(crate::ssh::SshAccessKind::Tailscale));
+        let recorded = tempfile::Builder::new()
+            .prefix(CONTROL_DIR_PREFIX)
+            .rand_bytes(CONTROL_DIR_RANDOM_BYTES)
+            .permissions(fs::Permissions::from_mode(0o700))
+            .tempdir_in("/tmp")
+            .unwrap();
+        let record = known_hosts_dir(state.path(), destination)
+            .unwrap()
+            .join(CONTROL_DIR_RECORD);
+        write_private_file(
+            &record,
+            recorded.path().file_name().unwrap().to_str().unwrap(),
+        )
+        .unwrap();
+        let legacy_path =
+            legacy_control_directory(state.path(), Path::new("/tmp"), destination).unwrap();
+        let legacy = tempfile::Builder::new()
+            .prefix(legacy_path.file_name().unwrap())
+            .rand_bytes(0)
+            .permissions(fs::Permissions::from_mode(0o700))
+            .tempdir_in("/tmp")
+            .unwrap();
+        let name = "taaaaaaaaaaaaaaaa0000000000000000000000000000000000000000";
+        let (new_socket, legacy_socket) = (recorded.path().join(name), legacy.path().join(name));
+        let _listeners = [&new_socket, &legacy_socket]
+            .map(|path| std::os::unix::net::UnixListener::bind(path).unwrap());
+        let output = state.path().join("exit-argv");
+        let program = state.path().join("ssh");
+        fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" END >> {}\nexit 255\n",
+                super::super::shell_quote(output.to_str().unwrap())
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            control_directory(state.path(), Path::new("/tmp"), destination).unwrap(),
+            recorded.path()
+        );
+        let transport = SystemTransport::with_ssh_program(state.path(), program);
+        transport.release_shared_connections(&row).await;
+        let invocations = fs::read_to_string(output).unwrap();
+        let commands: Vec<_> = invocations.split_terminator("\nEND\n").collect();
+        assert_eq!(commands.len(), 2, "{invocations}");
+        for (command, socket) in commands.iter().zip([new_socket, legacy_socket]) {
+            assert!(
+                command
+                    .lines()
+                    .any(|arg| arg == format!("ControlPath=\"{}\"", socket.display())),
+                "{command}"
+            );
+            assert!(command.ends_with("-O\nexit\n--\nuser@peer"), "{command}");
+            assert!(socket.exists());
+        }
     }
 
     /// Batch, sign-in and exit commands must select the same Tailscale master and keep every SSH override.
