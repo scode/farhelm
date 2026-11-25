@@ -350,10 +350,6 @@ consequences.
   — When a stale unused container-host entry is refused as a duplicate of a third host, the verified owner of the
   container machine cannot automatically take over the unused claim.
 
-- [`trailing-podman-build-prepare-uses-runtime-seam-bypassing-admission.md`](trailing-podman-build-prepare-uses-runtime-seam-bypassing-admission.md)
-  — Later recipe build and preparation stages look up cached runtime capabilities instead of rechecking fresh admission,
-  allowing new helper containers to start on hosts with an ordinary identity refusal or stale probe.
-
 - [`trailing-claim-podman-place-retains-unused-claim-after-twin.md`](trailing-claim-podman-place-retains-unused-claim-after-twin.md)
   — When an unused SSH host moves externally to a machine claimed by another host, Refresh refuses it as a twin but
   keeps its old claim on disk, blocking a third entry for the vacated machine.
