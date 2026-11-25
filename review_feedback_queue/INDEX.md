@@ -93,10 +93,6 @@ consequences.
   session can start while the warning explaining where the original checkout was left disappears after the reply
   deadline.
 
-- [`trailing-container-inherits-removed-proxy-setting.md`](trailing-container-inherits-removed-proxy-setting.md) — A new
-  container session can still use a proxy removed from its host if the running systemd user manager retains the earlier
-  setting.
-
 - [`trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md`](trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md)
   — A Tensorlake checkout launch can admit a newer recipe size than the one shown when the user confirms, if the same
   named recipe is edited before admission.
@@ -256,14 +252,6 @@ consequences.
 - [`trailing-environment-delete-drops-checkout-warning-received-after-inner-reply.md`](trailing-environment-delete-drops-checkout-warning-received-after-inner-reply.md)
   — A non-final environment Delete can complete on its host and explain why it left a checkout behind, yet the warning
   never reaches the rail if the reply arrives after the inner supervisor deadline.
-
-- [`trailing-recipe-images-retain-proxy-configuration-used-by-their-helpers.md`](trailing-recipe-images-retain-proxy-configuration-used-by-their-helpers.md)
-  — For ordinary image-backed login configuration, changing the place manager’s proxy or deleting one session does not
-  remove earlier credential-bearing settings from the shared recipe images.
-
-- [`trailing-fresh-proxy-regression-overlooks-installed-boot-file.md`](trailing-fresh-proxy-regression-overlooks-installed-boot-file.md)
-  — A regression could send the right values in the first import while writing the wrong bytes for later container
-  boots.
 
 - [`trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md`](trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md)
   — A regression could again hide the cause of an early container connection failure while the route-specific diagnostic
