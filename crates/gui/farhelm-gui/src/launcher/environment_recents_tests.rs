@@ -344,8 +344,8 @@ fn environment_setups_stay_apart_from_a_hosts_held_folder_default(cx: &mut TestA
 
 /// SPEC.md, "Sandbox sessions": "Restart, Restart with, Replace and Replace with stay in the existing sandbox"; the
 /// launcher area decided on 2026-11-16 that Replace with shows a new environment's setup and refuses it in the old
-/// launcher's words rather than leaving it out. Specified: in Replace with on host1, the `web` container setup is drawn
-/// "Replace: ~ · web container on host1 · …", disabled with explanatory help. Enter on the query result stays
+/// launcher's words rather than leaving it out. In Replace with on host1, the `web` container setup has a descriptive
+/// name and explanatory help. The disabled row offers no Fill or Replace action, and Enter on the query result stays
 /// refused with the same reason, so changing presentation cannot change the target.
 #[gpui::test]
 fn replace_with_refuses_an_environment_setup(cx: &mut TestAppContext) {
@@ -354,10 +354,7 @@ fn replace_with_refuses_an_environment_setup(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_with_hosts(cx, opened, fixture_hosts(&[0]));
     answer(&mut helm, cx, &[environment("web", None, 2)]);
     let name = name_of(cx, "launcher-recent-0").unwrap_or_default();
-    assert!(
-        name.starts_with("Replace: ~ · web container on host1"),
-        "{name}"
-    );
+    assert!(name.starts_with("~ · web container on host1"), "{name}");
     let before = draft(cx);
     let row = test_support::frame(cx)
         .into_iter()
@@ -390,6 +387,7 @@ fn replace_with_refuses_an_environment_setup(cx: &mut TestAppContext) {
     );
     cx.simulate_input("recent:");
     settle(cx);
+    assert_eq!(name_of(cx, "launcher-recent-enter"), None);
     keys(cx, "enter");
     assert_eq!(
         name_of(cx, "launcher-search-refusal").as_deref(),

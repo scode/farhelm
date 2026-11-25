@@ -152,6 +152,8 @@ linux/launcher-new--dark.png e7ea34e10d9fad793cefb44581a8774f7f3eed48
 linux/launcher-new--light.png 3bd2eab508c77aae17c0165041e1899f7f434d87
 linux/launcher-new-container--dark.png ada625b6f281da62007a0814cf742b7f8ef99bd0
 linux/launcher-new-container--light.png 5e5a7ce08b4c1cc3846d1ea1556e129706fff03f
+linux/launcher-replace-typed-recent--dark.png 3d2bea617746751dfc87fc0265406f387ced2bbb
+linux/launcher-replace-typed-recent--light.png bd0041c6fb7087614d158b8ad384b475869450dd
 linux/launcher-replace-with--dark.png 6963005db3c2776b2617eacec108dd5f5bfae107
 linux/launcher-replace-with--light.png b64174e881096575f60fe13b765af72c74b1923e
 linux/launcher-repository-refusal--dark.png 3615244be1b2021edf1b6814df9a3a102a03b036

@@ -64,6 +64,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Ignore Enter on a clipped recent setup.** In the session launcher's empty command pane, highlight a recent setup
+  with the arrow keys and scroll it out of view. Enter can still launch that setup or replace the source session. Keep
+  the highlight and consume Enter until a frame has shown the whole row again, as SPEC.md's “One GUI at a time”
+  requires. In the launcher search view (`launcher/view/search.rs` and `launcher/view/search/start.rs`), extend the
+  existing Enter action snapshot with the row's visibility after layout and scroll clipping, including the ancestor
+  clip. Invalidate it when the row disappears or is clipped. The next visible frame authorizes a fresh press. Preserve
+  the existing stale-choice refusal if the setup disappears before dispatch. Test partial and full clipping by scrolling
+  a selected row, then reveal it and verify the next Enter sends the stored setup's distinct model. The fix exceeds the
+  triage size gate because the existing snapshot is taken before layout, and the regression needs a scrollable pane and
+  a real Replace request.
+
 - **Show the settled build status in the New container golden.** The fake helm supplies the Development recipe but never
   supplies its build state on the selected Container host. The scene stops waiting when the Recipe field is drawn, which
   permits a picture of the interim status or an unavailable host. Stage a ready container host and a build place for

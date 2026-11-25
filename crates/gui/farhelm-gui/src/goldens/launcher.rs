@@ -134,6 +134,7 @@ enum LauncherScene {
     RepositoryRefusal,
     StaleChoice,
     Results,
+    RecentFill,
     TemplateSaveAfterUndo,
     Restart,
     HeldHostHelp,
@@ -208,6 +209,11 @@ pub(super) fn launcher_repository_refusal_setup(
 /// Capture a typed query against the open host catalog and file history, with a source already applied to the form.
 pub(super) fn launcher_results_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Results, window, cx);
+}
+
+/// The typed recent in Replace with fills the draft. Its permission stays visible on the selected row.
+pub(super) fn launcher_recent_fill_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    setup(state, LauncherScene::RecentFill, window, cx);
 }
 
 /// Restart keeps the recorded agent and destination fixed. Its command pane shows why their rows cannot apply.
@@ -385,7 +391,10 @@ fn open_new_with_claude(
     let scene = launcher_scene(state);
     if matches!(
         scene,
-        LauncherScene::Restart | LauncherScene::HeldHostHelp | LauncherScene::Replace
+        LauncherScene::Restart
+            | LauncherScene::HeldHostHelp
+            | LauncherScene::Replace
+            | LauncherScene::RecentFill
     ) {
         let open = if matches!(scene, LauncherScene::Restart | LauncherScene::HeldHostHelp) {
             entry::open_restart_with
@@ -527,7 +536,7 @@ fn answer_new_reads(
         } else if command.path == "/api/tensorlake" && environment {
             Some(json!(account(true, SshKeyStatus::NotCreated)))
         } else if command.path.starts_with("/api/launch-history") {
-            Some(launcher_history())
+            Some(launcher_history(scene))
         } else if scene == LauncherScene::ManagedCheckout
             && command.path == "/api/github-checkout-preview"
         {
@@ -664,6 +673,8 @@ fn answer_new_reads(
         };
         if scene == LauncherScene::Results {
             state.after.set(Some(apply_fixture_setup));
+        } else if scene == LauncherScene::RecentFill {
+            state.after.set(Some(type_launcher_query));
         } else if matches!(scene, LauncherScene::Restart | LauncherScene::HeldHostHelp) {
             assert!(
                 !recent.flags.click,
@@ -819,7 +830,12 @@ fn answer_hook_setup(
 }
 
 /// Seed the actual launch-history response so the view has to match setups and folders against the real draft.
-fn launcher_history() -> serde_json::Value {
+fn launcher_history(scene: LauncherScene) -> serde_json::Value {
+    let yolo_folder = if scene == LauncherScene::RecentFill {
+        "/home/user/src/permission-check"
+    } else {
+        "/home/user/src/api"
+    };
     let entry = |cwd: &str, selection| {
         json!({
             "host": 1, "cwd": cwd, "canonical_cwd": cwd, "github_repo": null,
@@ -829,7 +845,7 @@ fn launcher_history() -> serde_json::Value {
     json!({
         "launches": [
             entry("/home/user/src/api", json!({"harness": "claude", "permissions": "guarded"})),
-            entry("/home/user/src/api", json!({"harness": "claude", "permissions": "yolo"})),
+            entry(yolo_folder, json!({"harness": "claude", "permissions": "yolo"})),
             entry("/home/user/src/api", json!({
                 "harness": "claude", "permissions": "guarded", "effort": "high",
             })),
@@ -872,6 +888,7 @@ fn type_launcher_query(
         LauncherScene::Narrow => ("tl:", wait_for_launcher_results),
         LauncherScene::StaleChoice => ("tl:Bench", click_withdrawn_template),
         LauncherScene::RepositoryRefusal => ("gh:acme", answer_new_reads),
+        LauncherScene::RecentFill => ("recent:permission-check", wait_for_recent_fill),
         _ => ("build", wait_for_launcher_results),
     };
     if field.text(cx).as_ref() != query {
@@ -976,6 +993,29 @@ fn wait_for_launcher_results(
                 "the typed scene includes both folder and recent history"
             );
         }
+    }
+}
+
+/// Only a selected YOLO setup with its fill action in view proves this scene's wording and contrast.
+fn wait_for_recent_fill(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    let nodes = window.driver_nodes();
+    if let Some(cap) = nodes.iter().find(|node| {
+        node.element_id.as_deref() == Some("launcher-recent-enter")
+            && !node.visible_bounds.is_empty()
+    }) {
+        assert_eq!(cap.label.as_deref(), Some("⏎ Fill"));
+        assert!(
+            texts_within(nodes, "launcher-search-option-0")
+                .iter()
+                .any(|line| { line.text.as_ref() == "YOLO" && !line.visible_bounds.is_empty() })
+        );
+    } else {
+        state.after.set(Some(wait_for_recent_fill));
     }
 }
 

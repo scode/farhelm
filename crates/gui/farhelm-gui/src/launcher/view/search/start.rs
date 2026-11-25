@@ -289,8 +289,11 @@ impl Launcher {
                         .host(placement)
                         .text(" · ")
                         .host(&HostText::from_host(selection_summary(&entry.selection)));
-                    let label = if matches!(self.draft.mode, super::Mode::ReplaceWith { .. }) {
-                        format!("Replace: {}", whole.accessible_name()).into()
+                    let label = if !disabled
+                        && entry.selection.container.is_none()
+                        && matches!(self.draft.mode, super::Mode::ReplaceWith { .. })
+                    {
+                        format!("Fill from recent setup: {}", whole.accessible_name()).into()
                     } else {
                         whole.accessible_name()
                     };
@@ -308,7 +311,7 @@ impl Launcher {
                             placement,
                             self.chosen_host(cx),
                             "",
-                            active && !disabled && entry.selection.container.is_none(),
+                            active && !disabled,
                             selected,
                             recent_enter_cap(&self.draft.mode),
                             palette,
@@ -434,7 +437,8 @@ fn compact_match(full: &str, compact: &str, query: &str) -> HostText {
 }
 
 /// A recent setup keeps its full destination and choices in hover help. Start a wrapper's details with its prefix,
-/// since it can distinguish setups whose other visible choices are the same.
+/// since it can distinguish setups whose other visible choices are the same. A retired container still has an
+/// activation handler to explain the refusal, so its highlight alone cannot advertise an Enter action.
 #[allow(
     clippy::too_many_arguments,
     reason = "the row's drawn facts, shared by the start column and typed results, passed through once"
@@ -504,11 +508,11 @@ fn recent_choice(
                                 .underline_matches(query),
                         )
                         .when(yolo, |line| {
-                            line.child(key_chip(
-                                permission,
-                                if selected { ink } else { palette.danger },
-                                palette,
-                            ))
+                            // Give red its own background on the accent fill so the selected row keeps the warning.
+                            line.child(
+                                key_chip(permission, palette.danger, palette)
+                                    .when(selected, |chip| chip.bg(theme::color(palette.bg_0))),
+                            )
                         }),
                 )
                 .child(
@@ -528,7 +532,7 @@ fn recent_choice(
                         .child(details),
                 ),
         )
-        .when(active, |row| {
+        .when(active && selection.container.is_none(), |row| {
             row.child(
                 key_chip(enter_cap.clone(), ink, palette)
                     .id("launcher-recent-enter")
@@ -569,7 +573,7 @@ pub(super) fn typed_choice(
             query,
             selected,
             selected,
-            recent_enter_cap(&launcher.draft.mode),
+            format!("{RETURN_KEY} Fill").into(),
             palette,
         );
     }

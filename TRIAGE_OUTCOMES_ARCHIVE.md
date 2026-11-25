@@ -43088,3 +43088,117 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: `umqkoqqkzwylmtwvrnosllrnlzkmsrzu`, `plan/triage-launcher-nov24/02b-launcher-yolo`,
   [draft PR](https://github.com/scode/farhelm/pull/4823/changes). Fixed. The answer issues a host-setting write only
   while its question and shown launch request match, and checks both again before launching.
+
+## launcher-hidden-recent-remains-enter-target.md
+
+- Outcome: `fix code`.
+- Assessment: The user arrows onto a recent setup in the left pane, then scrolls that pane with the mouse wheel until
+  the row is out of view. Enter still launches that setup, and in Replace with it replaces the source. Nothing on screen
+  still names the setup. Verified: confirmed. The pane keeps the highlight through wheel scrolls by design
+  (`search/start.rs:162-163`, and `:205-211` only reveals a changed highlight), and `search_enter` takes it. SPEC.md
+  5788-5790 says an action "is ignored when ... its target is no longer in view". That conflicts with the deliberate,
+  commented code choice ("a wheel turn can reveal other choices without moving Enter's target"). No runtime scroll check
+  was run.
+- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
+  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
+  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
+  GUI at a time". Recommendation for reference: fix code. Keep the highlight but swallow Enter while the highlighted row
+  is not visible, as part of the Q-A mechanism. Size S-M. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry.
+- Execution: `ypxrxqmvpzlousklnpkmwrrwoypylolp`, `plan/triage-launcher-nov24/03-search`,
+  [draft PR](https://github.com/scode/farhelm/pull/4829/changes). Deferred to “Ignore Enter on a clipped recent setup”
+  in TODO.md. Measuring the presented row after layout and testing the actual Replace request exceeded the item's size
+  gate.
+
+## launcher-recent-highlight-mutes-yolo-cue.md
+
+- Outcome: `other`.
+- Assessment: On a highlighted recent setup, which is exactly the row Enter is about to launch, the YOLO chip loses its
+  red danger colour and takes the ordinary selected-row colour. Only the word "YOLO" remains as the cue. Verified:
+  confirmed. `search/start.rs:503-507` uses `ink` instead of `palette.danger` when the row is selected, and `row_inks`
+  (`start.rs:780-787`) records the deliberate inverse-ink choice. SPEC.md "Creation" 1204 says "permission danger stays
+  red". The fix needs a contrast-safe danger treatment on the selection fill, which is a design choice and would
+  overturn the commented one.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code with a red-on-selected chip treatment checked for contrast. Size S.
+- Execution: `ypxrxqmvpzlousklnpkmwrrwoypylolp`, `plan/triage-launcher-nov24/03-search`,
+  [draft PR](https://github.com/scode/farhelm/pull/4829/changes). Fixed. The recent setup keeps red permission text with
+  a contrasting background on the selected row.
+
+## launcher-recent-hover-can-follow-old-row.md
+
+- Outcome: `other`.
+- Assessment: Recent-setup rows are identified by list position. When the list changes under a resting pointer (a
+  history reply arrives, or the draft's filter changes), a pending or visible tooltip can keep describing the setup that
+  used to sit there. Verified: confirmed. `search/start.rs:282` uses `launcher-recent-{index}` as the id, and tooltip
+  retention is keyed by owner id. Whether this is rare is unclear: the list re-filters when the draft changes, so a
+  filter match was not claimed. Display only, and it corrects when the pointer leaves.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: discard, or fix code with content-derived row ids. Size S.
+- Execution: `ypxrxqmvpzlousklnpkmwrrwoypylolp`, `plan/triage-launcher-nov24/03-search`,
+  [draft PR](https://github.com/scode/farhelm/pull/4829/changes). No change under the cheap polish rule. Fixing the
+  transient label would require separating tooltip ownership from the option ID used by tests and automation, or
+  migrating those selectors.
+
+## launcher-result-pick-leaves-approval-focus.md
+
+- Outcome: `other`.
+- Assessment: While an agent approval card beside the launcher has keyboard focus, clicking a recent setup or template
+  in the launcher applies it, but focus stays on the approval card instead of returning to the command field. Verified:
+  confirmed. Rows call `focus::focus_in_layer` (`search/start.rs:136`, `search.rs:362-368`), which refuses the move when
+  focus is not inside the top layer (`focus.rs:651-666`). SPEC.md "Creation" 1505 says "A mouse pick returns focus to
+  the command field." The fix needs a choice of the right pointer-focus route, which SPEC_impl's in-layer rule
+  deliberately limits.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code with the pointer-focus route and its visibility checks. Size S.
+- Execution: `ypxrxqmvpzlousklnpkmwrrwoypylolp`, `plan/triage-launcher-nov24/03-search`,
+  [draft PR](https://github.com/scode/farhelm/pull/4829/changes). No change under the cheap polish rule. Moving focus
+  from a separate approval card needs a checked pointer route and coverage of the two focused surfaces.
+
+## launcher-recent-fill-option-named-replace.md
+
+- Outcome: `fix code`.
+- Assessment: In Replace with, each recent-setup row in the empty pane is announced as "Replace: ...", but clicking or
+  activating the row only fills the form. Only Enter from the command field on the highlighted row replaces. Verified:
+  confirmed. `search/start.rs:289-293` names every recent row "Replace: ...", while the click handler passes
+  `keyboard=false` (`start.rs:334-337`). The cue overstates rather than hides a destructive action.
+- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
+  Recommendation for reference: fix code. Put "Replace" only where activation replaces, for example on the highlighted
+  row's Enter cap. Size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: `ypxrxqmvpzlousklnpkmwrrwoypylolp`, `plan/triage-launcher-nov24/03-search`,
+  [draft PR](https://github.com/scode/farhelm/pull/4829/changes). Fixed. The option says it fills the form. The separate
+  empty-pane keyboard shortcut still says Replace when it replaces.
+
+## launcher-typed-recent-mislabels-enter.md
+
+- Outcome: `fix code`.
+- Assessment: In a wide Replace with launcher, a highlighted recent setup in typed search results shows the "⏎ Replace"
+  key cap, but Enter on a typed result only fills the form. In other modes it shows a bare ⏎, also implying a launch.
+  Verified: confirmed. `typed_choice` (`search/start.rs:560-571`) passes `recent_enter_cap(mode)`, while typed Enter
+  only calls `take_recent` (`search.rs:590-594`). SPEC.md "Creation" 1455-1456: "A query result for a recent setup fills
+  the form without launching."
+- Decision: q-wording, "User-visible text that misstates what will happen": the maintainer picked "Fix them all".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Correct the user-visible text so it states what will actually happen in the case at hand.
+  Recommendation for reference: fix code with a fill-only cap for typed rows. The wording is the only choice. Size S.
+  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: `ypxrxqmvpzlousklnpkmwrrwoypylolp`, `plan/triage-launcher-nov24/03-search`,
+  [draft PR](https://github.com/scode/farhelm/pull/4829/changes). Fixed. The typed recent result's Enter shortcut says
+  Fill.
