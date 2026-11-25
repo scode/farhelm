@@ -8,3 +8,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `agent-catalog-cli-and-drift-cleanups.md` — Remove GPT-5.6 from the model catalog, allow Goose named Restart capture, accept leading-hyphen `--effort`, and clean up OpenCode and instructions drift checks
 - [in-flight b07ad9] `tensorlake-setup-and-repo-cache-fixes.md` — Isolate repository-cache startup sweep errors, refuse Tensorlake setup reruns on suspended or deleting sandboxes, and assert setup never reads agent settings
 - [complete] `tailscale-private-socket-dirs.md` — Allocate private OS-chosen Tailscale SSH socket directories persisted across helm restarts and retire host masters on retarget and Remove without globbing `/tmp`
+- [pending] `launcher-style-whats-new.md` — Give What's new the session launcher's look, every entry in full, with release curation marking each highlight's headline (after `launcher-style-quick-dialogs.md`)
+- [pending] `welcome-empty-state.md` — Replace the startup Welcome card with a welcome in the empty main area, shown whenever there are no sessions (after `launcher-style-quick-dialogs.md`)
