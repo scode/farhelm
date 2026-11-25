@@ -38,10 +38,6 @@ Goose, Pi and OMP also start without provider or model flags and check that the 
 explicit OpenRouter models need `OPENROUTER_API_KEY`. The no-flag check still runs without it, but the case is then
 reported as COULD NOT RUN.
 
-The `permission_modes` category opens the CLI with the launcher's approval choices and checks Farhelm's live YOLO
-indicator where the integration reads one. Tracked agents complete one text turn with Custom permission flags. The test
-checks that Restart keeps those arguments in order and that the new process reaches its composer.
-
 A Codex retirement prompt can appear before the composer opens. The affected model is reported as unavailable when the
 prompt asks the user to choose between keeping it and switching to its replacement.
 
@@ -50,6 +46,10 @@ Minimal, Xhigh and Max, or High where none of those is offered) and checks the e
 enabled effort per harness also completes a real turn. Goose shows no effort, so its case checks only that Farhelm
 passes the effort to Goose and that Goose reaches its prompt and answers; a pass does not confirm the effort the
 provider applied. Goose, Pi and OMP need `OPENROUTER_API_KEY` for the whole case and report COULD NOT RUN without it.
+
+The `permission_modes` category opens the CLI with the launcher's approval choices and checks Farhelm's live YOLO
+indicator where the integration reads one. Tracked agents complete one text turn with Custom permission flags. The test
+checks that Restart keeps those arguments in order and that the new process reaches its composer.
 
 An agent may save a trust choice for the temporary directory. Claude, the Muse launcher and OMP can update themselves
 during startup, so these cases disable their updaters for the test invocations using an environment variable for Claude
