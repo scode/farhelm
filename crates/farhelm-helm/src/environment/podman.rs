@@ -29,6 +29,19 @@ pub(crate) mod failure_tests;
 const COMMAND: Duration = Duration::from_secs(30);
 const IMAGE_WORK: Duration = Duration::from_secs(1800);
 
+/// Keep the ownership check within the command output bound even when the
+/// container has a large environment, mounts list, or unrelated labels.
+const CONTAINER_INSPECTION: &str = r#"{
+    "Id":{{json .ID}},
+    "Name":{{json .Name}},
+    "Status":{{json .State.Status}},
+    "Labels":{
+        "farhelm.helm":{{json (index .Config.Labels "farhelm.helm")}},
+        "farhelm.role":{{json (index .Config.Labels "farhelm.role")}},
+        "farhelm.recipe":{{json (index .Config.Labels "farhelm.recipe")}}
+    }
+}"#;
+
 const UBUNTU: &str = "docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852";
 const PROXY_NAMES: [&str; 10] = [
     "http_proxy",
@@ -311,15 +324,18 @@ impl Podman {
         let text = self
             .require(
                 place,
-                vec!["container".into(), "inspect".into(), "--".into(), id.into()],
+                vec![
+                    "container".into(),
+                    "inspect".into(),
+                    "--format".into(),
+                    CONTAINER_INSPECTION.into(),
+                    "--".into(),
+                    id.into(),
+                ],
                 COMMAND,
             )
             .await?;
-        let data: serde_json::Value = serde_json::from_str(&text)?;
-        let item = data
-            .as_array()
-            .and_then(|items| items.first())
-            .context("Podman returned no inspected container")?;
+        let item: serde_json::Value = serde_json::from_str(&text)?;
         let observed = item["Id"]
             .as_str()
             .context("Podman returned no container ID")?
@@ -341,11 +357,11 @@ impl Podman {
         Ok(Some(ContainerInfo {
             id: observed,
             name,
-            status: item["State"]["Status"]
+            status: item["Status"]
                 .as_str()
                 .context("Podman returned no container state")?
                 .into(),
-            labels: serde_json::from_value(item["Config"]["Labels"].clone()).unwrap_or_default(),
+            labels: serde_json::from_value(item["Labels"].clone()).unwrap_or_default(),
         }))
     }
 

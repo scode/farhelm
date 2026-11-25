@@ -435,9 +435,10 @@ impl Commands {
                 ))
             }
             ("container", Some("inspect")) => {
+                assert_eq!(&args[2..4], ["--format", CONTAINER_INSPECTION]);
                 let item = self.container(last).expect("inspect only after existence");
-                Ok(output(0, &serde_json::json!([{"Id":item.id,"Name":item.name,"State":{"Status":item.status},
-                    "Config":{"Labels":{"farhelm.helm":self.helm,"farhelm.role":item.role,"farhelm.recipe":"dev"}}}]).to_string()))
+                Ok(output(0, &serde_json::json!({"Id":item.id,"Name":item.name,"Status":item.status,
+                    "Labels":{"farhelm.helm":self.helm,"farhelm.role":item.role,"farhelm.recipe":"dev"}}).to_string()))
             }
             ("image", Some("exists")) => {
                 let held = self.state.lock().unwrap().hold_image_absence;

@@ -269,10 +269,6 @@ consequences.
   — A regression could again hide the cause of an early container connection failure while the route-specific diagnostic
   checks pass.
 
-- [`trailing-full-podman-inspection-strand-container-farhelm-needs-to-remove.md`](trailing-full-podman-inspection-strand-container-farhelm-needs-to-remove.md)
-  — A container with enough otherwise valid metadata can fail Farhelm's ownership inspection and remain undeletable from
-  Farhelm.
-
 - [`trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md`](trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md)
   — The regression assertions would miss a change that forgets a capture when the confirmed request finds its image.
 
