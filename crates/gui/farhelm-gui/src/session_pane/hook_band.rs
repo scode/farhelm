@@ -15,7 +15,7 @@ use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::hook_setup::HookAgent;
 use crate::operations::{NotStarted, OpKey, Outcome};
-use crate::session::{self, ObservingCurrent};
+use crate::session::{self, ObservingCurrent, PerSession};
 use crate::{settings, theme};
 
 pub(super) const ID: &str = "hook-setup-band";
@@ -33,13 +33,21 @@ fn agent(row: &SessionRow) -> Option<HookAgent> {
     }
 }
 
-pub(super) struct HookBand {
+/// The local hide, in-flight save and refusal belong to the UI session that received the click.
+/// The new snapshot supplies the shared dismissal after a reset.
+#[derive(Default)]
+struct Known {
     /// The × is local to an occurrence. Evidence that the run captured or ended clears it, including off screen.
     hidden: HashSet<(String, HookAgent)>,
-    /// The selected session's eligible hint and its shared dismissal. Changes here wake the pane on pushes.
-    observed: Option<(String, HookAgent, bool)>,
     saving: Option<HookAgent>,
     error: Option<(String, SharedString)>,
+}
+
+pub(super) struct HookBand {
+    known: PerSession<Known>,
+    /// The last selected hint and its shared dismissal. Keep the observation across resets so an inert
+    /// window can retire the previously drawn hint.
+    observed: Option<(String, HookAgent, bool)>,
     settings: FocusHandle,
     _store: ObservingCurrent,
 }
@@ -47,10 +55,8 @@ pub(super) struct HookBand {
 impl HookBand {
     pub(super) fn new(cx: &mut Context<Self>) -> Self {
         Self {
-            hidden: HashSet::new(),
+            known: PerSession::default(),
             observed: None,
-            saving: None,
-            error: None,
             settings: cx.focus_handle().tab_stop(true),
             _store: session::observe_current(cx, Self::follow),
         }
@@ -58,9 +64,10 @@ impl HookBand {
 
     /// A missing row may only be outside the capped list. Clear the local dismissal when the pushed facts change.
     fn follow(&mut self, cx: &mut Context<Self>) {
+        let known = self.known.current(cx);
         let observed = session::current_store(cx).and_then(|store| {
             let collections = store.read(cx).collections();
-            self.hidden.retain(|(key, kind)| {
+            known.hidden.retain(|(key, kind)| {
                 collections
                     .get::<SessionRow>(key)
                     .is_none_or(|row| agent(row) == Some(*kind))
@@ -85,13 +92,15 @@ impl HookBand {
         };
         let band = cx.weak_entity();
         let settling = key.clone();
-        self.error = None;
+        let known = self.known.current(cx);
+        known.error = None;
         let begun = operations.update(cx, |operations, cx| {
             operations.start(&OpKey::preferences(), command, cx, move |settled, cx| {
                 let _ = band.update(cx, |band, cx| {
-                    band.saving = None;
+                    let known = band.known.current(cx);
+                    known.saving = None;
                     if !matches!(settled.outcome, Outcome::Done(_)) {
-                        band.error = Some((
+                        known.error = Some((
                             settling,
                             "Could not save hiding the hook setup prompt and hint. Try again."
                                 .into(),
@@ -102,8 +111,8 @@ impl HookBand {
             })
         });
         match begun {
-            Ok(()) => self.saving = Some(agent),
-            Err(NotStarted::Busy(_)) => self.error = Some((key, trust_band::busy())),
+            Ok(()) => known.saving = Some(agent),
+            Err(NotStarted::Busy(_)) => known.error = Some((key, trust_band::busy())),
             Err(error) => tracing::debug!(?error, "hook setup dismissal was not sent"),
         }
         cx.notify();
@@ -130,9 +139,11 @@ pub(super) fn draw(
 ) -> Option<AnyElement> {
     let agent = agent(row)?;
     let state = band.read(cx);
+    let known = state.known.read(cx);
     if dismissed(agent, cx)
-        || state.saving == Some(agent)
-        || state.hidden.contains(&(key.to_owned(), agent))
+        || known.is_some_and(|known| {
+            known.saving == Some(agent) || known.hidden.contains(&(key.to_owned(), agent))
+        })
     {
         return None;
     }
@@ -172,14 +183,16 @@ pub(super) fn draw(
     .accessible_name("Hide this hook setup hint for this session")
     .on_click(move |_, _, cx| {
         let _ = hiding.update(cx, |band, cx| {
-            band.hidden.insert((hidden_key.clone(), agent));
+            band.known
+                .current(cx)
+                .hidden
+                .insert((hidden_key.clone(), agent));
             cx.notify();
         });
     });
     let palette = theme::palette(cx);
-    let failure = state
-        .error
-        .as_ref()
+    let failure = known
+        .and_then(|known| known.error.as_ref())
         .filter(|(failed, _)| failed == key)
         .map(|(_, words)| {
             div()
@@ -223,13 +236,22 @@ pub(crate) fn golden(cx: &mut App) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
+    use farhelm_helm_client::Method;
     use farhelm_proto::PersistentHookSetup;
-    use gpui::TestAppContext;
+    use gpui::{TestAppContext, VisualTestContext};
 
     use super::ID;
+    use crate::session;
     use crate::session_list::menu_tests::{push, snapshot};
     use crate::session_list::tests::session;
-    use crate::test_support::{click, frame, open_main};
+    use crate::test_support::{click, frame, open_main, settle};
+
+    /// Inspect the hint above the open session's terminal after the view has drawn its changes.
+    fn shown(cx: &mut VisualTestContext) -> bool {
+        frame(cx)
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some(ID))
+    }
 
     /// The hint is bound to a run's missing setup while it waits for a capture. A pushed capture closes the
     /// occurrence, even after a local dismissal. A failed install leaves the session usable and has no hint.
@@ -242,11 +264,6 @@ mod tests {
             .waiting_for_hooks(PersistentHookSetup::NotRequested);
         let mut main = open_main(cx, snapshot(&[(missing.clone(), 0)], false));
         main.terminal_live();
-        let shown = |cx: &mut gpui::VisualTestContext| {
-            frame(cx)
-                .iter()
-                .any(|node| node.element_id.as_deref() == Some(ID))
-        };
         assert!(shown(main.cx), "a live uncaptured Grok run has no setup");
         let copy = frame(main.cx)
             .into_iter()
@@ -284,5 +301,53 @@ mod tests {
             shown(main.cx),
             "a later occurrence of missing setup is visible"
         );
+    }
+
+    /// A reconnect shows the selected run's hint again after a local hide or a lost dismissal reply.
+    /// Both cases reconnect to the same eligible row, with no shared dismissal stored.
+    #[gpui::test]
+    fn hook_hint_dismissals_start_over_after_a_ui_reset(cx: &mut TestAppContext) {
+        let row = session("a")
+            .agent_kind("grok")
+            .waiting_for_hooks(PersistentHookSetup::NotRequested);
+        let snapshot = || snapshot(&[(row.clone(), 0)], false);
+        let mut main = open_main(cx, snapshot());
+        main.terminal_live();
+        assert!(shown(main.cx), "the premise: the hook hint is shown");
+
+        for button in ["hook-setup-band-hide", "hook-setup-band-dismiss"] {
+            let old = main
+                .cx
+                .update(|_, cx| session::current_ui_session(cx))
+                .unwrap();
+            click(main.cx, button);
+            assert!(!shown(main.cx), "the press hid the hint");
+            if button == "hook-setup-band-dismiss" {
+                assert!(
+                    main.helm.commands().iter().any(|command| {
+                        command.method == Method::Put
+                            && command.path == "/api/preferences"
+                            && command.body
+                                == Some(serde_json::json!({"grok_hook_hint_dismissed": true}))
+                    }),
+                    "the dismissal save is outstanding"
+                );
+            }
+            main.helm.break_channel();
+            settle(main.cx);
+            assert!(
+                main.cx
+                    .update(|_, cx| session::current_ui_session(cx))
+                    .is_none()
+            );
+            main.helm.connect(snapshot());
+            settle(main.cx);
+            let new = main
+                .cx
+                .update(|_, cx| session::current_ui_session(cx))
+                .unwrap();
+            assert_ne!(new, old, "the snapshot replaced the UI session");
+            assert!(shown(main.cx), "the new UI session shows the eligible hint");
+        }
     }
 }

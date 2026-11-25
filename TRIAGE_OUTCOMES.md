@@ -94,41 +94,6 @@
   feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## hook-hint-dismissal-survives-ui-reset.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md, the UI reset rules (around lines 5724-5728): "The selected session survives a
-  reset by id ... The window itself ... is outside the reset, and settings come back with the rest of what the helm
-  reports. Everything else starts over". The code contradicts it. The hook band, and with it its × set, is created once
-  per window pane (`session_pane.rs:398`; `main_view.rs:155`) and never cleared on a reconnect. While disconnected,
-  `follow` skips its cleanup, and it keeps entries that are still eligible in the rebuilt store (`hook_band.rs:59-75`).
-  Verified: confirmed by reading the code.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code. Clear
-  the band's local state when the UI session changes. Size S, under 100 lines with a test. The trust band probably has
-  the same pattern; that is outside this item.). Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
-## hook-hint-dismissal-reply-loss-hides-all-hints.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. the same SPEC.md reset rules (around lines 5721-5728): "No action tracks its own fate
-  across a reset", and "Everything else starts over". The code contradicts it. **Don't show again** sets `saving`, which
-  only its reply clears (`hook_band.rs:89-105`). A reset drops that reply, the band survives, and `draw` keeps hiding
-  every hint for that agent while `saving` is set, even when the restored preference says to show them
-  (`hook_band.rs:133-136`). Verified: confirmed by reading the code.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code. Reset
-  `saving` and `error` on a UI session change; this shares the fix with 227. Size S.). Size gate: about 100 lines of
-  diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
-  part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-hooks-trust-nov24.md` ``.
-
 ## hook-recovery-text-omits-direction-isolation.md
 
 - Outcome: `fix code`.
