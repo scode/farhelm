@@ -8,4 +8,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `drift-named-conversation-starts.md` — Add live one-time named conversation start drift tests across all built-in agents (after `drift-model-selection.md`)
 - [in-flight ed6024] `drift-capture-timing-hooks.md` — Add live conversation capture timing, hook payload, and hooks-disabled drift tests (after `drift-model-selection.md`)
 - [in-flight a5d53a] `drift-workspace-trust.md` — Add live workspace trust pre-trust drift tests across supporting agents (after `drift-model-selection.md`)
-- [pending] `drift-instructions-delivery.md` — Add live `$farhelm` instructions pointer delivery drift tests across supporting agents (after `drift-model-selection.md`)
+- [in-flight 99b304] `drift-instructions-delivery.md` — Add live `$farhelm` instructions pointer delivery drift tests across supporting agents (after `drift-model-selection.md`)
