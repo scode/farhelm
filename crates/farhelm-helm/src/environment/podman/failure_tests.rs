@@ -1466,6 +1466,17 @@ async fn recipe_delete_drops_failure_only_state_for_a_removed_host() {
 /// A late absence report must still let the next Delete ask for consent.
 #[farhelm_testtrace::test]
 async fn recipe_delete_needs_explicit_consent_to_forget_an_absent_capture() {
+    check_capture_consent(true).await;
+}
+
+/// A prompt first absence must ask for consent without a prior timed-out Delete.
+#[farhelm_testtrace::test]
+async fn first_recipe_delete_prompts_for_an_absent_capture() {
+    check_capture_consent(false).await;
+}
+
+/// Both prompt and late absence share the same interrupted capture premise.
+async fn check_capture_consent(hold_first_answer: bool) {
     use axum::extract::{Path, Query, State};
     use axum::http::{StatusCode, Uri};
     use farhelm_proto::http::RECIPE_CAPTURE_CONFIRMATION_HEADER;
@@ -1490,6 +1501,15 @@ async fn recipe_delete_needs_explicit_consent_to_forget_an_absent_capture() {
         )
     };
     const RECIPE: &str = "/api/tensorlake/recipes/dev";
+    if !hold_first_answer {
+        assert!(f.recipe_state().await.absent_capture.is_none());
+        let reply = delete(RECIPE).await;
+        assert_eq!(reply.status(), StatusCode::CONFLICT);
+        let confirmation = &reply.headers()[RECIPE_CAPTURE_CONFIRMATION_HEADER];
+        assert_eq!(confirmation, "confirmation-required");
+        assert_eq!(f.recipe_state().await.retired_images, [tag]);
+        return;
+    }
     f.commands.state.lock().unwrap().hold_image_absence = true;
     tokio::time::pause();
     let timed_out = crate::rest_harness::within_reply_bound(delete(RECIPE)).await;

@@ -830,6 +830,7 @@ async fn retiring_owned_images_preserves_dangling_parents() {
 /// An absent tag cannot settle a disconnected commit that may still publish.
 /// Once the image appears, cleanup must pin its canonical ID and confirm its
 /// removal before releasing the same retained ownership record.
+/// Confirmed Delete still needs ownership and usage checks.
 #[farhelm_testtrace::test]
 async fn unresolved_commit_absence_retains_ownership_until_positive_identity() {
     let (_directory, provider, commands, place) = fixture().await;
@@ -849,8 +850,23 @@ async fn unresolved_commit_absence_retains_ownership_until_positive_identity() {
         provider.state("dev", place).await.unwrap().retired_images,
         [pending]
     );
-    commands.model.lock().unwrap().image_exists = true;
-    provider.retire_images("dev", place).await.unwrap();
+    let guard = provider.0.builds.begin_delete("dev").unwrap();
+    let guard = guard.with_missing_capture_consent(true);
+    let helm = provider.tag().await.unwrap();
+    for (owner, using, retained) in [("foreign", false, pending), (helm.as_str(), true, ID)] {
+        {
+            let mut model = commands.model.lock().unwrap();
+            model.image_exists = true;
+            model.helm = owner.into();
+            model.using_image = using;
+        }
+        provider.clean_images("dev", &guard).await.unwrap_err();
+        let saved = provider.state("dev", place).await.unwrap();
+        assert_eq!(saved.retired_images, [retained]);
+        assert!(commands.model.lock().unwrap().image_exists);
+    }
+    commands.model.lock().unwrap().using_image = false;
+    provider.clean_images("dev", &guard).await.unwrap();
     assert!(
         provider
             .state("dev", place)

@@ -275,19 +275,6 @@
   record which way it went. Recommendation for reference: discard (or fix code) — no product failure; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## recipe-delete-test-misses-warning-clipping.md
-
-- Outcome: `other`.
-- Assessment: The test for the recipe Delete confirmation checks the outer prompt box and its accessible name, but not
-  that the warning text and buttons stay visible in a very short window. No actual clipping was shown. Verified:
-  Confirmed as a test gap only (`settings/recipe_leave_tests.rs`, as cited). No product bug is established.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard — coverage only, no observed clipping; size S if kept.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
 ## pi-settings-tests-miss-trust-route.md
 
 - Outcome: `other`.
@@ -349,31 +336,6 @@
   in how the connection stage is picked for a container's connection would not be caught. Verified: Confirmed as a test
   gap by the reviewer's citations. Current line numbers in `manager.rs` have moved and I did not re-locate each test. No
   product bug is claimed.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
-## trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md
-
-- Outcome: `other`.
-- Assessment: No test checks that a confirmed Delete anyway still goes through the ordinary ownership and usage checks
-  when the image turns out to exist. Verified: Confirmed as a test gap. SPEC_impl.md "Podman places, creation and
-  images" ("If the image exists, it follows the usual ownership and usage checks") is the behavior that lacks a test.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
-## trailing-first-deletes-live-confirmation-reply-lacks-regression-assertion.md
-
-- Outcome: `other`.
-- Assessment: No test checks that a first recipe Delete answered promptly opens the Delete anyway question rather than
-  showing an ordinary error. Verified: Confirmed as a test gap. The existing test forces a timeout first.
 - Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
   (2026-11-24 fewest-questions triage page (main c38b93552).)
 - Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
