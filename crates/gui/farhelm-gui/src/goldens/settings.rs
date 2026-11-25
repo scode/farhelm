@@ -1135,6 +1135,7 @@ enum DraftStep {
     ShowKeyConflict,
     ShowNtfyRefusal,
     ShowHeldClose,
+    ShowTunnelQuestion,
     Done,
 }
 
@@ -1143,6 +1144,20 @@ fn stage_draft(state: &SceneState, section: crate::settings::Section, first: Dra
         section,
         step: Rc::new(Cell::new(first)),
     }));
+}
+
+/// Picture the existing Mac warning over the saved Terminal settings. The interaction test drives the late save.
+pub(super) fn settings_tunnel_question_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    settings_terminal_setup(state, window, cx);
+    stage_draft(
+        state,
+        crate::settings::Section::Terminal,
+        DraftStep::ShowTunnelQuestion,
+    );
 }
 
 /// A stable frame can precede the second form's read. Do not finish a draft screenshot during that gap.
@@ -1259,6 +1274,19 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
             });
             return div().into_any_element();
         }
+        DraftStep::ShowTunnelQuestion => {
+            if crate::layers::last_opened::<settings::SettingsDialog>(cx).is_some() {
+                let step = draft.step.clone();
+                window.defer(cx, move |window, cx| {
+                    let mark = Mark::take(cx);
+                    if crate::terminal::tunnels::ask_consent(&mark, window, cx, |_, _| {}).is_some()
+                    {
+                        step.set(DraftStep::Done);
+                    }
+                });
+            }
+            return div().into_any_element();
+        }
         DraftStep::VerifyDraft => {
             if settings::draft_changed_for_opened(draft.section.clone(), cx) {
                 draft.step.set(DraftStep::Done);
@@ -1311,6 +1339,7 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
             | DraftStep::ShowKeyConflict
             | DraftStep::ShowNtfyRefusal
             | DraftStep::ShowHeldClose
+            | DraftStep::ShowTunnelQuestion
             | DraftStep::Done => {
                 unreachable!("these steps do not edit a field")
             }

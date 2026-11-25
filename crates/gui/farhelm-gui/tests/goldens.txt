@@ -436,6 +436,8 @@ linux/settings-terminal--dark.png 8baa35e6a5faa5edeb715cd1b1e4970f07e58a11
 linux/settings-terminal--light.png b2a583d3566c1d1d2c726fec1d0e7986e5eb8abc
 linux/settings-terminal-edited--dark.png a8a82e30939f289604fa23b0dd302c046e6b70e4
 linux/settings-terminal-edited--light.png 18fe4fc9326d64ecfafd1f12ca547a0317396096
+linux/settings-tunnel-question-over-terminal--dark.png 04c6bf7b3dcdc7856f25ec3f52d0762d3cab1d10
+linux/settings-tunnel-question-over-terminal--light.png 0e74813e503e7b0cdd1683ad2a507b48a0dc3b40
 linux/settings-unsaved--dark.png d954a23d96202ad50d80895eb2fb15cab041afab
 linux/settings-unsaved--light.png c9d17af7959b251487e7b6dfe652a06e4d1b379d
 linux/solid-button-danger-held--dark.png 90ccd0f77da0946224c592547b42300ea1864c31
