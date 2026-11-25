@@ -2623,8 +2623,18 @@
       "reference": "approval-card"
     },
     {
+      "golden": "approval-yolo-actions",
+      "title": "Approval cards for a YOLO plain Restart and for a prompt to a running agent, each saying when a fresh approval applies",
+      "reference": null
+    },
+    {
       "golden": "approval-shell-template",
       "title": "An approval card showing the stored permission and flags of a Bash template",
+      "reference": null
+    },
+    {
+      "golden": "approval-template-unavailable-permission",
+      "title": "An approval card for a template whose stored permission mode the proposed agent does not offer, marked as not offered",
       "reference": null
     },
     {
@@ -2951,6 +2961,31 @@
       "reference": null
     },
     {
+      "golden": "launcher-replace-typed-recent",
+      "title": "Replace with after typing a recent setup's name: the result says what Return does and keeps its permission visible",
+      "reference": null
+    },
+    {
+      "golden": "launcher-incomplete-template",
+      "title": "New opened by a partial template shortcut, its incomplete-setup banner below the actions pointing up to the form",
+      "reference": null
+    },
+    {
+      "golden": "launcher-template-save-after-undo",
+      "title": "Save as template holding a draft whose permission change was undone, with the template's source mark restored",
+      "reference": null
+    },
+    {
+      "golden": "launcher-held-host-help",
+      "title": "Restart with's held host, its hover help naming the host in full where the address segment clips it",
+      "reference": null
+    },
+    {
+      "golden": "launcher-shell-help",
+      "title": "The Bash and Zsh choices' hover help, naming each as a shell",
+      "reference": null
+    },
+    {
       "golden": "launcher-yolo-question",
       "title": "New session with the YOLO confirmation visible below the launch actions",
       "reference": "launcher-yolo-confirmation"
@@ -3231,6 +3266,11 @@
       "reference": "host-settings-dialog"
     },
     {
+      "golden": "host-settings-tailscale-format",
+      "title": "Host settings refusing Tailscale mode for an SSH alias Tailscale cannot use, the address format guidance beside the switch",
+      "reference": null
+    },
+    {
       "golden": "host-settings-dialog-end",
       "title": "The host settings dialog scrolled to its end: the Permissions switches with their help",
       "reference": "host-settings-dialog-end"
@@ -3413,6 +3453,11 @@
     {
       "golden": "host-update-refusal",
       "title": "The host refusal dialog for an Update refused below the upgrade floor, with the helm's manual remedy (the old dialog's look is reference host-uninstall-refusal)",
+      "reference": null
+    },
+    {
+      "golden": "host-mac-update-app-refusal",
+      "title": "Hosts saying why Update did not run on a remote Mac that gained the desktop app before Update wrote anything",
       "reference": null
     },
     {
