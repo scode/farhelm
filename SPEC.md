@@ -1524,8 +1524,8 @@ field, Close, Command field messages when present, the visible body controls, th
 Tab stop, with its editors following it when expanded. New, Clone and Replace with open with focus in the command field.
 Restart with opens on Cancel. Refusals, destructive warnings and the inline YOLO question remain adjacent to the actions
 in a bounded scroll region, so long content cannot displace those actions. The save-as-template panel remains inline in
-the scrolling body. Project registration (associating metadata with a directory) is optional convenience and never a
-prerequisite.
+the scrolling body. Escape closes open search results before closing that panel. Project registration (associating
+metadata with a directory) is optional convenience and never a prerequisite.
 
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot

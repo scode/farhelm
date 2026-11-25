@@ -30,35 +30,6 @@
   to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
-## hook-save-uses-newer-replace-warning.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md "Lifecycle operations", Replace with: "launching carries the precondition
-  matching what the launcher showed at the click (see the confirmation rule below)". The confirmation rule (Confirmed
-  2026-10-01) says: "the answer applies to the wording on screen at the click, never to a state the user was not shown".
-  SPEC.md launcher section (around line 1221) adds: "launches that retire a session (Replace with) limited to the action
-  and consent already shown". The code contradicts this. **Set up and launch** is the click, but its continuation
-  (`launcher/view/hook_question.rs:188-208`, `:247-253`) calls `press_at` (`launcher/view.rs:1335-1356`), which takes
-  `SourceConsent` from `source_frame.current()` at the moment the settings save settles. That is not the frame shown at
-  the answer. Since #4623 the helm pushes live updates while the save request is out. If a source that showed nothing
-  alive at the click becomes live during the save, the newer frame draws a warning with the `Unconditional` guard, and
-  the continuation sends that guard. The source is then deleted without the user ever confirming that warning. The
-  module's own contract agrees with the spec (`hook_question.rs:2`): "Its launch continuation belongs to the draft that
-  was answered." The YOLO question already solves the same problem by freezing the shown source into its answer
-  (`launcher/view/yolo_question.rs:95-101`, `view.rs:2302-2306`). Verified: confirmed by reading the code. Runtime
-  frequency was not verified. A sub-issue goes away with the same fix: if the window has not yet presented the frame
-  when the save settles, `press_at` returns without a word (`view.rs:1346-1352`), so the setting is saved and the launch
-  is silently dropped.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code. Freeze
-  the `SourceConsent` shown at the hook answer, as the YOLO question does, and pass it to the continuation's submit.
-  Size M; with a GPUI test it may approach or exceed ~100 lines. Sibling item: 51.). Size gate: about 100 lines of diff
-  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any
-  part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md
 
 - Outcome: `fix code`.
@@ -728,34 +699,6 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — coverage only, no observed clipping; size S if kept.
 - Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
-## launcher-host-reorder-test-accepts-old-host.md
-
-- Outcome: `other`.
-- Assessment: A launcher test for the Host menu checks that Enter picks the highlighted host after the helm reorders
-  hosts. It never checks the drawn row order, and the highlighted host equals the draft's host, so some regressions
-  would pass. Verified: confirmed. The test is `launcher/view_tests.rs:3022`
-  (`an_open_host_menu_gets_its_first_highlight_when_hosts_arrive`). The shipped path honours the order. Test gap only.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard, or fix code with a small test edit. Size S.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
-## launcher-tab-test-omits-placement-premise.md
-
-- Outcome: `other`.
-- Assessment: A Tab-order test meant for "all destinations offered" never checks that the sandbox and container offers
-  are actually present, so it would pass if the fixture lost them. Verified: confirmed. `launcher/view_tests.rs:641-689`
-  asserts only the closed-form stops. Test gap only.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard, or fix code by asserting both offers in the menu
-  first. Size S.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## shift-enter-test-assumes-one-program-read.md
 
@@ -1981,50 +1924,6 @@
   maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## launcher-resize-changes-enter-action.md
-
-- Outcome: `fix code`.
-- Assessment: In a wide Replace with launcher, the user moves the keyboard highlight onto a template, where Enter only
-  fills the form. If the window is then narrowed and Enter arrives before the narrow layout is drawn, Enter presses
-  Replace instead. Replace creates the new session and deletes the source session, an action the drawn template
-  highlight never offered. Verified: confirmed in current code. `launcher/view/search.rs:293-322` (`search_enter`)
-  re-checks the live width and goes straight to `press()` when the pane no longer fits. `reflow_search`
-  (`search.rs:633-645`), which runs in render (`launcher/view.rs:2294`), also clears the start highlight on narrowing.
-  `press_at` (`view.rs:1335-1356`) reuses the source-consent snapshot, which a width change leaves unchanged
-  (`view.rs:2301-2307`, `prompt.rs:1225-1240` reuses an equal snapshot), and that snapshot carries no command-field
-  action or row identity. This contradicts SPEC.md "Creation" 1221-1222 and "One GUI at a time" 5788-5790. Not verified:
-  how often native GPUI dispatches a key between a dirty draw and its presentation. SPEC_impl.md 996-998 says it can
-  happen.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code. The spec already requires this, but the fix has more than one
-  possible shape: bind the command-field Enter to an ActionFrame of the drawn action and highlight, and swallow it on
-  change. Share the fix with 9 and 49. Size M, likely over 100 lines with tests. Size gate: about 100 lines of diff
-  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution
-  blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
-## launcher-recent-enter-before-display.md
-
-- Outcome: `fix code`.
-- Assessment: In a wide Replace with launcher, the user presses Up from a template to the recent setup above it and then
-  Enter, before the new highlight is drawn. Enter takes the recent setup, and in Replace with that submits a replace
-  that deletes the source session. The screen still showed a template, whose Enter only fills the form. Verified:
-  confirmed. `step_start_choice` (`search/start.rs:87-103`) moves the live highlight. `take_start_choice` and
-  `take_start_row` (`start.rs:107-158`) resolve it live and call `press()` for a keyboard pick. The only frame guard is
-  the source-consent snapshot, which this move does not change (`view.rs:1335-1356`). This contradicts SPEC.md 1221-1222
-  and 5788-5790. Not measured: native timing.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code, with the same mechanism as 8. Size M, shared. Size gate: about
-  100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over
-  that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## hook-settings-toggle-uses-unshown-state.md
 
 - Outcome: `fix code`.
@@ -2098,30 +1997,6 @@
   and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings
   the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
-## trailing-replace-with-folder-enter-out-of-bounds-highlight.md
-
-- Outcome: `fix code`.
-- Assessment: In Replace with, the user filters the Folder dropdown and arrows down to a suggestion. A template
-  shortcut, or a template batch that was waiting for the model catalog, then changes the folder, so the dropdown shrinks
-  while the highlight index stays. Enter now finds nothing at that index, falls through to the main action, and replaces
-  the session, deleting the source. With index 0 it silently picks Home instead. Verified: confirmed.
-  `launcher/view/folder_list.rs:221-246` guards Replace only when `highlighted.is_none()`. An out-of-range `Some(i)`
-  skips that guard, `get(i)` returns `None`, and the function returns `false`. Its caller then calls `press()`
-  (`view.rs:859-862`). `apply_now` (`view.rs:1060-1106`) calls `sync_fields` without dropping the folder highlight or
-  `filtering`, and the waiting-batch route is real (`view.rs:506-512`). Nuance: once the shrunken list is presented with
-  nothing highlighted, Enter launching matches SPEC's "with no highlighted entry it launches". The spec violation is an
-  Enter that arrives before that frame (SPEC.md 1221-1222), plus the silent Some(0)-to-Home pick.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code. Swallow an unresolvable highlight in Replace with, and drop
-  the folder highlight whenever a batch changes the folder. This is close to clearly settled, but the
-  identity-versus-index choice is a design call. Size S. Size gate: about 100 lines of diff (code, tests and docs, not
-  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
-  to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## trailing-replace-with-suspended-checkout-recent-skips-warning.md
 
@@ -5699,28 +5574,6 @@
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
-
-## launcher-escape-discards-template-edits.md
-
-- Outcome: `fix code`.
-- Assessment: In the wide session launcher, Save as template's name field and checklist sit inline next to the command
-  field's search results. With the panel open and results showing, Escape closes the Save as template panel, and its
-  typed name and checklist changes go with it. The results stay open, though the user probably meant to hide them. In
-  the narrow layout the results are a popover and take Escape first. Verified: confirmed. The launcher's dismissal hook
-  closes the save panel before it offers Escape to the inline results (`launcher/view.rs:228-246`,
-  `dismiss_command_pane` in `launcher/view/search.rs:618-640`). SPEC.md:1504 ("Escape or clicking outside the results
-  hides them and keeps the query") and SPEC.md:1322 ("Escape returns to the launcher", for the panel) both claim this
-  Escape. The panel-first order is a deliberate, commented choice: "closes the panel on Escape anywhere in the launcher,
-  as the old panel took the launcher's Escape first" (`templates/save_panel.rs:22-25`, `view.rs:228-229`). Only a short
-  panel input is lost, which the user can recreate quickly.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code — give open
-  results the first Escape, as the narrow layout already does, and update the save_panel doc comment. Size S. A discard
-  is also reasonable given how little is lost. Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
 
 ## launcher-incomplete-template-banner-misplaced.md
 

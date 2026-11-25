@@ -66,6 +66,7 @@ use crate::launcher::recents::{
 };
 use crate::launcher::request::capitalized;
 use crate::launcher::search::{Inputs, Results, Row, Scope, scoped, search};
+use crate::prompt::ActionFrame;
 use crate::theme::{self, metrics};
 
 mod start;
@@ -110,7 +111,7 @@ pub(super) fn command_pane_fits(window: &Window) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 #[allow(
     clippy::large_enum_variant,
-    reason = "at most two are held (the form's source and the keyboard target); boxing would gain nothing"
+    reason = "only the source, keyboard target and its shown snapshot hold setup identities"
 )]
 pub(super) enum SetupSource {
     Recent(Option<Install>, SetupKey),
@@ -182,6 +183,8 @@ pub(super) struct SearchBox {
     inline_results: bool,
     /// The field retains focus. Down explicitly starts navigating the empty pane and Up from the first row clears it.
     start_highlight: Option<SetupSource>,
+    /// In Replace with, Enter can retire the source. Its displayed start row (or the main action) authorizes the key.
+    start_enter_frame: ActionFrame<Option<SetupSource>>,
     /// The last child revealed by keyboard navigation, so drawing after a mouse wheel does not undo the scroll.
     pub(super) pane_revealed: Option<usize>,
     /// The setup or last template that filled the form. Hand edits leave its provenance visible until Reset.
@@ -296,9 +299,19 @@ impl Launcher {
         }
         // Literally empty, as the old check was: a box holding only spaces is a query, and never launches.
         if self.search.text(cx).is_empty() {
-            if command_pane_fits(window)
-                && let Some(row) = self.search_box.start_highlight.clone()
+            let row = command_pane_fits(window)
+                .then(|| self.search_box.start_highlight.clone())
+                .flatten();
+            if matches!(self.draft.mode, Mode::ReplaceWith { .. })
+                && !self
+                    .search_box
+                    .start_enter_frame
+                    .current()
+                    .is_some_and(|frame| frame.shown() == Some(&row))
             {
+                return;
+            }
+            if let Some(row) = row {
                 self.take_start_choice(&row, true, window, cx);
                 return;
             }
@@ -641,6 +654,17 @@ impl Launcher {
             self.close_search(window, cx);
             self.search_box.typed_choice = choice;
             self.open_search(window, cx);
+        }
+        if matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
+            if self.search.text(cx).is_empty() {
+                self.search_box.start_enter_frame.capture(
+                    self.search_box.start_highlight.clone(),
+                    (),
+                    window,
+                );
+            } else {
+                self.search_box.start_enter_frame.clear();
+            }
         }
     }
 

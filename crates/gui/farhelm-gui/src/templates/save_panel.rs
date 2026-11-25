@@ -21,8 +21,7 @@
 //!   Close and Escape. The helm's refusal is said in the panel, the draft stays, and nothing is retried.
 //! - **What the owner does.** The launcher draws the panel at the end of its scrolling body and hears two things: the
 //!   panel is done without saving (Cancel), and a template was saved (closing itself and opening Templates on it). The
-//!   launcher's dismissal hook closes the panel on Escape anywhere in the launcher, as the old panel took the
-//!   launcher's Escape first.
+//!   launcher's dismissal hook gives open command results the first Escape, then closes the panel on Escape.
 
 use std::rc::Rc;
 

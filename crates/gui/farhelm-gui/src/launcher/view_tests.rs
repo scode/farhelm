@@ -668,8 +668,14 @@ fn tab_follows_the_launch_groups_when_all_placements_are_offered(cx: &mut TestAp
         helm.reply(command.id, 200, body);
     }
     settle(cx);
-    assert!(search_focused(cx));
     assert!(drawn(cx, "launcher-recent-0"));
+    // Establish both placement offers before checking the focus order of the closed form.
+    click_in_body(cx, "launcher-host");
+    assert!(drawn(cx, "launcher-host-option-New sandbox"));
+    assert!(drawn(cx, "launcher-host-option-New container"));
+    keys(cx, "escape");
+    test_support::click(cx, "launcher-search-row");
+    assert!(search_focused(cx));
     for id in [
         "launcher-close",
         "launcher-destination-Folder",
@@ -3022,7 +3028,7 @@ fn the_host_button_is_empty_before_hosts_arrive(cx: &mut TestAppContext) {
 fn an_open_host_menu_gets_its_first_highlight_when_hosts_arrive(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_with_hosts(
         cx,
-        LaunchDraft::new(Some(1), "~".into(), None),
+        LaunchDraft::new(Some(2), "~".into(), None),
         fixture_hosts(&[]),
     );
     click_in_body(cx, "launcher-host");
@@ -3049,6 +3055,11 @@ fn an_open_host_menu_gets_its_first_highlight_when_hosts_arrive(cx: &mut TestApp
     settle(cx);
     assert_eq!(selected_state(cx, "launcher-host-option-2"), Some(false));
     assert_eq!(selected_state(cx, "launcher-host-option-1"), Some(true));
+    assert!(
+        test_support::bounds(cx, "launcher-host-option-2").origin.y
+            < test_support::bounds(cx, "launcher-host-option-1").origin.y
+    );
+    assert_eq!(draft(cx).host, Some(2), "browsing has kept the old host");
     keys(cx, "enter");
     assert!(
         draft(cx).host_chosen,
