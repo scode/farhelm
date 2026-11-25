@@ -2053,48 +2053,6 @@
   blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## hook-save-launches-into-later-folder.md
-
-- Outcome: `fix code`.
-- Assessment: The launcher can ask "Set up Restart for Grok/Antigravity?". If the user switches hosts while that
-  question is open and then answers **Set up and launch** before the new host's remembered folder has loaded, the
-  session can start in that remembered folder. The folder field showed the fallback when they answered. Verified:
-  confirmed in the code. The open question is retired only when the agent changes or when an edit happens while the save
-  is out (`hook_question.rs:94-105`). The folder default settles at render time without going through the edit path
-  (`view/history.rs:294-324`; `view.rs:2290`, compared with `changed()` at `:995-1009`). The answer does not check
-  whether a plain Launch would be refused, and the continuation rebuilds the request from the live draft. The folder it
-  lands in is the launcher's own default for the host the user picked, which an ordinary Launch would also have used
-  once settled. No spec sentence covers a continuation after a background settle.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmful case (deletes, retires a session, gives consent, launches, bills or opens a link): make
-  the action use the target, consent and preconditions from the frame the user was shown, or ignore it, per SPEC.md "One
-  GUI at a time". Recommendation for reference: fix code, together with item 10. Either bind the destination at the
-  answer, or save the setting and leave the launch to a later press when the draft was refused or changed. Two
-  reasonable shapes. Size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
-  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
-  the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
-## launch-without-hook-choice-lost.md
-
-- Outcome: `fix spec`.
-- Assessment: The user answers **Launch without**, which skips hook setup for this one launch, and then turns on the
-  all-hosts hook setting in Settings before that launch finishes. The launch then sets up hooks anyway. The window
-  exists while a new environment provisions, or while a slow Replace with keeps running behind its 504. Verified:
-  confirmed that the request carries no per-launch skip (`hook_question.rs:165-174`), and the final dispatch reads the
-  current setting. SPEC_impl.md, around 4687-4690, specifies exactly that: "The final create dispatch reads the setting
-  from the resolved launch kind, including ... a new environment". SPEC.md (around 3180-3184) says only that Launch
-  without "launches with no settings write". The finding's reading that it has a one-launch effect is an interpretation.
-  The setup that runs is one the user explicitly opted into moments later.
-- Decision: q-frame, "Clicks and keys that act on something other than what the user was shown": the maintainer picked
-  "Fix the harmful ones, accept the harmless ones". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Harmless case: widen the 2026-11-21 SPEC.md sentence (Creation, "A key or click may act before a
-  frame shows an arriving background update ...") from the launcher to the whole app, keeping its exceptions for
-  destructive confirmations and launches that retire a session. One spec change covers every item recorded this way. No
-  code change. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-launcher-nov24.md` ``.
-
 ## trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md
 
 - Outcome: `fix code`.
