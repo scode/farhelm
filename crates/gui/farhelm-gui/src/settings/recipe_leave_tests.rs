@@ -263,6 +263,7 @@ fn a_close_from_another_section_shows_recipes_first(cx: &mut TestAppContext) {
 /// Specified: New recipe draws no Delete; on an Edit, Delete asks "Delete recipe rust-dev? …" with Cancel and Delete;
 /// Cancel sends nothing; Delete again and confirmed sends `DELETE /api/tensorlake/recipes/rust-dev` under the recipe's
 /// key, the form locked meanwhile; the done answer closes the editor with focus on New recipe.
+/// The whole warning and both answers must fit at the minimum window size.
 #[gpui::test]
 fn delete_asks_then_deletes_under_the_recipes_key(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, vec![entry("rust-dev", idle(), Value::Null)]);
@@ -271,6 +272,8 @@ fn delete_asks_then_deletes_under_the_recipes_key(cx: &mut TestAppContext) {
     click(cx, "recipe-back");
     open_editor_with(&mut helm, cx, "recipe-edit-rust-dev", json!([]));
 
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
     click(cx, "recipe-delete");
     assert_eq!(
         question(cx),
@@ -291,6 +294,24 @@ fn delete_asks_then_deletes_under_the_recipes_key(cx: &mut TestAppContext) {
     let footer_bounds = bounds(cx, "settings-answers");
     assert!(prompt_bounds.left() >= footer_bounds.left());
     assert!(prompt_bounds.right() <= footer_bounds.right());
+    let shown = frame(cx);
+    let painted = shown
+        .iter()
+        .flat_map(|node| &node.texts)
+        .filter(|line| line.visible_bounds.intersect(&footer_bounds) == line.bounds)
+        .map(|line| line.text.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let warning = question(cx).unwrap().0;
+    assert!(painted.contains(&warning), "visible footer text: {painted}");
+    for id in ["prompt-cancel", "prompt-confirm"] {
+        let answer = shown
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id));
+        let answer = answer.unwrap_or_else(|| panic!("{id} was not drawn"));
+        let visible = answer.visible_bounds.intersect(&footer_bounds);
+        assert_eq!(visible, answer.bounds, "{id}");
+    }
     assert!(
         !drawn(cx, "settings-footer-close"),
         "the question owns the footer"

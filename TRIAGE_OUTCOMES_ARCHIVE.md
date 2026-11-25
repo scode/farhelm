@@ -46615,3 +46615,49 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   needs to bind dispatch to verified admission, distinguish the unsent reservation from a lost create result, and cover
   cancellation and refusals during both waits. Change `pzxlysnulspmllyyzvmowkzynvqvmppm`, bookmark
   `plan/triage-podman-nov24/05b-helper-admission`, [PR #4889](https://github.com/scode/farhelm/pull/4889/changes).
+
+## trailing-first-deletes-live-confirmation-reply-lacks-regression-assertion.md
+
+- Outcome: `other`.
+- Assessment: No test checks that a first recipe Delete answered promptly opens the Delete anyway question rather than
+  showing an ordinary error. Verified: Confirmed as a test gap. The existing test forces a timeout first.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
+- Execution: Fixed the test. A first Delete with a prompt absence answer, before any saved absence observation, must
+  return the exact confirmation marker and retain the capture tag. Change `rszukktzpnwrsukrkxolsoxovymkmowl`, bookmark
+  `plan/triage-podman-nov24/06a-delete-coverage`, [PR #4894](https://github.com/scode/farhelm/pull/4894/changes).
+
+## recipe-delete-test-misses-warning-clipping.md
+
+- Outcome: `other`.
+- Assessment: The test for the recipe Delete confirmation checks the outer prompt box and its accessible name, but not
+  that the warning text and buttons stay visible in a very short window. No actual clipping was shown. Verified:
+  Confirmed as a test gap only (`settings/recipe_leave_tests.rs`, as cited). No product bug is established.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — coverage only, no observed clipping; size S if kept.
+- Execution: Fixed the test. At the minimum window size it checks the complete painted warning and both answers against
+  their visible bounds within the footer. The accessibility and footer-ownership checks still run. Change
+  `rszukktzpnwrsukrkxolsoxovymkmowl`, bookmark `plan/triage-podman-nov24/06a-delete-coverage`,
+  [PR #4894](https://github.com/scode/farhelm/pull/4894/changes).
+
+## trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md
+
+- Outcome: `other`.
+- Assessment: No test checks that a confirmed Delete anyway still goes through the ordinary ownership and usage checks
+  when the image turns out to exist. Verified: Confirmed as a test gap. SPEC_impl.md "Podman places, creation and
+  images" ("If the image exists, it follows the usual ownership and usage checks") is the behavior that lacks a test.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
+- Execution: Fixed the test using the existing provider fixture. When a capture becomes visible, confirmed cleanup keeps
+  a foreign image under its tag and an owned image under its canonical ID while it has a user. It removes the image by
+  that ID after the user is gone. Change `rszukktzpnwrsukrkxolsoxovymkmowl`, bookmark
+  `plan/triage-podman-nov24/06a-delete-coverage`, [PR #4894](https://github.com/scode/farhelm/pull/4894/changes).

@@ -195,9 +195,6 @@ consequences.
 - [`recipe-tunnel-edit-marks-only-card.md`](recipe-tunnel-edit-marks-only-card.md) — A recipe with multiple tunnels
   marks only the card as edited, leaving the changed row and field unidentified.
 
-- [`recipe-delete-test-misses-warning-clipping.md`](recipe-delete-test-misses-warning-clipping.md) — The recipe Delete
-  regression checks that the prompt box fits without verifying that its warning text remains visible.
-
 - [`app-settings-shared-upgrade-option-has-local-heading.md`](app-settings-shared-upgrade-option-has-local-heading.md) —
   The App heading says This Mac even though it contains a helm-shared highlights setting.
 
@@ -240,13 +237,6 @@ consequences.
 - [`trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md`](trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md)
   — A regression could again hide the cause of an early container connection failure while the route-specific diagnostic
   checks pass.
-
-- [`trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md`](trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md)
-  — The regression assertions would miss a change that forgets a capture when the confirmed request finds its image.
-
-- [`trailing-first-deletes-live-confirmation-reply-lacks-regression-assertion.md`](trailing-first-deletes-live-confirmation-reply-lacks-regression-assertion.md)
-  — Existing assertions would miss a regression where prompt absence on a first Delete results in an ordinary error
-  instead of opening Delete anyway.
 
 - [`trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md`](trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md)
   — The no-default fixture checks numbering after a preview conflict and a successful create, leaving the specific
