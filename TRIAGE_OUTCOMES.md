@@ -329,33 +329,6 @@
   record which way it went. Recommendation for reference: discard, or fix code with one test (size S).
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
 
-## trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md
-
-- Outcome: `other`.
-- Assessment: The tests for early container connection failures feed the diagnostic function directly, so a regression
-  in how the connection stage is picked for a container's connection would not be caught. Verified: Confirmed as a test
-  gap by the reviewer's citations. Current line numbers in `manager.rs` have moved and I did not re-locate each test. No
-  product bug is claimed.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
-## trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md
-
-- Outcome: `other`.
-- Assessment: No test covers a new-environment managed checkout whose folder is taken after its preview, which should
-  clean up the new environment and show "Not launched." with the conflict. Verified: Confirmed as a test gap. The
-  behavior is specified (SPEC.md about line 1899) and no production failure is claimed.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard — coverage only; size S-M if kept.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
 ## trailing-borrower-classification-test-does-not-establish-checkout-membership.md
 
 - Outcome: `other`.
@@ -385,20 +358,6 @@
   behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
   record which way it went. Recommendation for reference: discard — the finding is refuted; size n/a
 - Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
-## remote-probe-absence-test-does-not-witness-proxy.md
-
-- Outcome: `other`.
-- Assessment: A setup-probe test expects the same "not installed" result before and after installing its stand-in
-  program, so it cannot tell whether the stand-in actually ran. Verified: Confirmed. `provisioning/backend.rs:4331-4364`
-  (`remote_probe_reads_absence_from_the_record_when_ssh_reports_zero`) asserts `Absent` both times and never shows that
-  the stand-in ran.
-- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
-  record which way it went. Recommendation for reference: discard — coverage only; size S if kept.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
 
 ## environment-launch-history-test-bypasses-origin-handoff.md
 

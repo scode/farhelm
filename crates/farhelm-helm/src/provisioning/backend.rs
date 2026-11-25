@@ -4419,6 +4419,7 @@ mod tests {
         let mut backend = SystemBackend::new(control.path().to_owned());
         backend.launcher = Arc::new(LyingSsh { omit_record: false });
         let executable = control.path().join("fixture-proxy");
+        let witness = executable.with_extension("ran");
         let target = ProbeTarget {
             transport: ProvisioningTarget::ssh("fixture.example"),
             probe_farhelm: executable.clone(),
@@ -4429,12 +4430,16 @@ mod tests {
             backend.probe(&target).await.unwrap(),
             ProbeObservation::Absent
         ));
-        std::fs::write(&executable, "#!/bin/sh\nexit 75\n").unwrap();
+        assert!(!witness.exists());
+        // Both paths report absence. Only the installed proxy can leave this
+        // witness, which proves the second probe ran it.
+        std::fs::write(&executable, "#!/bin/sh\nprintf ran > \"$0.ran\"\nexit 75\n").unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert!(matches!(
             backend.probe(&target).await.unwrap(),
             ProbeObservation::Absent
         ));
+        assert_eq!(std::fs::read(&witness).unwrap(), b"ran");
 
         backend.launcher = Arc::new(InterruptedProbeClient);
         let error = backend.probe(&target).await.unwrap_err();
