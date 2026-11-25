@@ -1764,30 +1764,6 @@
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-custom-agents-nov24.md` ``.
 
-## trailing-provisioning-service-omits-sealed-host-refusal.md
-
-- Outcome: `fix code`.
-- Assessment: After you delete a sandbox's or container's last session, Farhelm seals the environment and destroys it.
-  If that destruction fails, the host shows as being deleted with a Retry. During that time the helm still accepts an
-  Update, or a setup probe aimed at that machine, and would install Farhelm onto a machine the user chose to delete. The
-  desktop does not offer Update or Re-run for such a host, so only a direct API call or a click on a menu that was
-  already open could get there. Verified: confirmed in code, with a narrow route.
-  `ProvisioningService::suspended_refusal` (`crates/farhelm-helm/src/provisioning/service.rs:3151-3172`) refuses
-  Stopped/Suspended/TensorlakeChanging. Its `_ => None` arm lets through `HostState::Deleting`, which the manager
-  reports for sealed hosts (`manager.rs:2426-2440`, `sealed_state` at 2927-2938). Probe (`service.rs:974`), Update
-  (`1725`) and revalidate (`2838`, `2973`) all go through it. The only `is_sealed` check in provisioning is Tensorlake
-  Add (`tensorlake_add.rs:984`). The GUI hides Update and Re-run for any `Deleting` host
-  (`crates/gui/farhelm-gui/src/hosts/offers.rs:534-555`, `leaving`). The manager's own doc (`manager.rs:2941-2950`)
-  accepts that "an API client can still send" Suspend/Resume for such a host. Unverified: whether an Update admitted
-  here actually reaches the install step on a sealed sandbox, since the connection client is withheld while sealed.
-- Decision: q-listed, "Everything else: approve each item's recommendation": the maintainer picked "Approve as listed".
-  (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Apply the item's recommendation as written. Recommendation for reference: fix code — one
-  `Deleting` arm in `suspended_refusal` (or an `is_sealed` check beside it) plus a test; size S. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-environments-nov24.md` ``.
-
 ## trailing-launcher-choose-effort-omits-sync-fields.md
 
 - Outcome: `fix code`.
