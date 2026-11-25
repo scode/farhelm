@@ -854,7 +854,7 @@ impl ProvisioningService {
                 };
                 Ok((
                     ProbeTarget {
-                        transport: ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh {
+                        transport: ProvisioningTarget::remote(crate::access::RemoteRoute::Ssh {
                             destination: destination.clone(),
                             access,
                         }),
@@ -2079,7 +2079,7 @@ impl ProvisioningService {
             .await
             .expect("the provisioning planning semaphore is never closed");
         let _planning = self.lock_ssh_plan(Some(&row)).await?;
-        let plan = self.uninstall_plan(host, &row, true).await?;
+        let plan = self.uninstall_plan(host, &row, None).await?;
         let probe_id = uuid::Uuid::new_v4().to_string();
         let confirmation = plan.confirmation();
         self.retain_plan(
@@ -2101,19 +2101,58 @@ impl ProvisioningService {
         })
     }
 
-    /// The same uninstall checks run at planning and after confirmation. Planning hands a pending attempt back to
-    /// the ordered UI channel. The already-accepted run can wait on its owned task.
+    /// Select one Tailscale peer for the removal checks. Even a disconnected continuation needs to compare
+    /// against the peer originally inspected, since it has no supervisor identity to verify.
+    async fn pin_uninstall_target(
+        &self,
+        target: &mut ProvisioningTarget,
+        expected: Option<&ProvisioningTarget>,
+    ) -> anyhow::Result<()> {
+        if let ProvisioningTarget::Remote {
+            route:
+                crate::access::RemoteRoute::Ssh {
+                    destination,
+                    access: crate::ssh::SshAccessKind::Tailscale,
+                },
+            prepared,
+        } = target
+        {
+            let peer = self
+                .backend
+                .prepare_uninstall_access(self.helm_state_dir(), destination)
+                .await
+                .map_err(|error| {
+                    BackendFailure::new(
+                        "preparing Tailscale uninstall access",
+                        format!("{error:#}"),
+                    )
+                })?;
+            if let Some(target) = expected
+                && !matches!(target.prepared_access(),
+                    Some(crate::ssh::SshAccess::Tailscale(earlier)) if earlier.same_peer(&peer))
+            {
+                return Err(ProvisioningRequestError::Refused(
+                    "The Tailscale peer changed after the uninstall plan was made. Choose Uninstall again to see a new plan."
+                        .into(),
+                ).into());
+            }
+            *prepared = Some(Box::new(crate::ssh::SshAccess::Tailscale(peer)));
+        }
+        Ok(())
+    }
+
+    /// Planning can hand a sign-in question back to the UI. A confirmed run waits using the verified pin.
     async fn sign_in_for_uninstall(
         &self,
         target: &ProvisioningTarget,
         row: &HostRow,
-        pending_reply: bool,
+        confirmed: bool,
     ) -> anyhow::Result<()> {
         if let Some(setup) = &self.setup_sign_in {
-            if pending_reply {
-                setup.prepare(target, Some(row)).await?;
-            } else {
+            if confirmed {
                 setup.establish_for_run(target, row.id).await?;
+            } else {
+                setup.prepare(target, Some(row)).await?;
             }
         }
         Ok(())
@@ -2147,7 +2186,7 @@ impl ProvisioningService {
         &self,
         host: HostId,
         row: &HostRow,
-        pending_reply: bool,
+        expected: Option<&ProvisioningTarget>,
     ) -> anyhow::Result<ProvisioningPlan> {
         let refused =
             |message: String| anyhow::Error::new(ProvisioningRequestError::Refused(message));
@@ -2157,13 +2196,15 @@ impl ProvisioningService {
             .as_ref()
             .filter(|status| status.state.is_connected())
             .and_then(|status| status.client.clone());
-        let target = self.probe_target_for_row(row).await?;
+        let mut target = self.probe_target_for_row(row).await?;
         let (dialed, state_dir) = match &client {
             Some(client) => {
-                require_no_running_sessions(client).await?;
-                self.sign_in_for_uninstall(&target.transport, row, pending_reply)
+                self.pin_uninstall_target(&mut target.transport, expected)
                     .await?;
-                if !pending_reply && self.setup_sign_in.is_some() {
+                require_no_running_sessions(client, &target.transport).await?;
+                self.sign_in_for_uninstall(&target.transport, row, expected.is_some())
+                    .await?;
+                if expected.is_some() && self.setup_sign_in.is_some() {
                     // The sessions connection can keep serving while the setup connection waits for a code.
                     let current = self
                         .manager
@@ -2171,7 +2212,7 @@ impl ProvisioningService {
                         .filter(|status| status.state.is_connected())
                         .and_then(|status| status.client)
                         .ok_or_else(not_connected)?;
-                    require_no_running_sessions(&current).await?;
+                    require_no_running_sessions(&current, &target.transport).await?;
                 }
                 match self
                     .backend
@@ -2258,9 +2299,11 @@ impl ProvisioningService {
                         )));
                     }
                 }
-                self.sign_in_for_uninstall(&target.transport, row, pending_reply)
+                self.pin_uninstall_target(&mut target.transport, expected)
                     .await?;
-                if !pending_reply && self.setup_sign_in.is_some() {
+                self.sign_in_for_uninstall(&target.transport, row, expected.is_some())
+                    .await?;
+                if expected.is_some() && self.setup_sign_in.is_some() {
                     let current = self.manager.status(host);
                     // Connecting and unreachable can trade places while the setup master asks. What matters is
                     // that this is still the same entry, and no sessions connection or unsafe peer appeared.
@@ -2572,10 +2615,10 @@ impl ProvisioningService {
             None => self.manager.host_provision_lock(host).await,
         };
         let current_route = self.host_row(host).await.and_then(|row| {
-            if let ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh {
+            if let Some(crate::access::RemoteRoute::Ssh {
                 destination,
                 access,
-            }) = &pending.plan.target
+            }) = pending.plan.target.route()
             {
                 // A new ADD has no existing row lock until registration. Compare the frozen network
                 // target even when registration has refreshed the row's proposed configuration.
@@ -2809,11 +2852,11 @@ impl ProvisioningService {
     async fn revalidate_and_execute(
         &self,
         host: HostId,
-        pending: PendingPlan,
+        mut pending: PendingPlan,
         host_write: ProvisionLockGuard,
         automatic: bool,
     ) {
-        let preflight = self.revalidate(host, &pending, automatic).await;
+        let preflight = self.revalidate(host, &mut pending, automatic).await;
         match preflight {
             Ok(Revalidation::Execute) => self.execute(host, pending.plan, host_write).await,
             Ok(Revalidation::UseAsIs(message)) => {
@@ -2888,7 +2931,7 @@ impl ProvisioningService {
     async fn revalidate(
         &self,
         host: HostId,
-        pending: &PendingPlan,
+        pending: &mut PendingPlan,
         automatic: bool,
     ) -> Result<Revalidation, BackendFailure> {
         match &pending.confirmation {
@@ -2919,7 +2962,7 @@ impl ProvisioningService {
                     probe_state_dir: Some(pending.plan.state_dir.clone()),
                 };
                 if matches!(observation, ProbeObservation::Absent)
-                    && matches!(original_target.transport, ProvisioningTarget::Remote(_))
+                    && original_target.transport.route().is_some()
                     && (original_target.probe_farhelm != installed_target.probe_farhelm
                         || original_target.probe_state_dir != installed_target.probe_state_dir)
                 {
@@ -3161,13 +3204,11 @@ impl ProvisioningService {
             // a different plan means the host changed under the
             // confirmation, and the user should see the new one first.
             PendingConfirmation::Uninstall { registration, .. } => {
-                self.require_registration_unchanged(host, registration)
+                let row = self
+                    .require_registration_unchanged(host, registration)
                     .await?;
-                let row = self.host_row(host).await.map_err(|error| {
-                    BackendFailure::new(format!("re-reading the confirmed host row: {error:#}"), "")
-                })?;
                 let replanned = self
-                    .uninstall_plan(host, &row, false)
+                    .uninstall_plan(host, &row, Some(&pending.plan.target))
                     .await
                     .map_err(|error| BackendFailure::new(format!("{error:#}"), ""))?;
                 if replanned != pending.plan {
@@ -3177,6 +3218,8 @@ impl ProvisioningService {
                         "",
                     ));
                 }
+                // The confirmed commands must use the peer just verified by this replan.
+                pending.plan = replanned;
                 Ok(Revalidation::Execute)
             }
         }
@@ -3892,7 +3935,7 @@ impl ProvisioningService {
                     probe_state_dir: Some(self.layout.local_state_dir.clone()),
                 },
                 crate::access::HostAccess::Remote(route) => ProbeTarget {
-                    transport: ProvisioningTarget::Remote(route),
+                    transport: ProvisioningTarget::remote(route),
                     probe_farhelm: PathBuf::from(
                         row.remote_farhelm.as_deref().unwrap_or("farhelm"),
                     ),
@@ -3915,8 +3958,21 @@ impl ProvisioningService {
 /// them, as SPEC.md asks of `farhelm uninstall` too.
 async fn require_no_running_sessions(
     client: &crate::client::SupervisorClient,
+    target: &ProvisioningTarget,
 ) -> anyhow::Result<()> {
     let refused = |message: String| anyhow::Error::new(ProvisioningRequestError::Refused(message));
+    // The live client's route was selected when its connection opened. Even two identityless
+    // supervisors can answer the same destination over time. Only the pinned peer can clear removal.
+    if let Some(crate::ssh::SshAccess::Tailscale(peer)) = target.prepared_access()
+        && !client
+            .tailscale_peer()
+            .is_some_and(|connected| connected.same_peer(peer))
+    {
+        return Err(refused(
+            "The sessions connection reaches a different Tailscale peer. Reconnect the host, then choose Uninstall again."
+                .into(),
+        ));
+    }
     let listing = client.list_sessions().await.map_err(|error| {
         refused(format!(
             "uninstall could not read this host's session list ({error:#}), so it cannot check \

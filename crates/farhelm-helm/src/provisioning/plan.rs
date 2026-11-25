@@ -17,13 +17,55 @@ pub(crate) use farhelm_proto::provisioning::{
 
 /// Transport facts retained in the plan so execution cannot silently switch
 /// machines or access policies between confirmation and execution.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) enum ProvisioningTarget {
     Local,
     /// Remote filesystem operations and probes always execute through their
     /// route, including a container reached by a local Podman process.
-    Remote(RemoteRoute),
+    Remote {
+        route: RemoteRoute,
+        /// Uninstall keeps the peer selected during planning for comparison and uses the fresh
+        /// matching access from confirmation for execution. This handle stays out of plan JSON.
+        prepared: Option<Box<crate::ssh::SshAccess>>,
+    },
 }
+
+impl ProvisioningTarget {
+    /// Ordinary probes and setup resolve access when their commands run.
+    pub(crate) fn remote(route: RemoteRoute) -> Self {
+        Self::Remote {
+            route,
+            prepared: None,
+        }
+    }
+
+    /// Route configuration describes the planned destination independently
+    /// of access prepared to execute the plan.
+    pub(super) fn route(&self) -> Option<&RemoteRoute> {
+        match self {
+            Self::Local => None,
+            Self::Remote { route, .. } => Some(route),
+        }
+    }
+
+    /// A pinned SSH route uses this access for both its interactive master and its batch commands.
+    pub(super) fn prepared_access(&self) -> Option<&crate::ssh::SshAccess> {
+        match self {
+            Self::Remote { prepared, .. } => prepared.as_deref(),
+            Self::Local => None,
+        }
+    }
+}
+
+impl PartialEq for ProvisioningTarget {
+    /// Confirmation compares the same public plan the user saw. The checked
+    /// SSH access is authority for running that plan and stays out of equality.
+    fn eq(&self, other: &Self) -> bool {
+        self.route() == other.route()
+    }
+}
+
+impl Eq for ProvisioningTarget {}
 
 impl Serialize for ProvisioningTarget {
     /// Confirmation plans retain the established flat SSH shape. Wrapping a
@@ -38,10 +80,14 @@ impl Serialize for ProvisioningTarget {
             }
             // Expose the opt-in setting in the confirmation without carrying
             // a second value that could disagree with the frozen route.
-            Self::Remote(RemoteRoute::Ssh {
-                destination,
-                access: crate::ssh::SshAccessKind::Tailscale,
-            }) => {
+            Self::Remote {
+                route:
+                    RemoteRoute::Ssh {
+                        destination,
+                        access: crate::ssh::SshAccessKind::Tailscale,
+                    },
+                ..
+            } => {
                 use serde::ser::SerializeStruct as _;
                 let mut value = serializer.serialize_struct("ProvisioningTarget", 3)?;
                 value.serialize_field("kind", "ssh")?;
@@ -49,7 +95,7 @@ impl Serialize for ProvisioningTarget {
                 value.serialize_field("tailscale", &true)?;
                 value.end()
             }
-            Self::Remote(route) => route.serialize(serializer),
+            Self::Remote { route, .. } => route.serialize(serializer),
         }
     }
 }
@@ -59,7 +105,7 @@ impl ProvisioningTarget {
     /// An ordinary ssh host reached with the user's own ssh setup, for the
     /// tests' plan and backend fixtures.
     pub(super) fn ssh(destination: impl Into<String>) -> Self {
-        Self::Remote(RemoteRoute::Ssh {
+        Self::remote(RemoteRoute::Ssh {
             destination: destination.into(),
             access: crate::ssh::SshAccessKind::UserConfig,
         })
@@ -83,7 +129,7 @@ mod target_serialization_tests {
             serde_json::json!({"kind": "ssh", "destination": "user@host"})
         );
         assert_eq!(
-            serde_json::to_value(ProvisioningTarget::Remote(crate::tensorlake::ssh::route(
+            serde_json::to_value(ProvisioningTarget::remote(crate::tensorlake::ssh::route(
                 "sandbox"
             )))
             .unwrap(),
@@ -533,7 +579,7 @@ impl ProvisioningPlan {
             },
             match &self.target {
                 ProvisioningTarget::Local => "the local host".to_string(),
-                ProvisioningTarget::Remote(route) => route.destination().to_string(),
+                ProvisioningTarget::Remote { route, .. } => route.destination().to_string(),
             },
             if self.host_distro_id.is_empty() {
                 "unknown distribution"
@@ -756,7 +802,7 @@ impl PlanLayout {
                 ])
                 .collect(),
         }];
-        let remote = matches!(&target, ProvisioningTarget::Remote(_));
+        let remote = target.route().is_some();
         let farhelm_temporary = temporary(&farhelm_path, farhelm_name);
         if remote {
             actions.push(ProvisioningAction::UploadPayload {

@@ -268,12 +268,40 @@ impl RemoteRoute {
         policy: ConnectionPolicy,
         payload: RemoteCommand<'_>,
     ) -> anyhow::Result<ProcessCommand> {
+        self.command_with_access(control_dir, policy, payload, None)
+            .await
+    }
+
+    /// A confirmed provisioning run can bind its validated SSH access to
+    /// every subsequent command. The caller must supply the access prepared
+    /// for this destination. Resolving access again would change the peer
+    /// after the confirmation checks have already run.
+    pub(crate) async fn command_with_access(
+        &self,
+        control_dir: &Path,
+        policy: ConnectionPolicy,
+        payload: RemoteCommand<'_>,
+        prepared: Option<&SshAccess>,
+    ) -> anyhow::Result<ProcessCommand> {
         match self {
             Self::Ssh {
                 destination,
                 access,
             } => {
-                let access = SshAccess::prepare(*access, control_dir, destination).await?;
+                let resolved;
+                let access = match prepared {
+                    Some(prepared) => {
+                        anyhow::ensure!(
+                            prepared.kind() == *access,
+                            "prepared SSH access has a different policy"
+                        );
+                        prepared
+                    }
+                    None => {
+                        resolved = SshAccess::prepare(*access, control_dir, destination).await?;
+                        &resolved
+                    }
+                };
                 Ok(ProcessCommand {
                     program: "ssh".into(),
                     scrub_environment: false,
@@ -281,7 +309,7 @@ impl RemoteRoute {
                         destination,
                         control_dir,
                         policy,
-                        &access,
+                        access,
                         &payload.argv(),
                     )?,
                 })
@@ -292,6 +320,10 @@ impl RemoteRoute {
                 container: _,
                 user: _,
             } => {
+                anyhow::ensure!(
+                    prepared.is_none(),
+                    "prepared access requires a direct SSH route"
+                );
                 anyhow::ensure!(
                     podman.is_absolute(),
                     "container execution requires the current absolute Podman executable"

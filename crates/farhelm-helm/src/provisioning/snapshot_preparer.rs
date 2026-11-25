@@ -72,7 +72,7 @@ impl EnvironmentPreparer for InstallerSnapshotPreparer {
         route: &crate::access::RemoteRoute,
         home: PathBuf,
     ) -> anyhow::Result<PreparedInstallFacts> {
-        let target = ProvisioningTarget::Remote(route.clone());
+        let target = ProvisioningTarget::remote(route.clone());
         let reach = match self
             .backend
             .inspect(&ProbeTarget {
@@ -154,7 +154,7 @@ mod tests {
         )
         .unwrap();
         let backend = Arc::new(E2eProvisioningBackend::new(fixture.clone(), root.path()).unwrap());
-        let target = ProvisioningTarget::Remote(crate::tensorlake::ssh::route(
+        let target = ProvisioningTarget::remote(crate::tensorlake::ssh::route(
             crate::tensorlake::ssh::destination("fixture-preparer"),
         ));
         assert!(
@@ -252,7 +252,7 @@ mod tests {
         let plan = layout
             .plan(
                 ProvisioningOperation::Add,
-                ProvisioningTarget::Remote(crate::tensorlake::ssh::route(
+                ProvisioningTarget::remote(crate::tensorlake::ssh::route(
                     crate::tensorlake::ssh::destination("fixture-preparer"),
                 )),
                 &reach,

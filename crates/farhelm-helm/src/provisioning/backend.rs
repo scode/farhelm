@@ -399,6 +399,15 @@ impl BackendFailure {
 /// production implementation with only linger faked.
 #[async_trait]
 pub(crate) trait ProvisioningBackend: Send + Sync {
+    /// Prepare the SSH address, host keys and policy together before Uninstall inspects the peer.
+    async fn prepare_uninstall_access(
+        &self,
+        state_dir: &Path,
+        destination: &str,
+    ) -> anyhow::Result<crate::ssh::tailscale::TailscaleSshAccess> {
+        crate::ssh::tailscale::TailscaleSshAccess::prepare(state_dir, destination).await
+    }
+
     /// Remove one Farhelm-owned credential file. Absence is already clean.
     async fn remove_owned_file(
         &self,
@@ -790,7 +799,7 @@ impl SystemBackend {
                     }
                 }
             }
-            ProvisioningTarget::Remote(_) => {
+            ProvisioningTarget::Remote { .. } => {
                 let Some(parent) = destination.parent() else {
                     return Ok(());
                 };
@@ -880,6 +889,7 @@ impl SystemBackend {
         &self,
         route: &crate::access::RemoteRoute,
         remote_command: String,
+        prepared: Option<&crate::ssh::SshAccess>,
     ) -> anyhow::Result<(tokio::process::Command, Tag)> {
         let policy = if self.one_shot {
             crate::access::ConnectionPolicy::OneShot
@@ -889,10 +899,11 @@ impl SystemBackend {
         let tag = Tag::new();
         let script = tag.wrap(&format!("{REMOTE_RUNTIME_PREFIX}{remote_command}"));
         let command = route
-            .command(
+            .command_with_access(
                 &self.control_dir,
                 policy,
                 crate::access::RemoteCommand::Script(&script),
+                prepared,
             )
             .await?
             .command();
@@ -914,6 +925,7 @@ impl SystemBackend {
                 access,
             },
             script,
+            None,
         )
         .await
         .map(|(command, _)| command)
@@ -988,8 +1000,8 @@ impl SystemBackend {
                 command.args(["-c", script]);
                 (command, None)
             }
-            ProvisioningTarget::Remote(route) => self
-                .remote_command(route, script.to_string())
+            ProvisioningTarget::Remote { route, prepared } => self
+                .remote_command(route, script.to_string(), prepared.as_deref())
                 .await
                 .map(|(command, tag)| (command, Some((route, tag))))
                 .map_err(|error| {
@@ -1097,7 +1109,7 @@ impl SystemBackend {
                     error.to_string(),
                 )),
             },
-            ProvisioningTarget::Remote(_) => {
+            ProvisioningTarget::Remote { .. } => {
                 let path = shell_path(path)?;
                 // Read the file through stdin. GNU coreutils escapes a
                 // backslash or newline in a filename in its output, so
@@ -1172,7 +1184,7 @@ impl SystemBackend {
     ) -> Result<(), BackendFailure> {
         match target {
             ProvisioningTarget::Local => set_mode(path, mode).await,
-            ProvisioningTarget::Remote(_) => {
+            ProvisioningTarget::Remote { .. } => {
                 self.require_shell(
                     target,
                     // BSD chmod ends option parsing at the mode. Its `--`
@@ -1203,7 +1215,7 @@ impl SystemBackend {
                     error.to_string(),
                 )),
             },
-            ProvisioningTarget::Remote(_) => {
+            ProvisioningTarget::Remote { .. } => {
                 self.require_shell(
                     target,
                     &format!("rm -f -- {}", shell_path(path)?),
@@ -1331,7 +1343,7 @@ impl SystemBackend {
                 }
                 .await
             }
-            ProvisioningTarget::Remote(route) => {
+            ProvisioningTarget::Remote { route, .. } => {
                 async {
                     self.remote_put(route, source, temporary).await?;
                     // Status 79 is reserved for a generation mismatch. Hash/read failures
@@ -1417,7 +1429,7 @@ impl SystemBackend {
         destination: &Path,
         temporary: &Path,
     ) -> Result<ActionOutcome, BackendFailure> {
-        let ProvisioningTarget::Remote(route) = target else {
+        let ProvisioningTarget::Remote { route, .. } = target else {
             return Err(BackendFailure::new(
                 "uploading a local payload",
                 "local plans have no upload action",
@@ -1587,7 +1599,7 @@ impl SystemBackend {
             .map_err(|error| BackendFailure::new("reading staged payload size", error.to_string()))?
             .len();
         let (mut command, status_tag) = self
-            .remote_command(route, upload_script(remote)?)
+            .remote_command(route, upload_script(remote)?, None)
             .await
             .map_err(|error| {
                 BackendFailure::new("building the payload transfer command", error.to_string())
@@ -1708,7 +1720,7 @@ impl SystemBackend {
                 }
                 (command, None)
             }
-            ProvisioningTarget::Remote(route) => {
+            ProvisioningTarget::Remote { route, prepared } => {
                 let farhelm = shell_path(&target.probe_farhelm)?;
                 let state = target
                     .probe_state_dir
@@ -1716,7 +1728,7 @@ impl SystemBackend {
                     .map(|path| shell_path(path))
                     .transpose()?;
                 let script = Self::probe_script(&farhelm, state.as_deref(), route);
-                self.remote_command(route, script)
+                self.remote_command(route, script, prepared.as_deref())
                     .await
                     .map(|(command, tag)| (command, Some(tag)))
                     .map_err(|error| {
@@ -1739,10 +1751,10 @@ impl SystemBackend {
     /// Only ordinary SSH puts the provisioning socket in the helm's state directory.
     /// An unreachable Tailscale peer must not inherit that directory's socket warning.
     fn probe_sign_in_unavailable(&self, target: &ProvisioningTarget) -> Option<String> {
-        let ProvisioningTarget::Remote(RemoteRoute::Ssh {
+        let Some(RemoteRoute::Ssh {
             access: crate::ssh::SshAccessKind::UserConfig,
             ..
-        }) = target
+        }) = target.route()
         else {
             return None;
         };
@@ -2891,7 +2903,7 @@ impl ProvisioningBackend for SystemBackend {
                     ));
                 }
                 let mut code = status.code();
-                if let ProvisioningTarget::Remote(route) = &target.transport
+                if let Some(route) = target.transport.route()
                     && let Some(reason) = crate::transport::nested_session_failure(
                         route,
                         status.code(),
@@ -2901,7 +2913,7 @@ impl ProvisioningBackend for SystemBackend {
                     return Err(BackendFailure::session_limit(reason, stderr.diagnostic()));
                 }
                 // The reported script result cannot replace a local transport signal.
-                if let ProvisioningTarget::Remote(route) = &target.transport
+                if let Some(route) = target.transport.route()
                     && code.is_some()
                     && !(code == Some(255) && route_uses_ssh(route))
                 {
@@ -3045,7 +3057,7 @@ impl ProvisioningBackend for SystemBackend {
                     set_mode(&directory.path, directory.mode).await?;
                 }
             }
-            ProvisioningTarget::Remote(_) => {
+            ProvisioningTarget::Remote { .. } => {
                 // `install -d -m` chmods a directory that already exists, so a
                 // shared one is only handed to it when it is missing.
                 let commands = directories
@@ -3111,7 +3123,7 @@ impl ProvisioningBackend for SystemBackend {
                 )
                 .await
             }
-            ProvisioningTarget::Remote(_) => {
+            ProvisioningTarget::Remote { .. } => {
                 self.install_uploaded_source(target, &payload.hash, destination, temporary, mode)
                     .await
             }
@@ -3614,7 +3626,7 @@ resolve() {
                     error.to_string(),
                 )),
             },
-            ProvisioningTarget::Remote(_) => {
+            ProvisioningTarget::Remote { .. } => {
                 // The lookup goes through `stat` in the C locale, as the stop
                 // script's do, because the shell's `-e` and `-L` answer false
                 // for any error: a parent directory the user cannot search
@@ -3799,7 +3811,7 @@ pub(super) fn parse_uninstall_inspection(
 /// keeps the local executor from growing an implementation nothing can call.
 fn require_remote(target: &ProvisioningTarget, what: &str) -> Result<(), BackendFailure> {
     match target {
-        ProvisioningTarget::Remote(_) => Ok(()),
+        ProvisioningTarget::Remote { .. } => Ok(()),
         ProvisioningTarget::Local => Err(BackendFailure::new(
             format!("{what} is not done on the helm's own machine; use farhelm uninstall there"),
             "",
@@ -4284,7 +4296,7 @@ mod tests {
     fn probe_socket_warning_only_applies_to_ordinary_ssh() {
         let backend = SystemBackend::new(PathBuf::from("/fixture").join("a".repeat(120)));
         let route = |access| {
-            ProvisioningTarget::Remote(RemoteRoute::Ssh {
+            ProvisioningTarget::remote(RemoteRoute::Ssh {
                 destination: "fixture.example".into(),
                 access,
             })
@@ -4619,7 +4631,7 @@ mod tests {
         for code in [255, 125] {
             let mut backend = SystemBackend::new(root.path().to_path_buf());
             backend.launcher = Arc::new(MuxRefusalLauncher(code));
-            let target = ProvisioningTarget::Remote(route.clone());
+            let target = ProvisioningTarget::remote(route.clone());
             let shell = backend
                 .require_shell(&target, "true", "fixture command")
                 .await
@@ -4655,7 +4667,7 @@ mod tests {
             // Credential reads deliberately discard peer diagnostics. The
             // locally classified place diagnosis survives that redaction,
             // while a remote exit never gains the same trusted exception.
-            let sensitive_target = ProvisioningTarget::Remote(route.clone());
+            let sensitive_target = ProvisioningTarget::remote(route.clone());
             let home = backend.host_home(&sensitive_target).await.unwrap_err();
             let settings = backend
                 .read_small_file(&sensitive_target, Path::new("/home/developer/settings"))

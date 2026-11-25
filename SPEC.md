@@ -467,6 +467,9 @@ destination change that does not adopt a new identity keeps the host's settings,
 contacted. The identity rules above still hold: adopting a new identity resets all five permissions to asking, and the
 New dialog's default host and recent setups stay tied to the install the user saw.
 
+For a Tailscale host, Uninstall verifies at confirmation that Tailscale still identifies the same peer it inspected for
+the proposal. The run keeps that peer's address, advertised SSH keys and connection policy for its checks and removals.
+
 Exactly one helm can own each supervisor and all of its sessions. A host with no owner records the first helm that
 connects to manage it, including after an upgrade from a version without ownership. A helm keeps its identity across
 updates, restarts and reconnects. The supervisor refuses a different helm and reports who owns it and when that helm

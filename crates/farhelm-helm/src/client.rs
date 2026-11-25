@@ -1163,6 +1163,9 @@ pub struct SupervisorClient {
     /// never repeated — which is what makes retaining it here correct
     /// rather than a cache that could go stale. See [`PeerHello`].
     peer: PeerHello,
+    /// Pin supplied when the transport opened this exact stream. Uninstall
+    /// uses it to associate a live session list with its prepared peer.
+    tailscale_peer: Option<Box<crate::ssh::tailscale::TailscaleSshAccess>>,
     /// The connection-is-dead flag both background halves publish to (see
     /// [`Self::closed`]). A RECEIVER, never a sender: holding a sender here
     /// would keep the channel alive past the tasks and, worse, invert the
@@ -1322,6 +1325,7 @@ struct HostHandshake {
     helm: HelmHello,
     handler: crate::agent_requests::AgentRequestSlot,
     host: crate::store::HostId,
+    tailscale_peer: Option<Box<crate::ssh::tailscale::TailscaleSshAccess>>,
 }
 
 /// The supervisor finished its hello but refused this helm. Retain the
@@ -1711,7 +1715,7 @@ impl SupervisorClient {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
-        Self::start_for_host_with_heartbeat(r, w, handler, host, helm, false).await
+        Self::start_for_host_with_heartbeat(r, w, handler, host, helm, false, None).await
     }
 
     /// Tensorlake connections enable `heartbeat`: the writer emits an empty
@@ -1725,6 +1729,7 @@ impl SupervisorClient {
         host: crate::store::HostId,
         helm: HelmHello,
         heartbeat: bool,
+        tailscale_peer: Option<Box<crate::ssh::tailscale::TailscaleSshAccess>>,
     ) -> anyhow::Result<Arc<SupervisorClient>>
     where
         R: AsyncRead + Unpin + Send + 'static,
@@ -1739,6 +1744,7 @@ impl SupervisorClient {
                 helm,
                 handler,
                 host,
+                tailscale_peer,
             }),
             heartbeat.then_some(Duration::from_secs(30)),
         )
@@ -1755,7 +1761,7 @@ impl SupervisorClient {
         w: W,
         writer_stall: Duration,
         upload_stall: Duration,
-        agent: Option<HostHandshake>,
+        mut agent: Option<HostHandshake>,
         heartbeat: Option<Duration>,
     ) -> anyhow::Result<Arc<SupervisorClient>>
     where
@@ -1806,6 +1812,7 @@ impl SupervisorClient {
         let (connection_done, _) = watch::channel(false);
 
         let connection_id = NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
+        let tailscale_peer = agent.as_mut().and_then(|host| host.tailscale_peer.take());
         let agent = agent.map(|HostHandshake { handler, host, .. }| AgentUpcalls {
             handler,
             origin: crate::agent_requests::AgentOrigin {
@@ -1817,6 +1824,7 @@ impl SupervisorClient {
 
         let client = Arc::new(SupervisorClient {
             peer,
+            tailscale_peer,
             closed: connection_done.subscribe(),
             writer_tx,
             pending: Mutex::new(Pending::default()),
@@ -3082,6 +3090,11 @@ impl SupervisorClient {
     /// refresh.
     pub fn peer_hello(&self) -> &PeerHello {
         &self.peer
+    }
+
+    /// Original SSH peer and policy of this connected client's requests.
+    pub(crate) fn tailscale_peer(&self) -> Option<&crate::ssh::tailscale::TailscaleSshAccess> {
+        self.tailscale_peer.as_deref()
     }
 
     /// Resolves once this connection is dead — either half having failed,

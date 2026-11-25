@@ -124,7 +124,7 @@ impl Podman {
             .context("this helm has no provisioning transport")?;
         let route = self.route(place, id, user.clone()).await?;
         let home = backend
-            .prepare_tensorlake_sandbox(&ProvisioningTarget::Remote(route))
+            .prepare_tensorlake_sandbox(&ProvisioningTarget::remote(route))
             .await?;
         anyhow::ensure!(
             home == std::path::Path::new(&user.home),

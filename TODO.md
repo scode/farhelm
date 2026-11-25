@@ -218,14 +218,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   spans the Wayland receive code and the clipboard API used by Kit and the terminal. Cover keyboard and Edit menu paste,
   mixed offers and a reply that arrives after the target changes.
 
-- **Bind a confirmed Tailscale Uninstall to the verified peer.** Uninstall checks the machine again at confirmation,
-  then resolves the Tailscale destination separately for each removal step. Keep the peer address, verified SSH keys,
-  and connection policy for the entire run, including the confirmation's checks and every destructive step. Reuse the
-  route's prepared identity for batch commands and reject a changed peer. The current plan stores a destination and
-  access mode, while command lowering owns the prepared identity and the key file. Carrying a single identity across the
-  run needs changes on both sides, with a fixture that checks which peer receives each action. Plan:
-  `plans/queue/host-provisioning-action-fixes.md`.
-
 - **Give explicit host actions priority over automatic SSH sign-in.** A manual Update or Uninstall can join an automatic
   update's pending sign-in, and answering can admit the automatic run before the manual request retries. Turning
   Tailscale on or off can also hit a route lock held by an unanswered automatic check. Keep an attached manual request's

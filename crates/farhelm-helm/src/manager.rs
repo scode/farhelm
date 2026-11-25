@@ -5104,6 +5104,7 @@ impl HostActor {
         let TransportConnection {
             io: (reader, writer),
             ssh,
+            tailscale_peer,
         } = match self.transport.connect(row).await {
             Ok(connection) => connection,
             Err(error) => {
@@ -5174,6 +5175,7 @@ impl HostActor {
                     .map(|approval| approval.owner_revision.clone()),
             },
             row.kind.environment_provider().is_some(),
+            tailscale_peer,
         );
         tokio::pin!(hello);
         let ssh = progress.ssh.clone();

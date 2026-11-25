@@ -87,6 +87,35 @@ pub(crate) struct SignIn {
     gates: Mutex<HashMap<PathBuf, Weak<AsyncMutex<()>>>>,
 }
 
+/// Most sign-ins prepare their current route. A confirmed Uninstall instead
+/// uses the same access as its batch checks, so both use the same peer and
+/// control socket namespace.
+pub(crate) enum SignInAccess<'a> {
+    Resolve(ssh::SshAccessKind),
+    Prepared(&'a SshAccess),
+}
+
+impl<'a> SignInAccess<'a> {
+    /// A fresh sign-in shares the caller's deadline with access preparation.
+    /// Reusing a pin keeps the peer selected by the caller.
+    async fn prepare(
+        self,
+        state_dir: &Path,
+        destination: &str,
+        deadline: Instant,
+    ) -> anyhow::Result<std::borrow::Cow<'a, SshAccess>> {
+        match self {
+            Self::Prepared(access) => Ok(std::borrow::Cow::Borrowed(access)),
+            Self::Resolve(kind) => {
+                let access = timeout_at(deadline, SshAccess::prepare(kind, state_dir, destination))
+                    .await
+                    .context("preparing SSH sign-in timed out")??;
+                Ok(std::borrow::Cow::Owned(access))
+            }
+        }
+    }
+}
+
 impl SignIn {
     pub(crate) fn new(state_dir: PathBuf, cli: PathBuf, questions: Arc<Questions>) -> Self {
         Self {
@@ -115,15 +144,12 @@ impl SignIn {
         &self,
         program: &Path,
         destination: &str,
-        kind: ssh::SshAccessKind,
+        access: SignInAccess<'_>,
         deadline: Instant,
     ) -> anyhow::Result<bool> {
-        let access = timeout_at(
-            deadline,
-            SshAccess::prepare(kind, &self.state_dir, destination),
-        )
-        .await
-        .context("preparing SSH sign-in timed out")??;
+        let access = access
+            .prepare(&self.state_dir, destination, deadline)
+            .await?;
         if access
             .control_socket(&self.state_dir, SharedConnection::Provisioning)
             .is_none()
@@ -145,19 +171,16 @@ impl SignIn {
         &self,
         program: &Path,
         destination: &str,
-        kind: ssh::SshAccessKind,
+        access: SignInAccess<'_>,
         attempt: &Attempt,
         connect_timeout: Duration,
         on_question: &mut (dyn FnMut(bool) + Send),
     ) -> anyhow::Result<()> {
         let connection = attempt.connection;
         let deadline = Instant::now() + connect_timeout;
-        let access = timeout_at(
-            deadline,
-            SshAccess::prepare(kind, &self.state_dir, destination),
-        )
-        .await
-        .context("preparing SSH sign-in timed out")??;
+        let access = access
+            .prepare(&self.state_dir, destination, deadline)
+            .await?;
         let Some(control_socket) = access.control_socket(&self.state_dir, connection) else {
             return Ok(());
         };
