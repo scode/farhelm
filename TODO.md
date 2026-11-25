@@ -83,19 +83,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   negative assertion. Plan: `plans/queue/tensorlake-setup-and-repo-cache-fixes.md`.
 
 - **Cmd-Shift-[ and ] to switch tabs.** Add cmd-shift-[ and ] to switch between terminal tabs/agents within a session.
+  Plan: `plans/queue/tab-switch-shortcuts.md`.
 
 - **Hide removed container hosts with only a failed build record on recipe cards.** After #4934, a container host that
   was removed after a failed build or launch preparation (with no images or resources left) stays on the recipe card
   permanently as "Unavailable place" with a disabled Rebuild button, and nothing removes it except deleting the recipe
   (even re-adding the host gives it a new identity). In `recipe_places` (`crates/farhelm-helm/src/hosts.rs`), keep a
   place the provider no longer lists only while the recipe still has resources (`has_resources`) or active build work
-  there, while continuing to show failure-only state for hosts that are still registered.
+  there, while continuing to show failure-only state for hosts that are still registered. Plan:
+  `plans/queue/recipe-card-and-billed-size-fixes.md`.
 
 - **Drop the post-clone Claude workspace-trust edit.** Update `SPEC.md` and the implementation so workspace trust for
   agents whose config files must be edited (rather than supporting per-invocation trust flags) happens on launch of that
   agent kind, not earlier at checkout preparation. Stop editing `~/.claude.json` during managed-checkout creation when a
   session starts another agent (or before launch), along with the checkout-preparation Claude trust snapshotting and
-  docs/tests that existed for that path.
+  docs/tests that existed for that path. Plan: `plans/queue/drop-post-clone-claude-trust.md`.
 
 ## Plan follow-ups
 
@@ -110,7 +112,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   older helm refuses the new size field, keep the refusal and require a helm that can check it. Preserve the deliberate
   skip setting and ordinary container launches. Test a same-name edit after the prompt, prove no allocation on a
   mismatch, and review the refusal in both appearances. The protocol, validation and visual work exceed this triage
-  item's size gate.
+  item's size gate. Plan: `plans/queue/recipe-card-and-billed-size-fixes.md`.
 
 - **Keep checkout notices after an agent Delete times out.** If an approved agent Delete outlasts the supervisor's reply
   budget and then leaves a checkout on disk, keep the checkout path and reason in the notices bell. The target host's
@@ -144,7 +146,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   carry no override. Update SPEC_impl.md under “Questions: the prompt”. Exercise suspension between the question and
   answer, confirm the launch on the new connection, and show that changing installations before the refusal or during
   the wait, or starting a later launch, requires its own answer. Binding the original dispatch and testing the resumed
-  launch across these paths exceeds the launcher triage budget.
+  launch across these paths exceeds the launcher triage budget. Plan:
+  `plans/queue/launcher-consent-and-custom-agent-fixes.md`.
 
 - **Report late wake failures when launching on a suspended sandbox or stopped container.** When Resume takes longer
   than the reply deadline, a later failure can leave the session launcher waiting for a minute before it gives the wrong
@@ -218,7 +221,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   whether resumption or reporting is supported while the entry is unknown. Check both tabs in all three list states,
   with light and dark screenshots. Before pressing Launch, confirm that the fixture installed the intended catalog state
   and that the saved ID is absent. The prototype exceeded the triage size gate before it handled the empty Restart with
-  field and the loading message beside Launch.
+  field and the loading message beside Launch. Plan: `plans/queue/launcher-consent-and-custom-agent-fixes.md`.
 
 - **Show Custom approval flags in keyboard-highlighted Recent setups.** Two Recent setups in the launcher can show the
   same agent and Custom approval mode while saving different flags. Pointer hover and the screen-reader label give the
@@ -226,7 +229,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   command pane and narrow search results, before Enter. Keep the compact wrapper summary and avoid adding a Tab stop. A
   prototype that wrapped the flags in place still clipped the last words when a highlighted row was taller than the
   results area. Give keyboard users a way to read those words without changing the highlight, and test two setups with a
-  long shared flag prefix and different final arguments. The complete fix exceeds the triage size gate.
+  long shared flag prefix and different final arguments. The complete fix exceeds the triage size gate. Plan:
+  `plans/queue/launcher-consent-and-custom-agent-fixes.md`.
 
 - **Isolate hook setup errors in Restart and recovery.** A failed persistent hook setup carries the host's error in
   `PersistentHookSetup::Failed`. `restart_blocker` escapes and joins it into app prose before the desktop can isolate
@@ -235,7 +239,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   session's recovery card and Restart tooltip. Follow `SPEC_impl.md`'s Host-supplied text rule and keep the CLI's
   terminal wording. Test a right-to-left reason and hidden characters against the surrounding app text in the drawn UI
   and its accessible descriptions. The current helpers pass plain strings through the launcher and recovery card, so
-  this needs typed composition and tests across the surfaces. The triage plan deferred it under its size gate.
+  this needs typed composition and tests across the surfaces. The triage plan deferred it under its size gate. Plan:
+  `plans/queue/hooks-restart-and-antigravity-fixes.md`.
 
 - **Start the missing-hook warning clock after the agent starts.** In a fresh managed checkout's terminal, pressing
   Enter during the clone or post-clone command can start the missing conversation-hook timer. SPEC.md's Status section
@@ -245,6 +250,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   precedes the trust edit and agent exec. A reliable handoff signal needs recovery and cleanup rules so a prior launch
   cannot arm this one. Test that a preparation Enter stays quiet after the deadline and that an Enter delivered to the
   agent can still start the once-per-launch warning. The triage plan deferred the handoff work and its lifecycle tests.
+  Plan: `plans/queue/hooks-restart-and-antigravity-fixes.md`.
 
 - **Make Wayland text-field paste nonblocking.** Pasting into a text field such as an SSH sign-in answer can freeze the
   window while another app supplies clipboard data. [Terminal experience](SPEC.md#terminal-experience) requires Farhelm
@@ -267,7 +273,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and connection policy for the entire run, including the confirmation's checks and every destructive step. Reuse the
   route's prepared identity for batch commands and reject a changed peer. The current plan stores a destination and
   access mode, while command lowering owns the prepared identity and the key file. Carrying a single identity across the
-  run needs changes on both sides, with a fixture that checks which peer receives each action.
+  run needs changes on both sides, with a fixture that checks which peer receives each action. Plan:
+  `plans/queue/host-provisioning-action-fixes.md`.
 
 - **Give explicit host actions priority over automatic SSH sign-in.** A manual Update or Uninstall can join an automatic
   update's pending sign-in, and answering can admit the automatic run before the manual request retries. Turning
@@ -276,6 +283,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   retire an automatic-only check and observe release of its route guard. Define how automatic retries become eligible
   again and preserve a question that a manual action owns. Cover both shared authentication and route edits in tests
   with automatic updates still on. Cancelling the prompt alone cannot arbitrate the admission race after the answer.
+  Plan: `plans/queue/host-provisioning-action-fixes.md`.
 
 - **Show container recipe admission failures before recording build ownership.** An explicit Rebuild can answer Accepted
   before a fresh Podman check fails. The existing recipe place record keeps that failure visible after the job ends.
@@ -355,7 +363,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   early sweep missed both cases. The final fix needs a durable stop-intent and retry path beyond the triage budget.
   Extend the retained-create fixture in `host_creates.rs` to drive authorized Stop against an unanswering and a gone
   host, and add an answering host with a live child. Assert refusal preserves the launch, a completed retry preserves
-  its stop annotation, and a failed write reports the work already done.
+  its stop annotation, and a failed write reports the work already done. Plan:
+  `plans/queue/supervisor-stop-and-restart-cleanup-fixes.md`.
 
 - **Keep a failed tab close retryable after the terminal host ends.** Close can end the terminal host and then fail to
   confirm the final sweep for surviving shell processes. It returns an error after forgetting the tab and removing its
@@ -381,7 +390,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   races. Exercise a failed sweep with a confirmed-gone host, a replacement start that can still open its scope, and a
   restored session that must stay running. Ordinary Delete waits on Restart's lifecycle claim, so remove the row in the
   fixture while Restart is held. Verify the retry also works with an empty session table. Start with
-  `unwind_failed_host_relaunch`, the failed-relaunch republish decision, and `retry_pending_scope_cleanups`.
+  `unwind_failed_host_relaunch`, the failed-relaunch republish decision, and `retry_pending_scope_cleanups`. Plan:
+  `plans/queue/supervisor-stop-and-restart-cleanup-fixes.md`.
 
 - **Keep hook setup from launching into a folder that arrived later.** In the launcher, pick Grok or Antigravity to open
   the Restart hook question. Switch to a connected host whose remembered folder is still loading and choose **Set up and
@@ -395,7 +405,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   ordinary launcher. The fix and test exceed the triage size gate once they cover these paths. Reproduce from New with
   no open session and Folder untouched. Use the real host picker and hold the new host's history reply until the setting
   write starts. Draw the settled folder before replying to the write. Verify the write succeeds and only a fresh press
-  starts the session in the settled folder.
+  starts the session in the settled folder. Plan: `plans/queue/launcher-consent-and-custom-agent-fixes.md`.
 
 - **Ignore Enter on a clipped recent setup.** In the session launcher's empty command pane, highlight a recent setup
   with the arrow keys and scroll it out of view. Enter can still launch that setup or replace the source session. Keep
@@ -413,44 +423,51 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   permits a picture of the interim status or an unavailable host. Stage a ready container host and a build place for
   that exact host and recipe. Wait for the settled note to be drawn before comparing either appearance. The reference
   images must move with the fixture. Refresh them on the current launcher and recipe-host behavior, then inspect the
-  full comparison for unrelated differences before publishing the new references.
+  full comparison for unrelated differences before publishing the new references. Plan:
+  `plans/queue/golden-harness-and-new-container-scene.md`.
 
 - **Require a committed hook report after Restart in the drift checks.** The Codex, Antigravity and Grok cases can see a
   new acknowledged callback and the old stored resume identity even when the callback was a stale no-op. Require
   evidence that the resumed generation committed the report. Carry the generation and identity in the witness used by
   the drift tests, and cover an acknowledged same-identity no-op and a valid resumed report. The supervisor emits
   `acked` for committed and ignored callbacks. The drift matcher needs a distinct commit witness from supervisor
-  admission or a new resume pin bound to the resumed generation.
+  admission or a new resume pin bound to the resumed generation. Plan:
+  `plans/queue/agent-drift-and-screen-capture-tooling.md`.
 
 - **Bind the brick test's reopen samples to an app relaunch.** The bonus checkpoint currently checks that the remote
   process and its counter survived between samples. The samples can come from the same app lifetime. Require this
   attempt's before sample, a witnessed quit and fresh app identity, then the after sample. Carry that ordering through
-  guest receipt validation and host import. The counter and version checks alone cannot establish the transition.
+  guest receipt validation and host import. The counter and version checks alone cannot establish the transition. Plan:
+  `plans/queue/brick-test-reopen-and-retry-fixes.md`.
 
 - **Keep the brick test's installer pair retryable after an unavailable P0 check.** `record()` settles derived P1 and P2
   skips from a recoverable P0 observation. `retry-unavailable` then reads those skips as later executed checks. Keep
   later observations and independent skips, and let the supported recovery discard only skips derived from the retried
   checkpoint. Record why the eligible attempt can be repeated and preserve its evidence. Cover older saved manifests as
-  well as new ones. A change to the retry predicate alone leaves derived skips permanently recorded.
+  well as new ones. A change to the retry predicate alone leaves derived skips permanently recorded. Plan:
+  `plans/queue/brick-test-reopen-and-retry-fixes.md`.
 
 - **Publish captured agent screens as recoverable pairs.** `scripts/capture-agent-screens.py` copies each scrubbed
   screen and title from staging into a version directory. An I/O failure or interruption can leave those two files from
   different captures and remove the staged replacement. Preserve the previous matched pair, retain the validated
   replacement on failure, and let a later run recover any interrupted publication. Renaming each file atomically still
   leaves an interruption window between the two renames. Settle the pair publication and recovery contract with the
-  fixture loader, then exercise both an I/O failure and an interrupted replacement using stand-ins.
+  fixture loader, then exercise both an I/O failure and an interrupted replacement using stand-ins. Plan:
+  `plans/queue/agent-drift-and-screen-capture-tooling.md`.
 
 - **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
   out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
   its version, so a case can report a verdict for the wrong binary. Cover both timeouts and cancellation during
   preparation, including a signal arriving as the process starts. Reuse the same teardown for the updater and the
-  fallback shell, and verify with a local child process that no write can race the version probe or a case.
+  fallback shell, and verify with a local child process that no write can race the version probe or a case. Plan:
+  `plans/queue/agent-drift-and-screen-capture-tooling.md`.
 
 - **Show missing renders on the portable golden changes page.** A comparison can finish with both ordinary pixel
   differences and scenes that never rendered. The page contains retained differences, so a reviewer cannot infer
   coverage from missing images. Have the renderer report each selected light and dark appearance's render outcome
   separately from its comparison result. Include missing or failed appearances in the page, including an update that
-  exits successfully with missing captures. A shared nonzero exit cannot distinguish these cases.
+  exits successfully with missing captures. A shared nonzero exit cannot distinguish these cases. Plan:
+  `plans/queue/golden-harness-and-new-container-scene.md`.
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
   started with `cursor-agent -- "$prompt"`, where the prompt starts with `--` and includes a newline. Run
@@ -489,7 +506,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `--mode auto --settings '{}' --` reaches the composer, completes a turn and captures a conversation. The saved command
   places `--conversation` after `--`, where it is a positional argument. Keep the settings and conversation options
   before the delimiter, preserving stored Custom words and workspace-trust edits. The `permission_modes` drift case
-  reports this boundary before it would start the wrong conversation.
+  reports this boundary before it would start the wrong conversation. Plan:
+  `plans/queue/hooks-restart-and-antigravity-fixes.md`.
 
 - **Finish OpenRouter and saved-default model verification.** Goose 1.60.2, Pi 1.6.0 and OMP 19.1.1 opened with an
   active model when started without `--provider` or `--model`. Compare the active choice with the saved provider and
