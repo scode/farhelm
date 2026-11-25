@@ -30,9 +30,9 @@ The distinction is product behavior, not wording. `RestartReadiness::due_by_firs
 (`crates/farhelm-proto/src/lib.rs:1579`) gates the supervisor's silent-hook notification (`notify_hook_silent`,
 `crates/farhelm-supervisor/src/service/capture.rs:131-143`), and `early_capture`'s own doc says "A pending locator can
 be stored before the agent has persisted any conversation to reopen", which is exactly the harm a FirstReply agent
-reporting at prompt time would cause, but `early_capture` runs only before the prompt. The docs paragraph
-(`docs/harness-drift-tests.md`, "checks whether Restart becomes available before or after the first text turn")
-describes the binary check honestly; the commit message and the docstring of
+reporting at prompt time would cause, but `early_capture` runs only before the prompt. The `capture_timing_hooks`
+paragraph in `docs/harness-drift-tests.md`, which says the category "checks whether Restart becomes available before or
+after the first text turn", describes the binary check honestly; the commit message and the docstring of
 `capture_timing_covers_every_tracked_builtin_agent` ("Adding a timing promise to the launcher also needs a live case
 that exercises it") claim more.
 
