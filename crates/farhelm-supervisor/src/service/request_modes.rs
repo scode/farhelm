@@ -246,12 +246,6 @@ declare_execution_classes! {
                 config_revision: Some(1),
             },
         };
-        GithubRepoSearch => AdmittedConnectionTask => |c| ControlMsg::GithubRepoSearch {
-            req_id: c.req_id,
-            claim: farhelm_proto::ClaimContext { host: "conformance".into(), incarnation: 1 },
-            query: "project".into(),
-            root: Some(c.cwd.into()),
-        };
         StopSession => OwnedMutation => |c| ControlMsg::StopSession {
             req_id: c.req_id,
             session_id: c.session_id.into(),
@@ -345,7 +339,6 @@ declare_execution_classes! {
         ControlMsg::CheckoutTrashListed { .. },
         ControlMsg::CheckoutTrashDeleted { .. },
         ControlMsg::GithubCheckoutPreviewed { .. },
-        ControlMsg::GithubRepoResults { .. },
         ControlMsg::SessionStopped { .. },
         ControlMsg::SessionDeleted { .. },
         ControlMsg::SessionDeletedOrSealed { .. },

@@ -50,6 +50,7 @@ fn history(launches: Vec<LaunchHistoryEntry>) -> LaunchHistoryReply {
         launches,
         folders: Vec::new(),
         checkout_config_revision: 1,
+        needs_checkout_root: false,
     }
 }
 

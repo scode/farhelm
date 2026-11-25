@@ -1342,28 +1342,20 @@ async fn launcher_routes_answer_within_the_bound_when_the_host_never_answers() {
         assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{route} {body}");
     }
     let request = Request::builder()
-        .method("POST")
+        .method("GET")
         .uri("/api/github-repositories")
         .header("host", "127.0.0.1:7433")
-        .header("content-type", "application/json")
-        .body(Body::from(
-            serde_json::json!({ "host": host, "query": "" }).to_string(),
-        ))
+        .body(Body::empty())
         .unwrap();
     let response = harness.router().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK, "repository search");
-    let body: Value = serde_json::from_slice(
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Vec<farhelm_proto::GithubRepo> = serde_json::from_slice(
         &axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(body["truncated"], true, "{body}");
-    let scan_error = body["scan_error"].as_str().unwrap_or_default();
-    assert!(
-        scan_error.contains("did not answer"),
-        "the scan error names the timeout: {body}"
-    );
+    assert!(body.is_empty(), "history does not use the timed-out host");
 }
 
 // ---------------------------------------------------------------------------

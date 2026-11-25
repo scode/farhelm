@@ -245,26 +245,25 @@ The channel is the WebSocket `GET /api/ui` (`farhelm_proto::ui_channel::UI_CHANN
 channel handles itself and never routes. Rename, the ordinary session delete, Stop, Restart, Replace and the ordinary
 create bound their host wait at 20 seconds (`HOST_REPLY_BOUND` in the helm's sessions module) and then reply that the
 host timed out while the work continues; the GUI's watchdog therefore waits longer than that. The launcher's host reads
-(Browse and its folder check, the checkout preview, the repository search) stop waiting at the same bound and drop the
-read, since nothing is left to finish; the host's own scan may still run as long as SPEC.md's "Slow hosts" allows, and a
-repository search that times out keeps its recent repositories. The trash routes are bounded the same way (in place of
-an accepted form for trash deletion): a listing drops its read, and a delete replies that the host timed out while its
-cleanup runs on, a late answer that accepted a checkout advancing the host's Trash epoch so the Trash button and dialog
-read the host again, while a listing still queued behind such a cleanup when the bound passes says that, not that the
-host timed out; a supervisor of the helm's protocol moves the selected folders aside and answers without waiting for
-their removal, so only a hung host meets the bound. Host management's routes that can wait as long answer within the
-same bound, each saying where its late outcome shows: a host probe (a supervisor that answers late is still registered,
-so it appears in the pushed hosts list; otherwise the user probes again), an Update's plan (nothing changed, so the user
-asks again), an uninstall's plan (nothing changed, so the user chooses uninstall again), and a destination or alias
-change, which waits for any setup or update running on that host (SPEC.md, "Waiting between operations on one host") and
-lands when the run ends; those two first refuse at once what the registry already refuses, so the reply that they are
-still waiting is not given for a change that cannot land as things stand. Settings → Containers' routes and host removal
-answer within the same bound because every host-waiting route the GUI sends is bounded: the leftover listing asks the
-container hosts concurrently, so the bound applies to the slowest of them, and drops its read at the bound; a leftover's
-Delete replies that its cleanup carries on, and the list's next read shows whether the container is gone; and removing a
-host whose removal deletes its machine replies the same way, the host leaving the hosts list once its removal finishes,
-or staying listed with the reason only in the helm's log if it fails. An environment host's Suspend and Resume
-(`POST /api/hosts/{id}/suspend` and `/resume`) and a session's Stop and suspend
+(Browse and its folder check, and the checkout preview) stop waiting at the same bound and drop the read, since nothing
+is left to finish. The host's own operation may still run as long as SPEC.md's "Slow hosts" allows. The trash routes are
+bounded the same way (in place of an accepted form for trash deletion): a listing drops its read, and a delete replies
+that the host timed out while its cleanup runs on, a late answer that accepted a checkout advancing the host's Trash
+epoch so the Trash button and dialog read the host again, while a listing still queued behind such a cleanup when the
+bound passes says that, not that the host timed out; a supervisor of the helm's protocol moves the selected folders
+aside and answers without waiting for their removal, so only a hung host meets the bound. Host management's routes that
+can wait as long answer within the same bound, each saying where its late outcome shows: a host probe (a supervisor that
+answers late is still registered, so it appears in the pushed hosts list; otherwise the user probes again), an Update's
+plan (nothing changed, so the user asks again), an uninstall's plan (nothing changed, so the user chooses uninstall
+again), and a destination or alias change, which waits for any setup or update running on that host (SPEC.md, "Waiting
+between operations on one host") and lands when the run ends; those two first refuse at once what the registry already
+refuses, so the reply that they are still waiting is not given for a change that cannot land as things stand. Settings →
+Containers' routes and host removal answer within the same bound because every host-waiting route the GUI sends is
+bounded: the leftover listing asks the container hosts concurrently, so the bound applies to the slowest of them, and
+drops its read at the bound; a leftover's Delete replies that its cleanup carries on, and the list's next read shows
+whether the container is gone; and removing a host whose removal deletes its machine replies the same way, the host
+leaving the hosts list once its removal finishes, or staying listed with the reason only in the helm's log if it fails.
+An environment host's Suspend and Resume (`POST /api/hosts/{id}/suspend` and `/resume`) and a session's Stop and suspend
 (`POST /api/sessions/{id}/stop-and-suspend`) answer within the same bound, counted from their handler's start (in place
 of the accepted form, because their outcome already lands in the pushed host state). A Tensorlake Suspend may wait 60
 seconds for its sandbox and a Resume 120, and a container's change waits on its container host's commands. Suspend and
@@ -390,10 +389,10 @@ setup completion from `GET /api/ssh-sign-in-completions`, keyed by attempt id. T
 beside the channel's. The pushed preferences supersede the old client's reread of shared preferences before an automatic
 pick: the GUI picks from the preferences as last pushed, since the helm pushes them together with the session changes
 that prompt a pick. The snapshot sent when a channel opens never waits on a remote host. Every other read (directory
-browse, repository lists, the trash list, launch history) is an ordinary command, a GET or, for directory browse and
-repository lists, a POST, whose reply body is the result. File stat is not: it is an HTTP request of the helm client's
-transfers, `POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot be cancelled on its
-own. A hover check sent on the channel would keep running after the pointer left the link, and count against the
+browse, repository history, the trash list, launch history) is an ordinary command. A directory browse uses POST and
+repository and launch history use GET; the reply body is the result. File stat is not: it is an HTTP request of the helm
+client's transfers, `POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot be cancelled
+on its own. A hover check sent on the channel would keep running after the pointer left the link, and count against the
 channel's watchdog meanwhile, while SPEC.md says leaving cancels the check; as its own request, it is cancelled by
 dropping it. Data the old GUI polled stays a query that the GUI issues again; it does not become a replicated
 collection. There are two exceptions, both for work whose progress Settings follows while it runs: the Podman check's
@@ -3759,10 +3758,10 @@ accepted leftover. A sweep failure is logged and leaves unused caches for a late
 
 Spare-checkout recovery uses a sibling `<name>.spare.json` record containing outstanding namespace locations and their
 directory identities, plus the intended or retained ready spare's identity. A namespace is the owner directory under
-`<checkout root>/.farhelm-spares/<owner>`; both `.farhelm-spares` and the archive directory are reserved in occupancy
-and repository discovery. Old locations remain recorded until this repository's ready slot and strictly generated
-private names are positively absent, including after a create selects another checkout root. The record contains no Git
-facts, credentials, durable build status or per-temporary-tree journal.
+`<checkout root>/.farhelm-spares/<owner>`; both `.farhelm-spares` and the archive directory are reserved in occupancy.
+Old locations remain recorded until this repository's ready slot and strictly generated private names are positively
+absent, including after a create selects another checkout root. The record contains no Git facts, credentials, durable
+build status or per-temporary-tree journal.
 
 The namespace's inode and creation-time evidence uses the working-copy registry's existing remount-tolerant identity
 rule. Cleanup opens the canonical checkout root without following a final symlink, confines each reserved child lookup
@@ -5078,7 +5077,7 @@ no path values are stored in the notice.
 
 ## Helm internals
 
-### Checkout configuration and discovery
+### Checkout configuration
 
 Schema 27 adds global checkout settings, per-host overrides and a monotonically increasing revision. Effective settings
 are read in one SQLite snapshot. The configuration CLI opens only an existing current-schema database; it neither
@@ -5087,43 +5086,39 @@ whereas an empty hook override explicitly disables it. Configuration stays with 
 stays with the installation identity. Host settings exposes the root override only; the effective root continues to
 resolve from the current global default at launch rather than being copied when a host is added.
 
-Discovery, preview and creation share the same effective checkout settings for a host. If a session-owned host has no
-configured root, those three paths pass `~` for expansion by the target supervisor. Configuration reads for Settings and
-the command line continue to report the stored values and inheritance. A new environment launch can be admitted before
-it has a host row or a checkout folder.
+Setup eligibility, preview and creation share the same effective checkout settings for a host. A session-owned host with
+no configured root uses `~` for expansion by the target supervisor. Configuration reads for Settings and the command
+line continue to report the stored values and inheritance. A new environment launch can be admitted before it has a host
+row or a checkout folder.
 
 `POST /api/github-checkout-preview` asks the target supervisor to expand/canonicalize the configured root and propose
 the exact destination, without writing it. Responses include the configuration revision and installation/incarnation
 claim, never the hook. A missing root resolves by canonicalizing its deepest existing directory ancestor and appending
 only normal missing components; unresolved parent components, dangling links and non-directory ancestors refuse. This
-preserves preview/create agreement through symlinked ancestors such as macOS's temporary directory. Discovery returns
-complete-empty for a missing root, and preview has no filesystem occupancy but still reserves the archive name. Naming
-scans refuse incomplete results after 100,000 entries. Create verifies this binding, creates the canonical root and its
-parents using the ordinary umask, then re-resolves the configured spelling and requires the same canonical path before
-capturing the root identity. It may leave an empty root after a later refusal. Atomic mkdir remains the checkout
-collision authority. Known intent keys reconcile their original snapshot before current configuration or launch
-compilation; replacement identities additionally bind the source session and preserve its veto. The composer reads its
-checkout Folder line from that accepted preview. It leaves the folder read-only until an explicit existing-folder action
-changes the destination draft; the old editable `cwd` seed is never presented as a fresh-checkout path. Preview failures
-leave the path empty with an error state rather than displaying the old seed.
+preserves preview/create agreement through symlinked ancestors such as macOS's temporary directory. A missing root has
+no filesystem occupancy, and preview still reserves the archive name. Naming scans refuse incomplete results after
+100,000 entries. Create verifies this binding, creates the canonical root and its parents using the ordinary umask, then
+re-resolves the configured spelling and requires the same canonical path before capturing the root identity. It may
+leave an empty root after a later refusal. Atomic mkdir remains the checkout collision authority. Known intent keys
+reconcile their original snapshot before current configuration or launch compilation; replacement identities
+additionally bind the source session and preserve its veto. The composer reads its checkout Folder line from that
+accepted preview. It leaves the folder read-only until an explicit existing-folder action changes the destination draft;
+the old editable `cwd` seed is never presented as a fresh-checkout path. Preview failures leave the path empty with an
+error state rather than displaying the old seed.
 
 The serving future owns one serial three-second revision observer, initialized before readiness and HTTP serving.
 Changed revisions publish existing fleet invalidations; failed reads preserve the last observation. Launch history
-carries the authenticated revision. The launcher reads it for the chosen host when it opens and whenever the host or its
-connection changes, keeps an answer only while it still names the host and connection asked about, and does not follow
-later changes while open (`crates/gui/farhelm-gui/src/launcher/view/history.rs`); a rising revision asks the
-managed-checkout destination for a new preview, and the observed revision never goes back down, so an older read
-answering late cannot undo a newer one.
+carries the authenticated revision and an effective checkout-folder setup flag for the verified destination. The
+launcher asks on opening and when a destination connection changes, or when inline setup saves or reloads a different
+folder (`crates/gui/farhelm-gui/src/launcher/view/history.rs`). It keeps the setup field in place during that re-read
+and discards earlier answers for the same connection. The old preview loses authority as soon as the folder changes. The
+launcher waits for the refreshed revision before requesting its replacement. If the history read fails, it still
+requests the preview using the last observed revision as its lower bound.
 
-`POST /api/github-repositories` merges installation-scoped recents with supervisor discovery. The scanner owns two
-subprocess permits independently of directory admission, considers at most 1024 immediate entries and returns at most
-100 identities/64 KiB. It skips the archive directory, symlink children and candidates without their own `.git` entry.
-Read-only `git config --local --no-includes --get remote.origin.url` has a 4096-byte stdout cap, a one-second child
-deadline and a five-second enclosing budget. Cancellation kills and reaps before releasing permits. Inspection children
-discard ambient Git configuration/location overrides, without changing the ordinary credential environment used by
-clone. Only validated GitHub HTTPS/scp/SSH origins become canonical pairs; raw origin URLs never reach the UI.
-Recent-first deduplication, sorted discovered entries and explicit incomplete status keep a failed scan from disabling
-manual repository selection. The launcher's requests debounce for 150 ms and discard stale host/query generations.
+`GET /api/github-repositories` returns the helm's 100 most recent distinct Managed checkout repositories in admission
+order, without a destination or another supervisor request. The launcher reads it once on opening and filters the list
+locally in Repository and `gh:` search. A failed read still permits manually entered pairs. Protocol 91 removes the
+supervisor's repository search request and reply.
 
 `GET`/`PUT /api/checkout-root` is an ordinary protected route for the nullable global `root`.
 `GET`/`PUT /api/hosts/{id}/checkout-root` checks host existence (404 if absent). Its GET returns the host's stored
@@ -5319,12 +5314,16 @@ change. Each structured launch stores its accepted canonical destination beside 
 history remains a bounded suggestion projection: browse may refine legacy unknown paths but never changes an
 accepted-create destination.
 
-Schema 28 adds trusted repository provenance to the same bounded create-admission transaction. The helm records it from
-the accepted request, not arbitrary supervisor display metadata. Command-launch fresh creates age the same window and
-contribute repository recents; agent-launch history additionally projects the saved selection. Fresh requests retain
-accepted cwd for diagnostics but skip the folder projection. Repository setups group by destination kind, canonical
-repository and complete selection, independently of their previous ephemeral cwd. Adoption purges the old install's
-repository suggestions with its other history; ordinary history rows retain their existing semantics.
+Schema 28 adds repository provenance to the bounded create-admission transaction. A peer's display metadata has no
+authority to supply an accepted repository. Each fresh checkout retains its actual cwd for diagnostics and skips the
+folder projection. Structured recent setups group by destination kind, canonical repository and complete agent
+selection, independently of their previous ephemeral cwd.
+
+Schema 102 adds bounded helm-wide repository history. Migration seeds it from preserved ordinary and environment launch
+intent, using the stored timestamps across installations and the helm's admission time for a launch represented in both
+tables. New writes follow successful create admission order and survive host removal and adoption. A fresh checkout in
+an existing session-owned environment has its own bounded replay window so it can contribute a repository without aging
+the host's earlier setup or changing remembered settings.
 
 `LaunchHarness::omitted_permission` is the one per-harness fact for new request defaults. The helm fills omissions
 before validation and still refuses unsupported explicit choices. Every harness that offers Guarded defaults to it.

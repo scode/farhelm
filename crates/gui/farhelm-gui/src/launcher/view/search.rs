@@ -770,7 +770,7 @@ impl Launcher {
                 palette,
             )),
         };
-        let notices = self.command_notices(palette, window, cx);
+        let notices = self.command_notices(palette);
         let detail = (guidance.is_some() || notices.is_some()).then(|| {
             div()
                 .flex()
@@ -785,12 +785,7 @@ impl Launcher {
 
     /// Show command notices by the field even when the form below has scrolled away from its start. A refusal
     /// can name many competing templates, so the notice can scroll on its own without displacing the form or footer.
-    fn command_notices(
-        &self,
-        palette: &theme::Palette,
-        window: &Window,
-        cx: &App,
-    ) -> Option<AnyElement> {
+    fn command_notices(&self, palette: &theme::Palette) -> Option<AnyElement> {
         let note = match &self.note {
             Some(super::Note::Refusal(sentence)) => Some(
                 div()
@@ -813,15 +808,13 @@ impl Launcher {
                 .text_color(theme::color(palette.warn))
                 .child(words)
         });
-        let repository = self.search_repository_note(window, cx);
-        (note.is_some() || refusal.is_some() || repository.is_some()).then(|| {
+        (note.is_some() || refusal.is_some()).then(|| {
             let messages = div()
                 .flex()
                 .flex_col()
                 .gap(px(6.))
                 .children(note)
-                .children(refusal)
-                .children(repository);
+                .children(refusal);
             ScrollBox::new(
                 "launcher-command-notices",
                 "Command field messages",

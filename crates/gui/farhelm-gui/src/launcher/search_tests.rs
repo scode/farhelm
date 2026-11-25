@@ -939,6 +939,7 @@ fn with_history(
             launches,
             folders: folders.iter().map(|path| folder(path)).collect(),
             checkout_config_revision: 1,
+            needs_checkout_root: false,
         }),
         ..Draft::agent(harness)
     }

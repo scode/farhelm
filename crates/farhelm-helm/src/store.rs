@@ -10066,51 +10066,9 @@ impl HelmStore {
 .await
     }
 
-    /// Return distinct accepted repos in the installation's create order.
-    ///
-    /// Both raw and structured fresh creates live in the same bounded
-    /// admission window. Ordinary creates age these suggestions out, and
-    /// replay cannot refresh them. Identity is checked in the read itself
-    /// so an adoption racing an offline completion request cannot expose
-    /// suggestions belonging to the previous installation.
-    pub async fn github_repository_history(
-        &self,
-        host: HostId,
-        identity: &str,
-    ) -> anyhow::Result<Vec<farhelm_proto::GithubRepo>> {
-        let identity = identity.to_owned();
-        self.conn
-            .call(
-                "repository history task panicked",
-                move |conn: &mut Connection| {
-                    let mut stmt = conn.prepare(
-                        "SELECT github_repo FROM create_history_sessions
-                 WHERE host_id = ?1 AND host_identity = ?2 AND github_repo IS NOT NULL
-                   AND EXISTS (SELECT 1 FROM hosts WHERE id = ?1 AND host_identity = ?2)
-                 ORDER BY ordering_kind DESC, ordering_value DESC, session_id ASC",
-                    )?;
-                    let rows = stmt.query_map(rusqlite::params![host, identity], |row| {
-                        row.get::<_, String>(0)
-                    })?;
-                    let mut repos = Vec::new();
-                    let mut seen = std::collections::HashSet::new();
-                    for row in rows {
-                        let Ok(repo) = farhelm_proto::parse_github_repo(&row?) else {
-                            continue;
-                        };
-                        if seen.insert((repo.owner.clone(), repo.name.clone())) {
-                            repos.push(repo);
-                        }
-                    }
-                    Ok(repos)
-                },
-            )
-            .await
-    }
-
     /// Read folder suggestions for one still-matching installation.
     ///
-    /// Repository suggestions use the admission window instead; they must
+    /// Repository suggestions have their own global history; they must
     /// not turn a previous fresh checkout's diagnostic cwd into reusable intent.
     pub async fn folder_history(
         &self,
@@ -10974,10 +10932,7 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(
-            store
-                .github_repository_history(host, "identity-a")
-                .await
-                .unwrap(),
+            store.global_github_repository_history().await.unwrap(),
             vec![repo]
         );
 
@@ -11007,46 +10962,15 @@ mod tests {
         );
     }
 
-    /// Raw fresh launches supply recents, but every accepted create ages
-    /// that same window. Eviction must also prevent an old replay from
-    /// resurrecting a repository after its admission row has been reclaimed.
+    /// Ordinary creates and host identity adoption must not age out a global repository.
+    /// A replay that already fell outside the original installation's admission window must still be refused.
     #[tokio::test]
-    async fn repository_history_ages_with_raw_creates_and_adoption() {
+    async fn global_repository_history_survives_ordinary_create_aging_and_adoption() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "repo-window.example", "identity-a").await;
-        let repo = farhelm_proto::parse_github_repo("acme/bar").unwrap();
-        let original = session("fresh", 1);
-        assert!(
-            store
-                .record_create_history_with_destination(
-                    host,
-                    "identity-a",
-                    &admitted_row(host, &(original)),
-                    HistoryPaths {
-                        canonical_cwd: "/work/bar-1",
-                        display_cwd: "/work/bar-1"
-                    },
-                    Some(&repo),
-                    None
-                )
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            store
-                .github_repository_history(host, "identity-a")
-                .await
-                .unwrap(),
-            vec![repo.clone()]
-        );
-        assert!(
-            store
-                .launch_history(host, "identity-a")
-                .await
-                .unwrap()
-                .is_empty(),
-            "fixture is a raw launch"
-        );
+        let ordinary = (host, "identity-a");
+        assert!(admit_repository(&store, ordinary, "fresh", 1, "acme/bar", None).await);
+        assert_eq!(global_repository_names(&store).await, ["acme/bar"]);
         for index in 0..MAX_LAUNCH_HISTORY {
             store
                 .record_create_history(
@@ -11057,51 +10981,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        assert!(
-            store
-                .github_repository_history(host, "identity-a")
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            !store
-                .record_create_history_with_destination(
-                    host,
-                    "identity-a",
-                    &admitted_row(host, &(original)),
-                    HistoryPaths {
-                        canonical_cwd: "/work/bar-1",
-                        display_cwd: "/work/bar-1"
-                    },
-                    Some(&repo),
-                    None
-                )
-                .await
-                .unwrap()
-        );
-        let fresh = session("fresh-after-window", 1000);
-        store
-            .record_create_history_with_destination(
-                host,
-                "identity-a",
-                &admitted_row(host, &(fresh)),
-                HistoryPaths {
-                    canonical_cwd: "/work/bar-2",
-                    display_cwd: "/work/bar-2",
-                },
-                Some(&repo),
-                None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            store
-                .github_repository_history(host, "identity-a")
-                .await
-                .unwrap(),
-            vec![repo]
-        );
+        assert!(!admit_repository(&store, ordinary, "fresh", 1, "acme/bar", None).await);
         store
             .adopt_identity(
                 host,
@@ -11111,20 +10991,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(
-            store
-                .github_repository_history(host, "identity-a")
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            store
-                .github_repository_history(host, "identity-b")
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        assert_eq!(global_repository_names(&store).await, ["acme/bar"]);
     }
 
     /// Supply the explicit GUI selection separately from a raw peer reply.
@@ -12036,7 +11903,7 @@ mod tests {
         );
         assert!(
             migrated
-                .github_repository_history(host, "identity-a")
+                .global_github_repository_history()
                 .await
                 .unwrap()
                 .is_empty()

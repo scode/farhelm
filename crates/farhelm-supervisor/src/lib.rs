@@ -67,7 +67,6 @@ pub mod managed_supervisor;
 mod pi_extension;
 pub mod recipe_credentials;
 mod repo_cache;
-pub mod repository_discovery;
 mod spare_build;
 mod spare_checkouts;
 // Synchronous CLI entry points only. The private spec, scheduler and filesystem

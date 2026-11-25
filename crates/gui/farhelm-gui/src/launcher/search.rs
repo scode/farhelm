@@ -33,11 +33,8 @@
 //!
 //! - **Repositories** are offered only under `gh:`: the choices the managed-checkout destination gives the query
 //!   (`super::view::checkout`'s `repository_choices`, handed in by the view), so a valid typed `owner/repo` is always
-//!   the first row, whatever the host's discovery found (SPEC.md, "Managed checkouts": "Incomplete discovery is
-//!   visible and does not prevent selecting a valid manually entered pair"), and the host's discovered repositories
-//!   that match follow. Taking one makes the destination a managed checkout of it, as the repository field's pick
-//!   does. Ported from the old launcher's `SearchScope::Github` rows (`list/create_form.rs` at reference commit
-//!   `24bc0580`).
+//!   the first row. Matching repositories from the helm-wide launch history follow, in recency order. Taking one
+//!   makes the destination a managed checkout of that repository, as the repository field's pick does.
 
 use farhelm_proto::launcher::{
     EFFORT_ORDER, LaunchCatalogModel, compatible_efforts, is_catalog_family_word,
@@ -477,9 +474,9 @@ pub struct Inputs<'a> {
     /// The chosen host as the rows of its own history name it; a new environment's setup names its own placement
     /// instead (`super::recents::placement`).
     pub host: Option<&'a HostText>,
-    /// A `gh:` query's repository choices, in order (the module docs); only a `gh:` query reads them.
+    /// A `gh:` query's repository choices, filtered from the launcher's helm-wide history.
     pub repositories: &'a [GithubRepo],
-    /// Whether this `gh:` query awaits an answer. `None` when it has no discovery read to ask.
+    /// Whether this `gh:` query is still waiting for the repository history read.
     pub repository_pending: Option<bool>,
 }
 

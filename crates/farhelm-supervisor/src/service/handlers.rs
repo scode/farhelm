@@ -2931,36 +2931,6 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             ctx.tasks
                 .spawn(forward_owned_request_panic(mutation, ctx.panics.clone()));
         }
-        ControlMsg::GithubRepoSearch {
-            req_id,
-            root,
-            query,
-            ..
-        } => {
-            // Git can consume the full discovery deadline. Keep this work in
-            // the connection's tracked task set, with shared handler admission
-            // (refused while the host is busy, see `admit_or_refuse`) and the
-            // scanner's separate two-child budget. Never hold directory
-            // admission across inspection subprocesses.
-            let sup2 = Arc::clone(sup);
-            spawn_admitted(&sup.admission, ctx.tasks, ctx.tx, req_id, |tx| async move {
-                let reply = match sup2.github_repo_search(root.as_deref(), &query).await {
-                    Ok(result) => ControlMsg::GithubRepoResults {
-                        req_id,
-                        repos: result.repos,
-                        truncated: result.truncated,
-                    },
-                    Err(error) => ControlMsg::Error {
-                        create_unaccepted: false,
-                        req_id,
-                        kind: error_kind(&error),
-                        message: format!("{error:#}"),
-                    },
-                };
-                send_reply(&tx, &reply).await;
-            })
-            .await;
-        }
         ControlMsg::StopSession {
             req_id,
             session_id,
@@ -3186,7 +3156,6 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         | ControlMsg::CheckoutTrashListed { .. }
         | ControlMsg::CheckoutTrashDeleted { .. }
         | ControlMsg::GithubCheckoutPreviewed { .. }
-        | ControlMsg::GithubRepoResults { .. }
         | ControlMsg::SessionStopped { .. }
         | ControlMsg::SessionDeleted { .. }
         | ControlMsg::SessionDeletedOrSealed { .. }
@@ -7774,9 +7743,7 @@ mod tests {
     /// create inputs; those local refusals must leave no owned checkout behind.
     #[farhelm_testtrace::test]
     async fn github_checkout_dispatch_paths_preserve_authority_and_require_configuration() {
-        use farhelm_proto::{
-            CheckoutPreviewBinding, ClaimContext, GithubPreviewRequest, ResolvedGithubCheckout,
-        };
+        use farhelm_proto::{CheckoutPreviewBinding, GithubPreviewRequest, ResolvedGithubCheckout};
 
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -7854,32 +7821,6 @@ mod tests {
             reply,
             ControlMsg::Error {
                 req_id: 61,
-                kind: ErrorKind::Unauthorized,
-                ..
-            }
-        ));
-
-        handle_restricted_control(
-            &sup,
-            ControlMsg::GithubRepoSearch {
-                req_id: 62,
-                root: None,
-                claim: ClaimContext {
-                    host: "local".to_string(),
-                    incarnation: 1,
-                },
-                query: "bar".to_string(),
-            },
-            &tx,
-            &auth,
-        )
-        .await;
-        let reply: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("search refusal").body).unwrap();
-        assert!(matches!(
-            reply,
-            ControlMsg::Error {
-                req_id: 62,
                 kind: ErrorKind::Unauthorized,
                 ..
             }
@@ -7976,38 +7917,6 @@ mod tests {
         // folder-not-configured message, not the old not-supported-yet one.
         assert!(message.contains("needs a checkout folder"));
         assert!(!message.contains("not supported yet"));
-
-        handle_control(
-            &sup,
-            ControlMsg::GithubRepoSearch {
-                req_id: 65,
-                root: None,
-                claim: ClaimContext {
-                    host: "local".to_string(),
-                    incarnation: 1,
-                },
-                query: "bar".to_string(),
-            },
-            ConnectionCtx {
-                panics: &mpsc::channel(1).0,
-                tx: &tx,
-                priority: &tx,
-                channels: &mut channels,
-                tasks: &mut tasks,
-            },
-        )
-        .await;
-        let reply: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("ordinary search refusal").body)
-                .unwrap();
-        assert!(matches!(
-            reply,
-            ControlMsg::Error {
-                req_id: 65,
-                kind: ErrorKind::InvalidRequest,
-                ..
-            }
-        ));
 
         let missing_root = state.path().join("missing-checkout-root");
         assert!(!missing_root.exists());
@@ -9387,99 +9296,6 @@ mod tests {
             message.contains("no-such-session"),
             "the refusal names what was not found: {message}"
         );
-    }
-
-    /// Real local Git origins travel through the dispatcher as canonical repo
-    /// identities. Holding directory admission proves this observation path
-    /// does not serialize behind allocation/deletion, and joining its tracked
-    /// handler proves the test leaves no unobserved scan task running.
-    #[farhelm_testtrace::test]
-    async fn github_repository_dispatch_scans_without_directory_admission() {
-        let state = StateDir::new();
-        let home = tempfile::tempdir().unwrap();
-        let root = home.path().join("checkouts");
-        let repo = root.join("local-clone");
-        std::fs::create_dir_all(&repo).unwrap();
-        for args in [
-            vec!["init", "--quiet"],
-            vec![
-                "config",
-                "--local",
-                "remote.origin.url",
-                "git@github.com:Acme/Bar.git",
-            ],
-        ] {
-            let output = std::process::Command::new("git")
-                .args(args)
-                .current_dir(&repo)
-                .env_clear()
-                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-                .env("HOME", home.path())
-                .env("GIT_CONFIG_NOSYSTEM", "1")
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        assert!(repo.join(".git").is_dir());
-        assert!(
-            std::fs::read_to_string(repo.join(".git/config"))
-                .unwrap()
-                .contains("git@github.com:Acme/Bar.git")
-        );
-        let sup = Supervisor::new_with_seams(
-            state.path(),
-            dummy_exe(),
-            super::super::core::SupervisorTimeouts::default(),
-            super::super::core::SupervisorSeams {
-                user_home: Some(home.path().to_path_buf()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-        let directory_guard = sup.working_copy_operations.lock().await;
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut tasks = tokio::task::JoinSet::new();
-        handle_control(
-            &sup,
-            ControlMsg::GithubRepoSearch {
-                req_id: 701,
-                claim: farhelm_proto::ClaimContext {
-                    host: "local".into(),
-                    incarnation: 1,
-                },
-                query: "ACME".into(),
-                root: Some("~/checkouts".into()),
-            },
-            ConnectionCtx {
-                panics: &mpsc::channel(1).0,
-                tx: &tx,
-                priority: &tx,
-                channels: &mut ConnectionChannels::default(),
-                tasks: &mut tasks,
-            },
-        )
-        .await;
-        let frame = tokio::time::timeout(Duration::from_secs(10), rx.recv())
-            .await
-            .expect("discovery must not wait for directory admission")
-            .unwrap();
-        let reply: ControlMsg = serde_json::from_slice(&frame.body).unwrap();
-        assert!(
-            matches!(reply, ControlMsg::GithubRepoResults { req_id: 701, repos, truncated: false }
-            if repos == vec![farhelm_proto::parse_github_repo("acme/bar").unwrap()])
-        );
-        drop(directory_guard);
-        while let Some(result) = tasks.join_next().await {
-            result.unwrap();
-        }
-        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
-        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
     }
 
     /// A small complete checkout payload for byte-accounting tests. Paths
@@ -11389,7 +11205,7 @@ mod tests {
     }
 
     /// Spec: the requests admitted through `spawn_admitted` (tab open and
-    /// close, directory browse, repository search) are refused the same way
+    /// close and directory browse) are refused the same way
     /// on a saturated host, and typing continues.
     ///
     /// Why: `spawn_admitted` is the shared helper, and it waited for a slot

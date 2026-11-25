@@ -58,6 +58,16 @@ struct HistoryKey {
     verified: bool,
 }
 
+/// A setup change revokes the preview immediately. The matching history answer supplies the new revision, so
+/// a preview can follow the change once even when the checkout remained on the same connection.
+#[derive(Default, PartialEq, Eq)]
+enum RootRefresh {
+    #[default]
+    Idle,
+    Requested,
+    Reading,
+}
+
 /// The launcher's history read: what it last asked about, and its answer while still current.
 #[derive(Default)]
 pub(super) struct LaunchHistory {
@@ -67,6 +77,11 @@ pub(super) struct LaunchHistory {
     answered: Option<(HistoryKey, LaunchHistoryReply)>,
     /// The key whose read failed, while it is still the one asked about: New's folder default then settles on `~`.
     failed: Option<HistoryKey>,
+    /// A checkout-folder save asks for a new answer on the same connection. Keep the prior answer visible so
+    /// the setup field stays mounted and focused until the new configuration is known.
+    root_refresh: RootRefresh,
+    /// Distinguish two sends for the same connection, including a save during an older pending read.
+    generation: u64,
     /// Whether the helm's history of launches into new environments has been asked for: once per launcher.
     environment_asked: bool,
     /// That history's answer, newest first; `None` until it arrives, and after a failed read.
@@ -99,19 +114,53 @@ impl Launcher {
         if key.is_none() && !self.retains_checkout_setups(cx) {
             self.history.answered = None;
         }
-        if key == self.history.asked {
+        let same_host = key == self.history.asked;
+        if same_host && (self.history.root_refresh != RootRefresh::Requested || key.is_none()) {
             return;
         }
         self.history.asked = key.clone();
-        if key.is_some() {
+        if self.checkout_root_refresh_pending() {
+            // Setup changed shared configuration. A host switch during the read still needs the new revision
+            // before a preview, but only the new host's answer can resolve its own setup field.
+            self.history.root_refresh = if key.is_some() {
+                RootRefresh::Reading
+            } else {
+                RootRefresh::Requested
+            };
+        }
+        if key.is_some() && !same_host {
             self.history.answered = None;
         }
         self.history.failed = None;
         // The folder list has an index into this history. The command field keeps the earlier installation on its
         // explicit choice so the next Enter can explain why that choice disappeared.
-        self.drop_folder_highlight();
+        if !same_host {
+            self.drop_folder_highlight();
+        }
         if let Some(key) = key {
             self.send_history_read(key, cx);
+        }
+    }
+
+    /// Invalidate a pending response before the draw that asks again. A read issued before a save cannot
+    /// remove the setup field or claim the pending handoff to Repository.
+    pub(super) fn refresh_checkout_root(&mut self) {
+        self.history.generation += 1;
+        self.history.root_refresh = RootRefresh::Requested;
+    }
+
+    /// A setup update refreshes the current destination's revision before any preview uses the changed folder.
+    pub(super) fn checkout_root_refresh_pending(&self) -> bool {
+        self.history.root_refresh != RootRefresh::Idle
+    }
+
+    /// A wake continues with a fresh connected preview while the launcher is hidden. It does not draw to
+    /// read history again. Retire an unfinished setup read so it cannot either block or replace that preview.
+    pub(super) fn retire_checkout_root_refresh(&mut self) {
+        if self.checkout_root_refresh_pending() {
+            self.history.root_refresh = RootRefresh::Idle;
+            self.history.generation += 1;
+            self.history.asked = None;
         }
     }
 
@@ -121,10 +170,13 @@ impl Launcher {
         let Ok(path) =
             ApiPath::api(&["launch-history"]).and_then(|path| path.with_query(&[("host", &host)]))
         else {
+            self.history.root_refresh = RootRefresh::Idle;
             return;
         };
+        self.history.generation += 1;
+        let generation = self.history.generation;
         let launcher = cx.weak_entity();
-        operations::read::<LaunchHistoryReply>(
+        if !operations::read::<LaunchHistoryReply>(
             path,
             "GET /api/launch-history",
             cx,
@@ -132,11 +184,13 @@ impl Launcher {
                 let _ = launcher.update(cx, |launcher, cx| {
                     // An answer for a key the launcher has moved past is dropped here, so a late one never replaces
                     // the answer for the key asked since.
-                    if launcher.history.asked.as_ref() != Some(&key)
+                    if launcher.history.generation != generation
+                        || launcher.history.asked.as_ref() != Some(&key)
                         || launcher.history_key(cx).as_ref() != Some(&key)
                     {
                         return;
                     }
+                    launcher.history.root_refresh = RootRefresh::Idle;
                     match answer {
                         Ok(reply) => {
                             // A staged run's host shows the scenario's history in place of its real one, whose
@@ -150,6 +204,7 @@ impl Launcher {
                                 reply.checkout_config_revision,
                                 cx,
                             );
+                            launcher.checkout_root_read(reply.needs_checkout_root);
                             launcher.history.answered = Some((key, reply));
                             // The folder list uses an index. The command field resolves a deliberate pick by identity.
                             launcher.drop_folder_highlight();
@@ -162,7 +217,9 @@ impl Launcher {
                     cx.notify();
                 });
             },
-        );
+        ) {
+            self.history.root_refresh = RootRefresh::Idle;
+        }
     }
 
     /// Read the helm's history of launches into new environments, the first time the launcher is drawn (module docs).

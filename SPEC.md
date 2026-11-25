@@ -1897,10 +1897,10 @@ session snapshots default the new hint evidence to absent; the legacy Claude hin
 When the selected installed host has no checkout folder in effect, the launcher's managed-checkout destination offers
 the same explicit-save field, explaining that it sets the default for hosts without their own folder and can be changed
 later in Settings → Checkouts or overridden in each host's settings. A refusal discards the edit and reloads the stored
-folder. A successful save or a reload that finds a different folder refreshes the repository suggestions and checkout
-preview without reopening the launcher. The refusal stays visible even if that refresh removes the setup field.
-Selecting a repository before setup does not hide the field. A host with its own folder keeps that folder and is never
-offered this setup. The template editor keeps its ordinary destination control.
+folder. A successful save or a reload that finds a different folder rechecks setup and refreshes the checkout preview
+without reopening the launcher. The refusal stays visible even if that refresh removes the setup field. Selecting a
+repository before setup does not hide the field. A host with its own folder keeps that folder and is never offered this
+setup. The template editor keeps its ordinary destination control.
 
 Farhelm is not designed for a working-copy root that other local accounts can write to, such as a group-shared folder or
 a sticky, `/tmp`-style directory. Keeping the root, and so its checkouts and the archive folder inside it, in a location
@@ -1963,12 +1963,11 @@ launch waits on. This command-local policy does not change the user's later Git 
 
 With **Keep a checkout ready for faster launches** on (the default), a managed-checkout create may instead take a
 complete independent clone prepared earlier for that repository on that host. The reserved hidden container is
-`<checkout root>/.farhelm-spares/<owner>/<repository>`; allocation treats its name as occupied and repository discovery
-skips it. Each create freezes the switch and checkout root alongside its post-clone command and trust choice. Taking a
-spare preserves the newly allocated directory's identity, fetches from GitHub visibly in the session terminal, moves the
-spare's contents into that directory, then fast-forwards there. The terminal says an earlier checkout is being updated.
-The configured post-clone command, optional Claude trust and agent still run only at launch, in the final directory, in
-their existing order.
+`<checkout root>/.farhelm-spares/<owner>/<repository>`; allocation treats its name as occupied. Each create freezes the
+switch and checkout root alongside its post-clone command and trust choice. Taking a spare preserves the newly allocated
+directory's identity, fetches from GitHub visibly in the session terminal, moves the spare's contents into that
+directory, then fast-forwards there. The terminal says an earlier checkout is being updated. The configured post-clone
+command, optional Claude trust and agent still run only at launch, in the final directory, in their existing order.
 
 The resulting checkout is a clone made earlier and then updated: its reflog records that clone and update, `FETCH_HEAD`
 and `ORIG_HEAD` exist, unchanged files retain older modification times, and objects from branches deleted upstream can
@@ -2118,12 +2117,13 @@ visible notice that the checkout was not archived, naming the path left behind a
 result is shown, the notice is shown with it. If the reply timed out before Delete finished, its checkout notice appears
 in the navigation rail's notices bell once the host reports the outcome.
 
-Repository suggestions combine successful repository launches for the same host installation with immediate Git clones
-under the configured root. Discovery does not confer ownership, contact GitHub, fetch, recurse, run repository code, or
-return credential-bearing origin URLs. Incomplete discovery is visible and does not prevent selecting a valid manually
-entered pair. A saved repository setup remembers repository intent and agent choices: using it obtains a new preview and
-creates a new checkout, rather than reopening its prior directory. Fresh creates do not populate ordinary folder history
-with ephemeral paths; an explicit existing-directory launch can still do so.
+Repository suggestions come from successful Managed checkout launches across the helm, newest repository first. The same
+history is available for any destination, including new environments and hosts that are offline. Removing a host or its
+environment keeps its repositories in the history. The launcher filters the history as you type and always offers a
+valid manually entered pair. Suggestions neither scan host folders nor search GitHub. A saved repository setup remembers
+repository intent and agent choices: using it obtains a new preview and creates a new checkout, rather than reopening
+its prior directory. Fresh creates do not populate ordinary folder history with ephemeral paths; an explicit
+existing-directory launch can still do so.
 
 Unlabelled search retains ordinary matching. Leading `name:`, `host:`, `harness:`, `model:`, `effort:`, `perms:`,
 `folder:`, `recent:`, `tl:` and `gh:` labels offer or filter their respective actions, case-insensitively; unknown

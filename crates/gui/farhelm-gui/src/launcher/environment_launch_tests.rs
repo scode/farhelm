@@ -228,7 +228,9 @@ pub(crate) fn answer_reads(
             }
             let body = if command.path == "/api/tensorlake" {
                 account.map(|account| serde_json::to_value(account).unwrap())
-            } else if command.path.ends_with("launch-catalog") {
+            } else if command.path.ends_with("launch-catalog")
+                || command.path == "/api/github-repositories"
+            {
                 Some(json!([]))
             } else if command.path == "/api/environment-launch-history" {
                 environments.cloned()

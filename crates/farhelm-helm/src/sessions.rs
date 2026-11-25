@@ -156,6 +156,7 @@ pub(crate) struct LaunchHistoryBody {
     /// Carrying the current configuration epoch lets it invalidate an old
     /// checkout preview without exposing roots or hook text in the feed.
     checkout_config_revision: i64,
+    needs_checkout_root: bool,
 }
 
 /// A client request to inspect one directory on the selected host.
@@ -197,33 +198,7 @@ pub(crate) struct GithubCheckoutPreviewReq {
 /// of this payload. Settings reads only the all-hosts command separately.
 pub(crate) type GithubCheckoutPreviewBody = farhelm_proto::AcceptedGithubPreview;
 
-/// Repository completion is scoped to the destination connection selected by
-/// the composer. The query is the text after `gh:`, not a filesystem path.
-#[derive(Deserialize)]
-pub(crate) struct GithubRepositoriesReq {
-    host: store::HostId,
-    expected_incarnation: Option<u64>,
-    query: String,
-}
-
-/// Discovery status travels with usable suggestions. An incomplete scan cannot
-/// forbid a manually entered repository, and its error must not disable ordinary
-/// folder or agent choices. The installation claim lets the composer discard
-/// an answer after adoption, reconnect, or a destination change.
-#[derive(Serialize)]
-struct GithubRepositoriesBody {
-    host: String,
-    incarnation: u64,
-    installation_identity: String,
-    repos: Vec<farhelm_proto::GithubRepo>,
-    truncated: bool,
-    scan_error: Option<String>,
-    /// This is effective host configuration, not the global setting's absence.
-    /// The client must never offer setup over a command-line host override.
-    needs_checkout_root: bool,
-}
-
-/// Resolve the same checkout root for discovery, preview and create. A
+/// Resolve the same checkout root for setup, preview and create. A
 /// session-owned host can use its own home when the stored root is unset.
 /// Keep that fallback here so Settings and the CLI still read stored values.
 async fn checkout_config_for(
@@ -243,181 +218,12 @@ async fn checkout_config_for(
     Ok(config)
 }
 
-/// The status a failed repository search shows, chosen by the helm.
-///
-/// The supervisor's own error text never reaches the client here (it may
-/// carry config text or URLs), so the helm picks one of its own sentences.
-/// A supervisor that refused the search because every management slot was
-/// taken gets the shared busy sentence, since "verify Git" would send the
-/// user to fix something that is not broken; every other failure keeps the
-/// Git and checkout-root hint. Only the kind of a supervisor's reply is
-/// read, never its text, so a supervisor that lies about being busy can
-/// only choose between two helm-written sentences. A scan the helm stopped
-/// waiting for ([`within_host_read_bound`]) says so instead, since neither of
-/// those sentences describes a host that did not answer.
-fn repository_discovery_failure(error: &anyhow::Error) -> String {
-    let cause = crate::find_cause::<SupervisorError>(error);
-    let busy = cause.is_some_and(|e| {
-        e.origin() == crate::client::ErrorOrigin::SupervisorReply
-            && e.kind() == ErrorKind::Unavailable
-    });
-    let timed_out = cause.is_some_and(|e| {
-        e.origin() == crate::client::ErrorOrigin::Helm && e.kind() == ErrorKind::Timeout
-    });
-    if timed_out {
-        format!(
-            "the host did not answer the repository search within {} seconds; recent repositories \
-             are still available",
-            HOST_REPLY_BOUND.as_secs()
-        )
-    } else if busy {
-        farhelm_proto::HOST_BUSY_REFUSAL.to_string()
-    } else {
-        "repository discovery is unavailable on this host; verify Git and the configured checkout root"
-            .to_string()
+/// Return recent successful Managed checkout repositories without contacting any host.
+pub(crate) async fn github_repositories(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.store.global_github_repository_history().await {
+        Ok(repositories) => axum::Json(repositories).into_response(),
+        Err(error) => http_error(error),
     }
-}
-
-/// Ask the selected target to inspect local clone origins using helm-owned
-/// configuration. Missing configuration and scan failure are explicit incomplete
-/// observations, rather than a successful empty inventory or an error affecting
-/// the composer's independent launch choices. Accepted repo intent ranks first
-/// and remains available from the registry's installation history while offline.
-pub(crate) async fn github_repositories(
-    State(state): State<Arc<AppState>>,
-    axum::Json(req): axum::Json<GithubRepositoriesReq>,
-) -> impl IntoResponse {
-    if req.query.len() > 4096 {
-        return http_error(
-            SupervisorError::helm(
-                ErrorKind::InvalidRequest,
-                "repository query exceeds the 4096-byte limit".into(),
-            )
-            .into(),
-        );
-    }
-    let Some(status) = state.manager.status(req.host) else {
-        return http_error(
-            SupervisorError::helm(ErrorKind::NotFound, format!("no such host: {}", req.host))
-                .into(),
-        );
-    };
-    // Offline suggestions belong to the registry's accepted installation,
-    // never the identity of an unadopted replacement peer. Connected hosts
-    // instead use the same status snapshot that supplies the scan client.
-    let identity = match &status.state {
-        manager::HostState::Connected { identity, .. } => identity.clone(),
-        _ => match state.store.list_hosts().await {
-            Ok(hosts) => hosts
-                .into_iter()
-                .find(|host| host.id == req.host)
-                .and_then(|host| host.host_identity),
-            Err(error) => return http_error(error),
-        },
-    };
-    let claim = manager::SessionClaim {
-        host: req.host,
-        entry_uuid: status.entry_uuid.clone(),
-        incarnation: status.incarnation,
-        identity,
-    };
-    if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
-        return http_error(error);
-    }
-    let Some(installation_identity) = claim
-        .identity
-        .clone()
-        .filter(|identity| !identity.is_empty())
-    else {
-        return http_error(
-            SupervisorError::helm(
-                ErrorKind::Conflict,
-                "repository discovery requires a stable host installation identity".into(),
-            )
-            .into(),
-        );
-    };
-    let config = match checkout_config_for(&state, claim.host).await {
-        Ok(config) => config,
-        Err(error) => return http_error(error),
-    };
-    let needs_checkout_root = config.root.is_none();
-    let recent = match state
-        .store
-        .github_repository_history(claim.host, &installation_identity)
-        .await
-    {
-        Ok(recent) => recent,
-        Err(error) => return http_error(error),
-    };
-    let result = if let Some(client) = status.client.filter(|_| config.root.is_some()) {
-        // A scan that outlasts the bound is one more incomplete observation:
-        // the recents below still list, and a typed pair stays selectable.
-        within_host_read_bound(client.github_repo_search(
-            farhelm_proto::ClaimContext {
-                host: claim.host.to_string(),
-                incarnation: claim.incarnation,
-            },
-            &req.query,
-            config.root,
-        ))
-        .await
-        // A remote diagnostic may contain arbitrary config text or URLs.
-        // Keep discovery's public response limited to identities and a
-        // bounded actionable status, including when the scan itself fails.
-        .map_err(|error| repository_discovery_failure(&error))
-    } else if config.root.is_none() {
-        Err("no checkout folder is configured; set one in this host's settings or a default in Settings → Checkouts".to_string())
-    } else {
-        Err("repository discovery is unavailable while this host is offline; recent repositories are still available".to_string())
-    };
-    let (repos, mut truncated, scan_error) = match result {
-        Ok((repos, truncated)) => (repos, truncated, None),
-        Err(error) => (Vec::new(), true, Some(error)),
-    };
-    // Remote data is not authority to manufacture a repository identity. Keep
-    // only canonical parser-validated pairs and cap again at the REST boundary.
-    let mut validated = std::collections::BTreeMap::new();
-    for repo in repos {
-        let key = format!("{}/{}", repo.owner, repo.name);
-        if farhelm_proto::parse_github_repo(&key).ok().as_ref() != Some(&repo) {
-            truncated = true;
-            continue;
-        }
-        if validated.len() == farhelm_proto::GITHUB_REPO_RESULTS_CAP
-            && !validated.contains_key(&key)
-        {
-            truncated = true;
-            continue;
-        }
-        validated.insert(key, repo);
-    }
-    // Recent intent wins over alphabetically ordered discoveries. Filter it
-    // locally because the supervisor sees only its own scanned candidates.
-    let query = req.query.to_ascii_lowercase();
-    let mut repos = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for repo in recent.into_iter().chain(validated.into_values()) {
-        let key = format!("{}/{}", repo.owner, repo.name);
-        if !key.contains(&query) || !seen.insert(key) {
-            continue;
-        }
-        if repos.len() == farhelm_proto::GITHUB_REPO_RESULTS_CAP {
-            truncated = true;
-            break;
-        }
-        repos.push(repo);
-    }
-    axum::Json(GithubRepositoriesBody {
-        host: claim.host.to_string(),
-        incarnation: claim.incarnation,
-        installation_identity,
-        repos,
-        truncated,
-        scan_error,
-        needs_checkout_root,
-    })
-    .into_response()
 }
 
 /// POST /api/github-checkout-preview resolves the helm's checkout
@@ -755,15 +561,17 @@ pub(crate) async fn launch_history(
         Ok(target) => target,
         Err(error) => return http_error(error),
     };
-    let checkout_config_revision = match state.store.checkout_config_snapshot(None).await {
-        Ok(snapshot) => snapshot.revision,
+    let config = match checkout_config_for(&state, claim.host).await {
+        Ok(config) => config,
         Err(error) => return http_error(error),
     };
+    let checkout_config_revision = config.config_revision;
     let Some(identity) = claim.identity else {
         return axum::Json(LaunchHistoryBody {
             launches: Vec::new(),
             folders: Vec::new(),
             checkout_config_revision,
+            needs_checkout_root: false,
         })
         .into_response();
     };
@@ -775,6 +583,7 @@ pub(crate) async fn launch_history(
             launches,
             folders,
             checkout_config_revision,
+            needs_checkout_root: config.root.is_none(),
         })
         .into_response(),
         Err(error) => http_error(error),
@@ -3981,8 +3790,8 @@ async fn log_late_failure(
 /// timeout (a 504 through [`http_error`]) once it passes.
 ///
 /// The read counterpart of [`within_host_reply_bound`], for the launcher's
-/// host lookups (browse and the folder check, the checkout preview, the
-/// repository scan) and Settings → Containers' leftover listing. A read
+/// host lookups (browse and the folder check, and the checkout preview) and
+/// Settings → Containers' leftover listing. A read
 /// leaves nothing to finish, so it is dropped rather than moved to a task of
 /// its own: the routes that use this sit in the router's cancellable group,
 /// where dropping the handler is already the contract, or are GETs, which the

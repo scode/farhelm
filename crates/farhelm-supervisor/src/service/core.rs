@@ -1527,7 +1527,7 @@ impl StateDirOwnership {
 
 /// Cap on management requests in flight AT ONCE across the WHOLE
 /// supervisor process (`Supervisor::admission`): Stop, Restart, Delete,
-/// Rename, tab open and close, directory browse and repository search, each
+/// Rename, tab open and close, and directory browse, each
 /// spawned rather than awaited inline (see their handlers for why). The
 /// session list has its own limit, [`LIST_ADMISSION_PERMITS`].
 ///
@@ -5260,10 +5260,6 @@ pub struct Supervisor {
     /// Serve owns one sequential remover; durable obligations stay on retired
     /// working-copy records rather than a second persistent queue.
     pub(super) trash_remover: Arc<super::trash_remover::Remover>,
-    /// All discovery requests share this scanner's two-child budget. It is
-    /// independent of directory admission: slow Git inspection must not hold
-    /// up checkout allocation or last-reference deletion.
-    repository_scanner: crate::repository_discovery::RepositoryScanner,
     /// The home directory `~`-prefixed create cwds expand against,
     /// resolved once at construction from [`SupervisorSeams::user_home`]
     /// or `$HOME` (see [`expand_tilde_cwd`] for the contract). Resolved
@@ -5432,50 +5428,6 @@ fn record_read_is_transient(error: &anyhow::Error) -> bool {
 }
 
 impl Supervisor {
-    /// Inspect immediate clone origins beneath the effective checkout root.
-    /// No ownership or directory-admission lock is taken: discovery is bounded
-    /// observation, and races with filesystem changes report incomplete results
-    /// through the scanner. A not-yet-created root is a complete empty result;
-    /// discovery never creates it. Configuration and host claims remain helm-owned.
-    pub(crate) async fn github_repo_search(
-        &self,
-        root: Option<&str>,
-        query: &str,
-    ) -> anyhow::Result<crate::repository_discovery::DiscoveryResult> {
-        if query.len() > 4096 {
-            return Err(RequestError::new(
-                ErrorKind::InvalidRequest,
-                "repository query exceeds the 4096-byte limit",
-            )
-            .into());
-        }
-        let root = root.ok_or_else(|| {
-            RequestError::new(
-                ErrorKind::InvalidRequest,
-                "repository discovery needs a checkout folder; set one in this host's settings or a default in Settings → Checkouts",
-            )
-        })?;
-        // Root resolution belongs to the same work budget as scanning. On
-        // expiry the scanner's cancellation guard retains any child permit
-        // until kill/reap completes; timing out never makes a live child free.
-        tokio::time::timeout(Duration::from_secs(5), async {
-            let root = self.resolve_checkout_root(root).await?;
-            match tokio::fs::symlink_metadata(&root).await {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    return Ok(crate::repository_discovery::DiscoveryResult {
-                        repos: Vec::new(),
-                        truncated: false,
-                    });
-                }
-                Err(error) => return Err(error.into()),
-                Ok(_) => {}
-            }
-            self.repository_scanner.scan(Path::new(&root), query).await
-        })
-        .await
-        .map_err(|_| RequestError::new(ErrorKind::Internal, "repository discovery timed out"))?
-    }
-
     /// The supervisor's half of the GitHub-checkout preview: expand `~`
     /// in the helm-resolved root against THIS daemon's captured home,
     /// resolve existing symlink ancestors, run the bounded occupancy scan,
@@ -6365,7 +6317,6 @@ impl Supervisor {
             sealed: std::sync::atomic::AtomicBool::new(sealed),
             spare_builder: Arc::new(super::spare_builder::Builder::default()),
             trash_remover: Arc::new(super::trash_remover::Remover::default()),
-            repository_scanner: crate::repository_discovery::RepositoryScanner::new("git"),
             user_home,
             grok_home,
             capture_locks: Arc::new(KeyedLocks::default()),
@@ -33200,7 +33151,7 @@ exit 1
         }
     }
 
-    /// A saved future root must support discovery and preview without writing,
+    /// A saved future root must support preview without writing,
     /// then admission creates its missing parents at the exact previewed path.
     /// The symlink case distinguishes ancestor canonicalization from a textual
     /// guess (including platforms whose temporary directory is itself an alias).
@@ -33220,9 +33171,6 @@ exit 1
             assert!(!configured.exists());
             assert!(!expected.exists());
             let configured = configured.to_str().unwrap();
-            let discovery = sup.github_repo_search(Some(configured), "").await.unwrap();
-            assert!(discovery.repos.is_empty());
-            assert!(!discovery.truncated, "a future root is complete-empty");
             let preview = Supervisor::github_checkout_preview(
                 &sup,
                 "acme/bar",

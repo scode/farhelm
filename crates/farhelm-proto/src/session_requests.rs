@@ -6,7 +6,7 @@
 //! launcher's reads and their replies: the folder read
 //! (`POST /api/browse-directory`), the launch history
 //! (`GET /api/launch-history`), and the managed-checkout destination's
-//! repository suggestions (`POST /api/github-repositories`) and checkout
+//! repository history (`GET /api/github-repositories`) and checkout
 //! preview (`POST /api/github-checkout-preview`).
 //!
 //! The helm decodes each route into a request type of its own (`CreateReq`,
@@ -186,38 +186,6 @@ pub struct BrowseDirectoryReply {
     pub truncated: bool,
 }
 
-/// `POST /api/github-repositories`: repository suggestions for the launcher's managed-checkout destination on one host,
-/// filtered by `query` (the repository field's text). The helm decodes it into its own `GithubRepositoriesReq`.
-///
-/// `expected_incarnation` is the host connection the launcher is looking at, as for [`BrowseDirectoryBody`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct GithubRepositoriesBody {
-    pub host: i64,
-    pub expected_incarnation: Option<u64>,
-    pub query: String,
-}
-
-/// The helm's answer to [`GithubRepositoriesBody`]: suggestions, recent repositories first, with discovery's own
-/// status beside them, since an incomplete scan must never stop the user from choosing a valid pair they type
-/// (SPEC.md, "Managed checkouts").
-///
-/// `host`, `incarnation` and `installation_identity` say which host installation answered (`host` is the registry id
-/// in decimal), so the launcher can drop an answer about a host that was retargeted or reconnected meanwhile.
-/// `scan_error` is one of the helm's own sentences, never the host's text. `needs_checkout_root` is the host's
-/// effective configuration (its own folder, a command-line override, or the default), which decides whether the
-/// launcher offers its inline checkout-folder setup; an older helm that leaves it out means no setup is offered.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct GithubRepositoriesReply {
-    pub host: String,
-    pub incarnation: u64,
-    pub installation_identity: String,
-    pub repos: Vec<GithubRepo>,
-    pub truncated: bool,
-    pub scan_error: Option<String>,
-    #[serde(default)]
-    pub needs_checkout_root: bool,
-}
-
 /// `POST /api/github-checkout-preview`: the exact folder a managed checkout of `repo` would get on a host, before
 /// anything is created. The helm decodes it into its own `GithubCheckoutPreviewReq` and answers an
 /// [`AcceptedGithubPreview`], which the create then carries back unchanged in its [`GithubCheckoutRequest`].
@@ -246,6 +214,9 @@ pub struct LaunchHistoryReply {
     /// The checkout configuration's revision as of this read. A higher revision than any seen means the checkout
     /// folders may have moved, so a checkout preview taken before it is stale.
     pub checkout_config_revision: i64,
+    /// Whether this verified host lacks an effective checkout folder. Session-owned hosts have a home fallback.
+    #[serde(default)]
+    pub needs_checkout_root: bool,
 }
 
 /// One earlier successful agent launch: its destination and the choices it was made with, without its title or

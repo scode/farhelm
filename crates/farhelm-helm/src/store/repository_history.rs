@@ -26,6 +26,8 @@ CREATE TABLE github_repository_replacement_admissions (
 /// Prefer the helm's admission time for a launch retained in both tables, since the supervisor clock
 /// can differ from the helm's. The remaining sort keys make ties repeatable across upgrades.
 pub(super) fn migrate(tx: &Transaction<'_>) -> anyhow::Result<()> {
+    // Some historical tests rewind the version stamp on a current fixture. Keep any global history
+    // they leave in place. Real upgrades create and populate the table in one transaction.
     let already_created: bool = tx.query_row(
         "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'github_repository_history')",
         [],
@@ -151,7 +153,6 @@ pub(super) fn record_replacement(
 }
 
 /// Read the same newest-first order for every destination and revalidate identifiers before returning them.
-#[cfg(test)]
 fn list(conn: &rusqlite::Connection) -> anyhow::Result<Vec<GithubRepo>> {
     let mut query = conn.prepare(
         "SELECT github_repo FROM github_repository_history ORDER BY use_order DESC LIMIT ?1",
@@ -167,7 +168,6 @@ fn list(conn: &rusqlite::Connection) -> anyhow::Result<Vec<GithubRepo>> {
     Ok(repos)
 }
 
-#[cfg(test)]
 impl super::HelmStore {
     /// Read accepted repository intent independently of host-specific launch and folder history.
     pub(crate) async fn global_github_repository_history(&self) -> anyhow::Result<Vec<GithubRepo>> {

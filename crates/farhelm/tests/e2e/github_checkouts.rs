@@ -1336,7 +1336,8 @@ async fn post_exact_body(client: &reqwest::Client, base: &str, body: Vec<u8>) ->
         .expect("exact create body reached the helm")
 }
 
-/// The diagnostic proves the exact raw writer reaches a successful real clone.
+/// The diagnostic proves the exact raw writer reaches a successful real clone
+/// and that the accepted repository reaches the helm-wide launcher history.
 ///
 /// It stays separate from recovery so malformed HTTP, Git rewrite, and launch
 /// failures have a response and one narrow boundary.
@@ -1346,6 +1347,22 @@ async fn a_raw_http_fresh_checkout_completes_the_real_clone_hook_and_agent() {
     let title = "raw-diagnostic";
     let selector = Selector::Raw;
     let accepted = preview(&stack, title).await;
+    let history_url = format!("{}/api/github-repositories", stack.helm().base);
+    let before: Vec<farhelm_proto::GithubRepo> = stack
+        .client
+        .get(&history_url)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        before.is_empty(),
+        "the fixture has no successful checkout yet"
+    );
     let body = create_body(&stack.claim, &accepted, title, "diagnostic-key", &selector);
     let stream = send_unread_create(&stack, &body).await;
     let (status, body) = read_raw_response(stream).await;
@@ -1353,6 +1370,21 @@ async fn a_raw_http_fresh_checkout_completes_the_real_clone_hook_and_agent() {
     let session: SessionInfo = serde_json::from_str(&body).expect("diagnostic session JSON");
     let case = AcceptedCase::new(title, selector, 1, Vec::new(), accepted, session.clone());
     assert_case_metadata(&session, &case);
+    let after: Vec<farhelm_proto::GithubRepo> = stack
+        .client
+        .get(&history_url)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        after,
+        [farhelm_proto::parse_github_repo(REPO_TEXT).unwrap()]
+    );
     let argv = await_prepared(&stack, &session, &stack.hook_a(), 1).await;
     assert_process_argv(&case, &argv);
     assert_eq!(
@@ -1362,7 +1394,7 @@ async fn a_raw_http_fresh_checkout_completes_the_real_clone_hook_and_agent() {
     );
 }
 
-/// The shipped stack must discover and preview a future root without creating
+/// The shipped stack must preview a future root without creating
 /// it, then complete a real clone, hook and agent launch there on first use.
 /// Missing parents exercise more than an empty pre-existing directory, and the
 /// accepted canonical binding must still be the session's final destination.
@@ -1382,18 +1414,6 @@ async fn a_fresh_checkout_creates_the_missing_root_and_parents_on_first_use() {
         "saved future root: {shown}"
     );
     assert!(!root.exists(), "configuration must not create directories");
-    let discovery = stack.client.post(format!("{}/api/github-repositories", stack.helm().base))
-        .json(&json!({"host": stack.claim.id, "expected_incarnation": stack.claim.incarnation, "query": ""}))
-        .send().await.expect("discovery reaches the helm");
-    let status = discovery.status();
-    let discovered: Value = discovery.json().await.expect("discovery JSON");
-    assert!(
-        status.is_success(),
-        "future-root discovery failed: {discovered}"
-    );
-    assert_eq!(discovered["truncated"], false);
-    assert_eq!(discovered["scan_error"], Value::Null);
-    assert_eq!(discovered["repos"], json!([]));
     let title = "first-use";
     let selector = Selector::Raw;
     let accepted = preview(&stack, title).await;
@@ -1404,10 +1424,7 @@ async fn a_fresh_checkout_creates_the_missing_root_and_parents_on_first_use() {
         .unwrap()
         .join("missing/parents/checkouts");
     assert_eq!(accepted.binding.canonical_root, path_text(&expected));
-    assert!(
-        !root.exists(),
-        "discovery and preview must remain read-only"
-    );
+    assert!(!root.exists(), "preview must remain read-only");
     let body = create_body(&stack.claim, &accepted, title, "first-use-key", &selector);
     let response = post_exact_body(&stack.client, &stack.helm().base, body).await;
     let status = response.status();
