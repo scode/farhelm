@@ -23,28 +23,6 @@
   says remains.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-podman-claim-and-recipe-guards-omit-tailscale.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC_impl.md, "One route for transport and provisioning" (about line 6343): "An ordinary
-  SSH row stores a false-by-default `tailscale` bit. It travels with the destination, through the supervisor handshake's
-  identity write guard, the container place check, and confirmation of a provisioning plan." In current code,
-  `claim_podman_place` fences on `tailscale IS ?7` (`store/podman.rs:395-399`). But `has_podman_place_claim`
-  (`store/podman.rs:79-99`) compares `entry_uuid` and `destination` and not `tailscale`. And `write_recipe_state`
-  (`tensorlake/build.rs:345-358`) compares kind, entry and destination and not `tailscale`. Both are container place
-  checks that compare the destination without the bit that the spec says travels with it. The fix is direct: add
-  `tailscale` to both comparisons, plus a test of a toggle followed by a reclaim. Estimated 30-60 lines, well under 100.
-  Nothing in the code chose to leave it out. 74fa1951b updated only the claim query. On the bucket: the established
-  consequence is that a build started just before a mode toggle keeps going on the same machine and account, so `other`
-  fits better than `high`. The reviewers' highest path (a MITM'd unpinned route) is not established.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code —
-  clearly settled; size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
-  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
-  the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-podman-nov24.md` ``.
-
 ## settings-close-save-can-hide-credential-error.md
 
 - Outcome: `fix code`.

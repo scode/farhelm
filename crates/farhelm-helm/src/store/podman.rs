@@ -75,7 +75,8 @@ fn read_place_identity(
 }
 
 /// Verify a probe's exact place ownership inside the transaction that will
-/// record a new reference, or before serving a cached admission.
+/// record a new reference, or before serving a cached admission. An SSH
+/// mode edit invalidates old observations even if the same account reclaims it.
 pub(crate) fn has_podman_place_claim(
     conn: &Connection,
     row: &HostRow,
@@ -86,13 +87,15 @@ pub(crate) fn has_podman_place_claim(
             SELECT 1 FROM podman_place_claims AS claim JOIN hosts AS host ON host.id = claim.host_id
             WHERE host.id = ?1 AND host.entry_uuid = ?2 AND host.destination IS ?3
               AND claim.machine_id = ?4 AND claim.uid = ?5
+              AND host.tailscale IS ?6
         )",
         rusqlite::params![
             row.id,
             row.entry_uuid,
             row.destination,
             identity.machine_id,
-            identity.uid
+            identity.uid,
+            row.tailscale,
         ],
         |row| row.get(0),
     )?)
@@ -899,6 +902,80 @@ mod tests {
                 .await
                 .unwrap(),
             Some(PlaceClaim::Owned { displaced: None }),
+        );
+    }
+
+    /// Reclaiming the same endpoint after an SSH-mode change cannot admit an
+    /// old probe or let it record new recipe work against the parked route.
+    #[farhelm_testtrace::test]
+    async fn podman_place_guards_reject_the_previous_ssh_mode() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&directory.path().join("helm.db"))
+            .await
+            .unwrap();
+        let place = store.add_ssh_host("build-box", None, None).await.unwrap();
+        crate::tensorlake::recipes::tests_support::create(&store, "dev").await;
+        let current = || async {
+            store
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == place)
+                .unwrap()
+        };
+        let old = current().await;
+        let identity = PodmanPlaceIdentity {
+            machine_id: "1".repeat(32),
+            uid: 1000,
+        };
+        assert_eq!(
+            store
+                .claim_podman_place(&old, identity.clone(), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None })
+        );
+        assert!(store.set_ssh_tailscale(&old, true).await.unwrap());
+        let new = current().await;
+        assert!(!old.tailscale && new.tailscale);
+        assert_eq!(old.destination, new.destination);
+        assert_eq!(old.entry_uuid, new.entry_uuid);
+        assert_eq!(
+            store
+                .claim_podman_place(&new, identity.clone(), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None })
+        );
+        assert!(
+            !store
+                .owns_podman_place(old.clone(), identity.clone())
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .owns_podman_place(new.clone(), identity.clone())
+                .await
+                .unwrap()
+        );
+        for claim in [None, Some(&identity)] {
+            let refusal = store
+                .update_recipe_place_state("dev", &old, claim, |_, _| ())
+                .await
+                .unwrap_err();
+            assert!(
+                refusal.to_string().contains("the container place changed"),
+                "{refusal:#}"
+            );
+        }
+        assert_eq!(
+            store
+                .update_recipe_place_state("dev", &new, Some(&identity), |_, _| ())
+                .await
+                .unwrap(),
+            Some(())
         );
     }
 
