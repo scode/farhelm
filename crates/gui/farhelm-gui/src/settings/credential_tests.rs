@@ -740,6 +740,61 @@ fn a_chosen_codex_login_is_hidden_and_saved_only_on_submit(cx: &mut TestAppConte
     assert!(!painted(cx).contains(PRIVATE_MARKER));
 }
 
+/// The paste was the draft when the close question opened. A staged replacement needs a fresh Save.
+#[gpui::test]
+fn close_save_cannot_send_a_later_codex_file(cx: &mut TestAppContext) {
+    close_answer_preserves_later_codex_file(cx, "prompt-confirm");
+}
+
+/// Discard is also limited to the draft the question named. A staged replacement must remain available for review.
+#[gpui::test]
+fn close_discard_cannot_drop_a_later_codex_file(cx: &mut TestAppContext) {
+    close_answer_preserves_later_codex_file(cx, "prompt-alternative-0");
+}
+
+/// Deliver the fake chooser's response after the close question opens to control when the file replaces the paste.
+fn close_answer_preserves_later_codex_file(cx: &mut TestAppContext, answer: &'static str) {
+    const FILE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/credentials/example-auth.json"
+    );
+    let (mut helm, cx, _) = open_rail(cx, &Preferences::default());
+    show_credentials(
+        &mut helm,
+        cx,
+        json!([entry("codex-login", "codex_login", 1, &[])]),
+    );
+    press(cx, "credential-edit-codex-login");
+    fill(cx, "credential-secret", "{\"pasted\":true}");
+    press(cx, "credential-choose-file");
+    assert!(cx.did_prompt_for_paths());
+    click(cx, "settings-close");
+    assert!(painted(cx).contains("Unsaved: Credential"));
+    cx.simulate_path_prompt_response(|_| Some(vec![std::path::PathBuf::from(FILE)]));
+    settle(cx);
+    let contents = include_str!("../../tests/fixtures/credentials/example-auth.json");
+    assert_eq!(
+        secret(cx).1,
+        contents,
+        "the replacement staged with the question open"
+    );
+    click(cx, answer);
+    assert!(!drawn(cx, "prompt"), "the close answer was accepted");
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "neither close answer submits the new draft"
+    );
+    assert!(painted(cx).contains("example-auth.json"));
+    press(cx, "credential-save");
+    let (_, method, path, body) = one_command(&mut helm);
+    assert_eq!(
+        (method, path.as_str()),
+        (Method::Put, "/api/credentials/codex-login")
+    );
+    assert_eq!(body, json!({ "secret": contents }));
+}
+
 /// A Delete's reply can arrive after the user went Back and opened another editor; closing whatever editor is open
 /// then would throw away a secret the user is typing (the old editor's `mounted` check dropped such a reply).
 /// Specified: Delete of `free` is out, Back, Add endpoint token and a typed secret; the Delete's done reply leaves the

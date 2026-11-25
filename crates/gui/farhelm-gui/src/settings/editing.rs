@@ -2,7 +2,11 @@
 
 use std::collections::VecDeque;
 
-use gpui::{App, Context, Div, Entity, EntityId, ParentElement as _, Styled as _, Window, div, px};
+use farhelm_proto::{credentials::CredentialKind, custom_agents::CustomAgent};
+use gpui::{
+    App, Context, Div, Entity, EntityId, FocusHandle, ParentElement as _, Styled as _, Window, div,
+    px,
+};
 
 use super::{
     CheckoutField, Section, SettingsDialog, credentials, custom_agents,
@@ -118,7 +122,55 @@ enum Edit {
     CustomAgent(Section, Entity<custom_agents::Editor>),
 }
 
+/// What one Save or Discard authorized. Keep identities independent of values so closing a question does not keep
+/// a detached editor alive. A save that was already running can only be observed, never reissued.
+#[derive(Clone)]
+struct ApprovedEdit {
+    id: EntityId,
+    version: EditVersion,
+    was_saving: bool,
+}
+
+#[derive(Clone, PartialEq)]
+enum EditVersion {
+    Input(u64),
+    Alerts((u64, bool)),
+    Checkout((u64, u64)),
+    Key((FocusHandle, u64)),
+    Recipe(Box<recipes::draft::Draft>),
+    Credential((FocusHandle, u64, bool, String, CredentialKind)),
+    CustomAgent((CustomAgent, bool, bool)),
+}
+
+impl ApprovedEdit {
+    /// Compare both identity and the inputs that determine the write.
+    fn permits(&self, edit: &Edit, cx: &App) -> bool {
+        self.id == edit.id() && self.version == edit.version(cx)
+    }
+}
+
 impl Edit {
+    fn approval(&self, cx: &App) -> ApprovedEdit {
+        ApprovedEdit {
+            id: self.id(),
+            version: self.version(cx),
+            was_saving: self.state(cx) == EditState::Saving,
+        }
+    }
+
+    /// Text fields that own secrets contribute only their revision and source identity.
+    fn version(&self, cx: &App) -> EditVersion {
+        match self {
+            Self::FileTypes(view) => EditVersion::Input(view.read(cx).edit_revision()),
+            Self::Alerts(view) => EditVersion::Alerts(view.read(cx).edit_revision()),
+            Self::Checkout(view) => EditVersion::Checkout(view.read(cx).edit_revision()),
+            Self::Key(_, view) => EditVersion::Key(view.read(cx).edit_revision(cx)),
+            Self::Recipe(view) => EditVersion::Recipe(Box::new(view.read(cx).draft(cx))),
+            Self::Credential(view) => EditVersion::Credential(view.read(cx).edit_revision(cx)),
+            Self::CustomAgent(_, view) => EditVersion::CustomAgent(view.read(cx).edit_revision(cx)),
+        }
+    }
+
     fn id(&self) -> EntityId {
         match self {
             Self::FileTypes(view) => view.entity_id(),
@@ -248,7 +300,7 @@ pub(super) struct Batch {
     check_keys: bool,
     /// The receipt lives in the view. Hold it even if the user leaves its credential editor during the write.
     active: Vec<Edit>,
-    remaining: VecDeque<Edit>,
+    remaining: VecDeque<ApprovedEdit>,
     /// After the first of two matching keys has gone, the second must still agree with the key that was sent.
     paired_key: Option<String>,
     after: AfterBatch,
@@ -258,7 +310,7 @@ pub(super) struct Batch {
 enum AfterBatch {
     None,
     Question(LayerId),
-    SaveAndClose,
+    SaveAndClose(Vec<ApprovedEdit>),
 }
 
 impl SettingsDialog {
@@ -326,7 +378,13 @@ impl SettingsDialog {
     }
 
     pub(super) fn save_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.start_batch(Some(self.shown.clone()), window, cx);
+        let approved = self
+            .edits(cx)
+            .iter()
+            .filter(|edit| edit.is_form() && edit.section() == self.shown)
+            .map(|edit| edit.approval(cx))
+            .collect();
+        self.start_batch(approved, false, window, cx);
     }
 
     /// The current page has only one Save even when it holds several fields, as Checkouts does. Its identity
@@ -373,30 +431,46 @@ impl SettingsDialog {
         Some((name, answers))
     }
 
-    fn start_batch(&mut self, page: Option<Section>, window: &mut Window, cx: &mut Context<Self>) {
+    fn start_batch(
+        &mut self,
+        approved: Vec<ApprovedEdit>,
+        close: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.batch.is_some() {
             return;
         }
-        let mut edits = self.edits(cx);
         self.key_conflict = false;
-        if let Some(page) = &page {
-            edits.retain(|edit| edit.is_form() && &edit.section() == page);
-        } else if self.keys_disagree(cx) {
+        if close && self.keys_disagree(cx) {
             self.reveal_key_conflict(window, cx);
             return;
         }
 
-        let (saving, dirty): (Vec<_>, Vec<_>) = edits
+        // Waiting for a write that already started needs no new authorization. Only the queued writes do.
+        let saving: Vec<_> = self
+            .edits(cx)
             .into_iter()
-            .partition(|edit| edit.state(cx) == EditState::Saving);
+            .filter(|edit| {
+                edit.state(cx) == EditState::Saving
+                    && (close || approved.iter().any(|approval| approval.id == edit.id()))
+            })
+            .collect();
+        // Even a refused write that was already pending when the prompt opened needs a fresh Save.
+        let remaining = approved
+            .into_iter()
+            .filter(|approval| {
+                !approval.was_saving && !saving.iter().any(|edit| approval.id == edit.id())
+            })
+            .collect();
         self.save_generation = self.save_generation.wrapping_add(1);
         let generation = self.save_generation;
         self.batch = Some(Batch {
             generation,
-            close: page.is_none(),
-            check_keys: page.is_none(),
+            close,
+            check_keys: close,
             active: saving.clone(),
-            remaining: dirty.into(),
+            remaining,
             paired_key: None,
             after: AfterBatch::None,
         });
@@ -487,10 +561,12 @@ impl SettingsDialog {
     fn advance_batch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         while let Some(batch) = self.batch.as_mut().filter(|batch| batch.active.is_empty()) {
             let generation = batch.generation;
-            let Some(next) = batch.remaining.pop_front() else {
+            let Some(approval) = batch.remaining.pop_front() else {
                 if let Some(batch) = self.batch.take() {
                     match batch.after {
-                        AfterBatch::SaveAndClose => self.start_batch(None, window, cx),
+                        AfterBatch::SaveAndClose(approved) => {
+                            self.start_batch(approved, true, window, cx)
+                        }
                         AfterBatch::Question(layer) => {
                             self.refresh_close_question(layer, window, cx)
                         }
@@ -502,7 +578,14 @@ impl SettingsDialog {
                 }
                 break;
             };
-            if self.edits(cx).iter().any(|edit| edit.id() == next.id()) {
+            if let Some(next) = self
+                .edits(cx)
+                .into_iter()
+                .find(|edit| edit.id() == approval.id)
+            {
+                let permitted = approval.permits(&next, cx);
+                // A pair can become conflicting during an earlier write. Keep the Credentials explanation even
+                // when neither new draft can be sent under the old approval.
                 if let Edit::Key(_, view) = &next
                     && self.batch.as_ref().is_some_and(|batch| batch.check_keys)
                 {
@@ -527,12 +610,19 @@ impl SettingsDialog {
                         self.reveal_key_conflict(window, cx);
                         break;
                     }
-                    if let Some((key, _)) = self.key_drafts(cx)
+                    if permitted
+                        && let Some((key, _)) = self.key_drafts(cx)
                         && let Some(batch) = &mut self.batch
                         && batch.paired_key.is_none()
                     {
                         batch.paired_key = Some(key.to_owned());
                     }
+                }
+                if !permitted {
+                    if self.batch.as_ref().is_some_and(|batch| batch.close) {
+                        self.reveal_save_failure(next.section(), window, cx);
+                    }
+                    continue;
                 }
                 if let Some(batch) = &mut self.batch {
                     batch.active.push(next.clone());
@@ -611,6 +701,7 @@ impl SettingsDialog {
             .iter()
             .filter(|edit| edit.state(cx) == EditState::Saving)
             .collect();
+        let approved: Vec<_> = edits.iter().map(|edit| edit.approval(cx)).collect();
         let mut question = Question::new(
             "Save changes before closing?",
             Answer::new(
@@ -618,7 +709,7 @@ impl SettingsDialog {
                 HoverHelp::tooltip("Save all the listed changes, then close Settings"),
                 Tier::Primary,
             ),
-            (),
+            approved,
         )
         .line(format!("Unsaved: {}", names.join(", ")))
         .cancel_answer(Answer::new(
@@ -634,11 +725,16 @@ impl SettingsDialog {
                     HoverHelp::tooltip("Close Settings without saving the drafts"),
                     Tier::Ghost,
                 ),
-                move |(), window, cx| {
-                    if let Some(layer) = discard.upgrade().and_then(|dialog| dialog.read(cx).layer)
-                    {
-                        layers::close(layer, window, cx);
-                    }
+                move |approved, window, cx| {
+                    let _ = discard.update(cx, |dialog, cx| {
+                        // Closing drops every draft. A new or changed one needs its own answer.
+                        if dialog.edits(cx).iter().all(|edit| {
+                            edit.state(cx) == EditState::Dirty
+                                && approved.iter().any(|approval| approval.permits(edit, cx))
+                        }) {
+                            dialog.finish_close(window, cx);
+                        }
+                    });
                 },
             );
         }
@@ -648,16 +744,16 @@ impl SettingsDialog {
             question,
             None,
             &mark,
-            move |(), window, cx| {
+            move |approved, window, cx| {
                 let _ = save.update(cx, |dialog, cx| {
                     // An outstanding key save clears its field on success. Check the two drafts while
                     // they are still both present, before letting that save carry on into a close batch.
                     if dialog.batch.is_some() && dialog.keys_disagree(cx) {
                         dialog.reveal_key_conflict(window, cx);
                     } else if let Some(batch) = &mut dialog.batch {
-                        batch.after = AfterBatch::SaveAndClose;
+                        batch.after = AfterBatch::SaveAndClose(approved);
                     } else {
-                        dialog.start_batch(None, window, cx);
+                        dialog.start_batch(approved, true, window, cx);
                     }
                 });
             },

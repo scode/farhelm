@@ -276,6 +276,21 @@ impl Editor {
         )
     }
 
+    /// File staging replaces the paste input, while clearing a file changes its source without replacing the input.
+    /// Compare both along with the destination and paste revision so no confirmation stores the secret bytes.
+    pub(in crate::settings) fn edit_revision(
+        &self,
+        cx: &App,
+    ) -> (FocusHandle, u64, bool, String, CredentialKind) {
+        (
+            self.secret.input().focus_handle(cx),
+            self.secret.edit_revision(),
+            self.chosen_login.is_some(),
+            self.name(cx),
+            self.kind,
+        )
+    }
+
     /// Save the named credential and report whether its own operation was admitted.
     pub(in crate::settings) fn save(
         &mut self,

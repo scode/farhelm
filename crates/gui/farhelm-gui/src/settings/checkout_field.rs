@@ -421,6 +421,11 @@ impl CheckoutField {
         )
     }
 
+    /// Authorize the typed value together with the loaded base used by the compare-on-save request.
+    pub(super) fn edit_revision(&self) -> (u64, u64) {
+        (self.input.edit_revision(), self.read_generation)
+    }
+
     /// Restore this field without issuing a read or writing the other checkout field.
     pub(super) fn discard(&mut self, cx: &mut Context<Self>) {
         self.input.discard(self.window, cx);

@@ -407,6 +407,12 @@ impl TensorlakeKey {
         (!typed.is_empty()).then_some(typed)
     }
 
+    /// Save and Clear replace the input. Its focus identity distinguishes that replacement even when both inputs
+    /// have received the same number of edits.
+    pub(super) fn edit_revision(&self, cx: &App) -> (gpui::FocusHandle, u64) {
+        (self.key.input().focus_handle(cx), self.key.edit_revision())
+    }
+
     /// The settled conflict picture has a stored key and an independent draft, which must remain editable.
     #[cfg(test)]
     pub(super) fn replacement_input_for_golden(&self, cx: &App) -> Option<TextInputState> {
