@@ -15,10 +15,9 @@ unavailable on your account or host. See the
 ## Workspace trust
 
 Antigravity asks whether to trust a directory it doesn't know. Farhelm shows the session as waiting while the question
-is on screen. To skip the question when starting future Antigravity sessions, turn on **Skip Antigravity's workspace
-trust question** under **Settings → Agents → Antigravity**. It applies both to directories you select and to managed
-checkouts. The switch is off by default because trusting a directory lets its hooks, settings and commands run as if you
-had approved them.
+is on screen. To skip the question on installed hosts, turn on **Skip Antigravity's workspace trust question** under
+**Settings → Agents → Antigravity**. It applies both to directories you select and to managed checkouts. The switch is
+off by default because trusting a directory lets its hooks, settings and commands run as if you had approved them.
 
 For that launch, the session's working directory replaces Antigravity's saved list of trusted directories. Farhelm
 leaves your saved settings file alone. If you already pass `--settings` through **Custom** permission flags, that option

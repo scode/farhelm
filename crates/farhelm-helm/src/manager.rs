@@ -1494,6 +1494,9 @@ struct ActorMap {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionClaim {
     pub host: HostId,
+    /// The entry's fixed disposable status from the same capture as the
+    /// connection. A launch's trust decision must follow that destination.
+    pub(crate) is_session_owned: bool,
     /// Captured before dispatch so a successful reply can retain its entry prefix
     /// even if removal makes a later registry lookup impossible.
     pub entry_uuid: String,
@@ -8846,6 +8849,7 @@ mod tests {
 
         let claim = SessionClaim {
             host,
+            is_session_owned: false,
             entry_uuid: fixture.manager.status(host).expect("connected").entry_uuid,
             incarnation: fixture.manager.status(host).expect("connected").incarnation,
             identity: None,
@@ -8960,6 +8964,7 @@ mod tests {
         );
         let claim = SessionClaim {
             host,
+            is_session_owned: false,
             entry_uuid: fixture.manager.status(host).expect("connected").entry_uuid,
             incarnation: fixture.manager.status(host).expect("connected").incarnation,
             identity: None,
@@ -9054,6 +9059,7 @@ mod tests {
         assert!(!status.list_truncated, "a full-cap drain is not a cut");
         let claim = SessionClaim {
             host,
+            is_session_owned: status.is_session_owned,
             entry_uuid: status.entry_uuid.clone(),
             incarnation: status.incarnation,
             identity: None,
@@ -10291,6 +10297,7 @@ mod tests {
         let current = fixture.manager.status(host).expect("connected host");
         let claim = SessionClaim {
             host,
+            is_session_owned: current.is_session_owned,
             entry_uuid: current.entry_uuid.clone(),
             incarnation: current.incarnation,
             identity: Some("discarding-peer".to_string()),
@@ -10374,6 +10381,7 @@ mod tests {
         );
         let claim = SessionClaim {
             host,
+            is_session_owned: current.is_session_owned,
             entry_uuid: current.entry_uuid.clone(),
             incarnation: current.incarnation,
             identity: Some("early-peer".to_string()),

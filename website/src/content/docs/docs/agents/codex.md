@@ -26,8 +26,8 @@ specific to Codex.
   and [how to turn it off](/docs/how-it-works/agent-hook-injection/#turning-it-off).
 - **Restart** becomes available only after you submit your first prompt. A Codex session you never prompted cannot be
   restarted; replace it instead.
-- To skip Codex's directory-trust question, enable **Answer Codex's folder-trust question** under **Settings → Agents →
-  Codex**. The switch applies in any directory. Farhelm passes a trust argument for the launch and Codex keeps its saved
+- On installed hosts, **Answer Codex's folder-trust question** under **Settings → Agents → Codex** skips the question.
+  The switch applies in any directory. Farhelm passes a trust argument for the launch and Codex keeps its saved
   configuration. See [workspace trust](/docs/using/start-a-session/#workspace-trust) for when the switch and the note
   above the terminal apply.
 - **Restart** resumes the conversation Farhelm last learned of. After `/clear`, Farhelm learns of the new conversation

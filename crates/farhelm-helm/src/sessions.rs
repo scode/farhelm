@@ -55,7 +55,7 @@
 
 use crate::manager;
 use crate::workspace_trust::{
-    ApprovedLaunchTrust, TrustResolvedLaunch, configured_launch_workspace_trust,
+    ApprovedLaunchTrust, TrustDestination, TrustResolvedLaunch, configured_launch_workspace_trust,
     normalize_launch_workspace_trust, retain_stored_launch_workspace_trust,
 };
 use crate::{
@@ -821,6 +821,7 @@ pub(crate) async fn route_session(
     };
     let claim = manager::SessionClaim {
         host,
+        is_session_owned: status.is_session_owned,
         entry_uuid: status.entry_uuid.clone(),
         incarnation: status.incarnation,
         identity,
@@ -1486,6 +1487,7 @@ pub(crate) fn host_client(
     };
     let claim = manager::SessionClaim {
         host,
+        is_session_owned: status.is_session_owned,
         entry_uuid: status.entry_uuid.clone(),
         incarnation: status.incarnation,
         identity,
@@ -1830,7 +1832,12 @@ async fn create_session_request(
         None => {
             let mode = ordinary_mode
                 .expect("fresh and agent requests returned or took their own launch above");
-            normalize_launch_workspace_trust(state, mode).await?
+            normalize_launch_workspace_trust(
+                state,
+                mode,
+                TrustDestination::for_host(claim.is_session_owned),
+            )
+            .await?
         }
     };
     let named_start = req
@@ -2476,6 +2483,7 @@ async fn create_fresh_session_resolved(
             None => configured_launch_workspace_trust(
                 create_mode(&state.store, &mut req).await?,
                 &config,
+                TrustDestination::for_host(claim.is_session_owned),
             )?,
         };
         Ok((github_checkout, mode))
@@ -2785,8 +2793,12 @@ mod workspace_trust_tests {
             post_clone: None,
             config_revision: 1,
         };
-        let approved =
-            crate::workspace_trust::configured_launch_workspace_trust(launch, &settings).unwrap();
+        let approved = crate::workspace_trust::configured_launch_workspace_trust(
+            launch,
+            &settings,
+            TrustDestination::HostSettings,
+        )
+        .unwrap();
         let shown = approved.as_launch().clone();
         assert_eq!(
             shown.agent_selection().unwrap().workspace_trust,
@@ -2930,7 +2942,12 @@ mod workspace_trust_tests {
                     workspace_trust: harness.offers_workspace_trust().then_some(true),
                 };
                 let launch = launches::compile(selection).unwrap();
-                let normalized = configured_launch_workspace_trust(launch, &config).unwrap();
+                let normalized = configured_launch_workspace_trust(
+                    launch,
+                    &config,
+                    TrustDestination::HostSettings,
+                )
+                .unwrap();
                 assert_eq!(
                     normalized
                         .as_launch()
@@ -3413,7 +3430,14 @@ async fn resolve_and_restart_session(
     // Restart with composes for the session's recorded directory. Plain
     // Restart carries no replacement launch and replays the stored choice.
     let with = match with {
-        Some(launch) => Some(normalize_launch_workspace_trust(state, launch).await?),
+        Some(launch) => Some(
+            normalize_launch_workspace_trust(
+                state,
+                launch,
+                TrustDestination::for_host(claim.is_session_owned),
+            )
+            .await?,
+        ),
         None => None,
     };
     let named_start = conversation
@@ -4781,7 +4805,12 @@ async fn replace_session_inner(
     let prompt = with.as_mut().and_then(|body| body.prompt.take());
     let (mode, cwd, title, cols, rows) = match (with, with_mode) {
         (Some(with), Some(mode)) => {
-            let mode = normalize_launch_workspace_trust(state, mode).await?;
+            let mode = normalize_launch_workspace_trust(
+                state,
+                mode,
+                TrustDestination::for_host(claim.is_session_owned),
+            )
+            .await?;
             (mode, with.cwd, with.title, with.cols, with.rows)
         }
         // The two halves travel together: `with_mode` is `Some` exactly

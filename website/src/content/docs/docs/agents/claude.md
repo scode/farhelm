@@ -14,11 +14,11 @@ specific to Claude.
   asking about everything. Your allow rules, hooks and later mode switches can loosen it. See
   [Permission modes](/docs/agents/#permission-modes). Farhelm also tries to notice **bypass permissions on** in Claude's
   status line and show a YOLO shield; this is best effort, not a check of your allow rules or hooks.
-- Claude may ask whether you trust a directory the first time it starts there. Answer in the session's terminal, or
-  enable **Answer Claude's "trust this folder?"** under **Settings → Agents → Claude Code**. The switch lets Farhelm
-  edit Claude's own settings before launch. Farhelm skips your home directory and its parents, including the filesystem
-  root, because Claude's trust would cover everything inside. See
-  [workspace trust](/docs/using/start-a-session/#workspace-trust) for the risks and when Farhelm removes the entry.
+- On an installed host, Claude may ask whether you trust a directory the first time it starts there. Answer in the
+  session's terminal, or enable **Answer Claude's "trust this folder?"** under **Settings → Agents → Claude Code**. The
+  switch lets Farhelm edit Claude's own settings before launch. See
+  [workspace trust](/docs/using/start-a-session/#workspace-trust) for disposable sessions, the home directory
+  protections and when Farhelm removes the entry.
 - If you start Claude through a [wrapper prefix](/docs/agents/agent-wrappers/) or a
   [custom command](/docs/agents/custom-commands/), Farhelm can follow its conversation through multiple wrappers that
   stay running. Each wrapper must pass Claude's arguments and environment through. See

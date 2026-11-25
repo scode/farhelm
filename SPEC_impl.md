@@ -3634,10 +3634,12 @@ shim. The shim enters the final directory and uses the login shell's config envi
 preparation with trust enabled makes the same edit under the preparation flock after recording Ready. That branch owns
 the archive cleanup record, including when the checkout first runs another agent.
 
-Both paths check the canonical project key against the canonical home from the login shell before resolving a config
-file. Trust skips home and every parent of home, including the filesystem root, because Claude inherits trust in
-subdirectories. An unset, empty, relative or unresolvable `HOME` skips the edit even with `CLAUDE_CONFIG_DIR` set. A
-nonempty `CLAUDE_CONFIG_DIR` must also be absolute. The terminal notice gives the reason and the shim continues.
+Both paths compare the canonical project key and canonical home from the login shell. The launch-time edit refuses home
+and every parent of home, including the filesystem root, because Claude inherits trust in subdirectories. For exact
+home, the resolver can check the selected config's existing trust entry with a bounded read. A true entry satisfies the
+launch without a write, lock, cleanup record or terminal warning. An unset, empty, relative or unresolvable `HOME` skips
+the edit even with `CLAUDE_CONFIG_DIR` set. A nonempty `CLAUDE_CONFIG_DIR` must also be absolute. The terminal notice
+gives the reason and the shim continues.
 
 Claude 2.1.300 selects `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json`, with a nonempty legacy
 `<config-dir>/.config.json` taking precedence (`<config-dir>` defaults to `~/.claude`). An empty unwritable legacy file
@@ -5351,9 +5353,9 @@ classification so a saved launch at the previous size limit can still be copied.
 Plain Replace uses the shared YOLO question. The guarded answer sends the existing Replace-with body with the original
 host incarnation and Delete guard and a Guarded selection. It reads the source's title and directory from the current
 listing. A concurrent rename can carry over, and the directory stays fixed for that session. The helm compiles the new
-launch with current workspace trust settings and uses the ordinary Replace-with bookkeeping for launch history and
-remembered defaults. If the source leaves the listing, moves hosts or its saved launch changes before the answer, the
-desktop records the same note to choose Replace again.
+launch with the destination's workspace trust policy and uses the ordinary Replace-with bookkeeping for launch history
+and remembered defaults. If the source leaves the listing, moves hosts or its saved launch changes before the answer,
+the desktop records the same note to choose Replace again.
 
 The launcher observes completed agent-switch transactions for permission escalation, including cross-agent model picks
 and search. A template's explicit permission is a deliberate choice, not an automatic fallback; compare after its full
@@ -5398,21 +5400,23 @@ settles from the reply current at that moment. The launcher has no trust state, 
 grouping ignores historical trust, summaries omit it, and activating a recent clears it before composing a new launch.
 
 `LaunchSelection.workspace_trust` remains on the wire and in stored selections: supervisors persist selections, and
-their strict decoding must still accept older fields. The helm overwrites the field from the selected agent's trust
-setting when composing a launch. Compilation remains a function of the selection alone so the YOLO guard can reproduce
-stored commands exactly. Codex true and false still compile to whole-argv config markers; the supervisor fills one at
-the shared spawn seam, after any GitHub checkout has fixed the final cwd, with a trusted or untrusted project override.
-The cwd is quoted as a TOML key and resolved on the target host; omitted trust adds no Codex override. Muse true adds
-`--trust-workspace`; Muse false adds no trust flag and cannot undo trust from `--yolo` or vendor settings. Pi true adds
-`--approve` and Pi false adds `--no-approve`, independent of Pi's YOLO tool mode. The false branches remain for old
-stored launches, including plain Restart and Replace; new composition uses true or omission. Older selection JSON
-without the field continues to decode.
+their strict decoding must still accept older fields. The helm derives the field when composing a launch. It captures
+session ownership with the destination connection or knows the destination is disposable before approving a recipe
+launch. Disposable destinations enable trust where supported. Other destinations use the selected agent's setting. Fresh
+agent checkouts retain the Claude post-clone switch from the approval snapshot. Compilation remains a function of the
+selection alone so the YOLO guard can reproduce stored commands exactly. Codex true and false still compile to
+whole-argv config markers; the supervisor fills one at the shared spawn seam, after any GitHub checkout has fixed the
+final cwd, with a trusted or untrusted project override. The cwd is quoted as a TOML key and resolved on the target
+host; omitted trust adds no Codex override. Muse true adds `--trust-workspace`; Muse false adds no trust flag and cannot
+undo trust from `--yolo` or vendor settings. Pi true adds `--approve` and Pi false adds `--no-approve`, independent of
+Pi's YOLO tool mode. The false branches remain for old stored launches, including plain Restart and Replace; new
+composition uses true or omission. Older selection JSON without the field continues to decode.
 
 Antigravity true adds `--settings` with the canonical-directory JSON slot. Its all-hosts switch applies to structured
-launches in plain folders as well as managed checkouts. The supervisor resolves the directory when it fills the slot.
-Custom `--settings` and `--settings=...` options take precedence over Farhelm's opt-in. The resolved selection then
-omits trust, including on approval cards. A bare `--` ends the Custom options, so the compiled trust option goes before
-that token.
+launches on installed hosts in plain folders as well as managed checkouts. The supervisor resolves the directory when it
+fills the slot. Custom `--settings` and `--settings=...` options take precedence over Farhelm's opt-in. The resolved
+selection then omits trust, including on approval cards. A bare `--` ends the Custom options, so the compiled trust
+option goes before that token.
 
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order

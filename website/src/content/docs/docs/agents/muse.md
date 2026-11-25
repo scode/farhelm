@@ -39,8 +39,8 @@ verified, so they may look idle while Muse waits for you.
   default. Your approval rules, sandbox settings and later mode switches still matter; see
   [Permission modes](/docs/agents/#permission-modes). Farhelm also tries to notice **YOLO** on Muse's status line and
   show a YOLO shield; this is best effort, not a check of your approval or sandbox settings.
-- Muse's [workspace-trust switch](/docs/using/start-a-session/#workspace-trust) applies in any directory. Farhelm passes
-  a trust argument for the launch and Muse keeps its saved configuration.
+- Muse's [workspace-trust switch](/docs/using/start-a-session/#workspace-trust) applies in any directory on installed
+  hosts. Farhelm passes a trust argument for the launch and Muse keeps its saved configuration.
 - YOLO also makes Muse trust the session's directory. Muse's own configuration can grant trust independently of the
   switch.
 
