@@ -264,6 +264,14 @@ fn find_program(path: Option<&OsStr>, fallback: Option<&Path>) -> anyhow::Result
     std::path::absolute(&found).context("Could not resolve the local Tailscale executable")
 }
 
+/// Keep the address format guidance when registration or an edit refuses an otherwise usable SSH destination.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Tailscale mode needs a node name, full Tailscale DNS name, or IP address. \
+     An SSH login is optional (login@address)."
+)]
+pub(crate) struct InvalidTailscaleDestination;
+
 /// The destination can be a Tailscale IP or a DNS name, optionally prefixed by a login. A port comes from ssh config.
 pub(crate) fn destination_host(destination: &str) -> anyhow::Result<&str> {
     let (user, host) = destination
@@ -288,7 +296,7 @@ pub(crate) fn destination_host(destination: &str) -> anyhow::Result<&str> {
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || b"_.-+".contains(&byte))
         }) && (host.parse::<IpAddr>().is_ok() || dns_name),
-        "Enter a Tailscale node name or IP, optionally preceded by an SSH login and @."
+        InvalidTailscaleDestination
     );
     Ok(host)
 }

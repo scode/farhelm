@@ -175,6 +175,13 @@ pub fn open_settings(
     Some(layer)
 }
 
+/// Start the same route edit the host settings switch sends so the golden can show a server refusal.
+#[cfg(test)]
+pub(crate) fn enable_tailscale_for_golden(cx: &mut App) {
+    let dialog = layers::last_opened::<HostSettingsDialog>(cx).expect("host settings opened");
+    dialog.update(cx, |dialog, cx| dialog.toggle_tailscale(true, cx));
+}
+
 /// Whether the registry proves host `key` gone: a hosts list read whole that no longer lists it. A failed refresh keeps
 /// the hosts it had and proves nothing.
 pub(super) fn gone(store: &HelmStore, key: &str) -> bool {

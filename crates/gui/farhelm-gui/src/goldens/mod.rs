@@ -1614,6 +1614,12 @@ static SCENES: &[Scene] = &[
         setup: host_settings_dialog_setup,
     },
     Scene {
+        name: "host-settings-tailscale-format",
+        size: (560., 1000.),
+        draw: empty,
+        setup: host_settings_tailscale_format_setup,
+    },
+    Scene {
         name: "host-settings-dialog-end",
         size: (560., 1000.),
         draw: host_settings_dialog_end,

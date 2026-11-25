@@ -158,10 +158,6 @@ consequences.
   — After an SSH alias temporarily points to another Podman machine and is restored, cached capabilities from the wrong
   machine can break existing container operations or inject that machine's proxy settings into a recovering container.
 
-- [`trailing-tailscale-predictable-tmp-socket-dir-local-dos.md`](trailing-tailscale-predictable-tmp-socket-dir-local-dos.md)
-  — On a multi-user machine, another local account can pre-create the predictable /tmp/fhs-<digest> directory and
-  permanently block Farhelm from connecting to or setting up that Tailscale host.
-
 - [`trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md`](trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md)
   — If a user edits a custom agent, clicks Delete to show the confirmation buttons, and then closes Settings and chooses
   Save in the 'Save changes before closing?' dialog, saving silently fails without displaying any error and leaves
@@ -618,10 +614,6 @@ consequences.
 - [`trailing-ensure-hosts-skips-tailscale-validation-for-registered.md`](trailing-ensure-hosts-skips-tailscale-validation-for-registered.md)
   — An invalid Tailscale destination in --ensure-hosts is silently accepted when already registered and fails without
   the entry index or Tailscale format guidance when new.
-
-- [`trailing-tailscale-destination-format-guidance-discarded.md`](trailing-tailscale-destination-format-guidance-discarded.md)
-  — Enabling Tailscale mode on an existing SSH host with a URI, port, or underscore alias reports it as 'not a usable
-  ssh destination' instead of showing the Tailscale format guidance.
 
 - [`trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md`](trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md)
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
