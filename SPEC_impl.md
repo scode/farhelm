@@ -9085,15 +9085,16 @@ frozen `session_launch_v1` bytes. Same-fingerprint pending retries restore the t
 ordinary launch. New managed checkouts refuse it before their separate recovery encodings become involved. Both launch
 and transient serialized inputs count toward the existing request bounds.
 
-Reporting harnesses retain old capture until an accepted report replaces it. Goose's named restart clears capture,
-source and ownership version in the generation-opening transaction because its resume has no reporter. The same clear
-applies to any kind `AgentHooks::silences` reports as having no reporter under the supervisor's opt-out, decided from
-the seam value the spawn uses, or when the named start's reporter asset cannot be prepared. Asset-backed reporters are
-materialized or verified before deciding whether to retain the old capture; spawn still verifies the artifact for
-injection through its ordinary path. `PriorRun` retains those columns only for the existing definitive-abort
-restoration, fenced by the new generation. Success and ambiguous failures publish a cleared mirror; an abort restores
-that mirror only if its durable restoration succeeded. No capture is seeded from request data and no new report
-admission rule or database schema is needed.
+Harnesses with an ordinary report path retain old capture until an accepted report replaces it. Goose's named restart
+clears capture, source and ownership version in the generation-opening transaction. A conversation Farhelm started can
+supply its own saved MCP reporter. An external conversation may have no reporter, so retaining the old capture would
+leave plain Restart aimed at the wrong conversation. The same clear applies to any kind `AgentHooks::silences` reports
+as having no reporter under the supervisor's opt-out, decided from the seam value the spawn uses, or when the named
+start's reporter asset cannot be prepared. Asset-backed reporters are materialized or verified before deciding whether
+to retain the old capture; spawn still verifies the artifact for injection through its ordinary path. `PriorRun` retains
+those columns only for the existing definitive-abort restoration, fenced by the new generation. Success and ambiguous
+failures publish a cleared mirror; an abort restores that mirror only if its durable restoration succeeded. No capture
+is seeded from request data and no new report admission rule or database schema is needed.
 
 ### Launch kinds: one resolved launch
 

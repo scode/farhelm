@@ -2687,32 +2687,33 @@ fn prompt_and_conversation_rows_follow_the_agents_capabilities(cx: &mut TestAppC
             .any(|text| text.contains("Farhelm will not capture"))
     };
     // Cursor goes last so the Command switch has both fields and the warning to hide.
-    for (button, agent, prompt, captures) in [
-        ("launcher-harness-Claude", LaunchHarness::Claude, true, true),
-        ("launcher-harness-Codex", LaunchHarness::Codex, true, true),
-        ("launcher-harness-Grok", LaunchHarness::Grok, true, true),
-        ("launcher-harness-Muse", LaunchHarness::Muse, true, true),
-        ("launcher-harness-OMP", LaunchHarness::Omp, true, true),
+    for (button, agent, prompt, warns_on_named_start) in [
+        (
+            "launcher-harness-Claude",
+            LaunchHarness::Claude,
+            true,
+            false,
+        ),
+        ("launcher-harness-Codex", LaunchHarness::Codex, true, false),
+        ("launcher-harness-Grok", LaunchHarness::Grok, true, false),
+        ("launcher-harness-Muse", LaunchHarness::Muse, true, false),
+        ("launcher-harness-OMP", LaunchHarness::Omp, true, false),
         (
             "launcher-harness-OpenCode",
             LaunchHarness::OpenCode,
             true,
-            false,
-        ),
-        ("launcher-harness-Goose", LaunchHarness::Goose, false, false),
-        ("launcher-harness-Pi", LaunchHarness::Pi, false, true),
-        (
-            "launcher-harness-Cursor",
-            LaunchHarness::Cursor,
             true,
-            false,
         ),
+        // Goose can report after named start through the reporter saved with the conversation.
+        ("launcher-harness-Goose", LaunchHarness::Goose, false, false),
+        ("launcher-harness-Pi", LaunchHarness::Pi, false, false),
+        ("launcher-harness-Cursor", LaunchHarness::Cursor, true, true),
     ] {
         test_support::click(cx, button);
         assert_eq!(draft(cx).agent.harness, Some(agent), "{button}");
         assert_eq!(drawn(cx, "launcher-prompt-row"), prompt, "{button}");
         assert!(drawn(cx, "launcher-conversation-row"), "{button}");
-        assert_eq!(warns(cx), !captures, "{button}");
+        assert_eq!(warns(cx), warns_on_named_start, "{button}");
     }
     test_support::click(cx, "launcher-tabs-Command");
     assert_eq!(

@@ -1256,8 +1256,8 @@ agent choice is independent of that destination:
   conversation exists. Leading dashes, reserved locator tokens and Farhelm placeholders, spaces, quotes, backslashes,
   control characters and oversized values are refused by the existing conversation-id checks. Session-file paths may be
   absolute or relative to the session directory; a leading tilde is refused because it does not expand. New
-  managed-checkout destinations and command launches refuse a selector. Goose, Cursor and OpenCode show that Farhelm
-  will not capture the named conversation and later Restart will be unavailable.
+  managed-checkout destinations and command launches refuse a selector. Cursor and OpenCode show that Farhelm will not
+  capture the named conversation and later Restart will be unavailable.
 - Initial prompt: the agent tab offers a multiline **Initial prompt** box that grows with its text up to a cap and then
   scrolls, above **More options** for supported agents. The label note says it sends once as the agent's first message.
   Hover help says that Restart, Clone and Replace do not send it again. Enter edits the message without launching.
@@ -4184,36 +4184,38 @@ plugin, extension, or whatever reporting mechanism that harness needs. A selecto
 Restart with is a one-time start argument, never a captured identity. Claude, Codex, Grok, Pi, Muse, OMP and Antigravity
 can report the resulting conversation through the ordinary path. A named Restart with keeps the old capture until that
 report replaces it; Codex, Muse and Antigravity report at the first prompt, so plain Restart before then still enters
-the old conversation. Goose cannot report on this resume, so a named Restart with clears its old capture in the relaunch
-transaction; a definitive pre-spawn abort restores it, an ambiguous failure does not. The same clearing applies when
-Farhelm's conversation hooks are turned off for the agent (`FARHELM_AGENT_HOOKS`) or when the conversation reporter's
-extension cannot be prepared, since no report can then replace the old capture. For Grok and Antigravity the switch
-controls setup at launch. Either agent can still report through hooks already on disk. Cursor, OpenCode and named Goose
-starts do not gain later plain Restart from this choice. Heuristics that cannot be relied upon, such as correlating the
-vendor's files on disk with a launch, are not supported, because a wrong match resumes, and appends to, a conversation
-that is not the session's own. Checking the exact file a report names is verification of that report, not
-identification. A launch whose harness cannot report, or whose report never arrived, has no captured identity and cannot
-be restarted: Restart says why, and Replace starts the session over. For Grok and Antigravity the Restart explanation
-follows the reported setup result for that launch. It directs a session without setup to the agent's Settings page and a
-new start, gives the reason for a failed setup, or says that an installed hook normally reports after the first prompt
-while the agent is still running. Capture uses the agent's record directories read-only. Farhelm may change an agent's
-configuration only for the opt-in Claude trust edit and the opt-in Grok and Antigravity hook files. The Claude trust
-edit is independent of capture. A hook passed on the command line for one launch is allowed because it writes nothing
-the vendor owns — no configuration file, no conversation record, no trust state — and cannot outlive the launch that
-carried it. It is not invisible in the absolute: the report it delivers is written to a file in farhelm's own state
-directory and from there lands in farhelm's own database, and every run leaves a line in farhelm's own hook log.
-Vendor-owned state is the boundary these limits protect. Grok's `hooks/farhelm.json` under `$GROK_HOME` (normally
-`~/.grok`) and Antigravity's Farhelm plugin folder belong to Farhelm. Opt-in hook setup may replace the whole Grok file,
-and the Antigravity removal instructions may tell the user to delete the whole folder. Existing manual hooks elsewhere
-still work. Every integrated agent type identifies conversations only through accepted reports; Farhelm never selects a
-conversation by scanning vendor state. Historical stored identities remain usable under the same per-type Resume rules,
-regardless of their source. A reporting credential alone does not establish which Codex conversation is in the
-foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi loads
-a private static extension from Farhelm's state directory on every launch. A Pi report without a session file withdraws
-the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without following
-symlinks and requires its session ID to match. A failed check withdraws the durable resume offer, which makes Restart
-unavailable, and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that
-request.
+the old conversation. Goose can report a named start when the selected conversation carries the reporter Farhelm saved
+when it started that conversation. A Goose conversation started outside Farhelm has no such capture path. A named Goose
+Restart with clears the old capture in the relaunch transaction, so plain Restart becomes available only when Farhelm
+accepts the selected conversation's report. A definitive pre-spawn abort restores the old capture. An ambiguous failure
+leaves it cleared. The same clearing applies when Farhelm's conversation hooks are turned off for the agent
+(`FARHELM_AGENT_HOOKS`) or when the conversation reporter's extension cannot be prepared, since no report can then
+replace the old capture. For Grok and Antigravity the switch controls setup at launch. Either agent can still report
+through hooks already on disk. Cursor and OpenCode named starts do not gain later plain Restart from this choice.
+Heuristics that cannot be relied upon, such as correlating the vendor's files on disk with a launch, are not supported,
+because a wrong match resumes, and appends to, a conversation that is not the session's own. Checking the exact file a
+report names is verification of that report, not identification. A launch whose harness cannot report, or whose report
+never arrived, has no captured identity and cannot be restarted: Restart says why, and Replace starts the session over.
+For Grok and Antigravity the Restart explanation follows the reported setup result for that launch. It directs a session
+without setup to the agent's Settings page and a new start, gives the reason for a failed setup, or says that an
+installed hook normally reports after the first prompt while the agent is still running. Capture uses the agent's record
+directories read-only. Farhelm may change an agent's configuration only for the opt-in Claude trust edit and the opt-in
+Grok and Antigravity hook files. The Claude trust edit is independent of capture. A hook passed on the command line for
+one launch is allowed because it writes nothing the vendor owns — no configuration file, no conversation record, no
+trust state — and cannot outlive the launch that carried it. It is not invisible in the absolute: the report it delivers
+is written to a file in farhelm's own state directory and from there lands in farhelm's own database, and every run
+leaves a line in farhelm's own hook log. Vendor-owned state is the boundary these limits protect. Grok's
+`hooks/farhelm.json` under `$GROK_HOME` (normally `~/.grok`) and Antigravity's Farhelm plugin folder belong to Farhelm.
+Opt-in hook setup may replace the whole Grok file, and the Antigravity removal instructions may tell the user to delete
+the whole folder. Existing manual hooks elsewhere still work. Every integrated agent type identifies conversations only
+through accepted reports; Farhelm never selects a conversation by scanning vendor state. Historical stored identities
+remain usable under the same per-type Resume rules, regardless of their source. A reporting credential alone does not
+establish which Codex conversation is in the foreground. Goose persists a credential-free named MCP reporter with the
+conversation and reuses it on resume; Pi loads a private static extension from Farhelm's state directory on every
+launch. A Pi report without a session file withdraws the old resume target. Before a Pi resume, Farhelm reads the
+bounded first record of that exact file without following symlinks and requires its session ID to match. A failed check
+withdraws the durable resume offer, which makes Restart unavailable, and rejects the stale Resume request so the user
+can refresh; it never silently launches fresh under that request.
 
 Custom agents report their conversation explicitly through `farhelm custom-agent report-conversation --id <ID>`. The
 reporter stays silent and exits successfully even if it cannot write a report. Valid reports can be recorded while the

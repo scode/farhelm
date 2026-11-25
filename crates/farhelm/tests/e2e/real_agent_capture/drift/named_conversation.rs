@@ -1,9 +1,10 @@
 //! A named start must recall a conversation seeded by the test. Only harnesses that report a named start may
-//! offer a later plain Restart. Goose's named Restart must also clear the capture from its previous launch.
+//! offer a later plain Restart. A named Goose Restart must reach the selected conversation without keeping the old
+//! one as the resume target. The supervisor's named-restart tests pin the transaction that clears the old capture.
 
 use super::*;
 use farhelm_helm::CreateExtras;
-use farhelm_proto::SessionLaunch;
+use farhelm_proto::{NamedConversationCapture, SessionLaunch};
 use std::path::PathBuf;
 use std::process::Stdio;
 
@@ -29,20 +30,17 @@ async fn execute(harness: LaunchHarness) -> DriftResult {
         workspace_trust: profile.trust_at_launch.then_some(true),
     };
     let code_word = new_code_word();
-    with_drift_supervisor(&profile, selection, None, async |env, launch| {
-        if harness.captures_named_conversation() {
+    with_drift_supervisor(&profile, selection, None, async |env, launch| match harness
+        .named_conversation_capture()
+    {
+        NamedConversationCapture::Always => {
             check_capturing_harness(&env, &profile, launch, &code_word).await
-        } else {
-            use LaunchHarness::*;
-            match harness {
-                Goose => check_goose(&env, &profile, launch, &code_word).await,
-                Cursor | OpenCode => {
-                    check_without_capture(&env, &profile, launch, &code_word).await
-                }
-                Claude | Codex | Antigravity | Muse | Pi | Omp | Grok | Bash | Zsh | Custom => {
-                    Err(anyhow::anyhow!("no named-start check for {harness:?}").into())
-                }
-            }
+        }
+        NamedConversationCapture::ExistingReporter => {
+            check_existing_reporter(&env, &profile, launch, &code_word).await
+        }
+        NamedConversationCapture::Never => {
+            check_without_capture(&env, &profile, launch, &code_word).await
         }
     })
     .await
@@ -118,78 +116,93 @@ async fn check_capturing_harness(
             launch.clone(),
             &absolute.to_string_lossy(),
             code_word,
-            hook_witness,
         )
         .await?;
-        check_named_capture(env, profile, launch, relative, code_word, hook_witness).await
+        check_named_capture(env, profile, launch, relative, code_word).await
     } else {
-        check_named_capture(env, profile, launch, target, code_word, hook_witness).await
+        check_named_capture(env, profile, launch, target, code_word).await
     }
 }
 
-/// Require both a fresh reply and an accepted hook that makes the new session resume the selected ID or file.
+/// Check a named Create in a new Farhelm session. It has no earlier reports to satisfy the capture witness.
 async fn check_named_capture(
     env: &DriftEnv<'_>,
     profile: &Harness,
     launch: SessionLaunch,
     target: &str,
     code_word: &str,
-    hook_witness: HookWitness,
 ) -> DriftResult {
     env.with_session(launch.clone(), named_extras(&launch, target)?, async |id| {
-        let mut terminal = Terminal::attach(env.sup, env.client, id, true).await?;
-        terminal
-            .ready(profile, TrustPolicy::AutoAnswer, true)
-            .await?;
-        let reply = format!("RECALL-{code_word}");
-        send_prompt(&mut terminal, NAMED_RECALL_PROMPT, &reply, true).await?;
-        let captured = wait_for_turn(
-            &mut terminal,
-            env.sup,
-            id,
-            &env.state.join("hook-log").join(format!("{id}.log")),
-            &TurnExpectation {
-                reply: &reply,
-                acked_before: 0,
-                original_argv: None,
-                hook_witness,
-            },
-        )
-        .await
-        .map_err(|error| match error {
-            // This launch has a fresh hook log and a completed seed turn. A refusal during recall is a failure.
-            DriftError::CouldNotRun(reason) => anyhow::anyhow!(
-                "the named start could not recall after a successful seed: {reason}\n{}",
-                terminal.diagnostics()
-            )
-            .into(),
-            error => error,
-        })?;
-        let reported = selector(&captured)?;
-        let matches = if env.harness.named_conversation_is_file() {
-            env.work
-                .join(reported)
-                .canonicalize()
-                .map_err(anyhow::Error::from)?
-                == env
-                    .work
-                    .join(target)
-                    .canonicalize()
-                    .map_err(anyhow::Error::from)?
-        } else {
-            reported == target
-        };
-        if !matches {
-            return Err(anyhow::anyhow!("the new capture names a different conversation").into());
-        }
-        Ok(())
+        recall_and_capture(env, profile, id, target, code_word, "RECALL", 0).await
     })
     .await
 }
 
-/// Restart a captured Goose row into a separate test conversation. Its label proves that named Restart used the
-/// requested target, while the row's old capture makes the clearing assertion meaningful.
-async fn check_goose(
+/// A reply proves recall, while a new accepted report proves plain Restart will use the selected conversation.
+/// A named Restart shares a log with the previous generation, so the report must follow its pre-restart baseline.
+async fn recall_and_capture(
+    env: &DriftEnv<'_>,
+    profile: &Harness,
+    id: &str,
+    target: &str,
+    code_word: &str,
+    reply_prefix: &str,
+    acked_before: usize,
+) -> DriftResult {
+    let hook_witness = profile
+        .hook_witness
+        .expect("a capturing harness has a hook witness");
+    let mut terminal = Terminal::attach(env.sup, env.client, id, true).await?;
+    terminal
+        .ready(profile, TrustPolicy::AutoAnswer, true)
+        .await?;
+    let reply = format!("{reply_prefix}-{code_word}");
+    let prompt = format!("Reply {reply_prefix}- then my label. No spaces or tools.");
+    send_prompt(&mut terminal, &prompt, &reply, true).await?;
+    let captured = wait_for_turn(
+        &mut terminal,
+        env.sup,
+        id,
+        &env.state.join("hook-log").join(format!("{id}.log")),
+        &TurnExpectation {
+            reply: &reply,
+            acked_before,
+            original_argv: None,
+            hook_witness,
+        },
+    )
+    .await
+    .map_err(|error| match error {
+        DriftError::CouldNotRun(reason) => anyhow::anyhow!(
+            "the named start could not recall after a successful seed: {reason}\n{}",
+            terminal.diagnostics()
+        )
+        .into(),
+        error => error,
+    })?;
+    let reported = selector(&captured)?;
+    let matches = if env.harness.named_conversation_is_file() {
+        env.work
+            .join(reported)
+            .canonicalize()
+            .map_err(anyhow::Error::from)?
+            == env
+                .work
+                .join(target)
+                .canonicalize()
+                .map_err(anyhow::Error::from)?
+    } else {
+        reported == target
+    };
+    if !matches {
+        return Err(anyhow::anyhow!("the new capture names a different conversation").into());
+    }
+    Ok(())
+}
+
+/// Exercise both ways to reopen a conversation carrying a persisted reporter. Restart begins with a different
+/// captured conversation so retaining its old resume target would be observable.
+async fn check_existing_reporter(
     env: &DriftEnv<'_>,
     profile: &Harness,
     launch: SessionLaunch,
@@ -202,6 +215,7 @@ async fn check_goose(
         })
         .await?;
     let target = selector(&target)?;
+    check_named_capture(env, profile, launch.clone(), target, code_word).await?;
     env.with_session(launch.clone(), CreateExtras::default(), async |id| {
         let seed = seed_capture(env, profile, id, &previous_word, HookWitness::Fresh).await?;
         let stopped = snapshot(env, id).await?;
@@ -212,6 +226,10 @@ async fn check_goose(
             )
             .into());
         }
+        let hook_log = env.state.join("hook-log").join(format!("{id}.log"));
+        let acked_before =
+            acknowledged_reports(&std::fs::read_to_string(hook_log).map_err(anyhow::Error::from)?)
+                .count();
         let named = farhelm_helm::compile_named_start(&launch, target.to_owned())
             .map_err(anyhow::Error::msg)?;
         // The named selector is part of Restart with an explicit launch, even when the choices stay the same.
@@ -222,12 +240,22 @@ async fn check_goose(
         if restarted.generation <= stopped.generation {
             return Err(anyhow::anyhow!("Goose did not start a new generation").into());
         }
-        // The saved reporter may already have run. Retain the immediate observation, then check recall
-        // so a fast report cannot conceal an independent failure to select the named destination.
-        let cleared = ensure_uncaptured(&restarted)
-            .map_err(|error| error.context("immediately after named Restart"));
-        recall_without_capture(env, profile, id, code_word).await?;
-        cleared.map_err(Into::into)
+        // The target may already have reported. This sample witnesses the current target, while the supervisor
+        // tests pin when the old capture is cleared.
+        if restarted.captured_conversation == seed.captured_conversation {
+            return Err(anyhow::anyhow!(
+                "Goose kept the previous conversation after named Restart"
+            )
+            .into());
+        }
+        if restarted.captured_conversation.is_some() && selector(&restarted)? != target {
+            return Err(anyhow::anyhow!(
+                "Goose captured a different conversation immediately after named Restart"
+            )
+            .into());
+        }
+        // The named Create already put RECALL-… in this conversation. A different reply proves a new turn.
+        recall_and_capture(env, profile, id, target, code_word, "AGAIN", acked_before).await
     })
     .await
 }
