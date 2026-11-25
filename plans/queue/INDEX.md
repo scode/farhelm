@@ -6,7 +6,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 071fb2] `launcher-style-quick-dialogs.md` — Give the quick switcher (Cmd+K), the template list (Cmd+J) and Rename (Cmd+L) the session launcher's look, with its pieces shared as components
 - [pending] `launcher-style-whats-new.md` — Give What's new the session launcher's look, every entry in full, with release curation marking each highlight's headline (after `launcher-style-quick-dialogs.md`)
 - [pending] `welcome-empty-state.md` — Replace the startup Welcome card with a welcome in the empty main area, shown whenever there are no sessions (after `launcher-style-quick-dialogs.md`)
-- [landing c2d3e0] `tab-switch-shortcuts.md` — Add Cmd+Shift+[ / Cmd+Shift+] (Ctrl+Shift+[ / Ctrl+Shift+] on Linux) to switch between terminal tabs within a session
 - [complete] `recipe-card-and-billed-size-fixes.md` — Hide removed failure-only container hosts on recipe cards and bind Tensorlake launch consent to the billed size shown
 - [in-flight 64820b] `drop-post-clone-claude-trust.md` — Move Claude workspace-trust editing from managed-checkout preparation to Claude launch while preserving archive-time removal
 - [pending] `launcher-consent-and-custom-agent-fixes.md` — Carry one-time YOLO consent through host wake, guard hook-setup continuation against late-arriving folders, distinguish unread custom agents from deleted ones, and show Custom approval flags on keyboard-highlighted recent setups
