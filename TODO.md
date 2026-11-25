@@ -69,12 +69,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching
   indicators come later and should fit the layout. Plan: `plans/queue/welcome-empty-state.md`.
 
-- **Drop the post-clone Claude workspace-trust edit.** Update `SPEC.md` and the implementation so workspace trust for
-  agents whose config files must be edited (rather than supporting per-invocation trust flags) happens on launch of that
-  agent kind, not earlier at checkout preparation. Stop editing `~/.claude.json` during managed-checkout creation when a
-  session starts another agent (or before launch), along with the checkout-preparation Claude trust snapshotting and
-  docs/tests that existed for that path. Plan: `plans/queue/drop-post-clone-claude-trust.md`.
-
 - **Start several selected sessions at once.** When multiple sessions are selected we need to be able to start sessions
   if all the marked ones are stopped.
 

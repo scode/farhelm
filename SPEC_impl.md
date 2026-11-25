@@ -3627,10 +3627,10 @@ once publication may have started, missing or ambiguous evidence refuses automat
 create may recover an unstarted preparation. Ready restart validates the recorded identity and skips clone and hook. The
 agent's kind and launch metadata remain its actual values, rather than identifying the preparation wrapper.
 
-Protocol 51 carries a frozen `claude_trust` bool beside `post_clone` in `ResolvedGithubCheckout` and
-`CheckoutPreparation`; older stored specs default it to false. Its effect on supervisor behavior requires the ordinary
-version-skew hello refusal. Helm schema 53 adds `checkout_config.claude_trust` (false by default) and nullable
-`preferences.claude_trust_hint_dismissed`. The protected `GET /api/checkout-claude-trust` returns `enabled` and
+Protocol 51 added a `claude_trust` bool beside `post_clone` in `ResolvedGithubCheckout`. Retained requests still
+serialize it as before because the value is part of their create fingerprints. New requests omit it, and the supervisor
+takes the trust choice from the launch. Helm schema 53 adds `checkout_config.claude_trust` (false by default) and
+nullable `preferences.claude_trust_hint_dismissed`. The protected `GET /api/checkout-claude-trust` returns `enabled` and
 `hint_dismissed`; PUT requires only an `enabled` bool. This setting changes no destination, so it does not bump the
 checkout preview revision. Its write and the sparse dismissal patch publish ordinary invalidation hints. UI saves use
 the configuration ordering funnel; dismissal uses the per-field preference queue and overlays a still-pending dismissal
@@ -3638,11 +3638,11 @@ on fresh reads.
 
 Claude-specific file work lives in `agent_kind/claude/trust.rs`. A structured Claude launch freezes its trust choice in
 `LaunchSelection.workspace_trust`. The supervisor derives a default-off `LaunchSpec.claude_workspace_trust` for the
-shim. The shim enters the final directory and uses the login shell's config environment before exec. Fresh checkout
-preparation with trust enabled makes the same edit under the preparation flock after recording Ready. That branch owns
-the archive cleanup record, including when the checkout first runs another agent.
+shim. The shim enters the final directory after any checkout preparation, then uses the login shell's config environment
+to apply trust before exec. Older on-disk specs may still carry the obsolete checkout preparation flag. The shim ignores
+it.
 
-Both paths compare the canonical project key and canonical home from the login shell. The launch-time edit refuses home
+The shim compares the canonical project key and canonical home from the login shell. The launch-time edit refuses home
 and every parent of home, including the filesystem root, because Claude inherits trust in subdirectories. For exact
 home, the resolver can check the selected config's existing trust entry with a bounded read. A true entry satisfies the
 launch without a write, lock, cleanup record or terminal warning. An unset, empty, relative or unresolvable `HOME` skips
@@ -3654,20 +3654,22 @@ Claude 2.1.300 selects `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json`, wi
 also wins when the modern file is absent. Nonempty custom OAuth selects `.claude-custom-oauth.json`. An absent vendor
 file is left absent.
 
-The removal record stores the canonical file, selected lock alias, and canonical project key in the existing preparation
-record for fresh checkout preparation, durably before the edit. Later trust edits made as part of a Claude launch create
-no removal record. Claude 2.1.300 explicitly uses `<selected-config-path>.lock` even for a symlink, so the integration
-shares that mkdir lock while replacing the canonical target and preserving the symlink. Launch and post-Delete edits
-retry contention for twelve seconds; startup cleanup tries the lock once without waiting. Neither steals a lock. The
-edit reads at most 16 MiB from a regular file under the lock, requires object-shaped configuration/projects/project, and
-changes only `hasTrustDialogAccepted`. A missing projects/project object is created for the opt-in. Removal deletes only
-that key, preserving even empty objects. A same-directory temporary file receives the original mode, is written and
-fsynced, renamed atomically, and followed by directory fsync. Publication refuses a replaced target/lock or a lock held
-for four seconds, leaving margin before Claude's ten-second stale-lock threshold. Temporary files and owned locks are
-cleaned on error. The advisory lock has the same accepted limit as Claude's own writers: a writer stalled past Claude's
-stale-lock threshold can publish an old snapshot after another writer takes over, losing an update in either direction.
-Claude's unlocked exit-save race and vendor format changes remain explicit limits too; none of these checks proves
-compatibility forever.
+For a trusted Claude launch that created a managed checkout, the shim stores the canonical file, selected lock alias and
+canonical project key in the existing Ready record. It publishes the record durably under the per-checkout flock before
+attempting the edit, then releases the flock. A retry of the original create can make the recorded edit again. If its
+shell selects a different config, the shim keeps the existing record and skips the new edit. Later Claude launches into
+the directory create no removal record. Claude 2.1.300 explicitly uses `<selected-config-path>.lock` even for a symlink,
+so the integration shares that mkdir lock while replacing the canonical target and preserving the symlink. Launch and
+post-Delete edits retry contention for twelve seconds; startup cleanup tries the lock once without waiting. Neither
+steals a lock. The edit reads at most 16 MiB from a regular file under the lock, requires object-shaped
+configuration/projects/project, and changes only `hasTrustDialogAccepted`. A missing projects/project object is created
+for the opt-in. Removal deletes only that key, preserving even empty objects. A same-directory temporary file receives
+the original mode, is written and fsynced, renamed atomically, and followed by directory fsync. Publication refuses a
+replaced target/lock or a lock held for four seconds, leaving margin before Claude's ten-second stale-lock threshold.
+Temporary files and owned locks are cleaned on error. The advisory lock has the same accepted limit as Claude's own
+writers: a writer stalled past Claude's stale-lock threshold can publish an old snapshot after another writer takes
+over, losing an update in either direction. Claude's unlocked exit-save race and vendor format changes remain explicit
+limits too; none of these checks proves compatibility forever.
 
 Confirmed archive or missing-source retirement schedules removal off the Delete reply path. The worker retains directory
 admission until it settles, preventing reuse while an old remover can still touch that path's key; terminal I/O and
@@ -3686,7 +3688,7 @@ false. Listing and rename read the same sample cell. The hint requires the agent
 setting, and neither dismissal. The band stays mounted while hidden so a local × lasts until the question actually
 leaves the screen; its flow row lets the existing terminal resize observer fit it.
 
-Claude's hint covers structured Claude launches and sessions with fresh checkout provenance (`SessionInfo.github_repo`).
+Claude's hint covers structured Claude launches.
 
 Helm schema 57 adds independent `codex_trust`, `muse_trust` and `pi_trust` checkout settings. Schema 93 adds
 `antigravity_trust` and its nullable hint dismissal alongside the existing per-agent preferences. Each switch defaults
@@ -3850,8 +3852,8 @@ preserving the allocated folder itself. A failed first move permits clone only i
 every failure after any entry moved retains the partial checkout and fails preparation without rollback. The shim
 removes only the emptied claim directory. It then runs
 `git -c gc.auto=0 -c maintenance.auto=false merge --ff-only <full tracking ref>` in the final allocated folder, so
-changed-file filters and `post-merge` see that path. The existing post-clone command, Ready publication and trust steps
-follow unchanged. Interrupted or failed preparations remain non-restartable under the existing state rule.
+changed-file filters and `post-merge` see that path. The post-clone command and Ready publication follow. Interrupted or
+failed preparations remain non-restartable under the existing state rule.
 
 Each physically accepted fresh managed-checkout launch registers one background cache/spare attempt with its frozen
 root, shell and switch. A pending recovery that actually creates a terminal registers too; reconciliation of an already
@@ -5415,15 +5417,14 @@ grouping ignores historical trust, summaries omit it, and activating a recent cl
 `LaunchSelection.workspace_trust` remains on the wire and in stored selections: supervisors persist selections, and
 their strict decoding must still accept older fields. The helm derives the field when composing a launch. It captures
 session ownership with the destination connection or knows the destination is disposable before approving a recipe
-launch. Disposable destinations enable trust where supported. Other destinations use the selected agent's setting. Fresh
-agent checkouts retain the Claude post-clone switch from the approval snapshot. Compilation remains a function of the
-selection alone so the YOLO guard can reproduce stored commands exactly. Codex true and false still compile to
-whole-argv config markers; the supervisor fills one at the shared spawn seam, after any GitHub checkout has fixed the
-final cwd, with a trusted or untrusted project override. The cwd is quoted as a TOML key and resolved on the target
-host; omitted trust adds no Codex override. Muse true adds `--trust-workspace`; Muse false adds no trust flag and cannot
-undo trust from `--yolo` or vendor settings. Pi true adds `--approve` and Pi false adds `--no-approve`, independent of
-Pi's YOLO tool mode. The false branches remain for old stored launches, including plain Restart and Replace; new
-composition uses true or omission. Older selection JSON without the field continues to decode.
+launch. Disposable destinations enable trust where supported. Other destinations use the selected agent's setting.
+Compilation remains a function of the selection alone so the YOLO guard can reproduce stored commands exactly. Codex
+true and false still compile to whole-argv config markers; the supervisor fills one at the shared spawn seam, after any
+GitHub checkout has fixed the final cwd, with a trusted or untrusted project override. The cwd is quoted as a TOML key
+and resolved on the target host; omitted trust adds no Codex override. Muse true adds `--trust-workspace`; Muse false
+adds no trust flag and cannot undo trust from `--yolo` or vendor settings. Pi true adds `--approve` and Pi false adds
+`--no-approve`, independent of Pi's YOLO tool mode. The false branches remain for old stored launches, including plain
+Restart and Replace; new composition uses true or omission. Older selection JSON without the field continues to decode.
 
 Antigravity true adds `--settings` with the canonical-directory JSON slot. Its switch applies to structured launches on
 installed hosts in plain folders as well as managed checkouts. The supervisor resolves the directory when it fills the
@@ -9857,8 +9858,8 @@ unless the stored launch is still exactly that, comparing under the session's li
 also takes, so a Restart with from the GUI while the card waited cannot make the approval resume a launch the card did
 not show. The helm also refuses up front when its cache already shows the change, which only gives a clearer message.
 
-An agent-requested fresh checkout retains the Claude trust setting for checkout preparation from before the approval
-card through dispatch, including any environment startup.
+An agent-requested fresh checkout carries the selected launch's trust choice from the approval card through dispatch,
+including any environment startup.
 
 Template writes (`TemplateCreate`, `TemplateEdit`, `TemplateDelete`, protocol 42) go through the same card. An edit is
 merged with the stored template before the card, so the card shows the whole result, command text the listing withholds

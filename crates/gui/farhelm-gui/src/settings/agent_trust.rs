@@ -53,8 +53,8 @@ const CAUTION_GAP: f32 = 8.;
 pub(super) const CAUTION_ID: &str = "settings-claude-trust-caution";
 pub(super) const CAUTION_TITLE: &str = "How this works, and why it's off by default";
 const CLAUDE_TRUST_RISK: &str = "The repository's Claude hooks and commands can run, as when you answer Yes. In a folder you choose, \
-     the trust entry stays after the session ends. For checkouts Farhelm cloned with the switch on, \
-     Farhelm makes a best-effort removal when it archives the checkout.";
+     the trust entry stays after the session ends. When Farhelm adds trust on the first launch in a new managed checkout, \
+     it tries to remove the entry when it archives the checkout.";
 const FLAG_TRUST_RISK: &str = "As when you approve it yourself, repository hooks, settings and commands are then trusted. This \
      is why the switch is off by default.";
 pub(super) const CAUTION: [&str; 3] = [
@@ -229,12 +229,11 @@ impl TrustAgent {
         match self {
             TrustAgent::Claude => {
                 "When you choose Claude Code as the agent, Farhelm marks the folder trusted in Claude's settings file \
-                 before it starts. It does the same for a fresh managed checkout, including one created for another \
-                 agent. Farhelm skips your home directory and its parents, including /. Claude's trust covers \
-                 everything inside those directories, so Claude may \
-                 still ask there. On installed hosts, New, Clone, Restart with and Replace with use this setting. \
-                 Sandbox and container sessions apply workspace trust automatically. The setting also controls the \
-                 separate trust edit after a managed clone. Restart and Replace keep the session's saved launch."
+                 before it starts. This also applies when you start Claude Code in a new managed checkout. Farhelm \
+                 skips your home directory and its parents, including /. Claude's trust covers everything inside \
+                 those directories, so Claude may still ask there. On installed hosts, New, Clone, Restart with and \
+                 Replace with use this setting. Sandbox and container sessions apply workspace trust automatically. \
+                 Restart and Replace keep the session's saved launch."
             }
             TrustAgent::Codex => {
                 "In folders you choose and in managed checkouts, Farhelm passes a trust option to Codex for that \
@@ -316,9 +315,8 @@ impl TrustAgent {
 
     /// The agent whose current question can be answered by a Farhelm trust setting, for the terminal hint.
     ///
-    /// Claude's reader supplies its own flag. The edit applies to structured Claude launches and during fresh checkout
-    /// preparation. Launch provenance identifies a session created from a fresh clone. Checkout membership also
-    /// includes later sessions opened in the same folder.
+    /// Claude's reader supplies its own flag. The band points at a setting that applies only to structured Claude
+    /// launches, including launches into new managed checkouts.
     ///
     /// Codex, Muse and Antigravity share the neutral question flag. The structured launch names the setting they use.
     /// Pi's project approval has no recognized question.
@@ -327,7 +325,7 @@ impl TrustAgent {
             .launch
             .agent_selection()
             .and_then(|selection| Self::for_harness(selection.harness));
-        if info.claude_trust_prompt && (info.github_repo.is_some() || agent == Some(Self::Claude)) {
+        if info.claude_trust_prompt && agent == Some(Self::Claude) {
             return Some(TrustAgent::Claude);
         }
         if !info.workspace_trust_prompt {

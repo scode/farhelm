@@ -11340,7 +11340,6 @@ impl Supervisor {
                     directory_device: accepted.identity.0,
                     directory_inode: accepted.identity.1,
                     post_clone: resolved.post_clone.clone(),
-                    claude_trust: resolved.claude_trust,
                     // A pending create/retry keeps this exact frozen choice.
                     keep_spare: resolved.keep_spare,
                     // The supervisor's own resolved shell; the hook runs

@@ -1865,18 +1865,18 @@ Muse, Pi and Antigravity. Custom settings flags still take precedence. Local, SS
 Settings. Plain Restart and the Replace answers that reuse the saved command keep the stored choice. **Replace as
 guarded instead** uses the same policy as Replace with.
 
-Settings offers an off-by-default choice under **Agents → Claude Code** to answer Claude's "trust this folder?" for
-structured Claude launches in any directory outside the home checks below. On a new managed checkout the same switch
-also enables trust after clone and its post-clone command, including checkouts initially started with another agent.
-Changing the switch does not invalidate an already displayed path preview.
+For agents that require a change to their own settings file, Farhelm applies workspace trust at launch of that agent,
+after preparing the working directory. Settings offers an off-by-default choice under **Agents → Claude Code** to answer
+Claude's "trust this folder?" for structured Claude launches in any directory outside the home checks below. Changing
+the switch does not invalidate an already displayed path preview.
 
 The help leads with the mechanism: Claude has no supported switch, so Farhelm edits its settings file (normally
 `~/.claude.json`), which also holds sign-in, settings and per-directory state. It changes only that directory's trust
-key with an atomic replacement. For a checkout Farhelm cloned with the switch on, it makes a best-effort removal when
-the checkout is archived or retired as missing. An archive refusal leaves the directory and trust in place. Trust added
-in a directory the user chose, including a checkout first cloned with the switch off, stays after the session ends. A
-launch or Delete never fails because this edit failed. The caution explains that Claude's unlocked exit save can lose
-either writer's update, future Claude versions may change the file or locking without notice, and Farhelm cannot promise
+key with an atomic replacement. For an edit made on the initial Claude launch of a new managed checkout, Farhelm makes a
+best-effort removal when the checkout is archived or retired as missing. An archive refusal leaves the directory and
+trust in place. Trust added by a later launch in a checkout or by a launch in a directory the user chose stays. A launch
+or Delete never fails because this edit failed. The caution explains that Claude's unlocked exit save can lose either
+writer's update, future Claude versions may change the file or locking without notice, and Farhelm cannot promise
 continued safety. Farhelm waits on Claude's advisory lock and never takes over a stale one. A writer stalled past
 Claude's stale-lock threshold can still lose an update in either direction when another writer takes over. This is an
 accepted trade-off of editing Claude's file. Trust allows repository hooks and commands just as answering Yes does. The
@@ -1886,7 +1886,7 @@ directories beneath a trusted project. Farhelm also skips the edit when the logi
 directory or sets `CLAUDE_CONFIG_DIR` to a relative path. The session still starts and Claude may ask as usual. The edit
 on installed hosts is explicitly opt-in and best effort.
 
-Farhelm offers Claude's trust hint for a structured Claude launch or a session created from a fresh managed checkout.
+Farhelm offers Claude's trust hint for a structured Claude launch.
 
 While Claude's trust question is visible in the agent terminal, the setting is off, and the hint has not been dismissed,
 an informational band appears above the terminal, below its tabs. It takes layout space rather than covering the
@@ -1992,10 +1992,10 @@ launch waits on. This command-local policy does not change the user's later Git 
 With **Keep a checkout ready for faster launches** on (the default), a managed-checkout create may instead take a
 complete independent clone prepared earlier for that repository on that host. The reserved hidden container is
 `<checkout root>/.farhelm-spares/<owner>/<repository>`; allocation treats its name as occupied. Each create freezes the
-switch and checkout root alongside its post-clone command and trust choice. Taking a spare preserves the newly allocated
-directory's identity, fetches from GitHub visibly in the session terminal, moves the spare's contents into that
-directory, then fast-forwards there. The terminal says an earlier checkout is being updated. The configured post-clone
-command, optional Claude trust and agent still run only at launch, in the final directory, in their existing order.
+switch and checkout root alongside its post-clone command. Taking a spare preserves the newly allocated directory's
+identity, fetches from GitHub visibly in the session terminal, moves the spare's contents into that directory, then
+fast-forwards there. The terminal says an earlier checkout is being updated. The configured post-clone command and agent
+still run only at launch, in the final directory. Any workspace-trust edit belongs to that agent's launch.
 
 The resulting checkout is a clone made earlier and then updated: its reflog records that clone and update, `FETCH_HEAD`
 and `ORIG_HEAD` exist, unchanged files retain older modification times, and objects from branches deleted upstream can
@@ -2059,9 +2059,9 @@ such a directory against an identity recorded earlier follows this rule rather t
 removed and re-cloned at the same path, so Farhelm treats it as unconfirmed: Delete releases it without archiving it,
 with the notice below; the trash never deletes it permanently; and a new session started in it gets the agent trust the
 user opted into as any directory the user chose does, so Claude's entry is not removed when the checkout is archived.
-The launch that creates a fresh checkout records Claude's entry for removal at archive, because Farhelm just created the
-directory. A checkout recorded before creation times were kept, on a filesystem that reports them now, keeps the inode
-and device comparison.
+When a structured Claude launch creates a fresh checkout and applies trust, it records the entry for removal at archive.
+A checkout recorded before creation times were kept, on a filesystem that reports them now, keeps the inode and device
+comparison.
 
 Ownership follows use, not the lifetime of the session that first requested the checkout. Ordinary sessions in a managed
 directory or its canonical subdirectories also retain references, including references to managed ancestors. Stopped,

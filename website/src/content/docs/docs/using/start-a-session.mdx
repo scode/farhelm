@@ -398,25 +398,25 @@ Plain **Restart** and **Replace** reuse the trust carried by the saved launch. S
 of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
 
 On the **Claude Code** page, you can **Answer Claude's "trust this folder?"**. The switch is off by default. It applies
-when you choose Claude Code in the **Agent** tab, when an agent asks to start a Claude Code session, or when Farhelm
-creates a fresh managed checkout. Farhelm protects your home directory and its parents, including the filesystem root,
+when you choose Claude Code in the **Agent** tab or approve another agent's request to start Claude Code. This includes
+Claude Code sessions that start in a new managed checkout. Farhelm protects your home directory and its parents, including the filesystem root,
 because Claude's trust would cover everything inside. In a sandbox or container session, the default Claude config
 can already trust the disposable host's home. A launch there uses that entry. A different Claude config or an existing
 choice to leave home untrusted can still leave the question visible. If Farhelm cannot resolve your home
-directory on the session's host, the terminal shows a note and Claude may ask as usual. Farhelm also adds Claude trust to new
-checkouts that start with another agent while the switch is on.
+directory on the session's host, the terminal shows a note and Claude may ask as usual.
 
 Farhelm edits the Claude settings that the login shell selects on the session's host, normally `~/.claude.json`.
 A wrapper that changes the directory or selects a different Claude configuration can still leave Claude asking.
-For checkouts Farhelm cloned while the switch was on, it tries to remove the key when the checkout
-moves to the trash. Trust added later in a directory you choose stays after the session ends. The edit is best effort.
+If the edit was for the first launch in a new managed checkout, Farhelm tries to remove the key when the checkout
+moves to the trash. Trust added when you launch Claude Code in an existing directory stays after the session ends. The
+edit is best effort.
 A Claude session exiting at the same instant can lose either program's update, and an update to Claude can change how
 the file works. Read the caution in Settings before turning it on. Trust lets the repository's Claude hooks and commands
 run, as when you answer Yes.
 
 When Claude, Codex, Muse or Antigravity asks its trust question in a session started from the **Agent** tab, a note
 appears above the terminal if that agent's switch is off. Claude's note can also appear when another agent starts a
-Claude Code session or when you start the session with a fresh managed checkout. Its **Settings** button
+Claude Code session. Its **Settings** button
 (**Settings and caveats** for Claude) opens the agent's Settings page at its trust switch. × hides the note
 until the question leaves the screen, and **Don't show again** stops that agent's note for every session, leaving the
 other agents' notes alone. To bring one back, turn on the hint switch on the agent's page. You still answer
