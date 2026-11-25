@@ -2644,9 +2644,9 @@ impl ProvisioningService {
     /// point cannot be reused from the run: it would wait for a lock its
     /// caller holds, or abort the run that called it.
     ///
-    /// The order is Remove's: the cache-write lock so no cache write
-    /// interleaves with the deletion, the row, the helm's memory of the
-    /// host, then the actor, and its lock only after the row is gone.
+    /// Reserve the Tailscale destination before taking the cache-write lock. Keep the cache-write lock across
+    /// deleting the row, purging the helm's host memory and stopping its actor. Retire the masters after dropping
+    /// the cache-write lock, while the destination is still reserved for cleanup.
     /// Detached sign-in checks are cancelled after commit. Discovery can finish on its own schedule because its
     /// registration transaction checks the identity of the host it probed.
     ///
@@ -2661,6 +2661,7 @@ impl ProvisioningService {
         deleted: Option<&crate::environment::Destroyed>,
     ) -> anyhow::Result<bool> {
         let row = self.host_row(host).await?;
+        let destination = self.lock_tailscale_destination(&row).await?;
         let serialized = self.manager.host_write_lock(host).await;
         self.store.remove_host_row(host, deleted).await?;
         if let Some(setup) = &self.setup_sign_in {
@@ -2674,10 +2675,12 @@ impl ProvisioningService {
             let _ = task.await;
         }
         let stopped = self.manager.stop_actor(host).await;
-        self.forget_tailscale_keys(&row).await;
         self.delivery.forget(host);
         self.manager.forget_cache_lock(host);
         drop(serialized);
+        if let Some(files) = destination {
+            self.cleanup_tailscale_route(&row, files, true).await;
+        }
         Ok(stopped)
     }
 
@@ -2691,25 +2694,64 @@ impl ProvisioningService {
         &self.layout.local_state_dir
     }
 
-    /// Release a former route's private snapshots after its durable edit.
-    /// Both removal and uninstall come through this service.
-    pub(crate) async fn forget_tailscale_keys(&self, row: &HostRow) {
+    /// Reserve this Tailscale destination's shared files before the registry edit lets a replacement start using it.
+    /// Pending checks can still hold the host's route-read lock. This gate only fences fresh SSH file preparation.
+    pub(crate) async fn lock_tailscale_destination(
+        &self,
+        row: &HostRow,
+    ) -> anyhow::Result<Option<crate::ssh::tailscale::DestinationFiles>> {
+        let Some(destination) = row.destination.as_deref().filter(|_| row.tailscale) else {
+            return Ok(None);
+        };
+        let directory = crate::ssh::tailscale::known_hosts_dir(self.helm_state_dir(), destination)?;
+        Ok(Some(
+            crate::ssh::tailscale::lock_destination_files(directory).await,
+        ))
+    }
+
+    /// Retire a former Tailscale route once the registry has moved and the actor is gone or reconfigured.
+    /// Mode changes retire their masters before the edit while the actor is parked, so they pass
+    /// `retire_masters: false` here to clean up the pins only. Removal and uninstall share the same teardown.
+    pub(crate) async fn cleanup_tailscale_route(
+        &self,
+        row: &HostRow,
+        files: crate::ssh::tailscale::DestinationFiles,
+        retire_masters: bool,
+    ) {
         let Some(destination) = row.destination.as_deref().filter(|_| row.tailscale) else {
             return;
         };
         let result = async {
-            // After a removal or retarget the destination is available again.
-            // Once another registered Tailscale entry owns it, keep its pins.
-            if self.store.list_hosts().await?.iter().any(|current| {
-                current.tailscale && current.destination.as_deref() == Some(destination)
-            }) {
+            debug_assert_eq!(
+                files.directory(),
+                crate::ssh::tailscale::known_hosts_dir(self.helm_state_dir(), destination)?
+                    .as_path()
+            );
+            // A new registration can take this destination as soon as the old edit commits.
+            let in_use = || async {
+                let rows = self.store.list_hosts().await?;
+                anyhow::Ok(rows.iter().any(|current| {
+                    current.tailscale && current.destination.as_deref() == Some(destination)
+                }))
+            };
+            if in_use().await? {
                 return Ok(());
             }
-            crate::ssh::tailscale::forget_keys(self.helm_state_dir(), destination).await
+            if retire_masters {
+                self.manager
+                    .transport()
+                    .release_shared_connections(row)
+                    .await;
+                // The exit commands ran across an await. Preserve the pins of a host registered meanwhile.
+                if in_use().await? {
+                    return Ok(());
+                }
+            }
+            crate::ssh::tailscale::forget_keys(files).await
         }
         .await;
         if let Err(error) = result {
-            tracing::warn!(host = row.id, %error, "could not clean up Tailscale host keys");
+            tracing::warn!(host = row.id, %error, "could not clean up the former Tailscale route");
         }
     }
 

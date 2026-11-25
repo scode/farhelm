@@ -8,7 +8,7 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     ffi::OsStr,
     fs,
     io::{Read, Write},
@@ -19,7 +19,7 @@ use std::{
     },
     path::{Path, PathBuf},
     process::Stdio,
-    sync::Mutex,
+    sync::{Arc, LazyLock, Mutex, Weak},
     time::Duration,
 };
 
@@ -29,9 +29,48 @@ const CONTROL_DIR_RANDOM_BYTES: usize = 10;
 const CONTROL_DIR_BASENAME_LEN: usize = CONTROL_DIR_PREFIX.len() + CONTROL_DIR_RANDOM_BYTES;
 const CONTROL_DIR_RECORD: &str = "control-dir";
 
-/// A state directory has one serving helm. Serializing allocation here gives concurrent dials the same on-disk
-/// rendezvous without introducing a lockfile that would live inside a directory the last host can remove.
-static CONTROL_DIR_ALLOCATION: Mutex<()> = Mutex::new(());
+type DestinationGate = tokio::sync::Mutex<()>;
+static DESTINATION_FILES: LazyLock<Mutex<HashMap<PathBuf, Weak<DestinationGate>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// An owned gate paired with the destination it protects, carried through blocking file operations.
+pub(crate) struct DestinationFiles {
+    directory: PathBuf,
+    _gate: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl DestinationFiles {
+    /// The exact private directory protected by this guard for pin publication and retirement.
+    pub(crate) fn directory(&self) -> &Path {
+        &self.directory
+    }
+}
+
+/// Serialize publication and retirement of one destination's pin and socket files. An edit holds this from
+/// before it frees the destination until the old masters are retired, so a new owner prepares afterward.
+/// Like the sign-in gate, entries survive only while there is an owner or a waiter.
+///
+/// Take a route-write lock first when the caller needs one. Take the cache-write lock after this gate.
+/// Stop or park the actor before retiring masters. Other preparation tasks can be waiting for this gate,
+/// so join a task here only after cancelling it.
+pub(crate) async fn lock_destination_files(directory: PathBuf) -> DestinationFiles {
+    let gate = {
+        let mut gates = DESTINATION_FILES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gates.retain(|_, gate| gate.strong_count() != 0);
+        let entry = gates.entry(directory.clone()).or_default();
+        entry.upgrade().unwrap_or_else(|| {
+            let gate = Arc::new(DestinationGate::new(()));
+            *entry = Arc::downgrade(&gate);
+            gate
+        })
+    };
+    DestinationFiles {
+        directory,
+        _gate: gate.lock_owned().await,
+    }
+}
 
 /// One prepared peer. Every SSH invocation for it uses the address selected with its advertised keys.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,15 +143,8 @@ impl TailscaleSshAccess {
         // A shared connection also fixes its network path. A change between direct and userspace modes
         // needs a new master even if the peer's keys and address stay the same.
         let socket_scope = short_digest([contents.as_bytes(), proxy.as_bytes()]);
-        let (state, runtime, destination) =
-            (state.to_owned(), runtime.to_owned(), destination.to_owned());
-        let control_dir = tokio::task::spawn_blocking(move || {
-            write_private_file(&path, &contents)
-                .context("Could not publish Tailscale host keys")?;
-            control_directory(&state, &runtime, &destination)
-        })
-        .await
-        .context("Preparing the Tailscale host keys did not complete")??;
+        let control_dir =
+            publish_destination_files(state, runtime, destination, path, contents).await?;
         Ok(Self {
             address,
             known_hosts,
@@ -154,6 +186,28 @@ impl TailscaleSshAccess {
     }
 }
 
+/// Publish the verified SSH pins and socket record together, after any retirement of this exact destination.
+/// The gate begins here so the Tailscale status request can run while the old SSH masters are closing.
+async fn publish_destination_files(
+    state: &Path,
+    runtime: &Path,
+    destination: &str,
+    path: PathBuf,
+    contents: String,
+) -> anyhow::Result<PathBuf> {
+    let files = lock_destination_files(known_hosts_dir(state, destination)?).await;
+    let (state, runtime, destination) =
+        (state.to_owned(), runtime.to_owned(), destination.to_owned());
+    tokio::task::spawn_blocking(move || {
+        // Cancelling the preparing future cannot stop this blocking write once it has started.
+        let _files = files;
+        write_private_file(&path, &contents).context("Could not publish Tailscale host keys")?;
+        control_directory(&state, &runtime, &destination)
+    })
+    .await
+    .context("Preparing the Tailscale host keys did not complete")?
+}
+
 /// A 96-bit suffix keeps per-pin sharing paths short while distinguishing independently prepared key sets.
 fn short_digest<'a>(fields: impl IntoIterator<Item = &'a [u8]>) -> String {
     let mut hash = Sha256::new();
@@ -185,11 +239,8 @@ fn legacy_control_directory(
 
 /// Keep the OS-allocated private directory across ordinary helm restarts so earlier masters can still be retired.
 /// The record holds only the basename. When the runtime directory is wiped, the next prepare allocates a new
-/// directory and replaces the record.
+/// directory and replaces the record. The caller serializes this with pin publication and cleanup.
 fn control_directory(state: &Path, runtime: &Path, destination: &str) -> anyhow::Result<PathBuf> {
-    let _allocation = CONTROL_DIR_ALLOCATION
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let record = known_hosts_dir(state, destination)?.join(CONTROL_DIR_RECORD);
     if let Some(path) = recorded_control_directory(&record, runtime)? {
         return Ok(path);
@@ -514,8 +565,37 @@ pub(crate) fn known_hosts_dir(state: &Path, destination: &str) -> anyhow::Result
 }
 
 /// Discard private pin generations after the registry can no longer start new dials for this destination.
-pub(crate) async fn forget_keys(state: &Path, destination: &str) -> anyhow::Result<()> {
-    match tokio::fs::remove_dir_all(known_hosts_dir(state, destination)?).await {
+/// Keep the basename while verified socket storage survives so later retirement can reach masters left by a failed exit.
+/// The caller holds the destination gate until the cleanup finishes.
+pub(crate) async fn forget_keys(files: DestinationFiles) -> anyhow::Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let DestinationFiles { directory, _gate } = files;
+        forget_keys_at(&directory, Path::new("/tmp"))
+    })
+    .await
+    .context("Tailscale key cleanup did not finish")?
+}
+
+/// The runtime root is passed by the caller so tests can own the entire lifetime of the socket directory.
+fn forget_keys_at(directory: &Path, runtime: &Path) -> anyhow::Result<()> {
+    let record = directory.join(CONTROL_DIR_RECORD);
+    let remaining = recorded_control_directory(&record, runtime)?.is_some_and(|path| {
+        // The master can acknowledge exit before unlinking its socket. Repeat the empty-directory cleanup
+        // at the end of retirement, when the master has had time to remove it.
+        let _ = fs::remove_dir(&path);
+        is_private_control_directory(&path)
+    });
+    if remaining {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.file_name() != CONTROL_DIR_RECORD {
+                fs::remove_file(entry.path())
+                    .context("removing a private Tailscale SSH key snapshot")?;
+            }
+        }
+        return Ok(());
+    }
+    match fs::remove_dir_all(directory) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error).context("removing private Tailscale SSH keys"),
@@ -789,6 +869,40 @@ mod tests {
         assert!(proxy_option(Path::new("/example/line\nbreak/tailscale")).is_err());
     }
 
+    /// The publication path must queue before touching the pin or directory record. The later waiter proves the
+    /// publisher actually reached the same gate, even though its blocking filesystem work also yields.
+    #[farhelm_testtrace::test]
+    async fn tailscale_file_publication_waits_for_retirement() {
+        let state = tempfile::tempdir().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let destination = "user@peer";
+        let directory = known_hosts_dir(state.path(), destination).unwrap();
+        let pin = known_hosts_path(state.path(), destination, "fixture").unwrap();
+        let retirement = lock_destination_files(directory.clone()).await;
+        let mut prepare = std::pin::pin!(publish_destination_files(
+            state.path(),
+            runtime.path(),
+            destination,
+            pin.clone(),
+            "fixture".to_owned(),
+        ));
+        assert!(futures_util::poll!(&mut prepare).is_pending());
+        assert!(!directory.exists());
+        let mut later = std::pin::pin!(lock_destination_files(directory.clone()));
+        assert!(futures_util::poll!(&mut later).is_pending());
+        drop(retirement);
+        // Tokio's mutex hands the release to the first waiter, which must be the actual publisher.
+        assert!(futures_util::poll!(&mut later).is_pending());
+        let control_dir = prepare.await.unwrap();
+        let _next = later.await;
+        assert_eq!(fs::read_to_string(pin).unwrap(), "fixture");
+        assert_eq!(
+            recorded_control_directory(&directory.join(CONTROL_DIR_RECORD), runtime.path())
+                .unwrap(),
+            Some(control_dir)
+        );
+    }
+
     /// A restart can reuse only a valid record and private directory. Reboot, changed permissions or a symlink
     /// must cause a fresh allocation instead of making the destination unavailable or redirecting a connection.
     #[farhelm_testtrace::test]
@@ -911,6 +1025,34 @@ mod tests {
             .unwrap()
             .remove_empty_directories();
         assert!(!legacy.exists());
+    }
+
+    /// Pin cleanup after a failed retirement must preserve the only way to find the surviving master's socket.
+    /// A bound listener stands in for a master that survived exit. If a later exit unlinks the socket after
+    /// the first cleanup attempt, forgetting the pins can remove the now-empty directory and its record.
+    #[farhelm_testtrace::test]
+    fn tailscale_pin_cleanup_retains_a_surviving_master_record() {
+        let state = tempfile::tempdir_in("/tmp").unwrap();
+        let runtime = tempfile::tempdir_in("/tmp").unwrap();
+        let destination = "user@peer";
+        let dir = control_directory(state.path(), runtime.path(), destination).unwrap();
+        let pins = known_hosts_dir(state.path(), destination).unwrap();
+        let pin = known_hosts_path(state.path(), destination, "fixture").unwrap();
+        write_private_file(&pin, "fixture").unwrap();
+        let socket = dir.join("qaaaaaaaaaaaaaaaa0000000000000000000000000000000000000000");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let retire = || shared_sockets_at(state.path(), runtime.path(), destination).unwrap();
+        assert_eq!(retire().paths.as_slice(), std::slice::from_ref(&socket));
+        retire().remove_empty_directories();
+        forget_keys_at(&pins, runtime.path()).unwrap();
+        assert!(!pin.exists());
+        assert_eq!(retire().paths.as_slice(), std::slice::from_ref(&socket));
+        drop(listener);
+        fs::remove_file(socket).unwrap();
+        assert!(dir.is_dir());
+        forget_keys_at(&pins, runtime.path()).unwrap();
+        assert!(!dir.exists());
+        assert!(!pins.exists());
     }
 
     /// A fresh transport after a helm restart must issue exit against the exact recorded and pre-upgrade masters.
