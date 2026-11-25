@@ -1182,6 +1182,39 @@ fn guarded_answer_replaces_with_the_saved_choices_and_delete_guard(cx: &mut Test
     assert!(!drawn(cx, "prompt-alternative-0"));
 }
 
+/// A row can leave the listing before an already-drawn Guarded answer is clicked. The answer should leave an
+/// explanation on that session's operation line instead of silently closing or sending a replacement.
+#[gpui::test]
+fn guarded_answer_leaves_a_note_if_the_source_left_the_listing(cx: &mut TestAppContext) {
+    let source = ended("a").launch(json!({
+        "kind": "agent",
+        "selection": {"harness": "codex", "permissions": "yolo"},
+        "start": ["codex", "{farhelm_args}"],
+        "resume": null,
+    }));
+    let (mut helm, cx, id) = replacing_open(cx, source);
+    refuse_for_yolo(&mut helm, cx, id);
+    assert_eq!(
+        label_of(cx, "prompt-alternative-0").as_deref(),
+        Some("Replace as guarded instead")
+    );
+    let guarded = test_support::center(cx, "prompt-alternative-0");
+    test_support::show_next_frame(cx);
+    cx.update(|window, cx| {
+        test_support::withdraw_presented_choice::<SessionRow>("a", cx);
+        test_support::click_before_redraw(guarded, window, cx);
+        let operations = session::current_operations(cx).unwrap();
+        let note = operations.read(cx).failure(&OpKey::session("a")).unwrap();
+        assert_eq!(
+            note.message.raw(),
+            "This session changed while the question was open. Choose Replace again."
+        );
+    });
+    test_support::settle(cx);
+    assert!(pending(&mut helm).is_empty());
+    assert!(!drawn(cx, "prompt-alternative-0"));
+}
+
 /// Custom flags may opt out of checks. The confirmation keeps those flags
 /// under the YOLO answers and offers no automatic guarded equivalent.
 #[gpui::test]

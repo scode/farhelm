@@ -988,7 +988,8 @@ changed since its prompt stay (a delete or restart that goes beyond what its con
 `6aef8dc2`). No new generic precondition protocol is added on the helm or supervisor; the GUI sends each route's
 existing preconditions, and new precondition checks go only where SPEC already requires them. The launcher's YOLO and
 hook setup questions keep their source warnings live until the user answers. Each answer uses the warning shown at that
-moment.
+moment. Plain Replace's guarded answer can carry over a concurrent rename. It keeps the original host incarnation, saved
+launch choices and Delete guard.
 
 This is the structural fix for the old GUI's largest bug class: an action that ran on state the user was not shown.
 
@@ -5334,11 +5335,12 @@ launch representations symmetrically so its source and destination can be upgrad
 retain their equality checks. Create admission accounts separately for the two extra JSON bytes of the YOLO
 classification so a saved launch at the previous size limit can still be copied.
 
-Plain Replace uses the shared YOLO question. The guarded answer sends the existing Replace-with body with the visible
-source title and directory at answer time, the original host incarnation and Delete guard, and a Guarded selection. The
-helm compiles the new launch with current workspace trust settings and uses the ordinary Replace-with bookkeeping for
-launch history and remembered defaults. If the visible source moves hosts or its saved launch changes before the answer,
-the desktop asks the user to choose Replace again.
+Plain Replace uses the shared YOLO question. The guarded answer sends the existing Replace-with body with the original
+host incarnation and Delete guard and a Guarded selection. It reads the source's title and directory from the current
+listing. A concurrent rename can carry over, and the directory stays fixed for that session. The helm compiles the new
+launch with current workspace trust settings and uses the ordinary Replace-with bookkeeping for launch history and
+remembered defaults. If the source leaves the listing, moves hosts or its saved launch changes before the answer, the
+desktop records the same note to choose Replace again.
 
 The launcher observes completed agent-switch transactions for permission escalation, including cross-agent model picks
 and search. A template's explicit permission is a deliberate choice, not an automatic fallback; compare after its full

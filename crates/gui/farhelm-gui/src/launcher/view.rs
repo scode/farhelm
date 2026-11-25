@@ -1336,8 +1336,8 @@ impl Launcher {
         self.press_at(None, Mark::take(cx), window, cx);
     }
 
-    /// A hook answer carries the source warning and input mark from its own press through the setting write.
-    /// Direct presses use the currently presented warning.
+    /// A button or hook answer carries its own source warning. Shortcuts without a button use the current presented
+    /// warning. The input mark stays with the press through any setting write.
     fn press_at(
         &mut self,
         answered_source: Option<SourceConsent>,
@@ -1534,7 +1534,7 @@ impl Launcher {
 /// A click handler that runs `act` on the launcher, if it is still open.
 fn on_launcher(
     launcher: WeakEntity<Launcher>,
-    act: fn(&mut Launcher, &mut Window, &mut Context<Launcher>),
+    act: impl Fn(&mut Launcher, &mut Window, &mut Context<Launcher>) + 'static,
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
     move |_, window, cx| {
         let _ = launcher.update(cx, |launcher, cx| act(launcher, window, cx));
@@ -2313,12 +2313,14 @@ impl Render for Launcher {
         let holding = self.yolo_in_flight(cx) || self.hook_write_in_flight(cx);
         let restart = matches!(self.draft.mode, Mode::RestartWith(_));
         let source = self.source_consent(cx);
-        if restart || matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
-            self.source_frame.capture(source, (), window);
+        let source_action = if restart || matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
             if let Some(state) = &self.hook_question {
                 state.show_source(source, cx);
             }
-        }
+            Some(self.source_frame.capture(source, (), window))
+        } else {
+            None
+        };
         if let Some(state) = &self.yolo {
             state.show_request(source, self.request(false, source, cx), cx);
         }
@@ -2872,7 +2874,16 @@ impl Render for Launcher {
             .refused(refusal.is_some())
             // Busy while the YOLO question's host write is out, when a press does nothing (`Launcher::press`).
             .busy(holding || self.hook_answer_pending(cx))
-            .on_click(on_launcher(weak.clone(), Launcher::press)),
+            .on_click(on_launcher(weak.clone(), move |launcher, window, cx| {
+                // A click on this button can authorize only the source warning from its own rendered frame.
+                if let Some(action) = &source_action {
+                    if let Some(&source) = action.shown() {
+                        launcher.press_at(Some(source), Mark::take(cx), window, cx);
+                    }
+                } else {
+                    launcher.press(window, cx);
+                }
+            })),
         );
         let title = search::command_title(&self.draft.mode);
         let (command, guidance, command_anchor) = self.command_header(palette, window, cx);

@@ -216,12 +216,14 @@ pub(crate) fn ask(
                 let Some(store) = session::current_store(cx) else {
                     return;
                 };
-                let Some(row) = store.read(cx).collections().get::<SessionRow>(&key) else {
-                    return;
-                };
-                // A concurrent rename can be visible by the time the user
-                // answers. Keep the offered launch and original connection.
-                if row.host != host || row.info.launch != asked_launch {
+                // A concurrent rename can carry over to the replacement. The guarded answer still needs the source
+                // to be in the listing with the launch it offered and on the same host.
+                let Some(row) = store
+                    .read(cx)
+                    .collections()
+                    .get::<SessionRow>(&key)
+                    .filter(|row| row.host == host && row.info.launch == asked_launch)
+                else {
                     if let Some(operations) = session::current_operations(cx) {
                         let op_key = OpKey::session(&key);
                         operations.update(cx, |operations, cx| {
@@ -236,7 +238,7 @@ pub(crate) fn ask(
                         });
                     }
                     return;
-                }
+                };
                 let Some(guarded) = guarded_create(row, expected_incarnation) else {
                     return;
                 };
@@ -277,7 +279,7 @@ pub(crate) fn ask(
     true
 }
 
-/// Carry the source's visible details into a guarded replacement. Replace
+/// Carry the source's current title and directory into a guarded replacement. Replace
 /// with composes argv using current trust settings and enforces the original
 /// host incarnation and Delete guard.
 fn guarded_create(
