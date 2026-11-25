@@ -214,11 +214,6 @@ consequences.
   single 'Custom agent' and jumps Settings to whichever custom-agent draft sorts first rather than staying on the page
   the user was viewing.
 
-- [`trailing-custom-agent-settings-launch-preview-breaks-bidi-isolation.md`](trailing-custom-agent-settings-launch-preview-breaks-bidi-isolation.md)
-  — If a custom agent's command contains right-to-left characters, the Start and Resume command previews in Settings can
-  visually reorder Farhelm's --model, --effort, and --resume flags with the command text instead of keeping them
-  isolated.
-
 - [`trailing-custom-agent-settings-omits-per-field-unsaved-dots.md`](trailing-custom-agent-settings-omits-per-field-unsaved-dots.md)
   — Editing Display name, ID, Command, or capability checkboxes on a custom-agent page marks the sidebar row and footer
   as unsaved, but never shows the unsaved dot next to any edited field.
@@ -268,15 +263,6 @@ consequences.
   — When a custom agent is deleted externally while the user has unsaved edits, the 'This registration was deleted.
   Register it again to keep these edits.' banner is omitted from the accessibility tree so assistive technology never
   exposes or announces it.
-
-- [`trailing-settings-custom-agent-duplicate-host-sentence-id.md`](trailing-settings-custom-agent-duplicate-host-sentence-id.md)
-  — Whenever a registered custom agent's Settings page is open, both its sidebar navigation row and its page heading
-  emit a label with the same flat element ID in GPUI's driver node list, violating Farhelm's unique-ID rule for host
-  sentences and making element-ID lookups in tests and the gpui-agent automation bridge ambiguous.
-
-- [`trailing-settings-custom-agent-nav-tooltip-omits-bidi-isolation.md`](trailing-settings-custom-agent-nav-tooltip-omits-bidi-isolation.md)
-  — Hovering a custom agent's row in the Settings sidebar shows a tooltip that embeds the agent's display name directly
-  in a plain string instead of isolating its text direction.
 
 - [`trailing-settings-custom-agents-unavailable-collection-silently-appears-empty.md`](trailing-settings-custom-agents-unavailable-collection-silently-appears-empty.md)
   — If the helm fails to read the custom-agents catalog (for example due to a database error or a corrupted catalog

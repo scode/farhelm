@@ -3,8 +3,9 @@
 use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::ui_channel::{ApiPath, Availability, Collection, Method};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Div, Entity, IntoElement as _, ParentElement as _,
-    Render, Role, SharedString, Styled as _, WeakEntity, Window, div, px,
+    AnyElement, App, AppContext as _, Context, Div, Entity, InteractiveElement as _,
+    IntoElement as _, ParentElement as _, Render, Role, SharedString, Styled as _, WeakEntity,
+    Window, div, px,
 };
 
 use super::{
@@ -45,15 +46,33 @@ impl Section {
         let Self::CustomAgent(id) = self else {
             return self.label().into();
         };
-        let store = session::current_store(cx);
-        let name = store
-            .as_ref()
-            .and_then(|store| store.read(cx).collections().get::<CustomAgent>(id))
-            .map_or(id.as_str(), |agent| agent.display_name.as_str());
         HostSentence::new(SharedString::from(format!("custom-agent-name-{id}")))
-            .host(&HostText::from_host(name))
+            .host(&registration_name(id, cx))
             .into()
     }
+
+    /// The registered name stays isolated from the surrounding tooltip words, including after a pushed rename.
+    pub(super) fn nav_help(&self, label: &str, cx: &App) -> HoverHelp {
+        match self {
+            Self::CustomAgent(id) => HoverHelp::sentence(
+                HostSentence::new(SharedString::from(format!("custom-agent-nav-help-{id}")))
+                    .text("Show ")
+                    .host(&registration_name(id, cx))
+                    .text(" settings"),
+            ),
+            _ => HoverHelp::tooltip(format!("Show {label} settings")),
+        }
+    }
+}
+
+/// A deleted registration's retained draft still has its stable ID to label it.
+fn registration_name(id: &str, cx: &App) -> HostText {
+    let store = session::current_store(cx);
+    let name = store
+        .as_ref()
+        .and_then(|store| store.read(cx).collections().get::<CustomAgent>(id))
+        .map_or(id, |agent| agent.display_name.as_str());
+    HostText::from_host(name)
 }
 
 impl SettingsDialog {
@@ -630,16 +649,24 @@ impl Render for Editor {
         } else {
             draft.command
         };
-        let preview = |id, label, tail: &str| {
-            let argv = HostText::from_host(format!(
-                "{command} [--model <model>] [--effort <effort>]{tail}"
-            ));
+        let command = HostText::from_host(command);
+        let preview = |id: &'static str, label, tail: &str| {
             div()
                 .flex()
                 .flex_col()
                 .gap(px(4.))
                 .child(label)
-                .child(HostSentence::new(id).mono(&argv))
+                // The registration cannot reorder Farhelm's flag words. Both parts keep the terminal face.
+                .child(
+                    div()
+                        .debug_selector(|| id.to_owned())
+                        .font_family(crate::assets::TERMINAL_FONT)
+                        .child(
+                            HostSentence::new(id)
+                                .host(&command)
+                                .text(format!(" [--model <model>] [--effort <effort>]{tail}")),
+                        ),
+                )
         };
         let settings = card::rows(
             [

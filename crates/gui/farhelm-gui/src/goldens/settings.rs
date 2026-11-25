@@ -183,6 +183,27 @@ fn settings_scene_with(
 
 /// Scroll the saved registration to its two capabilities and command previews. The pinned heading keeps its ID.
 pub(super) fn settings_custom_agent_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    open_custom_agent(state, window, cx);
+    stage_scroll_end(state, false);
+}
+
+/// Use the bundled-font spelling in screenshots. The Settings test checks the actual right-to-left text isolates.
+pub(super) fn settings_custom_agent_nav_tooltip_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open_custom_agent(state, window, cx);
+    window.set_driver_enabled(true);
+    state.hover.set(Some("settings-section-custom-acme-code"));
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(super::Pending(Cell::new(true))));
+}
+
+/// Both captures use the same registration so the Settings page and sidebar refer to the same agent.
+fn open_custom_agent(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene_with(
         state,
         crate::settings::Section::CustomAgent("acme-code".into()),
@@ -193,7 +214,31 @@ pub(super) fn settings_custom_agent_setup(state: &SceneState, window: &mut Windo
         window,
         cx,
     );
-    stage_scroll_end(state, false);
+}
+
+/// Custom agents are below the built-in sections. Scroll the sidebar before the shared hover step rests on the row.
+pub(super) fn settings_custom_agent_nav_tooltip(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    if let Some(nav) = window.driver_nodes().iter().find(|node| {
+        node.element_id.as_deref() == Some("settings-sections") && !node.visible_bounds.is_empty()
+    }) && super::take_pending(state)
+    {
+        let position = nav.visible_bounds.center();
+        window.defer(cx, move |window, cx| {
+            window.dispatch_event(
+                gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                    position,
+                    delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1000.))),
+                    ..Default::default()
+                }),
+                cx,
+            );
+        });
+    }
+    div().into_any_element()
 }
 
 /// A later section in the same opening receives the same fake configuration as if it were the first.

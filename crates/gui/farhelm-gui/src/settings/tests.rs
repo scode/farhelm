@@ -271,8 +271,11 @@ pub(super) fn heading(cx: &mut VisualTestContext) -> Option<String> {
 
 /// The catalog owns navigation even when it is empty. An external delete before a PUT settles takes the user
 /// back to Add while retaining the draft and its receipt. A delete confirmed on the page removes it entirely.
+/// The previews and sidebar hover help isolate registered text so it cannot reorder the surrounding app words.
 #[gpui::test]
 fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppContext) {
+    const DISPLAY_NAME: &str = "Example Code סוכן";
+    const COMMAND: &str = "~/bin/כלי-42";
     let collection = Collection::CustomAgents;
     let (mut helm, cx, _gear) = open_rail_with(
         cx,
@@ -286,19 +289,29 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     open_settings(cx);
     click_section(cx, Section::AddCustomAgent);
     assert_eq!(heading(cx).as_deref(), Some("Add custom agent"));
-    fill(cx, "custom-agent-name", "Example Code");
-    fill(cx, "custom-agent-command", "~/bin/example-code");
+    fill(cx, "custom-agent-name", DISPLAY_NAME);
+    fill(cx, "custom-agent-command", COMMAND);
     into_view(cx, "custom-agent-resumption");
     click(cx, "custom-agent-resumption");
     assert_eq!(switch_on(cx, "custom-agent-resumption"), Some(true));
+    for id in ["custom-agent-start-preview", "custom-agent-resume-preview"] {
+        into_view(cx, id);
+        let lines = crate::session_list::tests::texts_within(&frame(cx), id);
+        assert!(
+            lines
+                .iter()
+                .any(|line| { crate::host_text::tests::paints_isolated(&line.text, COMMAND) }),
+            "{id} isolates the command on its own: {lines:?}"
+        );
+    }
     click(cx, "custom-agent-save");
     let (create, body) = one_command(&mut helm, Method::Post, "/api/custom-agents");
     assert_eq!(
         body,
         json!({
             "id": "example-code",
-            "display_name": "Example Code",
-            "command": "~/bin/example-code",
+            "display_name": DISPLAY_NAME,
+            "command": COMMAND,
             "supports_resumption": true,
             "supports_reporting": false,
         })
@@ -314,7 +327,21 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     });
     helm.reply(create, 201, Some(body));
     settle(cx);
-    assert_eq!(heading(cx).as_deref(), Some("Example Code"));
+    assert_eq!(heading(cx).as_deref(), Some(DISPLAY_NAME));
+
+    let nav = "settings-section-custom-example-code";
+    assert!(shows_whole(cx, nav, "settings-navigation-region"));
+    let at = test_support::center(cx, nav);
+    cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+    test_support::advance(cx, crate::layers::HOVER_DELAY);
+    let tooltip =
+        crate::session_list::tests::texts_within(&frame(cx), "custom-agent-nav-help-example-code");
+    assert!(
+        tooltip
+            .iter()
+            .any(|line| { crate::host_text::tests::paints_isolated(&line.text, DISPLAY_NAME) }),
+        "the tooltip isolates the registered name: {tooltip:?}"
+    );
 
     fill(cx, "custom-agent-command", "~/bin/example-v2");
     click(cx, "custom-agent-save");
@@ -354,7 +381,7 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     });
     helm.reply(register, 201, Some(recovered));
     settle(cx);
-    assert_eq!(heading(cx).as_deref(), Some("Example Code"));
+    assert_eq!(heading(cx).as_deref(), Some(DISPLAY_NAME));
 
     click(cx, "custom-agent-delete");
     assert!(sent(&mut helm).is_empty(), "Delete asks first");

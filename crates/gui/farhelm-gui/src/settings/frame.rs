@@ -309,7 +309,7 @@ impl SettingsDialog {
         Button::new(
             section.nav_button_id(),
             label.clone(),
-            HoverHelp::tooltip(format!("Show {label} settings")).beside_list(false),
+            section.nav_help(&label, cx).beside_list(false),
             Role::Button,
         )
         .tier(Tier::Nav)
