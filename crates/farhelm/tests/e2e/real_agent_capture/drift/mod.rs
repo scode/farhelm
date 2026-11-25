@@ -869,6 +869,7 @@ macro_rules! drift_cases {
 }
 
 mod base;
+mod initial_prompt;
 mod model_selection;
 mod permission_modes;
 mod reasoning_effort;

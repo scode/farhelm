@@ -53,6 +53,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
+  started with `cursor-agent -- "$prompt"`, where the prompt starts with `--` and includes a newline. Run
+  `python3 -B scripts/run-harness-drift.py --no-upgrade --category initial_prompt --harness cursor` with an existing
+  Cursor login. Verify the fresh turn and find the test conversation's ID so the check can exercise
+  `cursor-agent --resume "$id" -- "$prompt"` too.
+
+- **Verify launch prompts when reopening OpenCode conversations.** OpenCode 1.19.6 answered the fresh launch prompt.
+  `opencode --session "$id" "--prompt=$prompt"` reopened that conversation and showed the earlier reply and an empty
+  composer. It never showed the recall prompt or its reply. Reproduce with
+  `python3 -B scripts/run-harness-drift.py --no-upgrade --category initial_prompt --harness opencode`. The tested
+  release's TUI opens the named session without passing along the startup prompt. Check a release that includes the
+  upstream fix.
+  [OpenCode 1.19.6 startup code](https://github.com/anomalyco/opencode/blob/v1.19.6/packages/tui/src/app.tsx#L449-L469)
+
 - **Verify OpenRouter reasoning effort with credentials.** The new reasoning effort checks for Goose 1.60.2, Pi 1.6.0
   and OMP 19.1.1 stopped before launch because `OPENROUTER_API_KEY` was missing. Run
   `python3 -B scripts/run-harness-drift.py --no-upgrade --category reasoning_effort` with the key to exercise Goose's
@@ -183,12 +197,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   disabled, verify Cursor's default launch without a permission flag ("Agent's own setting"), and send a real prompt to
   Cursor and OpenCode to confirm interactive turns work under Farhelm's terminal host (today both stop at the initial
   TUI or trust screen).
-
-- **Drift tests: initial prompt delivery via launch arguments.** Cover all eight agents that accept a launch-time prompt
-  (Claude, Codex, Cursor, Muse, OMP, and Grok via `-- <prompt>`; OpenCode via `--prompt=<prompt>`; Antigravity via
-  `--prompt-interactive=<prompt>`), including leading-dash and multiline prompts, proving each starts interactively,
-  submits the prompt automatically, does not re-send it on Restart, and works with a named conversation start where
-  supported. Plan: `plans/queue/drift-initial-prompt-launch.md`.
 
 - **Drift tests: one-time named conversation starts.** Cover starting a session on a named conversation ID or file
   across all ten agents — especially Cursor's `--resume <chat-id>` and OpenCode's `--session <session-id>`, which have
