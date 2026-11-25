@@ -25,6 +25,26 @@ pub(super) fn shell_template_approval(_: &SceneState, _: &mut Window, cx: &mut A
     approval_scene(approval, 660., cx)
 }
 
+/// The card shows the stored permission even when the proposed agent cannot launch with that mode.
+pub(super) fn unavailable_template_permission(
+    _: &SceneState,
+    _: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let mut approval = approval_spawn();
+    approval.action = farhelm_proto::approvals::ApprovalAction::TemplateWrite {
+        name: "review".into(),
+        replaces_existing: false,
+        fields: farhelm_proto::launcher::TemplateFields {
+            agent: Some(farhelm_proto::LaunchHarness::Claude),
+            permissions: Some(Some(farhelm_proto::LaunchPermission::Approve)),
+            ..Default::default()
+        },
+        host_name: None,
+    };
+    approval_scene(approval, 660., cx)
+}
+
 /// The same spawn at the old minimum window's card width, from a host with a long name: labels stacked over their
 /// values, the From line wrapping with its ID and Copy ID under the title, and the answer buttons wrapping onto lines of
 /// their own, each "Always allow" button shrinking and wrapping its host name inside the card rather than running past

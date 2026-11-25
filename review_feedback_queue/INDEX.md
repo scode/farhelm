@@ -13,9 +13,6 @@ consequences.
 
 ## Highest priority: security or data loss
 
-- [`template-delete-can-target-unshown-editor.md`](template-delete-can-target-unshown-editor.md) — Delete can remove a
-  different template from the one shown. The old button can also suppress Undo.
-
 - [`settings-close-can-save-unlisted-drafts.md`](settings-close-can-save-unlisted-drafts.md) — Save and Close can write
   an unlisted form and clear the saved alert token outside the user’s confirmation.
 
@@ -318,9 +315,6 @@ consequences.
 - [`app-settings-shared-upgrade-option-has-local-heading.md`](app-settings-shared-upgrade-option-has-local-heading.md) —
   The App heading says This Mac even though it contains a helm-shared highlights setting.
 
-- [`launcher-incomplete-template-banner-misplaced.md`](launcher-incomplete-template-banner-misplaced.md) — The
-  incomplete-template message appears below the form and asks the user to complete the form below it.
-
 - [`podman-launch-lifetime-notice-hidden.md`](podman-launch-lifetime-notice-hidden.md) — The launcher only explains in
   Host help that deleting the last session removes a new container and its files.
 
@@ -332,9 +326,6 @@ consequences.
 
 - [`launcher-highlights-escape-notation.md`](launcher-highlights-escape-notation.md) — The launcher can underline the
   escape notation displayed for a path even when that notation was absent from the matching path.
-
-- [`quick-launch-loses-template-source-mark.md`](quick-launch-loses-template-source-mark.md) — A launcher opened for
-  review or correction by quick launch can omit the source marker for the template that filled it.
 
 - [`launcher-announces-two-selected-setups.md`](launcher-announces-two-selected-setups.md) — The launcher can report
   both the setup that filled the form and the current keyboard target as selected.
@@ -676,10 +667,6 @@ consequences.
 - [`trailing-settings-containers-reload-omits-loading-keeps-error.md`](trailing-settings-containers-reload-omits-loading-keeps-error.md)
   — After a failed refresh in Settings -> Containers, deleting the last leftover or clicking Refresh hides the reading
   indicator and leaves only the old refresh error visible while the new read waits.
-
-- [`trailing-template-summary-misstates-unsupported-permissions.md`](trailing-template-summary-misstates-unsupported-permissions.md)
-  — When a template stores an approval mode its chosen non-shell agent does not offer, approval cards and template list
-  summaries display that agent's default mode instead of the stored mode.
 
 - [`trailing-masked-input-test-omits-a11y-value-checks.md`](trailing-masked-input-test-omits-a11y-value-checks.md) — The
   masked-input test checks painted text and accessible names but never inspects accessible values or runs with

@@ -16,14 +16,14 @@ use super::{Pending, SceneState, take_pending};
 
 /// The Templates dialog as the list header's Templates button opens it (reference `templates-dialog`): three templates
 /// with summaries of different shapes, the first holding ⚡ (so its row has the chord line and the filled amber bolt)
-/// and the second holding number key 2. Focus on the dialog itself, where it starts until the editor exists, so no
+/// and the second holding number key 2 and an unavailable approval mode. Focus starts on the dialog itself, so no
 /// ring shows. The fake and the connection are kept for the scene's life, like Settings'.
 pub(super) fn templates_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let templates = [
         serde_json::json!({"name": "my-codex", "fields": {"kind": "agent", "agent": "codex", "model": "gpt-6-luna", "effort": "high"}}),
-        serde_json::json!({"name": "review", "fields": {"permissions": "guarded", "name": "review"}}),
+        serde_json::json!({"name": "review", "fields": {"agent": "claude", "permissions": "approve", "name": "review"}}),
         serde_json::json!({"name": "webbuilder", "fields": {"kind": "command", "command": "make dev", "yolo": false, "destination": {"folder": "/src/web"}}}),
     ];
     helm.connect(vec![

@@ -1410,16 +1410,16 @@ agent choice is independent of that destination:
   command names remain No shortcut or the key chord; ownership and binding help are separate accessible descriptions. A
   template has at most one key and each key has at most one template. Any template can hold a number key, including one
   that cannot launch alone; only the combined setup must be launchable. Pressing such a key alone opens New with the
-  template applied and a prominent alert banner at the top explaining that it cannot launch on its own and how to
-  combine it with the sequence prefix. The banner expires about six seconds after application finishes, or when the user
-  starts editing. Both key and bolt hover explain launching, their uniqueness and the current choice; partial-template
-  key hover explains composition. The bolt retains its existing eligibility rule. Bindings are a whole-map shared
-  preference, replaced on write; a GUI save, which re-reads the bindings first, can undo an agent's or the command
-  line's binding change that lands between that read and its write (One GUI at a time). Names must be syntactically
-  valid but need not exist at write time. Rename keeps a key, delete frees it through both delete paths, and Undo never
-  restores it. An agent may assign or clear a number key through the same template verbs and approval card. Assigning an
-  occupied key moves it from its previous template, as the Templates editor does; a key can still belong to a partial
-  template.
+  template applied and a prominent alert banner below the launcher actions explaining that it cannot launch on its own
+  and how to combine it with the sequence prefix. The banner expires about six seconds after application finishes, or
+  when the user starts editing. Both key and bolt hover explain launching, their uniqueness and the current choice;
+  partial-template key hover explains composition. The bolt retains its existing eligibility rule. Bindings are a
+  whole-map shared preference, replaced on write; a GUI save, which re-reads the bindings first, can undo an agent's or
+  the command line's binding change that lands between that read and its write (One GUI at a time). Names must be
+  syntactically valid but need not exist at write time. Rename keeps a key, delete frees it through both delete paths,
+  and Undo never restores it. An agent may assign or clear a number key through the same template verbs and approval
+  card. Assigning an occupied key moves it from its previous template, as the Templates editor does; a key can still
+  belong to a partial template.
 - Quick-launch sequences compose templates without changing the single-chord shortcuts. Cmd+X on macOS, or Ctrl+Shift+X
   on Linux, starts a sequence, except in a text field outside the launcher where it retains its normal meaning. In the
   launcher's own text fields it starts a sequence only when no text is selected; with a selection it keeps Cut. A
@@ -1444,7 +1444,7 @@ agent choice is independent of that destination:
   the pill says "apply" instead of "launch". An unbound key opens Templates at Enter with the binding hint outside the
   launcher. Inside the launcher it shows a refusal below the command field without changing the draft. A refusal names
   its template and reveals New with the draft outside the launcher; an incomplete result opens New with a prominent
-  banner saying "This sequence doesn't make a complete setup; complete it below", whether one or several templates were
+  banner saying "This sequence doesn't make a complete setup. Complete it above.", whether one or several templates were
   queued. A YOLO question uses the same fallback. The banner follows the number-key banner's expiry and dismissal rules.
   Bindings refresh when the prefix starts; Enter captures the bound names currently shown in the pill. Enter with
   nothing queued cancels without opening anything. A non-modal amber status pill is centered over the terminal area, or
@@ -4671,7 +4671,8 @@ classification. A command launch's Asserted YOLO or Asserted not YOLO is explici
 Farhelm's verdict. Stored workspace trust has its own Trusted workspace or Not trusted chip. The trusted chip names
 Settings as the source. Permission flags remain a separate, fully wrapped fact. Prompt cards use the same chip
 presentation. Template cards show the permission field when present, resolving a reset to the agent's default when the
-template names one. They retain any explicit command YOLO assertion.
+template names one. An explicit mode keeps its stored name, and the card marks a mode the named agent does not offer.
+Template cards retain any explicit command YOLO assertion.
 
 A qualifying session card offers Allow, **Always allow on <host> only**, **Always allow from <host>**, and Deny. The new
 button grants only **Manage sessions on this host without asking** to the requesting install and approves that request.

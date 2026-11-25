@@ -398,7 +398,7 @@ fn with_no_match_enter_does_nothing_and_escape_or_a_press_outside_closes(cx: &mu
 /// "Template number shortcuts": "The same banner accompanies an incomplete Cmd+J or quick-switcher pick, without
 /// recommending the sequence prefix"). Launching it would only be refused. Specified: `partial` and Enter close the
 /// list, send no create, and open New with focus inside it, the template's folder and the banner "partial needs more
-/// choices before it can launch; complete it below."; the chord then opens no list over New.
+/// choices before it can launch. Complete it above." The chord then opens no list over New.
 #[gpui::test]
 fn a_partial_template_opens_new_with_its_choices_applied(cx: &mut TestAppContext) {
     let mut main = open_main(cx, fleet());
@@ -421,7 +421,7 @@ fn a_partial_template_opens_new_with_its_choices_applied(cx: &mut TestAppContext
     );
     assert_eq!(
         label(main.cx, "launcher-banner").as_deref(),
-        Some("partial needs more choices before it can launch; complete it below.")
+        Some("partial needs more choices before it can launch. Complete it above.")
     );
     keys(main.cx, CHORD);
     assert!(!switcher_drawn(main.cx), "no list over New");

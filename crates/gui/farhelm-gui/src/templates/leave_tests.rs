@@ -494,13 +494,49 @@ fn the_label_the_user_saw_decides_the_undo(cx: &mut TestAppContext) {
         cx.update(|window, cx| {
             let dialog = layers::last_opened::<super::dialog::TemplatesDialog>(cx)
                 .expect("a dialog is open");
-            dialog.update(cx, |dialog, cx| dialog.delete_editor(kind, window, cx));
+            dialog.update(cx, |dialog, cx| {
+                dialog.delete_editor(name, kind, window, cx)
+            });
         });
         let (id, _) = one(&mut helm, Method::Delete, &format!("/api/templates/{name}"));
         helm.reply(id, 200, None);
         settle(cx);
         assert_eq!(drawn(cx, "templates-undo-notice"), undo, "{name}");
     }
+}
+
+/// A click on an old Delete permanently footer must not delete the different template that just opened. A fresh
+/// click after the new footer is shown still deletes the template it names.
+#[gpui::test]
+fn an_old_delete_footer_cannot_delete_the_new_editor(cx: &mut TestAppContext) {
+    let mut list = templates();
+    list[2].fields.command = Some("make\u{200B}dev".into());
+    let (mut helm, cx) = open_header(cx, &list, None);
+    open_editor(&mut helm, "template-open-webbuilder", cx);
+    assert!(painted(cx).contains("Delete permanently"));
+    let next = test_support::center(cx, "template-open-codex-deep");
+    let delete = test_support::center(cx, "templates-delete");
+    cx.update(|window, cx| {
+        test_support::click_before_redraw(next, window, cx);
+        let dialog = layers::last_opened::<super::dialog::TemplatesDialog>(cx).unwrap();
+        let editor = dialog.read(cx).editor.as_ref().unwrap();
+        assert_eq!(editor.previous(), Some("codex-deep"));
+        assert!(window.driver_nodes().iter().any(|node| {
+            node.element_id.as_deref() == Some("templates-delete")
+                && node.label.as_deref() == Some("Delete permanently")
+        }));
+        test_support::click_before_redraw(delete, window, cx);
+    });
+    test_support::show_next_frame(cx);
+    assert!(
+        helm.commands()
+            .iter()
+            .all(|command| command.method != Method::Delete)
+    );
+    assert_eq!(draft(cx).name, "codex-deep");
+    assert!(!painted(cx).contains("Delete permanently"));
+    click(cx, "templates-delete");
+    one(&mut helm, Method::Delete, "/api/templates/codex-deep");
 }
 
 /// A delete the helm refuses must say so and keep the template open, or the user believes it gone. Specified: the

@@ -1302,9 +1302,9 @@ impl Editor {
                 let _ = weak.update(cx, |dialog, cx| dialog.duplicate(window, cx));
             })
         });
-        // Delete, for a stored template only, between Duplicate and Save as in the old footer. The handler holds the
-        // kind this frame's label says ([`DeleteKind`]).
-        let delete = self.previous.is_some().then(|| {
+        // A click can still reach this frame's footer after the list has opened another editor. The stored name and
+        // Delete kind identify the action the footer offered together.
+        let delete = self.previous.clone().map(|name| {
             let weak = weak.clone();
             let kind = self.delete_kind(cx);
             let (label, help) = match kind {
@@ -1321,7 +1321,7 @@ impl Editor {
                 .tier(Tier::Danger)
                 .busy(busy)
                 .on_click(move |_, window, cx| {
-                    let _ = weak.update(cx, |dialog, cx| dialog.delete_editor(kind, window, cx));
+                    let _ = weak.update(cx, |dialog, cx| dialog.delete_editor(&name, kind, window, cx));
                 })
         });
         band.children(duplicate).children(delete).child(save)

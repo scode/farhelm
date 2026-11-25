@@ -103,6 +103,33 @@ fn resets_and_permissions_read_as_the_launch_would_request() {
     assert_eq!(plain(&yolo), "Approvals YOLO · YOLO");
 }
 
+/// An explicit unavailable mode is part of the stored template. Presenting the default instead misdescribes what a
+/// user would edit or approve.
+#[test]
+fn explicit_unavailable_modes_keep_their_names() {
+    for (agent, permission, expected) in [
+        (
+            LaunchHarness::Claude,
+            LaunchPermission::Approve,
+            "Approve (not offered) · Claude",
+        ),
+        (
+            LaunchHarness::Pi,
+            LaunchPermission::Custom,
+            "Custom (not offered) · Pi",
+        ),
+    ] {
+        assert_eq!(
+            plain(&TemplateFields {
+                agent: Some(agent),
+                permissions: Some(Some(permission)),
+                ..TemplateFields::default()
+            }),
+            expected
+        );
+    }
+}
+
 /// A template's placement is how a user tells a container template from a sandbox one in the list, so it reads as the
 /// environment it makes, in the launcher's words: the old summary's "New " and `target_label` with no hosts, so a
 /// container's place is its host's id ("New web container on host 1") and a sandbox reads "New web sandbox". The

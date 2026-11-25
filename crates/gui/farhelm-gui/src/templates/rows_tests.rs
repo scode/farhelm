@@ -156,7 +156,7 @@ fn a_switcher_pick_opens_new_with_the_template_and_never_launches(cx: &mut TestA
     );
     assert_eq!(
         banner(cx).as_deref(),
-        Some("partial needs more choices before it can launch; complete it below.")
+        Some("partial needs more choices before it can launch. Complete it above.")
     );
     test_support::advance(cx, BANNER_SHOWS_FOR - Duration::from_millis(100));
     assert!(
@@ -373,6 +373,6 @@ fn a_pick_applies_its_template_once_the_catalog_is_read(cx: &mut TestAppContext)
     );
     assert_eq!(
         banner(cx).as_deref(),
-        Some("model-only needs more choices before it can launch; complete it below.")
+        Some("model-only needs more choices before it can launch. Complete it above.")
     );
 }

@@ -478,9 +478,11 @@ impl TemplatesDialog {
             .is_some_and(|editor| editor.save(self.catalog.as_deref(), window, cx))
     }
 
-    /// The editor's Delete of the `kind` its label said. Nothing while any write of the dialog's is in flight.
+    /// Delete the named template with the Undo promise from the footer that was shown. Ignore the old footer if a
+    /// row click changed editors before redraw, or if a write is in flight.
     pub(super) fn delete_editor(
         &mut self,
+        name: &str,
         kind: DeleteKind,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -488,10 +490,15 @@ impl TemplatesDialog {
         if self.writing(cx) {
             return;
         }
+        let Some(editor) = self
+            .editor
+            .as_mut()
+            .filter(|editor| editor.previous() == Some(name))
+        else {
+            return;
+        };
         self.status = None;
-        if let Some(editor) = self.editor.as_mut() {
-            editor.delete(kind, window, cx);
-        }
+        editor.delete(kind, window, cx);
     }
 
     /// One of the editor's writes settled ([`Editor::settled`]); act on what reaches beyond the editor. A save the

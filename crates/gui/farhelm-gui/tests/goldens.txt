@@ -12,6 +12,8 @@ linux/approval-card-narrow--dark.png 621c3acb0ac441c546d19aa00cc9d1784ee82edd
 linux/approval-card-narrow--light.png 264e7966f8da4679cd110accce0f4307b84f4a5c
 linux/approval-shell-template--dark.png e87bb2e40a19fab09c74fdb1bea82b8201bf2e4d
 linux/approval-shell-template--light.png 345b7882034e48cac47eaa20bd7c4372eb3fc32c
+linux/approval-template-unavailable-permission--dark.png 58635134d769d3a9a733bb81d3487d31ce0f03e7
+linux/approval-template-unavailable-permission--light.png 4e8cdaec8f39e82ec9736b38deebe446a4404a7d
 linux/attention-cue-flash--dark.png 2f4dc627b20f1f9378f6f55bc8ed3b216bb6c6d1
 linux/attention-cue-flash--light.png 535cf23653405c3303f423ef3d926779a52b75c0
 linux/attention-cue-flight--dark.png 60665294fa1a15be4aa4c921d4ab412f63d091dd
@@ -140,6 +142,8 @@ linux/launcher-hook-setup--dark.png e2da2eaf5eddb2649daab8f6cc50987e0b6a3c49
 linux/launcher-hook-setup--light.png c44c6bbee52b9d65f8319378a4066e676f1e6dc1
 linux/launcher-host-menu--dark.png 136751a18fb7c316d2aedac88818b0436ee16369
 linux/launcher-host-menu--light.png 35e16fadd5fd7c3a43473cc40cf81941b6342783
+linux/launcher-incomplete-template--dark.png 9bd2cffc7330ae11fd27da3853d8478bcb687165
+linux/launcher-incomplete-template--light.png f80df1b2a3dde7f1cf633d2976766e6fc9759998
 linux/launcher-managed-checkout--dark.png ef5f35c94ebd2fde25e714227252e170eaef5502
 linux/launcher-managed-checkout--light.png ab7152d67502fb0743f58994ed7fd02113bfb09f
 linux/launcher-managed-checkout-narrow--dark.png b5cf1fb9bfd42aead4096ccc192fb30e79a1ccd6
@@ -390,8 +394,8 @@ linux/template-shell-permissions--dark.png 32a94990a65e8a9b5fc02635cd2e589fa545d
 linux/template-shell-permissions--light.png b9336225fbb139fdbbfbc86ef9d14891291cece6
 linux/template-wrapper-help--dark.png 4ad4c470c32117083ec692ba38399f72857a20a3
 linux/template-wrapper-help--light.png 615f06f3fa19fbe0212898b6683059a76d42d90c
-linux/templates-dialog--dark.png b1390e7fce8d2244ffb3280a3443b31b3d15c5d5
-linux/templates-dialog--light.png fd89548f30c2ea15715b3bb100418b6e4aef51a4
+linux/templates-dialog--dark.png 2b8b2b0d36b3fa64c9d5286bafb672e81dccf4bd
+linux/templates-dialog--light.png 6f8e4e685fad195985acde14a651c2557e3b5d18
 linux/terminal-covered-link--dark.png fcf05b0ca81076e7e2085ea46cf8b61ce4353cde
 linux/terminal-covered-link--light.png c98c2be37c8195c97f3cb50693e9b08fb1b50fbe
 linux/terminal-cursors--dark.png 3459e566da4c53c46bf870d97660f696ab9a150d

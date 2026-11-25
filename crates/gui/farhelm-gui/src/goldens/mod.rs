@@ -708,6 +708,12 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "approval-template-unavailable-permission",
+        size: (684., 570.),
+        draw: unavailable_template_permission,
+        setup: no_setup,
+    },
+    Scene {
         name: "terminal-styles",
         size: (380., 200.),
         draw: terminals,
@@ -1242,6 +1248,12 @@ static SCENES: &[Scene] = &[
         size: (1080., 1160.),
         draw: session_lists_then,
         setup: launcher_recent_fill_setup,
+    },
+    Scene {
+        name: "launcher-incomplete-template",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_incomplete_template_setup,
     },
     Scene {
         name: "launcher-template-save-after-undo",
