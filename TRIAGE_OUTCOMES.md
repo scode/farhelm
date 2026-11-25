@@ -259,29 +259,6 @@
   Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
 - Execution: ``planned in `plans/queue/triage-helm-nov24.md` ``.
 
-## trailing-shortcuts-chord-opens-during-terminal-ime.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md "Desktop window chrome" (around line 4002): "Cmd+/ on macOS, Ctrl+Shift+/ on
-  Linux, opens **Keyboard shortcuts**, including from a focused terminal. ... repeat and composition do not open it."
-  Current code opens it unconditionally (`crates/gui/farhelm-gui/src/main_view.rs:307-309`). The same file already
-  guards Delete and Rename with `session_pane.terminal_is_composing` (`main_view.rs:268-283`; helper
-  `crates/gui/farhelm-gui/src/session_pane.rs:533-540`). The recorded gap
-  (`crates/gui/farhelm-gui/src/shortcuts.rs:27-31`; `docs/gpui/parity/other-dialogs.md` "Keyboard shortcuts") says
-  "nothing in the app can tell that handler whether the focused input is composing". That reason no longer holds for
-  terminals since 2ce86b879 (#4528), so the note records a limitation rather than a deliberate choice. The fix: add the
-  same guard, and narrow the note and parity entry to text fields, which still cannot be queried. No spec rule changes.
-  Estimated size: under 40 lines including a test modeled on the Delete and Rename composition tests, well under 100.
-  Verified: Confirmed for the terminal case. Text-field composition stays an open gap after the fix (no input-method
-  query exists), so the queue item should be narrowed to that, not removed.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
-- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code.
-  Directly follows from the spec. Size S.). Size gate: about 100 lines of diff (code, tests and docs, not counting this
-  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment says remains.
-- Execution: ``planned in `plans/queue/triage-terminal-nov24.md` ``.
-
 ## trailing-pending-scope-cleanups-logs-invalid-session-id-unescaped.md
 
 - Outcome: `fix code`.

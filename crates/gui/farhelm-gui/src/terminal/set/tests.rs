@@ -483,10 +483,15 @@ fn tabs_opened_and_closed_elsewhere_come_and_go(cx: &mut TestAppContext) {
     assert_eq!(window.strip_labels(), ["Agent", "Terminal 1", "Terminal 2"]);
 }
 
-/// The app's session shortcuts can see a terminal key before its input handler does. They must leave a composition
-/// alone, including when Delete would otherwise send immediately, and honor the next shortcut once it has ended.
+/// At dispatch, Delete, Rename and Keyboard shortcuts leave a focused terminal's marked text alone, including when
+/// Delete would send immediately. Clearing the mark lets the same chord open the overview.
 #[gpui::test]
 fn session_shortcuts_ignore_a_focused_terminal_composition(cx: &mut TestAppContext) {
+    let overview = if cfg!(target_os = "macos") {
+        "cmd-/"
+    } else {
+        "ctrl-shift-/"
+    };
     for skip in [false, true] {
         let mut app = cx.new_app();
         let mut window = open(&mut app, if skip { skipping(&[]) } else { snapshot(&[]) });
@@ -497,6 +502,11 @@ fn session_shortcuts_ignore_a_focused_terminal_composition(cx: &mut TestAppConte
             window.cx.update(|window, cx| {
                 let agent = set.read(cx).agent().clone();
                 agent.update(cx, |agent, _| {
+                    assert!(agent.is_live(), "the terminal can send input");
+                    assert!(
+                        agent.focus_handle().is_focused(window),
+                        "the terminal has focus"
+                    );
                     agent.mark_text(marked);
                     assert_eq!(agent.is_composing(window), !marked.is_empty());
                 });
@@ -506,7 +516,11 @@ fn session_shortcuts_ignore_a_focused_terminal_composition(cx: &mut TestAppConte
         window.helm.commands();
         keys(window.cx, crate::actions::RENAME_SESSION_CHORD);
         keys(window.cx, crate::actions::DELETE_SESSION_CHORD);
+        keys(window.cx, overview);
         assert!(!test_support::any_open(window.cx));
+        window.cx.update(|window, cx| {
+            assert!(set.read(cx).agent().read(cx).is_composing(window));
+        });
         assert!(
             window
                 .helm
@@ -516,6 +530,14 @@ fn session_shortcuts_ignore_a_focused_terminal_composition(cx: &mut TestAppConte
         );
         assert!(!window.typed_into(agent));
         composition(&mut window, "");
+        keys(window.cx, overview);
+        assert!(
+            test_support::frame(window.cx)
+                .iter()
+                .any(|node| node.element_id.as_deref() == Some("keyboard-shortcuts")),
+            "the same chord opens the overview after composition"
+        );
+        keys(window.cx, "escape");
         keys(window.cx, crate::actions::DELETE_SESSION_CHORD);
         assert_eq!(test_support::any_open(window.cx), !skip);
         assert_eq!(

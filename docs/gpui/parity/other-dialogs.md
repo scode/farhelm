@@ -94,7 +94,8 @@ is empty) and the bridge's fake fleet cannot queue one
 
 Tests: 5. Covers: the ${mac ? "Mac" : "non-Mac"} overview chord owns terminal input and labels.
 
-partly, below; a chord typed mid-composition is a recorded deviation (below)
+replaced for marked terminal text at dispatch, below. Native input handling and other text fields have separate
+composition gaps.
 
 ### `tests/sounds.spec.ts`
 
@@ -356,7 +357,8 @@ the main view's ground) and the `?` menu's Keyboard shortcuts item. Replacing te
   (`actions_tests::keypad_digits_and_extra_modifiers_do_not_match`, `the_position_decides_whatever_the_layout_prints`,
   `keys_at_those_positions_without_the_chord_reach_the_program`); a held repeat is
   `actions_tests::a_held_number_key_acts_once_and_a_held_text_size_chord_repeats`, which holds this chord and finds it
-  runs once. Composition is a deviation (below).
+  runs once. `session_shortcuts_ignore_a_focused_terminal_composition` checks the chord with marked text in the focused
+  terminal and again after composition ends.
 - "the chord is unavailable before sign-in or initial preferences":
   `the_chord_does_nothing_before_the_preferences_arrive`; the sign-in half is superseded (the desktop app never signs
   in).
@@ -498,12 +500,11 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### Keyboard shortcuts
 
-- **Composition opens it.** SPEC.md says composition does not open the overview, and the old listener checked the
-  event's `isComposing`. Here the keystroke interceptor takes the chord by the Slash key's position before the element
-  that owns the input handler sees it, so the refusal falls to the chord's handler, and nothing in the app can tell that
-  handler whether the focused input is composing (GPUI's key events carry no composing flag, and no foundation asks the
-  focused input for marked text). A chord typed mid-composition opens the overview. It stays until an input-method query
-  exists for handlers to ask.
+- **A composition can still open it on some input paths.** SPEC.md says composition does not open the overview. The main
+  view can check marked text in the focused terminal when it receives the action. On Linux, native compose handling can
+  clear the mark before dispatching the same key, which leaves the action unaware of the composition. When a focused
+  text field other than the terminal holds marked text, the action has no equivalent query if the chord is otherwise
+  available.
 - **No read when it opens.** The old overview read the helm's preferences once per opening and kept the names it had
   cached when that read failed. Here the ⚡ and number-key rows come from the preferences the helm pushes, which the
   store holds current (every change to them is pushed, an agent's or the command line's included), so each opening

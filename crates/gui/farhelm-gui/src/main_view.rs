@@ -304,11 +304,13 @@ impl Render for MainView {
                 session_list::open_new(&new_list, None, window, cx);
             })
             // Taken whatever the overview does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
-            // The interceptor dispatches the physical-key row to the focused element, a terminal or a dialog's control
-            // included, so it bubbles up to here like the bound shortcuts above.
-            .on_action(|_: &ShowKeyboardShortcuts, window, cx| {
-                crate::shortcuts::open_from_chord(window, cx)
-            })
+            // Check the focused terminal's marked text at dispatch. Native input handling may already have processed
+            // the key by the time this action reaches the main view.
+            .on_action(cx.listener(|main, _: &ShowKeyboardShortcuts, window, cx| {
+                if !main.session_pane.read(cx).terminal_is_composing(window, cx) {
+                    crate::shortcuts::open_from_chord(window, cx);
+                }
+            }))
             // Taken whatever the sequence does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
             .on_action(cx.listener(|main, _: &BeginSequence, window, cx| {
                 templates::begin_sequence(main.pane_anchor.clone(), window, cx)
