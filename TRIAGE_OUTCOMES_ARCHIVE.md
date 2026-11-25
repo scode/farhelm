@@ -48206,3 +48206,20 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   prefix, size S).
 - Execution: No change under the cheap-test rule. The duplicate ID is confined to flat automation lookups and has no user-facing behavior for a test to guard. Change `zvwnqzstptklmwxyymykyropktvrvput`, bookmark `plan/triage-custom-agents-nov24/03-settings-text-direction`,
   https://github.com/scode/farhelm/pull/4890/changes.
+
+## trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md
+
+- Outcome: `fix code`.
+- Assessment: In Settings → Custom agents, if the agent being edited is deleted elsewhere while the user has unsaved
+  edits, the page shows "This registration was deleted. Register it again to keep these edits." Screen readers never see
+  or announce that line. Verified: Confirmed. `crates/gui/farhelm-gui/src/settings/custom_agents.rs:685-687` is a bare
+  div with no role. GPUI exposes only elements that have a role (per `host_text.rs`). No SPEC rule requires this status
+  to be announced.
+- Decision: q-a11y, "Screen-reader and keyboard parity the spec does not name": the maintainer picked "Parity for
+  consent, warning and status text". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Expose this consent, warning or status text to assistive technology under that principle.
+  Recommendation for reference: fix code — render it through `choices::outcome_line`; size S. Size gate: about 100 lines
+  of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed by exposing the retained draft’s existing recovery notice as a named accessibility status. Change `qzlpovwkznzsxsvrnvsxrxzxstpwztux`, bookmark `plan/triage-custom-agents-nov24/03b-settings-deletion-status`,
+  https://github.com/scode/farhelm/pull/4893/changes.

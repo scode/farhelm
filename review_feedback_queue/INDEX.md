@@ -259,11 +259,6 @@ consequences.
   actions menu header and the quick switcher's agent column, instead of the custom agent's current display name (or its
   saved ID after the registration is deleted).
 
-- [`trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md`](trailing-settings-custom-agent-deleted-banner-omits-a11y-role-and-label.md)
-  — When a custom agent is deleted externally while the user has unsaved edits, the 'This registration was deleted.
-  Register it again to keep these edits.' banner is omitted from the accessibility tree so assistive technology never
-  exposes or announces it.
-
 - [`trailing-settings-custom-agents-unavailable-collection-silently-appears-empty.md`](trailing-settings-custom-agents-unavailable-collection-silently-appears-empty.md)
   — If the helm fails to read the custom-agents catalog (for example due to a database error or a corrupted catalog
   row), Settings hides the failure and shows an empty Custom agents section with only '+ Add custom agent', leaving the
