@@ -2806,7 +2806,10 @@ automatic continuation yields, and a fresh attempt waits for the explicit run to
 confirmation. The expiry wakes the ordinary fleet scan. A failed shared check still consumes the automatic attempt for
 that connection. A Tailscale mode edit queues for the host's route write guard and retires its automatic-only checks,
 while a question with a manual owner remains available to answer. The editor returns a busy reply if the route guard is
-still held at the end of the host reply bound.
+still held after five seconds. Retiring an automatic-only check releases its guard at once, so the short wait is enough
+for that case. The bound stays well under the desktop's 30-second reply watchdog: the edit travels in the desktop's
+ordered command lane, where a longer wait would hold every later command, a sign-in answer included, and the reconnect
+that follows has its own park bound of up to 15 seconds.
 
 A confirmed manual run already has progress and performs the same sign-in before revalidating or mutating its host, even
 when the setup master used during planning has expired. Automatic Update revalidates in batch mode. An expired master
@@ -6413,9 +6416,9 @@ resolved address and verifies its key against an immutable, private known-hosts 
 OpenSSH still reads its config for credentials and ports. In userspace networking mode it reaches the peer through
 `tailscale nc`. A missing peer or key stops the attempt before SSH runs.
 
-Uninstall keeps the prepared access that inspected the removal proposal. Confirmation prepares access once and checks it
-against that proposal even when continuing after the supervisor has stopped. The matching confirmation access then
-supplies the interactive sign-in, supervisor probe, inspection and every removal command. The live session list can
+Uninstall keeps the peer that inspected the removal proposal to compare against. Confirmation prepares access once and
+checks it against that proposal even when continuing after the supervisor has stopped. The matching confirmation access
+then supplies the interactive sign-in, supervisor probe, inspection and every removal command. The live session list can
 clear Uninstall only if its supervisor connection opened with the same peer and policy. The connection carries those
 facts from its own dial, which lets this check work even for a supervisor with no identity.
 
