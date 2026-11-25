@@ -3159,13 +3159,22 @@ pub(crate) fn invalid_request(message: String) -> anyhow::Error {
 /// `Stop` verb (`agent_requests::HelmAgentRequests::handle`): both need
 /// exactly "route, then ask the owning supervisor to stop it". The outcome
 /// carries any unresolved tab cleanup for the caller to present.
+/// An agent's approval binds the dispatch to the connection that described
+/// the target, even when the same session ID appears on a new connection.
 pub(crate) async fn do_stop_session(
     state: &AppState,
     key: &store::SessionKey,
     refuse_if_tabs_open: bool,
     refuse_if_agent_running: bool,
+    agent_connection: Option<u64>,
 ) -> anyhow::Result<farhelm_proto::SessionStopOutcome> {
     let (_claim, client) = route_active_session(state, key).await?;
+    if agent_connection.is_some_and(|expected| expected != client.connection_id()) {
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            "the target host's connection changed while this Stop waited for approval. Nothing was stopped. Ask again to approve its current state.".into(),
+        )));
+    }
     client
         .stop_session_guarded(
             &key.session_id,
@@ -3208,6 +3217,7 @@ pub(crate) async fn stop_session(
             &key,
             request.refuse_if_tabs_open,
             request.refuse_if_agent_running,
+            None,
         )
         .await
         {

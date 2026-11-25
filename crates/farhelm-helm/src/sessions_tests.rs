@@ -1866,6 +1866,8 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
 /// but cannot authorize the new tab closure. Pin both defaults at the wire
 /// boundary, including an empty JSON-content-type body; a completed Stop
 /// still returns an empty object when there is no cleanup notice.
+/// A Stop carrying an approval for a different connection refuses before
+/// sending any request through the same live route.
 #[farhelm_testtrace::test]
 async fn stop_session_happy_path_returns_200_with_empty_object_body() {
     use farhelm_proto::ControlMsg;
@@ -1910,8 +1912,25 @@ async fn stop_session_happy_path_returns_200_with_empty_object_body() {
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
-        let app = harness.router();
+        let key = store::SessionKey {
+            host: rest_harness::local_id(&harness.store).await,
+            session_id: "sess-1".into(),
+        };
+        let (_, client) = super::route_active_session(&harness.state, &key)
+            .await
+            .expect("the test session has a live Stop route");
+        let other_connection = client.connection_id().wrapping_add(1);
+        let refusal =
+            super::do_stop_session(&harness.state, &key, true, false, Some(other_connection))
+                .await
+                .expect_err("the live route must refuse an unmatched approval");
+        assert_eq!(
+            crate::error_kind(&refusal),
+            farhelm_proto::ErrorKind::Conflict
+        );
+        assert!(refusal.to_string().contains("Nothing was stopped"));
 
+        let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
             .uri(harness.local_session_uri("/api/sessions/sess-1/stop"))

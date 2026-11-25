@@ -639,18 +639,24 @@ impl AgentRequestHandler for HelmAgentRequests {
                 )
                 .await
                 {
-                    Ok(()) => crate::sessions::do_stop_session(&state, &target, false, false)
-                        .await
-                        .and_then(|outcome| {
-                            // The agent reply has no notice field. Preserve
-                            // the truthful partial outcome in its existing
-                            // error message rather than claiming every tab
-                            // closed when Stop could not confirm that.
-                            if let Some(notice) = outcome.notice {
-                                anyhow::bail!(notice);
-                            }
-                            Ok(AgentReply::Stopped {})
-                        }),
+                    Ok(()) => crate::sessions::do_stop_session(
+                        &state,
+                        &target,
+                        false,
+                        false,
+                        Some(client.connection_id()),
+                    )
+                    .await
+                    .and_then(|outcome| {
+                        // The agent reply has no notice field. Preserve
+                        // the truthful partial outcome in its existing
+                        // error message rather than claiming every tab
+                        // closed when Stop could not confirm that.
+                        if let Some(notice) = outcome.notice {
+                            anyhow::bail!(notice);
+                        }
+                        Ok(AgentReply::Stopped {})
+                    }),
                     Err(refused) => Err(refused),
                 }
             }
@@ -2122,8 +2128,8 @@ async fn create_for_agent(
             .await?;
             // Resolve trust before the card. The same launch is carried through
             // approval and dispatch, so a Settings change while the card waits
-            // cannot silently change what the user approved. Only a launch whose
-            // folder the card pins is tied to the connection that checked it.
+            // cannot silently change what the user approved. If the path is
+            // checked here, keep that earlier connection through dispatch.
             let launch = normalize_launch_workspace_trust(state, launch).await?;
             if launch.pins_approval_cwd() {
                 let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
@@ -2171,7 +2177,7 @@ async fn create_for_agent(
             .map_err(crate::sessions::invalid_request)?;
     }
     let agent_wrapper_supplied = resolved.resolution.agent_wrapper_supplied;
-    let wrapper_approved = approve_launch(
+    let approval = approve_launch(
         state,
         origin,
         asking_session,
@@ -2202,9 +2208,9 @@ async fn create_for_agent(
             parent,
             spawned,
             request_fingerprint,
-            composition_incarnation,
+            expected_incarnation: composition_incarnation.or(approval.target_incarnation),
             agent_wrapper_supplied,
-            wrapper_approved,
+            wrapper_approved: approval.wrapper_approved,
         },
     )
     .await
@@ -2359,7 +2365,8 @@ async fn create_checkout_for_agent(
                     },
                     None,
                 )
-                .await?;
+                .await?
+                .wrapper_approved;
             }
             crate::yolo_guard::check_agent_approved(
                 state,
@@ -2428,7 +2435,8 @@ async fn create_checkout_for_agent(
         },
         None,
     )
-    .await?;
+    .await?
+    .wrapper_approved;
     // Every other agent mutation leaves a line in the helm log; a clone is the
     // one that can run the maintainer's post-clone command on code the agent
     // chose, so it must not be the one that leaves no record.
@@ -2682,6 +2690,12 @@ fn launch_for_approval(
     launch
 }
 
+/// Retain the host connection observed at approval and any explicit wrapper consent through dispatch.
+struct ApprovedLaunch {
+    target_incarnation: Option<u64>,
+    wrapper_approved: bool,
+}
+
 /// The gate in front of every new session an agent asks for: the agent YOLO
 /// rule, then the user's approval, then the rule, the request's own
 /// connection and the target host's connection all rechecked for the time the
@@ -2692,7 +2706,7 @@ fn launch_for_approval(
 /// the target host's own setting rules out (`yolo_guard::check_agent_wrapper`), and
 /// again after the approval, because the setting can change during the wait
 /// (SPEC.md: the rule is applied again when the user approves). The origin
-/// recheck is [`approved`]'s. The returned bit is true only after the special
+/// recheck is [`approved`]'s. The wrapper bit is true only after the special
 /// wrapper card's Allow; the final dispatch needs it because a host's command
 /// shortcut can approve an ordinary card without ever showing one.
 async fn approve_launch(
@@ -2701,7 +2715,7 @@ async fn approve_launch(
     asking_session: &str,
     approval: LaunchApproval,
     named_start: Option<&farhelm_proto::NamedConversationStart>,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<ApprovedLaunch> {
     let wrapper_card = matches!(
         crate::yolo_guard::check_agent_wrapper(
             state,
@@ -2790,7 +2804,10 @@ async fn approve_launch(
         wrapper_card,
     )
     .await?;
-    Ok(wrapper_card)
+    Ok(ApprovedLaunch {
+        target_incarnation: target_before,
+        wrapper_approved: wrapper_card,
+    })
 }
 
 /// Approve a message using the target's current display facts and pinned owner.
@@ -3025,9 +3042,9 @@ struct AgentCreateDispatch {
     /// What the target matches a keyed retry by; see
     /// [`LaunchEditsRequest::request_fingerprint`].
     request_fingerprint: Option<String>,
-    /// The destination connection used for launch composition and any trust
-    /// path check. Its replacement cannot inherit that approval.
-    composition_incarnation: Option<u64>,
+    /// The destination connection that resolved a trusted path or supplied the approval's target.
+    /// Its replacement cannot inherit that approval.
+    expected_incarnation: Option<u64>,
     agent_wrapper_supplied: bool,
     wrapper_approved: bool,
 }
@@ -3074,7 +3091,7 @@ async fn dispatch_agent_create(
     // write the create goes on to make revalidate against the connection it
     // was actually sent on (see `sessions::host_client`).
     let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
-    crate::precondition::incarnation_holds(&claim, dispatch.composition_incarnation)?;
+    crate::precondition::incarnation_holds(&claim, dispatch.expected_incarnation)?;
     let host_name = resolved.host_name.as_str();
     if let Some(refusal) =
         template_host_moved(resolved.template_identity.as_deref(), &claim, host_name)
@@ -4097,7 +4114,8 @@ async fn clone_for_agent(
         },
         None,
     )
-    .await?;
+    .await?
+    .wrapper_approved;
     // The source row is authoritative only while it still belongs to the
     // same owner connection. Re-resolving closes the read/dispatch window
     // (which now includes the user's approval) without trusting the helm's
@@ -9235,7 +9253,7 @@ mod tests {
             parent: None,
             spawned: false,
             request_fingerprint: None,
-            composition_incarnation: None,
+            expected_incarnation: None,
             agent_wrapper_supplied: false,
             wrapper_approved: false,
         };
@@ -11424,7 +11442,7 @@ mod tests {
                 parent: None,
                 spawned: false,
                 request_fingerprint: None,
-                composition_incarnation: Some(claim.incarnation),
+                expected_incarnation: Some(claim.incarnation),
                 agent_wrapper_supplied: false,
                 wrapper_approved: false,
             },
