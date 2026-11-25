@@ -49308,3 +49308,28 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   editor leaves, joining them correctly in Close, and showing their refusal exceed this outcome’s size allowance. Change
   `ospmzxrqtmrwxpnssqorysowlzstrvxz`, bookmark `plan/triage-settings-nov24/03a-detached-credential-save-follow-up`,
   [#4987](https://github.com/scode/farhelm/pull/4987/changes).
+
+## settings-close-can-hide-credential-delivery-warnings.md
+
+- Outcome: `fix code`.
+- Assessment: Replacing a saved credential pushes it to hosts that use it; a plain Save shows "Saved; not delivered to
+  <host>" lines on the Credentials overview. If the replacement is saved through Save and Close, Settings closes and
+  those per-host lines are never shown. Verified: confirmed. A done credential save passes delivery failures to the
+  overview and signals success (`credentials/editor.rs:310-320`); the batch then closes Settings when nothing is left
+  (`editing.rs:481-483`). SPEC.md 2601-2602: "A successful save with failed deliveries closes and clears the secret
+  editor, and shows the delivery failures on the Credentials overview"; SPEC.md 535-536 has the save report them. Each
+  failing host still turns amber with the reason in its details (SPEC.md 532-533), so the information survives
+  elsewhere. Whether Save and Close must stop for these warnings is a reading.
+- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
+  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
+  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
+  prompt contracts. Recommendation for reference: fix code — keep Settings open on Credentials when a close-save returns
+  delivery warnings; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
+  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
+  the feedback file and its index entry.
+- Execution: Deferred to TODO.md’s “Keep credential delivery reports visible when Settings closes”. The complete path
+  must preserve newly arrived reports past a newer confirmation, with interaction and visual evidence beyond this
+  outcome’s size allowance. Change `ppsxrwxoukuyutvyzvkyzxmrznlwvymp`, bookmark
+  `plan/triage-settings-nov24/03b-credential-delivery-report-follow-up`,
+  [#4990](https://github.com/scode/farhelm/pull/4990/changes).

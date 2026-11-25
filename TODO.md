@@ -60,6 +60,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Keep credential delivery reports visible when Settings closes.** A replacement saved through Save and Close can
+  reach storage while some hosts miss delivery. `crates/gui/farhelm-gui/src/settings/credentials/editor.rs` sends the
+  committed receipt and clears the editor. `settings/credentials.rs` puts the host names and reasons on the overview,
+  but `settings/editing.rs` can close Settings before anyone sees them. Preserve the fresh delivery report and show it
+  on the Credentials overview before closing. Continue other approved writes until the first refusal. A newer
+  confirmation must keep its page and focus. If it delays revealing a report, or another refusal or dirty draft keeps
+  Settings open, the next Close must give the person a chance to see the report. Once shown, retire the old automatic
+  close while any remaining approved writes finish. Keep editing retires that close attempt, and an unrelated later Save
+  must not inherit it. An older report that was shown must not hold a later Close open, and a replacement that committed
+  must not be resent. See the Settings and Credentials paragraphs under “Session list” in `SPEC.md`. Test the exact
+  committed PUT and host report, including a tunnel question opened before the receipt, then Cancel and Close. Review
+  the Credentials overview in both appearances. The ordinary path, the deferred reveal after a newer action, and their
+  required evidence together exceed this item's size allowance.
+
 - **Wait for credential saves after Back or Cancel.** A credential editor can start Save, then close while the helm
   still owns the write. Settings can close without waiting or offer Discard for another draft, and a refused write has
   no editor left to show its reason. In `crates/gui/farhelm-gui/src/settings/credentials/editor.rs`, Back and Cancel
