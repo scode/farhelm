@@ -102,10 +102,6 @@ consequences.
   — During a container build or setup, an external SSH alias or User change can open a fresh SSH connection and stream
   cached proxy credentials on stdin without checking the host identity, or read proxies from the moved host.
 
-- [`trailing-set-tailscale-unparks-actor-on-sync-registry-failure.md`](trailing-set-tailscale-unparks-actor-on-sync-registry-failure.md)
-  — If saving a host's Tailscale setting succeeds but refreshing connections immediately hits a database read error,
-  Farhelm unparks the host and can dial under the previous SSH trust mode while a retry skips retiring those masters.
-
 - [`trailing-setup-rerun-omits-tailscale-allowing-ssh-downgrade.md`](trailing-setup-rerun-omits-tailscale-allowing-ssh-downgrade.md)
   — Re-running failed setup on a Tailscale host omits the Tailscale flag from the probe request, so removing or toggling
   the host concurrently lets Farhelm fall back to unpinned ordinary SSH and auto-provision or re-register it.
@@ -128,15 +124,6 @@ consequences.
 - [`trailing-launcher-enter-deleted-custom-agent-chip-submits-previous-agent.md`](trailing-launcher-enter-deleted-custom-agent-chip-submits-previous-agent.md)
   — Pressing Enter on a deleted custom-agent chip in the launcher submits the previously selected agent instead of
   refusing, which in Replace with mode can retire the running session under the wrong agent (borderline highest/high).
-
-- [`trailing-osc8-mismatch-warning-bypassed-by-u1160-hangul-filler.md`](trailing-osc8-mismatch-warning-bypassed-by-u1160-hangul-filler.md)
-  — Embedding a zero-width Hangul Jungseong Filler (U+1160) in a terminal hyperlink label bypasses the
-  invisible-character strip and suppresses the mismatched-destination warning on hover (borderline highest/high;
-  ordinary hover preview still names the real host).
-
-- [`trailing-printed-url-cut-at-contrasting-hue-opens-shorter-address.md`](trailing-printed-url-cut-at-contrasting-hue-opens-shorter-address.md)
-  — A printed URL ends early at readable text whose colour differs in hue but not brightness, so a plain click opens a
-  shorter address than the user reads, with nothing shown first; the readability premise is unverified.
 
 - [`trailing-deleted-credential-stays-on-connected-host-after-lookup-failure.md`](trailing-deleted-credential-stays-on-connected-host-after-lookup-failure.md)
   — A Claude or Codex token the user deleted from the recipe and Settings stays in a connected host's launch
@@ -193,21 +180,11 @@ consequences.
 - [`launch-without-hook-choice-lost.md`](launch-without-hook-choice-lost.md) — A launch accepted with Launch without can
   still install hooks after the user enables setup for future launches while provisioning continues.
 
-- [`suspend-mixes-list-and-refresh-observations.md`](suspend-mixes-list-and-refresh-observations.md) — Suspend can use
-  an old idle session list alongside a newer successful refresh and skip asking before it freezes active work.
-
 - [`hook-settings-close-hides-opt-out-failure.md`](hook-settings-close-hides-opt-out-failure.md) — Closing Settings
   while an opt-out saves can hide the refusal and leave automatic hook setup active.
 
 - [`wayland-ssh-paste-blocks-window.md`](wayland-ssh-paste-blocks-window.md) — Pasting an SSH answer on Wayland can
   block the GUI while another application supplies clipboard data.
-
-- [`trailing-automatic-update-fresh-dev-build.md`](trailing-automatic-update-fresh-dev-build.md) — Automatic Update can
-  replace a development supervisor even after a fresh probe identifies it as a development build.
-
-- [`trailing-credential-delivery-holds-disconnected-environment.md`](trailing-credential-delivery-holds-disconnected-environment.md)
-  — When an environment disconnects during initial credential delivery, reconnect and launch can stall while Farhelm
-  still treats the old connection as eligible for replacements.
 
 - [`trailing-replace-drops-late-checkout-warning.md`](trailing-replace-drops-late-checkout-warning.md) — A replacement
   session can start while the warning explaining where the original checkout was left disappears after the reply
@@ -346,65 +323,6 @@ consequences.
   one whose Approvals was set to 'Keeps safety checks') displays only the static message 'Custom agents always run in
   YOLO mode.' with no toggle and lets the user save, yet actually saves YOLO as off ('Not YOLO').
 
-- [`trailing-link-scanner-misses-lookalike-punctuation.md`](trailing-link-scanner-misses-lookalike-punctuation.md) —
-  Terminal hyperlink text using look-alike punctuation the scanner does not fold (`paypalꓸcom`, `httpsꓽ//paypal.com`,
-  Devanagari visarga for `:`) shows no mismatch warning.
-
-- [`trailing-link-scanner-ignores-all-lookalike-hosts.md`](trailing-link-scanner-ignores-all-lookalike-hosts.md) —
-  Hyperlink text spelling a familiar site entirely in look-alike letters (Cyrillic `раураӏ.сом`) shows no mismatch
-  warning, contrary to SPEC.md, and the tests pin the narrower rule.
-
-- [`trailing-link-scanner-ignores-at-prefixed-host-with-path.md`](trailing-link-scanner-ignores-at-prefixed-host-with-path.md)
-  — Hyperlink text such as `@paypal.com/login` is treated as a handle and shows no mismatch warning, though SPEC.md
-  exempts only handles; a test pins it.
-
-- [`trailing-link-scanner-treats-site-before-at-as-email.md`](trailing-link-scanner-treats-site-before-at-as-email.md) —
-  Hyperlink text such as `paypal.com@evil.test` (a familiar site as login details, with nothing after) is read as an
-  email and shows no mismatch warning; SPEC.md does not say where email ends and login details begin.
-
-- [`trailing-link-scanner-treats-dotted-handle-as-claimless.md`](trailing-link-scanner-treats-dotted-handle-as-claimless.md)
-  — Hyperlink text `@paypal.com` (a handle whose name is a familiar site) shows no mismatch warning; whether SPEC.md's
-  handle rule covers dotted names is unclear.
-
-- [`trailing-link-scanner-reads-slash-prefixed-host-as-path.md`](trailing-link-scanner-reads-slash-prefixed-host-as-path.md)
-  — Hyperlink text such as `/paypal.com/login` is read as a file path and shows no mismatch warning.
-
-- [`trailing-link-scanner-short-ipv4-is-not-an-address.md`](trailing-link-scanner-short-ipv4-is-not-an-address.md) —
-  Hyperlink text naming a shortened IPv4 address with a port or path (`127.1:8080/admin`) shows no mismatch warning,
-  though SPEC.md counts an IPv4 address followed by a path or port.
-
-- [`trailing-link-scanner-host-glued-to-cjk-prose.md`](trailing-link-scanner-host-glued-to-cjk-prose.md) — A site name
-  glued to CJK prose is misread: an honest `详见github.com/x` warns falsely and `请看github.com。谢谢` on a link
-  elsewhere is missed; untested.
-
-- [`trailing-link-scanner-backslash-path-counts-as-bare-site.md`](trailing-link-scanner-backslash-path-counts-as-bare-site.md)
-  — Hyperlink text such as `github.com\org\repo` is compared as a bare site name, so it stays quiet for any link to that
-  site, including a different repository.
-
-- [`trailing-link-scanner-exempts-lookalike-idn-endings.md`](trailing-link-scanner-exempts-lookalike-idn-endings.md) —
-  Hyperlink text `paypal.ευ` (Greek letters that read as `.eu`) shows no mismatch warning because a real
-  internationalized ending is exempt from the look-alike check.
-
-- [`trailing-link-scanner-spacing-mark-after-slash-hides-host.md`](trailing-link-scanner-spacing-mark-after-slash-hides-host.md)
-  — Hyperlink text `/ःpaypal.com/login` (a spacing mark after `/`) reads to the scanner as a path, so it shows no
-  mismatch warning whether the mark is visible or not.
-
-- [`trailing-link-disclosure-joined-reading-treats-no-address-as-match.md`](trailing-link-disclosure-joined-reading-treats-no-address-as-match.md)
-  — A multi-row hyperlink whose first reading mismatches loses its warning when joining the rows makes the address
-  unrecognizable (`x_` or `/` before `paypal.com/login` on the next row).
-
-- [`trailing-link-disclosure-gap-splits-address-across-rows.md`](trailing-link-disclosure-gap-splits-address-across-rows.md)
-  — A program can split a familiar address across a line wrap (`Sign in at github` / `.com/login`) and avoid the
-  mismatch warning by leaving one unlinked cell anywhere in the link's text.
-
-- [`trailing-link-disclosure-letter-test-counts-spacing-marks.md`](trailing-link-disclosure-letter-test-counts-spacing-marks.md)
-  — A multi-row hyperlink whose next row starts with a spacing mark before a familiar address joins that address onto a
-  `/` above it in every reading, so the mismatch warning never shows.
-
-- [`trailing-link-text-invisible-spacing-mark-silences-warning.md`](trailing-link-text-invisible-spacing-mark-silences-warning.md)
-  — A spacing mark drawn in the background colour between `/` and a familiar address is invisible yet counts as seen, so
-  the hyperlink shows neither a mismatch warning nor the "hard to see" note.
-
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`template-leave-spec-still-inline.md`](template-leave-spec-still-inline.md) — The implementation spec still describes
@@ -413,21 +331,12 @@ consequences.
 - [`legacy-template-can-ask-to-save-automatic-cleanup.md`](legacy-template-can-ask-to-save-automatic-cleanup.md) — A
   legacy template can ask to save when the only remaining change is automatic cleanup of a retired trust field.
 
-- [`ensure-hosts-repair-omits-settings-loss.md`](ensure-hosts-repair-omits-settings-loss.md) — The repair message omits
-  that removing and re-adding a staged host forgets its saved organization and settings.
-
 - [`sealed-container-delete-spec-conflicts.md`](sealed-container-delete-spec-conflicts.md) — The product and
   implementation specs disagree about where a late sealed container deletion failure is reported.
 
 - [`tensorlake-key-clear-spec-misstates-leftover-refresh.md`](tensorlake-key-clear-spec-misstates-leftover-refresh.md) —
   The implementation spec says clearing the Tensorlake API key refreshes the leftovers list. The app clears and
   invalidates that list instead.
-
-- [`antigravity-recovery-republishes-old-trust-status.md`](antigravity-recovery-republishes-old-trust-status.md) — A
-  recovered terminal can initially show Antigravity’s old trust status and date the first fresh screen as new activity.
-
-- [`antigravity-restart-can-send-stale-trust-alert.md`](antigravity-restart-can-send-stale-trust-alert.md) — A refresh
-  during Restart can send a pending trust alert after the Antigravity process that asked has stopped.
 
 - [`antigravity-trust-falls-back-to-uncanonical-folder.md`](antigravity-trust-falls-back-to-uncanonical-folder.md) — If
   the folder can no longer be resolved or encoded during launch preparation, the Antigravity trust setting can use the
@@ -465,13 +374,6 @@ consequences.
 
 - [`docs-shot-run-can-overwrite-earlier-failure-frame.md`](docs-shot-run-can-overwrite-earlier-failure-frame.md) — A
   later shot can overwrite the raw image retained for a failed capture, leaving its error linked to the wrong frame.
-
-- [`manual-update-check-can-be-consumed-by-automatic-skip.md`](manual-update-check-can-be-consumed-by-automatic-skip.md)
-  — A manual update request can disappear when it joins a background check whose policy decision already skipped
-  installation.
-
-- [`settings-shows-unreadable-updater-as-on.md`](settings-shows-unreadable-updater-as-on.md) — Settings can still show
-  automatic app updates as on when the updater has paused them because preferences are unreadable.
 
 - [`menu-shortcuts-omitted-from-native-accessibility.md`](menu-shortcuts-omitted-from-native-accessibility.md) — The new
   menu shortcut labels do not reach the native accessibility shortcut fields.
@@ -777,24 +679,12 @@ consequences.
   — The new test proves the planner can try again when explicitly called, while regressions that leave a host idle
   without waking automatic Update can pass this test.
 
-- [`trailing-linux-add-writes-frozen-install-before-rechecking-systemd-availability.md`](trailing-linux-add-writes-frozen-install-before-rechecking-systemd-availability.md)
-  — An approved Linux setup can install the binary and unit, then fail on reload, when the user service manager became
-  unavailable while the setup question was open.
-
-- [`trailing-retired-lease-still-admit-local-provisioning-command-before-next.md`](trailing-retired-lease-still-admit-local-provisioning-command-before-next.md)
-  — An outgoing credential replacement can locally start another provisioning operation during retirement. The remote
-  credential outcome is unverified.
-
 - [`trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md`](trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md)
   — Tests can keep passing if a replacement already queued for a host resumes under the wrong connection lifetime.
 
 - [`trailing-retired-yolo-flag-refusal-overstates-when-farhelm-asks.md`](trailing-retired-yolo-flag-refusal-overstates-when-farhelm-asks.md)
   — The retired --confirm-yolo flag tells agents that every launch requires the user to answer even though host command
   permissions can waive ordinary cards.
-
-- [`trailing-retained-environment-queue-checkout-removal-without-waking-trash.md`](trailing-retained-environment-queue-checkout-removal-without-waking-trash.md)
-  — After deleting the only session using a checkout in a still-running Farhelm environment, an idle Trash view misses
-  the automatic cleanup and can delay showing a background failure.
 
 - [`trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md`](trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md)
   — The new test would still pass if a future edit broke automatic Trash refresh after Replace removes its source.
@@ -815,10 +705,6 @@ consequences.
   — A non-final environment Delete can complete on its host and explain why it left a checkout behind, yet the warning
   never reaches the rail if the reply arrives after the inner supervisor deadline.
 
-- [`trailing-proxy-probe-failure-handling-remains-partly-unverified.md`](trailing-proxy-probe-failure-handling-remains-partly-unverified.md)
-  — The inspected paths refuse a failed proxy read. Whether every failed read stays distinct from an empty result,
-  including redaction of the refusal, remains unverified.
-
 - [`trailing-recipe-images-retain-proxy-configuration-used-by-their-helpers.md`](trailing-recipe-images-retain-proxy-configuration-used-by-their-helpers.md)
   — For ordinary image-backed login configuration, changing the place manager’s proxy or deleting one session does not
   remove earlier credential-bearing settings from the shared recipe images.
@@ -831,32 +717,12 @@ consequences.
   — A regression could again hide the cause of an early container connection failure while the route-specific diagnostic
   checks pass.
 
-- [`trailing-unrelated-manager-settings-block-container-launch-and-cleanup.md`](trailing-unrelated-manager-settings-block-container-launch-and-cleanup.md)
-  — A place or custom image can be refused even when its proxy and path settings are small and readable. A failed place
-  refresh can also prevent Farhelm from removing an existing container.
-
 - [`trailing-full-podman-inspection-strand-container-farhelm-needs-to-remove.md`](trailing-full-podman-inspection-strand-container-farhelm-needs-to-remove.md)
   — A container with enough otherwise valid metadata can fail Farhelm's ownership inspection and remain undeletable from
   Farhelm.
 
-- [`trailing-delete-anyway-forget-second-tag-whose-absence-was-never.md`](trailing-delete-anyway-forget-second-tag-whose-absence-was-never.md)
-  — One Delete anyway warning can let Farhelm forget multiple unfinished saves, including a tag whose first absence
-  check occurs during confirmed Delete.
-
-- [`trailing-saved-absence-replaces-different-places-or-providers-cleanup-error.md`](trailing-saved-absence-replaces-different-places-or-providers-cleanup-error.md)
-  — After a Delete has found a missing capture, ordinary retry shows Delete anyway while a separate cleanup blocker
-  stays hidden.
-
 - [`trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md`](trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md)
   — The regression assertions would miss a change that forgets a capture when the confirmed request finds its image.
-
-- [`trailing-new-launch-reservation-make-confirmed-delete-refuse-after-changing.md`](trailing-new-launch-reservation-make-confirmed-delete-refuse-after-changing.md)
-  — When an approved new container launch overlaps Delete anyway for the same recipe, Delete can report that a host uses
-  the recipe after already removing its prepared images.
-
-- [`trailing-delete-anyway-omits-host-needed-to-locate-late-image.md`](trailing-delete-anyway-omits-host-needed-to-locate-late-image.md)
-  — With several container hosts, even a warning for exactly one capture gives the user no location for the cleanup it
-  says might be needed.
 
 - [`trailing-first-deletes-live-confirmation-reply-lacks-regression-assertion.md`](trailing-first-deletes-live-confirmation-reply-lacks-regression-assertion.md)
   — Existing assertions would miss a regression where prompt absence on a first Delete results in an ordinary error
@@ -954,14 +820,6 @@ consequences.
 - [`trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md`](trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md)
   — The tests can pass without showing that a command typed in Bash or Zsh is saved when Farhelm stops the session.
 
-- [`trailing-scoped-shell-teardown-suppresses-failed-history-saving-hangup.md`](trailing-scoped-shell-teardown-suppresses-failed-history-saving-hangup.md)
-  — If the scope's hangup request fails to start, a first-class shell can be forcibly stopped with no chance to save
-  history through that signal and the operation can still report success.
-
-- [`trailing-portable-teardown-first-find-pinned-shell-when-it-is.md`](trailing-portable-teardown-first-find-pinned-shell-when-it-is.md)
-  — One partial process-table read can cause a running unscoped shell to be stopped forcibly without a chance to handle
-  the history-saving hangup.
-
 - [`trailing-delete-skips-hangup-for-live-tab-it-knows-only.md`](trailing-delete-skips-hangup-for-live-tab-it-knows-only.md)
   — Deleting a non-shell session can forcibly terminate a known terminal tab without giving its shell the tab's graceful
   hangup.
@@ -988,9 +846,6 @@ consequences.
 - [`trailing-retry-delete-ambiguous-restart-record-before-scope-is-confirmed.md`](trailing-retry-delete-ambiguous-restart-record-before-scope-is-confirmed.md)
   — If a failed Restart leaves an unresolved scope, another refused Restart can erase the evidence that blocks startup
   from reopening the older terminal.
-
-- [`trailing-attach-admits-retained-gone-main-terminal-listings-report-missing.md`](trailing-attach-admits-retained-gone-main-terminal-listings-report-missing.md)
-  — A request to attach can be admitted after the supervisor already knows the main terminal is gone.
 
 - [`trailing-tab-resume-pass-without-receiving-flood-output.md`](trailing-tab-resume-pass-without-receiving-flood-output.md)
   — The terminal-tab regression can pass while the paused tab fails to deliver the output produced during its pause.
@@ -1044,10 +899,6 @@ consequences.
 - [`trailing-borrower-reload-lacks-completed-origin-runtime-handoff-witness.md`](trailing-borrower-reload-lacks-completed-origin-runtime-handoff-witness.md)
   — The borrower test compares status across reload, but can pass without showing the origin terminal was released and
   successfully recovered.
-
-- [`trailing-delete-verifies-stale-records-host-identity-after-requesting-takeover.md`](trailing-delete-verifies-stale-records-host-identity-after-requesting-takeover.md)
-  — If a retained launch record names a socket serving another session whose host already has a client, Delete can close
-  that owning connection before refusing.
 
 - [`trailing-live-route-conformance-pass-when-terminal-control-skips-target.md`](trailing-live-route-conformance-pass-when-terminal-control-skips-target.md)
   — Keeping the target terminal alive improves setup, but the reader-progress test can still pass without proving that
@@ -1108,10 +959,6 @@ consequences.
 - [`trailing-recent-activity-product-spec-still-promises-retired-capture-recovery.md`](trailing-recent-activity-product-spec-still-promises-retired-capture-recovery.md)
   — The recent-activity contract tells readers that a recovered screen always starts a fresh ordering baseline after
   capture failure.
-
-- [`trailing-sampler-date-retained-final-screen-after-agent-exited.md`](trailing-sampler-date-retained-final-screen-after-agent-exited.md)
-  — If an agent exits during another session's sample processing, its retained work screen can refresh its age and
-  unseen marker after the exit.
 
 - [`trailing-interrupted-be-superseded-by-inferred-preparation-failure.md`](trailing-interrupted-be-superseded-by-inferred-preparation-failure.md)
   — The protocol docs promise a definitive launch error before Interrupted changes, while the supervisor can reclassify
@@ -1277,10 +1124,6 @@ consequences.
   — After a failed or busy Don't show again click, dismissing the trust hint in Settings (or having the first click
   succeed after a rapid second click) leaves a red Not saved alert stuck with no Close button.
 
-- [`trailing-pending-restart-scope-cleanups-sequential-starvation.md`](trailing-pending-restart-scope-cleanups-sequential-starvation.md)
-  — If multiple unconfirmed restart scope cleanups accumulate on Linux, wedged earlier entries can consume the 60-second
-  startup cleanup budget and prevent later cleanable scopes from being reaped.
-
 - [`trailing-unwind-failed-host-relaunch-drops-pending-scope-cleanup.md`](trailing-unwind-failed-host-relaunch-drops-pending-scope-cleanup.md)
   — If a session row disappears during a failing restart whose replacement host started a scoped process, failing to
   confirm scope teardown drops the pending cleanup obligation on the next supervisor start.
@@ -1365,10 +1208,6 @@ consequences.
   session_pane module comment still describes the pre-#4623 behavior where the helm withheld pushes while a command was
   in flight.
 
-- [`trailing-trash-deleted-drops-removal-report-on-unordered-race.md`](trailing-trash-deleted-drops-removal-report-on-unordered-race.md)
-  — If an unordered Trash refresh fails or runs ahead of a Trash delete, the Trash button can drop the freeing-space
-  status or skip rechecking the listing after the delete settles.
-
 - [`trailing-suspend-read-activity-still-uses-ordered-lane.md`](trailing-suspend-read-activity-still-uses-ordered-lane.md)
   — Primary Suspend and Stop and suspend actions still wait up to 20 seconds behind any slow host on the ordered channel
   lane because their pre-flight session activity check was left on Lane::Ordered.
@@ -1385,18 +1224,6 @@ consequences.
   — Enabling Tailscale mode on an existing SSH host with a URI, port, or underscore alias reports it as 'not a usable
   ssh destination' instead of showing the Tailscale format guidance.
 
-- [`trailing-tailscale-retarget-skips-ssh-route-lock.md`](trailing-tailscale-retarget-skips-ssh-route-lock.md) — Editing
-  a Tailscale host's destination races concurrent probes, sign-in prompts, and Podman checks—potentially deleting
-  known-hosts pins under active SSH, leaving old masters alive, or re-inserting the old destination.
-
-- [`trailing-ssh-route-lock-leaks-cache-locks-on-delete-race.md`](trailing-ssh-route-lock-leaks-cache-locks-on-delete-race.md)
-  — Removing an SSH host concurrently with a probe, sign-in preflight, or Podman check can re-insert an orphaned entry
-  into cache_locks for the lifetime of the helm.
-
-- [`trailing-podman-leftovers-run-ssh-without-ssh-route-lock.md`](trailing-podman-leftovers-run-ssh-without-ssh-route-lock.md)
-  — Listing or deleting leftover containers on an unused SSH host races turning off Tailscale mode or removing the host,
-  risking failed SSH commands or orphaned Tailscale keys and ControlMasters.
-
 - [`trailing-add-host-tailscale-checkbox-evicts-focus.md`](trailing-add-host-tailscale-checkbox-evicts-focus.md) —
   Pressing Enter on the Tailscale checkbox in Add host or receiving a background approval card during an agent host-add
   request disables the checkbox and drops keyboard focus from it.
@@ -1404,10 +1231,6 @@ consequences.
 - [`trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md`](trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md)
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
   failure above it, and leaves the launch refusal stuck even after an in-flight toggle succeeds.
-
-- [`trailing-reply-and-outcome-debug-can-expose-ntfy-topic.md`](trailing-reply-and-outcome-debug-can-expose-ntfy-topic.md)
-  — Although ntfy::Settings omits Debug so diagnostics never include the ntfy topic, Reply and operations::Outcome
-  derive Debug over raw JSON response bodies that carry it (no production log call currently formats them).
 
 - [`trailing-apply-template-custom-command-yolo-diverges-from-gui.md`](trailing-apply-template-custom-command-yolo-diverges-from-gui.md)
   — Applying launch templates that declare a custom agent on the Command tab behaves differently in the desktop app and
@@ -1575,13 +1398,6 @@ consequences.
   draft page when an external delete arrives mid-save, and only exercises Delete on a clean draft, missing the bug where
   confirming Delete on a modified custom agent leaves a ghost entry in the Settings sidebar.
 
-- [`trailing-custom-agent-validate-model-effort-allows-leading-hyphen.md`](trailing-custom-agent-validate-model-effort-allows-leading-hyphen.md)
-  — Custom agent model and effort values can begin with a hyphen (for example `--resume` or `-v`), which Farhelm passes
-  as separate `--model <value>` and `--effort <value>` arguments.
-
-- [`trailing-custom-agent-validate-omits-display-name-and-command-length-caps.md`](trailing-custom-agent-validate-omits-display-name-and-command-length-caps.md)
-  — Registering a custom agent accepts arbitrarily long display names and executable paths without a size limit.
-
 - [`trailing-custom-pin-corrected-text-omits-prior-restart-consequence.md`](trailing-custom-pin-corrected-text-omits-prior-restart-consequence.md)
   — When a custom agent's parent process corrects a conversation first reported by a child process, the session
   notification omits explaining what an earlier Restart would have resumed (unlike the other five pinned agents) and
@@ -1716,11 +1532,6 @@ consequences.
   conversation, it tells you "Enter a conversation to restart" even though it hides the Conversation ID input and cannot
   resume; if the session has a captured conversation, Restart stays enabled and submits a request that the
   helm/supervisor then rejects.
-
-- [`trailing-session-launch-validate-new-skips-effort-and-custom-model.md`](trailing-session-launch-validate-new-skips-effort-and-custom-model.md)
-  — Widening effort on stored and transmitted launches to accept custom free-text strings allows invalid or arbitrary
-  effort text (including control characters or unknown words on built-in agents) to pass launch-shape validation when
-  loading stored sessions or validating a session launch directly.
 
 - [`trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md`](trailing-session-menu-and-quick-switcher-show-generic-custom-agent.md)
   — Sessions launched with a registered custom agent show the generic label "Custom agent" in both the session row's
@@ -1876,12 +1687,6 @@ consequences.
   — Triggering a quick launch (⚡ shortcut, number shortcut, sequence, or Cmd+J) whose template names a deleted custom
   agent on a suspended host (such as a suspended Tensorlake sandbox or Podman container) wakes the suspended host
   anyway, only failing with "no longer registered" / "was deleted" after the host finishes waking.
-
-- [`trailing-versionskew-incarnation-stays-unchanged-on-different-peer-build.md`](trailing-versionskew-incarnation-stays-unchanged-on-different-peer-build.md)
-  — If an automatic update fails or is refused on a remote host with an older protocol (for example, because the host's
-  supervisor is below the upgrade floor) and the host is later upgraded out-of-band to a newer but still incompatible
-  supervisor build without Farhelm observing it offline in between, Farhelm keeps treating it as the same failed attempt
-  and does not automatically update it until the user manually clicks Update or Retry or restarts the helm.
 
 - [`trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md`](trailing-yolo-confirmation-custom-agent-reads-every-custom-permission.md)
   — When you launch or plain-replace a registered custom agent on a host that asks before YOLO launches, the
