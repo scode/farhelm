@@ -62,6 +62,7 @@ use crate::components::{
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::short_name;
+use crate::launcher::custom_registration::CustomRegistration;
 use crate::launcher::draft::{Field, Install, Mode, Tab};
 use crate::launcher::recents::{
     SetupKey, destination_label, permission_presentation, setup_key, summary_before_permissions,
@@ -335,10 +336,11 @@ impl Launcher {
         let results = self.search_results(cx);
         if let Some(index) = self.search_highlight(&results, cx) {
             self.take_search_row(results.rows[index].clone(), window, cx);
-        } else if self.search_box.typed_choice.as_ref().is_some_and(|choice| {
-            self.save_panel.is_none() || !matches!(choice.row, Row::Template(_))
-        }) {
-            self.refuse_stale_choice(window, cx);
+        } else if let Some(choice) = &self.search_box.typed_choice
+            && (self.save_panel.is_none() || !matches!(choice.row, Row::Template(_)))
+        {
+            let reason = self.withdrawn_row_reason(&choice.row, cx);
+            self.refuse_stale_choice(reason, window, cx);
         }
     }
 
@@ -354,14 +356,34 @@ impl Launcher {
         if let Some(index) = picked.position(&results, self.chosen_host(cx)) {
             self.take_search_row(results.rows.swap_remove(index), window, cx);
         } else if self.save_panel.is_none() || !matches!(picked.row, Row::Template(_)) {
-            self.refuse_stale_choice(window, cx);
+            let reason = self.withdrawn_row_reason(&picked.row, cx);
+            self.refuse_stale_choice(reason, window, cx);
         }
     }
 
+    /// A stale registration cannot reach the choice handler. Explain its absence using the live catalog,
+    /// since a failed read cannot establish that the user needs to register it again.
+    fn withdrawn_row_reason(&self, row: &Row, cx: &App) -> Option<HostSentence> {
+        let Row::CustomAgent { id, .. } = row else {
+            return None;
+        };
+        let registration = CustomRegistration::read(self.store.read(cx).collections(), id);
+        super::choices::custom_registration_words(
+            &registration,
+            "That custom agent is no longer registered",
+        )
+    }
+
     /// Consume the stale choice. Closing results exposes the inline warning even in the narrow popover layout.
-    fn refuse_stale_choice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search_box.refusal =
-            Some(HostSentence::new("launcher-refusal-reason").text(STALE_ROW));
+    fn refuse_stale_choice(
+        &mut self,
+        reason: Option<HostSentence>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.search_box.refusal = Some(
+            reason.unwrap_or_else(|| HostSentence::new("launcher-refusal-reason").text(STALE_ROW)),
+        );
         self.close_search(window, cx);
         cx.notify();
     }

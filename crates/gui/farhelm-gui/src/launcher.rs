@@ -44,6 +44,7 @@
 //!   deals with the reply; a launch started without showing the launcher goes through the same check, body and reply
 //!   handling.
 
+mod custom_registration;
 pub(crate) mod destination_rows;
 pub mod draft;
 pub mod entry;

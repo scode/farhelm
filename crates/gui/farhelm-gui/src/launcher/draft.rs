@@ -56,6 +56,7 @@ use farhelm_proto::{
     ui_channel::HostView,
 };
 
+use super::custom_registration::CustomRegistration;
 use crate::drafts::Draft;
 
 /// The release's model catalog as the launcher read it: `None` until `GET /api/launch-catalog` answers (or when it
@@ -233,13 +234,8 @@ pub struct AgentChoices {
     pub custom_agent: Option<String>,
     /// Text for the free-form effort control; built-in efforts still come from their closed vocabulary.
     pub custom_effort: String,
-    /// Refreshed from the current catalog while the launcher is open. An existing session's ordinary Restart
-    /// uses its stored resume command without consulting this flag.
-    pub custom_resumption: bool,
-    /// Reporting and resumption are independent capabilities. A named start can succeed without recording an ID.
-    pub custom_reporting: bool,
-    /// The composer keeps a deleted ID visible so the user knows which choice to repair.
-    pub custom_registration_missing: bool,
+    /// The state of the saved ID in the launcher catalog. Plain Restart uses the stored resume command directly.
+    pub(super) custom_registration: CustomRegistration,
     /// The accepted model id; `None` is the agent type's configured default.
     pub model: Option<String>,
     /// Which agent type a custom (non-catalog) model id was entered for, so a later agent switch clears it exactly as
@@ -301,8 +297,8 @@ pub struct CommandChoices {
     /// The optional declared agent type.
     pub agent: Option<LaunchHarness>,
     pub custom_agent: Option<String>,
-    /// Keeps a saved declaration visible after deletion while preventing a newly rejected launch.
-    pub custom_registration_missing: bool,
+    /// The saved declaration remains visible while its catalog entry is missing.
+    pub(super) custom_registration: CustomRegistration,
     /// Whether the user opted into Resume; it counts only while an agent type is declared.
     pub resume_on: bool,
     /// The resume command's raw text, kept while Resume is off or hidden.
@@ -488,6 +484,22 @@ pub enum FolderDefault {
 // ---------------------------------------------------------------------------------------------------------------------
 
 impl LaunchDraft {
+    /// The selected tab's saved registration. A bare Custom command has no ID and needs no catalog entry.
+    pub(super) fn selected_custom_registration(&self) -> Option<&CustomRegistration> {
+        match self.tab {
+            Tab::Agent => self
+                .agent
+                .custom_agent
+                .as_ref()
+                .map(|_| &self.agent.custom_registration),
+            Tab::Command => self
+                .command
+                .custom_agent
+                .as_ref()
+                .map(|_| &self.command.custom_registration),
+        }
+    }
+
     /// New: no agent type, the Agent tab, and the remembered permission as a passive default (SPEC.md: "The
     /// permissions mode remembers the last successful agent launch"). The caller supplies New's host and folder
     /// (SPEC.md, "Host" and "Working directory").
@@ -650,9 +662,7 @@ impl LaunchDraft {
             harness: Some(selection.harness),
             custom_agent: selection.custom_agent.clone(),
             custom_effort: String::new(),
-            custom_resumption: false,
-            custom_reporting: false,
-            custom_registration_missing: false,
+            custom_registration: CustomRegistration::Loading,
             model: selection.model.clone(),
             model_owner: selection.model.as_ref().map(|_| selection.harness),
             effort: None,
@@ -713,7 +723,7 @@ impl LaunchDraft {
             .then_some(command.yolo),
             agent: command.agent,
             custom_agent: command.custom_agent.clone(),
-            custom_registration_missing: false,
+            custom_registration: CustomRegistration::Loading,
             resume_on: command.resume.is_some(),
             resume: command.resume.clone().unwrap_or_default(),
         };
@@ -782,9 +792,7 @@ impl LaunchDraft {
             self.conversation.clear();
             edit.switched_agent = true;
         }
-        self.agent.custom_resumption = agent.supports_resumption;
-        self.agent.custom_reporting = agent.supports_reporting;
-        self.agent.custom_registration_missing = false;
+        self.agent.custom_registration = CustomRegistration::of(agent);
         edit
     }
 
@@ -846,9 +854,7 @@ impl LaunchDraft {
             self.agent.wrapper_explicit = false;
             self.agent.permission_flags = String::new();
             self.agent.custom_agent = None;
-            self.agent.custom_resumption = false;
-            self.agent.custom_reporting = false;
-            self.agent.custom_registration_missing = false;
+            self.agent.custom_registration = CustomRegistration::Loading;
         }
         self.tab = Tab::Agent;
         Edit {
@@ -1079,7 +1085,7 @@ impl LaunchDraft {
     pub fn choose_command_agent(&mut self, agent: Option<LaunchHarness>) {
         self.command.agent = agent;
         self.command.custom_agent = None;
-        self.command.custom_registration_missing = false;
+        self.command.custom_registration = CustomRegistration::Loading;
     }
 
     pub fn choose_command_resume(&mut self, on: bool) {

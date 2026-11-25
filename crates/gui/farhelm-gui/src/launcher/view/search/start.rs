@@ -128,7 +128,7 @@ impl Launcher {
         {
             self.take_start_row(row.result(), keyboard, window, cx);
         } else {
-            self.refuse_stale_choice(window, cx);
+            self.refuse_stale_choice(None, window, cx);
         }
     }
 
@@ -159,7 +159,7 @@ impl Launcher {
                 }
             }
             Err(RecentRefusal::Retired) => self.notice = Some(RETIRED_CONTAINER_REASON.into()),
-            Err(RecentRefusal::Stale) => self.refuse_stale_choice(window, cx),
+            Err(RecentRefusal::Stale) => self.refuse_stale_choice(None, window, cx),
             Err(RecentRefusal::Held | RecentRefusal::KeepsEnvironment) => {}
         }
         cx.notify();

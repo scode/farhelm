@@ -4,8 +4,8 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
 use farhelm_proto::tensorlake::SshKeyStatus;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionState, ContainerCheckView, HelmMarker, HostView,
-    KeyedEntry, Preferences,
+    Availability, Collection, CollectionChanges, CollectionState, ContainerCheckView, HelmMarker,
+    HostView, KeyedEntry, Preferences,
 };
 use farhelm_proto::{
     LaunchEffort, LaunchHarness, LaunchPermission, LaunchTarget, Place, RecipePlaceView,
@@ -14,7 +14,7 @@ use gpui::{App, AppContext as _, Entity, IntoElement as _, Window, div, point, p
 use serde_json::json;
 
 use super::{SceneState, fleet, session_list_scene_preferring};
-use crate::launcher::draft::DestinationKind;
+use crate::launcher::draft::{DestinationKind, Tab};
 use crate::launcher::entry;
 use crate::launcher::environment_tests::{account, built_json, ready_key, recipe_json};
 use crate::launcher::view_tests::fixture_hosts;
@@ -449,6 +449,7 @@ enum LauncherScene {
     CustomEscalation,
     CustomEffortDefault,
     UnavailableCustomAgent,
+    CustomRegistration(Tab, CustomListState),
     RenamedCustomSearch,
     IncompleteCustomQuickLaunch,
     CustomRecents,
@@ -468,6 +469,26 @@ enum LauncherScene {
     Yolo,
     CustomYolo,
     HookSetup,
+}
+
+/// A saved ID can be missing for three distinct reasons. The screenshot uses the same draft in every state.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum CustomListState {
+    Loading,
+    Unavailable,
+    Deleted,
+}
+
+impl CustomListState {
+    fn availability(self) -> Option<Availability> {
+        match self {
+            Self::Loading => None,
+            Self::Unavailable => Some(Availability::Unavailable {
+                error: "The registration list could not be opened".into(),
+            }),
+            Self::Deleted => Some(Availability::Available),
+        }
+    }
 }
 
 /// The held address truncates this name. The tooltip needs to show its distinguishing suffix.
@@ -573,6 +594,22 @@ pub(super) fn launcher_unavailable_custom_agent_setup(
     cx: &mut App,
 ) {
     setup(state, LauncherScene::UnavailableCustomAgent, window, cx);
+}
+
+/// Show the same saved registration on either tab with the selected list result, including no read yet.
+pub(super) fn launcher_custom_registration_setup(
+    state: &SceneState,
+    tab: Tab,
+    read: CustomListState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(
+        state,
+        LauncherScene::CustomRegistration(tab, read),
+        window,
+        cx,
+    );
 }
 
 /// The explicit highlight survives a registry push with a new display name for the same ID.
@@ -798,6 +835,17 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
         extra.push(CollectionState {
             collection: Collection::CustomAgents,
             meta: meta(&[]),
+            entries: Vec::new(),
+        });
+    }
+    if let LauncherScene::CustomRegistration(_, read) = scene
+        && let Some(availability) = read.availability()
+    {
+        let mut meta = meta(&[]);
+        meta.availability = availability;
+        extra.push(CollectionState {
+            collection: Collection::CustomAgents,
+            meta,
             entries: Vec::new(),
         });
     }
@@ -1034,7 +1082,10 @@ fn open_new_with_claude(
     }
     let remembered = scene == LauncherScene::RememberedWrapper;
     draft.edit_folder("/home/user/src/api".into());
-    if matches!(
+    if let LauncherScene::CustomRegistration(tab, _) = scene {
+        draft = crate::launcher::view_tests::saved_custom_draft();
+        draft.choose_tab(tab);
+    } else if matches!(
         scene,
         LauncherScene::CustomAgent
             | LauncherScene::CustomYolo
@@ -1222,6 +1273,12 @@ fn answer_new_reads(
     let checkout_awaits_replies = scene == LauncherScene::ManagedCheckout && !commands.is_empty();
     let mut checkout_refused = false;
     for command in commands {
+        if matches!(scene, LauncherScene::CustomRegistration(..)) {
+            assert_ne!(
+                command.path, "/api/sessions",
+                "the absent registration blocks launch"
+            );
+        }
         if scene == LauncherScene::IncompleteCustomQuickLaunch {
             assert_ne!(
                 command.path, "/api/sessions",
@@ -1277,6 +1334,45 @@ fn answer_new_reads(
             None
         };
         helm.reply(command.id, 200, body);
+    }
+    if let LauncherScene::CustomRegistration(tab, read) = scene {
+        drop(keep);
+        let store = crate::session::current_store(cx).expect("the scene has a store");
+        let collections = store.read(cx).collections();
+        assert_eq!(
+            collections
+                .meta(Collection::CustomAgents)
+                .map(|meta| &meta.availability),
+            read.availability().as_ref()
+        );
+        assert!(
+            collections
+                .get::<farhelm_proto::custom_agents::CustomAgent>("acme-code")
+                .is_none()
+        );
+        let nodes = window.driver_nodes();
+        let visible = |id| {
+            nodes.iter().any(|node| {
+                node.element_id.as_deref() == Some(id) && !node.visible_bounds.is_empty()
+            })
+        };
+        let choice = match tab {
+            Tab::Agent => "launcher-custom-acme-code",
+            Tab::Command => "launcher-command-agent-row",
+        };
+        if !visible(choice) {
+            state.after.set(Some(answer_new_reads));
+        } else if read == CustomListState::Deleted {
+            // Retry only passive readiness checks. Another click schedules another draw, which can keep
+            // the headless event queue busy inside its idle drain, before settle counts the next frame.
+            // The automatic folder's action is ready only after presentation, which headless draws do not deliver.
+            window.simulate_next_frame(cx);
+            assert!(click_control(window, cx, "launcher-launch"));
+            state.after.set(Some(expect_custom_registration_deleted));
+        } else if !visible("launcher-custom-registration-status") {
+            state.after.set(Some(answer_new_reads));
+        }
+        return;
     }
     if checkout_refused {
         // Finishing the drained batch keeps any later reads answerable.
@@ -1480,6 +1576,45 @@ fn answer_new_reads(
             hover_launcher_help(state, "launcher-shells-Bash", window, cx);
         }
     }
+}
+
+/// Verify the refusal after the one simulated press. Both tabs preserve the selection, with different recovery
+/// instructions because the Command tab can keep running the command without its deleted registration.
+fn expect_custom_registration_deleted(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    let LauncherScene::CustomRegistration(tab, CustomListState::Deleted) = launcher_scene(state)
+    else {
+        unreachable!("only the deletion scenes press Launch");
+    };
+    let mut keep = state.keep.borrow_mut();
+    let helm = keep
+        .iter_mut()
+        .find_map(|kept| kept.downcast_mut::<FakeHelm>())
+        .expect("the deletion scene keeps its fake helm");
+    assert!(
+        helm.commands()
+            .iter()
+            .all(|command| command.path != "/api/sessions"),
+        "a deleted registration must block launch"
+    );
+    let expected = match tab {
+        Tab::Agent => "Not launched. The selected custom agent is no longer registered",
+        Tab::Command => {
+            "Not launched. The custom agent registration was deleted. Choose Custom to keep using this command."
+        }
+    };
+    let refusal = window.driver_nodes().iter().find(|node| {
+        node.element_id.as_deref() == Some("launcher-refusal") && !node.visible_bounds.is_empty()
+    });
+    assert_eq!(
+        refusal.and_then(|node| node.label.as_deref()),
+        Some(expected),
+        "the first press on the drawn button should show the deletion refusal"
+    );
 }
 
 /// The restored checkout must keep the host and repository close enough to

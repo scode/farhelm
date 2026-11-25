@@ -7,7 +7,8 @@
 
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionState, HostStateView, HostView, KeyedEntry,
+    Availability, Collection, CollectionChanges, CollectionState, HostStateView, HostView,
+    KeyedEntry,
 };
 use farhelm_proto::{
     LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer, SessionLaunch,
@@ -1359,6 +1360,219 @@ pub(super) fn acme_agent() -> farhelm_proto::custom_agents::CustomAgent {
         supports_resumption: false,
         supports_reporting: false,
     }
+}
+
+/// A saved setup can name a registration before its collection arrives. Keep the same ID on both tabs so changing
+/// tabs cannot clear the choice or substitute bare Custom.
+pub(crate) fn saved_custom_draft() -> LaunchDraft {
+    let mut launch = LaunchDraft::new(Some(1), "/work/example".into(), None);
+    let agent = acme_agent();
+    launch.choose_custom_agent(&agent, None, None);
+    launch.edit_command("acme-code --build".into());
+    launch.choose_command_agent(Some(LaunchHarness::Custom));
+    launch.command.custom_agent = Some(agent.id);
+    launch
+}
+
+/// Before the first catalog read, both saved tabs keep their ID with a loading status.
+#[gpui::test]
+fn both_launcher_tabs_keep_missing_custom_choices_while_loading(cx: &mut TestAppContext) {
+    assert_missing_custom_on_both_tabs(cx, None);
+}
+
+/// A failed read keeps the ID and explains the failure on both tabs.
+#[gpui::test]
+fn both_launcher_tabs_keep_missing_custom_choices_after_a_failed_read(cx: &mut TestAppContext) {
+    assert_missing_custom_on_both_tabs(
+        cx,
+        Some(Availability::Unavailable {
+            error: "The registration list could not be opened".into(),
+        }),
+    );
+}
+
+/// Only a successful list without the saved entry can establish that it was deleted.
+#[gpui::test]
+fn both_launcher_tabs_explain_confirmed_custom_deletion(cx: &mut TestAppContext) {
+    assert_missing_custom_on_both_tabs(cx, Some(Availability::Available));
+}
+
+/// A host refusal explains what stopped Launch, and the catalog status still explains the saved choice.
+#[gpui::test]
+fn loading_custom_registration_stays_visible_beside_a_host_refusal(cx: &mut TestAppContext) {
+    let mut saved = saved_custom_draft();
+    saved.host = None;
+    let (mut helm, cx) = launcher_on(cx, saved);
+    assert_eq!(draft(cx).host, None);
+    assert_eq!(
+        name_of(cx, "launcher-custom-registration-status").as_deref(),
+        Some("Loading custom agent registrations")
+    );
+    test_support::click(cx, "launcher-launch");
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Not launched. Choose a connected host before launching")
+    );
+    assert_eq!(
+        name_of(cx, "launcher-custom-registration-status").as_deref(),
+        Some("Loading custom agent registrations")
+    );
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+}
+
+/// In the loaded cases the snapshot installs the empty collection. Pushes can only update an installed collection.
+pub(super) fn empty_custom_catalog(availability: Availability) -> CollectionState {
+    let mut meta = meta(&[]);
+    meta.availability = availability;
+    CollectionState {
+        collection: Collection::CustomAgents,
+        meta,
+        entries: Vec::new(),
+    }
+}
+
+/// Witness the retained ID and the visible refusal in each tab, with no dispatch from an absent registration.
+fn assert_missing_custom_on_both_tabs(cx: &mut TestAppContext, availability: Option<Availability>) {
+    use farhelm_proto::custom_agents::CustomAgent;
+
+    let mut collections = vec![hosts(), preferences(&[], None)];
+    collections.extend(availability.clone().map(empty_custom_catalog));
+    let (mut helm, cx) = launcher_over(cx, saved_custom_draft(), collections);
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+    cx.update(|_, cx| {
+        let store = crate::session::current_store(cx).unwrap();
+        let collections = store.read(cx).collections();
+        assert_eq!(
+            collections
+                .meta(Collection::CustomAgents)
+                .map(|meta| &meta.availability),
+            availability.as_ref()
+        );
+        assert!(collections.get::<CustomAgent>("acme-code").is_none());
+    });
+    for (tab, target) in [
+        (Tab::Agent, "launcher-tabs-Agent"),
+        (Tab::Command, "launcher-tabs-Command"),
+    ] {
+        test_support::click(cx, target);
+        let saved = draft(cx);
+        assert_eq!(saved.tab, tab);
+        let choice = match tab {
+            Tab::Agent => {
+                assert_eq!(
+                    name_of(cx, "launcher-custom-acme-code").as_deref(),
+                    Some("acme-code")
+                );
+                saved.agent.custom_agent
+            }
+            Tab::Command => {
+                assert!(
+                    crate::session_list::host_rail::tests::texts_within(
+                        &test_support::frame(cx),
+                        "launcher-command-agent-row"
+                    )
+                    .iter()
+                    .any(|line| line.text.contains("acme-code") && !line.visible_bounds.is_empty())
+                );
+                saved.command.custom_agent
+            }
+        };
+        assert_eq!(choice.as_deref(), Some("acme-code"));
+        let reason = match availability {
+            None => "Loading custom agent registrations",
+            Some(Availability::Unavailable { .. }) => "Could not read custom agent registrations",
+            Some(Availability::Available) if tab == Tab::Agent => {
+                "The selected custom agent is no longer registered"
+            }
+            Some(Availability::Available) => {
+                "The custom agent registration was deleted. Choose Custom to keep using this command."
+            }
+        };
+        if availability != Some(Availability::Available) {
+            assert!(
+                name_of(cx, "launcher-custom-registration-status")
+                    .is_some_and(|words| words.starts_with(reason))
+            );
+        }
+        test_support::click(cx, "launcher-launch");
+        if availability == Some(Availability::Available) {
+            assert_eq!(shown_refusal(cx), Some(format!("Not launched. {reason}")));
+        } else {
+            assert!(
+                name_of(cx, "launcher-custom-registration-status")
+                    .is_some_and(|words| words.starts_with(reason))
+            );
+            assert_eq!(
+                shown_refusal(cx),
+                None,
+                "the status already explains the refusal"
+            );
+        }
+        assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+    }
+}
+
+/// A failed refresh leaves the last known entry usable, including the saved registration ID in the launch body.
+#[gpui::test]
+fn failed_custom_registration_refresh_keeps_entries_usable(cx: &mut TestAppContext) {
+    use farhelm_proto::custom_agents::CustomAgent;
+    use farhelm_proto::ui_channel::Availability;
+
+    let agent = acme_agent();
+    let mut state = meta(&[agent.id.as_str()]);
+    let (mut helm, cx) = launcher_over(
+        cx,
+        saved_custom_draft(),
+        vec![
+            hosts(),
+            preferences(&[], None),
+            CollectionState {
+                collection: Collection::CustomAgents,
+                meta: state.clone(),
+                entries: vec![KeyedEntry {
+                    key: agent.id.clone(),
+                    value: serde_json::to_value(&agent).unwrap(),
+                }],
+            },
+        ],
+    );
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+    state.availability = Availability::Unavailable {
+        error: "The registration refresh failed".into(),
+    };
+    helm.push(CollectionChanges {
+        collection: Collection::CustomAgents,
+        meta: state.clone(),
+        upsert: Vec::new(),
+        remove: Vec::new(),
+    });
+    settle(cx);
+    cx.update(|_, cx| {
+        let store = crate::session::current_store(cx).unwrap();
+        let collections = store.read(cx).collections();
+        assert_eq!(
+            collections
+                .meta(Collection::CustomAgents)
+                .unwrap()
+                .availability,
+            state.availability
+        );
+        assert_eq!(collections.get::<CustomAgent>(&agent.id), Some(&agent));
+    });
+    assert_eq!(
+        name_of(cx, "launcher-custom-acme-code").as_deref(),
+        Some("Acme Code")
+    );
+    assert!(name_of(cx, "launcher-custom-registration-status").is_none());
+    test_support::click(cx, "launcher-launch");
+    let creates = super::launch_tests::creates(&mut helm, cx);
+    let [create] = &creates[..] else {
+        panic!("one create expected from the retained entry, got {creates:?}");
+    };
+    assert_eq!(
+        create.body.as_ref().unwrap()["launch"]["custom_agent"],
+        "acme-code"
+    );
 }
 
 /// The Default search choice clears both the effort the user sees and the value a later launch will send.

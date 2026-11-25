@@ -1430,6 +1430,90 @@ static SCENES: &[Scene] = &[
         setup: launcher_unavailable_custom_agent_setup,
     },
     Scene {
+        name: "launcher-agent-registration-loading",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: |state, window, cx| {
+            launcher_custom_registration_setup(
+                state,
+                crate::launcher::draft::Tab::Agent,
+                CustomListState::Loading,
+                window,
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "launcher-agent-registration-unavailable",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: |state, window, cx| {
+            launcher_custom_registration_setup(
+                state,
+                crate::launcher::draft::Tab::Agent,
+                CustomListState::Unavailable,
+                window,
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "launcher-agent-registration-deleted",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: |state, window, cx| {
+            launcher_custom_registration_setup(
+                state,
+                crate::launcher::draft::Tab::Agent,
+                CustomListState::Deleted,
+                window,
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "launcher-command-registration-loading",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: |state, window, cx| {
+            launcher_custom_registration_setup(
+                state,
+                crate::launcher::draft::Tab::Command,
+                CustomListState::Loading,
+                window,
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "launcher-command-registration-unavailable",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: |state, window, cx| {
+            launcher_custom_registration_setup(
+                state,
+                crate::launcher::draft::Tab::Command,
+                CustomListState::Unavailable,
+                window,
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "launcher-command-registration-deleted",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: |state, window, cx| {
+            launcher_custom_registration_setup(
+                state,
+                crate::launcher::draft::Tab::Command,
+                CustomListState::Deleted,
+                window,
+                cx,
+            )
+        },
+    },
+    Scene {
         name: "launcher-renamed-custom-search",
         size: (1080., 950.),
         draw: session_lists_then,

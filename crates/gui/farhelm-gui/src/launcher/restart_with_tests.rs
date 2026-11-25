@@ -9,7 +9,7 @@
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionState, KeyedEntry, SessionRow,
+    Availability, Collection, CollectionChanges, CollectionState, KeyedEntry, SessionRow,
 };
 use farhelm_proto::{LaunchEffort, LaunchPermission, SessionInfo};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
@@ -19,7 +19,9 @@ use super::draft::{LaunchDraft, Mode};
 use super::entry::{open_restart_with, restart_with_unavailable};
 use super::entry_tests::{window_on, window_with};
 use super::folder_default_tests::edit_draft;
-use super::view_tests::{click_in_body, draft, launch_help, name_of, shown_refusal};
+use super::view_tests::{
+    click_in_body, draft, empty_custom_catalog, fixture_hosts, launch_help, name_of, shown_refusal,
+};
 use super::yolo_tests::refuse_for_yolo;
 use crate::layers;
 use crate::local_state;
@@ -286,7 +288,7 @@ fn disabling_custom_resumption_updates_restart_with(cx: &mut TestAppContext) {
     assert!(restart_with(cx, "a"));
     let before = draft(cx);
     assert_eq!(before.agent.custom_agent.as_deref(), Some("acme-code"));
-    assert!(before.agent.custom_resumption && before.requires_conversation());
+    assert!(before.offers_conversation() && before.requires_conversation());
     assert!(cx.debug_bounds("launcher-conversation-row").is_some());
     helm.push(registration(false));
     settle(cx);
@@ -329,6 +331,102 @@ fn disabling_custom_resumption_updates_restart_with(cx: &mut TestAppContext) {
     test_support::click(cx, "launcher-launch");
     assert!(
         shown_refusal(cx).is_some_and(|reason| reason.contains("no longer supports resumption"))
+    );
+    assert!(restarts(&mut helm, cx).is_empty());
+}
+
+/// A saved resume command lets Restart with open while the registration is unread. Keep the required empty
+/// selector in the form without claiming that the current entry supports resumption or capture.
+#[gpui::test]
+fn unread_custom_registration_keeps_the_required_restart_conversation_visible(
+    cx: &mut TestAppContext,
+) {
+    assert_unread_registration_allows_entering_a_restart_conversation(cx, None);
+}
+
+/// A failed read also leaves the required selector in place, with the failure explaining why Restart waits.
+#[gpui::test]
+fn failed_custom_registration_keeps_the_required_restart_conversation_visible(
+    cx: &mut TestAppContext,
+) {
+    assert_unread_registration_allows_entering_a_restart_conversation(
+        cx,
+        Some(Availability::Unavailable {
+            error: "The registration list could not be opened".into(),
+        }),
+    );
+}
+
+/// Start with the catalog state the test needs. Install the failed collection in the snapshot so its metadata
+/// is actually present before opening the editor.
+fn assert_unread_registration_allows_entering_a_restart_conversation(
+    cx: &mut TestAppContext,
+    availability: Option<Availability>,
+) {
+    use farhelm_proto::custom_agents::CustomAgent;
+
+    let (mut helm, cx) = window_on(
+        cx,
+        Some("a"),
+        fixture_hosts(&[0, 4, 8, 10]),
+        availability
+            .clone()
+            .map(empty_custom_catalog)
+            .into_iter()
+            .collect(),
+    );
+    let row = session("a").host(9).status(json!({"state": "idle"})).agent_kind("custom").launch(json!({
+        "kind": "agent", "selection": {"harness": "custom", "custom_agent": "acme-code"},
+        "start": ["acme-code", "{farhelm_args}"], "resume": ["acme-code", "{conversation}", "{farhelm_args}"],
+    }));
+    let mut changes = change(listing_meta(&["a", "b", "c", "d"], 5, false), &[row], &[]);
+    changes.upsert[0].value["host_identity"] = json!("identity9");
+    changes.upsert[0].value["restart_offer"] = json!("not_captured");
+    helm.push(changes);
+    settle(cx);
+    assert_eq!(cx.update(|_, cx| restart_with_unavailable("a", cx)), None);
+    assert!(restart_with(cx, "a"));
+    assert!(restarts(&mut helm, cx).is_empty());
+
+    cx.update(|_, cx| {
+        let store = crate::session::current_store(cx).unwrap();
+        let collections = store.read(cx).collections();
+        assert_eq!(
+            collections
+                .meta(Collection::CustomAgents)
+                .map(|meta| &meta.availability),
+            availability.as_ref()
+        );
+        assert!(collections.get::<CustomAgent>("acme-code").is_none());
+    });
+    let draft = draft(cx);
+    assert!(draft.requires_conversation() && draft.conversation.is_empty());
+    assert!(test_support::drawn(cx, "launcher-conversation-row"));
+    let reason = if availability.is_none() {
+        "Loading custom agent registrations"
+    } else {
+        "Could not read custom agent registrations"
+    };
+    assert!(
+        name_of(cx, "launcher-custom-restart-blocked")
+            .is_some_and(|words| words.starts_with(reason))
+    );
+    let frame = test_support::frame(cx);
+    let words = crate::session_list::host_rail::tests::texts_within(&frame, "launcher-body");
+    assert!(
+        !words
+            .iter()
+            .any(|line| line.text.contains("will not capture"))
+    );
+    test_support::click(cx, "launcher-launch");
+    assert!(
+        name_of(cx, "launcher-custom-registration-status")
+            .is_some_and(|words| words.starts_with(reason))
+    );
+    assert_eq!(
+        shown_refusal(cx),
+        None,
+        "the status already explains the refusal"
     );
     assert!(restarts(&mut helm, cx).is_empty());
 }

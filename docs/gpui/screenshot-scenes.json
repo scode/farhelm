@@ -3714,6 +3714,36 @@
       "reference": null
     },
     {
+      "golden": "launcher-agent-registration-loading",
+      "title": "Agent tab with a retained choice while custom registrations load",
+      "reference": null
+    },
+    {
+      "golden": "launcher-agent-registration-unavailable",
+      "title": "Agent tab with a retained choice and the registration read error",
+      "reference": null
+    },
+    {
+      "golden": "launcher-agent-registration-deleted",
+      "title": "Agent tab after Launch refuses a deleted registration",
+      "reference": null
+    },
+    {
+      "golden": "launcher-command-registration-loading",
+      "title": "Command tab with a retained agent type while custom registrations load",
+      "reference": null
+    },
+    {
+      "golden": "launcher-command-registration-unavailable",
+      "title": "Command tab with a retained agent type and the registration read error",
+      "reference": null
+    },
+    {
+      "golden": "launcher-command-registration-deleted",
+      "title": "Command tab after Launch suggests choosing Custom to keep the saved command",
+      "reference": null
+    },
+    {
       "golden": "quick-switcher-custom-agents",
       "title": "The quick switcher showing a registered custom agent's name in hover help",
       "reference": null

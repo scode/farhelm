@@ -138,13 +138,16 @@ fn custom_agent_choices_round_trip_through_a_saved_setup() {
         None,
         "Default cannot uncover a saved built-in effort"
     );
-    launch.agent.custom_resumption = false;
+    launch.agent.custom_registration = super::custom_registration::CustomRegistration::Present {
+        supports_resumption: false,
+        supports_reporting: agent.supports_reporting,
+    };
     assert_eq!(launch.conversation, "one-start");
     assert!(
         launch.conversation_error().is_some(),
         "a revoked capability must refuse the named start"
     );
-    launch.agent.custom_resumption = true;
+    launch.agent.custom_registration = super::custom_registration::CustomRegistration::of(&agent);
     let other = farhelm_proto::custom_agents::CustomAgent {
         id: "other-code".into(),
         supports_resumption: false,

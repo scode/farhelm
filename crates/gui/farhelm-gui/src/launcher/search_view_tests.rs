@@ -835,6 +835,103 @@ fn clicking_a_withdrawn_host_result_preserves_the_query(cx: &mut TestAppContext)
     assert!(creates(&mut helm, cx).is_empty());
 }
 
+/// A drawn result can lose its registration before the click. Confirmed deletion should tell the user that
+/// the registration is gone, while leaving the query ready to choose a replacement.
+#[gpui::test]
+fn clicking_a_withdrawn_custom_registration_explains_deletion(cx: &mut TestAppContext) {
+    assert_withdrawn_custom_registration(cx, farhelm_proto::ui_channel::Availability::Available);
+}
+
+/// A failed catalog read that has no entry to retain needs its own explanation, even from an old search row.
+#[gpui::test]
+fn clicking_a_withdrawn_custom_registration_explains_the_failed_read(cx: &mut TestAppContext) {
+    assert_withdrawn_custom_registration(
+        cx,
+        farhelm_proto::ui_channel::Availability::Unavailable {
+            error: "The registration list could not be opened".into(),
+        },
+    );
+}
+
+/// Click the last rendered result after changing what the live result lookup sees.
+fn assert_withdrawn_custom_registration(
+    cx: &mut TestAppContext,
+    availability: farhelm_proto::ui_channel::Availability,
+) {
+    use farhelm_helm_client::collections::decode_changes;
+    use farhelm_proto::custom_agents::CustomAgent;
+    use farhelm_proto::ui_channel::{
+        Availability, Collection, CollectionChanges, CollectionState, KeyedEntry,
+    };
+
+    let agent = super::view_tests::acme_agent();
+    let (mut helm, cx) = super::view_tests::launcher_over(
+        cx,
+        LaunchDraft::new(Some(1), "~".into(), None),
+        vec![
+            fixture_hosts(&[0]),
+            CollectionState {
+                collection: Collection::CustomAgents,
+                meta: test_support::meta(&[&agent.id]),
+                entries: vec![KeyedEntry {
+                    key: agent.id.clone(),
+                    value: serde_json::to_value(&agent).unwrap(),
+                }],
+            },
+        ],
+    );
+    assert!(search_focused(cx));
+    type_in(cx, &agent.id);
+    let row = "launcher-search-option-0";
+    assert!(name_of(cx, row).is_some_and(|name| name.starts_with("Acme Code")));
+    let at = test_support::center(cx, row);
+    let before = draft(cx);
+    cx.update(|window, cx| {
+        withdraw_presented_choice::<CustomAgent>(&agent.id, cx);
+        let store = crate::session::current_store(cx).unwrap();
+        // A failure after a successful withdrawal retains the now-empty list. Apply both events between
+        // frames so the user can still press the entry from the previous successful read.
+        if matches!(availability, Availability::Unavailable { .. }) {
+            let changes = decode_changes(CollectionChanges {
+                collection: Collection::CustomAgents,
+                meta: super::view_tests::empty_custom_catalog(availability.clone()).meta,
+                upsert: Vec::new(),
+                remove: Vec::new(),
+            })
+            .unwrap();
+            store.update(cx, |store, cx| store.apply(&changes, cx));
+        }
+        let collections = store.read(cx).collections();
+        assert!(collections.get::<CustomAgent>(&agent.id).is_none());
+        assert_eq!(
+            collections
+                .meta(Collection::CustomAgents)
+                .unwrap()
+                .availability,
+            availability
+        );
+        test_support::click_before_redraw(at, window, cx);
+    });
+    settle(cx);
+    let reason = match availability {
+        Availability::Available => "That custom agent is no longer registered",
+        Availability::Unavailable { .. } => {
+            "Could not read custom agent registrations. The registration list could not be opened"
+        }
+    };
+    assert_eq!(
+        name_of(cx, "launcher-search-refusal").as_deref(),
+        Some(reason)
+    );
+    assert_eq!(search_text(cx), agent.id);
+    assert!(search_focused(cx));
+    assert!(!results_shown(cx), "the results cannot cover the warning");
+    let after = draft(cx);
+    assert_eq!(after.agent.harness, before.agent.harness);
+    assert_eq!(after.agent.custom_agent, before.agent.custom_agent);
+    assert!(creates(&mut helm, cx).is_empty());
+}
+
 /// Replace with keeps its host fixed. Even if the user has scrolled the form down, taking a host result must explain
 /// that refusal at the command field and leave the launch action reachable.
 #[gpui::test]
