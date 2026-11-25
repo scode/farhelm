@@ -284,43 +284,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### v1
 
-- **Holistic Tensorlake onboarding, Settings structure, and setup wizard.** Rework setup, onboarding, and Settings
-  together rather than patching individual forms: consider a separate top-level tab system in Settings (with Tensorlake
-  on its own tab and most existing settings under a General tab) and/or a Tensorlake setup wizard. Cover the six-stop
-  first-time setup flow (Settings → Tensorlake → external `tl sbx ssh keys add` → Credentials → Recipes → Build snapshot
-  → New session), starter recipe and inline credential creation in the recipe editor, fixing the crowded Settings →
-  Tensorlake viewport (where the experimental banner and plaintext storage box hide the SSH key card below the fold, and
-  removing/replacing the experimental warning for v1), and removing the duplicated Tensorlake API key form from the top
-  of Settings → Credentials.
-
-- **Discoverability of Tensorlake sandboxes before setup.** The welcome card mentions only Mac and SSH Linux boxes, and
-  the session launcher hides `New sandbox` entirely until a Tensorlake API key is saved. Surface Tensorlake as a clear
-  option before setup is complete.
-
-- **Remove the permanent SSH key registration command block from the session launcher.** Push SSH key registration
-  exclusively into Tensorlake setup in Settings and/or the setup wizard, and make it easy to jump there from the
-  launcher instead of repeating the full `tl sbx ssh keys add` block on every launch (which currently pushes the Agent
-  section below the fold when Managed checkout is selected).
-
-- **Handle unbuilt recipes in the session launcher.** Saving a recipe does not build a snapshot, and the launcher then
-  disables it as `No snapshot yet` with no inline Build button or link to Recipes (whereas
-  `Add host → Tensorlake sandbox` accepts an unbuilt recipe and builds and prepares it automatically).
-
-- **Eliminate or surface the two-stage Build + hidden 1-minute Prepare stall.** Even after clicking `Build snapshot`,
-  the first launch (and every 24 h or after a Farhelm update) stalls for about a minute on `Prepare snapshot`, with no
-  combined Build + Prepare or explicit "Prepare now" action.
-
-- **Hide unrelated Podman status noise on Tensorlake recipe cards.** Because Managed Ubuntu is shared with Podman,
-  recipe cards show a local Podman check/error line and a `Rebuild` button right above the Tensorlake status lines even
-  when the user is only using Tensorlake.
-
-- **Align launcher agent selection with sandbox recipes.** Managed Ubuntu currently installs only Claude Code and Codex
-  while the launcher presents all ten built-in agents as selectable. Design the UX for recipe-dependent harnesses —
-  likely supporting installing the harness the user picks on demand.
-
-- **Fix Managed checkout repository suggestions for new sandboxes.** When `New sandbox` + `Managed checkout` is
-  selected, repository suggestions scan an existing connected host (such as Local) rather than using the recipe's
-  configured GitHub token.
+#### Wave 0 — No-UX-design fixes
 
 - **Always suppress workspace trust prompts in per-session sandboxes where supported.** Workspace trust makes no sense
   for a fresh per-session sandbox; suppress it automatically whenever the agent supports pre-trusting, rather than
@@ -333,6 +297,25 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   home and also checks a separate onboarding-completion setting. The fix the maintainer deferred: have Farhelm write the
   smallest set of non-secret first-run settings Claude needs, found by an isolated probe, keeping the user's other
   settings and the normal agent home, and check it with a valid subscription login.
+
+- **Fix Managed checkout repository suggestions for new sandboxes.** When `New sandbox` + `Managed checkout` is
+  selected, repository suggestions scan an existing connected host (such as Local) rather than using the recipe's
+  configured GitHub token.
+
+- **Hide unrelated Podman status noise on Tensorlake recipe cards.** Because Managed Ubuntu is shared with Podman,
+  recipe cards show a local Podman check/error line and a `Rebuild` button right above the Tensorlake status lines even
+  when the user is only using Tensorlake.
+
+- **Investigate Tensorlake's ssh gateway leaving forwarded channels open, and report it if it is a bug.** Through the
+  gateway, an ssh client holding a remote-forwarded connection never learned that the sandbox side was gone: the sandbox
+  side was torn down within half a second, but the local ssh and its connection to the local service were still up 185
+  seconds later, with keep-alives on or off, while an ordinary OpenSSH server ended the same setup in about 1.3 seconds
+  and the gateway did end a connection with no forwarded channel open. Confirm what the gateway does (including whether
+  it relays a forwarded channel's close in the ordinary case where only the sandbox-side client hangs up), and if it is
+  a gateway bug, send Tensorlake a report with the minimal reproduction. Everything known so far, measured and inferred
+  kept apart, is in `lore/2026-11-07-tensorlake-gateway-forwarded-channels.md`.
+
+#### Wave 1 — Running, stopping, and billing safety
 
 - **Replace plain Stop on per-session sandboxes with Stop and suspend.** Plain Stop currently stops the agent
   immediately with no warning when no extra terminal tabs are open, leaving the sandbox running and billing. Plain Stop
@@ -349,31 +332,61 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   without opening Hosts. Inside Hosts, replace or clean up raw `farhelm-sess-…` names and the generic
   `Settings: Edit this host's connection` menu entry.
 
+- **Bulk Suspend, Resume, and Stop and suspend in the session list.** Support bulk Suspend, Resume, and Stop and suspend
+  for sandbox sessions in the session list.
+
+#### Wave 2 — Recipes, snapshots, and host-vs-session unification
+
 - **Unify standalone sandbox hosts (`Add host`) and per-session sandboxes (`New sandbox`).** Reconcile the subtle
   differences between the two Tensorlake flows (auto-build vs. refuse-if-unbuilt, 24 h vs. 30 min idle timeout, rail
   icon vs. hidden, five-step creation plan vs. inline confirmation).
 
-- **Sandbox-session conveniences: Save as template and bulk Suspend / Resume / Stop and suspend.** Restore
-  `Save as template` in the launcher footer for sandbox launches (currently omitted, forcing manual rebuild in the
-  Templates dialog), and support bulk Suspend, Resume, and Stop and suspend in the session list.
+- **Handle unbuilt recipes in the session launcher.** Saving a recipe does not build a snapshot, and the launcher then
+  disables it as `No snapshot yet` with no inline Build button or link to Recipes (whereas
+  `Add host → Tensorlake sandbox` accepts an unbuilt recipe and builds and prepares it automatically).
+
+- **Eliminate or surface the two-stage Build + hidden 1-minute Prepare stall.** Even after clicking `Build snapshot`,
+  the first launch (and every 24 h or after a Farhelm update) stalls for about a minute on `Prepare snapshot`, with no
+  combined Build + Prepare or explicit "Prepare now" action.
+
+- **Align launcher agent selection with sandbox recipes.** Managed Ubuntu currently installs only Claude Code and Codex
+  while the launcher presents all ten built-in agents as selectable. Design the UX for recipe-dependent harnesses —
+  likely supporting installing the harness the user picks on demand.
 
 - **Recipe maintenance friction.** Address immutable recipe names, deletion blocked by suspended sandboxes, and disk
   shrinks below the existing snapshot size failing until a manual snapshot rebuild.
 
-- **Investigate Tensorlake's ssh gateway leaving forwarded channels open, and report it if it is a bug.** Through the
-  gateway, an ssh client holding a remote-forwarded connection never learned that the sandbox side was gone: the sandbox
-  side was torn down within half a second, but the local ssh and its connection to the local service were still up 185
-  seconds later, with keep-alives on or off, while an ordinary OpenSSH server ended the same setup in about 1.3 seconds
-  and the gateway did end a connection with no forwarded channel open. Confirm what the gateway does (including whether
-  it relays a forwarded channel's close in the ordinary case where only the sandbox-side client hangs up), and if it is
-  a gateway bug, send Tensorlake a report with the minimal reproduction. Everything known so far, measured and inferred
-  kept apart, is in `lore/2026-11-07-tensorlake-gateway-forwarded-channels.md`.
+#### Wave 3 — Session launcher polish
 
-- **Codex Subscription rotating refresh-token conflict across concurrent sandboxes (separate credential track).**
+- **Remove the permanent SSH key registration command block from the session launcher.** Push SSH key registration
+  exclusively into Tensorlake setup in Settings and/or the setup wizard, and make it easy to jump there from the
+  launcher instead of repeating the full `tl sbx ssh keys add` block on every launch (which currently pushes the Agent
+  section below the fold when Managed checkout is selected).
+
+- **Save as template from a sandbox launch.** Restore `Save as template` in the launcher footer for sandbox launches
+  (currently omitted, forcing manual rebuild in the Templates dialog).
+
+- **Discoverability of Tensorlake sandboxes in the session launcher before setup.** The session launcher currently hides
+  `New sandbox` entirely until a Tensorlake API key is saved. Surface Tensorlake as a clear option before setup is
+  complete, linking into the Wave 4 setup flow.
+
+#### Wave 4 — Holistic Settings tabs, setup wizard, and exiting Experimental
+
+- **Holistic Tensorlake onboarding, Settings structure, and setup wizard.** Rework setup, onboarding, and Settings
+  together rather than patching individual forms: consider a separate top-level tab system in Settings (with Tensorlake
+  on its own tab and most existing settings under a General tab) and/or a Tensorlake setup wizard. Cover the six-stop
+  first-time setup flow (Settings → Tensorlake → external `tl sbx ssh keys add` → Credentials → Recipes → Build snapshot
+  → New session), starter recipe and inline credential creation in the recipe editor, fixing the crowded Settings →
+  Tensorlake viewport (where the experimental banner and plaintext storage box hide the SSH key card below the fold, and
+  removing/replacing the experimental warning for v1), removing the duplicated Tensorlake API key form from the top of
+  Settings → Credentials, and updating the welcome card so Tensorlake sandboxes are discoverable from first launch.
+
+#### Wave 5 — Credentials (completes v1)
+
+- **Codex Subscription rotating refresh-token conflict across concurrent sandboxes (and broader sandbox credentials).**
   Launching multiple per-session sandboxes from a recipe using Codex Subscription copies the same `auth.json` into each
-  sandbox, so the first to rotate its refresh token invalidates the others. Keep in v1, but leave out of the initial UX
-  planning pass (credentials are a separate track; focus first on sandboxes working smoothly with an API endpoint / load
-  balancer).
+  sandbox, so the first to rotate its refresh token invalidates the others. Keep in v1 as the final wave (credentials
+  are a separate track; Waves 0–4 focus on sandboxes working smoothly with an API endpoint / load balancer).
 
 ### v2
 
