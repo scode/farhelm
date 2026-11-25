@@ -89,7 +89,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   existing Cursor login and identify the active model field. The older authenticated screen fixture displays a bare
   label such as `GPT-5.6 Luna 272K Low` beside the composer. With the same login, run
   `python3 -B scripts/run-harness-drift.py --no-upgrade --category permission_modes --harness cursor` to confirm YOLO
-  and Custom launches. Both of those starts also reached the login screen.
+  and Custom launches. Both of those starts also reached the login screen. The `named_conversation` category's Cursor
+  case, which seeds a chat from `cursor-agent create-chat` and reopens it by ID, also stopped at the login screen and
+  still needs a run with the same login.
 
 - **Keep Antigravity's Restart selector before a Custom `--`.** With Antigravity 1.5.16, a launch with
   `--mode auto --settings '{}' --` reaches the composer, completes a turn and captures a conversation. The saved command

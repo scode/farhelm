@@ -33,12 +33,15 @@ async fn execute(harness: LaunchHarness) -> DriftResult {
         if harness.captures_named_conversation() {
             check_capturing_harness(&env, &profile, launch, &code_word).await
         } else {
+            use LaunchHarness::*;
             match harness {
-                LaunchHarness::Goose => check_goose(&env, &profile, launch, &code_word).await,
-                LaunchHarness::Cursor | LaunchHarness::OpenCode => {
+                Goose => check_goose(&env, &profile, launch, &code_word).await,
+                Cursor | OpenCode => {
                     check_without_capture(&env, &profile, launch, &code_word).await
                 }
-                _ => Err(anyhow::anyhow!("no named-start check for {harness:?}").into()),
+                Claude | Codex | Antigravity | Muse | Pi | Omp | Grok | Bash | Zsh | Custom => {
+                    Err(anyhow::anyhow!("no named-start check for {harness:?}").into())
+                }
             }
         }
     })
@@ -250,14 +253,24 @@ async fn check_without_capture(
     launch: SessionLaunch,
     code_word: &str,
 ) -> DriftResult {
-    let cursor_id = if env.harness == LaunchHarness::Cursor {
-        let output = vendor_lookup(env.work, profile.binary, &["create-chat"], false).await?;
-        let id = output.trim();
-        uuid::Uuid::parse_str(id)
-            .map_err(|_| anyhow::anyhow!("Cursor create-chat did not return a chat UUID"))?;
-        Some(id.to_owned())
-    } else {
-        None
+    use LaunchHarness::*;
+    let cursor_id = match env.harness {
+        Cursor => {
+            let output = vendor_lookup(env.work, profile.binary, &["create-chat"], false).await?;
+            let id = output.trim();
+            uuid::Uuid::parse_str(id)
+                .map_err(|_| anyhow::anyhow!("Cursor create-chat did not return a chat UUID"))?;
+            Some(id.to_owned())
+        }
+        // OpenCode's ID is found after the seed turn, from its session list.
+        OpenCode => None,
+        Claude | Codex | Antigravity | Muse | Goose | Pi | Omp | Grok | Bash | Zsh | Custom => {
+            return Err(anyhow::anyhow!(
+                "no way to find an uncaptured conversation for {:?}",
+                env.harness
+            )
+            .into());
+        }
     };
     let extras = cursor_id
         .as_deref()
