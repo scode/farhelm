@@ -625,7 +625,7 @@
   write-failure teardowns, and add a regression test with a concurrent incoming frame during displacement. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## helm-agent-create-dispatch-logs-asking-session-unescaped.md
 
@@ -646,7 +646,7 @@
   (`agent_requests.rs:3116- 3121`) matching its sibling sites, and add a focused regression test. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-security-and-agent-boundaries.md` ``.
 
 ## trailing-templates-stale-save-duplicate-footer.md
 
@@ -669,7 +669,7 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
 ## trailing-host-refusal-remove-reads-live-skip.md
 
@@ -694,7 +694,7 @@
   with a regression test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
 ## agent-environment-launch-skips-place-host-incarnation-pin.md
 
@@ -716,7 +716,7 @@
   lines). If planning or execution finds this is much more complicated than reusing existing mechanisms, kick it back to
   `TODO.md` with an explanation of why it is complicated instead of landing a complex change. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-security-and-agent-boundaries.md` ``.
 
 ## uninstall-newline-stripping-defeats-state-inside-lib-guard.md
 
@@ -733,7 +733,7 @@
   `crates/farhelm-helm/src/provisioning/backend.rs`, fail closed when a resolved path contains an embedded newline so
   Uninstall refuses the layout, and add a focused regression test (estimate S, ~20-40 lines). Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## trailing-legacy-claude-settings-v036-hosts-never-cleaned.md
 
@@ -750,7 +750,7 @@
   (carrying no delivery record) are accepted as not automatically migrated for Claude settings (alongside the existing
   crash acceptance). Combine with `trailing-legacy-codex-config-v036-hosts-never-cleaned.md` if convenient. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-and-comment-updates.md` ``.
 
 ## trailing-legacy-codex-config-v036-hosts-never-cleaned.md
 
@@ -766,7 +766,7 @@
   Tensorlake is still experimental and that legacy v0.36.0 Tensorlake hosts that never reconnected under v0.37-v0.43
   (carrying no delivery record) are accepted as not automatically migrated for Codex config as well as Claude settings.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-and-comment-updates.md` ``.
 
 ## trailing-replace-with-recent-named-fill-enter-replaces.md
 
@@ -782,7 +782,7 @@
   option's accessible name/description so assistive technology explicitly announces that Enter replaces and deletes the
   source session (while clicking fills), with a focused regression test (estimate S, ~20-40 lines). Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-safety.md` ``.
 
 ## trailing-sandbox-agent-plants-repository-suggestions.md
 
@@ -799,7 +799,7 @@
   gate repository-history recording on `origin == CreateOrigin::User` in `crates/farhelm-helm/src/sessions.rs`, and add
   regression tests for both sandbox/container and ordinary-host agent checkouts (estimate S, ~20-40 lines). Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-security-and-agent-boundaries.md` ``.
 
 ## trailing-auto-trust-overrides-custom-flag-refusal.md
 
@@ -815,7 +815,7 @@
   Codex project-trust `-c` overrides in Custom permission flags (with unit tests, estimate S ~30-50 lines), and update
   `SPEC.md` (and `SPEC_impl.md` if applicable) to specify this explicitly as best-effort detection ONLY — never
   documented or promised as a guarantee. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
 
 ## trailing-host-setup-frozen-skip-ignores-later-restore.md
 
@@ -831,7 +831,7 @@
   `hosts/setup.rs`) so turning skip OFF mid-probe restores the confirmation while turning skip ON mid-probe still cannot
   skip it, with a regression test (estimate S, ~15-35 lines). Only implement if it stays simple; if it turns
   complicated, kick it back into `TODO.md` with an explanation instead. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
 ## trailing-tensorlake-rerun-reads-skip-setting-late.md
 
@@ -847,7 +847,7 @@
   confirmation if either the pre-probe or post-probe value says to ask, with a regression test (estimate S-M, ~40-80
   lines). Only implement if it stays simple; if it turns complicated, kick it back into `TODO.md` with an explanation
   instead. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
 ## trailing-unread-hook-and-spare-switches-read-as-off.md
 
@@ -861,7 +861,7 @@
 - Completion criteria: Switch the hook-setup and spare-checkout Settings switches to `.value_unknown(...)` matching
   `agent_trust.rs`, and add regression tests verifying screen-reader state while unread/unreadable (estimate S, ~25-35
   lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
 
 ## trailing-stored-trust-chip-credits-settings-switch.md
 
@@ -876,7 +876,7 @@
   this session when it started. Repository hooks, settings and commands can run without asking."), update
   `SPEC.md:4721-4722` to match, and add/update tests (and goldens if affected) (estimate S, ~20-35 lines). Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
 
 ## trailing-settings-trust-help-misdescribes-persistent-hosts.md
 
@@ -892,7 +892,7 @@
   with `SPEC.md:1861-1863` (distinguishing a session's own disposable sandbox/container from installed and persistent
   hosts created with Add host), and update affected tests/goldens (estimate S, ~15-25 lines). Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
 
 ## trailing-disposable-trust-hint-says-off-by-default.md
 
@@ -907,7 +907,7 @@
 - Completion criteria: Suppress the workspace-trust hint band when the session's host has `is_session_owned == true`,
   update `SPEC.md:1887-1917` to state that the hint applies only where the Settings switch applies, and add a regression
   test (estimate S, ~25-40 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
 
 ## trailing-menu-stop-and-suspend-exited-shell-wording.md
 
@@ -921,7 +921,7 @@
 - Completion criteria: Give the row menu's Stop and suspend item (tooltip, description, and confirmation/Cancel copy) a
   tab-only variant when the session's main program has already ended while tabs remain, matching PR #4931's wording, and
   add a regression test/golden (estimate S, ~40-70 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
 ## trailing-spec-file-click-release-wording.md
 
@@ -934,7 +934,7 @@
 - Completion criteria: Reword `SPEC.md:3753-3754` to match shipped behavior and `SPEC_impl.md:3484-3499` (pressed while
   that hover's disclosure is painted and fully visible, and released before the disclosure is replaced, with link text
   unchanged). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-and-comment-updates.md` ``.
 
 ## trailing-spec-impl-hook-answer-preview-wait.md
 
@@ -948,7 +948,7 @@
   permission through a host-setting write or checkout preview) from the hook-setup answer (carries permission through
   its setting write and refuses safely if a checkout preview is still loading). Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-and-comment-updates.md` ``.
 
 ## trailing-spec-impl-custom-agent-id-letter.md
 
@@ -959,7 +959,7 @@
   match code". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Change `SPEC_impl.md:7613` from "start with a letter" to "start with a lowercase letter or
   digit". Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-and-comment-updates.md` ``.
 
 ## trailing-stale-references-to-removed-repository-search.md
 
@@ -972,7 +972,7 @@
 - Completion criteria: Clean up all 6 stale references to removed repository discovery/search in `SPEC.md`, code
   comments, and the `ui_channel_tests.rs` test docstring (docs/comments only, ~15 lines). Remove the feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-and-comment-updates.md` ``.
 
 ## trailing-file-prepaint-click-test-gap.md
 
@@ -985,7 +985,7 @@
 - Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
   guards a user-facing behavior; otherwise make no change. Either way remove the feedback file and its index entry, and
   record in Execution which way it went.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
 ## trailing-tab-shell-hangup-delete-wiring-untested.md
 
@@ -998,7 +998,7 @@
 - Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
   guards a user-facing behavior; otherwise make no change. Either way remove the feedback file and its index entry, and
   record in Execution which way it went.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## trailing-agent-create-connection-binding-untested.md
 
@@ -1012,7 +1012,7 @@
 - Completion criteria: Add a focused helm test pinning `approval.target_incarnation` forwarding through
   `create_for_agent` into `dispatch_agent_create` (estimate S-M, ~35-60 lines). Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-security-and-agent-boundaries.md` ``.
 
 ## trailing-trust-hint-late-refusal-untested.md
 
@@ -1024,7 +1024,7 @@
 - Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
   guards a user-facing behavior; otherwise make no change (estimate ~12-15 lines). Either way remove the feedback file
   and its index entry, and record in Execution which way it went.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
 
 ## trailing-switch-warning-description-untested.md
 
@@ -1037,7 +1037,7 @@
 - Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
   guards a user-facing behavior; otherwise make no change (estimate ~15-20 lines). Either way remove the feedback file
   and its index entry, and record in Execution which way it went.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
 
 ## trailing-replace-in-environment-history-check-vacuous.md
 
@@ -1050,7 +1050,7 @@
 - Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
   guards a user-facing behavior; otherwise make no change (estimate ~10-20 lines). Either way remove the feedback file
   and its index entry, and record in Execution which way it went.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## trailing-session-owned-setup-flag-untested.md
 
@@ -1063,7 +1063,7 @@
 - Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
   guards a user-facing behavior; otherwise make no change (estimate ~8-12 lines). Either way remove the feedback file
   and its index entry, and record in Execution which way it went.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## trailing-drift-copyback-runs-while-agent-may-live.md
 
@@ -1078,7 +1078,7 @@
 - Completion criteria: Track confirmed session deletion and absence of failed-create leftovers in `DriftEnv` so
   `PrivateConfig::finish` gates copy-back accurately (and emits notes when skipped), update the misleading comments in
   `private_config.rs`, and add unit tests (estimate S-M, ~40-65 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-drift-and-brick-tooling.md` ``.
 
 ## trailing-drift-runner-drops-requested-harness.md
 
@@ -1091,7 +1091,7 @@
 - Completion criteria: In `scripts/run-harness-drift.py`, refuse with a clear error when any explicitly requested
   `--harness` has no matching case in the selected categories, and cover this in `scripts/test-run-harness-drift.py`
   (estimate S, ~20-35 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-drift-and-brick-tooling.md` ``.
 
 ## trailing-drift-panic-skips-copyback.md
 
@@ -1104,7 +1104,7 @@
 - Completion criteria: Catch unwinds around `run(...).await` in `with_drift_supervisor_using`, run normal teardown and
   `config.finish(...)`, then resume unwind on panic, with a unit test (estimate S, ~20-35 lines). Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-drift-and-brick-tooling.md` ``.
 
 ## trailing-drift-failed-copyback-passes-case.md
 
@@ -1119,7 +1119,7 @@
 - Completion criteria: Continue copying all remaining files and running `real_leaves_unchanged()`, then fail the drift
   case (after printing notes) when any copy-back I/O replacement failed, update `docs/harness-drift-tests.md`, and add a
   unit test (estimate S, ~20-35 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-drift-and-brick-tooling.md` ``.
 
 ## trailing-drift-cursor-initial-prompt-never-passes.md
 
@@ -1135,7 +1135,7 @@
   in `named_conversation.rs:258-264` and shared `vendor_lookup` helper) so both fresh and named steps can pass, remove
   the matching `TODO.md:480-485` entry if fully addressed, and add unit coverage (estimate S, ~25-45 lines). Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-drift-and-brick-tooling.md` ``.
 
 ## trailing-drift-capture-timing-check-too-coarse.md
 
@@ -1149,7 +1149,7 @@
 - Completion criteria: Tighten `capture_timing_hooks` to assert hook-log ordering (prompt/start capture line precedes
   `event=Stop`) for `FirstPrompt` / `FirstPromptWithHooks` agents, with unit tests (estimate S, ~25-40 lines). Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-drift-and-brick-tooling.md` ``.
 
 ## trailing-release-notes-recapture-parks-on-tooltip-field.md
 
@@ -1160,7 +1160,7 @@
 - Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
   items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Remove the feedback file and its index entry without changing code or spec.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-queue-discards.md` ``.
 
 ## trailing-brick-cleanup-refuses-untested-remote-mac-pair.md
 
@@ -1173,7 +1173,7 @@
 - Completion criteria: In `releasing/mac-vm-test/brick_test.py`, require `native_preflight_retained(entry)` during
   cleanup only when the pass is in scope or already has results/preflight/tester evidence, and add a unit test in
   `test_native_coordinator.py` (estimate S, ~15-25 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-drift-and-brick-tooling.md` ``.
 
 ## trailing-drift-claude-trust-real-config-byte-check.md
 
@@ -1188,7 +1188,7 @@
   entry (`hasTrustDialogAccepted`) for the scratch workspace key (or emit a `drift:` note on unrelated byte changes),
   update `docs/harness-drift-tests.md`, and add unit tests (estimate S, ~25-40 lines). Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-drift-and-brick-tooling.md` ``.
 
 ## trailing-drift-claude-trust-ancestor-vacuous-pass.md
 
@@ -1204,7 +1204,7 @@
   private mirror copy of Claude config files before launching the Claude trust drift case (so the test proves Farhelm's
   entry works even if `/tmp` or `/` is trusted in real config), and add a unit test (estimate S, ~20-35 lines). Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-drift-and-brick-tooling.md` ``.
 
 ## upload-cancel-mid-publication-reported-not-published.md
 
@@ -1219,7 +1219,7 @@
 - Completion criteria: Return `ErrorKind::Internal` for `DiskStage::Cancelled` in `commit_upload`
   (`crates/farhelm-supervisor/src/service/uploads.rs:1254-1258`, matching `DiskStage::Failed` and `SPEC_impl.md:5050`),
   and add a focused unit test (estimate S, ~15-30 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## preapproved-agent-requests-skip-deleting-session-refusal.md
 
@@ -1233,7 +1233,7 @@
 - Completion criteria: Check `state.approvals.session_is_being_deleted(&asking_key)` before preapproval fast paths in
   `ask_with_answer` (`crates/farhelm-helm/src/approvals.rs`), and add a regression test (estimate S, ~25-35 lines).
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-security-and-agent-boundaries.md` ``.
 
 ## update-identity-unverified-misleading-plan-again-remedy.md
 
@@ -1247,7 +1247,7 @@
 - Completion criteria: Refuse `recorded = Some` / `reported = None` during Update planning with the `IdentityUnverified`
   remedies from `attach_refusal`, distinguish missing vs changed identity in `revalidate` (`service.rs:3021-3028`), and
   add regression tests (estimate S, ~25-45 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## installer-fallback-lock-world-openable.md
 
@@ -1260,7 +1260,7 @@
 - Completion criteria: Create `FALLBACK_LOCK_FILE` with `.mode(0o600)` at
   `crates/farhelm-supervisor/src/installation/ mod.rs:208-215` (leaving `~/Applications` folder creation standard) and
   add a unit test (estimate S, ~15-30 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## trailing-file-disclosure-holdback-silent-click.md
 
@@ -1275,7 +1275,7 @@
 - Completion criteria: Show the `"not visible"` refusal (`Hidden::NotVisible.file_words()`) when clicking a terminal
   file path whose disclosure was held back over the pointer (matching web links and `SPEC_impl.md:3555-3562`), and add a
   regression test (estimate S-M, ~35-60 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
 ## trailing-reposted-notice-not-revealed.md
 
@@ -1288,7 +1288,7 @@
 - Completion criteria: Move a re-posted notice to the bottom of the notice stack in `notices::post` and scroll it into
   view in `main_view.rs` (tracking a monotonic post sequence or position change), with a regression test (estimate S,
   ~20-35 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
 ## trailing-launcher-new-clone-enter-after-vanished-pick.md
 
@@ -1302,7 +1302,7 @@
 - Completion criteria: Extend the existing presented-frame `ActionFrame` Enter guards for empty-pane highlights and
   folder dropdown highlights to New and Clone (not just Replace with), matching `SPEC.md:1235-1237` and `5871-5873`, and
   add regression tests (estimate S, ~30-60 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-safety.md` ``.
 
 ## trailing-launcher-held-escape-discards-draft.md
 
@@ -1317,7 +1317,7 @@
   launcher region (`inline_results` or `save_panel`) and returns `Dismissal::Stay`, preserving fresh second Escape to
   close the launcher, and add tests for both regions (estimate S, ~10-25 lines). Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-safety.md` ``.
 
 ## trailing-launcher-stale-permanent-yolo-answer-silent.md
 
@@ -1335,7 +1335,7 @@
   Save-panel-open); show a clear launcher note on post-write staleness stating that the host now starts YOLO sessions
   without asking and the launch did not start because it changed; update/add tests (estimate S-M, ~40-80 lines). Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-safety.md` ``.
 
 ## trailing-podman-image-inspect-hits-output-cap.md
 
@@ -1348,7 +1348,7 @@
 - Completion criteria: Project both `podman image inspect` calls in `podman/build.rs` with `--format` extracting only
   `Id` and the needed `farhelm.*` labels (matching #4880's `container inspect` projection), and update/add unit tests
   (estimate S, ~35-55 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## trailing-podman-leftover-listing-hits-output-cap.md
 
@@ -1362,7 +1362,7 @@
 - Completion criteria: Switch `list_owned` in `crates/farhelm-helm/src/environment/podman.rs` to
   `--no-trunc --format {{.ID}}` (preserving deliberate `try_join_all` all-or-error semantics), and update/add unit tests
   (estimate S, ~25-40 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## trailing-recipe-home-launch-skips-early-title-check.md
 
@@ -1379,7 +1379,7 @@
   64 KiB cap with a neutral non-checkout error message) so invalid titles are refused before provisioning for
   home-folder recipe launches as well as managed checkouts, and add tests for both GUI/REST and agent-request routes
   (estimate S, ~25-45 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## trailing-repository-history-failure-shown-as-no-matches.md
 
@@ -1393,7 +1393,7 @@
   `"Couldn't load recent repositories; enter owner/repo"` in `repository_empty_message` while keeping manual
   `owner/repo` entry working and keeping the once-per-opening read (`SPEC_impl.md:5121`), with a regression test
   (estimate S, ~25-45 lines). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-launcher-safety.md` ``.
 
 ## shortcuts-chord-during-composition.md
 
@@ -1407,7 +1407,7 @@
   6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Document the Linux XKB compose-cancellation limitation for `Ctrl+Shift+/` in `SPEC_impl.md` (no
   vendored GPUI patch; Part 2 has no shipped non-layer text field). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-and-comment-updates.md` ``.
 
 ## provisioning-orphan-sweep-deletes-concurrent-helm-upload.md
 
@@ -1418,7 +1418,7 @@
 - Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
   6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Remove the feedback file and its index entry without changing code or spec.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-queue-discards.md` ``.
 
 ## release-payload-cache-misses-private-dir-hardening.md
 
@@ -1429,7 +1429,7 @@
 - Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
   6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Remove the feedback file and its index entry without changing code or spec.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-queue-discards.md` ``.
 
 ## podman-settle-claim-incumbent-state-non-atomic.md
 
@@ -1441,7 +1441,7 @@
 - Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
   6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Remove the feedback file and its index entry without changing code or spec.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-queue-discards.md` ``.
 
 ## trailing-grid-wide-glyph-absorbs-foreign-spacer.md
 
@@ -1455,7 +1455,7 @@
 - Completion criteria: Add mid-wide-character DCH/ICH edits (deleting/inserting starting on a wide character's spacer
   column) to `SPEC.md:3396-3399`'s 2026-11-21 terminal fidelity exclusions. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-and-comment-updates.md` ``.
 
 ## trailing-hook-hint-keeps-stale-save-error.md
 
@@ -1467,7 +1467,7 @@
 - Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
   6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Remove the feedback file and its index entry without changing code or spec.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-queue-discards.md` ``.
 
 ## trailing-trust-hint-hide-survives-reconnect.md
 
@@ -1478,7 +1478,7 @@
 - Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
   6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Remove the feedback file and its index entry without changing code or spec.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-queue-discards.md` ``.
 
 ## trailing-relative-claude-lock-in-old-cleanup-records.md
 
@@ -1490,7 +1490,7 @@
 - Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
   6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Remove the feedback file and its index entry without changing code or spec.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-queue-discards.md` ``.
 
 ## trailing-symlinked-claude-json-permanent-warning.md
 
@@ -1504,4 +1504,4 @@
   6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Update `SPEC_impl.md:6836-6840` to explicitly accept the generic persistent warning and retry on
   symlinked/non-regular `~/.claude.json` alongside the 1 MiB trade-off. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: ``planned in `plans/queue/triage-spec-and-comment-updates.md` ``.
