@@ -358,4 +358,68 @@ mod tests {
             );
         }
     }
+
+    /// Existing Custom launches stored the selector after the delimiter. Moving the trust option must preserve
+    /// the historical resume command byte for byte outside that option, so a clone or inherited spawn can still
+    /// apply its destination's trust policy without recompiling the saved launch.
+    #[test]
+    fn antigravity_trust_accepts_the_historical_custom_resume_boundary() {
+        use farhelm_proto::LaunchPermission;
+        use farhelm_proto::session_launch::{
+            ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER, CONVERSATION_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER,
+        };
+        let flags = ["--mode", "auto", "--", "literal operand"];
+        let selection = LaunchSelection {
+            custom_agent: None,
+            harness: LaunchHarness::Antigravity,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::Custom),
+            permission_flags: Some(flags.map(String::from).into()),
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        };
+        let base = ["agy", "--mode", "auto", "--", "literal operand"].map(String::from);
+        let old = SessionLaunch::Agent {
+            selection,
+            custom_reporting: None,
+            start: [base.as_slice(), &[FARHELM_ARGS_PLACEHOLDER.into()]].concat(),
+            resume: Some(
+                [
+                    base.as_slice(),
+                    &[
+                        "--conversation".into(),
+                        CONVERSATION_PLACEHOLDER.into(),
+                        FARHELM_ARGS_PLACEHOLDER.into(),
+                    ],
+                ]
+                .concat(),
+            ),
+        };
+        let trusted = launches::with_workspace_trust(old.clone(), Some(true)).unwrap();
+        let SessionLaunch::Agent {
+            resume: Some(resume),
+            ..
+        } = &trusted
+        else {
+            panic!("expected the saved resume command");
+        };
+        assert_eq!(
+            resume,
+            &[
+                "agy",
+                "--mode",
+                "auto",
+                "--settings",
+                ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER,
+                "--",
+                "literal operand",
+                "--conversation",
+                CONVERSATION_PLACEHOLDER,
+                FARHELM_ARGS_PLACEHOLDER,
+            ]
+        );
+        assert_eq!(launches::with_workspace_trust(trusted, None).unwrap(), old);
+    }
 }
