@@ -17,7 +17,11 @@ impl PromptProbe {
     /// An unpredictable answer keeps prior conversations and generic acknowledgments out of the oracle.
     fn new() -> Self {
         let random = uuid::Uuid::new_v4().simple().to_string();
-        let word = format!("FH{}", random[..8].to_ascii_uppercase());
+        Self::with_word(format!("FH{}", random[..8].to_ascii_uppercase()))
+    }
+
+    /// A named seed built separately from the fresh launch must have a different recall witness.
+    fn with_word(word: String) -> Self {
         let initial = format!(
             "-- Remember the test word {word}\nReply with FIRST, a hyphen, and the test word from the previous line. If there is no previous line, reply SINGLELINE. No tools."
         );
@@ -54,17 +58,27 @@ async fn execute(harness: LaunchHarness) -> DriftResult {
                     prompt: Some(probe.initial.clone()),
                     ..CreateExtras::default()
                 },
-                async |id| check_fresh(&env, &profile, id, &probe).await,
+                async |id| check_fresh(&env, &profile, id, &probe, None).await,
             )
             .await?;
         if harness.supports_initial_prompt(true) {
-            let selector = selector.ok_or_else(|| {
-                DriftError::CouldNotRun(
-                    "fresh prompt passed, but this CLI did not expose a conversation selector for the test workspace"
-                        .into(),
-                )
-            })?;
-            check_named(&env, &profile, launch, selector, &probe).await?;
+            let (selector, named_probe, check_cursor_argv) = match selector {
+                Some(selector) => (selector, probe, false),
+                None => {
+                    let seed = PromptProbe::with_word(format!("{}N", probe.word));
+                    let selector = seed_named_prompt(&env, &profile, &launch, &seed).await?;
+                    (selector, seed, true)
+                }
+            };
+            check_named(
+                &env,
+                &profile,
+                launch,
+                selector,
+                &named_probe,
+                check_cursor_argv,
+            )
+            .await?;
             println!("named conversation launch prompt confirmed");
         }
         Ok(())
@@ -79,6 +93,7 @@ async fn check_fresh(
     profile: &Harness,
     id: &str,
     probe: &PromptProbe,
+    cursor_selector: Option<&str>,
 ) -> Result<Option<String>, DriftError> {
     let mut terminal = Terminal::attach(env.sup, env.client, id, false).await?;
     terminal
@@ -87,6 +102,9 @@ async fn check_fresh(
     // The model can infer the answer if its input turns the newline into a space. Check the literal value
     // at the child boundary as well as the automatic reply. Flag values may be attached with `=`.
     let argv = live_child_argv(&terminal, "fresh launch")?;
+    if let Some(selector) = cursor_selector {
+        require_cursor_selector(&argv, selector)?;
+    }
     if !argv.split(|&byte| byte == 0).any(|arg| {
         arg == probe.initial.as_bytes()
             || arg
@@ -273,9 +291,10 @@ async fn check_named(
     launch: SessionLaunch,
     selector: String,
     probe: &PromptProbe,
+    check_cursor_argv: bool,
 ) -> DriftResult {
     let named_start =
-        farhelm_helm::compile_named_start(&launch, selector).map_err(anyhow::Error::msg)?;
+        farhelm_helm::compile_named_start(&launch, selector.clone()).map_err(anyhow::Error::msg)?;
     let named_argv = named_start.argv.clone();
     let recall = format!("RECALL-{}", probe.word);
     env.with_session(
@@ -290,6 +309,9 @@ async fn check_named(
             terminal
                 .ready(profile, TrustPolicy::AutoAnswer, true)
                 .await?;
+            if check_cursor_argv {
+                require_cursor_selector(&live_child_argv(&terminal, "Cursor recall")?, &selector)?;
+            }
             await_prompt_reply(env, profile, id, &mut terminal, &recall, Some(&named_argv)).await?;
             terminal.ready(profile, TrustPolicy::AutoAnswer, true).await
         },
@@ -297,8 +319,26 @@ async fn check_named(
     .await
 }
 
-/// OpenCode must list one conversation for the workspace after the fresh turn. A missing or ambiguous match
-/// fails the case. Cursor exposes a resume UI, so the named prompt check has no selector to use there.
+/// Match the Cursor selector among the options. A prompt can contain both the flag and the ID after `--`.
+fn require_cursor_selector(argv: &[u8], selector: &str) -> Result<(), DriftError> {
+    let args = argv
+        .split(|&byte| byte == 0)
+        .take_while(|arg| *arg != b"--");
+    if args
+        .clone()
+        .zip(args.skip(1))
+        .any(|(flag, value)| flag == b"--resume" && value == selector.as_bytes())
+    {
+        return Ok(());
+    }
+    Err(
+        anyhow::anyhow!("the Cursor child did not receive the allocated chat after --resume")
+            .into(),
+    )
+}
+
+/// OpenCode must list one conversation for the workspace after the fresh turn. A missing or ambiguous match fails
+/// the case. Cursor allocates a separate chat as the named seed after this fresh launch completes.
 async fn untracked_selector(
     env: &DriftEnv<'_>,
     profile: &Harness,
@@ -311,6 +351,51 @@ async fn untracked_selector(
         Cursor | Claude | Codex | Antigravity | Goose | Grok | Muse | Pi | Omp | Bash | Zsh
         | Custom => Ok(None),
     }
+}
+
+/// Keep Cursor's fresh proof free of a resume selector. Seed a new known chat with the same launch prompt so the
+/// named recall reads a conversation this case actually started, without relying on the interactive resume picker.
+async fn seed_named_prompt(
+    env: &DriftEnv<'_>,
+    profile: &Harness,
+    launch: &SessionLaunch,
+    probe: &PromptProbe,
+) -> Result<String, DriftError> {
+    use LaunchHarness::*;
+    let selector = match env.harness {
+        Cursor => cursor_chat_id(env.work, profile.binary, true).await?,
+        Claude | Codex | Antigravity | Goose | Grok | Muse | Pi | Omp | OpenCode | Bash | Zsh
+        | Custom => {
+            return Err(DriftError::CouldNotRun(
+                "fresh prompt passed, but this CLI did not expose a conversation selector for the test workspace".into(),
+            ));
+        }
+    };
+    let named_start =
+        farhelm_helm::compile_named_start(launch, selector.clone()).map_err(anyhow::Error::msg)?;
+    env.with_session(
+        launch.clone(),
+        CreateExtras {
+            named_start: Some(named_start),
+            prompt: Some(probe.initial.clone()),
+            ..CreateExtras::default()
+        },
+        async |id| {
+            check_fresh(env, profile, id, probe, Some(&selector))
+                .await
+                .map(|_| ())
+        },
+    )
+    .await
+    .map_err(|error| match error {
+        // The fresh turn already established login. Keep the marker as evidence of a failure in the named path.
+        DriftError::CouldNotRun(reason) => anyhow::anyhow!(
+            "Cursor could not seed the allocated chat after its fresh turn: {reason}"
+        )
+        .into(),
+        error => error,
+    })?;
+    Ok(selector)
 }
 
 drift_cases! {
@@ -337,4 +422,30 @@ fn initial_prompt_covers_every_builtin_harness_that_accepts_it() {
     for harness in expected {
         assert_eq!(HARNESSES.iter().filter(|&&case| case == harness).count(), 1);
     }
+}
+
+/// The selector witness must be the value of a Cursor option, even if the prompt contains an identical pair.
+#[farhelm_testtrace::test]
+fn cursor_selector_must_be_the_resume_value() {
+    assert!(
+        require_cursor_selector(
+            b"cursor-agent\0--resume\0fixture-chat\0--\0prompt\0",
+            "fixture-chat"
+        )
+        .is_ok()
+    );
+    assert!(
+        require_cursor_selector(
+            b"cursor-agent\0--resume\0wrong-chat\0--\0fixture-chat\0",
+            "fixture-chat"
+        )
+        .is_err()
+    );
+    assert!(
+        require_cursor_selector(
+            b"cursor-agent\0--\0--resume\0fixture-chat\0",
+            "fixture-chat"
+        )
+        .is_err()
+    );
 }

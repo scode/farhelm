@@ -40,10 +40,8 @@ async fn check_launch(harness: LaunchHarness, profile: &Harness, trusted: bool) 
         workspace_trust: Some(trusted),
     };
     let evidence = trust_evidence(harness);
-    let private = (evidence == TrustEvidence::ClaudeConfig).then_some(
-        private_config::PrivateConfig::prepare_claude_trust
-            as fn(&Path) -> anyhow::Result<private_config::PrivateConfig>,
-    );
+    let private = (evidence == TrustEvidence::ClaudeConfig)
+        .then_some(private_config::PrivateConfig::prepare_claude_trust as ExtraPrivateConfig);
     with_drift_supervisor(profile, selection, private, async |env, launch| {
         if evidence == TrustEvidence::PiExtension {
             write_pi_extension(env.work)?;
@@ -76,7 +74,7 @@ async fn check_launch(harness: LaunchHarness, profile: &Harness, trusted: bool) 
                 TrustEvidence::ClaudeConfig => {
                     env.private
                         .expect("Claude must have a private config")
-                        .check_claude_trust(env.work)?;
+                        .check_claude_trust()?;
                 }
                 TrustEvidence::ComposerOnly => {}
             }

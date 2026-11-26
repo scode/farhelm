@@ -261,13 +261,82 @@ impl Mirror {
                 path.display()
             );
         }
+        Ok(())
+    }
+
+    /// Real Claude sessions share this file. Only new trust for this case's workspace implicates the mirror.
+    fn check_real_copies(
+        &self,
+        workspace: Option<&str>,
+        notes: &mut Vec<String>,
+    ) -> anyhow::Result<()> {
         for (leaf, before) in &self.copied {
             let path = self.real.join(leaf);
+            let after = read_optional(&path)?;
+            if after == *before {
+                continue;
+            }
+            let Some(workspace) = workspace else {
+                bail!("the real {} changed while a drift case ran", path.display());
+            };
+            let trusted = |bytes: &Option<Vec<u8>>| {
+                bytes
+                    .as_deref()
+                    .is_some_and(|bytes| claude_project_is_trusted(bytes, workspace))
+            };
             ensure!(
-                read_optional(&path)? == *before,
-                "the real {} changed while a drift case ran",
+                !trusted(&after) || trusted(before),
+                "the real {} gained trust for the drift workspace",
                 path.display()
             );
+            notes.push(format!(
+                "the real {} changed without adding trust for the drift workspace",
+                path.display()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Clear exact and inherited trust in the private files. Keep other settings, malformed candidates and file
+    /// permissions so the launch still uses the same config resolver and rejects the same unsupported input.
+    fn clear_claude_trust(&self, work: &Path) -> anyhow::Result<()> {
+        for (leaf, _) in &self.copied {
+            let file = self.private.join(leaf);
+            // The real snapshot and private file were read separately. Clear trust from the bytes the vendor
+            // will actually open, including any trust added between those reads.
+            let bytes = read_optional(&file)?;
+            let Some(mut document) = bytes
+                .as_deref()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+            else {
+                continue;
+            };
+            let Some(projects) = document
+                .get_mut("projects")
+                .and_then(serde_json::Value::as_object_mut)
+            else {
+                continue;
+            };
+            let mut changed = false;
+            for ancestor in work.ancestors().filter_map(Path::to_str) {
+                if let Some(project) = projects
+                    .get_mut(ancestor)
+                    .and_then(serde_json::Value::as_object_mut)
+                {
+                    changed |= project.remove("hasTrustDialogAccepted").is_some();
+                }
+            }
+            if changed {
+                let parent = file.parent().expect("a mirrored config has a parent");
+                let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+                serde_json::to_writer(&mut staged, &document)?;
+                staged
+                    .as_file()
+                    .set_permissions(fs::metadata(&file)?.permissions())?;
+                staged
+                    .persist(&file)
+                    .with_context(|| format!("clearing inherited trust in {}", file.display()))?;
+            }
         }
         Ok(())
     }
@@ -417,8 +486,15 @@ fn regular_file_identity(path: &Path) -> Option<(u64, u64)> {
 #[derive(Debug)]
 pub(super) struct PrivateConfig {
     mirrors: Vec<Mirror>,
-    /// The Claude trust case replaces the login shell because rc files could undo its path redirects.
-    launch_shell: Option<PathBuf>,
+    claude: Option<ClaudeTrust>,
+}
+
+/// The same canonical key serves the private proof and the check for leakage into the real config.
+#[derive(Debug)]
+struct ClaudeTrust {
+    workspace: String,
+    /// Replace the login shell because rc files could undo the mirror's redirects.
+    shell: PathBuf,
 }
 
 impl PrivateConfig {
@@ -444,17 +520,17 @@ impl PrivateConfig {
         }
         Ok(Some(Self {
             mirrors,
-            launch_shell: None,
+            claude: None,
         }))
     }
 
     /// Opt in separately from hook setup. A typical base launch of Claude uses its ordinary configuration.
-    pub(super) fn prepare_claude_trust(scratch: &Path) -> anyhow::Result<Self> {
+    pub(super) fn prepare_claude_trust(scratch: &Path, work: &Path) -> anyhow::Result<Self> {
         let home = Root::Home.real()?;
         let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
             .filter(|value| !value.is_empty())
             .map(PathBuf::from);
-        Self::claude_trust_mirrors(scratch, &home, config_dir.as_deref())
+        Self::claude_trust_mirrors(scratch, &home, config_dir.as_deref(), work)
     }
 
     /// Protect the normal, custom OAuth and legacy names so the test uses the production resolver's
@@ -464,6 +540,7 @@ impl PrivateConfig {
         scratch: &Path,
         home: &Path,
         config_dir: Option<&Path>,
+        work: &Path,
     ) -> anyhow::Result<Self> {
         ensure!(
             home.is_absolute(),
@@ -515,28 +592,43 @@ impl PrivateConfig {
             &private_home,
             config_dir.map(|_| private_override.as_path()),
         );
+        let work = fs::canonicalize(work)?;
+        let workspace = work
+            .to_str()
+            .context("Claude workspace is not UTF-8")?
+            .to_owned();
+        for mirror in &mirrors {
+            mirror.clear_claude_trust(&work)?;
+        }
         Ok(Self {
             mirrors,
-            launch_shell: Some(shell),
+            claude: Some(ClaudeTrust { workspace, shell }),
         })
     }
 
     /// After the composer opens without a trust answer, show that Farhelm wrote the fresh project's key in a
     /// private config instead of relying on a trust decision the vendor already knew.
-    pub(super) fn check_claude_trust(&self, work: &Path) -> anyhow::Result<()> {
-        let work = fs::canonicalize(work)?;
-        let key = work.to_str().context("Claude workspace is not UTF-8")?;
+    pub(super) fn check_claude_trust(&self) -> anyhow::Result<()> {
+        let key = &self
+            .claude
+            .as_ref()
+            .context("the case has no Claude trust mirror")?
+            .workspace;
+        // A concurrent vendor save during Delete can replace a leaked write before finish sees it.
+        let mut notes = Vec::new();
+        let real = self
+            .mirrors
+            .iter()
+            .try_for_each(|mirror| mirror.check_real_copies(Some(key), &mut notes));
+        for note in notes {
+            eprintln!("drift: {note}");
+        }
+        real?;
         for mirror in &self.mirrors {
-            for (relative, before) in &mirror.copied {
+            for (relative, _) in &mirror.copied {
                 if let Some(bytes) = read_optional(&mirror.private.join(relative))?
                     && claude_project_is_trusted(&bytes, key)
                 {
-                    ensure!(
-                        before
-                            .as_ref()
-                            .is_none_or(|bytes| !claude_project_is_trusted(bytes, key)),
-                        "Claude's scratch workspace was already trusted before this test"
-                    );
                     return Ok(());
                 }
             }
@@ -546,8 +638,8 @@ impl PrivateConfig {
 
     /// Point the supervisor's setup and the agent's environment at the mirrors.
     pub(super) fn apply(&self, seams: &mut SupervisorSeams) {
-        if let Some(shell) = &self.launch_shell {
-            seams.launch_shell = Some(shell.to_string_lossy().into_owned());
+        if let Some(claude) = &self.claude {
+            seams.launch_shell = Some(claude.shell.to_string_lossy().into_owned());
         }
         for mirror in &self.mirrors {
             match mirror.root {
@@ -608,10 +700,11 @@ impl PrivateConfig {
                 notes.extend(mirror.dropped_without_cleanup());
             }
         }
-        let unchanged = self
-            .mirrors
-            .iter()
-            .try_for_each(|mirror| mirror.real_leaves_unchanged());
+        let workspace = self.claude.as_ref().map(|claude| claude.workspace.as_str());
+        let unchanged = self.mirrors.iter().try_for_each(|mirror| {
+            mirror.real_leaves_unchanged()?;
+            mirror.check_real_copies(workspace, &mut notes)
+        });
         for note in &notes {
             eprintln!("drift: {note}");
         }
@@ -805,7 +898,7 @@ mod tests {
 
         let config = PrivateConfig {
             mirrors: vec![mirror],
-            launch_shell: None,
+            claude: None,
         };
         let unconfirmed = config.finish(false).unwrap();
         assert_eq!(unconfirmed.len(), 2, "{unconfirmed:?}");
@@ -863,7 +956,7 @@ mod tests {
 
         let config = PrivateConfig {
             mirrors: vec![mirror],
-            launch_shell: None,
+            claude: None,
         };
         let error = format!("{:#}", config.finish(true).unwrap_err());
         assert_eq!(
@@ -914,7 +1007,7 @@ mod tests {
         }
         let config = PrivateConfig {
             mirrors: vec![mirror],
-            launch_shell: None,
+            claude: None,
         };
         let error = config.finish(true).unwrap_err().to_string();
         assert!(
@@ -941,8 +1034,13 @@ mod tests {
         fs::write(home.join(".claude/backups/.claude.json.backup.1"), b"real").unwrap();
         fs::create_dir_all(override_dir.join("backups")).unwrap();
         fs::create_dir(&isolated).unwrap();
-        let config =
-            PrivateConfig::claude_trust_mirrors(&isolated, &home, Some(&override_dir)).unwrap();
+        let config = PrivateConfig::claude_trust_mirrors(
+            &isolated,
+            &home,
+            Some(&override_dir),
+            scratch.path(),
+        )
+        .unwrap();
         for private in [
             isolated.join("private-home/.claude/backups"),
             isolated.join("private-claude-config/backups"),
@@ -966,6 +1064,76 @@ mod tests {
                 .unwrap()
                 .next()
                 .is_none()
+        );
+    }
+
+    /// An ancestor trust decision could hide a broken Farhelm write. The fixture clears only applicable private
+    /// flags and treats an unrelated real write differently from a new trust decision for its own workspace.
+    #[farhelm_testtrace::test]
+    fn claude_trust_mirror_clears_applicable_flags_and_checks_only_new_real_workspace_trust() {
+        let scratch = farhelm_teststate::tempdir().unwrap();
+        let home = scratch.path().join("real-home");
+        let isolated = scratch.path().join("isolated");
+        let work = scratch.path().join("parent/project");
+        for dir in [&home, &isolated, &work] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let work = work.canonicalize().unwrap();
+        let parent = work.parent().unwrap().to_str().unwrap();
+        let key = work.to_str().unwrap();
+        let unrelated = scratch.path().join("elsewhere");
+        let unrelated = unrelated.to_str().unwrap();
+        let real = home.join(".claude.json");
+        let mut document = serde_json::json!({"projects": {
+            parent: {"hasTrustDialogAccepted": true, "otherSetting": 1},
+            unrelated: {"hasTrustDialogAccepted": true}
+        }});
+        let before = serde_json::to_vec(&document).unwrap();
+        fs::write(&real, &before).unwrap();
+        let config = PrivateConfig::claude_trust_mirrors(&isolated, &home, None, &work).unwrap();
+        let private = isolated.join("private-home/.claude.json");
+        let private_bytes = fs::read(&private).unwrap();
+        assert!(claude_project_is_trusted(&before, parent));
+        assert!(!claude_project_is_trusted(&private_bytes, parent));
+        assert!(claude_project_is_trusted(&private_bytes, unrelated));
+        let mut private_document: serde_json::Value =
+            serde_json::from_slice(&private_bytes).unwrap();
+        assert_eq!(private_document["projects"][parent]["otherSetting"], 1);
+        assert_eq!(fs::read(&real).unwrap(), before);
+        // The actual copy can have ancestor trust missing from the snapshot taken just before it.
+        let grandparent = work.ancestors().nth(2).unwrap().to_str().unwrap();
+        private_document["projects"][grandparent] =
+            serde_json::json!({"hasTrustDialogAccepted": true, "copyOnly": 2});
+        let updated_copy = serde_json::to_vec(&private_document).unwrap();
+        assert!(!claude_project_is_trusted(&before, grandparent));
+        assert!(claude_project_is_trusted(&updated_copy, grandparent));
+        fs::write(&private, updated_copy).unwrap();
+        config.mirrors[0].clear_claude_trust(&work).unwrap();
+        let cleared = fs::read(&private).unwrap();
+        assert!(!claude_project_is_trusted(&cleared, grandparent));
+        private_document = serde_json::from_slice(&cleared).unwrap();
+        assert_eq!(private_document["projects"][grandparent]["copyOnly"], 2);
+        assert!(config.check_claude_trust().is_err());
+        private_document["projects"][key] = serde_json::json!({"hasTrustDialogAccepted": true});
+        fs::write(&private, serde_json::to_vec(&private_document).unwrap()).unwrap();
+        config.check_claude_trust().unwrap();
+
+        document["unrelatedUpdate"] = serde_json::json!(true);
+        fs::write(&real, serde_json::to_vec(&document).unwrap()).unwrap();
+        let notes = config.finish(true).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("without adding trust"));
+        document["projects"][key] = serde_json::json!({"hasTrustDialogAccepted": true});
+        fs::write(&real, serde_json::to_vec(&document).unwrap()).unwrap();
+        let early_error = config.check_claude_trust().unwrap_err().to_string();
+        assert!(
+            early_error.contains("gained trust for the drift workspace"),
+            "{early_error}"
+        );
+        let error = config.finish(true).unwrap_err().to_string();
+        assert!(
+            error.contains("gained trust for the drift workspace"),
+            "{error}"
         );
     }
 
@@ -1003,8 +1171,13 @@ mod tests {
         std::os::unix::fs::symlink(&real_target, home.join("config-alias")).unwrap();
         let real_lock = override_dir.join(".claude-custom-oauth.json.lock");
         fs::create_dir(&real_lock).unwrap();
-        let config =
-            PrivateConfig::claude_trust_mirrors(&isolated, &home, Some(&override_dir)).unwrap();
+        let config = PrivateConfig::claude_trust_mirrors(
+            &isolated,
+            &home,
+            Some(&override_dir),
+            scratch.path(),
+        )
+        .unwrap();
         let mut seams = SupervisorSeams::default();
         config.apply(&mut seams);
         let (_, private_override) = seams
@@ -1052,7 +1225,7 @@ mod tests {
         let value = serde_json::json!({"projects": {project.to_str().unwrap(): {"hasTrustDialogAccepted": true}}});
         fs::write(private_file, serde_json::to_vec(&value).unwrap()).unwrap();
         config.check_hook_setup(true).unwrap();
-        config.check_claude_trust(&project).unwrap();
+        config.check_claude_trust().unwrap();
         assert!(config.finish(true).unwrap().is_empty());
         assert_eq!(fs::read(real_file).unwrap(), b"{}");
         assert!(real_lock.is_dir());
@@ -1072,7 +1245,8 @@ mod tests {
         let legacy = home.join(".claude/.config.json");
         fs::write(&legacy, b"").unwrap();
         fs::set_permissions(&legacy, fs::Permissions::from_mode(0o400)).unwrap();
-        let config = PrivateConfig::claude_trust_mirrors(&isolated, &home, None).unwrap();
+        let config =
+            PrivateConfig::claude_trust_mirrors(&isolated, &home, None, scratch.path()).unwrap();
         let private_home = isolated.join("private-home");
         let metadata = fs::metadata(private_home.join(".claude/.config.json")).unwrap();
         assert_eq!(metadata.mode() & 0o777, 0o400);

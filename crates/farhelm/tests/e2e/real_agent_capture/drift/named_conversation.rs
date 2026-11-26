@@ -278,13 +278,7 @@ async fn check_without_capture(
 ) -> DriftResult {
     use LaunchHarness::*;
     let cursor_id = match env.harness {
-        Cursor => {
-            let output = vendor_lookup(env.work, profile.binary, &["create-chat"], false).await?;
-            let id = output.trim();
-            uuid::Uuid::parse_str(id)
-                .map_err(|_| anyhow::anyhow!("Cursor create-chat did not return a chat UUID"))?;
-            Some(id.to_owned())
-        }
+        Cursor => Some(cursor_chat_id(env.work, profile.binary, false).await?),
         // OpenCode's ID is found after the seed turn, from its session list.
         OpenCode => None,
         Claude | Codex | Antigravity | Muse | Goose | Pi | Omp | Grok | Bash | Zsh | Custom => {

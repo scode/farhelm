@@ -50414,3 +50414,72 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   unit test (estimate S, ~20-35 lines). Remove the feedback file and its index entry.
 - Execution: Fixed as decided. Change `tzyzkromqutqoypsopukkpnqyzsxmmrp`, bookmark
   `plan/triage-drift-and-brick-tooling/01-drift-copyback-and-runner`, [#5044](https://github.com/scode/farhelm/pull/5044/changes).
+
+## trailing-drift-cursor-initial-prompt-never-passes.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source
+  (`crates/farhelm/tests/e2e/real_agent_capture/drift/initial_prompt.rs:58-70,101-108, 302-310`): `untracked_selector`
+  returns `Ok(None)` unconditionally for Cursor, so the named second step always ends `COULD NOT RUN`. Explicitly left
+  unfixed by `plans/queue/agent-catalog-cli-and-drift-cleanups.md` PR 4; also noted in `TODO.md:480-485` (Plan
+  follow-ups).
+- Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
+  items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Seed Cursor's `initial_prompt` drift case using `cursor-agent create-chat` (reusing the pattern
+  in `named_conversation.rs:258-264` and shared `vendor_lookup` helper) so both fresh and named steps can pass, remove
+  the matching `TODO.md:480-485` entry if fully addressed, and add unit coverage (estimate S, ~25-45 lines). Remove the
+  feedback file and its index entry.
+- Execution: Fixed as decided. Change `unlszxspmmxqxpoukopwsxlkomqvknsw`, bookmark
+  `plan/triage-drift-and-brick-tooling/02-drift-cursor-timing-and-claude-trust`,
+  [#5047](https://github.com/scode/farhelm/pull/5047/changes).
+
+## trailing-drift-capture-timing-check-too-coarse.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source
+  (`crates/farhelm/tests/e2e/real_agent_capture/drift/capture_timing_hooks.rs:291-340, 365-398`): `FirstPrompt`,
+  `FirstPromptWithHooks`, and `FirstReply` share one branch checking only no capture before prompt and expected lines
+  present after the turn, without checking hook-log ordering for prompt-timed agents.
+- Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
+  items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Tighten `capture_timing_hooks` to assert hook-log ordering (prompt/start capture line precedes
+  `event=Stop`) for `FirstPrompt` / `FirstPromptWithHooks` agents, with unit tests (estimate S, ~25-40 lines). Remove
+  the feedback file and its index entry.
+- Execution: Fixed as decided. Change `unlszxspmmxqxpoukopwsxlkomqvknsw`, bookmark
+  `plan/triage-drift-and-brick-tooling/02-drift-cursor-timing-and-claude-trust`,
+  [#5047](https://github.com/scode/farhelm/pull/5047/changes).
+
+## trailing-drift-claude-trust-real-config-byte-check.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source
+  (`crates/farhelm/tests/e2e/real_agent_capture/drift/private_config.rs:255-273,478-481, 584,617`): byte-for-byte
+  equality on real `~/.claude.json` fails whenever another active Claude Code session on the shared host rewrites it
+  during the drift case (frequency unmeasured).
+- Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
+  items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: For copied Claude config files in `private_config.rs`, fail only if the real file gained a trust
+  entry (`hasTrustDialogAccepted`) for the scratch workspace key (or emit a `drift:` note on unrelated byte changes),
+  update `docs/harness-drift-tests.md`, and add unit tests (estimate S, ~25-40 lines). Remove the feedback file and its
+  index entry.
+- Execution: Fixed as decided. Change `unlszxspmmxqxpoukopwsxlkomqvknsw`, bookmark
+  `plan/triage-drift-and-brick-tooling/02-drift-cursor-timing-and-claude-trust`,
+  [#5047](https://github.com/scode/farhelm/pull/5047/changes).
+
+## trailing-drift-claude-trust-ancestor-vacuous-pass.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source
+  (`crates/farhelm/tests/e2e/real_agent_capture/drift/private_config.rs:228-243,465-547, 652-656`): copying real
+  `~/.claude.json` verbatim preserves ancestor `projects` entries, so if the host's config already trusts `/tmp` or `/`,
+  Claude inherits trust (`SPEC_impl.md:3637-3638`) and the drift case passes without proving Farhelm's entry took
+  effect. Local config state unverified.
+- Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
+  items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Strip `hasTrustDialogAccepted` / ancestor `projects` entries for `work.ancestors()` from the
+  private mirror copy of Claude config files before launching the Claude trust drift case (so the test proves Farhelm's
+  entry works even if `/tmp` or `/` is trusted in real config), and add a unit test (estimate S, ~20-35 lines). Remove
+  the feedback file and its index entry.
+- Execution: Fixed as decided. Change `unlszxspmmxqxpoukopwsxlkomqvknsw`, bookmark
+  `plan/triage-drift-and-brick-tooling/02-drift-cursor-timing-and-claude-trust`,
+  [#5047](https://github.com/scode/farhelm/pull/5047/changes).
