@@ -717,8 +717,8 @@ pub(super) fn group(
         .tier(Tier::Neutral)
         .square(px(24.))
         .on_click(move |_, _, cx| crate::sounds::play(sound, cx));
-        // Leave room before the switch's mark for the preview button. It has its own hitbox over the row, so
-        // the label and description still toggle the sound while a press on Play only previews it.
+        // Center Play in the reserved space without giving its full-height alignment wrapper a hitbox.
+        // The switch still takes clicks above and below Play, and the button takes only its own square.
         div()
             .relative()
             .child(toggle.content(copy.pr(px(26.))))
@@ -730,8 +730,7 @@ pub(super) fn group(
                     .bottom_0()
                     .flex()
                     .items_center()
-                    .block_mouse_except_scroll()
-                    .child(preview),
+                    .child(div().block_mouse_except_scroll().child(preview)),
             )
             .into_any_element()
     } else {

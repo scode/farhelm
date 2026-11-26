@@ -68,17 +68,19 @@ impl Group {
     }
 }
 
-/// The scope describes which installation the page configures. It stays the same as the page's contents load.
+/// The heading names the installations the page configures. App includes the helm when release highlights are shown.
 enum Scope {
     Hosts,
     Helm,
     Device,
+    DeviceAndHelm,
 }
 
 impl Scope {
-    fn of(section: &Section) -> Self {
+    fn of(section: &Section, cx: &gpui::App) -> Self {
         match section {
             Section::Recipes | Section::Tensorlake | Section::Credentials => Self::Helm,
+            Section::App if section.has_live_choices(cx) => Self::DeviceAndHelm,
             Section::App => Self::Device,
             Section::Sessions
             | Section::Appearance
@@ -98,6 +100,7 @@ impl Scope {
             Self::Hosts => "Every host on this helm",
             Self::Helm => "This helm",
             Self::Device => "This Mac",
+            Self::DeviceAndHelm => "This Mac and this helm",
         }
     }
 
@@ -105,7 +108,7 @@ impl Scope {
         match self {
             Self::Hosts => Icon::Hosts,
             Self::Helm => Icon::HostHouse,
-            Self::Device => Icon::HostLaptop,
+            Self::Device | Self::DeviceAndHelm => Icon::HostLaptop,
         }
     }
 }
@@ -381,7 +384,7 @@ impl SettingsDialog {
     /// The scope tells readers where the controls apply without repeating that information under each switch.
     fn page_heading(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let section = &self.shown;
-        let scope = Scope::of(section);
+        let scope = Scope::of(section, cx);
         let display = if *section == Section::AddCustomAgent {
             "Add custom agent".into()
         } else {
