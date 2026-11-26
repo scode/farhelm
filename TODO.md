@@ -74,6 +74,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Let agents enable Tailscale when adding a host.** Make it possible for agents to support directly enabling tailscale
   when adding a host. Also audit for any other gaps between GUI and agent capabilities when adding or removing hosts.
 
+- **Let an agent that adds a host start YOLO sessions on it.** We need to make it practical for an agent that adds a
+  host to be granted permissions to then start YOLO sessions on it. Details TBD. Circumstances that prompted this: an
+  agent was asked to add four new worker hosts and start a Claude Code session in YOLO mode, with a fresh checkout of
+  the Farhelm repository, on each. It added the first host (Farhelm accepted it through the host-add dialog, installed
+  it, and the agent waited for it to connect), then tried to create the session. Farhelm refused the YOLO launch and
+  started nothing: the new host "asks before YOLO launches, so an agent may not start a YOLO launch … To let agents do
+  this, turn on 'Start YOLO sessions without asking' in [the host]'s settings". The agent noted this is a per-host
+  setting it cannot override, so it had to stop and ask the user to turn the setting on for that host and then tell it
+  to retry, and to do the same for each of the other three hosts once added, or it would hit the same refusal on each.
+  Its only other option was guarded mode (Claude's auto mode), which it can start without the setting, but the user had
+  asked for YOLO and the existing executors run that way, so it waited.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
