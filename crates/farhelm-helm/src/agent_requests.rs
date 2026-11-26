@@ -16131,6 +16131,56 @@ mod tests {
         }
     }
 
+    /// An invalid home-folder recipe title makes the launch impossible before approval.
+    #[farhelm_testtrace::test]
+    async fn recipe_home_title_is_checked_before_agent_approval() {
+        let (h, local, _, containers) = container_fleet().await;
+        put_recipe(&h, "dev").await;
+        let _gui = h.manager.ui_seat().hold();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let local_name = listed_name(&h, local).await;
+        let before = owned_rows(&h).await;
+        for (title, expected) in [
+            (
+                "unfinished\nname".into(),
+                "title must not contain control characters",
+            ),
+            (
+                "a".repeat(farhelm_proto::text::MAX_SESSION_TITLE_BYTES + 1),
+                "session title exceeds the 65536-byte limit",
+            ),
+        ] {
+            let (_, message) = refused(
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    handler.handle(
+                        origin_of(&h, local),
+                        "local-live",
+                        AgentVerb::CreateEnvironment {
+                            recipe: "dev".into(),
+                            container_host: Some(local_name.clone()),
+                            templates: Vec::new(),
+                            edits: farhelm_proto::launcher::TemplateFields {
+                                name: Some(title),
+                                name_kind: Some(farhelm_proto::launcher::TemplateNameKind::Fixed),
+                                ..environment_edits()
+                            },
+                        },
+                    ),
+                )
+                .await
+                .expect("invalid title must resolve without an approval answer"),
+            );
+            assert!(message.contains(expected), "{message}");
+        }
+        assert!(h.state.approvals.list().is_empty());
+        assert_eq!(owned_rows(&h).await, before);
+        assert_eq!(
+            containers.builds.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+    }
+
     /// Spec: a recipe that cannot run at the chosen place is refused before
     /// any card (SPEC.md, "Agents and environments"; the launch task's own
     /// recipe checks, made early).

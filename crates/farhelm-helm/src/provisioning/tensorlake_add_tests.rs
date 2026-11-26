@@ -556,6 +556,57 @@ impl Fixture {
     }
 }
 
+/// Invalid recipe titles must be refused before the REST route reserves or bills a sandbox.
+#[farhelm_testtrace::test]
+async fn recipe_home_title_is_checked_before_rest_provisioning() {
+    use axum::http::StatusCode;
+    use serde_json::json;
+
+    let mut f = fixture(false).await;
+    f.bind_session_launch().await;
+    let (recipe, _) = f
+        .harness
+        .store
+        .tensorlake_recipe_row("test-recipe")
+        .await
+        .unwrap()
+        .unwrap();
+    let hosts_before = f.harness.store.list_hosts().await.unwrap().len();
+    for (title, expected) in [
+        (
+            "unfinished\nname".into(),
+            "title must not contain control characters",
+        ),
+        (
+            "a".repeat(farhelm_proto::text::MAX_SESSION_TITLE_BYTES + 1),
+            "session title exceeds the 65536-byte limit",
+        ),
+    ] {
+        let response = f.session_launch_at("/api/environment-sessions", json!({
+            "recipe": "test-recipe",
+            "place": {"kind": "tensorlake_account"},
+            "confirmed": true,
+            "confirmed_size": recipe.size,
+            "request": {"cwd": "~", "title": title, "command": {"command": "true", "yolo": false}},
+        })).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let refusal = String::from_utf8_lossy(&body);
+        assert!(
+            refusal.contains(expected),
+            "expected {expected:?}, got {refusal:?}"
+        );
+    }
+    assert_eq!(
+        f.harness.store.list_hosts().await.unwrap().len(),
+        hosts_before
+    );
+    assert!(f.service.runs().await.runs.is_empty());
+    assert!(!f.root.path().join("api/events.jsonl").exists());
+}
+
 /// A same-name edit can change what the answer would buy. Both routes reject
 /// a stale explicit size before reserving a host or calling the provider.
 /// The current route also refuses a historical confirmation flag by itself.

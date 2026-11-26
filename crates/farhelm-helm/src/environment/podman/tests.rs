@@ -35,6 +35,10 @@ struct Model {
     name: String,
     using_image: bool,
     image_exists: bool,
+    /// Deployed images may be checkpoints, which cannot serve as base images.
+    image_artifact: Option<&'static str>,
+    /// An invalid listing must fail as a whole.
+    invalid_listing: bool,
     lost_run: bool,
     helper_oracle: bool,
     /// The session's selected image facts must already be durable at run.
@@ -216,17 +220,19 @@ impl Commands {
             ("rm", _) => { model.exists = false; output(0, ID) },
             ("image", Some("exists")) =>
                 output(if model.place_identity.is_none() && model.image_exists { 0 } else { 1 }, ""),
-            ("image", Some("inspect")) => output(0, &serde_json::json!([{"Id":ID,"Config":{"Labels":{
-                "farhelm.helm":model.helm,"farhelm.recipe":"dev","farhelm.artifact":"software"
-            }}}]).to_string()),
+            ("image", Some("inspect")) => {
+                assert_eq!(&args[2..5], ["--format", IMAGE_INSPECTION, "--"]);
+                output(0, &serde_json::json!({"Id": ID, "Labels":{
+                    "farhelm.helm":model.helm, "farhelm.recipe":"dev",
+                    "farhelm.artifact": model.image_artifact.unwrap_or("software")
+                }}).to_string())
+            },
             ("image", Some("rm")) => { model.image_exists = false; output(0, ID) },
-            ("ps", _) if args.iter().any(|arg| arg == "--format=json") => {
-                let listed = if model.exists {
-                    serde_json::json!([{"Id": ID}]).to_string()
-                } else {
-                    "[]".to_owned()
-                };
-                output(0, &listed)
+            ("ps", _) if args.iter().any(|arg| arg.starts_with("label=farhelm.helm=")) => {
+                assert!(args.iter().any(|arg| arg == "--no-trunc"));
+                assert!(args.ends_with(&["--format".into(), "{{.ID}}".into()]));
+                let listed = if model.invalid_listing { "unexpected header" } else if model.exists { ID } else { "" };
+                output(0, listed)
             }
             ("ps", _) => output(0, if model.using_image { ID } else { "" }),
             other => panic!("unexpected provider command {other:?}: {args:?}"),
@@ -804,6 +810,40 @@ async fn retired_images_wait_for_users_and_never_force_user_storage() {
         .unwrap();
     assert!(!removal.iter().any(|arg| arg == "--force" || arg == "-f"));
     assert_eq!(removal.last().unwrap(), ID);
+}
+
+/// Selecting an existing base uses the same compact inspect contract as
+/// retirement. The projected label still identifies a prepared checkpoint.
+#[farhelm_testtrace::test]
+async fn projected_image_inspection_keeps_the_checkpoint_base_refusal() {
+    let (_directory, provider, commands, place) = fixture().await;
+    commands.model.lock().unwrap().image_exists = true;
+    provider.pull_base(place.into(), ID).await.unwrap();
+    commands.model.lock().unwrap().image_artifact = Some("prepared");
+    let refusal = provider.pull_base(place.into(), ID).await.unwrap_err();
+    assert!(refusal.to_string().contains("cannot be a recipe base"));
+}
+
+/// An unreadable ID list cannot establish absence or authorize inspecting a name.
+#[farhelm_testtrace::test]
+async fn projected_container_listing_refuses_a_noncanonical_id() {
+    let (_directory, provider, commands, place) = fixture().await;
+    commands.model.lock().unwrap().invalid_listing = true;
+    let refusal = provider
+        .list_owned(Place::PodmanHost(place))
+        .await
+        .err()
+        .expect("a malformed listing must fail");
+    assert!(refusal.to_string().contains("noncanonical container ID"));
+    assert!(
+        !commands
+            .model
+            .lock()
+            .unwrap()
+            .commands
+            .iter()
+            .any(|argv| { argv.get(1).is_some_and(|arg| arg == "container") })
+    );
 }
 
 /// Retiring an unused owned image must keep its dangling parents. An untagged

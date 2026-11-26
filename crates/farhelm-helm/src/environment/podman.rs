@@ -1611,18 +1611,17 @@ impl EnvironmentProvider for Podman {
                     "--no-trunc".into(),
                     "--filter".into(),
                     format!("label=farhelm.helm={}", self.tag().await?),
-                    "--format=json".into(),
+                    "--format".into(),
+                    "{{.ID}}".into(),
                 ],
                 COMMAND,
             )
             .await?;
-        let items: Vec<serde_json::Value> = serde_json::from_str(&text)?;
         let mut owned = Vec::new();
-        for item in items {
-            let id = item["Id"]
-                .as_str()
-                .or_else(|| item["ID"].as_str())
-                .context("Podman listed a container without an ID")?;
+        // The listing supplies candidates only. Inspect each full ID before
+        // accepting ownership, and propagate a malformed listing as an error.
+        for id in text.lines() {
+            canonical(id)?;
             if let Some(info) = self.inspect(host.into(), id).await? {
                 let role = info
                     .labels

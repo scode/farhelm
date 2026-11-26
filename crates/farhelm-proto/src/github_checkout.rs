@@ -52,7 +52,7 @@ pub const MAX_BASENAME_BYTES: usize = 200;
 /// A short derived basename can still have a long or multiline title.
 pub fn check_checkout_preview_title(title: &str) -> Result<(), &'static str> {
     crate::text::check_session_title_printable(title)?;
-    if title.len() > 64 * 1024 {
+    if title.len() > crate::text::MAX_SESSION_TITLE_BYTES {
         return Err("checkout preview title exceeds the 65536-byte limit");
     }
     Ok(())
