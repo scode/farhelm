@@ -202,6 +202,8 @@ linux/launcher-incomplete-custom-quick-launch--dark.png f43ad5f4841234ba80b751f0
 linux/launcher-incomplete-custom-quick-launch--light.png 7f7ce03641e7e620152783795e5f1a97588eec01
 linux/launcher-incomplete-template--dark.png 9bd2cffc7330ae11fd27da3853d8478bcb687165
 linux/launcher-incomplete-template--light.png f80df1b2a3dde7f1cf633d2976766e6fc9759998
+linux/launcher-late-wake-failure--dark.png 76b6b04e69634b985ed101f4b1dba5f600938eb1
+linux/launcher-late-wake-failure--light.png b615d65f03148429065a8a4b681f35e6483d2c73
 linux/launcher-managed-checkout--dark.png ef5f35c94ebd2fde25e714227252e170eaef5502
 linux/launcher-managed-checkout--light.png ab7152d67502fb0743f58994ed7fd02113bfb09f
 linux/launcher-managed-checkout-narrow--dark.png b5cf1fb9bfd42aead4096ccc192fb30e79a1ccd6

@@ -242,15 +242,17 @@ fn capsule(id: &'static str, palette: &theme::Palette) -> gpui::Stateful<gpui::D
 /// different session can stay open while the destination wakes.
 pub(super) struct WakePill {
     host: HostText,
-    starting: bool,
+    /// The verb ahead of the host's name, the provider's own ([`crate::environment_ui::WakeWords::status`]):
+    /// "Resuming " for a sandbox or a paused container, "Starting " for a stopped one.
+    status: &'static str,
     spinner: Option<Spinner>,
 }
 
 impl WakePill {
-    pub(super) fn new(host: HostText, starting: bool) -> Self {
+    pub(super) fn new(host: HostText, status: &'static str) -> Self {
         Self {
             host,
-            starting,
+            status,
             spinner: None,
         }
     }
@@ -265,11 +267,7 @@ impl Render for WakePill {
         let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
         let palette = theme::palette(cx);
         let words = HostSentence::new("launch-wake-label")
-            .text(if self.starting {
-                "Starting "
-            } else {
-                "Resuming "
-            })
+            .text(self.status)
             .host(&self.host)
             .text(", then connecting… the session starts when it's ready");
         capsule("launch-wake", palette)

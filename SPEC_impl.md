@@ -275,15 +275,16 @@ ends, and the host's state in the hosts and session lists then shows how it ende
 tag (`{"request": "..."}`; no body and `{}` are untagged) also has its terminal outcome, ready or failed with the same
 reason its error reply would carry, published on that host's entry in the hosts list, so the client that sent it learns
 a late failure of its own Resume. Only the latest tagged outcome per host is kept, in the helm's memory: the next tagged
-Resume of that host replaces it, and a helm restart loses it. An untagged Resume is never recorded, and neither is a
-busy refusal, which the sender sees in its reply and may retry. A Resume that ends abnormally (its task panics) records
-nothing, and its sender falls back to its own deadline. A late failure of a Suspend or of an untagged Resume still
-reaches only the helm's log. Tensorlake's refusals before anything changes (a busy host, a host that is not an
-environment, no account key) are local and answer as before; a container host checks its container over SSH first,
-inside the bound. Stop and suspend is one command with one reply, so one bound covers its Stop and its Suspend together.
-The helm's 504 at that bound carries the `StopAndSuspendReplyBound` marker and says that the operation may or may not
-still be running. A 504 from the supervisor's Stop is an ordinary failure and arrives without the marker. The
-environment only suspends after a clean Stop.
+Resume of that host replaces it, and a helm restart loses it. The desktop launcher is the one sender of tags, and reads
+only its own ("Tensorlake hosts"). An untagged Resume is never recorded, and neither is a busy refusal, which the sender
+sees in its reply and may retry. A Resume that ends abnormally (its task panics) records nothing, and its sender falls
+back to its own deadline. A late failure of a Suspend or of an untagged Resume still reaches only the helm's log.
+Tensorlake's refusals before anything changes (a busy host, a host that is not an environment, no account key) are local
+and answer as before; a container host checks its container over SSH first, inside the bound. Stop and suspend is one
+command with one reply, so one bound covers its Stop and its Suspend together. The helm's 504 at that bound carries the
+`StopAndSuspendReplyBound` marker and says that the operation may or may not still be running. A 504 from the
+supervisor's Stop is an ordinary failure and arrives without the marker. The environment only suspends after a clean
+Stop.
 
 A session's environment Delete (`DELETE /api/sessions/{id}?delete_environment_session=true`), the warned
 whole-environment Delete (`?delete_sandbox=true`) and the Retry of a failed destruction
@@ -7334,12 +7335,16 @@ already-running sandbox with an already-connected actor skips recovery, preservi
 failure releases the hold. The helm marks the one lifecycle refusal that waiting can clear, another operation holding
 the host's provisioning lock, with the helm-only `x-farhelm-host-busy` header, the same for every provider
 (`HOST_BUSY_HEADER` in `crates/farhelm-proto/src/http.rs`), so a launch waking its host can retry on it and on nothing
-else. The desktop launcher owns the wake per window. It sends the ordinary Resume and waits for pushed host state on the
-same installation before it sends the create. It retries only the busy marker, once a second within the shared 60-second
-budget. The accepted request and the provider's subsequent Resuming phase pause that budget. The attention classifier
-treats a routine lifecycle transition as neither a Problem nor an Update, while independent provisioning progress and
-unseen setup warnings keep their existing precedence. Tunnel failures retain their connected-host eligibility; stopped
-forwards during a lifecycle hold do not report a live tunnel failure.
+else. The desktop launcher owns the wake per window. It sends the ordinary Resume with a request tag of its own, one per
+wake (process id, the time the app minted its first tag and a counter, with no randomness, since the helm keeps only the
+latest tagged outcome per host and grants nothing for a tag), and waits for pushed host state on the same installation
+before it sends the create. A failed outcome under its own tag in the hosts list ends the wake at once with the helm's
+reason unless the host has already connected; an outcome under any other tag, and a ready one under its own, change
+nothing. It retries only the busy marker, once a second within the shared 60-second budget. The accepted request and the
+provider's subsequent Resuming phase pause that budget. The attention classifier treats a routine lifecycle transition
+as neither a Problem nor an Update, while independent provisioning progress and unseen setup warnings keep their
+existing precedence. Tunnel failures retain their connected-host eligibility; stopped forwards during a lifecycle hold
+do not report a live tunnel failure.
 
 An explicit Suspend keeps a saved time for the current pause. With no saved time or a newer Running observation, it
 records its own completion time even when Tensorlake is already paused. Timing and attribution are best effort. A resume

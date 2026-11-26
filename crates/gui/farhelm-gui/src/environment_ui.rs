@@ -13,7 +13,8 @@
 //! `launch_help`, `recipe_refusal`, [`target_label`]), and so do New sandbox's account prerequisites, its recipes' mark
 //! and size and its SSH-key registration note (`launch_place`, `recipe_listing`, `registration_note`), the question it
 //! asks before creating a billed sandbox (`creation_question`), and the template editor's copy of the switch, with its
-//! own authoring rules (`template_place`, `base_refusal`).
+//! own authoring rules (`template_place`, `base_refusal`). The launcher's wake of an existing sandbox or container
+//! before a launch takes its pill's verb and every one of its failures from here (`wake_words`).
 
 use farhelm_proto::recipes::{RecipeBase, RecipeView};
 use farhelm_proto::tensorlake::{Settings, SshKeyStatus};
@@ -47,6 +48,32 @@ pub(crate) enum AgentLaunchPlace {
     NamedHost(&'static str),
     /// A label and this app's own words, for a place with no host of the user's to name.
     Note(&'static str, &'static str),
+}
+
+/// The session launcher's words for one wake of an existing environment host, as [`ProviderUi::wake_words`] chooses
+/// them for its provider and for whether the host started out Stopped. The wake holds one of these for its whole life,
+/// so its pill, its refusals and its deadlines all speak of the same action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WakeWords {
+    /// The preparation pill's verb, ahead of the host's name: "Resuming " or "Starting ".
+    pub(crate) status: &'static str,
+    /// The lead ahead of the helm's own reason when the wake's Resume is refused in its reply, or fails later and the
+    /// helm publishes that failure under the wake's request tag: "Resuming the host failed: " or, for a stopped
+    /// container, "Starting the host failed: ".
+    pub(crate) failed_lead: &'static str,
+    /// A new provider diagnosis on the pushed host ([`ProviderUi::wake_failed`]).
+    pub(crate) diagnosed: &'static str,
+    /// The host left the registry while the launch waited.
+    pub(crate) removed: &'static str,
+    /// The launcher could not even send its Resume again after a busy reply.
+    pub(crate) unasked: &'static str,
+    /// The host went back to sleep (a new suspension, or a container stopped again) while the launch waited.
+    pub(crate) suspended_again: &'static str,
+    /// The provider work finished but no fresh connection arrived within the launcher's minute.
+    pub(crate) unconnected: &'static str,
+    /// The same expiry for a managed checkout, which also says that nothing was launched, the checkout flow's
+    /// established refusal.
+    pub(crate) checkout_unconnected: &'static str,
 }
 
 #[warn(clippy::wildcard_enum_match_arm)]
@@ -203,6 +230,55 @@ impl ProviderUi {
             (ProviderKind::Podman, false) => {
                 "The container host could not resume this container; check its details"
             }
+        }
+    }
+
+    /// Everything the session launcher says about one wake of an existing host of this provider, from its preparation
+    /// pill to each way the wake can fail. `stopped` is whether the host was Stopped when the launch was pressed, the
+    /// same fact [`ProviderUi::wake_failed`] takes: a stopped container is started from scratch, not resumed, so its
+    /// wake says Starting, start and stopped where a sandbox's and a paused container's say Resuming, resume and
+    /// suspended (SPEC.md, "Container sessions": "Stopped has its own state and is never labelled Suspended").
+    ///
+    /// The launcher calls the host "the host" whatever its provider, so only the verbs change between the arms. A
+    /// Tensorlake sandbox and a paused container keep the words the launcher used before containers had words of their
+    /// own, and a Tensorlake host says them even when Stopped (the pill aside, which already said Starting for any
+    /// stopped host).
+    pub(crate) fn wake_words(self, stopped: bool) -> WakeWords {
+        let diagnosed = self.wake_failed(stopped);
+        match (self.0, stopped) {
+            (ProviderKind::Tensorlake, stopped) => WakeWords {
+                status: if stopped { "Starting " } else { "Resuming " },
+                failed_lead: "Resuming the host failed: ",
+                diagnosed,
+                removed: "The host was removed while resuming",
+                unasked: "Farhelm could not ask the host to resume",
+                suspended_again: "The host was suspended again while it was waking; resume it and launch again",
+                unconnected: "The host resumed but did not connect within 60 seconds; try again when it connects",
+                checkout_unconnected: "The host resumed, but this window did not see it connect within 60 seconds. \
+                                       The session was not launched; try again.",
+            },
+            (ProviderKind::Podman, false) => WakeWords {
+                status: "Resuming ",
+                failed_lead: "Resuming the host failed: ",
+                diagnosed,
+                removed: "The host was removed while resuming",
+                unasked: "Farhelm could not ask the host to resume",
+                suspended_again: "The host was suspended again while it was waking; resume it and launch again",
+                unconnected: "The host resumed but did not connect within 60 seconds; try again when it connects",
+                checkout_unconnected: "The host resumed, but this window did not see it connect within 60 seconds. \
+                                       The session was not launched; try again.",
+            },
+            (ProviderKind::Podman, true) => WakeWords {
+                status: "Starting ",
+                failed_lead: "Starting the host failed: ",
+                diagnosed,
+                removed: "The host was removed while starting",
+                unasked: "Farhelm could not ask the host to start",
+                suspended_again: "The host was stopped again while it was starting; start it and launch again",
+                unconnected: "The host started but did not connect within 60 seconds; try again when it connects",
+                checkout_unconnected: "The host started, but this window did not see it connect within 60 seconds. \
+                                       The session was not launched; try again.",
+            },
         }
     }
 
