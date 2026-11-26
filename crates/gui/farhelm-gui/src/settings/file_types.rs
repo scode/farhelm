@@ -197,6 +197,11 @@ impl FileTypes {
         )
     }
 
+    /// A queued save can spend only the edit that was present when it was authorized.
+    pub(super) fn edit_revision(&self) -> u64 {
+        self.input.edit_revision()
+    }
+
     /// Restore the last pushed list, including the default spelling when the helm has no explicit setting.
     pub(super) fn discard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.input.discard(window.window_handle(), cx);

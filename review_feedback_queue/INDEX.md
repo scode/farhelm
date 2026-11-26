@@ -13,13 +13,6 @@ consequences.
 
 ## Highest priority: security or data loss
 
-- [`settings-close-can-save-unlisted-drafts.md`](settings-close-can-save-unlisted-drafts.md) — Save and Close can write
-  an unlisted form and clear the saved alert token outside the user’s confirmation.
-
-- [`settings-queued-save-can-commit-later-draft.md`](settings-queued-save-can-commit-later-draft.md) — A queued Settings
-  save can commit later edits to an approved form, including changes that clear a saved alert token.
-
-
 - [`hook-settings-toggle-uses-unshown-state.md`](hook-settings-toggle-uses-unshown-state.md) — Space can save the
   all-hosts hook opt-in while the switch still shows the on state the user intended to turn off.
 
@@ -51,10 +44,6 @@ consequences.
 
 - [`settings-close-can-retry-refused-save.md`](settings-close-can-retry-refused-save.md) — Save and Close can miss one
   pending refusal and retry the rejected draft without a new decision.
-
-- [`settings-close-can-save-newly-staged-codex-login.md`](settings-close-can-save-newly-staged-codex-login.md) — A file
-  read can change the Codex login draft while the Save and Close question is open, leaving the chosen file unreviewed
-  before it is saved.
 
 - [`settings-close-can-hide-credential-delivery-warnings.md`](settings-close-can-hide-credential-delivery-warnings.md) —
   Save and Close can hide which hosts failed to receive a saved credential replacement.

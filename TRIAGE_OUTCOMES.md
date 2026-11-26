@@ -176,51 +176,6 @@
   file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## settings-close-can-save-unlisted-drafts.md
-
-- Outcome: `fix code`.
-- Assessment: When you close Settings while another Save is still going, Settings asks "Save changes before closing?"
-  and names the unsaved forms. If you answer Save, Settings waits for the earlier save and then saves whatever is
-  unsaved at that moment, including a form you edited after answering (for example a Notifications server change, which
-  by the normal rule clears the saved ntfy access token). Discard can likewise drop a draft that appeared after the
-  question. Verified: confirmed. The Save answer captures nothing (`editing.rs:635-643`); with a batch running it only
-  sets `AfterBatch::SaveAndClose`, which later calls `start_batch(None)` (`editing.rs:477`), and that re-reads the live
-  form list (`editing.rs:364`). Settings stays interactive after the question closes; forms waiting behind another save
-  are editable (ntfy locks fields only while its own save runs, `ntfy.rs:21,368`). SPEC_impl.md "Questions: the prompt"
-  (lines 984-985): "When a confirmation opens, it freezes what it shows: targets, consequences and preconditions. Its
-  answer buttons come pre-wired to that frozen state." The ntfy form does show "Changing the server clears the saved
-  token when you save" beside such an edit (`ntfy.rs:648-656`). The Codex late-file-read variant depends on picker
-  timing (unmeasured).
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code — freeze the listed edits (entity ids) in the answer and
-  leave later edits unsaved with Settings open; one fix with 6 and 47; size M. Size gate: about 100 lines of diff (code,
-  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
-  brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
-## settings-queued-save-can-commit-later-draft.md
-
-- Outcome: `fix code`.
-- Assessment: A Settings Save (page Save or Save and Close) that covers several forms saves them one at a time. A form
-  waiting its turn is saved with whatever it contains when its turn comes, so edits made after pressing Save are saved
-  too; for Notifications that can include a server change that clears the saved access token. Verified: confirmed. The
-  batch stores form identities only (`editing.rs:229-239`) and each queued form is saved from its live contents when
-  dispatched (`editing.rs:489-530`, e.g. `save_from_settings` for the second Checkouts field). No version of the
-  authorized draft is kept. Same governing text as 5 (SPEC_impl.md 984-985 for the close question; for a page Save no
-  spec sentence speaks to queued edits).
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code — record each form's draft revision at authorization and
-  skip/stop on a changed draft; fix with 5; size M. Size gate: about 100 lines of diff (code, tests and docs, not
-  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
-  to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## settings-close-can-miss-detached-credential-save.md
 
 - Outcome: `fix code`.
@@ -239,26 +194,6 @@
   question sees them; size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
-## settings-close-can-save-newly-staged-codex-login.md
-
-- Outcome: `fix code`.
-- Assessment: In the Codex login editor you can pick an `auth.json` file. If the file is still being read when you close
-  Settings and the question appears, the read can finish behind the question; answering Save then saves the chosen file
-  rather than the text that was shown when you asked to close. Verified: partly correct, timing unverified. The file
-  read completes asynchronously and switches the draft if nothing was typed meanwhile (`credentials/editor.rs:398-447`);
-  the close question captures no draft revision (`editing.rs:572-656`). Save does stop a pending read once it is
-  dispatched (`:289-290`), but not one finishing while the question is open. The saved file is one the user picked
-  themselves.
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code with 5/6 (draft revision binding covers it); size S on top
-  of 5. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
 ## settings-close-can-hide-credential-delivery-warnings.md

@@ -3656,6 +3656,75 @@ fn close_save_stops_at_the_first_failure_and_shows_that_page(cx: &mut TestAppCon
     assert_eq!(text(cx, Field::PostClone), "make setup");
 }
 
+/// A running page Save and a later close answer each authorize only the drafts they observed. After the folder
+/// settles, the second checkout edit and a new Notifications server must stay unsaved until a fresh action.
+#[gpui::test]
+fn close_save_leaves_unlisted_forms_and_later_versions_unsaved(cx: &mut TestAppContext) {
+    let (mut helm, cx, _) = open_rail(cx, &Preferences::default());
+    show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
+    click(cx, section_button(Section::Notifications));
+    let reads = sent_reads(&mut helm);
+    let [(read, path)] = reads.as_slice() else {
+        panic!("expected one Notifications read before the held save");
+    };
+    assert_eq!(path, "/api/ntfy-alerts");
+    helm.reply(
+        *read,
+        200,
+        Some(ntfy("https://ntfy.sh", "saved", "default", true)),
+    );
+    settle(cx);
+    click(cx, section_button(Section::Checkouts));
+    fill(cx, Field::Folder.selector(), "~/approved");
+    fill(cx, Field::PostClone.selector(), "make approved");
+    click(cx, FOOTER_SAVE);
+    let (folder, body) = one_put(&mut helm, Field::Folder.path());
+    assert_eq!(body, json!({ "root": "~/approved" }));
+    assert_eq!(preference_work(cx), Some(Work::Save));
+    click(cx, section_button(Section::Terminal));
+    fill(cx, super::file_types::ID, "md, pdf");
+    keys(cx, "escape");
+    assert!(painted(cx).contains("Unsaved: File types, Checkout settings"));
+    click(cx, "prompt-confirm");
+
+    click(cx, section_button(Section::Notifications));
+    fill(cx, "ntfy-server", "https://new.example");
+    assert!(drawn(cx, "ntfy-token-origin-hint"));
+    click(cx, section_button(Section::Checkouts));
+    fill(cx, Field::PostClone.selector(), "make later");
+    assert_eq!(sent(&mut helm), []);
+
+    helm.reply(folder, 204, None);
+    settle(cx);
+    let commands = sent(&mut helm);
+    let [read, save] = commands.as_slice() else {
+        panic!("expected the folder read-back and only the unchanged draft's save");
+    };
+    assert_eq!(
+        (read.method, read.path.as_str()),
+        (Method::Get, Field::Folder.path())
+    );
+    assert_eq!(
+        (save.method, save.path.as_str()),
+        (Method::Put, "/api/preferences")
+    );
+    assert_eq!(save.body, Some(json!({ "open_extensions": "md, pdf" })));
+    helm.reply(read.id, 200, Some(json!({ "root": "~/approved" })));
+    helm.reply(save.id, 200, None);
+    settle(cx);
+    assert_eq!(sent(&mut helm), []);
+    assert!(any_open(cx));
+    click(cx, section_button(Section::Notifications));
+    assert!(drawn(cx, "ntfy-token-origin-hint"));
+    click(cx, section_button(Section::Checkouts));
+    assert_eq!(text(cx, Field::PostClone), "make later");
+    click(cx, FOOTER_SAVE);
+    assert_eq!(
+        one_put(&mut helm, Field::PostClone.path()).1,
+        json!({ "command": "make later" })
+    );
+}
+
 // ---- Notifications: ntfy alerts ------------------------------------------------------------------------------------
 
 /// The helm's ntfy settings as its route answers them, on `server` with the given topic, priority and token presence.

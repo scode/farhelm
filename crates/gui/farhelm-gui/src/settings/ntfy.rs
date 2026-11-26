@@ -251,6 +251,8 @@ pub(super) struct NtfyAlerts {
     /// Why the last read failed, until a read answers.
     unreadable: Option<HostText>,
     form: Draft<Form>,
+    /// Save and Close may be waiting on another form while this draft is still editable.
+    edit_revision: u64,
     server: TextInputState,
     topic: TextInputState,
     token: TextInputState,
@@ -281,6 +283,7 @@ impl NtfyAlerts {
             stored: None,
             unreadable: None,
             form: Draft::load(Form::over(&Settings::default())),
+            edit_revision: 0,
             server,
             topic,
             token,
@@ -401,6 +404,7 @@ impl NtfyAlerts {
         change(&mut form);
         let taken = self.form.edit(form);
         if taken {
+            self.edit_revision = self.edit_revision.wrapping_add(1);
             self.tested = None;
         }
         cx.notify();
@@ -459,6 +463,11 @@ impl NtfyAlerts {
                     .as_ref()
                     .is_some_and(|stored| Form::over(stored) != *self.form.value()),
         )
+    }
+
+    /// Include whether this draft would clear the saved token, which also depends on the last loaded settings.
+    pub(super) fn edit_revision(&self) -> (u64, bool) {
+        (self.edit_revision, self.token_will_clear())
     }
 
     /// Send test uses the saved configuration and holds Save until its reply.

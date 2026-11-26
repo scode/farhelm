@@ -319,6 +319,11 @@ impl Editor {
         EditState::of(self.saving, !self.deleting && self.dirty(cx))
     }
 
+    /// A catalog removal can change which operation saves the same text, so include that destination in approval.
+    pub(super) fn edit_revision(&self, cx: &App) -> (CustomAgent, bool, bool) {
+        (self.draft(cx), self.stored.is_some(), self.removed)
+    }
+
     fn restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let saved = self.stored.as_ref();
         self.generated_id = saved.is_none().then(String::new);
