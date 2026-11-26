@@ -19,6 +19,7 @@ use crate::host_restarts::{Stack, agent_host, retire, type_line, wait_until_caug
 use crate::host_terminals::{WAIT_SECS, host_process, wait_for_liveness, wait_for_screen};
 use crate::terminal_tabs::{listed_tabs, notifying_gate};
 use farhelm_supervisor::hosts::{HostTerminal, Liveness};
+use farhelm_supervisor::service::{TabCloseSweep, TabCloseSweepFault};
 use std::path::{Path, PathBuf};
 
 // ---- Fixtures -------------------------------------------------------------------
@@ -1400,6 +1401,262 @@ async fn a_failed_tab_end_is_retried_by_the_reap_after_its_backoff() {
         failed_at.elapsed()
     );
     assert_eq!(ends.load(Ordering::SeqCst), 2, "one failure, one retry");
+    h.client.delete_session(&session.id).await.expect("delete");
+    serving.stop().await;
+}
+
+/// Fail every call a tab close makes for `sweep` ([`TabCloseSweep`]) with
+/// `"injected sweep failure"` until the test sets the returned release flag,
+/// letting every other sweep run as usual, and count the calls for `sweep`.
+/// The test holds the failure for as long as it inspects the pending state,
+/// so a reap retry on a loaded machine cannot finish the tab before the test
+/// has looked.
+fn failing_sweep(
+    sweep: TabCloseSweep,
+) -> (
+    TabCloseSweepFault,
+    Arc<std::sync::atomic::AtomicUsize>,
+    Arc<AtomicBool>,
+) {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let released = Arc::new(AtomicBool::new(false));
+    let (counted, release) = (Arc::clone(&calls), Arc::clone(&released));
+    let fault: TabCloseSweepFault = Arc::new(move |asked| {
+        if asked != sweep {
+            return Ok(());
+        }
+        counted.fetch_add(1, Ordering::SeqCst);
+        if release.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err("injected sweep failure".to_string())
+        }
+    });
+    (fault, calls, released)
+}
+
+/// Wait until the reap has finished a tab: the session no longer holds it,
+/// its host's process is gone and its launch record removed.
+async fn wait_for_tab_finished(
+    h: &Harness,
+    session_id: &str,
+    tab_id: &str,
+    host_pid: u32,
+    record: &Path,
+) {
+    wait_for_condition("the reap finished the tab", || async {
+        let held = h.sup.tab_host_for_test(session_id, tab_id).await.is_some();
+        if !held && process_is_gone(host_pid) && !record.exists() {
+            Ok(())
+        } else {
+            Err(format!(
+                "held {held}, host gone {}, record {}",
+                process_is_gone(host_pid),
+                record.exists()
+            ))
+        }
+    })
+    .await;
+}
+
+/// A close whose host ended but whose sweep after the end failed keeps the
+/// tab and its record, and the reap finishes it later.
+///
+/// Why: that sweep is the only one that reaches what outlived the hangup
+/// (by marker and scope; nothing roots at a child already gone), and a
+/// close that forgot the tab and its record before reporting the failure
+/// left nothing to try again with, so survivors could stay until the
+/// session's Delete. Spec: on a served supervisor ticking every 100 ms, with
+/// the sweep after a tab host's end made to fail until the test releases it
+/// (a seam): the user's close fails saying survivors could not be confirmed
+/// reaped; the host's process is gone (the end worked), the session still
+/// holds the tab, its record is still there, and the tab strip hides it (its
+/// host ended); once released, the reap sweeps again, removes the record and
+/// forgets the tab.
+#[farhelm_testtrace::test]
+async fn a_tab_close_whose_last_sweep_fails_keeps_the_tab_for_the_reap() {
+    let home = farhelm_teststate::tempdir().expect("home");
+    let (fault, calls, release) = failing_sweep(TabCloseSweep::AfterEnd);
+    let mut seams = tab_seams(home.path());
+    seams.ticker_interval = Duration::from_millis(100);
+    seams.faults.tab_close_sweep_fault = Some(fault);
+    let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
+    let serving = crate::hook_identity::ServeTask::spawn(&h.sup, h.state.path()).await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = create(&h.client, work.path()).await;
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+    let host = tab_host(&h.sup, &session.id, &tab.id).await;
+    let host_pid = host_process(host.socket()).expect("the tab's host runs");
+    let record = tab_record(h.state.path(), &session.id, &tab.id);
+
+    let refused = h
+        .client
+        .close_tab(&session.id, &tab.id)
+        .await
+        .expect_err("the injected sweep failure fails the close");
+    let message = format!("{refused:#}");
+    assert!(
+        message.contains("could not be confirmed reaped")
+            && message.contains("injected sweep failure"),
+        "{message}"
+    );
+    wait_until_pid_gone(host_pid, WAIT_SECS).await;
+    assert!(
+        h.sup
+            .tab_host_for_test(&session.id, &tab.id)
+            .await
+            .is_some(),
+        "the session still holds the tab"
+    );
+    assert!(record.exists(), "the record stays for the retry");
+    assert!(
+        listed_tabs(&h.client, &session.id).await.is_empty(),
+        "the strip hides a tab whose host ended"
+    );
+
+    release.store(true, Ordering::SeqCst);
+    wait_for_tab_finished(&h, &session.id, &tab.id, host_pid, &record).await;
+    assert!(
+        calls.load(Ordering::SeqCst) >= 2,
+        "the reap swept again after the failure"
+    );
+    h.client.delete_session(&session.id).await.expect("delete");
+    serving.stop().await;
+}
+
+/// A close whose host end and whose sweep after it both fail reports both,
+/// never that the tab's processes were reaped.
+///
+/// Why: the reply is the user's only account of what may still run; one
+/// that said the processes were reaped while the sweep for what outlived
+/// the hangup had failed would hide exactly the survivors that sweep looks
+/// for. Spec: with the first end of a tab's host made to fail and the sweep
+/// after it made to fail until the test releases it (seams), the user's
+/// close fails with a message that names both injected failures and does
+/// not say the processes were reaped; once released, the reap finishes the
+/// tab.
+#[farhelm_testtrace::test]
+async fn a_tab_close_whose_end_and_last_sweep_fail_reports_both() {
+    let home = farhelm_teststate::tempdir().expect("home");
+    let (fault, _calls, release) = failing_sweep(TabCloseSweep::AfterEnd);
+    let ends = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = Arc::clone(&ends);
+    let mut seams = tab_seams(home.path());
+    seams.ticker_interval = Duration::from_millis(100);
+    seams.faults.tab_close_sweep_fault = Some(fault);
+    seams.faults.tab_host_end_fault = Some(Arc::new(move || {
+        if counted.fetch_add(1, Ordering::SeqCst) == 0 {
+            Err("injected end failure".to_string())
+        } else {
+            Ok(())
+        }
+    }));
+    let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
+    let serving = crate::hook_identity::ServeTask::spawn(&h.sup, h.state.path()).await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = create(&h.client, work.path()).await;
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+    let host = tab_host(&h.sup, &session.id, &tab.id).await;
+    let host_pid = host_process(host.socket()).expect("the tab's host runs");
+    let record = tab_record(h.state.path(), &session.id, &tab.id);
+
+    let refused = h
+        .client
+        .close_tab(&session.id, &tab.id)
+        .await
+        .expect_err("the injected failures fail the close");
+    let message = format!("{refused:#}");
+    assert!(
+        message.contains("injected end failure") && message.contains("injected sweep failure"),
+        "both failures are named: {message}"
+    );
+    assert!(
+        !message.contains("were reaped"),
+        "the reply does not claim the processes were reaped: {message}"
+    );
+
+    release.store(true, Ordering::SeqCst);
+    wait_for_tab_finished(&h, &session.id, &tab.id, host_pid, &record).await;
+    h.client.delete_session(&session.id).await.expect("delete");
+    serving.stop().await;
+}
+
+/// A retried close whose first sweep fails moves the reap's next try on by
+/// its backoff, rather than trying again on every pass.
+///
+/// Why: a close that could not confirm its host ended is finished by the
+/// reap; if that retry's own sweep failed and left the retry time where it
+/// was (already past), the reap would close the tab again on every tick,
+/// holding its session's lifecycle claim and a reap slot almost all the time
+/// for as long as the sweep keeps failing. Spec: on a served supervisor
+/// ticking every 100 ms, with the first end of a tab's host made to fail and
+/// the first retry's sweep before the end made to fail (seams): after the
+/// user's close fails, the reap's first retry fails at that sweep, and its
+/// second retry comes at least 1.8 s after the first (the second backoff is
+/// two seconds, where ticks come every 100 ms), after which the tab is
+/// finished.
+#[farhelm_testtrace::test]
+async fn a_failed_retry_sweep_advances_the_tab_reaps_backoff() {
+    let home = farhelm_teststate::tempdir().expect("home");
+    // The user's close makes the first before-end sweep; the reap's first
+    // retry makes the second, which is the one that fails.
+    let calls = Arc::new(std::sync::Mutex::new(Vec::<std::time::Instant>::new()));
+    let seen = Arc::clone(&calls);
+    let fault: TabCloseSweepFault = Arc::new(move |asked| {
+        if asked != TabCloseSweep::BeforeEnd {
+            return Ok(());
+        }
+        let mut seen = seen.lock().unwrap();
+        seen.push(std::time::Instant::now());
+        if seen.len() == 2 {
+            Err("injected sweep failure".to_string())
+        } else {
+            Ok(())
+        }
+    });
+    let ends = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = Arc::clone(&ends);
+    let mut seams = tab_seams(home.path());
+    seams.ticker_interval = Duration::from_millis(100);
+    seams.faults.tab_close_sweep_fault = Some(fault);
+    seams.faults.tab_host_end_fault = Some(Arc::new(move || {
+        if counted.fetch_add(1, Ordering::SeqCst) == 0 {
+            Err("injected end failure".to_string())
+        } else {
+            Ok(())
+        }
+    }));
+    let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
+    let serving = crate::hook_identity::ServeTask::spawn(&h.sup, h.state.path()).await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = create(&h.client, work.path()).await;
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+    let host = tab_host(&h.sup, &session.id, &tab.id).await;
+    let host_pid = host_process(host.socket()).expect("the tab's host runs");
+    let record = tab_record(h.state.path(), &session.id, &tab.id);
+
+    let refused = h
+        .client
+        .close_tab(&session.id, &tab.id)
+        .await
+        .expect_err("the injected end failure fails the close");
+    assert!(
+        format!("{refused:#}").contains("injected end failure"),
+        "{refused:#}"
+    );
+
+    wait_for_tab_finished(&h, &session.id, &tab.id, host_pid, &record).await;
+    let calls = calls.lock().unwrap().clone();
+    assert_eq!(
+        calls.len(),
+        3,
+        "the close, the failed first retry and the second retry each swept once"
+    );
+    let gap = calls[2] - calls[1];
+    assert!(
+        gap >= Duration::from_millis(1800),
+        "the second retry came {gap:?} after the failed first, before its backoff"
+    );
     h.client.delete_session(&session.id).await.expect("delete");
     serving.stop().await;
 }

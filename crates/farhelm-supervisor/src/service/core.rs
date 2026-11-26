@@ -841,6 +841,8 @@ fault_hooks! {
     /// its signals, a process table that cannot be read), so a test can show
     /// what the reap does with such a tab. `None` in production.
     tab_host_end_fault: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
+    /// See [`TabCloseSweepFault`]. `None` in production.
+    tab_close_sweep_fault: TabCloseSweepFault,
     /// See [`HostRestartFault`]. `None` in production.
     host_restart_fault: HostRestartFault,
     /// See [`ReclaimDiscoveryGate`]. `None` in production.
@@ -1152,6 +1154,26 @@ pub enum TabOpenStage {
 /// open between its steps. Production installs none, so each call site is
 /// one `Option` check.
 pub type TabOpenFault = Arc<dyn Fn(TabOpenStage) -> anyhow::Result<()> + Send + Sync>;
+
+/// Which of a tab close's two sweeps a [`TabCloseSweepFault`] is asked about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabCloseSweep {
+    /// The sweep before the tab's host is ended, rooted at the shell while
+    /// it runs (or by marker and scope alone when the close finishes an
+    /// earlier one that could not confirm its host ended).
+    BeforeEnd,
+    /// The sweep after the host is ended, by marker and scope alone, for
+    /// what outlived the hangup.
+    AfterEnd,
+}
+
+/// A failure injected into one of a tab close's sweeps (`host_tabs`): an
+/// error stands for a sweep that could not confirm its processes reaped (a
+/// scope that cannot be confirmed gone, a process table that cannot be
+/// read). A seam because nothing makes a real sweep fail on demand, and what
+/// needs exercising is what the close keeps for a retry and how the reap
+/// backs off. Production installs none.
+pub type TabCloseSweepFault = Arc<dyn Fn(TabCloseSweep) -> Result<(), String> + Send + Sync>;
 
 impl Default for SupervisorSeams {
     fn default() -> Self {
@@ -16204,24 +16226,19 @@ impl Supervisor {
     }
 }
 
-/// A tab close's verdict once its host has ended: survivors of its shell
-/// that could not be confirmed reaped fail the close, since a retry cannot
-/// recover the ended host, and dropping the error would discard the only
-/// account of what may still be alive.
-fn tab_close_cleanup_result(
-    tab_id: &str,
-    survivors: anyhow::Result<()>,
-) -> Result<(), RequestError> {
-    survivors.map_err(|survivors| {
-        RequestError::new(
-            ErrorKind::Internal,
-            format!(
-                "terminal tab {}'s terminal has ended but survivors of its shell could not be \
-                 confirmed reaped: {survivors:#}",
-                truncate_for_error(tab_id)
-            ),
-        )
-    })
+/// A tab close's error once its host has ended but survivors of its shell
+/// could not be confirmed reaped: the close fails, since dropping the error
+/// would discard the only account of what may still be alive. The caller
+/// keeps the tab marked for a retry (`host_tabs::close_host_tab`).
+fn tab_close_cleanup_error(tab_id: &str, survivors: anyhow::Error) -> RequestError {
+    RequestError::new(
+        ErrorKind::Internal,
+        format!(
+            "terminal tab {}'s terminal has ended but survivors of its shell could not be \
+             confirmed reaped: {survivors:#}",
+            truncate_for_error(tab_id)
+        ),
+    )
 }
 
 /// How long a stopping supervisor spends closing its terminal-output

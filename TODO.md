@@ -314,20 +314,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   already preserves an existing Stop intent without starting another agent. Plan:
   `plans/queue/supervisor-stop-pending-launch.md`.
 
-- **Keep a failed tab close retryable after the terminal host ends.** Close can end the terminal host and then fail to
-  confirm the final sweep for surviving shell processes. It returns an error after forgetting the tab and removing its
-  launch record, so Close and the automatic cleanup cannot retry it. If the host end also fails, the error claims the
-  processes were reaped even when their sweep failed. Keep the cleanup evidence until both checks pass, as SPEC.md's
-  “Lifecycle operations” requires. Start with `close_host_tab` and the tab reap's existing backoff. Retaining the record
-  in Close alone leaves a gap after a normal supervisor restart. Reload drops tabs whose host is gone and startup
-  reclaim removes their records. The launch record also lacks the scope selection that the ended host's tag supplied.
-  Carry that selection and the pending cleanup across reload without re-adopting a closed tab or sweeping unrelated
-  tabs. This needs a durable recovery design beyond the triage budget. Exercise a successful host end with an injected
-  final sweep failure, a failure of both checks, and a retry across supervisor restart with the scope initially
-  unavailable and then verified gone. A pending close's first sweep can fail before the failure branch that advances the
-  retry deadline. Advance the deadline on every failed automatic retry and assert that cleanup waits until the new
-  deadline. Plan: `plans/queue/supervisor-tab-close-retry.md`.
-
 - **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
   out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
   its version, so a case can report a verdict for the wrong binary. Cover both timeouts and cancellation during

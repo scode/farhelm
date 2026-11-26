@@ -2510,6 +2510,15 @@ an exited agent stays viewable with its scrollback — because a tab's shell exi
 A shell that dies before the tab's open completes still refuses the open loudly, with the shell's last words as the
 error.
 
+When closing a tab cannot confirm that its terminal host ended, or that what outlived the host's hangup was reaped, the
+close reports what it could not confirm, never that a sweep succeeded when it did not, and Farhelm keeps the tab and
+tries again on its own: after a second or two, then less and less often, at most about a minute apart. Closing it by
+hand tries again too. That retry is kept only while the supervisor runs; a supervisor restarted before it succeeds
+leaves whatever remains to the session's Delete. This follows the cleanup policy: on Linux with a usable systemd user
+manager, Farhelm relies on systemd scopes to end a session's and a tab's processes; without one, and for programs that
+ignore SIGHUP when their terminal host is killed, Farhelm applies cheap sanity checks only and adds no significant
+complexity, such as a durable record that would carry a tab close's retry across a supervisor restart.
+
 Closing the active shell tab, including when its shell exits or another client closes it, selects the nearest surviving
 tab to its left in opening order. The main terminal takes over when there is no earlier tab. Closing a tab that is
 already in the background leaves the active terminal in place. The fallback takes focus if the closed terminal held it.
