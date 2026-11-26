@@ -27,8 +27,8 @@ use gpui::{
 
 use super::model::{
     Answer, AnswerHelp, AnswerLabel, COPY, COPY_HELP, COPY_ID, Card, Chips, FROM_COPY_NAME,
-    FROM_HOST, FROM_ID_LABEL, Fact, LeadNote, ON_HOST_ONLY, OWN_HOST_HELP, Requester, Shape,
-    TRUSTED_WORKSPACE, count, sentence_case,
+    FROM_HOST, FROM_ID_LABEL, Fact, LeadNote, ON_HOST_ONLY, OWN_HOST_HELP, Requester, Shape, count,
+    sentence_case,
 };
 use crate::assets;
 use crate::components::{
@@ -544,6 +544,7 @@ fn chip(content: impl IntoElement, warning: bool, palette: &Palette) -> AnyEleme
 /// The Permissions row names its chips and warnings as one static fact so a
 /// screen reader can read everything the card says about consent before the answers.
 fn permission(id: SharedString, label: &str, chips: &Chips, palette: &Palette) -> AnyElement {
+    let trust_description = chips.trust_description();
     let trust = chips.trust.map(|trusted| {
         if trusted {
             "Trusted workspace"
@@ -556,9 +557,9 @@ fn permission(id: SharedString, label: &str, chips: &Chips, palette: &Palette) -
         accessible_text.push(' ');
         accessible_text.push_str(trust);
         accessible_text.push('.');
-        if chips.trust == Some(true) {
+        if let Some(description) = trust_description {
             accessible_text.push(' ');
-            accessible_text.push_str(TRUSTED_WORKSPACE);
+            accessible_text.push_str(description);
         }
     }
     let shield = svg()
@@ -598,12 +599,15 @@ fn permission(id: SharedString, label: &str, chips: &Chips, palette: &Palette) -
             .gap(px(8.))
             .mt(px(5.))
             .child(chip(div().child(label), false, palette))
-            .when(chips.trust == Some(true), |line| {
+            .when_some(trust_description, |line, description| {
                 line.child(
+                    // The whole warning needs to fit within a narrow approval card.
                     div()
+                        .min_w_0()
+                        .max_w_full()
                         .text_size(metrics::TEXT_SM)
                         .line_height(SMALL_LINE)
-                        .child(TRUSTED_WORKSPACE),
+                        .child(description),
                 )
             })
     });

@@ -946,6 +946,8 @@ pub struct Chips {
     pub guarded: Option<&'static str>,
     /// The stored workspace trust, when the launch records one.
     pub trust: Option<bool>,
+    /// The explanation on a trusted chip. Its source is the newly resolved launch or the session's saved launch.
+    trust_description: Option<&'static str>,
 }
 
 /// What the chip names. Several share a shield; the words tell them apart.
@@ -973,6 +975,7 @@ enum Detail {
 
 /// The chip explains what the recorded trust choice allows. Directory scope depends on the harness.
 pub const TRUSTED_WORKSPACE: &str = "Enabled on the agent's Settings page, or automatically in a session's own sandbox or container. Repository hooks, settings and commands can run without asking.";
+const STORED_TRUSTED_WORKSPACE: &str = "Saved with this session's launch. Repository hooks, settings and commands can run without asking.";
 
 impl Chips {
     /// The card has a Permissions row only for launches with a shield.
@@ -982,6 +985,12 @@ impl Chips {
         let selection = launch
             .agent_selection()
             .filter(|_| matches!(detail, Detail::Launch(_)));
+        let trust = selection.and_then(|selection| selection.workspace_trust);
+        let trust_description = match (trust, detail) {
+            (Some(true), Detail::Launch(Runs::Start)) => Some(TRUSTED_WORKSPACE),
+            (Some(true), Detail::Launch(Runs::Resume)) => Some(STORED_TRUSTED_WORKSPACE),
+            _ => None,
+        };
         let action_description = match (kind, detail) {
             (ChipKind::Yolo, Detail::Launch(Runs::Resume)) => {
                 Some("Plain Restart is exempt from the host's YOLO launch rule")
@@ -998,8 +1007,14 @@ impl Chips {
             guarded: selection
                 .filter(|_| kind == ChipKind::Guarded)
                 .and_then(|selection| words::guarded_mode_name(selection.harness)),
-            trust: selection.and_then(|selection| selection.workspace_trust),
+            trust,
+            trust_description,
         })
+    }
+
+    /// Plain Restart reuses the trust choice saved with the launch. Current Settings only govern a new launch.
+    pub(crate) fn trust_description(&self) -> Option<&'static str> {
+        self.trust_description
     }
 
     /// The session list's shield for the launch.

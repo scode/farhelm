@@ -772,7 +772,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "approval-yolo-actions",
-        size: (1088., 590.),
+        size: (1088., 614.),
         draw: approval_yolo_actions,
         setup: no_setup,
     },

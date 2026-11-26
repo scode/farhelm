@@ -1,5 +1,5 @@
 //! The trust hint band above the agent terminal offers Settings while a recognized workspace-trust question is
-//! visible. Claude, Codex, Muse and Antigravity show it in any directory.
+//! visible. Claude, Codex, Muse and Antigravity show it in any directory on hosts where trust follows Settings.
 //!
 //! SPEC.md, "Managed checkouts" (the paragraphs that start "While Claude's trust question is visible" and "Codex and
 //! Muse show the same nonmodal discovery hint"). Ported from the old app's `ClaudeTrustBand` (`claude_trust.rs`) and
@@ -33,7 +33,8 @@
 
 use std::collections::HashSet;
 
-use farhelm_proto::ui_channel::SessionRow;
+use farhelm_helm_client::Collections;
+use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight, HighlightStyle,
     InteractiveElement as _, IntoElement, ParentElement as _, Role, SharedString, Stateful,
@@ -105,10 +106,13 @@ impl Facts {
     }
 }
 
-/// Read the asking agent's setting only for a reachable session. A stale
-/// row carries its last known screen and cannot start a fresh read.
-fn at_question(row: &SessionRow) -> Option<TrustAgent> {
-    TrustAgent::asking(&row.info).filter(|_| !row.stale)
+/// The hint sends the user to a Settings switch. That switch has no effect on a session's own environment,
+/// so the band waits for the host entry before offering the switch or reading its value. Session and host rows
+/// can arrive separately.
+fn settings_apply(row: &SessionRow, collections: &Collections) -> bool {
+    collections
+        .get::<HostView>(&HostView::key(row.host))
+        .is_some_and(|host| !host.is_session_owned)
 }
 
 // ---- State ----------------------------------------------------------------------------------------------------------
@@ -116,7 +120,7 @@ fn at_question(row: &SessionRow) -> Option<TrustAgent> {
 /// What the band knows for one UI session. A reset starts it over: its reads and its save die with the session.
 #[derive(Default)]
 struct Known {
-    /// The open session the trust read is for, while it is at a question ([`at_question`]), and the agent asking there,
+    /// The open session the trust read is for, while it is at a question, and the agent asking there,
     /// whose trust is read.
     read_for: Option<(String, TrustAgent)>,
     /// The last answer for `read_for`: `Some` when the helm said, `None` before any answer or after a failed one.
@@ -203,12 +207,12 @@ impl TrustBand {
         let store = session::current_store(cx);
         // The agent the store's row for `key` shows asking, and the one at the question in the band's sense.
         let question = |key: &str, cx: &App| {
-            let row = store
-                .as_ref()?
-                .read(cx)
-                .collections()
-                .get::<SessionRow>(key)?;
-            Some((TrustAgent::asking(&row.info), at_question(row)))
+            let collections = store.as_ref()?.read(cx).collections();
+            let row = collections.get::<SessionRow>(key)?;
+            let asking = TrustAgent::asking(&row.info);
+            // A stale row holds the last known question but cannot start a fresh read.
+            let eligible = asking.filter(|_| !row.stale && settings_apply(row, collections));
+            Some((asking, eligible))
         };
         let before = self.hidden.len();
         self.hidden.retain(|(key, agent)| {
@@ -346,6 +350,10 @@ pub(crate) fn draw(
 ) -> Option<AnyElement> {
     // Every fact below is about the asking agent's question; while no agent with a hint asks, no question is up.
     let agent = TrustAgent::asking(&row.info)?;
+    let store = session::current_store(cx)?;
+    if !settings_apply(row, store.read(cx).collections()) {
+        return None;
+    }
     let words = agent.band_words()?;
     let state = band.read(cx);
     let known = state.known.read(cx);

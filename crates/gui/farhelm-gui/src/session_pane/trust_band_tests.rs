@@ -17,7 +17,7 @@ use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeCommand;
 use farhelm_proto::LaunchHarness;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, KeyedEntry, PREFERENCES_KEY, Preferences, SessionRow,
+    Collection, CollectionChanges, HostView, KeyedEntry, PREFERENCES_KEY, Preferences, SessionRow,
 };
 use gpui::{Bounds, Pixels, Role, TestAppContext, px, size};
 use serde_json::{Value, json};
@@ -27,6 +27,7 @@ use super::trust_band::{
 };
 use crate::focus::Mark;
 use crate::operations::OpKey;
+use crate::session_list::host_rail::tests::{fleet_hosts, hosts, remote};
 use crate::session_list::menu_tests::{push, snapshot};
 use crate::session_list::tests::{Fixture, session};
 use crate::settings::{self, TrustAgent};
@@ -148,7 +149,9 @@ fn open(cx: &mut TestAppContext) -> Trust<'_> {
 /// `agent`'s trust sent.
 fn open_as(cx: &mut TestAppContext, agent: Agent) -> Trust<'_> {
     let fleet = [((agent.asking)("a"), 0), (session("b"), 0)];
-    let mut main = test_support::open_main(cx, snapshot(&fleet, false));
+    let mut state = snapshot(&fleet, false);
+    state.push(hosts(&[remote(2, "fixture.invalid")]));
+    let mut main = test_support::open_main(cx, state);
     // Tall enough for Settings at Agent trust to show Claude's hint switch without scrolling.
     main.cx.simulate_resize(size(px(1600.), px(1000.)));
     main.terminal_live();
@@ -661,7 +664,8 @@ fn the_band_follows_only_the_stored_dismissal(cx: &mut TestAppContext) {
 /// drops the line; a second refusal brings it back, and a press that the helm stores takes it away with the band; a
 /// refusal that lands after the user opened `b` shows on neither session, and `a` opened again shows the band without
 /// the line.
-/// A dismissal pushed from elsewhere also retires the error before the hint is enabled again.
+/// A dismissal pushed from elsewhere retires an existing error and prevents a refusal that arrives later
+/// from showing when the user re-enables the hint.
 #[gpui::test]
 fn a_refused_dont_show_again_says_so_only_while_its_session_is_open(cx: &mut TestAppContext) {
     let mut trust = open(cx);
@@ -700,17 +704,25 @@ fn a_refused_dont_show_again_says_so_only_while_its_session_is_open(cx: &mut Tes
     assert_eq!(trust.parts(), (false, false));
     trust.dismissed_is(Some(false));
     assert_eq!(trust.parts(), (true, false), "re-enabled with no old error");
-    click(trust.main.cx, DISMISS_ID);
-    let save = trust.dismissals()[0].0;
-    let read = trust.one_read();
-    trust.dismissed_is(Some(true));
-    trust.answer(save, 204, None);
-    trust.trust_is(read, false);
-    assert!(
-        !trust.shows(),
-        "dismissed, and the line went with the press"
-    );
-    trust.dismissed_is(Some(false));
+    for status in [204, 503] {
+        click(trust.main.cx, DISMISS_ID);
+        let save = trust.dismissals()[0].0;
+        let read = trust.one_read();
+        trust.dismissed_is(Some(true));
+        trust.answer(save, status, None);
+        trust.trust_is(read, false);
+        assert_eq!(
+            trust.parts(),
+            (false, false),
+            "dismissed, save status {status}"
+        );
+        trust.dismissed_is(Some(false));
+        assert_eq!(
+            trust.parts(),
+            (true, false),
+            "re-enabled, save status {status}"
+        );
+    }
 
     click(trust.main.cx, DISMISS_ID);
     let save = trust.dismissals()[0].0;
@@ -727,6 +739,62 @@ fn a_refused_dont_show_again_says_so_only_while_its_session_is_open(cx: &mut Tes
         trust.parts(),
         (true, false),
         "a fresh band, without the line"
+    );
+}
+
+/// A question can appear before the host row arrives. Wait for evidence that Settings applies before offering
+/// to change the switch or starting its read. A session-owned container never needs either.
+#[gpui::test]
+fn the_hint_applies_only_when_the_hosts_trust_follows_settings(cx: &mut TestAppContext) {
+    let owned = hosts(&fleet_hosts())
+        .entries
+        .into_iter()
+        .find(|entry| entry.key == HostView::key(4))
+        .unwrap();
+    assert_eq!(owned.value["is_session_owned"], json!(true));
+    let mut persistent = owned.clone();
+    persistent.value["is_session_owned"] = json!(false);
+    let mut state = snapshot(&[(codex_asking("a").host(4), 0)], false);
+    // The connection can push host rows only after installing the Hosts collection in its snapshot.
+    state.push(hosts(&[]));
+    let mut main = test_support::open_main(cx, state);
+    main.terminal_live();
+    let mut trust = Trust {
+        main,
+        agent: CODEX,
+        pending: Vec::new(),
+    };
+    assert_eq!(trust.parts(), (false, false));
+    assert!(trust.reads().is_empty(), "waiting for the host's ownership");
+
+    let push_host = |trust: &mut Trust<'_>, entry: KeyedEntry| {
+        trust.main.helm.push(CollectionChanges {
+            collection: Collection::Hosts,
+            meta: meta(&[entry.key.as_str()]),
+            upsert: vec![entry],
+            remove: Vec::new(),
+        });
+        settle(trust.main.cx);
+    };
+    push_host(&mut trust, owned.clone());
+    assert!(
+        trust.drawn("terminal-grid").is_some(),
+        "the terminal still shows"
+    );
+    assert_eq!(trust.parts(), (false, false));
+    assert!(trust.reads().is_empty(), "the session owns its host");
+
+    push_host(&mut trust, persistent);
+    trust.shown();
+    assert!(
+        trust.shows(),
+        "the same question shows the hint on a persistent host"
+    );
+    push_host(&mut trust, owned);
+    assert_eq!(
+        trust.parts(),
+        (false, false),
+        "ownership withdraws the hint"
     );
 }
 
@@ -976,7 +1044,9 @@ fn pi_and_command_launches_borrow_no_band(cx: &mut TestAppContext) {
     let command = session("b")
         .launch(command_launch())
         .at_workspace_trust_question();
-    let mut main = test_support::open_main(cx, snapshot(&[(pi, 0), (command, 0)], false));
+    let mut state = snapshot(&[(pi, 0), (command, 0)], false);
+    state.push(hosts(&[remote(2, "fixture.invalid")]));
+    let mut main = test_support::open_main(cx, state);
     main.terminal_live();
     assert!(!main.helm.commands().iter().any(any_trust_read));
     // A consistency check only: no read was answered, so trust stays unknown and no band would show for any agent. The

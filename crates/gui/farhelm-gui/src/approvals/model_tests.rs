@@ -481,22 +481,32 @@ fn launch_and_restart_cards_explain_stored_workspace_trust() {
                 },
                 &["agent"],
             );
-            for action in [
-                create(launch.clone()),
-                ApprovalAction::Restart {
-                    target: unknown("s"),
-                    stop_if_running: false,
-                    launch: Some(launch.clone()),
-                },
+            for (action, explanation) in [
+                (create(launch.clone()), TRUSTED_WORKSPACE),
+                (
+                    ApprovalAction::Restart {
+                        target: unknown("s"),
+                        stop_if_running: false,
+                        launch: Some(launch.clone()),
+                    },
+                    "Saved with this session's launch. Repository hooks, settings and commands can run without asking.",
+                ),
             ] {
                 let trust: Vec<_> = chips(&facts(&action))
                     .into_iter()
-                    .map(|row| row.trust)
+                    .map(|row| (row.trust, row.trust_description()))
                     .collect();
                 if harness.is_shell() {
                     assert!(trust.is_empty(), "shells have no permissions row");
                 } else {
-                    assert_eq!(trust, vec![workspace_trust], "{harness:?}");
+                    assert_eq!(
+                        trust,
+                        vec![(
+                            workspace_trust,
+                            (workspace_trust == Some(true)).then_some(explanation)
+                        )],
+                        "{harness:?}"
+                    );
                 }
             }
         }

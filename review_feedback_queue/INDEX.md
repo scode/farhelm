@@ -33,14 +33,5 @@ consequences.
   A stale "Start, and don't ask again on this host" answer closes the YOLO question with nothing started and no reason,
   sometimes after the host setting was already saved.
 
-- [`trailing-trust-hint-late-refusal-untested.md`](trailing-trust-hint-late-refusal-untested.md) — No test covers a
-  trust hint save refusal that lands while the hint is already dismissed.
-
-- [`trailing-stored-trust-chip-credits-settings-switch.md`](trailing-stored-trust-chip-credits-settings-switch.md) —
-  Restart and prompt approval cards explain a session's stored trust by a Settings switch that may now be off.
-
-- [`trailing-disposable-trust-hint-says-off-by-default.md`](trailing-disposable-trust-hint-says-off-by-default.md) — In
-  a session's own sandbox, the trust hint says trust is off by default and points to a switch that does not apply there.
-
 - [`trailing-repository-history-failure-shown-as-no-matches.md`](trailing-repository-history-failure-shown-as-no-matches.md)
   — A failed repository-history read shows "No repository matches" and is not retried while the launcher is open.
