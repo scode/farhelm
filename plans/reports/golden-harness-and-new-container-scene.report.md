@@ -50,3 +50,67 @@ None.
 Both PRs passed independent source review with high-effort Sol. The outcome reporting fix now retains receipts on
 interrupted comparisons and tests partial success from a renderer that exits zero. The scene fixture checks the actual
 painted text and reports the observed container host, recipe and note when the staging budget runs out.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round. Since the plan's PRs were based, main gained the What's new restyle (which replaced
+its two screenshots and refactored the launcher's Launch button), the release headline checker, the supervisor's Restart
+cleanup fix and two helm SSH sign-in fixes. The rebase applied without conflicts. The two New container screenshots were
+captured before the launcher's button refactor landed, so the round's full screenshot comparison ran on the combined
+code: every picture matched, those two included. The new coverage rule works from the scenes the renderer reports rather
+than from the picture list, so the What's new pictures needed nothing from it, and both sides' picture list lines are
+present.
+
+#### Fixes made while landing
+
+- **One sentence in the validation instructions became wrong.** It said a render with no differences produces no review
+  page; a run with a missing or failed picture now produces one even without differences. Fixed inside
+  [#5011](https://github.com/scode/farhelm/pull/5011/changes). The landing's independent review found nothing else to
+  change before landing.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the plan's PRs rebased onto main as it stood at the start of the landing (`0ff64462`), which applied without
+conflicts; every file's change is exactly what the executor pushed, apart from the one-sentence instructions fix inside
+#5011, which changes no code.
+
+- The desktop app's screenshot comparison, `python3 scripts/check-gui-goldens.py`, all scenes, locally, with the plan's
+  new runner (recorder run `275332ed-a746-48b2-9622-1f3c79e45d6a`): passed, every expected appearance present, including
+  the two New container pictures the plan updated.
+- The golden runner's stand-in tests, `python3 -B scripts/test-check-gui-goldens.py`, locally (recorder run
+  `397d662d-f889-43f3-a3e4-26768def8b2a`): passed.
+- The screenshot batch tool's test, including the committed scene list against the changed picture list (recorder run
+  `b8317e4a-bc55-46ca-bc2c-9bc4a7f5837e`), locally: passed.
+- The GUI crate's tests, `cargo nextest run -p farhelm-gui`, on the test worker (recorder run
+  `d88d6bfd-b44a-474b-92f0-987e6ec0d46c`): all 3433 passed, including the review page's Rust tests. Only this crate's
+  golden code changed among the Rust code.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker: passed.
+- `python3 scripts/check-agents-md.py` (before and after the instructions fix),
+  `python3 releasing/check-changelog.py format`, `cargo fmt --all -- --check` and
+  `python -B scripts/check-test-sleeps.py`, locally: passed. `dprint check`, locally: this plan's files pass; it fails
+  only on over-long lines in the triage outcomes archive, which main has had since an earlier triage record (#4978)
+  landed. No PR fixes them yet; a formatting-only one would, and I recommend it, as earlier rounds' notes did.
+
+Reused: none. The executor's runs were on an older base, and everything they covered ran again above.
+
+Skipped: the workspace Rust suite, the desktop app's tests and clippy configurations and the end-to-end smoke, since no
+app code changed (only the golden harness, which is test code in the GUI crate, and its Python runner); a Mac run, since
+nothing changed is Mac-specific; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+- Nothing.
+
+#### Things you should know that the report does not say
+
+- **A run whose test filter selects no scene now fails in comparison mode too**; before, it passed without comparing
+  anything. That is deliberate, but worth knowing if a `--scene` pattern with a typo now stops a run.
+- **Smaller points the review noticed.** Nothing pins the format of the per-appearance results the Python runner reads
+  from the renderer, though a drift would fail every run loudly rather than hide a gap; when the New container scene
+  stalls before the launcher opens, its timeout message still says it was waiting for the "Ready on" note, though the
+  values it prints show the real step; and after an update the error line for an incomplete render names a directory
+  whose result files were already removed, while the review page still lists the reasons. None needs a follow-up on its
+  own.
