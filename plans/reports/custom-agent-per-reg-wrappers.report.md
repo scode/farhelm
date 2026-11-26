@@ -83,3 +83,61 @@ agents' chips. Smaller findings were fixed: a stricter test step, a premise chec
 stored wrapper now reading as none instead of failing the whole preferences read, and docstring and wording fixes. Two
 were kept deliberately: a code-structure suggestion that would have touched every way of creating a session for no
 change in behavior, and the template-clearing case described above.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round, and main had gained nothing but plan bookkeeping since its base, so nothing interacted
+with it. An independent reviewer and I both read the change against the code around it:
+
+- the helm database upgrade rebuilds the custom agent list keeping every agent's ID, definition and timestamps; nothing
+  else in the database refers to that list, and an older helm refuses the upgraded database, as it does any newer one;
+- the registration number that tells a re-registered agent from the old one is never reused, even after the newest agent
+  is deleted, and a test checks this;
+- a launch remembers its wrapper only for the registration it was started from, so a launch that reports success after
+  Delete, or after the same ID is registered again, changes nothing. Every way of starting a session from the launcher
+  says which registration it used. Agent-made launches, plain Replace and Restart with remember no wrapper at all. A
+  new-checkout launch accepted on retry after a lost reply remembers none for a custom agent, but still does for
+  built-in agents;
+- the helm now sends the desktop app a new, optional list of each custom agent's remembered wrapper. The desktop app
+  always runs its own helm, so the protocol version did not need to change.
+
+#### Fixes made while landing
+
+Two documentation fixes, both found by the independent review:
+
+- The implementation spec still said the custom agent table is keyed by the agent's ID. Since this plan's database
+  upgrade, the table is keyed by the registration number; the agent's ID is still unique but is no longer the key. The
+  paragraph now says so.
+- One new test's description said a launch of a second custom agent without a wrapper clears that agent's own wrapper,
+  but that agent never had one, so the test cannot show it. The description now says what the test shows: the first
+  agent's wrapper is left alone. Clearing an agent's own wrapper is covered by the database tests.
+
+Nothing from the landing needs a follow-up.
+
+#### Checks
+
+Run on the plan's two PRs exactly as the executor pushed them, stacked on main as it stood when the landing started
+(`82386429`, which had changed nothing outside the plan files since the plan's base). The landing fixes above change
+only a spec paragraph and a test's description, so these runs still cover what merged. The test worker is an aarch64
+Linux machine:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean.
+- On the test worker, `cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-gui -p farhelm-desktop`, recorded
+  run d910944a-6fca-423f-ad3e-fe306d20322a: 5,928 passed, 7 skipped. That covers the helm's database upgrade from every
+  older schema, the new tests of late launches after Delete and re-registration, and all the launcher and template
+  tests, with both PRs applied. It is wider than the executor's last runs, which after the review fixes covered only the
+  helm tests about custom agents and wrappers.
+- On the test worker, the desktop app's end-to-end smoke, recorded run 7e124514-9865-4f9d-b9e5-bc730e266449: all 49
+  steps passed, except the paste step, which runs only on a Mac and was skipped as always on Linux. It opens the
+  launcher and starts sessions from it. It and the screenshot comparison below are the two checks the executor's report
+  skipped.
+- Locally, the full screenshot golden comparison, recorded run 6f52adb8-8bd5-4664-9b95-3c0a3fdef342: no picture changed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown: passed, and again after the landing fixes.
+
+Reused: nothing. Skipped: the supervisor's tests and the end-to-end Rust suite, since nothing the supervisor runs or the
+helm sends it changed.
