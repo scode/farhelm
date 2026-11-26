@@ -959,7 +959,9 @@ are not.
   coordinate, and on a Mac, where the real pointer moves, the point park has to work too.
 
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
-  sessions without a managed checkout too, by retaining their metadata.
+  sessions without a managed checkout too, by retaining their metadata. Don't forget name recycling: we probably want
+  some kind of quarantine on names so that they aren't immediately recycled, so that restoring a session can be done
+  without changing the absolute path to its checkout.
 
 - **Protect the repository against force pushes and similar, while agents can still merge.** Guard main and the release
   tags against force pushes, deletion and other history rewrites in a way that also binds agents, while still letting
