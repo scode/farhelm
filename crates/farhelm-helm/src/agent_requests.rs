@@ -4659,6 +4659,7 @@ async fn launch_environment_for_agent(
                 format!("{error}; nothing was started"),
             )
         })?;
+    let place_pin = crate::environment::PlacePin::capture(state, place).await?;
     let place_name = match place.host() {
         Some(host) => crate::hosts::host_views(state)
             .await?
@@ -4690,6 +4691,9 @@ async fn launch_environment_for_agent(
         },
     )
     .await?;
+    if let Some(pin) = &place_pin {
+        pin.recheck(state).await?;
+    }
     // A clone's source read is authority only while its owner is unchanged;
     // the user may have taken minutes to answer. Re-route rather than reread,
     // so the launch that runs is exactly the one the card showed.
@@ -4723,6 +4727,7 @@ async fn launch_environment_for_agent(
             request,
             plan.title_kind,
             None,
+            place_pin,
         ))
         .await?;
     // The relay includes time for the approval and this post-approval wait,
@@ -14592,6 +14597,9 @@ mod tests {
     #[derive(Default)]
     struct RunningContainers {
         place: std::sync::OnceLock<HostId>,
+        /// Park one place read so a test can change the claim after Allow
+        /// while registration is still pending.
+        next_place_read: std::sync::Mutex<Option<Arc<tokio::sync::Barrier>>>,
         builds: std::sync::atomic::AtomicUsize,
         /// Makes `destroy` fail, for the environment Delete's failure path.
         fail_destroy: std::sync::atomic::AtomicBool,
@@ -14634,6 +14642,11 @@ mod tests {
             unreachable!("agent-request fixture")
         }
         async fn places(&self) -> anyhow::Result<Vec<crate::environment::EnvironmentPlace>> {
+            let gate = self.next_place_read.lock().unwrap().take();
+            if let Some(gate) = gate {
+                gate.wait().await;
+                gate.wait().await;
+            }
             Ok(self
                 .place
                 .get()
@@ -14727,7 +14740,7 @@ mod tests {
     }
 
     /// [`environment_fleet`], also returning its stand-in provider, whose one
-    /// container place is the local host.
+    /// container place is the local host with a verified store claim.
     async fn container_fleet() -> (Harness, HostId, HostId, Arc<RunningContainers>) {
         let containers = Arc::new(RunningContainers::default());
         let (builder, remote) = FleetBuilder::new()
@@ -14753,8 +14766,34 @@ mod tests {
         containers.place.set(local).unwrap();
         h.await_refreshed(local).await;
         h.await_refreshed(remote).await;
+        claim_fixture_container_place(&h, local, 1000).await;
         trust_without_asking(&h).await;
         (h, local, remote, containers)
+    }
+
+    /// The stand-in reports available places without probing a machine. Give
+    /// it the durable ownership evidence a real successful probe records.
+    async fn claim_fixture_container_place(h: &Harness, host: HostId, uid: u32) {
+        let row = h
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        let claim = crate::store::PodmanPlaceIdentity::from_parts(&"1".repeat(32), uid).unwrap();
+        assert_eq!(
+            h.store
+                .claim_podman_place(&row, claim.clone(), row.host_identity.clone(), None)
+                .await
+                .unwrap(),
+            Some(crate::store::PlaceClaim::Owned { displaced: None })
+        );
+        assert_eq!(
+            h.store.podman_place_identity(host).await.unwrap(),
+            Some(claim)
+        );
     }
 
     /// What a scripted environment supervisor was asked to do, in order:
@@ -15705,6 +15744,96 @@ mod tests {
             before,
             "the failed launch removed the environment it registered"
         );
+    }
+
+    /// Allow stays bound to the container host through registration. A
+    /// separate requesting host lets the target reconnect while its durable
+    /// claim stays the same, independently of changes to the claim itself.
+    #[farhelm_testtrace::test]
+    async fn changed_container_place_refuses_agent_launch_before_registration() {
+        enum Change {
+            ClaimWhileWaiting,
+            ClaimAfterAllow,
+            ReconnectWhileWaiting,
+        }
+        for change in [
+            Change::ClaimWhileWaiting,
+            Change::ClaimAfterAllow,
+            Change::ReconnectWhileWaiting,
+        ] {
+            let (h, local, remote, containers) = container_fleet().await;
+            put_recipe(&h, "dev").await;
+            let before = owned_rows(&h).await;
+            let origin = origin_of(&h, remote);
+            let incarnation = h.manager.status(local).unwrap().incarnation;
+            let claim = h.store.podman_place_identity(local).await.unwrap().unwrap();
+            let place = listed_name(&h, local).await;
+            let _gui = h.manager.ui_seat().hold();
+            let handler = HelmAgentRequests::for_state(&h.state);
+            let task = tokio::spawn(async move {
+                handler
+                    .handle(
+                        origin,
+                        "remote-a",
+                        AgentVerb::CreateEnvironment {
+                            recipe: "dev".into(),
+                            container_host: Some(place),
+                            templates: Vec::new(),
+                            edits: environment_edits(),
+                        },
+                    )
+                    .await
+            });
+            let card = await_card(&h, &task).await;
+            assert!(matches!(card.action, ApprovalAction::LaunchEnvironment {
+                place: farhelm_proto::Place::PodmanHost(host), ..
+            } if host == local));
+            let gate = Arc::new(tokio::sync::Barrier::new(2));
+            match change {
+                Change::ClaimWhileWaiting => {
+                    claim_fixture_container_place(&h, local, 1001).await;
+                }
+                Change::ClaimAfterAllow => {
+                    *containers.next_place_read.lock().unwrap() = Some(Arc::clone(&gate));
+                }
+                Change::ReconnectWhileWaiting => {
+                    h.fleet.kill_connection(local);
+                    h.await_refreshed_after(local, incarnation).await;
+                    assert_ne!(h.manager.status(local).unwrap().incarnation, incarnation);
+                    assert_eq!(
+                        h.store.podman_place_identity(local).await.unwrap(),
+                        Some(claim)
+                    );
+                }
+            }
+            assert_eq!(
+                answer_card(&h, "allow").await,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            if matches!(change, Change::ClaimAfterAllow) {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    gate.wait().await;
+                    assert!(!task.is_finished());
+                    claim_fixture_container_place(&h, local, 1001).await;
+                    gate.wait().await;
+                })
+                .await
+                .expect("the approved task reached the preregistration place read");
+            }
+            let (kind, message) = refused(task.await.unwrap());
+            assert_eq!(kind, ErrorKind::Unavailable);
+            let expected = if matches!(change, Change::ClaimAfterAllow) {
+                "changed before launch"
+            } else {
+                "waited for approval"
+            };
+            assert!(message.contains(expected), "{message}");
+            assert_eq!(owned_rows(&h).await, before);
+            assert_eq!(
+                containers.builds.load(std::sync::atomic::Ordering::SeqCst),
+                0
+            );
+        }
     }
 
     /// The refusals that keep an environment launch honest come before any

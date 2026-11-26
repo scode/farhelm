@@ -1303,6 +1303,7 @@ async fn absent_session_create_settles_only_a_completed_confirmed_refusal() {
                 "farhelm-sess-refusal".into(),
                 "dev".into(),
                 f.place,
+                None,
             )
             .await
             .unwrap();
@@ -1629,7 +1630,12 @@ async fn creation_proxy_restart_follows_admission_across_fresh_and_recovered_cre
         );
         let host = f
             .store
-            .register_pending_session_container("farhelm-sess-proxy".into(), "dev".into(), f.place)
+            .register_pending_session_container(
+                "farhelm-sess-proxy".into(),
+                "dev".into(),
+                f.place,
+                None,
+            )
             .await
             .unwrap();
         let row = f
@@ -1806,6 +1812,7 @@ async fn failed_initial_proxy_restart_leaves_installation_unadmitted() {
             "farhelm-sess-proxy-failed".into(),
             "dev".into(),
             f.place,
+            None,
         )
         .await
         .unwrap();
@@ -1863,6 +1870,7 @@ async fn partial_install_coordinates_refuse_proxy_recovery_without_mutating_the_
                 "farhelm-sess-partial".into(),
                 "dev".into(),
                 f.place,
+                None,
             )
             .await
             .unwrap();

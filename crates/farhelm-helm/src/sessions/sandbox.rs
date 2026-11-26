@@ -129,6 +129,7 @@ async fn admit_environment_session(
                 request.request,
                 request.name_kind,
                 request.confirmed_size,
+                None,
             )
             .await
     })

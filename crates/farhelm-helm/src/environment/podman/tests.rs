@@ -392,7 +392,12 @@ async fn lost_session_create_records_login_and_refuses_an_automatic_second_run()
     let host = provider
         .0
         .store
-        .register_pending_session_container("farhelm-sess-pending".into(), "dev".into(), place)
+        .register_pending_session_container(
+            "farhelm-sess-pending".into(),
+            "dev".into(),
+            place,
+            None,
+        )
         .await
         .unwrap();
     let row = commands.session_row(host).await;
@@ -527,7 +532,7 @@ async fn moved_container_place_keeps_the_session_and_offers_delete_retry() {
     let harness = builder.podman(Arc::new(provider.clone())).start().await;
     let store = &harness.store;
     let host = store
-        .register_pending_session_container("farhelm-sess-test".into(), "dev".into(), place)
+        .register_pending_session_container("farhelm-sess-test".into(), "dev".into(), place, None)
         .await
         .unwrap();
     let row = commands.session_row(host).await;
