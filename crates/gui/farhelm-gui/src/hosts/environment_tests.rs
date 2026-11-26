@@ -456,17 +456,29 @@ fn retry_on_a_failed_deletion_deletes_again_and_a_late_answer_is_a_refusal(
 
 // ---- A sandbox's Re-run --------------------------------------------------------------------------------------------
 
-/// Open `gpubox`'s menu with its setup failed and choose Re-run; the probe it sends, checked to name the sandbox's
-/// host, and its envelope id.
-fn rerun_probe(cx: &mut VisualTestContext, helm: &mut FakeHelm) -> u64 {
+/// Start `gpubox`'s Re-run and answer the press-time account read while its setup probe is still out.
+fn rerun_probe(cx: &mut VisualTestContext, helm: &mut FakeHelm, skips_at_press: bool) -> u64 {
     click(cx, "host-menu-toggle-4");
     click(cx, "host-menu-rerun");
-    let (id, body) = one_command(helm, Method::Post, "/api/hosts/probe");
+    let sent = helm.commands();
+    let [read, probe] = sent.as_slice() else {
+        panic!("expected a press-time account read followed by the probe: {sent:?}");
+    };
     assert_eq!(
-        body,
-        json!({ "target": { "kind": "tensorlake-host", "host": 4 } })
+        (read.method, read.path.as_str()),
+        (Method::Get, "/api/tensorlake")
     );
-    id
+    assert_eq!(
+        (probe.method, probe.path.as_str()),
+        (Method::Post, "/api/hosts/probe")
+    );
+    assert_eq!(
+        probe.body.as_ref(),
+        Some(&json!({ "target": { "kind": "tensorlake-host", "host": 4 } }))
+    );
+    helm.reply(read.id, 200, Some(account(skips_at_press)));
+    settle(cx);
+    probe.id
 }
 
 /// The panel with `gpubox`'s setup failed, and `more`.
@@ -489,8 +501,8 @@ fn failed_setup(
 /// question has no Back.
 ///
 /// Specified: with "Set up new hosts without asking" on, Re-run on `gpubox` probes `{"kind": "tensorlake-host", "host":
-/// 4}`; its plan reads the Tensorlake account, and with that account's skip off asks "Create Tensorlake sandbox ·
-/// gpubox" with "2 CPUs · 4 GB memory · 20 GB disk", the billing callout, and only Cancel and Create sandbox; Create
+/// 4}`. A skip enabled after Re-run cannot waive the billing question. The question shows "Create Tensorlake sandbox ·
+/// gpubox", "2 CPUs · 4 GB memory · 20 GB disk", the billing callout, and only Cancel and Create sandbox. Create
 /// sandbox sends `POST /api/hosts/provision` with the plan's id under the host's key.
 #[gpui::test]
 fn a_sandboxs_rerun_asks_its_creation_question_without_back(cx: &mut TestAppContext) {
@@ -499,11 +511,11 @@ fn a_sandboxs_rerun_asks_its_creation_question_without_back(cx: &mut TestAppCont
         skips_both(cx),
         "the premise: removing and setting up hosts without asking are on"
     );
-    let probe = rerun_probe(cx, &mut helm);
+    let probe = rerun_probe(cx, &mut helm, false);
     helm.reply(probe, 200, Some(plan("probe-1")));
     settle(cx);
     let (read, _) = one_command(&mut helm, Method::Get, "/api/tensorlake");
-    helm.reply(read, 200, Some(account(false)));
+    helm.reply(read, 200, Some(account(true)));
     settle(cx);
     assert_eq!(
         label(cx, "prompt").as_deref(),
@@ -527,12 +539,12 @@ fn a_sandboxs_rerun_asks_its_creation_question_without_back(cx: &mut TestAppCont
 /// Why this matters: the Tensorlake skip is the user's own choice to create sandboxes without a question, and a read
 /// of it that fails must not be taken for that choice.
 ///
-/// Specified: with the account's skip on, the rerun's plan is sent as it arrives, with no question; with the account
-/// read refused, the question is asked.
+/// The plan goes out without a question only when both account reads grant the skip. Restoring confirmation or
+/// losing the account read while the probe is out makes the billing question necessary again.
 #[gpui::test]
 fn the_tensorlake_skip_creates_without_asking_and_a_failed_read_asks(cx: &mut TestAppContext) {
     let (mut helm, cx) = failed_setup(cx, Vec::new());
-    let probe = rerun_probe(cx, &mut helm);
+    let probe = rerun_probe(cx, &mut helm, true);
     helm.reply(probe, 200, Some(plan("probe-1")));
     settle(cx);
     let (read, _) = one_command(&mut helm, Method::Get, "/api/tensorlake");
@@ -541,22 +553,28 @@ fn the_tensorlake_skip_creates_without_asking_and_a_failed_read_asks(cx: &mut Te
     let (create, body) = one_command(&mut helm, Method::Post, "/api/hosts/provision");
     assert_eq!(body, json!({ "probe_id": "probe-1" }));
     assert!(!any_open(cx), "no question");
-    // The helm refuses that submission, which leaves the failed setup and its Re-run as they were; this time the
-    // account cannot be read.
+    // A refused submission leaves the failed setup available for another Re-run.
     helm.reply(create, 409, Some(json!("the plan is unknown")));
     settle(cx);
-    let probe = rerun_probe(cx, &mut helm);
-    helm.reply(probe, 200, Some(plan("probe-2")));
-    settle(cx);
-    let (read, _) = one_command(&mut helm, Method::Get, "/api/tensorlake");
-    helm.reply(read, 500, Some(json!("the settings could not be read")));
-    settle(cx);
-    assert_eq!(
-        label(cx, "prompt").as_deref(),
-        Some("Create Tensorlake sandbox · gpubox"),
-        "a failed read asks"
-    );
-    assert!(helm.commands().is_empty(), "nothing was submitted");
+    for (id, status, body) in [
+        ("probe-2", 200, account(false)),
+        ("probe-3", 500, json!("the settings could not be read")),
+    ] {
+        let probe = rerun_probe(cx, &mut helm, true);
+        helm.reply(probe, 200, Some(plan(id)));
+        settle(cx);
+        let (read, _) = one_command(&mut helm, Method::Get, "/api/tensorlake");
+        helm.reply(read, status, Some(body));
+        settle(cx);
+        assert_eq!(
+            label(cx, "prompt").as_deref(),
+            Some("Create Tensorlake sandbox · gpubox"),
+            "the account reply for {id} requires confirmation"
+        );
+        assert!(helm.commands().is_empty(), "nothing was submitted for {id}");
+        keys(cx, "escape");
+        assert!(!any_open(cx), "Cancel leaves Re-run available");
+    }
 }
 
 // ---- Resume --------------------------------------------------------------------------------------------------------

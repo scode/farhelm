@@ -1309,8 +1309,8 @@ impl AddHostDialog {
                     // plan goes out on the strength of the Add, so a refusal is judged against that.
                     mark,
                 };
-                // An agent's add asks whatever the preference says (SPEC.md, "Agent-spawned sessions").
-                if !asks_before_setup && !self.from_agent {
+                // An agent's Add always asks. For a manual Add, the user can restore confirmation during the probe.
+                if !self.from_agent && !asks_before_setup && !setup::asks_first(cx) {
                     // The close is queued first: a submission refused at once (a launch in flight) reopens Add host
                     // on a later turn, which must come after this dialog's close, or the close would take the
                     // reopened dialog with it (closing a layer closes the layers opened from it, and the reopened

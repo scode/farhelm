@@ -315,6 +315,54 @@ fn a_refusal_marked_remove_instead_offers_remove_host(cx: &mut TestAppContext) {
     );
 }
 
+/// A refusal's Remove cannot forget a host using a skip preference that has yet to be presented.
+#[gpui::test]
+fn refusal_remove_waits_for_its_changed_confirmation_choice_to_be_shown(cx: &mut TestAppContext) {
+    let key = farhelm_proto::ui_channel::PREFERENCES_KEY;
+    let preferences = |skip| CollectionState {
+        collection: Collection::Preferences,
+        meta: meta(&[key]),
+        entries: vec![KeyedEntry {
+            key: key.into(),
+            value: json!({ "skip_host_remove_confirmation": skip }),
+        }],
+    };
+    let (mut helm, cx) = panel(cx, vec![hosts(&reference_hosts()), preferences(false)]);
+    let plan = choose_update(&mut helm, 2, cx);
+    helm.reply_marked(
+        plan,
+        409,
+        vec![HelmMarker::RemoveHostInstead],
+        Some(json!("remove this host instead")),
+    );
+    settle(cx);
+    assert_eq!(label(cx, "host-refusal-remove").as_deref(), Some("Remove"));
+    crate::test_support::show_next_frame(cx);
+    let position = crate::test_support::center(cx, "host-refusal-remove");
+    let changed = preferences(true);
+    let changes = farhelm_helm_client::collections::decode_changes(CollectionChanges {
+        collection: changed.collection,
+        meta: changed.meta,
+        upsert: changed.entries,
+        remove: vec![],
+    })
+    .unwrap();
+    cx.update(|window, cx| {
+        assert!(crate::hosts::remove::asks_first(cx));
+        let store = session::current_store(cx).unwrap();
+        store.update(cx, |store, cx| store.apply(&changes, cx));
+        assert!(!crate::hosts::remove::asks_first(cx));
+        window.draw(cx).clear(cx);
+        crate::test_support::click_before_redraw(position, window, cx);
+    });
+    settle(cx);
+    assert!(helm.commands().is_empty(), "the stale press did nothing");
+    assert!(label(cx, "host-refusal").is_some());
+    crate::test_support::show_next_frame(cx);
+    click(cx, "host-refusal-remove");
+    one_command(&mut helm, Method::Delete, "/api/hosts/2");
+}
+
 /// SPEC.md, "Keyboard focus": a result that arrives after the user moved on opens no dialog and shows where it belongs
 /// (the goal's "No queue for results that arrive later"). The layer manager refuses a dialog for a mark the user has
 /// moved on from, so this guards the plumbing on Update's side: the refusal dialog opens through the mark taken at the
