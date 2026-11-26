@@ -95,28 +95,6 @@
   feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
-## agent-environment-launch-skips-place-host-incarnation-pin.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed by source inspection (live retarget not executed). In
-  `crates/farhelm-helm/src/agent_requests.rs:4582-4775` (`launch_environment_for_agent`), cached places are checked
-  before the approval card (`:4600-4621`), and after Allow only `plan.source_owner` is rechecked (`:4696-4706`); the
-  container host's connection incarnation, route, or Podman `PlaceIdentity` is never pinned, so
-  `Podman::ensure_prepared` and `Podman::create` (`podman.rs:1230,1318-1329`) call `places.fresh(...)` and can claim a
-  replacement machine if the place host was retargeted while the card waited. Contrasts with ordinary agent Create
-  (`approve_launch`, `agent_requests.rs:2747,2802-2809`, PR #4860) and `SPEC_impl.md:9825-9826`.
-- Decision: Q1 ("Pin container host identity on agent launch"): maintainer picked "Fix code: pin across card & into
-  container creation" with note: "if this is easy using existing mechanisms, which it sounds like from the estimate. if
-  the executor or planned realizes this iis much more complicated, kick it back to the todo list with an explanation of
-  why its complicated." (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Capture the container host's identity before showing the approval card, verify it after Allow,
-  and pass it through `start_session_environment` into `Podman::ensure_prepared` and `Podman::create` so a retargeted
-  place host is refused rather than claiming a different machine, using existing mechanisms (estimate M, ~120-180
-  lines). If planning or execution finds this is much more complicated than reusing existing mechanisms, kick it back to
-  `TODO.md` with an explanation of why it is complicated instead of landing a complex change. Remove the feedback file
-  and its index entry.
-- Execution: ``planned in `plans/queue/triage-security-and-agent-boundaries.md` ``.
-
 ## uninstall-newline-stripping-defeats-state-inside-lib-guard.md
 
 - Outcome: `fix code`.

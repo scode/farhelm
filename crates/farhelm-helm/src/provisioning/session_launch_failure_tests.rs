@@ -283,6 +283,7 @@ impl Fixture {
                 serde_json::from_value(request).unwrap(),
                 None,
                 None,
+                None,
             )
             .await
             .unwrap()
@@ -939,6 +940,7 @@ async fn lost_session_reply_recovers_canonical_identity_without_a_second_run() {
         "dev".into(),
         farhelm_proto::Place::PodmanHost(f.place),
         f.recipe.size,
+        None,
     )
     .await
     .unwrap();

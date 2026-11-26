@@ -8733,7 +8733,7 @@ async fn a_hosts_status_names_the_provider_its_kind_records() {
     let local = rest_harness::local_id(&h.store).await;
     let container = h
         .store
-        .register_pending_session_container("farhelm-sess-paused".into(), "dev".into(), local)
+        .register_pending_session_container("farhelm-sess-paused".into(), "dev".into(), local, None)
         .await
         .unwrap();
     let sandbox = h

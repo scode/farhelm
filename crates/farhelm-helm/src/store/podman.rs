@@ -644,19 +644,23 @@ impl HelmStore {
                 home: new.home,
                 uid: new.uid,
             }),
+            None,
         )
         .await
     }
 
     /// Launch progress owns a host row before preparation observes a custom
-    /// image's account. No guessed home or UID becomes an execution route.
+    /// image's account. An approved place must still own the claim in the
+    /// transaction that takes this new reference to it.
     pub(crate) async fn register_pending_session_container(
         &self,
         name: String,
         recipe: String,
         place: HostId,
+        approved_place: Option<PodmanPlaceIdentity>,
     ) -> anyhow::Result<HostId> {
-        self.register_container(name, recipe, place, None).await
+        self.register_container(name, recipe, place, None, approved_place)
+            .await
     }
 
     async fn register_container(
@@ -665,11 +669,20 @@ impl HelmStore {
         recipe: String,
         place: HostId,
         login: Option<PodmanLogin>,
+        approved_place: Option<PodmanPlaceIdentity>,
     ) -> anyhow::Result<HostId> {
         validate_name(&name)?;
         anyhow::ensure!(!recipe.is_empty(), "a container requires a recipe");
         self.conn.call("register container task panicked", move |conn| {
             let tx = conn.transaction()?;
+            if let Some(approved) = approved_place
+                && read_place_identity(&tx, place)?.as_ref() != Some(&approved)
+            {
+                return Err(crate::SupervisorError::helm(
+                    farhelm_proto::ErrorKind::Unavailable,
+                    "the approved container host's identity changed before launch; nothing was started".to_string(),
+                ).into());
+            }
             let (kind, environment_name, provider): (String, Option<String>, Option<String>) = tx.query_row(
                 "SELECT kind, tensorlake_sandbox, environment_provider FROM hosts WHERE id = ?1",
                 [place], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -878,6 +891,7 @@ mod tests {
                 "farhelm-sess-identity".into(),
                 "dev".into(),
                 first.id,
+                None,
             )
             .await
             .unwrap();
@@ -1082,7 +1096,12 @@ mod tests {
             .unwrap();
         let place = place_row.id;
         let host = store
-            .register_pending_session_container("farhelm-sess-observed".into(), "dev".into(), place)
+            .register_pending_session_container(
+                "farhelm-sess-observed".into(),
+                "dev".into(),
+                place,
+                None,
+            )
             .await
             .unwrap();
         let row = store

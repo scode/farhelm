@@ -5305,6 +5305,7 @@ mod tests {
                 memory_gb: 4,
                 disk_gb: 20,
             },
+            None,
         )
         .await
         .unwrap();

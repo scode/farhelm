@@ -13,11 +13,6 @@ consequences.
 
 ## Highest priority: security or data loss
 
-- [`agent-environment-launch-skips-place-host-incarnation-pin.md`](agent-environment-launch-skips-place-host-incarnation-pin.md)
-  — An approved agent container-environment launch can create the container on a different machine than the card named
-  if the place host was retargeted or re-identified while the card waited; the environment-launch path never pins the
-  place host's connection (the ordinary-create path does).
-
 - [`uninstall-newline-stripping-defeats-state-inside-lib-guard.md`](uninstall-newline-stripping-defeats-state-inside-lib-guard.md)
   — Uninstall's `readlink -f | tr -d '\n'` strips embedded newlines, corrupting the spellings every containment/identity
   guard consumes; a constructed dual-newline layout can make uninstall delete the user's data directory (traced, not

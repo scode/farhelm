@@ -81,6 +81,66 @@ impl EnvironmentBinding {
     }
 }
 
+/// The host-backed destination an agent's environment approval names. An
+/// account-backed place has no host connection to pin. Host-backed launches
+/// must still own this place when the pending environment becomes durable.
+pub(crate) struct PlacePin {
+    host: HostId,
+    identity: crate::store::PodmanPlaceIdentity,
+    incarnation: Option<u64>,
+}
+
+impl PlacePin {
+    /// Take both observations before asking. A cached available place alone
+    /// cannot authorize a launch if its durable claim has already gone.
+    pub(crate) async fn capture(
+        state: &crate::AppState,
+        place: Place,
+    ) -> anyhow::Result<Option<Self>> {
+        match place {
+            Place::TensorlakeAccount => Ok(None),
+            Place::PodmanHost(host) => {
+                let identity = state
+                    .store
+                    .podman_place_identity(host)
+                    .await?
+                    .ok_or_else(|| {
+                        crate::SupervisorError::helm(
+                            farhelm_proto::ErrorKind::Unavailable,
+                            "the container host's identity is not verified; nothing was started"
+                                .to_string(),
+                        )
+                    })?;
+                let incarnation = state.manager.status(host).map(|status| status.incarnation);
+                Ok(Some(Self {
+                    host,
+                    identity,
+                    incarnation,
+                }))
+            }
+        }
+    }
+
+    /// Allow belongs to the observed endpoint and supervisor connection.
+    /// The registration transaction checks endpoint ownership again before
+    /// inserting the durable reference that prevents further retargeting.
+    pub(crate) async fn recheck(&self, state: &crate::AppState) -> anyhow::Result<()> {
+        let identity = state.store.podman_place_identity(self.host).await?;
+        let incarnation = state
+            .manager
+            .status(self.host)
+            .map(|status| status.incarnation);
+        if identity.as_ref() != Some(&self.identity) || incarnation != self.incarnation {
+            return Err(crate::SupervisorError::helm(
+                farhelm_proto::ErrorKind::Unavailable,
+                "the container host's identity or connection changed while this request waited for approval; nothing was started"
+                    .to_string(),
+            ).into());
+        }
+        Ok(())
+    }
+}
+
 /// Provider-owned coordinates, decoded from the current host representation.
 /// A Podman handle keeps its place ID, so later access resolves the place's
 /// current endpoint rather than retaining the destination observed at create.
@@ -131,7 +191,14 @@ impl ProviderHandle {
         recipe: String,
         place: Place,
         size: farhelm_proto::recipes::RecipeSize,
+        pin: Option<PlacePin>,
     ) -> anyhow::Result<HostId> {
+        if let Some(pin) = &pin {
+            anyhow::ensure!(
+                place.host() == Some(pin.host),
+                "the approval names another environment place"
+            );
+        }
         match place {
             Place::TensorlakeAccount => {
                 store
@@ -146,7 +213,12 @@ impl ProviderHandle {
             }
             Place::PodmanHost(host) => {
                 store
-                    .register_pending_session_container(name, recipe, host)
+                    .register_pending_session_container(
+                        name,
+                        recipe,
+                        host,
+                        pin.map(|pin| pin.identity),
+                    )
                     .await
             }
         }

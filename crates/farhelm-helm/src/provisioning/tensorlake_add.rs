@@ -337,6 +337,12 @@ impl ProvisioningService {
     /// task ends its run even if it panics ([`Self::end_panicked_launch`]).
     /// When the caller supplied a confirmed size, check it against the same
     /// definition this launch uses for registration and provider work.
+    /// An agent's placement approval also fences registration against the
+    /// container host's durable identity.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "size and place confirmation come from different callers but must reach the admission boundary"
+    )]
     pub(crate) async fn start_session_environment(
         self: Arc<Self>,
         state: Arc<crate::AppState>,
@@ -345,6 +351,7 @@ impl ProvisioningService {
         mut request: crate::sessions::CreateReq,
         name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
         confirmed_size: Option<farhelm_proto::recipes::RecipeSize>,
+        place_pin: Option<crate::environment::PlacePin>,
     ) -> anyhow::Result<(
         RunAccepted,
         tokio::sync::oneshot::Receiver<anyhow::Result<farhelm_proto::SessionInfo>>,
@@ -407,6 +414,7 @@ impl ProvisioningService {
             recipe.clone(),
             place,
             definition.size,
+            place_pin,
         )
         .await?;
         let row = self.host_row(host).await?;
