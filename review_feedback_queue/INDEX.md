@@ -89,12 +89,6 @@ consequences.
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
   failure above it, and leaves the launch refusal stuck even after an in-flight toggle succeeds.
 
-- [`trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md`](trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md)
-  — When you replace your saved Tensorlake API key with a different key in Settings without clicking Clear first, the
-  list of sandboxes not on this helm keeps showing leftover sandboxes from the old key while the new check runs — and
-  keeps showing them indefinitely with active Delete buttons if the new key fails to list sandboxes (for example, if the
-  new key is invalid or Tensorlake is unreachable).
-
 - [`ui-channel-displaced-notice-lost-to-reader-race.md`](ui-channel-displaced-notice-lost-to-reader-race.md) — A
   displaced UI channel's Displaced notice can be dropped by a reader/writer drain race, so the displaced window
   reconnects and steals the seat back (latent: a second UI cannot arise in the shipped embedded app).
