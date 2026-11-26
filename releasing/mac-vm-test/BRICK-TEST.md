@@ -725,11 +725,13 @@ also journal computer use, decisions and interruptions as operator policy requir
 On the installer pair, ordinary cleanup requires valid P0 evidence and a result for every in-scope P1 and P2 check. A
 check that can never run counts: the coordinator records it as skipped, with the reason, when its chain stopped, its
 place in the pair's order passed, or (for P2) a P0 check of the run did not pass. On the dedicated Mac pair, ordinary
-cleanup requires a result for every in-scope P1 checkpoint. Out-of-scope tiers need no result. A P1 or P2 product
-failure can use ordinary cleanup. Its verdict and evidence are preserved while the pair is cleaned normally. Other
-failed or incomplete checks, and any automation failure, keep the retention rule below. Every recorded P1 and P2 result
-still requires intact exported evidence, and a failed or unavailable one must have some; changed or missing captures
-must be recovered before ordinary cleanup.
+cleanup requires a result for every in-scope P1 checkpoint. Out-of-scope tiers need no result. If scope narrows before
+any tests on a prepared pair, that pair no longer needs a native preflight receipt. A pair with any in-scope check or
+existing result, preflight or tester record still needs its preflight evidence. A P1 or P2 product failure can use
+ordinary cleanup. Its verdict and evidence are preserved while the pair is cleaned normally. Other failed or incomplete
+checks, and any automation failure, keep the retention rule below. Every recorded P1 and P2 result still requires intact
+exported evidence, and a failed or unavailable one must have some; changed or missing captures must be recovered before
+ordinary cleanup.
 
 Failure or interruption preserves partial manifests and live supervision. Inspect `status`, actual Tart state and the
 journal before acting again; preparation is never replayed automatically. Agree failed-clone retention with the

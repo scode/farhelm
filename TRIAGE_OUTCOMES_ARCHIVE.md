@@ -50483,3 +50483,18 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed as decided. Change `unlszxspmmxqxpoukopwsxlkomqvknsw`, bookmark
   `plan/triage-drift-and-brick-tooling/02-drift-cursor-timing-and-claude-trust`,
   [#5047](https://github.com/scode/farhelm/pull/5047/changes).
+
+## trailing-brick-cleanup-refuses-untested-remote-mac-pair.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source (`releasing/mac-vm-test/brick_test.py:280-286,936-947,1399-1418,1675-1680,1882-1900`):
+  after `stop-after-p0` narrows scope before any test runs on a prepared remote Mac P1 pair, `cleanup` still requires
+  `native_preflight_retained(entry)` and refuses cleanup, contrary to `BRICK-TEST.md:715-716`.
+- Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
+  items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: In `releasing/mac-vm-test/brick_test.py`, require `native_preflight_retained(entry)` during
+  cleanup only when the pass is in scope or already has results/preflight/tester evidence, and add a unit test in
+  `test_native_coordinator.py` (estimate S, ~15-25 lines). Remove the feedback file and its index entry.
+- Execution: Fixed as decided. Change `qunmnmqkomqwzzmmlllxnmumqptsvzot`, bookmark
+  `plan/triage-drift-and-brick-tooling/03-brick-cleanup-untested-remote-pair`,
+  [#5048](https://github.com/scode/farhelm/pull/5048/changes).

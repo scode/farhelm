@@ -488,10 +488,12 @@ follow every P0 turn. The long-turn floors apply to the agent conversations.
             with self.assertRaisesRegex(Refused, 'incomplete or failed'):
                 self.run.cleanup(REMOTE_MAC_PASS)
             self.assertEqual(entry['phase'], 'ready')
+            self.run.limit_scope('p0-only')
+            with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                self.run.cleanup(REMOTE_MAC_PASS)
             entry['native_preflight'] = preflight
             # Narrowed scope leaves this pair with no required P0 results to guard preparation.
             entry['preparation_error'] = 'fictional incomplete setup'
-            self.run.data['scope'] = 'p0-only'
             calls_before = len(f.model.calls)
             with self.assertRaisesRegex(Refused, 'incomplete or failed'):
                 self.run.cleanup(REMOTE_MAC_PASS)
@@ -499,6 +501,36 @@ follow every P0 turn. The long-turn floors apply to the agent conversations.
             del entry['preparation_error']
             self.run.data['scope'] = 'p1-only'
             self.run.cleanup(REMOTE_MAC_PASS)
+
+    def test_stop_after_p0_cleans_prepared_untested_remote_mac_pair(self):
+        """A scope change before the first test should release both prepared guests without a preflight receipt."""
+        f = self.fixture
+        f.enable_p0(scope='p1-only', remote_mac=True)
+        self.run = f.run
+        self.finish_preceding_pairs()
+        self.drive_pair('p0-installer-upgrade')
+        with self.run.locked():
+            self.run.cleanup('p0-installer-upgrade')
+        children = f.prepare(REMOTE_MAC_PASS)
+        with self.run.locked():
+            entry = self.run.selected(REMOTE_MAC_PASS)
+            self.assertEqual(entry['phase'], 'ready')
+            self.assertEqual(entry['results'], {})
+            self.assertNotIn('native_preflight', entry)
+            self.assertNotIn('tester', entry)
+            with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                self.run.cleanup(REMOTE_MAC_PASS)
+            self.run.limit_scope('p0-only')
+            # A stop between claiming and dispatching preflight can leave only a finished tester record.
+            entry['tester'] = {'phase': 'complete', 'check_id': 'native-preflight'}
+            calls_before = len(f.model.calls)
+            with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                self.run.cleanup(REMOTE_MAC_PASS)
+            self.assertEqual(len(f.model.calls), calls_before)
+            del entry['tester']
+            self.run.cleanup(REMOTE_MAC_PASS)
+            self.assertEqual(entry['phase'], 'deleted')
+        self.assertTrue(all(child.poll() == 0 for child in children))
 
     def test_a_failed_p1_turn_skips_the_later_p1_turns_and_still_sends_feedback(self):
         """A lost session stops the checks that share it, but not the independent feedback send.
