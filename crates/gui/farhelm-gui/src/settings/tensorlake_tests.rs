@@ -188,7 +188,8 @@ fn the_warning_heads_the_section_and_a_failed_read_locks_it_until_a_retry(cx: &m
 /// one "Not encrypted on disk" warning and points to Credentials; showing Credentials afterwards reads only the
 /// catalog, not the account again; a key saved in Credentials makes Tensorlake's form know a key is saved (its Test,
 /// unavailable before, becomes available), while the key typed into Tensorlake's form beforehand is still there,
-/// unsent; and that form's Save sends its own key.
+/// unsent. Discarding that draft must preserve the saved key and the other form's draft. A subsequent Save still
+/// sends only the value typed on its own page.
 #[gpui::test]
 fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
     cx: &mut TestAppContext,
@@ -249,6 +250,7 @@ fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
         Some(super::tensorlake_sandbox_tests::leftover_list(&[], &[])),
     );
     settle(cx);
+    fill(cx, "tensorlake-key", "fictional-credentials-draft");
 
     click(cx, section_button(Section::Tensorlake));
     assert_eq!(
@@ -267,6 +269,16 @@ fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
         "fictional-key-typed-here",
         "the other form's draft is its own"
     );
+    click(cx, "settings-footer-discard");
+    assert!(
+        sent(&mut helm).is_empty(),
+        "Discard does not clear the saved key"
+    );
+    assert!(typed_here(cx).is_empty());
+    assert_eq!(available(cx, "tensorlake-key-test"), Some(true));
+    assert_eq!(typed_in_credentials(cx), "fictional-credentials-draft");
+
+    fill(cx, "tensorlake-key", "fictional-key-typed-here");
     click(cx, "settings-footer-save");
     let (_, body) = one_account_save(&mut helm);
     assert_eq!(body, json!({ "api_key": "fictional-key-typed-here" }));

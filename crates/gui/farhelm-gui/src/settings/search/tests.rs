@@ -163,7 +163,8 @@ fn highlights_use_original_character_boundaries() {
     );
 }
 
-/// Words from standalone help and option labels must be searchable even when the section never loaded.
+/// Words from standalone help and option labels must be searchable even when the section never loaded. The agent
+/// result carries its focus target independently from its label and page, so a correct label alone cannot prove it.
 #[test]
 fn authored_help_and_radio_options_lead_to_their_settings() {
     let entries = catalog(Platform::Linux);
@@ -177,11 +178,6 @@ fn authored_help_and_radio_options_lead_to_their_settings() {
             "agent trust",
             Section::Agent(LaunchHarness::Claude),
             super::agent_trust::CAUTION_ID,
-        ),
-        (
-            "agent trust",
-            Section::Agent(LaunchHarness::Antigravity),
-            super::TrustAgent::Antigravity.id(),
         ),
         (
             "agent trust",
@@ -211,6 +207,12 @@ fn authored_help_and_radio_options_lead_to_their_settings() {
             "{query:?} must find {section:?} {id}"
         );
     }
+    assert!(entries.iter().any(|entry| {
+        entry.section == Section::Agent(LaunchHarness::Antigravity)
+            && entry.id == super::TrustAgent::Antigravity.id()
+            && entry.target == Target::Trust(super::TrustAgent::Antigravity)
+            && entry.matches(&[fold("agent"), fold("trust")])
+    }));
 }
 
 /// Search offers only what this build shows: with no updater, App's settings are not results (SPEC.md lists App only

@@ -1446,12 +1446,21 @@ fn previewing_a_setting_plays_only_the_chosen_sound(cx: &mut TestAppContext) {
     show_ntfy(&mut helm, cx, ntfy("https://ntfy.sh", "", "default", false));
     let played = Rc::new(RefCell::new(Vec::new()));
     cx.update(|_, cx| sounds::install_player(Rc::new(Played(played.clone())), cx));
-    let toggle = Choice::SoundTurnFinished.id();
-    assert_eq!(switch_on(cx, toggle), Some(false), "the sound is off");
-    click(cx, "settings-sound-turn-finished-preview");
-    assert_eq!(*played.borrow(), vec![Sound::TurnFinished]);
-    assert_eq!(switch_on(cx, toggle), Some(false));
-    assert!(sent(&mut helm).is_empty());
+    let previews = [
+        ("settings-sound-waiting-preview", Sound::Waiting),
+        ("settings-sound-approval-preview", Sound::Approval),
+        ("settings-sound-turn-finished-preview", Sound::TurnFinished),
+        ("settings-sound-ssh-sign-in-preview", Sound::SshSignIn),
+    ];
+    for (choice, (preview, expected)) in SOUNDS.into_iter().zip(previews) {
+        into_view(cx, preview);
+        let before = Some(expected != Sound::TurnFinished);
+        assert_eq!(switch_on(cx, choice.id()), before);
+        click(cx, preview);
+        assert_eq!(played.take(), [expected]);
+        assert_eq!(switch_on(cx, choice.id()), before);
+        assert!(sent(&mut helm).is_empty());
+    }
 }
 
 /// The Sounds sub-heading is how the user turns each status sound on or off, and each switch must write only its own
@@ -2498,7 +2507,8 @@ fn show_agent_trust(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<(u64
 }
 
 /// Each agent page reads only its own choice on the first visit. A pending read keeps its switch unavailable. Claude's
-/// answer stays in Claude's page while visiting Codex, and an agent with no settings has a discoverable empty page.
+/// answer stays on its page even when Codex's read and refusal arrive there. Pi reads its stored trust choice and
+/// draws only that switch. An agent with no settings has a discoverable empty page.
 #[gpui::test]
 fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -2525,9 +2535,35 @@ fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mu
             .collect::<Vec<_>>(),
         [TRUST_PATHS[1]]
     );
+    click_section(cx, Section::Agent(LaunchHarness::Claude));
     answer_trust(&mut helm, &reads, false, cx);
+    assert_eq!(switch_on(cx, TrustAgent::Claude.id()), Some(true));
+    click_section(cx, Section::Agent(LaunchHarness::Codex));
+    assert!(sent(&mut helm).is_empty(), "Codex's late read was retained");
+    assert_eq!(available(cx, TrustAgent::Codex.id()), Some(true));
     assert_eq!(switch_on(cx, TrustAgent::Codex.id()), Some(false));
     assert!(!drawn(cx, TrustAgent::Claude.id()));
+    click(cx, TrustAgent::Codex.id());
+    let (save, _) = one_put(&mut helm, TRUST_PATHS[1]);
+    click_section(cx, Section::Agent(LaunchHarness::Claude));
+    helm.reply(save, 503, Some(json!("late Codex refusal")));
+    settle(cx);
+    assert!(trust_failure(cx, TrustAgent::Claude).is_none());
+    click_section(cx, Section::Agent(LaunchHarness::Codex));
+    let failure = trust_failure(cx, TrustAgent::Codex).expect("Codex's refusal");
+    assert!(failure.ends_with("late Codex refusal"), "{failure}");
+    assert_eq!(switch_on(cx, TrustAgent::Codex.id()), Some(false));
+
+    click_section(cx, Section::Agent(LaunchHarness::Pi));
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads[0].1, "/api/checkout-agent-trust/pi");
+    answer_trust(&mut helm, &reads, true, cx);
+    assert_eq!(switch_on(cx, TrustAgent::Pi.id()), Some(true));
+    let switches: Vec<_> = frame(cx)
+        .into_iter()
+        .filter(|node| node.role == Some(Role::Switch))
+        .collect();
+    assert_eq!(switches.len(), 1, "Pi draws only the trust switch");
 
     click_section(cx, Section::Agent(LaunchHarness::Cursor));
     assert_eq!(heading(cx).as_deref(), Some("Cursor"));
@@ -4483,6 +4519,12 @@ fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppC
     // Close cannot send this dirty form while Send test owns it. Explain the refused close before the test answers.
     assert!(drawn(cx, "ntfy-working"));
     assert!(drawn(cx, "settings-unsaved"));
+    assert_eq!(super::recipe_tests::pressable(cx, FOOTER_SAVE), Some(false));
+    click(cx, FOOTER_SAVE);
+    assert!(
+        sent(&mut helm).is_empty(),
+        "the busy Save cannot send the draft"
+    );
     keys(cx, "escape");
     click(cx, "prompt-confirm");
     assert_eq!(
@@ -4497,6 +4539,7 @@ fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppC
     let topic = topic_input(cx);
     let text = cx.update(|_, cx| topic.text(cx).to_string());
     assert_eq!(text, "unsaved-topic", "the unsaved topic stayed");
+    assert_eq!(super::recipe_tests::pressable(cx, FOOTER_SAVE), Some(true));
 
     let id = send_test(&mut helm, cx);
     helm.reply(id, 204, None);
