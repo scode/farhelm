@@ -75,7 +75,7 @@ struct Draft {
     catalog: Option<Vec<LaunchCatalogModel>>,
     catalog_pending: bool,
     custom_agents: Vec<farhelm_proto::custom_agents::CustomAgent>,
-    repository_pending: Option<bool>,
+    repository_history: super::search::RepositoryHistory,
     hosts: Vec<HostView>,
     templates: Result<Vec<TemplateRow>, HostSentence>,
     history: Option<LaunchHistoryReply>,
@@ -90,7 +90,7 @@ impl Draft {
             catalog: Some(catalog()),
             catalog_pending: false,
             custom_agents: Vec::new(),
-            repository_pending: Some(false),
+            repository_history: super::search::RepositoryHistory::Loaded(Vec::new()),
             hosts: hosts(),
             templates: Ok(Vec::new()),
             history: None,
@@ -120,7 +120,7 @@ impl Draft {
             history: self.history.as_ref(),
             host: Some(&placement),
             repositories: &[],
-            repository_pending: self.repository_pending,
+            repository_history: &self.repository_history,
         })
     }
 
@@ -526,7 +526,7 @@ fn empty_results_say_why_and_warn_only_on_a_miss() {
     );
     assert_eq!(draft.search("codex").message, None, "rows leave no message");
     let loading = Draft {
-        repository_pending: Some(true),
+        repository_history: super::search::RepositoryHistory::Loading,
         ..draft
     };
     assert_eq!(

@@ -643,18 +643,26 @@ fn repository_history_loads_on_open_and_enter_picks_a_filtered_match(cx: &mut Te
     );
 }
 
-/// If the helm cannot read its history, a valid typed pair remains selectable immediately.
+/// Distinguish failed history from a successful empty search on both surfaces. A user can still choose a typed pair.
 #[gpui::test]
 fn a_typed_pair_is_chosen_when_repository_history_fails(cx: &mut TestAppContext) {
     let (mut helm, cx, request) = checkout_open_with_history_pending(cx);
     click_in_body(cx, "launcher-repository");
-    test_support::keys(cx, "a c m e / q u x");
+    test_support::keys(cx, "a c m e /");
     request.answer(&mut helm, cx, 504, json!("repository history read failed"));
+    let failed = Some("Couldn't load recent repositories; enter owner/repo");
+    assert_eq!(name_of(cx, "launcher-repository-empty").as_deref(), failed);
+    test_support::click(cx, "launcher-search-row");
+    super::search_view_tests::type_in(cx, "gh:acme/");
+    assert_eq!(name_of(cx, "launcher-search-message").as_deref(), failed);
+    click_in_body(cx, "launcher-repository");
+    test_support::keys(cx, "q u x");
     test_support::click(cx, "launcher-repository-option-acme/qux");
     assert_eq!(
         draft(cx).checkout.and_then(|checkout| checkout.repo),
         Some(repo("acme", "qux"))
     );
+    assert!(to(&sent(&mut helm, cx), REPOSITORIES).is_empty());
 }
 
 /// The repository row Enter would choose must remain visible while arrows wrap through an overflowing list. Checking

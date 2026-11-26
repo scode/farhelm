@@ -228,6 +228,8 @@ linux/launcher-replace-typed-recent--dark.png 3d2bea617746751dfc87fc0265406f387c
 linux/launcher-replace-typed-recent--light.png bd0041c6fb7087614d158b8ad384b475869450dd
 linux/launcher-replace-with--dark.png 6963005db3c2776b2617eacec108dd5f5bfae107
 linux/launcher-replace-with--light.png b64174e881096575f60fe13b765af72c74b1923e
+linux/launcher-repository-history-failure--dark.png c4736a84e26a610ca84322079f26562159705432
+linux/launcher-repository-history-failure--light.png ea0655cb07fa295bf9da66e1a73d78d154efcad4
 linux/launcher-restart-wake-refusal--dark.png 85dfef428c4f8c8fffcfd9c80f89124a8dfcf1fc
 linux/launcher-restart-wake-refusal--light.png 06f69c02ed4f96bd99d3bd31937d62709c36d011
 linux/launcher-restart-with--dark.png 372d3a1de95bd15ca063397546331e03ec78a39a
@@ -248,6 +250,10 @@ linux/launcher-unavailable-custom-agent--dark.png 9cd87727c0a27e275a199763eeabcd
 linux/launcher-unavailable-custom-agent--light.png 471f9e5dd3563f3e2ba7a4de60dc177c5910abe2
 linux/launcher-yolo-question--dark.png 00f054e900816752ab1c74ad1e0def24f6e40492
 linux/launcher-yolo-question--light.png 63ec86c28a2201aa9ef727d85b3b7f1362938b0e
+linux/launcher-yolo-save-panel-refusal--dark.png 3c8169c951a5e2f5d1f3336b5334cfdb86290724
+linux/launcher-yolo-save-panel-refusal--light.png 3009e52f274c6c1b8afe85ab3e7f672f97c396b8
+linux/launcher-yolo-setting-saved--dark.png f467352ab9480d4ce1103ca691cb2a2db759229e
+linux/launcher-yolo-setting-saved--light.png a2a28c0ae0ee9296770017a18381f7075c84a7c0
 linux/linux-title-bar--dark.png 46842af44551445cbb6fba4a4be0b6d321874947
 linux/linux-title-bar--light.png bf63e2f218b51f882bc6a66258bbf7a1c8a187e5
 linux/muted-waiting-dot-hover--dark.png 66d644e8cab0c915c618a0b3564347d3e7ead925

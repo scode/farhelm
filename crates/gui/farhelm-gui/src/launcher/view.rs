@@ -78,7 +78,7 @@ use crate::components::{
     TabOption, TabStrip, TextInput, TextInputEvent, TextInputState, Tier, return_key_content,
     scroll_from_controls, scroll_handle,
 };
-use crate::focus::{Mark, ReturnTo};
+use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, phase};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
@@ -157,7 +157,7 @@ const SOURCE_BUSY: &str = "Wait for this session's other operation to finish";
 
 /// Why Launch waits while the Save as template panel is open, the old launcher's words: the panel saves a template, and
 /// a launch beside it would start a session the user had not finished choosing to keep.
-const TEMPLATE_PANEL_OPEN: &str = "Finish or cancel saving the template before launching";
+const TEMPLATE_PANEL_OPEN: &str = "Finish or cancel saving the template before launching.";
 
 /// Open the launcher on `draft`, on top of everything in `window`. `mark` is the [`Mark`] taken in the handler of the
 /// user's action that asked for it; nothing opens if the user moved on since (the layer manager's rule) or no UI
@@ -240,10 +240,12 @@ pub(super) fn show(
                     return layers::Dismissal::Stay;
                 }
                 if launcher.update(cx, |launcher, cx| launcher.dismiss_command_pane(window, cx)) {
+                    focus::note_closing(true, window, cx);
                     return layers::Dismissal::Stay;
                 }
                 if launcher.read(cx).save_panel.is_some() {
                     launcher.update(cx, |launcher, cx| launcher.close_save_panel(window, cx));
+                    focus::note_closing(true, window, cx);
                     return layers::Dismissal::Stay;
                 }
                 layers::Dismissal::Close
@@ -295,9 +297,10 @@ pub enum Note {
     /// box as one plain line in the warning ink, as the box's own refusal is, where the old launcher said why a
     /// template did not apply (`view::search`), and cleared by the next press of Launch as by an edit.
     Refusal(HostSentence),
-    /// Why the host could not be prepared for this launch, or why a managed checkout's preview failed once the host
-    /// woke. Holds the reason only: the launcher draws it beside Launch after the mode's own lead ("Not launched." or
-    /// "Restart error.").
+    /// Why the host could not be prepared for this launch, why a managed checkout's preview failed once the host
+    /// woke, or why a YOLO answer could no longer start the launch it was given for (a changed draft or host
+    /// installation). Holds the reason only: the launcher draws it beside Launch after the mode's own lead ("Not
+    /// launched." or "Restart error.").
     WakeRefusal(HostSentence),
 }
 
@@ -663,6 +666,9 @@ pub(crate) struct Launcher {
     /// The YOLO question for a launch the helm refused because its host asks first, from the refusal until it is
     /// answered or the draft changes (`yolo_question`).
     yolo: Option<yolo_question::YoloState>,
+    /// A permanent YOLO choice saved on the host after its launch changed. It remains visible alongside newer
+    /// questions or refusals until the next edit or submit.
+    yolo_setting_saved: Option<HostSentence>,
     /// A settings read or question for the agent picked in this launcher. Templates have their own launch path.
     hook_question: Option<hook_question::HookQuestion>,
     /// A successful setup save with no continuation. The flag distinguishes a changed launch from one that
@@ -980,6 +986,7 @@ impl Launcher {
             cancel_focus: cx.focus_handle().tab_stop(true),
             layer: None,
             yolo: None,
+            yolo_setting_saved: None,
             hook_question: None,
             hook_setup_saved: None,
             hook_offer_on_return: [None; 2],
@@ -1035,6 +1042,7 @@ impl Launcher {
         self.refused = None;
         // A YOLO question asks about the launch that was sent; once the draft changes, it would answer for another.
         self.yolo = None;
+        self.yolo_setting_saved = None;
         // So does the sandbox question, about the draft at its press.
         self.sandbox = None;
         self.retire_hook_answer(cx);
@@ -1530,6 +1538,7 @@ impl Launcher {
         self.refresh_custom_capabilities(cx);
         self.refused = None;
         self.yolo = None;
+        self.yolo_setting_saved = None;
         self.sandbox = None;
         self.hook_setup_saved = None;
         // A press speaks for itself: a quick launch's or a shortcut's refusal said before it would hide its reason.
@@ -2911,6 +2920,13 @@ impl Render for Launcher {
             _ => alert,
         }
         .map(|sentence| refusal_alert("launcher-refusal", sentence, palette));
+        let yolo_setting_saved = self.yolo_setting_saved.as_ref().map(|reason| {
+            refusal_alert(
+                "launcher-yolo-setting-saved",
+                reason.clone().prepend_text(format!("{lead} ")),
+                palette,
+            )
+        });
         let hook_saved = self.hook_setup_saved.map(|launch_changed| {
             let action = self.verb(cx);
             let words = if launch_changed {
@@ -2947,7 +2963,7 @@ impl Render for Launcher {
         let note = self.note_element(palette);
         let save_refusal = self.save_refusal_line(palette);
         let question = self
-            .yolo_inline()
+            .yolo_inline(cx)
             .cloned()
             .map(IntoElement::into_any_element)
             .or_else(|| {
@@ -2963,6 +2979,7 @@ impl Render for Launcher {
         let notices = (warning.is_some()
             || note.is_some()
             || hook_saved.is_some()
+            || yolo_setting_saved.is_some()
             || save_refusal.is_some()
             || question.is_some()
             || alert.is_some()
@@ -2976,6 +2993,7 @@ impl Render for Launcher {
                 .children(warning)
                 .children(note)
                 .children(hook_saved)
+                .children(yolo_setting_saved)
                 .children(save_refusal)
                 .children(registration_status)
                 .children(last)

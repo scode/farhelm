@@ -16,14 +16,3 @@ consequences.
 ## High priority: material UX degradation
 
 ## Other: correctness, diagnostics, cleanup, or convenience
-
-- [`trailing-launcher-held-escape-discards-draft.md`](trailing-launcher-held-escape-discards-draft.md) — Holding Escape
-  with typed results or the Save as template panel open can close the whole launcher and discard its draft; the fix
-  covered only the highlight case.
-
-- [`trailing-launcher-stale-permanent-yolo-answer-silent.md`](trailing-launcher-stale-permanent-yolo-answer-silent.md) —
-  A stale "Start, and don't ask again on this host" answer closes the YOLO question with nothing started and no reason,
-  sometimes after the host setting was already saved.
-
-- [`trailing-repository-history-failure-shown-as-no-matches.md`](trailing-repository-history-failure-shown-as-no-matches.md)
-  — A failed repository-history read shows "No repository matches" and is not retried while the launcher is open.

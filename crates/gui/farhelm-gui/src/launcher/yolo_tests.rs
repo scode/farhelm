@@ -330,7 +330,8 @@ fn cancel_starts_nothing_and_keeps_the_launcher(cx: &mut gpui::TestAppContext) {
 /// without consent beside the one the answer sends with it, and closing the launcher would let the write change the
 /// host's setting with nothing left to report it. An edit of the draft retires the question, so the write's success
 /// must not launch a draft the user never confirmed. Specified: during the write, Launch sends nothing and Close and
-/// Cancel leave the launcher open; after an edit of the name, the write's success sends no create.
+/// Cancel leave the launcher open; after an edit of the name, the write's success sends no create and acknowledges
+/// the saved choice without erasing a later template refusal.
 #[gpui::test]
 fn the_launcher_holds_still_while_stop_asking_is_out(cx: &mut gpui::TestAppContext) {
     let (mut helm, cx, create) = launched_with(cx, yolo_command_draft());
@@ -362,16 +363,51 @@ fn the_launcher_holds_still_while_stop_asking_is_out(cx: &mut gpui::TestAppConte
         "n",
         "the premise: the edit reached the draft"
     );
+    let template_refusal = "This template needs a different host.";
+    cx.update(|window, cx| {
+        let launcher = super::entry::open_launcher(window, cx).expect("the launcher stays open");
+        launcher.update(cx, |launcher, cx| {
+            launcher.apply_batch(
+                move |_, _, _| {
+                    Err(crate::host_text::HostSentence::new("template-refused")
+                        .text(template_refusal))
+                },
+                window,
+                cx,
+            );
+        });
+    });
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "launcher-note").as_deref(),
+        Some(template_refusal)
+    );
+
     helm.reply(write.id, 200, Some(json!({})));
     settle(cx);
     assert!(
         creates(&mut helm, cx).is_empty(),
         "after the edit retired the question, the write's success launched nothing"
     );
+    assert_eq!(name_of(cx, "prompt-confirm"), None);
+    assert_eq!(
+        name_of(cx, "launcher-note").as_deref(),
+        Some(template_refusal)
+    );
+    assert!(
+        name_of(cx, "launcher-yolo-setting-saved").is_some_and(|words| {
+            words.starts_with("Not launched. ")
+                && words.ends_with(
+                    "now starts YOLO sessions without asking. The launch changed while the setting was saved. \
+                     Review the form before launching again.",
+                )
+        }),
+        "the host write took effect although the launch did not start"
+    );
 }
 
-/// A reconnect after the last frame can leave its confirmation visible. The old button must leave both the host
-/// preference and the new connection alone.
+/// A reconnect to the same verified installation can leave its old confirmation visible. The answer must explain
+/// that the launch changed while leaving the setting and the new connection alone.
 #[gpui::test]
 fn a_stale_permanent_answer_does_not_write_after_reconnect(cx: &mut gpui::TestAppContext) {
     let (mut helm, cx, create) = launched_with(cx, yolo_command_draft());
@@ -379,6 +415,10 @@ fn a_stale_permanent_answer_does_not_write_after_reconnect(cx: &mut gpui::TestAp
     test_support::show_next_frame(cx);
     let at = test_support::center(cx, "prompt-alternative-0");
     let mut hosts = super::view_tests::fixture_hosts(&[0]);
+    let identity = hosts.entries[0].value["identity"]
+        .as_str()
+        .expect("the fixture starts with a verified installation")
+        .to_owned();
     let previous = create.body.unwrap()["expected_incarnation"]
         .as_u64()
         .unwrap();
@@ -395,6 +435,7 @@ fn a_stale_permanent_answer_does_not_write_after_reconnect(cx: &mut gpui::TestAp
         store.update(cx, |store, cx| store.apply(&changes, cx));
         let host = store.read(cx).collections().get::<HostView>("1").unwrap();
         assert_eq!(host.incarnation, previous + 1);
+        assert_eq!(host.identity.as_deref(), Some(identity.as_str()));
         test_support::click_before_redraw(at, window, cx);
     });
     settle(cx);
@@ -402,6 +443,37 @@ fn a_stale_permanent_answer_does_not_write_after_reconnect(cx: &mut gpui::TestAp
         name_of(cx, "prompt-confirm"),
         None,
         "the stale answer closed"
+    );
+    assert_eq!(
+        name_of(cx, "launcher-refusal").as_deref(),
+        Some("Not launched. The launch changed. Review the current setup and launch again.")
+    );
+    assert!(helm.commands().iter().all(|sent| {
+        sent.path != "/api/hosts/1/yolo-without-asking" && sent.path != "/api/sessions"
+    }));
+}
+
+/// Save as template holds Launch. The stale permanent answer must say so without saving the host setting.
+#[gpui::test]
+fn a_permanent_answer_with_save_as_template_open_shows_the_launch_refusal(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (mut helm, cx, create) = launched_with(cx, yolo_codex_draft());
+    refuse_for_yolo(&mut helm, cx, create.id);
+    assert!(name_of(cx, "prompt-confirm").is_some());
+    test_support::click(cx, "launcher-save-template");
+    assert!(read(cx, |launcher, _, _| launcher.save_panel_open()));
+    let permanent = "prompt-alternative-1";
+    assert_eq!(
+        name_of(cx, permanent).as_deref(),
+        Some("Start, and don't ask again on this host")
+    );
+    test_support::click(cx, permanent);
+    assert_eq!(name_of(cx, "prompt-confirm"), None);
+    assert!(read(cx, |launcher, _, _| launcher.save_panel_open()));
+    assert_eq!(
+        name_of(cx, "launcher-refusal").as_deref(),
+        Some("Not launched. Finish or cancel saving the template before launching.")
     );
     assert!(helm.commands().iter().all(|sent| {
         sent.path != "/api/hosts/1/yolo-without-asking" && sent.path != "/api/sessions"

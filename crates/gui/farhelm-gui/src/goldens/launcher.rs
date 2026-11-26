@@ -440,6 +440,7 @@ fn wait_for_deleted_shortcut_refusal(
 enum LauncherScene {
     Form,
     ManagedCheckout,
+    RepositoryHistoryFailure,
     HostMenu,
     Container,
     ContainerCheckoutRefusal,
@@ -468,6 +469,8 @@ enum LauncherScene {
     Replace,
     Narrow,
     Yolo,
+    YoloSavePanelRefusal,
+    YoloSettingSaved,
     CustomYolo,
     HookSetup,
 }
@@ -529,6 +532,15 @@ pub(super) fn launcher_managed_checkout_setup(
     cx: &mut App,
 ) {
     setup(state, LauncherScene::ManagedCheckout, window, cx);
+}
+
+/// Show a failed history read in the command pane where a user can still type a repository.
+pub(super) fn launcher_repository_history_failure_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::RepositoryHistoryFailure, window, cx);
 }
 
 /// Open the host menu once both new-environment offers can be drawn from the fixture.
@@ -759,6 +771,24 @@ pub(super) fn launcher_stale_choice_setup(state: &SceneState, window: &mut Windo
 /// Ask the ordinary inline YOLO question, leaving the real launcher actions and both panes drawn around it.
 pub(super) fn launcher_yolo_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Yolo, window, cx);
+}
+
+/// Saving a template blocks an old permanent answer before it changes the host.
+pub(super) fn launcher_yolo_save_panel_refusal_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::YoloSavePanelRefusal, window, cx);
+}
+
+/// A reconnect can cancel the launch after the separately requested host setting succeeded.
+pub(super) fn launcher_yolo_setting_saved_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::YoloSettingSaved, window, cx);
 }
 
 /// The host confirmation for a registered agent whose launch always counts as YOLO.
@@ -1344,6 +1374,14 @@ fn answer_new_reads(
         } else if command.path == "/api/github-repositories" {
             assert_eq!(command.method, farhelm_helm_client::Method::Get);
             assert_eq!(command.body, None);
+            if scene == LauncherScene::RepositoryHistoryFailure {
+                helm.reply(
+                    command.id,
+                    504,
+                    Some(json!("Repository history is unavailable")),
+                );
+                continue;
+            }
             Some(json!([{"owner": "acme", "name": "widget"}]))
         } else {
             None
@@ -1515,7 +1553,12 @@ fn answer_new_reads(
         .iter()
         .find(|node| node.element_id.as_deref() == Some("launcher-recent-0"));
     // Query scenes can return here with the results pane already replacing the template list.
-    let shows_templates = !matches!(scene, LauncherScene::Narrow | LauncherScene::StaleChoice);
+    let shows_templates = !matches!(
+        scene,
+        LauncherScene::Narrow
+            | LauncherScene::StaleChoice
+            | LauncherScene::RepositoryHistoryFailure
+    );
     if !catalog_drawn || (shows_templates && !catalog_template) {
         state.after.set(Some(answer_new_reads));
     } else if scene == LauncherScene::ContainerCheckoutRefusal {
@@ -1559,14 +1602,22 @@ fn answer_new_reads(
         // Through the focus coordinator, as every focus move the app makes is: the launcher is the open dialog.
         let field = launcher.read(cx).search_for_golden().focus_handle(cx);
         crate::focus::focus_in_layer(&field, &crate::focus::Mark::take(cx), window, cx);
-    } else if scene == LauncherScene::Yolo {
+    } else if matches!(
+        scene,
+        LauncherScene::Yolo | LauncherScene::YoloSavePanelRefusal | LauncherScene::YoloSettingSaved
+    ) {
         state.after.set(Some(choose_yolo));
     } else if scene == LauncherScene::HookSetup {
         state.after.set(Some(pick_grok));
     } else if scene == LauncherScene::TemplateSaveAfterUndo {
         assert!(click_control(window, cx, "launcher-template-Review a PR"));
         state.after.set(Some(escalate_template));
-    } else if matches!(scene, LauncherScene::Narrow | LauncherScene::StaleChoice) {
+    } else if matches!(
+        scene,
+        LauncherScene::Narrow
+            | LauncherScene::StaleChoice
+            | LauncherScene::RepositoryHistoryFailure
+    ) {
         state.after.set(Some(type_launcher_query));
     } else {
         let Some(recent) = recent else {
@@ -1905,6 +1956,9 @@ fn type_launcher_query(
     );
     let (query, stage): (&str, super::AfterDrawn) = match launcher_scene(state) {
         LauncherScene::Narrow => ("tl:", wait_for_launcher_results),
+        LauncherScene::RepositoryHistoryFailure => {
+            ("gh:acme/", wait_for_repository_history_failure)
+        }
         LauncherScene::RenamedCustomSearch => ("acme-code", rename_highlighted_custom_agent),
         LauncherScene::StaleChoice => ("tl:Bench", click_withdrawn_template),
         LauncherScene::RecentFill => ("recent:permission-check", wait_for_recent_fill),
@@ -1915,6 +1969,22 @@ fn type_launcher_query(
         field.edit_for_golden(query, window, cx);
     }
     state.after.set(Some(stage));
+}
+
+/// Capture only once the read's failure is visible, since the same empty list also has a loading state.
+fn wait_for_repository_history_failure(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    if !window.driver_nodes().iter().any(|node| {
+        node.element_id.as_deref() == Some("launcher-search-message")
+            && node.label.as_deref() == Some("Couldn't load recent repositories; enter owner/repo")
+            && !node.visible_bounds.is_empty()
+    }) {
+        state.after.set(Some(wait_for_repository_history_failure));
+    }
 }
 
 /// Wait for both candidate rows, then move the highlight once. Keep the key outside the readiness retry so it
@@ -2245,7 +2315,7 @@ fn wait_for_yolo_question(
     _: &Entity<SessionList>,
     state: &SceneState,
     window: &mut Window,
-    _: &mut App,
+    cx: &mut App,
 ) {
     let nodes = window.driver_nodes();
     let shown = |id| {
@@ -2255,6 +2325,155 @@ fn wait_for_yolo_question(
     };
     if !shown("prompt-confirm") || !shown("launcher-command-pane") {
         state.after.set(Some(wait_for_yolo_question));
+    } else if launcher_scene(state) == LauncherScene::YoloSavePanelRefusal {
+        assert!(click_control(window, cx, "launcher-save-template"));
+        state.after.set(Some(answer_permanent_with_save_panel));
+    } else if launcher_scene(state) == LauncherScene::YoloSettingSaved {
+        window.simulate_next_frame(cx);
+        assert!(click_control(window, cx, "prompt-alternative-1"));
+        state.after.set(Some(reply_to_permanent_after_reconnect));
+    }
+}
+
+/// Answer only after Save as template is present and the question has recorded its current launchability.
+fn answer_permanent_with_save_panel(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !window.driver_nodes().iter().any(|node| {
+        node.element_id.as_deref() == Some("save-template-panel") && !node.visible_bounds.is_empty()
+    }) {
+        state.after.set(Some(answer_permanent_with_save_panel));
+        return;
+    }
+    window.simulate_next_frame(cx);
+    assert!(click_control(window, cx, "prompt-alternative-1"));
+    state.after.set(Some(wait_for_stale_permanent_refusal));
+}
+
+/// Reconnect the same installation after the host write dispatches. Its setting can be saved even though the
+/// launch request's recorded connection is stale.
+fn reply_to_permanent_after_reconnect(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    _: &mut Window,
+    cx: &mut App,
+) {
+    let mut keep = state.keep.borrow_mut();
+    let helm = keep
+        .iter_mut()
+        .find_map(|item| item.downcast_mut::<FakeHelm>())
+        .expect("the launcher scene keeps its fake helm");
+    let mut answered = false;
+    for command in helm.commands() {
+        assert_ne!(command.path, "/api/sessions");
+        if command.path == "/api/hosts/1/yolo-without-asking" {
+            let store = crate::session::current_store(cx).expect("the launcher has a store");
+            let collections = store.read(cx).collections();
+            let mut host = collections
+                .get::<HostView>("1")
+                .expect("host 1 is present")
+                .clone();
+            assert!(host.identity.is_some(), "the installation stays verified");
+            host.incarnation += 1;
+            let changes = farhelm_helm_client::collections::decode_changes(CollectionChanges {
+                collection: Collection::Hosts,
+                meta: collections
+                    .meta(Collection::Hosts)
+                    .expect("host order")
+                    .clone(),
+                upsert: vec![KeyedEntry {
+                    key: "1".into(),
+                    value: serde_json::to_value(host).unwrap(),
+                }],
+                remove: Vec::new(),
+            })
+            .expect("the fixture publishes a new incarnation");
+            store.update(cx, |store, cx| store.apply(&changes, cx));
+            helm.reply(command.id, 200, Some(json!({})));
+            answered = true;
+        } else {
+            helm.reply(command.id, 200, None);
+        }
+    }
+    state.after.set(Some(if answered {
+        wait_for_stale_permanent_refusal
+    } else {
+        reply_to_permanent_after_reconnect
+    }));
+}
+
+/// A closed prompt and a visible notice establish the frame's outcome in both permanent-answer scenes.
+fn wait_for_stale_permanent_refusal(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let save_panel = launcher_scene(state) == LauncherScene::YoloSavePanelRefusal;
+    let (id, words) = if save_panel {
+        (
+            "launcher-refusal",
+            "Finish or cancel saving the template before launching.",
+        )
+    } else {
+        (
+            "launcher-yolo-setting-saved",
+            "now starts YOLO sessions without asking. The launch changed while the setting was saved. \
+             Review the form before launching again.",
+        )
+    };
+    let nodes = window.driver_nodes();
+    if !nodes.iter().any(|node| {
+        node.element_id.as_deref() == Some(id)
+            && node
+                .label
+                .as_deref()
+                .is_some_and(|label| label.ends_with(words))
+            && !node.visible_bounds.is_empty()
+    }) {
+        state.after.set(Some(wait_for_stale_permanent_refusal));
+        return;
+    }
+    assert!(
+        !nodes
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some("prompt-confirm"))
+    );
+    if save_panel {
+        let body = nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some("launcher-body"))
+            .expect("the Save panel is in the scrollable launcher form");
+        let panel = nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some("save-template-panel"))
+            .expect("the refusal leaves Save as template open");
+        let beyond = panel.bounds.bottom() + px(12.) - body.visible_bounds.bottom();
+        if beyond > px(1.) {
+            let body = body.visible_bounds;
+            window.dispatch_event(
+                gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                    position: point(body.left() + px(8.), body.center().y),
+                    delta: gpui::ScrollDelta::Pixels(point(px(0.), -beyond)),
+                    ..Default::default()
+                }),
+                cx,
+            );
+            state.after.set(Some(wait_for_stale_permanent_refusal));
+            return;
+        }
+        // Keep the way out of the refusal in the captured frame with the explanation.
+        for action in ["save-template-save", "save-template-cancel"] {
+            let button = nodes
+                .iter()
+                .find(|node| node.element_id.as_deref() == Some(action))
+                .expect(action);
+            assert_eq!(button.visible_bounds, button.bounds, "{action} is clipped");
+            assert!(!button.visible_bounds.is_empty(), "{action} is hidden");
+        }
     }
 }
 

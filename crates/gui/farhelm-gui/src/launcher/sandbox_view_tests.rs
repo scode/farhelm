@@ -334,6 +334,56 @@ fn a_press_asks_before_creating_a_sandbox_with_cancel_focused(cx: &mut TestAppCo
     );
 }
 
+/// A delayed host write still needs to disclose its effect when the user has moved on to a billed sandbox.
+/// Its reply leaves the new confirmation in place and sends neither the old launch nor the new one.
+#[gpui::test]
+fn a_saved_yolo_setting_stays_visible_beside_a_new_sandbox_question(cx: &mut TestAppContext) {
+    let account = usable();
+    let (mut helm, cx) = window_with_more(
+        cx,
+        super::yolo_tests::yolo_command_draft(),
+        fixture_hosts(&[0, 1, 2]),
+        plain_preferences(),
+        vec![catalog()],
+    );
+    answer_with(&mut helm, cx, Some(&account), |_| false);
+    let keep_create = |command: &FakeCommand| {
+        matches!(
+            command.path.as_str(),
+            "/api/sessions" | "/api/environment-sessions"
+        )
+    };
+    test_support::click(cx, "launcher-launch");
+    let creates = answer_with(&mut helm, cx, Some(&account), keep_create);
+    let [create] = creates.as_slice() else {
+        panic!("expected one host launch, got {creates:?}");
+    };
+    assert_eq!(create.path, "/api/sessions");
+    super::yolo_tests::refuse_for_yolo(&mut helm, cx, create.id);
+    test_support::click(cx, "prompt-alternative-0");
+    let writes = answer_with(&mut helm, cx, Some(&account), |command| {
+        command.path == "/api/hosts/1/yolo-without-asking"
+    });
+    let [write] = writes.as_slice() else {
+        panic!("expected one pending host write, got {writes:?}");
+    };
+
+    assert!(press_in_new_sandbox(&mut helm, cx, &account).is_empty());
+    let question = Some("Create a sandbox for this session?");
+    assert_eq!(name_of(cx, "prompt").as_deref(), question);
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    helm.reply(write.id, 200, Some(json!({})));
+    settle(cx);
+
+    assert_eq!(name_of(cx, "prompt").as_deref(), question);
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert!(
+        name_of(cx, "launcher-yolo-setting-saved")
+            .is_some_and(|words| words.contains("now starts YOLO sessions without asking"))
+    );
+    assert!(answer_with(&mut helm, cx, Some(&account), keep_create).is_empty());
+}
+
 /// SPEC.md, "Sandbox sessions": "Cancel creates nothing"; the old Cancel's help, "create no sandbox and keep the
 /// launcher open", is the promise. Specified: Cancel sends nothing, takes the question away and leaves the launcher
 /// open on its draft, still New sandbox on `ready`, with no refusal shown.
