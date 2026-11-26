@@ -22,7 +22,8 @@ notes' text and their cold read stay with the monitor.
 monitor's own checkout neither is needed. The monitor log is `log.md` in the agent records' `landing` record, the
 directory `cargo xtask records path landing` prints; it is never an argument. The commands that edit it expect the two
 lines the monitor keeps there: `running, last checked <time>` in `## Status`, and `- Landing claim in progress: <text>`.
-History entries go at the end of the file.
+History entries go at the end of the file. How agent records work (the repository, the host files and the records tool)
+is in `.agents/agent-records.md`.
 
 Round commands take `--round <N>`, the round's number. The round's text files (`plans.txt`, `base.txt`, `prs.txt`,
 `tested_commits.txt` and `notes/`) live directly in the `round/<N>` record, the directory
