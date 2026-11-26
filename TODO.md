@@ -71,6 +71,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a human will accidentally click the close button for a terminal tab when they intended to create a new terminal. I
   keep doing this all the time.
 
+- **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
+  user when blocked through farhelm.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
