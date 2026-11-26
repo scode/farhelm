@@ -237,6 +237,10 @@ pub enum Icon {
     /// A page with a folded corner and two lines: a document to read, the update menu's What's new (the old app's
     /// Document glyph).
     Document,
+    /// A sparkle identifies the upgrade highlights dialog.
+    Sparkle,
+    /// A wrench marks a fix in the upgrade highlights.
+    Wrench,
     /// A low line: minimize the window (the Linux window's drawn title bar).
     Minimize,
     /// A square: maximize the window (the Linux window's drawn title bar).
@@ -425,6 +429,8 @@ impl Icon {
         Icon::Update,
         Icon::Refresh,
         Icon::Document,
+        Icon::Sparkle,
+        Icon::Wrench,
         Icon::Minimize,
         Icon::Maximize,
         Icon::Restore,
@@ -532,6 +538,8 @@ impl Icon {
             Icon::Update => "icons/update.svg",
             Icon::Refresh => "icons/refresh.svg",
             Icon::Document => "icons/document.svg",
+            Icon::Sparkle => "icons/sparkle.svg",
+            Icon::Wrench => "icons/wrench.svg",
             Icon::Minimize => "icons/minimize.svg",
             Icon::Maximize => "icons/maximize.svg",
             Icon::Restore => "icons/restore.svg",
@@ -692,6 +700,8 @@ impl Assets {
             "icons/update.svg" => Some(include_bytes!("../assets/icons/update.svg")),
             "icons/refresh.svg" => Some(include_bytes!("../assets/icons/refresh.svg")),
             "icons/document.svg" => Some(include_bytes!("../assets/icons/document.svg")),
+            "icons/sparkle.svg" => Some(include_bytes!("../assets/icons/sparkle.svg")),
+            "icons/wrench.svg" => Some(include_bytes!("../assets/icons/wrench.svg")),
             "icons/minimize.svg" => Some(include_bytes!("../assets/icons/minimize.svg")),
             "icons/maximize.svg" => Some(include_bytes!("../assets/icons/maximize.svg")),
             "icons/restore.svg" => Some(include_bytes!("../assets/icons/restore.svg")),

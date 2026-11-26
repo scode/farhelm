@@ -33,23 +33,44 @@ pub(crate) fn highlights() -> Vec<ReleaseHighlights> {
             version: RUNNING.to_owned(),
             date: "2026-11-20".to_owned(),
             total_changes: 17,
-            highlights: vec![HighlightCategory {
-                name: "Added".to_owned(),
-                entries: vec![Highlight {
-                    pieces: vec![
-                        piece(HighlightStyle::Bold, "Keyboard shortcuts"),
-                        piece(
-                            HighlightStyle::Plain,
-                            " now appear in menus. Look for them beside actions like ",
+            highlights: vec![
+                HighlightCategory {
+                    name: "Added".to_owned(),
+                    entries: vec![Highlight {
+                        pieces: vec![
+                            piece(
+                                HighlightStyle::Bold,
+                                "Keyboard shortcuts now appear in menus.",
+                            ),
+                            piece(HighlightStyle::Plain, " Look for them beside actions like "),
+                            piece(HighlightStyle::Code, "Rename"),
+                            piece(
+                                HighlightStyle::Plain,
+                                " in a session's menu. The shortcut shown there matches the key you use on this platform. (#1)",
+                            ),
+                        ],
+                        screenshot_url: Some(
+                            "https://farhelm.io/docs/release-notes/#v0.44.0-pr-1".to_owned(),
                         ),
-                        piece(HighlightStyle::Code, "Rename"),
-                        piece(HighlightStyle::Plain, " in a session's menu."),
-                    ],
-                    screenshot_url: Some(
-                        "https://farhelm.io/docs/release-notes/#v0.44.0-pr-1".to_owned(),
-                    ),
-                }],
-            }],
+                    }],
+                },
+                HighlightCategory {
+                    name: "Changed".to_owned(),
+                    entries: vec![Highlight {
+                        pieces: vec![
+                            piece(
+                                HighlightStyle::Bold,
+                                "The session launcher remembers your recent setups.",
+                            ),
+                            piece(
+                                HighlightStyle::Plain,
+                                " You can choose a past setup in the command field and check its host and folder before starting. (#2)",
+                            ),
+                        ],
+                        screenshot_url: None,
+                    }],
+                },
+            ],
         },
         ReleaseHighlights {
             version: "0.43.0".to_owned(),
@@ -58,15 +79,63 @@ pub(crate) fn highlights() -> Vec<ReleaseHighlights> {
             highlights: vec![HighlightCategory {
                 name: "Fixes worth highlighting".to_owned(),
                 entries: vec![Highlight {
-                    pieces: vec![piece(
-                        HighlightStyle::Plain,
-                        "Terminal tabs keep their scrollback when you switch away and come back.",
-                    )],
+                    pieces: vec![
+                        piece(HighlightStyle::Plain, "Terminal tabs keep their "),
+                        piece(HighlightStyle::Bold, "scrollback"),
+                        piece(
+                            HighlightStyle::Plain,
+                            " when you switch away and come back. This also keeps the old content visible if the terminal is no longer running. (#3)",
+                        ),
+                    ],
                     screenshot_url: None,
                 }],
             }],
         },
     ]
+}
+
+/// Published notes often start with an emphasized control name. It stays inline, while a curated sentence gets
+/// its own line and leaves a styled paragraph with the join removed.
+#[test]
+fn only_a_curated_opening_bold_sentence_is_a_headline() {
+    use super::view::{body_pieces, headline};
+    let piece = |style, text: &str| HighlightPiece {
+        style,
+        text: text.to_owned(),
+    };
+    for opening in ["Open a session.", "Open a session?", "Open a session!"] {
+        let pieces = [
+            piece(HighlightStyle::Bold, opening),
+            piece(HighlightStyle::Plain, ""),
+            piece(HighlightStyle::Plain, " "),
+            piece(HighlightStyle::Code, " farhelm new"),
+            piece(HighlightStyle::Plain, " opens the launcher. (#1)"),
+        ];
+        let (title, rest) = headline(&pieces).expect("a bold sentence with a rest");
+        assert_eq!(title, opening);
+        let runs: Vec<_> = body_pieces(rest, true).collect();
+        assert!(matches!(
+            runs.as_slice(),
+            [
+                (HighlightStyle::Code, "farhelm new"),
+                (HighlightStyle::Plain, " opens the launcher. (#1)")
+            ]
+        ));
+        assert!(
+            headline(&pieces[..3]).is_none(),
+            "empty joining runs do not count as the rest"
+        );
+    }
+    for first in [
+        piece(HighlightStyle::Bold, "Open"),
+        piece(HighlightStyle::Plain, "Open a session."),
+    ] {
+        let pieces = [
+            first,
+            piece(HighlightStyle::Plain, " Use the launcher. (#1)"),
+        ];
+        assert!(headline(&pieces).is_none(), "this opening stays inline");
+    }
 }
 
 /// Install the host before the window opens so its startup path sees the same capability as an installed app.
@@ -133,21 +202,38 @@ fn welcome_and_announcements_precede_upgrade_highlights(cx: &mut TestAppContext)
     assert_eq!(focused_id(cx).as_deref(), Some("whats-new-got-it"));
     assert_eq!(
         label(cx, "whats-new-release-0.44.0").as_deref(),
-        Some("0.44.0, 2026-11-20")
+        Some("0.44.0 · Nov 20, 17 changes")
     );
     assert_eq!(
-        label(cx, "whats-new-category-0.44.0-0").as_deref(),
-        Some("Added")
+        label(cx, "whats-new-version-range").as_deref(),
+        Some(RUNNING)
     );
     assert_eq!(
         label(cx, "whats-new-entry-0.44.0-0-0").as_deref(),
         Some(
-            "Keyboard shortcuts now appear in menus. Look for them beside actions like Rename in a session's menu."
+            "Added: Keyboard shortcuts now appear in menus. Look for them beside actions like Rename in a session's menu. The shortcut shown there matches the key you use on this platform. (#1)"
+        )
+    );
+    assert_eq!(label(cx, "whats-new-count-new").as_deref(), Some("1 new"));
+    assert_eq!(
+        label(cx, "whats-new-count-changed").as_deref(),
+        Some("1 changed")
+    );
+    assert_eq!(
+        label(cx, "whats-new-count-fixed").as_deref(),
+        Some("1 fixed")
+    );
+    assert!(label(cx, "whats-new-count-breaking").is_none());
+    assert!(label(cx, "whats-new-count-removed").is_none());
+    assert_eq!(
+        label(cx, "whats-new-entry-0.43.0-0-0").as_deref(),
+        Some(
+            "Fixes worth highlighting: Terminal tabs keep their scrollback when you switch away and come back. This also keeps the old content visible if the terminal is no longer running. (#3)"
         )
     );
     assert_eq!(
-        label(cx, "whats-new-footer-note").as_deref(),
-        Some("20 changes in total. See the release notes for the full detail.")
+        label(cx, "whats-new-shot-0.44.0-0-0").as_deref(),
+        Some("Screenshot ↗")
     );
     assert!(
         helm.commands().is_empty(),
@@ -281,6 +367,10 @@ fn a_failed_check_can_retry_and_all_dismissals_record_the_release(cx: &mut TestA
         reset(&mut helm, cx, snapshot.clone());
         assert!(shows(cx, "whats-new"));
         assert_eq!(focused_id(cx).as_deref(), Some("whats-new-got-it"));
+        assert_eq!(
+            label(cx, "whats-new-version-range").as_deref(),
+            Some("From 0.42.0 to 0.44.0")
+        );
         if way == "escape" {
             keys(cx, way);
         } else {

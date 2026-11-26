@@ -51,12 +51,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Give What's new the session launcher's look.** Restyle the upgrade highlights window as direction 2, "Launcher
-  sibling", in
-  [the What's new and Welcome directions mockup](https://snippets.scode.org/s/farhelm-whats-new-directions/), showing
-  every entry in full rather than clamped. Release curation marks each highlight's headline so the window can show it.
-  Plan: `plans/queue/launcher-style-whats-new.md`.
-
 - **Make Welcome the empty main area.** Replace the startup Welcome card with direction W7, "Empty state", in
   [the same mockup](https://snippets.scode.org/s/farhelm-whats-new-directions/): the empty main area introduces Farhelm
   and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching

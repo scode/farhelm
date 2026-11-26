@@ -9,21 +9,20 @@ use std::rc::Rc;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
-    App, AppContext as _, Context, Div, FocusHandle, FontWeight, HighlightStyle,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, StyledText, Task, WeakEntity, Window, div, px,
-    relative,
+    App, AppContext as _, Context, FocusHandle, IntoElement, ParentElement as _, Render,
+    Styled as _, Task, WeakEntity, Window, div, px,
 };
 
-use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
+use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier, return_key_content};
 use crate::desktop::updates::{self, notes};
 use crate::focus::{self, Mark, ReturnTo};
 use crate::layers::{self, Dialog, Dismissal, LayerId, MainAction};
 use crate::notices::{self, Notice};
-use crate::{assets, session, theme};
+use crate::{session, theme};
 
 #[cfg(test)]
 pub(crate) mod tests;
+mod view;
 
 const TITLE: &str = "What's new in Farhelm";
 const RELEASE_NOTES_URL: &str = crate::update_readout::view::RELEASE_NOTES_URL;
@@ -80,7 +79,7 @@ pub(crate) fn check(mark: Mark, window: &Window, cx: &App) -> Option<Task<()>> {
                     if !layers::focus_layer_open(window, cx)
                         && layers::last_focus_layer(window, cx) == last_focus_layer =>
                 {
-                    open(running, releases, &mark, window, cx);
+                    open(running, previous.as_deref(), releases, &mark, window, cx);
                 }
                 notes::UpgradeNotes::Show(_) => {}
             }
@@ -125,13 +124,24 @@ pub(crate) fn preferences_patch(running: &str, show: Option<bool>) -> serde_json
 /// Open the selected releases. Only dismissal calls the recording hook, so a reset never counts as seeing the notes.
 pub(crate) fn open(
     running: String,
+    previous: Option<&str>,
     releases: Vec<notes::ReleaseHighlights>,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
+    let version_range = previous.map_or_else(
+        || running.clone(),
+        |previous| format!("{previous} → {running}"),
+    );
+    let version_label = previous.map_or_else(
+        || running.clone(),
+        |previous| format!("From {previous} to {running}"),
+    );
     let view = cx.new(|cx| HighlightsDialog {
         running: Some(running),
+        version_range,
+        version_label,
         releases,
         opt_out: false,
         got_it: cx.focus_handle().tab_stop(true),
@@ -176,6 +186,8 @@ pub(crate) fn open(
 /// Hold the releases that were presented together. A later preference push does not rewrite the open dialog.
 struct HighlightsDialog {
     running: Option<String>,
+    version_range: String,
+    version_label: String,
     releases: Vec<notes::ReleaseHighlights>,
     opt_out: bool,
     got_it: FocusHandle,
@@ -196,177 +208,17 @@ fn dismiss(view: &WeakEntity<HighlightsDialog>, opt_out: bool, window: &mut Wind
     }
 }
 
-/// Tell the user which releases actually arrived. The saved baseline can precede that range.
-fn subtitle(releases: &[notes::ReleaseHighlights]) -> String {
-    match releases {
-        [] => String::new(),
-        [release] => format!("Highlights from {}", release.version),
-        [newest, older] => format!("Highlights from {} and {}", older.version, newest.version),
-        [newest, .., oldest] => format!("Highlights from {} to {}", oldest.version, newest.version),
-    }
-}
-
-/// A wrapping paragraph gets one accessible label for the entire entry. Code ranges split the drawing's
-/// text runs so GPUI can apply the font override at their edges.
-fn paragraph(id: SharedString, pieces: &[notes::HighlightPiece]) -> impl IntoElement {
-    let mut text = String::new();
-    let mut highlights = Vec::new();
-    let mut code = Vec::new();
-    for piece in pieces {
-        let start = text.len();
-        text.push_str(&piece.text);
-        let range = start..text.len();
-        match piece.style {
-            notes::HighlightStyle::Plain => {}
-            notes::HighlightStyle::Bold => highlights.push((
-                range,
-                HighlightStyle {
-                    font_weight: Some(FontWeight::BOLD),
-                    ..HighlightStyle::default()
-                },
-            )),
-            notes::HighlightStyle::Code => {
-                highlights.push((range.clone(), HighlightStyle::default()));
-                code.push((range, SharedString::from(assets::TERMINAL_FONT)));
-            }
-        }
-    }
-    let text = SharedString::from(text);
-    let styled = StyledText::new(text.clone())
-        .with_highlights(highlights)
-        .with_font_family_overrides(code);
-    div()
-        .id(id)
-        .role(Role::Label)
-        .aria_label(text)
-        .w_full()
-        .child(styled)
-}
-
-/// The source already orders categories and entries. Keep screenshot links with the text they illustrate.
-fn release_section(release: &notes::ReleaseHighlights, cx: &App) -> Div {
-    let palette = theme::palette(cx);
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(10.))
-        .child(
-            div()
-                .id(SharedString::from(format!(
-                    "whats-new-release-{}",
-                    release.version
-                )))
-                .role(Role::Heading)
-                .aria_label(format!("{}, {}", release.version, release.date))
-                .flex()
-                .items_baseline()
-                .gap(px(10.))
-                .child(
-                    div()
-                        .text_size(px(16.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(release.version.clone()),
-                )
-                .child(
-                    div()
-                        .text_color(theme::color(palette.fg_2))
-                        .child(release.date.clone()),
-                ),
-        )
-        .children(
-            release
-                .highlights
-                .iter()
-                .enumerate()
-                .map(|(category_index, category)| {
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.))
-                        .child(
-                            div()
-                                .id(SharedString::from(format!(
-                                    "whats-new-category-{}-{category_index}",
-                                    release.version
-                                )))
-                                .role(Role::Heading)
-                                .aria_label(category.name.clone())
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(category.name.clone()),
-                        )
-                        .children(category.entries.iter().enumerate().map(|(index, entry)| {
-                            let link = entry.screenshot_url.clone().map(|url| {
-                                Button::new(
-                                    SharedString::from(format!(
-                                        "whats-new-shot-{}-{category_index}-{index}",
-                                        release.version
-                                    )),
-                                    "See screenshot ↗",
-                                    HoverHelp::tooltip("Open this entry on the Release notes page"),
-                                    Role::Link,
-                                )
-                                .tier(Tier::Link)
-                                .on_click(move |_, _, cx| cx.open_url(&url))
-                            });
-                            // Each entry is a bulleted list item, as on the website's Release notes page.
-                            // The bullet sits in its own column so wrapped lines and the screenshot link
-                            // hang under the text rather than under the bullet. It shares the body's text
-                            // size and line height, so in a top-aligned row it centers on the first line.
-                            div()
-                                .flex()
-                                .items_start()
-                                .gap(px(8.))
-                                .pl(px(4.))
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .text_color(theme::color(palette.fg_2))
-                                        .child("•"),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .gap(px(4.))
-                                        .items_start()
-                                        .child(paragraph(
-                                            SharedString::from(format!(
-                                                "whats-new-entry-{}-{category_index}-{index}",
-                                                release.version
-                                            )),
-                                            &entry.pieces,
-                                        ))
-                                        .children(link),
-                                )
-                        }))
-                }),
-        )
-}
-
 impl Render for HighlightsDialog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let weak = cx.weak_entity();
         let got_it = weak.clone();
         let opt_out = weak.clone();
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap(px(18.))
-            .text_size(px(13.))
-            .line_height(relative(1.45))
-            .children(
-                self.releases
-                    .iter()
-                    .map(|release| release_section(release, cx)),
-            );
-        let count = self
-            .releases
-            .iter()
-            .map(|release| release.total_changes)
-            .fold(0, u64::saturating_add);
-        let changes = if count == 1 { "change" } else { "changes" };
+        let palette = theme::palette(cx);
+        let body = div().flex().flex_col().gap(px(12.)).children(
+            self.releases
+                .iter()
+                .map(|release| view::release_section(release, palette)),
+        );
         DialogFrame::new(
             "whats-new",
             TITLE,
@@ -393,15 +245,19 @@ impl Render for HighlightsDialog {
                     HoverHelp::tooltip("Close these highlights"),
                     Role::Button,
                 )
+                .content(return_key_content("Got it", palette.on_accent_dim, palette))
                 .tier(Tier::Primary)
                 .focus(&self.got_it)
                 .on_click(move |_, window, cx| dismiss(&got_it, false, window, cx)),
             ],
         )
-        .summary(subtitle(&self.releases))
-        .note(format!(
-            "{count} {changes} in total. See the release notes for the full detail."
+        .heading(view::heading(
+            &self.version_range,
+            &self.version_label,
+            &self.releases,
+            palette,
         ))
+        .footer_lead(view::footer_hints(palette))
         .width(px(664.))
         .scroll_stop("Release highlights")
         .close(

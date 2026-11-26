@@ -540,5 +540,5 @@ linux/version-readout-update-ready--dark.png 3a3b7add0b092ccaed69600f28e2115644d
 linux/version-readout-update-ready--light.png ccbe9cd2bf58b0bef79a58289222aa3c65ad3821
 linux/welcome-dialog--dark.png 9f535d56dbe5772fd74a3798261cdda55d614cdb
 linux/welcome-dialog--light.png 8b9d43f5aa3a201cd43e8b9d0ab5418b6fd14b76
-linux/whats-new-dialog--dark.png 4560509b64882a4ab32216e564daa3c241129059
-linux/whats-new-dialog--light.png 39443fedffbd9243f692503313a07dcb34f23ca9
+linux/whats-new-dialog--dark.png 895c8908df79678c2174ab0bed91a03354e839f4
+linux/whats-new-dialog--light.png 15450219c00c9c01cc5dd9ff8dc1ff70896ac9d3

@@ -74,7 +74,7 @@ use super::request::{Account, Recipes, Refusal, SELECT_REPOSITORY, Target};
 use super::words::agent_note;
 use crate::components::{
     Button, Checkbox, DialogFrame, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption,
-    TabOption, TabStrip, TextInput, TextInputEvent, TextInputState, Tier, key_chip,
+    TabOption, TabStrip, TextInput, TextInputEvent, TextInputState, Tier, return_key_content,
     scroll_from_controls, scroll_handle,
 };
 use crate::focus::{Mark, ReturnTo};
@@ -2938,14 +2938,7 @@ impl Render for Launcher {
                 help,
                 Role::Button,
             )
-            .content(
-                div().flex().items_center().gap(px(8.)).child(verb).child(
-                    key_chip(search::RETURN_KEY, key_ink, palette)
-                        .px(px(4.))
-                        .py(px(0.))
-                        .border_color(theme::color(key_ink)),
-                ),
-            )
+            .content(return_key_content(verb, key_ink, palette))
             .tier(Tier::Primary)
             .refused(refusal.is_some())
             // Busy while the YOLO question's host write is out, when a press does nothing (`Launcher::press`).

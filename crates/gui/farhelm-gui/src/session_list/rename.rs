@@ -71,7 +71,7 @@ use gpui::{
 use crate::assets::{Icon, TERMINAL_FONT};
 use crate::components::{
     Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier, command_field,
-    command_icon_tile, key_chip,
+    command_icon_tile, key_chip, return_key_content,
 };
 use crate::drafts::DraftInput;
 use crate::focus::{Mark, ReturnTo};
@@ -635,19 +635,7 @@ impl Render for RenameEditor {
             HoverHelp::tooltip(save_help),
             Role::Button,
         )
-        .content(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .child(save_label)
-                .child(
-                    key_chip("⏎", key_ink, palette)
-                        .px(px(4.))
-                        .py(px(0.))
-                        .border_color(theme::color(key_ink)),
-                ),
-        )
+        .content(return_key_content(save_label, key_ink, palette))
         .tier(Tier::Primary)
         // Busy, not disabled, while a save is in flight: a disabled button drops out of focus, and the old app kept a
         // clicked Save focused (`aria-disabled` only) so focus stayed on the action the user chose.

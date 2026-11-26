@@ -342,12 +342,13 @@ pub(super) fn welcome_dialog_setup(state: &SceneState, window: &mut Window, cx: 
     crate::welcome::open(&state.ring, &mark, window, cx);
 }
 
-/// The upgrade dialog gets two finalized releases with different categories, styled runs and one screenshot link.
-/// Use the real dialog so the picture covers the scrollable body, pinned count and all three actions together.
+/// Draw two finalized releases in the real upgrade dialog, including a curated headline and an older entry.
+/// The saved release predates both so the header shows the range alongside the actions and their key hints.
 pub(super) fn whats_new_dialog_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
     let releases = crate::whats_new::tests::highlights();
     crate::whats_new::open(
         releases[0].version.clone(),
+        Some("0.42.0"),
         releases,
         &Mark::take(cx),
         window,
