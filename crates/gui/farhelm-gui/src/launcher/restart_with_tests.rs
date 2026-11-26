@@ -198,7 +198,9 @@ fn row(edit: impl FnOnce(&mut Value)) -> SessionRow {
 /// stored resume command is offered even before its conversation is captured (the conversation field is then required).
 #[test]
 fn restart_with_names_why_it_is_not_offered() {
-    use super::entry::restart_with_reason as reason;
+    let reason = |row: &SessionRow| {
+        super::entry::restart_with_reason(row).map(|sentence| sentence.accessible_name())
+    };
     assert_eq!(reason(&row(|_| {})), None);
     for offer in ["no_resume_command", "no_conversation_reporting"] {
         assert_eq!(reason(&row(|value| {
@@ -214,7 +216,7 @@ fn restart_with_names_why_it_is_not_offered() {
             value["restart_offer"] = json!("no_resume_command");
         }))
         .as_deref(),
-        Some("This command launch has no resume command, so it cannot be restarted; use Replace with")
+        Some("This command launch has no resume command, so it cannot be restarted; use Replace with…")
     );
     assert_eq!(
         reason(&row(|value| {
@@ -223,7 +225,7 @@ fn restart_with_names_why_it_is_not_offered() {
         }))
         .as_deref(),
         Some(
-            "This session was created before launch kinds, so its launch cannot be changed; use Replace with"
+            "This session was created before launch kinds, so its launch cannot be changed; use Replace with…"
         )
     );
     assert_eq!(
@@ -290,11 +292,14 @@ fn disabling_custom_resumption_updates_restart_with(cx: &mut TestAppContext) {
     settle(cx);
     let reason = cx
         .update(|_, cx| restart_with_unavailable("a", cx))
-        .expect("the menu refuses");
+        .expect("the menu refuses")
+        .accessible_name();
     assert!(reason.contains("no longer supports resumption"));
     assert_eq!(
-        name_of(cx, "launcher-custom-restart-blocked").as_deref(),
-        Some(reason.as_str())
+        name_of(cx, "launcher-custom-restart-blocked")
+            .as_deref()
+            .map(|text| text.trim_end_matches('.')),
+        Some(reason.as_ref())
     );
     assert!(cx.debug_bounds("launcher-conversation-row").is_none());
     assert!(cx.debug_bounds("launcher-wrapper-row").is_some());
@@ -332,8 +337,10 @@ fn disabling_custom_resumption_updates_restart_with(cx: &mut TestAppContext) {
 /// setup result as Restart while keeping its own action name and ordinary first-prompt timing.
 #[test]
 fn restart_with_explains_antigravity_hook_setup_from_the_launch() {
-    use super::entry::restart_with_reason;
     use farhelm_proto::PersistentHookSetup;
+    let restart_with_reason = |row: &SessionRow| {
+        super::entry::restart_with_reason(row).map(|sentence| sentence.accessible_name())
+    };
 
     let mut row = row(|value| {
         value["agent_kind"] = json!("antigravity");

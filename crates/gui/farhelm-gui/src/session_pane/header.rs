@@ -125,6 +125,7 @@ use crate::components::{
 use crate::desktop::title_band::{self, Row};
 use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
+use crate::host_text::Line;
 use crate::launcher::entry;
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
 use crate::operations::Work;
@@ -233,13 +234,15 @@ impl Action {
 /// The hover help of `action` on `row`, as listed and drawn now, with Skip session confirmations as `skipped`. Delete
 /// names the platform's Delete shortcut, and drops "after you confirm" when the question is skipped; Restart's says
 /// whether the conversation can be resumed and why not ([`restart::hover_help`]).
-pub(crate) fn hover_help(action: Action, row: &SessionRow, skipped: bool) -> String {
-    match action {
+fn hover_help(action: Action, row: &SessionRow, skipped: bool) -> HoverHelp {
+    let words = match action {
         Action::Stop => format!(
             "Stop the {} and close its terminal tabs",
             crate::session_list::stop::program_word(row)
         ),
-        Action::Restart => restart::hover_help(row),
+        Action::Restart => {
+            return HoverHelp::sentence(restart::hover_help(row, "header-restart-help"));
+        }
         Action::Replace => replace::menu_help(row).to_owned(),
         Action::Clone => menu::CLONE_HELP.to_owned(),
         Action::Delete if skipped => {
@@ -248,7 +251,8 @@ pub(crate) fn hover_help(action: Action, row: &SessionRow, skipped: bool) -> Str
         Action::Delete => format!(
             "Delete: remove this session and its state, after you confirm ({DELETE_SESSION_SHORTCUT_NAME})"
         ),
-    }
+    };
+    HoverHelp::tooltip(words)
 }
 
 /// The id of an environment session's own control, Suspend or Resume, immediately left of Stop ([`environment_button`]).
@@ -336,8 +340,8 @@ impl Split {
 struct Choices {
     plain_unavailable: bool,
     with_unavailable: bool,
-    plain_description: String,
-    with_description: String,
+    plain_description: Line,
+    with_description: Line,
 }
 
 impl Choices {
@@ -347,7 +351,7 @@ impl Choices {
     /// ([`entry::restart_with_unavailable`]) or cannot open; Replace's plain choice is offered, and its
     /// variant only while the launcher can open. Both plain choices also wait for a host change
     /// ([`menu::launch_wait`]), as the main parts do. An unavailable choice's description is its reason; the others
-    /// are the old menu's, through [`menu_line`].
+    /// keep the menu's own wording. A host error stays a host part for the description and its tooltip.
     fn of(
         split: Split,
         key: &str,
@@ -370,16 +374,21 @@ impl Choices {
                 let reason = entry::restart_with_unavailable(key, cx);
                 let offered = restart::offered(row);
                 let plain = match wait.filter(|_| offered) {
-                    Some(wait) => wait.to_owned(),
-                    None => restart::offer_continuation(row),
+                    Some(wait) => wait.into(),
+                    None => restart::menu_description(row).into(),
                 };
                 Choices {
                     plain_unavailable: !offered || wait.is_some(),
                     with_unavailable: reason.is_some() || launcher_wait.is_some(),
-                    plain_description: menu_line(&plain),
-                    with_description: menu_line(reason.as_deref().or(launcher_wait).unwrap_or(
-                        "Resume this session's conversation with changed launch settings",
-                    )),
+                    plain_description: plain,
+                    with_description: reason.map_or_else(
+                        || {
+                            launcher_wait
+                                .unwrap_or("Resume this session's conversation with changed launch settings")
+                                .into()
+                        },
+                        Line::from,
+                    ),
                 }
             }
             Split::Replace => Choices {
@@ -391,10 +400,10 @@ impl Choices {
                     } else {
                         "Swap this session for a fresh conversation with the same settings"
                     })
-                    .to_owned(),
+                    .into(),
                 with_description: launcher_wait
                     .unwrap_or("Edit the settings, then swap this session for a new one")
-                    .to_owned(),
+                    .into(),
             },
         }
     }
@@ -402,19 +411,6 @@ impl Choices {
     /// Whether neither choice can run, so the caret is muted and its help says to open it for the reasons.
     fn none_available(&self) -> bool {
         self.plain_unavailable && self.with_unavailable
-    }
-}
-
-/// An explanation as a menu item's description, the old `menu_description`: sentence case with no closing period, and
-/// "Replace with" named with its ellipsis, as the menu item that offers it is labelled. Only the app's own words go
-/// through it: it changes the first letter, which in a host value would be a different value.
-fn menu_line(text: &str) -> String {
-    let text = text.replace("use Replace with", "use Replace with…");
-    let text = text.trim_end_matches('.');
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => String::new(),
     }
 }
 
@@ -1117,7 +1113,10 @@ fn action_button(
         Action::Clone => offer.launcher_wait,
         _ => offer.launch_wait.filter(|_| action.would_launch(row)),
     };
-    let help = wait.map_or_else(|| hover_help(action, row, shown.skipped), str::to_owned);
+    let help = wait.map_or_else(
+        || hover_help(action, row, shown.skipped),
+        HoverHelp::tooltip,
+    );
     // An environment session's Stop says what plain Stop leaves running there, and its freeze withholds Stop, Restart
     // and Replace (the old header's). While it is being deleted, Stop, Clone and Delete say why nothing is available.
     let help = match (action, offer.environment) {
@@ -1127,14 +1126,14 @@ fn action_button(
                 deleting: Some(reason),
                 ..
             }),
-        ) => reason.to_owned(),
-        (Action::Stop, Some(environment)) => environment.ui.stop_help().to_owned(),
+        ) => HoverHelp::tooltip(reason),
+        (Action::Stop, Some(environment)) => HoverHelp::tooltip(environment.ui.stop_help()),
         // An environment session's Delete always asks, so its help never takes the skipped wording, as the old header's
         // did not; it names the lane a click asks in.
-        (Action::Delete, Some(environment)) => format!(
+        (Action::Delete, Some(environment)) => HoverHelp::tooltip(format!(
             "{}, after you confirm ({DELETE_SESSION_SHORTCUT_NAME})",
             environment.delete_help
-        ),
+        )),
         _ => help,
     };
     let frozen = offer
@@ -1146,25 +1145,20 @@ fn action_button(
     } else {
         action.label()
     };
-    let mut button = Button::new(
-        action.id(),
-        label,
-        HoverHelp::tooltip(help).below(),
-        Role::Button,
-    )
-    .icon(action.icon())
-    .tier(action.tier())
-    .toolbar()
-    .condensed(condensed.then_some(Condensed::Words))
-    .expanded(asking)
-    .on_click(move |_, window, cx| {
-        if let Some(target) = captured.shown() {
-            let mark = Mark::take(cx);
-            let _ = pane.update(cx, |pane, cx| {
-                pane.act_from_header(action, target, &mark, window, cx)
-            });
-        }
-    });
+    let mut button = Button::new(action.id(), label, help.below(), Role::Button)
+        .icon(action.icon())
+        .tier(action.tier())
+        .toolbar()
+        .condensed(condensed.then_some(Condensed::Words))
+        .expanded(asking)
+        .on_click(move |_, window, cx| {
+            if let Some(target) = captured.shown() {
+                let mark = Mark::take(cx);
+                let _ = pane.update(cx, |pane, cx| {
+                    pane.act_from_header(action, target, &mark, window, cx)
+                });
+            }
+        });
     if stopping {
         button = button.spinner(shown.step);
     } else if action == Action::Stop && !frozen {
@@ -1501,24 +1495,28 @@ impl Render for CaretMenu {
                 )
             };
             let (pane, captured, split) = (self.pane.clone(), captured.clone(), self.split);
-            MenuItem::new(
-                format!("{id}-{}", if with { "with" } else { "plain" }),
-                icon,
-                label,
-                HoverHelp::tooltip(description.clone()),
-                Role::MenuItem,
-            )
-            .description(description)
-            .disabled(busy || unavailable)
-            .focus(&self.items[usize::from(with)])
-            .on_click(move |_, window, cx| {
-                if let Some(target) = captured.shown() {
-                    let mark = Mark::take(cx);
-                    let _ = pane.update(cx, |pane, cx| {
-                        pane.caret_choice(split, target, with, &mark, window, cx)
-                    });
+            let item_id = format!("{id}-{}", if with { "with" } else { "plain" });
+            let help = match &description {
+                Line::App(words) => HoverHelp::tooltip(words.clone()),
+                Line::Sentence(sentence) => {
+                    HoverHelp::sentence(sentence.clone().with_id(format!("{item_id}-help")))
                 }
-            })
+            };
+            let item = MenuItem::new(item_id, icon, label, help, Role::MenuItem);
+            let item = match description {
+                Line::App(words) => item.description(words),
+                Line::Sentence(sentence) => item.description_sentence(sentence),
+            };
+            item.disabled(busy || unavailable)
+                .focus(&self.items[usize::from(with)])
+                .on_click(move |_, window, cx| {
+                    if let Some(target) = captured.shown() {
+                        let mark = Mark::take(cx);
+                        let _ = pane.update(cx, |pane, cx| {
+                            pane.caret_choice(split, target, with, &mark, window, cx)
+                        });
+                    }
+                })
         };
         let (first, last) = (self.items[0].clone(), self.items[1].clone());
         let (tabbed, shift_tabbed) = (self.pane.clone(), self.pane.clone());

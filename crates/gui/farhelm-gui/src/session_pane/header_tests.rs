@@ -1919,6 +1919,65 @@ fn an_unavailable_choice_stays_in_its_menu_with_its_reason(cx: &mut TestAppConte
     assert_eq!(pending(&mut fake), []);
 }
 
+/// A failed hook on a declared command keeps both Restart actions greyed. Its reason may include right-to-left
+/// host text. Check that the drawn tooltip and each menu description isolate the error. The description passed to
+/// accessibility spells the hidden character visibly and omits the drawing-only isolate. The GPUI test driver
+/// exposes tooltip text and sentence labels. The component test covers how hover help supplies the description.
+#[gpui::test]
+fn restart_help_and_menu_isolate_a_failed_hook_reason(cx: &mut TestAppContext) {
+    use crate::session_list::host_rail::tests::texts_within;
+
+    let mut row = offering(&session("a"), 0, "not_captured", "antigravity");
+    row.value["launch"] = json!({
+        "kind": "command", "command": "agy {farhelm_args}", "yolo": false, "agent": "antigravity",
+        "resume": "agy --conversation {conversation} {farhelm_args}"
+    });
+    row.value["persistent_hook_setup"] = json!({"status": "failed", "reason": "تعذّر\u{202e}"});
+    let (_fake, cx) = open_main(cx, snapshot_of(vec![row], false));
+    let blocker = "Farhelm could not set up its Antigravity conversation hooks (تعذّر<U+202E>)";
+    let isolated = "\u{2066}تعذّر<U+202E>\u{2069})";
+    assert_eq!(
+        label_of(cx, "session-header-restart").as_deref(),
+        Some("Restart unavailable"),
+        "the premise: the uncaptured session cannot restart"
+    );
+    assert_eq!(
+        hover(cx, "session-header-restart").as_deref(),
+        Some(format!("Restart unavailable — {blocker}. Replace starts the session over.").as_str())
+    );
+    assert!(
+        texts_within(&frame(cx), "header-restart-help")
+            .iter()
+            .any(|line| line.text.contains(isolated)),
+        "the drawn tooltip isolates the error inside the parentheses"
+    );
+
+    test_support::click(cx, RESTART_CARET);
+    assert!(drawn(cx, "session-header-restart-options-menu"));
+    let plain = format!("{blocker}. Replace starts the session over");
+    for (item, description, expected) in [
+        (
+            "session-header-restart-options-plain",
+            "restart-menu-reason",
+            plain.as_str(),
+        ),
+        (
+            "session-header-restart-options-with",
+            "restart-with-menu-reason",
+            blocker,
+        ),
+    ] {
+        assert_eq!(hover(cx, item).as_deref(), Some(expected));
+        assert_eq!(label_of(cx, description).as_deref(), Some(expected));
+        assert!(
+            texts_within(&frame(cx), description)
+                .iter()
+                .any(|line| line.text.contains(isolated)),
+            "{item}'s description isolates the error inside the app's words"
+        );
+    }
+}
+
 /// Clone and the "with…" choices open the launcher, which SPEC.md keeps from opening while a launch is pending or a
 /// host change runs ("Launches and changes to the host registry still exclude each other"), so they are drawn
 /// unavailable then, as New's button is, and say why: a greyed entry's "tooltips and accessible descriptions explain

@@ -337,6 +337,7 @@ pub struct HostSentence {
     parts: Vec<Part>,
     underlined_query: Option<(String, bool)>,
     live_value: bool,
+    named_by_parent: bool,
 }
 
 impl HostSentence {
@@ -347,7 +348,21 @@ impl HostSentence {
             parts: Vec::new(),
             underlined_query: None,
             live_value: false,
+            named_by_parent: false,
         }
+    }
+
+    /// Give a second rendering its own node, such as a tooltip that repeats a visible menu description.
+    pub(crate) fn with_id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    /// Draw the isolated words without repeating their accessible name as a child label. The caller must give
+    /// the owning control this sentence's `accessible_name`, as the recovery card does for its focusable group.
+    pub(crate) fn named_by_parent(mut self) -> Self {
+        self.named_by_parent = true;
+        self
     }
 
     /// Expose the same escaped words as the value of a label inside a live region. AccessKit's macOS adapter
@@ -574,7 +589,7 @@ fn sentence_runs(
 
 impl RenderOnce for HostSentence {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        let name = self.accessible_name();
+        let name = (!self.named_by_parent).then(|| self.accessible_name());
         let (text, mono) = self.drawn();
         // GPUI applies a font family override only to runs that lie wholly inside its range, and a text with no
         // highlights is one run, so every monospace range is also handed in as a highlight that changes nothing, which
@@ -591,9 +606,12 @@ impl RenderOnce for HostSentence {
         // div's label alone is dropped. `Label` is the role GPUI gives its own id-bearing text.
         div()
             .id(self.id)
-            .role(Role::Label)
-            .aria_label(name.clone())
-            .when(self.live_value, |label| label.aria_value(name))
+            .when_some(name, |label, name| {
+                label
+                    .role(Role::Label)
+                    .aria_label(name.clone())
+                    .when(self.live_value, |label| label.aria_value(name))
+            })
             // `min_w_0` lets the sentence shrink to a flex row it sits in and wrap there. Without it a flex item's
             // minimum width is its whole unwrapped line (GPUI measures text with no wrap width for that query), so a
             // long session title in a dialog summary ran past the dialog's edge and was cut off there, hiding the part

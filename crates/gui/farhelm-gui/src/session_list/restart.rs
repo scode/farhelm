@@ -33,12 +33,15 @@
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::session_requests::RestartSessionBody;
 use farhelm_proto::ui_channel::SessionRow;
-use farhelm_proto::{LaunchKind, ReadinessWording, RestartOffer, SessionInfo, SessionStatus};
+use farhelm_proto::{
+    LaunchKind, ReadinessWording, RestartHookBlocker, RestartOffer, SessionInfo, SessionStatus,
+};
 use gpui::{App, Window};
 use serde_json::json;
 
 use super::{menu, outcome};
-use crate::components::{HoverHelp, Tier};
+use crate::components::{HoverHelp, Tier, capitalize_validation};
+use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::{Answer, Question};
 
@@ -59,40 +62,50 @@ pub(crate) fn offer_label(offer: RestartOffer) -> &'static str {
     }
 }
 
-/// Restart's hover help for `row`: its accessible name, an em dash, then [`offer_continuation`], as the old header's
-/// tooltip joined them.
-pub(crate) fn hover_help(row: &SessionRow) -> String {
-    format!(
-        "{} — {}",
-        offer_label(row.info.restart_offer),
-        offer_continuation(row)
-    )
+/// Restart's hover help begins with the offer name. The same sentence supplies the accessible description,
+/// with the host's error escaped separately from the words around it.
+pub(crate) fn hover_help(row: &SessionRow, id: &'static str) -> HostSentence {
+    let sentence =
+        HostSentence::new(id).text(format!("{} — ", offer_label(row.info.restart_offer)));
+    offer_continuation(sentence, row, false)
 }
 
-/// What a restart of this session does, or why it cannot, as the clause that follows the
-/// accessible name in the hover help: a lead for the two states where the terminal is gone for a reason the user should
-/// hear first (interrupted, never started), the offer's own clause, and for an uncaptured conversation the invitation to
-/// send feedback. Built from authored clauses, so the agent's name and "Restart" keep their case. The header's Restart
-/// menu shows it, with its first letter raised and no closing period, as its plain Restart's description, as the old
-/// menu showed the same explanation there.
-pub(crate) fn offer_continuation(row: &SessionRow) -> String {
+/// The plain Restart menu item starts with sentence case and omits a final period.
+pub(crate) fn menu_description(row: &SessionRow) -> HostSentence {
+    offer_continuation(HostSentence::new("restart-menu-reason"), row, true)
+}
+
+/// The reason follows the conditions already visible in the header. Menu styling changes only app words, leaving
+/// the error's separately escaped value intact in both the tooltip and the menu.
+fn offer_continuation(sentence: HostSentence, row: &SessionRow, menu: bool) -> HostSentence {
     let status = &row.info.status;
     let ended = status.has_ended();
-    let offered = offer_clause(row, ended);
-    let note = feedback_note(&row.info, ended);
-    match status {
+    let lead = match status {
         SessionStatus::Interrupted => {
-            format!("interrupted by a host reboot or a Farhelm update — {offered}.{note}")
+            "interrupted by a host reboot or a Farhelm update — ".to_owned()
         }
         SessionStatus::Error { .. } => {
             let program = super::stop::program_word(row);
-            format!("the {program} never started — {offered}.{note}")
+            format!("the {program} never started — ")
         }
         SessionStatus::Running
         | SessionStatus::Waiting
         | SessionStatus::Idle
         | SessionStatus::Unknown
-        | SessionStatus::Exited { .. } => format!("{offered}.{note}"),
+        | SessionStatus::Exited { .. } => String::new(),
+    };
+    let capitalize_clause = menu && lead.is_empty();
+    let lead = if menu {
+        capitalize_validation(lead)
+    } else {
+        lead
+    };
+    let clause = offer_clause(sentence.text(lead), row, ended, capitalize_clause);
+    let note = feedback_note(&row.info, ended);
+    if menu && note.is_empty() {
+        clause
+    } else {
+        clause.text(".").text(note)
     }
 }
 
@@ -100,24 +113,40 @@ pub(crate) fn offer_continuation(row: &SessionRow) -> String {
 /// unavailable clause names Replace, since SPEC.md makes Replace the way such a session starts over. No "Restart is
 /// unavailable" here: the accessible name says so, and the hover help joins the two. The interrupted card's text
 /// (`session_pane/card.rs`) is built from the same clause, so the card and the hover help cannot drift apart.
-pub(crate) fn offer_clause(row: &SessionRow, ended: bool) -> String {
-    match row.info.restart_offer {
-        RestartOffer::Resume => "restarting resumes this session's own conversation".to_owned(),
-        RestartOffer::NotCaptured => not_captured_clause(&row.info, ended, REPLACE_STARTS_OVER),
+pub(crate) fn offer_clause(
+    sentence: HostSentence,
+    row: &SessionRow,
+    ended: bool,
+    capitalize: bool,
+) -> HostSentence {
+    let words = match row.info.restart_offer {
+        RestartOffer::Resume => "restarting resumes this session's own conversation",
+        RestartOffer::NotCaptured => {
+            return not_captured_clause(
+                sentence,
+                &row.info,
+                ended,
+                REPLACE_STARTS_OVER,
+                capitalize,
+            );
+        }
         RestartOffer::NoConversationReporting if row.info.launch.is_shell() => {
-            "this shell has no conversation to resume, so Replace starts a fresh shell".to_owned()
+            "this shell has no conversation to resume, so Replace starts a fresh shell"
         }
         RestartOffer::NoConversationReporting => {
             "Farhelm has no conversation reporting for this session's agent, so Replace starts it over"
-                .to_owned()
         }
         RestartOffer::NoResumeCommand if row.info.launch.launch_kind() == LaunchKind::Agent => {
-            "this agent launch has no stored resume command, so Replace starts it over".to_owned()
+            "this agent launch has no stored resume command, so Replace starts it over"
         }
         RestartOffer::NoResumeCommand => {
             "this command launch did not opt into Resume, so it has no resume command and Replace starts it over"
-                .to_owned()
         }
+    };
+    if capitalize {
+        sentence.text(capitalize_validation(words.to_owned()))
+    } else {
+        sentence.text(words)
     }
 }
 
@@ -130,19 +159,25 @@ pub(crate) const REPLACE_STARTS_OVER: &str = "Replace starts the session over";
 /// the agent may still report, it says, naming the agent, when Restart normally becomes available (the agent kind's own
 /// timing, the one source of those facts); once the agent has ended that would be false, so it says the conversation
 /// was never captured. A kind that names no agent gets the same shape with no per-agent claim.
-pub(crate) fn not_captured_clause(info: &SessionInfo, ended: bool, start_over: &str) -> String {
+pub(crate) fn not_captured_clause(
+    sentence: HostSentence,
+    info: &SessionInfo,
+    ended: bool,
+    start_over: &str,
+    capitalize: bool,
+) -> HostSentence {
     let kind = info.agent_kind;
-    if let Some(reason) = info
+    if let Some(blocker) = info
         .persistent_hook_setup
-        .restart_blocker(kind, ReadinessWording::ToTheUser)
+        .restart_blocker_parts(kind, ReadinessWording::ToTheUser)
     {
-        return format!("{reason}. {start_over}");
+        return append_restart_blocker(sentence, blocker).text(format!(". {start_over}"));
     }
     let readiness = kind
         .display_name()
         .zip(kind.restart_readiness())
         .map(|(name, readiness)| (name, readiness.clause(ReadinessWording::ToTheUser)));
-    match (readiness, ended) {
+    let words = match (readiness, ended) {
         (Some((name, timing)), false) => format!(
             "for {name} sessions, Restart becomes available {timing}; until then, {start_over}"
         ),
@@ -155,6 +190,25 @@ pub(crate) fn not_captured_clause(info: &SessionInfo, ended: bool, start_over: &
         (None, true) => format!(
             "Farhelm never captured this session's conversation, so Restart can't resume it; {start_over}"
         ),
+    };
+    sentence.text(if capitalize {
+        capitalize_validation(words)
+    } else {
+        words
+    })
+}
+
+/// The CLI escapes the error as text. The desktop gives it a host part so hidden controls are escaped and the
+/// surrounding parentheses and prose keep their direction when the host's error is right-to-left.
+pub(crate) fn append_restart_blocker(
+    sentence: HostSentence,
+    blocker: RestartHookBlocker<'_>,
+) -> HostSentence {
+    let sentence = sentence.text(blocker.message);
+    if let Some(error) = blocker.host_error {
+        sentence.host(&HostText::from_host(error)).text(")")
+    } else {
+        sentence
     }
 }
 
@@ -335,6 +389,13 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
+
+    /// Read the hover help as the button supplies it to assistive technology.
+    fn hover_help(row: &SessionRow) -> String {
+        super::hover_help(row, "restart-help")
+            .accessible_name()
+            .to_string()
+    }
 
     /// A row with `status`, `offer` and `agent`, from the helm's pinned fixture.
     fn row(status: Value, offer: &str, agent: &str) -> SessionRow {
