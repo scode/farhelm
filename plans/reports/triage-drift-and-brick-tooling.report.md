@@ -59,3 +59,77 @@ verification. There is no decision blocking this stack.
 Independent Sol source review passed each draft after corrections. The Cursor scope review confirmed that the fresh
 launch, named seed, and named recall cover the two required launch behaviors. The executor compared the stack with
 current main and found no changes to the affected behavior.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round. Since its PRs were based, main gained the provisioning, Podman and runtime triage, the
+spec and comment updates, the queue discards and the host menu and terminal triage; the only one that touches a file
+this plan touches is the upload cancel change, in a different part of the attachment upload tests. The rebase met only
+conflicts in the shared triage records, kept both ways, and the queue's files, index and open outcomes agree afterwards.
+The landing's independent review also checked the plan against the earlier drift and brick test changes it builds on
+(the committed hook report check after Restart, the brick test's retry and reopen fixes) and found them compatible: the
+tighter launch evidence reads only the hook's own log lines, and the brick cleanup waiver applies only to a pair with no
+checks, results, preflight or tester record.
+
+On the parts that touch real files, the review found the guards hold: copying the agents' rewritten configuration back
+now requires every session the run created to be confirmed deleted and its terminal hosts gone, still requires the real
+file to be unchanged, and refuses a destination that aliases a copied vendor file; a panicking case runs the same
+cleanup first. The new `futures-util` dependency is for the tests only and was already in the build.
+
+#### Fixes made while landing
+
+- None. The review found no blocker or should-fix item.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the plan's PRs rebased onto main as it stood at the start of the landing (`76ac115c`), with the shared triage
+records' conflicts kept both ways; every other change is exactly what the executor pushed.
+
+- The drift, hook identity and Codex identity tests of the end-to-end suite,
+  `cargo nextest run -p farhelm --test e2e -E 'test(/^real_agent_capture::/) | test(/^hook_identity::/) | test(/^codex_identity::/)'`,
+  on the test worker (recorder run `09b58c40-65c0-4aec-b0d8-fde78e11d8a7`): all 82 passed. The drift cases that drive
+  real agents are ignored by default and did not run.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- The dependency license notices, `python3 -B scripts/dependency-notices.py --check`, on the test worker: passed
+  (`Cargo.lock` changed); and the dependency policy, `cargo-deny --locked check licenses sources` with the pinned
+  cargo-deny, locally: passed.
+- The drift runner's tests, `python3 -B scripts/test-run-harness-drift.py`, locally (recorder run
+  `0ede4521-4eca-4b59-a094-68878a6bac46`): all 21 passed; and the release brick test harness's portable tests,
+  `python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py'`, locally (recorder run
+  `c94c6f80-8a4c-49f8-86f9-c8ef396711df`): all 333 passed.
+- `python3 scripts/check-agents-md.py`, `python3 releasing/check-changelog.py format`, `cargo fmt --all -- --check` and
+  `python -B scripts/check-test-sleeps.py`, locally: passed. `dprint check`, locally: this plan's files pass; it fails
+  only on over-long lines in the triage outcomes archive that main already had. No PR fixes them yet; a formatting-only
+  one would, and I recommend it, as earlier rounds' notes did.
+
+Reused: none. The executor's runs were on an older base, and everything they covered ran again above.
+
+Skipped: the rest of the workspace Rust suite, since only test code, the drift runner and the brick harness changed; the
+real-agent drift cases and a real Mac brick test, which spend vendor turns or need a Mac guest and run only when asked;
+the desktop app's checks and the screenshot comparison, since nothing in the app changed; and CI, which runs only on
+demand.
+
+#### What the report says that is no longer true
+
+- Nothing.
+
+#### Things you should know that the report does not say
+
+- **A real Claude drift run might clear your Claude trust for the test workspace's parent directories (unverified).** A
+  drift run gives Claude a private copy of its configuration and, at the end, copies back the files Claude rewrote in
+  that copy, provided the real files did not change meanwhile. To keep the trust case from passing on trust inherited
+  from a parent directory, the plan now clears trust for the test workspace and its parents in that private copy. If
+  Claude rewrites the file holding those trust entries during the run, the copy-back carries the cleared entries into
+  your real configuration, and the unchanged-real-file guard does not stop it, since your real file did not change. You
+  would lose the trust approvals for those parent directories, which are real directories on the machine, and Claude
+  would ask again. Whether current Claude rewrites that file was not established. The drift tests run only when asked,
+  so nothing happens until then. I recommend checking this before the next real Claude drift run, by running it once
+  against a throwaway home; say if you want a TODO entry.
+- **Smaller points the review noticed.** The offline tests exercise the drift cleanup helpers but not how the harness
+  wires them in, which `.agents/validation.md` slightly overstates; a "real Claude config changed" note prints twice;
+  one error branch in the drift runner is unreachable when a harness is named; and a Cursor login that expires between
+  two turns is reported as a failure rather than "could not run". None needs a follow-up on its own.
