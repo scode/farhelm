@@ -100,3 +100,75 @@ as described. It also raised five small points: an implementation-notes sentence
 unrestricted, a test comment's wording, an explicit "no host" premise in the new test, a redundant assertion, and a
 constant visible more widely than needed. All were fixed. The fixes were not reviewed again; run `c2f64ba2` ran after
 them.
+
+### Landing
+
+#### What landed with it
+
+This round landed session-right-click-menu and launcher-late-wake-failures before this plan, and drift-updater-teardown
+after it; see the first plan's notes for the round. The four plans' changes overlapped only in TODO.md. The change on
+main that matters here reached main after this plan was built: Stop and Restart now end an agent that outlived its
+killed terminal host (#5083), in the same part of Stop this plan edits. The rebase applied cleanly, but a clean rebase
+can still combine two changes badly, so two independent reviewers and I checked them together. They cannot both apply to
+one session: this plan's refusal covers a session with no recorded main terminal, and #5083's cleanup of a leftover
+agent only runs for a session that has one. That cleanup is still in place in Stop and in Restart, untouched, and a
+session with no recorded terminal never reached it before this plan either. Stop refuses before asking for any
+confirmation and leaves the session exactly as it was, as SPEC.md requires of a refusal. The new right-click menu for
+marked sessions (session-right-click-menu) sends ordinary Stops, so such a session gets the same refusal on its row.
+
+#### Fixes made while landing
+
+None for this plan. The reviewers found nothing to fix.
+
+#### Worth knowing
+
+- **In two of the cases the refusal covers, the old Stop actually worked.** One is the Restart that failed without
+  knowing whether its new agent started, which the report covers. The other is a create where the host reported an error
+  after the agent's terminal was already running: Farhelm never recorded that terminal as the session's main terminal,
+  but it existed, and the old Stop ended it. In both cases the refusal message ("there is no terminal for Stop to stop")
+  is not quite right, and Stop can no longer close the session's terminal tabs either; the report does not mention tabs.
+  The way out after a failed Restart is Restart and then Stop. After a failed create, Restart is usually not offered, so
+  the only way out is Delete, which removes the session.
+- This bears on the report's open question. The reviewers and I agree with its recommendation to keep the refusal, but
+  the tabs point may change your view. Possible follow-up either way: reword the refusal message for these two cases.
+
+#### Checks
+
+Run once for the whole round, on its four plans stacked in queue order (session-right-click-menu,
+launcher-late-wake-failures, supervisor-stop-pending-launch, drift-updater-teardown) on main as it stood when the
+landing started; what reached main after each plan was built is in each plan's notes. The test worker is an aarch64
+Linux machine with a systemd user manager:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean.
+- On the test worker,
+  `cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm-gui -p farhelm-desktop`: the
+  first attempt, recorded run b6571c52-9267-4c9b-9635-f7c159c2a3f1, never ran a test, because the compiler was killed
+  while building the helm's tests (the worker ran out of memory with four build jobs). The rerun with two build jobs,
+  recorded run 264e5b64-065f-46f0-8dcb-ab15f3ef799d: 7,624 passed, 17 skipped (tests marked ignored). That is every test
+  of the shared message types, the helm, the supervisor, the desktop app and its GUI.
+- On the test worker, the end-to-end tests of host creates, host terminals, relaunches, supervisor restarts and every
+  test whose name contains `restart` or `stop` (`cargo nextest run -p farhelm --test e2e` filtered to them), recorded
+  run 08bd628d-e968-4273-8466-14c3e4f84735: 160 passed, and none skipped for lack of systemd.
+- On the test worker, the desktop app's end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), recorded run
+  2a146ce3-50ae-460e-a84b-d597d7d7b659: 48 of the 49 steps passed; the paste step runs only on a Mac and was skipped, as
+  it always is on Linux.
+- Locally, every screenshot scene compared with its approved picture (`python3 scripts/check-gui-goldens.py`), recorded
+  run 33bc1d03-4b78-4cc2-a05e-d822d0dce764: every picture matched, the new late wake failure picture included. This
+  covers the re-render launcher-late-wake-failures' report skipped after its rebase.
+- Locally, `python3 -B scripts/test-gui-screenshot-batch.py`, which checks the screenshot scene list against the golden
+  manifest: recorded run b81cb326-fd3c-4921-9f49-69ff01bb3f0d failed because the new late wake failure picture was
+  missing from the scene list; after the landing fix in launcher-late-wake-failures, recorded run
+  ffecfaab-79e4-4bfd-942e-a25925a47bd5 passed.
+- Locally, the drift runner's own tests (`python3 -B scripts/test-run-harness-drift.py`), recorded run
+  029c1d18-8368-4a93-b71c-ea765289da54: passed, on the landing machine's systemd user manager (Linux).
+- Locally, `python3 scripts/check-agents-md.py` (0 errors; its one warning is an old one about the frozen triage
+  archive), `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown: passed.
+
+Reused: nothing. Skipped: the Podman suites, since no plan changes how a container is actually started or stopped
+(launcher-late-wake-failures changes only how the launcher's own start reports a failure, which the helm's tests cover
+with stand-ins); the rest of the end-to-end suite, since the filter above covers every end-to-end test that creates,
+stops or restarts a session or host; the real-agent drift cases themselves, which spend vendor turns and run only on
+request.
