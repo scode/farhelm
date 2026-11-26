@@ -3999,8 +3999,9 @@ no archive listing cache. IDs select records, never paths supplied by the client
 `archived: true` only when its completed last-reference teardown moved a checkout; bare successes and notice-only
 replies retain their existing JSON shapes. If the helm's reply deadline expires, it saves any late cleanup notice under
 the host and removed session's ID and wakes the notices feed after committing it. This includes Replace's source Delete.
-A timely reply carries its own notice and adds nothing to this history. A read mark also resolves a late Delete's notice
-because the Delete has already finished.
+A timely client reply carries its own notice and adds nothing to this history. An agent Delete (`farhelm agent delete`)
+saves its checkout notice there even when its reply is timely, since the asking agent may not pass it on. A read mark
+also resolves a late Delete's notice because the Delete has already finished.
 
 `checkout_trash` operates only on retired working-copy rows with a recorded archive destination. It derives that path
 under the recorded root, opens the root and archive without following their final symlinks, and applies the
