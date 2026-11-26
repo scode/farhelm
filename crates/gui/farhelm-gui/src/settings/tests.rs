@@ -2534,6 +2534,7 @@ fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mu
 
 /// An unknown setup switch cannot authorize a write. After reading Grok's choice, the switch writes to Grok alone,
 /// and its separate hint switch can restore the launcher question and the session hint together.
+/// A refusal that redraws the switch before the next Space cannot turn that press into another opt-in.
 #[gpui::test]
 fn grok_hook_setup_and_its_hint_are_independent_settings(cx: &mut TestAppContext) {
     let (mut helm, cx, gear) = open_rail(
@@ -2562,15 +2563,23 @@ fn grok_hook_setup_and_its_hint_are_independent_settings(cx: &mut TestAppContext
     assert_eq!(switch_on(cx, agent.id()), Some(false));
     assert_eq!(switch_on(cx, agent.dismissal_id()), Some(false));
     assert!(accessible_help_contains(cx, agent.removal()));
-    click(cx, agent.id());
-    let writes = helm.commands();
-    let [write] = writes.as_slice() else {
-        panic!("one setting write: {writes:?}")
-    };
-    assert_eq!(write.method, farhelm_helm_client::Method::Put);
-    assert_eq!(write.path, "/api/agent-hook-setup/grok");
-    assert_eq!(write.body, Some(json!({ "enabled": true })));
-    helm.reply(write.id, 204, None);
+    reach(cx, agent.id());
+    keys(cx, "space");
+    let (attempt, body) = one_put(&mut helm, "/api/agent-hook-setup/grok");
+    assert_eq!(body, json!({ "enabled": true }));
+    test_support::show_next_frame(cx);
+    assert_eq!(switch_on(cx, agent.id()), Some(true));
+    helm.reply(attempt, 403, Some(json!({ "error": "Hook setup refused" })));
+    settle(cx);
+    assert_eq!(switch_on(cx, agent.id()), Some(false));
+    assert_eq!(focused_id(cx).as_deref(), Some(agent.id()));
+    // The refusal has redrawn the switch, but the on state is still the last one presented.
+    cx.simulate_keystrokes("space");
+    assert!(sent(&mut helm).is_empty());
+    keys(cx, "space");
+    let (save, body) = one_put(&mut helm, "/api/agent-hook-setup/grok");
+    assert_eq!(body, json!({ "enabled": true }));
+    helm.reply(save, 204, None);
     settle(cx);
     assert_eq!(switch_on(cx, agent.id()), Some(true));
     click(cx, agent.dismissal_id());

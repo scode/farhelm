@@ -5,6 +5,7 @@ use gpui::{App, Div, FocusHandle, ParentElement as _, Styled as _, Window, div, 
 use super::{card, choices, configured};
 use crate::components::{Checkbox, HoverHelp, Role};
 use crate::hook_setup::HookAgent;
+use crate::prompt::ActionFrame;
 
 pub(super) const LABEL: &str = "Set up conversation hooks on all hosts";
 pub(super) const TOOLTIP: &str = "Let Farhelm install its conversation hooks in this agent's configuration whenever it starts the agent";
@@ -21,8 +22,16 @@ pub(super) fn row(
     switch: &HookSwitch,
     refused: &super::Refused,
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> Div {
+    let checked = switch.state.shown();
+    let available = switch.state.available();
+    // A refusal can reverse the switch during a keyboard redraw. Only a shown state can authorize all-hosts setup.
+    let frame = window.use_keyed_state(("hook-consent", agent.index()), cx, |_, _| {
+        ActionFrame::default()
+    });
+    let toggle = frame.update(cx, |frame, _| frame.capture(!checked, available, window));
     let contents = div()
         .flex()
         .items_start()
@@ -48,10 +57,14 @@ pub(super) fn row(
                 .switch()
                 .content(contents)
                 .accessible_description(format!("{} {}", agent.consent(), agent.removal()))
-                .checked(switch.state.shown())
-                .disabled(!switch.state.available())
+                .checked(checked)
+                .disabled(!available)
                 .focus(&switch.focus)
-                .on_toggle(on_toggle),
+                .on_toggle(move |_, window, cx| {
+                    if let Some(&enabled) = toggle.shown() {
+                        on_toggle(enabled, window, cx);
+                    }
+                }),
         )
         .children(configured::failure(
             agent.error_id(),
