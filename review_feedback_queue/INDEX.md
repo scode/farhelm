@@ -71,9 +71,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`settings-close-save-can-hide-credential-error.md`](settings-close-save-can-hide-credential-error.md) — Settings can
-  keep a failed credential save’s explanation behind the Credentials overview.
-
 - [`settings-close-save-stalls-silently-during-tests.md`](settings-close-save-stalls-silently-during-tests.md) — Save
   and Close can give up without explanation while a Notifications or Tensorlake test is running.
 
