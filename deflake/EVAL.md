@@ -72,6 +72,8 @@ this is an evaluation of the tooling:
 4. Do not modify anything under deflake/ except deflake/known-flakes.txt.
 5. Never touch any other checkout or anything under ~/.local/state/farhelm. The driver's own state under
    /tmp/farhelm-tmp/deflake is fine.
+6. Working log: keep it in your scratch directory, not in the records. Do not clone, write or push `agent-records`
+   (`.agents/agent-records.md`): an evaluation's throwaway log must not enter the real records' history.
 
 The numeric phase-log prefix is the sweep number; batteries execute sequentially within each sweep.
 

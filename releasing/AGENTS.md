@@ -8,10 +8,11 @@ fragments", not here.
 
 After a compaction or resume, re-read every file in your role's reading list before your next action.
 
-A release session is long-running. Keep its working log in the parent directory of the checkout, named
-`farhelm-release-log-<checkout>.md` (`<checkout>` is the checkout directory's name), and record in it the active flow,
-the release version, the reading list you are following, the step you are on, and the session's scratch directory. After
-any compaction or resume, read that log first.
+A release session is long-running. Keep its working log in the records, at `farhelm/flows/release/<checkout>/log.md` in
+the checkout's attended clone (`<checkout>` is the checkout directory's name), and record in it the active flow, the
+release version, the reading list you are following, the step you are on, and the session's scratch directory. After any
+compaction or resume, read that log first. Before creating or writing it, read `.agents/agent-records.md`, "Attended
+flows' logs", which says how to set up the clone, when to push, and what to do when either fails.
 
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".

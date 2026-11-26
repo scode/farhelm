@@ -50,12 +50,14 @@ Before starting, read these in full, and again after any compaction or resume:
 - Keep ready, independent fixes below unfinished fixes in the linear stack so unrelated work cannot delay their landing.
   Reorder only when the changes are independent, preserving their diffs and validation coverage; an unready prerequisite
   still blocks its dependents.
-- Keep a working log from the start at `farhelm-run-all-tests-log-<checkout>.md` in the directory that contains the
-  checkout, where a compacted session can find it again (a scratch directory can be lost track of). Record in it this
-  flow's name, the reading list above, and your scratch directory (`/tmp/farhelm-tmp/<id>/`, per `AGENTS.md`, "Agent
-  scratch space"); then every check with its result and recorder run id, the sweep's run id and events, every decision
-  and why, PRs, and GitHub run URLs. Name its path in the final report. The log is what lets the maintainer ask
-  afterwards what ran and what failed, including after a context compaction.
+- Keep a working log from the start in the records, at `farhelm/flows/run-all-tests/<checkout>/log.md` in the checkout's
+  attended clone, where a compacted session can find it again (a scratch directory can be lost track of). Record in it
+  this flow's name, the reading list above, and your scratch directory (`/tmp/farhelm-tmp/<id>/`, per `AGENTS.md`,
+  "Agent scratch space"); then every check with its result and recorder run id, the sweep's run id and events, every
+  decision and why, PRs, and GitHub run URLs. Name its path in the final report. The log is what lets the maintainer ask
+  afterwards what ran and what failed, including after a context compaction. Before creating or writing it, read
+  `.agents/agent-records.md`, "Attended flows' logs", which says how to set up the clone, when to push, and what to do
+  when either fails.
 - The machine is shared. Do not run `rustup update` (other agents share the default toolchain), and leave the live
   install alone as `AGENTS.md`, "The live install is off-limits", requires.
 
