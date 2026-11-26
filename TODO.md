@@ -60,6 +60,22 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Show a failed hook setup save after Settings closes.** A person can turn off Set up conversation hooks on all hosts
+  for Grok or Antigravity and close Settings before the helm answers. If the write fails, the previous consent can still
+  apply to later launches and the reason is gone. `crates/gui/farhelm-gui/src/settings/editing.rs` inventories staged
+  forms for Close. The immediate write in `SettingsDialog::toggle_configured` settles through `drafts::save`, whose
+  callback only updates the original dialog. Keep the inline error when that dialog is open. If it has closed, use the
+  same write's refusal to post an agent-specific notice with the reason and a way to retry in Settings. Reuse the window
+  notice center and preserve the earlier choice on refusal. When a staged form brings up the close question, include the
+  pending hook write in its pending state. If it refuses while that question or its Save and Close answer owns the
+  write, stay on the agent's page with the reason and stop before sending more drafts. Leave a newer question or an
+  independently authorized page Save alone. Use the same receipt for both paths and never send the hook write twice.
+  Test the exact opt-out with plain Close before the reply, its success counterpart, and the refusal before and after
+  accepting the close question with another draft staged. Review the notice and revealed refusal in light and dark. See
+  `SPEC.md` under “Settings” and “Errors and diagnostics”. The receipt must outlive the dialog for plain Close and join
+  the close decision for staged drafts. Those paths and their test and visual evidence exceed this triage item's size
+  allowance.
+
 - **Reveal the credential editor when Save and Close fails.** Resolving a Tensorlake key conflict from the Credentials
   overview footer can leave that overview in front of a retained credential draft. Save and Close still submits the
   draft, but if the helm refuses the write, the overview offers only Resume editing credential. The reason stays in the

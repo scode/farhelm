@@ -45,9 +45,6 @@ consequences.
 - [`settings-close-can-hide-credential-delivery-warnings.md`](settings-close-can-hide-credential-delivery-warnings.md) —
   Save and Close can hide which hosts failed to receive a saved credential replacement.
 
-- [`hook-settings-close-hides-opt-out-failure.md`](hook-settings-close-hides-opt-out-failure.md) — Closing Settings
-  while an opt-out saves can hide the refusal and leave automatic hook setup active.
-
 - [`trailing-settings-trust-help-omits-agent-requested-launches.md`](trailing-settings-trust-help-omits-agent-requested-launches.md)
   — The Settings pages for Codex, Muse, Pi, and Antigravity omit that their workspace-trust switch also applies to
   agent-requested launches, which run without an approval card on Always-allow hosts.

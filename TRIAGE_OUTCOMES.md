@@ -173,27 +173,6 @@
   the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## hook-settings-close-hides-opt-out-failure.md
-
-- Outcome: `fix code`.
-- Assessment: Turning off "Set up conversation hooks on all hosts" saves at once. If you close Settings before that save
-  settles and the helm refuses it, nothing tells you; the setting stays on and later agent starts keep installing hooks.
-  Verified: confirmed by source. The close inventory lists forms and editors only (`editing.rs:251-286`) and closes at
-  once when it is empty (`:577-579`); the switch's failure lives in the dialog's own state (`hook_settings.rs:57-62`).
-  SPEC.md "Errors and diagnostics" (4944-4945): "Every failed operation surfaces a concrete, actionable error ... A
-  dialog must never close as though an operation succeeded when it failed", with named exceptions for some switches
-  (4963-4969) that do not include hook setup. Other switches without a named exception (trust switches) likely share the
-  gap; the fix shape (hold the close, or a surviving notice) is a design choice.
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code — let close wait for or surface pending switch saves (or
-  decide a spec exception per switch); size M. Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
-  maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## trailing-custom-agent-settings-close-save-silent-fail-during-delete-confirm.md
 
 - Outcome: `fix code`.
