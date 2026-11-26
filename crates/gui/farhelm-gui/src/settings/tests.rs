@@ -4342,7 +4342,8 @@ fn the_tallest_sections_last_line_clears_the_footer_scrolled_to_the_end(cx: &mut
 /// overtake it, and showed one outcome at a time. Specified: right after a done save, Send test sends one `POST
 /// /api/ntfy-alerts/test` with no body, shows "Working…" and takes the saved line away; meanwhile Save and the switch
 /// send and change nothing; the helm's refusal shows in its own words with the alert role; an edit takes that line
-/// away; with an unsaved topic typed, a refusal stays after showing Sessions and Notifications again, beside the
+/// away; with an unsaved topic typed, an attempted Save and Close stays open with a retry explanation while the
+/// test is pending. A test refusal stays after showing Sessions and Notifications again, beside the
 /// unsaved topic; a test answered with no body shows "Test alert sent" with the status role, which also stays across
 /// that switch; closing Settings with it showing (Discard in the close question) and opening it again shows no line,
 /// and Save sends the stored topic, not the unsaved one.
@@ -4408,6 +4409,16 @@ fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppC
     assert!(!drawn(cx, "ntfy-tested"), "an edit took the line away");
 
     let id = send_test(&mut helm, cx);
+    // Close cannot send this dirty form while Send test owns it. Explain the refused close before the test answers.
+    assert!(drawn(cx, "ntfy-working"));
+    assert!(drawn(cx, "settings-unsaved"));
+    keys(cx, "escape");
+    click(cx, "prompt-confirm");
+    assert_eq!(
+        label_of(cx, "settings-close-save-held").as_deref(),
+        Some(super::CLOSE_SAVE_HELD)
+    );
+    assert!(sent(&mut helm).is_empty(), "the test is the only request");
     helm.reply(id, 502, Some(json!(refusal)));
     settle(cx);
     switch_sections(cx);

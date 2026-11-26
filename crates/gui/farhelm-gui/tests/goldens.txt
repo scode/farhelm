@@ -356,6 +356,8 @@ linux/settings-checkouts-edited--dark.png 2b469c00727ca7cc77bd58e0e25b098a004674
 linux/settings-checkouts-edited--light.png 0a5f95bc4523c76433e10e08de1bd7ceb264b14a
 linux/settings-claude--dark.png a96a299452d81580a933c8f5c8c9f8a8afeb870d
 linux/settings-claude--light.png f3453c89b90c682747ccf3be8e4e147b05cc8f9f
+linux/settings-close-save-held--dark.png f1f3e3900c288f76698bda46ab8a70303b8d32ef
+linux/settings-close-save-held--light.png 4608fb1da8765584e4cced4c7320b944d3d9fa35
 linux/settings-codex--dark.png 1bf9550748767b73eb0587e00ca63fbb56010b7f
 linux/settings-codex--light.png cf911a42cb68fa3b686bd51f67d8be4928df0281
 linux/settings-containers--dark.png 302bed2b59cec3f0d98135ec12b64455db15c25e

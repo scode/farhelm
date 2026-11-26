@@ -1813,6 +1813,12 @@ static SCENES: &[Scene] = &[
         setup: settings_unsaved_setup,
     },
     Scene {
+        name: "settings-close-save-held",
+        size: (720., 560.),
+        draw: settings_edited,
+        setup: settings_close_save_held_setup,
+    },
+    Scene {
         name: "settings-app",
         size: (800., 830.),
         draw: empty,

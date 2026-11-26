@@ -68,9 +68,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`settings-close-save-stalls-silently-during-tests.md`](settings-close-save-stalls-silently-during-tests.md) — Save
-  and Close can give up without explanation while a Notifications or Tensorlake test is running.
-
 - [`settings-close-can-dismiss-a-newer-question.md`](settings-close-can-dismiss-a-newer-question.md) — A successful Save
   and Close can dismiss a newer unanswered tunnel-permission question.
 
