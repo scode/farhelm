@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [complete] `bulk-start-sessions.md` — Add bulk Restart/Replace action for marked stopped sessions
+- [landing 840c59] `bulk-start-sessions.md` — Add bulk Restart/Replace action for marked stopped sessions
 - [pending] `session-right-click-menu.md` — Open session and bulk context menus on right-click (after `bulk-start-sessions.md`)
 - [complete] `custom-agent-delete-prompt.md` — Port Settings custom-agent Delete to the shared inline confirmation prompt
 - [in-flight e425a3] `tensorlake-sandbox-key-consent.md` — Bind Settings leftover-sandbox Delete confirmation and list to the active Tensorlake key
