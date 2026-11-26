@@ -1,35 +1,50 @@
+## Since the last review
+
+The landing monitor found three issues in the first delivery. It chose to keep the YOLO question available when a host
+reports no installation identity and the answer can go back on the connection that refused the launch. A fresh launch
+must ask again after a wake or reconnect. It also asked to report a successful Restart hook save when the launch has
+changed, and to restore the exact repository suggestion alignment check.
+
+#4999 now binds the one-time answer to the original connection when the host has no installation identity. It also pins
+each edited Restart to the connection chosen at dispatch, so a reconnect the desktop has yet to see cannot redirect the
+answer. A verified answer can still follow a recognized reconnection to the same installation. #5003 shows a separate
+save acknowledgment and asks for a fresh press when the shown launch changes. #5037 verifies the repository suggestion
+panel against the field and measures the scroll viewport separately for Recent flags. #5029 was restacked with the other
+drafts. There are four draft PRs.
+
 ## What this was about
 
-A suspended sandbox or stopped container could wake after **Start YOLO session anyway** and ask the same question a
-second time. New, Clone, Replace with and Restart with now continue after wake and any checkout preparation using the
-one-time answer for the same verified installation. If the installation changes or the prepared checkout path differs,
-review the target and press Launch, Replace or Restart again. Farhelm asks for approval if the new attempt requires it.
+A suspended sandbox or stopped container could wake after **Start YOLO session anyway** and repeat the question. New,
+Clone, Replace with and Restart with can now continue after wake or a checkout preview using the one-time answer for the
+same verified installation. When an unverified host needs a wake or reconnect, the old answer stops at that boundary. On
+the same live connection, the one-time answer sends the launch as usual.
 
-Selecting Grok or Antigravity can offer to set up its Restart hook. **Set up and launch** enables that agent's hook on
-all hosts. Previously, a remembered folder could arrive during the save and become the launch destination even though
-the question had never shown it. The save now continues the launch only when the question showed a launchable setup and
-the same destination and source warning still apply. If the folder was still loading when you answered, the setting
-saves and you can press Launch once the folder is visible. An unchanged, ready-to-wake environment can still wake and
-continue. Replace with and Restart with also require the same source session and stop or replacement warning.
+When selecting Grok or Antigravity, **Set up and launch** enables the shared Restart hook setting for that agent. Future
+launches use that setting on any host. A remembered folder could arrive while that save was pending, letting the launch
+use a folder the confirmation had never shown. The answer now launches only if the draft was ready when the user
+answered and still points to the shown destination. When the save succeeds after the launch changes, the form confirms
+the save and asks for a fresh press. When the draft stays unavailable, it confirms the save and tells the user to press
+the action once the draft is ready.
 
-A saved Custom choice could look deleted while its registration list was loading or a read had failed. The Agent and
-Command tabs keep the saved ID visible and explain the current read. A retained registration from the last successful
-read can still start a session. If there is no entry, Launch waits. Once a successful list confirms deletion, choose a
-different registration on Agent or choose Custom on Command to keep running the saved command.
+The launcher could report a saved Custom agent as deleted while its registration list was loading or a read had failed.
+The Agent and Command tabs now keep the saved ID visible and explain the wait or failure. A retained entry from a
+successful read remains usable, and only a successful list that omits the ID produces deletion advice. Restart with can
+keep the required conversation field available while the registration is unread.
 
-Recent setups with identical summaries can carry different Custom approval flags. Keyboard users could reach Enter
-without seeing which arguments the selected setup would use. Both layouts now show the complete saved arguments below
-the results, with the compact wrapper summary in the row.
+Keyboard users can now read the full Custom approval flags for the highlighted Recent setup before Enter. Both launcher
+layouts keep those arguments below the scrolling results. Page Up and Page Down scroll long flags without moving focus
+or choosing another setup.
 
 ## Things you should know
 
-A saved resume command can open Restart with while the registration is unread. The form explains the wait and lets you
-enter a required conversation ID. Restart becomes available when a usable registration supports resumption and the
-normal restart checks pass. Confirmed deletion or loss of resume support rules out that restart.
+Edited Restart requests use the same connection check as Create and Replace with. Plain Restart continues to relaunch
+the session's saved choice. After a visible and verified same-installation reconnect, the edited retry uses the new
+connection and the original answer. A connection change that happens before the desktop can see it requires the user to
+review the launch again.
 
-The maintainer chose the pinned, non-focusing detail for Recent. A bounded text area keeps long flag lists from taking
-the results' space. Page Up and Page Down reveal the final arguments before Enter while keeping the command field
-focused and the same setup highlighted.
+The repository suggestion panel was already aligned with the input. The width test had followed the scrolling rows when
+the panel's border moved into an outer element. The test now measures the painted panel, and the Recent flags test
+measures the rows separately. Both keep their original geometric expectations.
 
 ## Open questions and possible follow-ups
 
@@ -44,36 +59,31 @@ None.
 
 ## Checks run, reused and skipped
 
-- Recorded `cargo nextest run --locked -p farhelm-gui --lib -E <selection>` with four slots and no retries. The launch,
-  YOLO, wake, checkout, sandbox, Replace, Restart and environment launch modules passed 186 tests for the consent layer
-  (`94b3ccf4-a9ee-4038-aa65-038cae45b302` on `bb22690a`). Hook setup cases and the folder-default, wake, Replace and
-  Restart modules passed 81 (`34892528-cbff-4a08-b9fb-9c6c1b2739c0` on `3b38fb86`). Later rebases preserved their
-  dispatch, source and destination checks. YOLO, wake, folder defaults, search and hook setup passed 91 on the rebased
-  command surface (`5cd2166f-c491-48f2-a3e1-03d3c56fc9f6` on `fb81f695`).
-- Recent, search and folder-list checks passed all 94 cases on `e78c87d9` (recorder
-  `ba9f2e27-a2e6-4e94-9d5d-d875208cd7e7`). The final run also verifies the strengthened scroll reset assertion.
-- After integrating main's typed Restart hook wording, 64 selected GUI tests passed on `5bd7d1dd` (recorder
-  `b74077a2-173d-4bda-8d91-50285a9926c5`). This covers Restart with, both missing-registration tabs, the two hook
-  history cases, both Recent paging and selection paths, and existing dialog scrolling. The following changes listed the
-  new scenes in the screenshot batch index.
-- Reviewed and published 16 new Linux references in light and dark across both registration tabs and both Recent
-  layouts. `python3 scripts/check-gui-goldens.py --update --jobs 4 -j 4` rendered 572 images and matched all existing
-  references on `3af8fe37` (`c3abcee1-10e8-4d5f-8b7d-14c51d298588`). The same runner in compare mode matched 24
-  published images on `77a1ecc6` (`73d028c3-60eb-487f-91e8-a103af7f05d6`), selecting registration, Recent flags, Custom
-  restart, YOLO and hook setup scenes.
-- `python3 -B scripts/test-gui-screenshot-batch.py` passed all 47 cases at the registration layer
-  (`0fc7e8c9-59b2-4f63-b72d-88b369e0a4b8`) and the final tip (`6bbbc555-8b4c-4b4b-aeef-054393612737`). The earlier
-  failure identified scene names missing from the index after publication. The first registration render stalled when a
-  headless press repeatedly preceded presentation. The fixture now presents the frame and presses once. The passing
-  capture runs use a deadline.
-- Rust formatting, Markdown and scene-index formatting, test-delay lint, changelog format and whitespace checks passed.
-  `cargo clippy --locked -p farhelm-gui --lib --tests -- -D warnings` passed on `77a1ecc6`.
-- The native macOS and full workspace suites were skipped. The Linux GUI tests, the fake helm's request and refusal
-  witnesses, and both rendered themes cover this launcher change.
+- The recorded `cargo nextest run --locked -p farhelm-gui -p farhelm-helm --lib -E <selection>` on `bf8f55c5` passed all
+  189 tests (run `f133b639-343b-40a0-9f1b-73a2fa9b85b7`). It covered same-connection and verified-wake answers, stale
+  restart routing, checkout alignment, narrow and wide Recent flags, hook setup, and folder history. The final
+  hook-state amendment affects the hook acknowledgment only.
+- The exact repository alignment test via recorded `cargo nextest run --locked -p farhelm-gui --lib -E <test>` (run
+  `19b70985-514e-4783-9dd9-8be2be79e0b4`) showed the scrolling rows starting one pixel inside the painted border. The
+  intermediate run `a52efe0e-2657-43d7-bbc3-9ece50aafebe` passed 187 of 188 cases and identified the Recent viewport
+  measurement in the same bounds marker. The subsequent passing run covers both assertions.
+- `cargo clippy --locked -p farhelm-gui -p farhelm-helm --lib --tests -- -D warnings` passed at `8b571d8c`. Cargo and
+  Markdown formatting, changelog format, test-delay and whitespace checks passed. The instructions checker passed with a
+  pre-existing archive warning.
+- The final recorded `cargo nextest run --locked -p farhelm-gui --lib -E <selection>` passed 30 tests on `8b571d8c` (run
+  `f5ae9e40-d1b6-4e32-a398-43e04f7b0eed`). This reran the actual folder edit during the setup write and the adjacent
+  custom-registration checks after moving the save acknowledgment to its own state.
+- Recorded `python3 scripts/check-gui-goldens.py --render-timeout 150 --scene <selection>` matched the published light
+  and dark references for nine YOLO, wake, hook prompt, checkout and Recent scenes at `8b571d8c` (run
+  `1280ecf6-8427-4664-be04-b829196f5566`). The new acknowledgment after a save is covered by the rendered GUI test.
+- The delivery rebase added main's recipe-title and channel changes and the adjacent explanation of checkout preview
+  waits. The stack's patches kept their behavior. The tested launcher tree and edited Restart routing still apply.
+- The 16 registration and Recent references published during the first delivery still cover those rendering changes. The
+  native macOS and full workspace suites were skipped in favor of the focused Linux GUI, helm routing and appearance
+  checks for this round.
 
 ## Review gate
 
-Each PR received an independent GPT-6.2 Sol high source review. Rechecks covered consent across wake and checkout
-preparation, the destination and source checks for hook setup, retained registration wording and tests, and reading long
-Recent flags without changing focus. A scope review kept keyboard paging local to the launcher by reusing the existing
-scroll behavior. The final Restart with rebase was also rechecked.
+Independent GPT-6.2 Sol high source rechecks cleared the three revised PRs. The rechecks led to pinning every edited
+Restart dispatch, keeping the successful hook-save status separate from other notices, and distinguishing panel and
+viewport bounds in the tests. The registration layer has its original source review and an adjacent merge recheck.
