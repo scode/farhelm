@@ -86,7 +86,7 @@ use gpui::{
 };
 use gpui_component::Root;
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 // The scene functions `SCENES` names, the only items the area files make `pub(super)`.
@@ -2255,8 +2255,13 @@ impl GoldenRun {
         })
     }
 
-    /// Keep comparison failures next to each other without writing an image for a passing comparison.
-    fn check(&self, name: &str, screenshot: &image::RgbaImage) -> anyhow::Result<()> {
+    /// Record the completed comparison or update without writing an image for a matching reference.
+    /// An output error means the renderer could not finish the requested appearance.
+    fn check(
+        &self,
+        name: &str,
+        screenshot: &image::RgbaImage,
+    ) -> anyhow::Result<changes::RenderOutcome> {
         use anyhow::Context as _;
 
         let os = std::env::consts::OS;
@@ -2272,28 +2277,32 @@ impl GoldenRun {
                 .with_context(|| format!("write {}", capture.display()))
         };
         let Self::Compare { references, .. } = self else {
-            return save();
+            save()?;
+            return Ok(changes::RenderOutcome::Rendered);
         };
         let reference = references.join(os).join(name);
-        let (problem, expected) =
-            match image::open(&reference).map(|expected| expected.into_rgba8()) {
-                Ok(expected) if &expected == screenshot => return Ok(()),
-                Ok(expected) => (
-                    format!("differs from {}", reference.display()),
-                    Some(expected),
-                ),
-                Err(error) => (
-                    format!("could not read {}: {error}", reference.display()),
-                    None,
-                ),
-            };
+        let (problem, expected) = match image::open(&reference)
+            .map(|expected| expected.into_rgba8())
+        {
+            Ok(expected) if &expected == screenshot => return Ok(changes::RenderOutcome::Matched),
+            Ok(expected) => (
+                format!("differs from {}", reference.display()),
+                Some(expected),
+            ),
+            Err(error) => (
+                format!("could not read {}: {error}", reference.display()),
+                None,
+            ),
+        };
         save().with_context(|| problem.clone())?;
         if let Err(error) =
             changes::write(&directory.join("review"), &capture, expected, screenshot)
         {
             eprintln!("could not make a pixel review for {name}: {error:#}");
         }
-        anyhow::bail!("{problem} (capture in {})", capture.display());
+        Ok(changes::RenderOutcome::Different {
+            reason: format!("{problem} (capture in {})", capture.display()),
+        })
     }
 }
 
@@ -2406,6 +2415,7 @@ fn selected_scenes() -> anyhow::Result<Vec<&'static Scene>> {
 #[ignore = "needs the headless renderer selected; run scripts/check-gui-goldens.py"]
 fn component_goldens() -> anyhow::Result<()> {
     let run = GoldenRun::from_env()?;
+    let outcomes = std::env::var_os("FARHELM_GOLDEN_OUTCOMES_DIR").map(PathBuf::from);
     let mut failures = Vec::new();
     for scene in selected_scenes()? {
         for (appearance, preference) in [("light", Preference::Light), ("dark", Preference::Dark)] {
@@ -2417,8 +2427,16 @@ fn component_goldens() -> anyhow::Result<()> {
                 catch_render_panic(|| render_capture(&mut cx, scene, preference))
             })
             .and_then(|screenshot| run.check(&name, &screenshot));
-            if let Err(error) = result {
-                failures.push(format!("{name}: {error:#}"));
+            let outcome = result.unwrap_or_else(|error| changes::RenderOutcome::Failed {
+                reason: format!("{error:#}"),
+            });
+            if let Some(reason) = outcome.problem() {
+                failures.push(format!("{name}: {reason}"));
+            }
+            if let Some(directory) = &outcomes
+                && let Err(error) = changes::write_outcome(directory, Path::new(&name), &outcome)
+            {
+                failures.push(format!("{name}: could not write render outcome: {error:#}"));
             }
         }
     }

@@ -176,8 +176,9 @@ second clippy run on floating stable is needed.
   full comparison and the runner's default of four processes (capped at available CPUs). While iterating on a particular
   view, use `--scene PATTERN` (repeatable). `--jobs 1` runs only one renderer process.
 - `python3 -B scripts/test-check-gui-goldens.py` (private comparison outputs, the update lock, focused update isolation,
-  render completeness and cancellation against a stand-in, and the changes page's native review requests. The GUI unit
-  tests cover the native highlight and resize calculations.)
+  render completeness and cancellation against a stand-in, missing and failed appearances on the changes page with or
+  without differences, and the page's native review requests. The GUI unit tests cover the native highlight and resize
+  calculations.)
 - `python3 -B scripts/gui-goldens.py --self-test` (fetching and publishing the golden references)
 - `python3 -B scripts/test-gui-agent.py` (including the bounded automatic parking report and retained rejection frames),
   and one end-to-end run of the GPUI app harness from `.agents/validation.md` (`scripts/gui-agent.py <run dir> start`, a

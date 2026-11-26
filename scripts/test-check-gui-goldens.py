@@ -89,6 +89,19 @@ class GoldenRunnerTests(unittest.TestCase):
         for name in json.loads(env["FARHELM_GOLDEN_SCENES"]):
             (dest / f"{name}--light.png").touch()
             (dest / f"{name}--dark.png").touch()
+        GoldenRunnerTests.record_selected(env, "rendered")
+
+    @staticmethod
+    def record_selected(env, status, overrides=None):
+        """Supply the same appearance receipts as the real renderer. An override of None means no receipt."""
+        outcomes = Path(env["FARHELM_GOLDEN_OUTCOMES_DIR"])
+        fallback = {"status": status}
+        for name in json.loads(env["FARHELM_GOLDEN_SCENES"]):
+            for appearance in ("light", "dark"):
+                stem = f"{name}--{appearance}"
+                record = (overrides or {}).get(stem, fallback)
+                if record is not None:
+                    (outcomes / f"{stem}.json").write_text(json.dumps(record), encoding="utf-8")
 
     @staticmethod
     def picture(root, name, pixels, width=2):
@@ -131,6 +144,14 @@ class GoldenRunnerTests(unittest.TestCase):
             self.picture(dest, original.name, after)
             self.picture(dest, second.name, after)
             self.picture(dest, "launcher-new--dark.png", after)
+            different = {"status": "different"}
+            self.record_selected(env, "matched", {
+                original.stem: different,
+                second.stem: different,
+                "launcher-new--dark": different,
+                "launcher-new--light": None,
+                "first--dark": {"status": "failed", "reason": "fixture <lost>"},
+            })
             for reference in (original, second):
                 self.review(dest / PLATFORM / "review", reference.stem, (2, 1), (2, 1), 1)
             return subprocess.CompletedProcess(command, 101)
@@ -138,6 +159,9 @@ class GoldenRunnerTests(unittest.TestCase):
         self.assertEqual(self.run_suite(render, update=False), 101)
         self.assertEqual(sys.stdout.getvalue().splitlines()[-1], f"golden changes page: {self.page}")
         page = self.page.read_text(encoding="utf-8")
+        self.assertIn("Missing or failed renders", page)
+        self.assertIn("<code>launcher-new</code> <span>· light</span> · Missing render", page)
+        self.assertIn("<code>first</code> <span>· dark</span> · Render failed: fixture &lt;lost&gt;", page)
         self.assertIn("<code>first</code> <span>· light</span>", page)
         self.assertIn("<code>launcher-new</code> <span>· dark</span>", page)
         self.assertIn("New scene", page)
@@ -155,8 +179,28 @@ class GoldenRunnerTests(unittest.TestCase):
                          (2, 1, bytes((30, 40, 50, 255, 255, 104, 42, 255))))
         self.assertEqual(read_rgba(self.page.parent / "launcher-search--dark-diff.png"),
                          (2, 1, bytes((30, 40, 50, 255, 255, 104, 42, 255))))
-        self.assertEqual(self.run_suite(lambda command, **_: subprocess.CompletedProcess(command, 0), update=False), 0)
+        def match(command, *, env, **_):
+            self.record_selected(env, "matched")
+            return subprocess.CompletedProcess(command, 0)
+
+        self.assertEqual(self.run_suite(match, update=False), 0)
         self.assertFalse(self.page.parent.exists())
+
+    def test_zero_exit_with_one_missing_comparison_marks_an_incomplete_run(self):
+        """Matching images are discarded, so only the receipts can expose the appearance the worker skipped."""
+        outputs = []
+
+        def render(command, *, env, **_):
+            outputs.append(Path(env["FARHELM_GOLDEN_CAPTURE_DIR"]).parent)
+            self.record_selected(env, "matched", {"first--dark": None})
+            return subprocess.CompletedProcess(command, 0)
+
+        self.assertEqual(self.run_suite(render, update=False, patterns=["first"]), 1)
+        self.assertTrue(outputs[0].is_dir())
+        self.assertEqual({p.name for p in self.page.parent.iterdir()}, {"index.html"})
+        page = self.page.read_text(encoding="utf-8")
+        self.assertIn("<code>first</code> <span>· dark</span> · Missing render", page)
+        self.assertNotIn("· light", page)
 
     def test_update_filters_identical_pictures_and_keeps_working_without_the_store(self):
         """An offline update can distinguish changed references from new scenes and still certify a full capture."""
@@ -172,6 +216,7 @@ class GoldenRunnerTests(unittest.TestCase):
             for name in json.loads(env["FARHELM_GOLDEN_SCENES"]):
                 self.picture(dest, f"{name}--light.png", changed if name == "first" else original)
                 self.picture(dest, f"{name}--dark.png", original)
+            self.record_selected(env, "rendered")
             return subprocess.CompletedProcess(command, 0)
 
         self.assertEqual(self.run_suite(render, patterns=["last"]), 0)
@@ -212,6 +257,7 @@ class GoldenRunnerTests(unittest.TestCase):
             if "goldens::component_goldens" in command:
                 for before in (light, dark):
                     self.picture(Path(env["FARHELM_UPDATE_GOLDENS"]), before.name, bytes((1, 2, 3, 255) * 2))
+                self.record_selected(env, "rendered")
                 return subprocess.CompletedProcess(command, 0)
             self.assertIn("goldens::changes::review_pairs", command)
             request = Path(env["FARHELM_GOLDEN_DIFF_BATCH"])
@@ -251,6 +297,7 @@ class GoldenRunnerTests(unittest.TestCase):
             dest = Path(env["FARHELM_UPDATE_GOLDENS"])
             for appearance in ("light", "dark"):
                 self.picture(dest, f"first--{appearance}.png", bytes((4, 5, 6, 255) * 2))
+            self.record_selected(env, "rendered")
             return subprocess.CompletedProcess(command, 0)
 
         self.assertEqual(self.run_suite(render, patterns=["first"], base={"FARHELM_GOLDENS_DIR": str(self.references)}),
@@ -267,12 +314,16 @@ class GoldenRunnerTests(unittest.TestCase):
     def test_update_keeps_the_manifest_baseline_when_the_live_file_moves(self):
         """A capture matching a newer checkout manifest was still a change against the run's baseline."""
         original = self.picture(self.references, "first--light.png", bytes((1, 2, 3, 255) * 2))
-        self.manifest_for(original)
+        dark = self.picture(self.references, "first--dark.png", bytes((1, 2, 3, 255) * 2))
+        self.manifest_for(original, dark)
         digest = self.tool.manifest_digest(self.tool.MANIFEST)
 
         def render(command, *, env, **_):
-            current = self.picture(Path(env["FARHELM_UPDATE_GOLDENS"]), original.name, bytes((4, 5, 6, 255) * 2))
-            self.manifest_for(current)
+            dest = Path(env["FARHELM_UPDATE_GOLDENS"])
+            current = self.picture(dest, original.name, bytes((4, 5, 6, 255) * 2))
+            current_dark = self.picture(dest, dark.name, bytes((1, 2, 3, 255) * 2))
+            self.record_selected(env, "rendered")
+            self.manifest_for(current, current_dark)
             return subprocess.CompletedProcess(command, 0)
 
         self.assertEqual(self.run_suite(render, patterns=["first"]), 0)
@@ -292,6 +343,23 @@ class GoldenRunnerTests(unittest.TestCase):
             self.assertEqual(self.run_suite(render), 128 + signal.SIGTERM)
         report.assert_not_called()
         self.assertFalse(self.marker.exists())
+
+    def test_cancelled_comparison_keeps_receipts_without_generating_a_page(self):
+        """A matched appearance leaves only its receipt, which survives cancellation along with the run."""
+        outputs = []
+
+        def render(command, *, env, **_):
+            outputs.append(Path(env["FARHELM_GOLDEN_CAPTURE_DIR"]).parent)
+            self.record_selected(env, "matched", {"first--dark": None})
+            return subprocess.CompletedProcess(command, 128 + signal.SIGTERM)
+
+        with mock.patch.object(runner.golden_changes_page, "report") as report:
+            self.assertEqual(self.run_suite(render, update=False, patterns=["first"]), 128 + signal.SIGTERM)
+        report.assert_not_called()
+        retained = outputs[0] / "outcomes"
+        self.assertEqual({file.name for file in retained.iterdir()}, {"first--light.json"})
+        self.assertEqual(json.loads((retained / "first--light.json").read_text(encoding="utf-8")),
+                         {"status": "matched"})
 
     def test_cancelling_the_review_keeps_a_full_update_unpublishable(self):
         """An operator stopping the review gets a cancellation even if the renderer wrote all expected files."""
@@ -330,6 +398,7 @@ class GoldenRunnerTests(unittest.TestCase):
             review = captures / PLATFORM / "review"
             review.mkdir()
             (review / f"{ref.stem}.json").write_text("null", encoding="utf-8")
+            self.record_selected(env, "matched", {ref.stem: {"status": "different"}})
             return subprocess.CompletedProcess(command, 101)
 
         self.assertEqual(self.run_suite(render, update=False), 101)
@@ -388,6 +457,7 @@ class GoldenRunnerTests(unittest.TestCase):
             dest = Path(env["FARHELM_UPDATE_GOLDENS"]) / PLATFORM
             dest.mkdir()
             (dest / "first--light.png").touch()
+            self.record_selected(env, "rendered")
             return subprocess.CompletedProcess(command, 101)
 
         self.assertEqual(self.run_suite(render), 101)
@@ -398,6 +468,39 @@ class GoldenRunnerTests(unittest.TestCase):
         """A libtest command that selects no tests cannot publish an empty golden set."""
         self.assertEqual(self.run_suite(lambda command, **_: subprocess.CompletedProcess(command, 0)), 1)
         self.assertFalse(self.marker.exists())
+        self.assertIn("Missing or failed renders", self.page.read_text(encoding="utf-8"))
+
+    def test_zero_exit_with_one_missing_selected_capture_fails(self):
+        """A receipt without its PNG cannot certify a selected update, even when comparison finds no difference."""
+        light = self.picture(self.references, "first--light.png", bytes((1, 2, 3, 255) * 2))
+        self.manifest_for(light)
+
+        def render(command, *, env, **_):
+            self.record_selected(env, "rendered")
+            self.picture(Path(env["FARHELM_UPDATE_GOLDENS"]), light.name, bytes((1, 2, 3, 255) * 2))
+            return subprocess.CompletedProcess(command, 0)
+
+        self.assertEqual(self.run_suite(render, patterns=["first"]), 1)
+        self.assertEqual({p.name for p in self.page.parent.iterdir()}, {"index.html"})
+        page = self.page.read_text(encoding="utf-8")
+        self.assertIn("<code>first</code> <span>· dark</span> · Missing capture after render", page)
+        self.assertFalse((self.focused / self.marker.name).exists())
+
+    def test_zero_exit_and_all_pictures_cannot_certify_a_failed_appearance(self):
+        """Even a complete set of PNG names is suspect when the renderer reports a failure writing one of them."""
+        def render(command, *, env, **_):
+            self.write_selected(env)
+            self.record_selected(env, "rendered", {
+                "first--dark": {"status": "failed", "reason": "write failed"},
+            })
+            return subprocess.CompletedProcess(command, 0)
+
+        self.assertEqual(self.run_suite(render), 1)
+        self.assertEqual(len(list((self.tool.CAPTURES / PLATFORM).glob("*.png"))), 2 * len(self.names))
+        self.assertFalse(self.marker.exists())
+        self.assertIn("<code>first</code> <span>· dark</span> · Render failed: write failed",
+                      self.page.read_text(encoding="utf-8"))
+        self.assertFalse((self.page.parent / "first--dark-capture.png").exists())
 
     def test_matching_the_count_with_wrong_names_cannot_certify_an_update(self):
         """A full update needs each expected appearance. Its count alone can conceal a missing picture."""
@@ -426,7 +529,9 @@ class GoldenRunnerTests(unittest.TestCase):
             if len(outputs) == 1:
                 (dest / PLATFORM).mkdir(parents=True)
                 (dest / PLATFORM / "first--light.png").touch()
+                self.record_selected(env, "matched", {"first--light": {"status": "different"}})
                 return subprocess.CompletedProcess(command, 101)
+            self.record_selected(env, "matched")
             return subprocess.CompletedProcess(command, 0)
 
         self.assertEqual(self.run_suite(render, update=False, patterns=["first"]), 101)
@@ -448,6 +553,7 @@ class GoldenRunnerTests(unittest.TestCase):
         def render(command, *, cwd, env, pass_fds):
             self.assertEqual(Path(env["FARHELM_GOLDENS_DIR"]), fetched[-1])
             self.assertEqual(Path(env["FARHELM_GOLDEN_CAPTURE_DIR"]).parent, fetched[-1].parent)
+            self.record_selected(env, "matched")
             return subprocess.CompletedProcess(command, 101 if len(fetched) == 1 else 0)
 
         self.tool.fetch = fetch
@@ -502,7 +608,7 @@ class GoldenRunnerTests(unittest.TestCase):
     def test_a_killed_worker_leaves_other_outputs_unpublishable(self):
         """Actual concurrent children reach a shared readiness boundary before one is killed.
 
-        All expected PNG names exist. Even that set cannot certify a full update if one of its renderers was killed.
+        All expected PNG names and receipts are complete. That set cannot certify an update if a worker was killed.
         Each job's captured output is still readable and carries the killed child's signal.
         """
         binary = self.tool.WORK / "fake-renderer"
@@ -516,6 +622,7 @@ class GoldenRunnerTests(unittest.TestCase):
             from pathlib import Path
 
             captures = Path(os.environ["FARHELM_UPDATE_GOLDENS"])
+            outcomes = Path(os.environ["FARHELM_GOLDEN_OUTCOMES_DIR"])
             names = json.loads(os.environ["FARHELM_GOLDEN_SCENES"])
             print(f"ready {names[0]}", flush=True)
             (captures.parent / (names[0] + ".ready")).touch()
@@ -530,7 +637,9 @@ class GoldenRunnerTests(unittest.TestCase):
             dest.mkdir(exist_ok=True)
             for name in names:
                 for appearance in ("light", "dark"):
-                    (dest / f"{name}--{appearance}.png").touch()
+                    stem = f"{name}--{appearance}"
+                    (dest / f"{stem}.png").touch()
+                    (outcomes / f"{stem}.json").write_text(json.dumps({"status": "rendered"}))
             if names[0] == "first":
                 os.kill(os.getpid(), signal.SIGKILL)
             """), encoding="utf-8")
@@ -550,6 +659,7 @@ class GoldenRunnerTests(unittest.TestCase):
             {file.name for file in (self.tool.CAPTURES / PLATFORM).iterdir()},
             {f"{name}--{appearance}.png" for name in self.names for appearance in ("light", "dark")},
         )
+        self.assertNotIn("incomplete golden render", sys.stderr.getvalue())
         self.assertFalse(self.marker.exists())
 
     def test_term_during_spawn_keeps_the_returned_worker_owned(self):

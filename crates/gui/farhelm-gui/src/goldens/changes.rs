@@ -19,6 +19,43 @@ struct Review {
     pixels: Option<usize>,
 }
 
+/// An independent receipt for one requested appearance. Compare can produce a difference and still have rendered
+/// successfully. Update stops after saving an image and leaves the comparison to the Python runner.
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub(super) enum RenderOutcome {
+    Matched,
+    Different { reason: String },
+    Rendered,
+    Failed { reason: String },
+}
+
+impl RenderOutcome {
+    /// Preserve the libtest failure summary for differences and errors, separately from the coverage receipts.
+    pub(super) fn problem(&self) -> Option<&str> {
+        match self {
+            Self::Different { reason } | Self::Failed { reason } => Some(reason),
+            Self::Matched | Self::Rendered => None,
+        }
+    }
+}
+
+/// Workers receive disjoint scene names. A final filename becomes readable only after the receipt is complete, so
+/// interruption leaves that appearance missing rather than publishing part of a record.
+pub(super) fn write_outcome(
+    directory: &Path,
+    picture: &Path,
+    outcome: &RenderOutcome,
+) -> anyhow::Result<()> {
+    let stem = picture
+        .file_stem()
+        .context("outcome picture has no file stem")?;
+    let temporary = directory.join(stem).with_extension("tmp");
+    fs::write(&temporary, serde_json::to_vec(outcome)?)?;
+    fs::rename(temporary, directory.join(stem).with_extension("json"))?;
+    Ok(())
+}
+
 /// An opaque marker makes alpha-only differences visible. Reuse the old pixel storage for the highlighted copy.
 fn review(mut reference: RgbaImage, capture: &RgbaImage) -> (Review, Option<RgbaImage>) {
     let mut info = Review {
