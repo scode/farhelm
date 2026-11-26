@@ -26,6 +26,16 @@ pub(crate) const FILE_LIST_MIME_TYPE: &str = "text/uri-list";
 /// Text mime types that we'll accept from other programs.
 pub(crate) const ALLOWED_TEXT_MIME_TYPES: [&str; 2] = ["text/plain;charset=utf-8", "UTF8_STRING"];
 
+/// Which flavors an async read asks another program's selection for, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadOrder {
+    /// A text field's paste (`read_from_clipboard_async`): text, then an image, as the synchronous read used to ask.
+    Text,
+    /// A paste that can take files or an image (`read_from_clipboard_payload_async`): local files, then an image, then
+    /// text, so a file manager's copy attaches its files rather than typing their paths.
+    Payload,
+}
+
 pub(crate) struct Clipboard {
     connection: Connection,
     loop_handle: LoopHandle<'static, ()>,
@@ -36,7 +46,6 @@ pub(crate) struct Clipboard {
     primary_contents: Option<ClipboardItem>,
 
     // External clipboard
-    cached_read: Option<ClipboardItem>,
     current_offer: Option<DataOffer<WlDataOffer>>,
     /// Selection events can supersede a proxy that is still alive in the compositor.
     offer_generation: Rc<Cell<u64>>,
@@ -110,6 +119,7 @@ mod attachment_clipboard_tests {
     fn attachment_clipboard_prefers_local_files_from_a_mixed_list() {
         let offer = offer_with(&["text/plain", "image/png", FILE_LIST_MIME_TYPE]);
         let item = smol::block_on(offer.read_payload(
+            ReadOrder::Payload,
             || true,
             |mime, format| {
                 assert_eq!(mime, FILE_LIST_MIME_TYPE);
@@ -154,6 +164,7 @@ mod attachment_clipboard_tests {
             let offer = offer_with(&mimes);
             let mut requested = Vec::new();
             let item = smol::block_on(offer.read_payload(
+                ReadOrder::Payload,
                 || true,
                 |mime, format| {
                     requested.push(mime.to_owned());
@@ -192,6 +203,7 @@ mod attachment_clipboard_tests {
         let live = Cell::new(true);
         let mut requested = Vec::new();
         let result = smol::block_on(offer.read_payload(
+            ReadOrder::Payload,
             || live.get(),
             |mime, _| {
                 requested.push(mime.to_owned());
@@ -203,6 +215,7 @@ mod attachment_clipboard_tests {
         assert_eq!(requested, [FILE_LIST_MIME_TYPE]);
 
         let result = smol::block_on(offer.read_payload(
+            ReadOrder::Payload,
             || live.get(),
             |_, _| panic!("an expired offer cannot receive"),
         ));
@@ -214,6 +227,7 @@ mod attachment_clipboard_tests {
     fn attachment_clipboard_does_not_fall_back_after_a_pipe_error() {
         let offer = offer_with(&[FILE_LIST_MIME_TYPE, "text/plain"]);
         let result = smol::block_on(offer.read_payload(
+            ReadOrder::Payload,
             || true,
             |mime, _| {
                 assert_eq!(mime, FILE_LIST_MIME_TYPE);
@@ -224,6 +238,117 @@ mod attachment_clipboard_tests {
             result,
             Err(ClipboardReadError::UnsupportedContent)
         ));
+    }
+
+    /// Why this matters: a text field pastes only text, and its paste on Wayland now always takes the async read.
+    /// If that read kept the terminal's order, copying a file in a file manager or an image with a caption in a
+    /// browser would paste nothing into a field, though the clipboard holds text, where the old synchronous read
+    /// pasted the text.
+    ///
+    /// Specification: the text read asks a mixed offer for its text flavor first and only for that (whatever order
+    /// the producer listed its flavors in, and with a file list, an image or both beside it), and hands back the
+    /// text with CRLF made LF; an offer with no text flavor is asked for its image; one with only a file list is
+    /// asked for nothing.
+    #[test]
+    fn attachment_clipboard_text_read_takes_text_from_a_mixed_offer() {
+        for mimes in [
+            vec!["image/png", "text/plain;charset=utf-8"],
+            vec!["text/plain;charset=utf-8", "image/png"],
+            vec![FILE_LIST_MIME_TYPE, "text/plain;charset=utf-8"],
+            vec![
+                FILE_LIST_MIME_TYPE,
+                "image/png",
+                "UTF8_STRING",
+                "text/plain",
+            ],
+        ] {
+            let offer = offer_with(&mimes);
+            let mut requested = Vec::new();
+            let item = smol::block_on(offer.read_payload(
+                ReadOrder::Text,
+                || true,
+                |mime, format| {
+                    requested.push(mime.to_owned());
+                    Task::ready(decode_payload(b"fix\r\nbug".to_vec(), false, format))
+                },
+            ))
+            .unwrap()
+            .unwrap();
+            let text = if mimes.contains(&"UTF8_STRING") {
+                "UTF8_STRING"
+            } else {
+                "text/plain;charset=utf-8"
+            };
+            assert_eq!(requested, [text], "{mimes:?}: only the text flavor");
+            assert_eq!(item.text().as_deref(), Some("fix\nbug"), "{mimes:?}");
+        }
+
+        let offer = offer_with(&[FILE_LIST_MIME_TYPE, "image/png"]);
+        let mut requested = Vec::new();
+        let item = smol::block_on(offer.read_payload(
+            ReadOrder::Text,
+            || true,
+            |mime, format| {
+                requested.push(mime.to_owned());
+                Task::ready(decode_payload(b"image".to_vec(), false, format))
+            },
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            requested,
+            ["image/png"],
+            "no text: the image, never the list"
+        );
+        assert!(matches!(
+            item.entries.as_slice(),
+            [ClipboardEntry::Image(_)]
+        ));
+
+        let offer = offer_with(&[FILE_LIST_MIME_TYPE]);
+        let result = smol::block_on(offer.read_payload(
+            ReadOrder::Text,
+            || true,
+            |_, _| panic!("a file list alone has nothing for a text field"),
+        ));
+        assert!(result.unwrap().is_none());
+    }
+
+    /// Why this matters: the terminal's paste keeps its own order on the new payload read. Pinned beside the text
+    /// read's test so that the two orders cannot quietly become one.
+    ///
+    /// Specification: on an offer listing text, an image and a file list, the payload read asks for the file list
+    /// first, and after an empty list for the image, never the text; its text, when text is all there is, keeps its
+    /// CRLF line endings, which the terminal's paste leaves to the supervisor.
+    #[test]
+    fn attachment_clipboard_payload_read_keeps_files_then_image_then_text() {
+        let offer = offer_with(&["text/plain;charset=utf-8", "image/png", FILE_LIST_MIME_TYPE]);
+        let mut requested = Vec::new();
+        smol::block_on(offer.read_payload(
+            ReadOrder::Payload,
+            || true,
+            |mime, format| {
+                requested.push(mime.to_owned());
+                Task::ready(decode_payload(
+                    b"https://example.org/\n".to_vec(),
+                    mime == FILE_LIST_MIME_TYPE,
+                    format,
+                ))
+            },
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(requested, [FILE_LIST_MIME_TYPE, "image/png"]);
+
+        let offer = offer_with(&["text/plain;charset=utf-8"]);
+        let item = smol::block_on(offer.read_payload(
+            ReadOrder::Payload,
+            || true,
+            |_, format| Task::ready(decode_payload(b"a\r\nb".to_vec(), false, format)),
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(item.text().as_deref(), Some("a\r\nb"));
     }
 }
 
@@ -266,17 +391,18 @@ impl<T: ReceiveData> DataOffer<T> {
         self.mime_types.iter().any(|t| t == mime_type)
     }
 
-    /// The async fallback prefers images over text and requests the exact offered MIME, including aliases.
-    fn payload_mime_type(&self) -> Option<(&str, Option<ImageFormat>)> {
-        for format in ImageFormat::iter() {
-            if let Some(mime) = self
-                .mime_types
+    /// The offered image flavor, as the exact offered MIME (including legacy aliases) and its format.
+    fn image_mime_type(&self) -> Option<(&str, Option<ImageFormat>)> {
+        ImageFormat::iter().find_map(|format| {
+            self.mime_types
                 .iter()
                 .find(|mime| ImageFormat::from_mime_type(mime) == Some(format))
-            {
-                return Some((mime, Some(format)));
-            }
-        }
+                .map(|mime| (mime.as_str(), Some(format)))
+        })
+    }
+
+    /// The offered text flavor, in [`TEXT_MIME_TYPES`]' order of preference.
+    fn text_mime_type(&self) -> Option<(&str, Option<ImageFormat>)> {
         TEXT_MIME_TYPES.iter().find_map(|preferred| {
             self.mime_types
                 .iter()
@@ -285,20 +411,40 @@ impl<T: ReceiveData> DataOffer<T> {
         })
     }
 
+    /// The payload read's flavor after files: an image over text, requested as the exact offered MIME.
+    fn payload_mime_type(&self) -> Option<(&str, Option<ImageFormat>)> {
+        self.image_mime_type().or_else(|| self.text_mime_type())
+    }
+
+    /// The flavors `order` asks this offer for, in turn. Only an empty file list moves on to the next one.
+    fn flavors(&self, order: ReadOrder) -> Vec<(&str, Option<ImageFormat>)> {
+        match order {
+            ReadOrder::Text => self
+                .text_mime_type()
+                .into_iter()
+                .chain(self.image_mime_type())
+                .collect(),
+            ReadOrder::Payload => self
+                .has_mime_type(FILE_LIST_MIME_TYPE)
+                .then_some((FILE_LIST_MIME_TYPE, None))
+                .into_iter()
+                .chain(self.payload_mime_type())
+                .collect(),
+        }
+    }
+
     /// An empty file list permits fallback on this offer. Losing the offer or failing to read its pipe ends the
     /// request. The caller supplies the current-selection check independently of the lifetime of the Wayland proxy.
     async fn read_payload(
         &self,
+        order: ReadOrder,
         is_current: impl Fn() -> bool,
         mut read: impl FnMut(
             &str,
             Option<ImageFormat>,
         ) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>>,
     ) -> Result<Option<ClipboardItem>, ClipboardReadError> {
-        let files = self
-            .has_mime_type(FILE_LIST_MIME_TYPE)
-            .then_some((FILE_LIST_MIME_TYPE, None));
-        for (mime, format) in files.into_iter().chain(self.payload_mime_type()) {
+        for (mime, format) in self.flavors(order) {
             if !is_current() {
                 return Ok(None);
             }
@@ -307,7 +453,12 @@ impl<T: ReceiveData> DataOffer<T> {
                 return Ok(None);
             }
             if let Some(item) = result? {
-                return Ok(Some(item));
+                // A text field gets the line endings the synchronous read gave it: Firefox, for one, copies CRLF,
+                // which a field would otherwise show as blank lines.
+                return Ok(Some(match (order, format) {
+                    (ReadOrder::Text, None) => unix_line_endings(item),
+                    _ => item,
+                }));
             }
         }
         Ok(None)
@@ -444,6 +595,16 @@ fn local_file_uri(line: &str) -> Option<PathBuf> {
     url.to_file_path().ok()
 }
 
+/// `item`'s text with CRLF line endings made LF, as the synchronous text read always made them.
+fn unix_line_endings(item: ClipboardItem) -> ClipboardItem {
+    match item.text() {
+        Some(text) if text.contains("\r\n") => {
+            ClipboardItem::new_string(text.replace("\r\n", "\n"))
+        }
+        _ => item,
+    }
+}
+
 /// A URI list with no local files supplies no attachment. A readable image or text supplies its usual payload.
 fn decode_payload(
     bytes: Vec<u8>,
@@ -479,7 +640,6 @@ impl Clipboard {
             contents: None,
             primary_contents: None,
 
-            cached_read: None,
             current_offer: None,
             offer_generation: Rc::new(Cell::new(0)),
             cached_primary_read: None,
@@ -498,7 +658,6 @@ impl Clipboard {
     pub fn set_offer(&mut self, data_offer: Option<DataOffer<WlDataOffer>>) {
         self.offer_generation
             .set(self.offer_generation.get().wrapping_add(1));
-        self.cached_read = None;
         self.current_offer = data_offer;
     }
 
@@ -527,22 +686,16 @@ impl Clipboard {
         }
     }
 
-    pub fn read(&mut self) -> Option<ClipboardItem> {
+    /// Only this app's own copy is answered here. Another program's selection arrives through a pipe it writes when it
+    /// gets around to it, and waiting for that on this thread holds the event loop and every window with it, so its
+    /// contents come only from [`Clipboard::read_async`]. A text field's paste falls back to that read when this one
+    /// gives nothing.
+    pub fn read(&self) -> Option<ClipboardItem> {
         let offer = self.current_offer.as_ref()?;
-        if let Some(cached) = self.cached_read.clone() {
-            return Some(cached);
-        }
-
         if offer.has_mime_type(&self.self_mime) {
             return self.contents.clone();
         }
-
-        let item = offer
-            .read_text(&self.connection)
-            .or_else(|| offer.read_image(&self.connection))?;
-
-        self.cached_read = Some(item.clone());
-        Some(item)
+        None
     }
 
     /// Keep the captured offer on the Wayland thread so fallback can request another flavor after the first pipe
@@ -550,6 +703,7 @@ impl Clipboard {
     /// task owns a proxy and connection clone, so it never holds a client borrow across the background read.
     pub fn read_async(
         &self,
+        order: ReadOrder,
         background: &BackgroundExecutor,
         foreground: &ForegroundExecutor,
         has_focus: impl Fn() -> bool + 'static,
@@ -568,6 +722,7 @@ impl Clipboard {
         foreground.spawn(async move {
             offer
                 .read_payload(
+                    order,
                     || generation.get() == captured && has_focus() && offer.inner.is_alive(),
                     |mime, format| offer.receive_payload(&connection, &background, mime, format),
                 )

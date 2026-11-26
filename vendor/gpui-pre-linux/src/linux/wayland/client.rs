@@ -93,7 +93,7 @@ use crate::linux::{
     keystroke_from_xkb, keystroke_underlying_dead_key, modifiers_from_xkb, native_key_from_xkb,
     new_xkb_context, open_uri_internal, read_fd_with_timeout, reveal_path_internal,
     wayland::{
-        clipboard::{Clipboard, DataOffer, FILE_LIST_MIME_TYPE, TEXT_MIME_TYPES},
+        clipboard::{Clipboard, DataOffer, FILE_LIST_MIME_TYPE, ReadOrder, TEXT_MIME_TYPES},
         cursor::Cursor,
         serial::{ActivationContext, Serial, SerialKind, SerialTracker},
         to_shape,
@@ -1502,18 +1502,34 @@ impl WaylandConnection {
     }
 
     pub(crate) fn read_from_clipboard(&self) -> Option<gpui::ClipboardItem> {
-        self.0.borrow_mut().clipboard.read()
+        self.0.borrow().clipboard.read()
+    }
+
+    /// A text field's read: text first, then an image.
+    pub(crate) fn read_from_clipboard_async(
+        &self,
+    ) -> gpui::Task<Result<Option<gpui::ClipboardItem>, gpui::ClipboardReadError>> {
+        self.read_clipboard_async(ReadOrder::Text)
+    }
+
+    /// A paste payload's read: local files, then an image, then text.
+    pub(crate) fn read_from_clipboard_payload_async(
+        &self,
+    ) -> gpui::Task<Result<Option<gpui::ClipboardItem>, gpui::ClipboardReadError>> {
+        self.read_clipboard_async(ReadOrder::Payload)
     }
 
     /// Wayland selection offers expire with keyboard focus as well as selection changes. Reuse the current focus
     /// state and the platform executor between pipe reads, without keeping the client alive or borrowed.
-    pub(crate) fn read_from_clipboard_async(
+    fn read_clipboard_async(
         &self,
+        order: ReadOrder,
     ) -> gpui::Task<Result<Option<gpui::ClipboardItem>, gpui::ClipboardReadError>> {
         let state = self.0.borrow();
         let common = state.common.borrow();
         let client = Rc::downgrade(&self.0);
         state.clipboard.read_async(
+            order,
             &common.background_executor,
             &common.foreground_executor,
             move || {

@@ -635,6 +635,13 @@ systemd or SSH substrate ran.
   preference test checks that subscribers see each new value until their subscription is dropped. The GPUI trees are
   excluded from the workspace. Run this selection when anything under `vendor/gpui-pre*` or `vendor/patches/gpui/`
   changes. It takes minutes, since it builds GPUI on its own.
+- `python3 scripts/record-test-run.py --kind development --selection 'vendored gpui-pre-linux clipboard' --concurrency 'libtest default threads' -- cargo test -p gpui-pre-linux --lib attachment_clipboard`
+  — the vendored Linux tree's Wayland clipboard tests (`vendor/README.md`, "GPUI", the attachment-clipboard layer):
+  which flavors the text read and the payload read ask a selection offer for and in what order, the local files a file
+  list yields, fallback after an empty list and none after a failed pipe, and a read cancelled when the offer expires.
+  They exercise the flavor choice against stand-in offers, never a compositor or a real pipe. Run from the checkout
+  root, as a package of the workspace's graph, so that the tree builds against the patched core. Run it when
+  `vendor/gpui-pre-linux/src/linux/wayland/clipboard.rs` or that layer's patches change; a few minutes the first time.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
   — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
   (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, data that

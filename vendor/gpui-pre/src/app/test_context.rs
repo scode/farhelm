@@ -1,3 +1,4 @@
+// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
 use crate::{
     Action, AnyView, AnyWindowHandle, App, AppCell, AppContext, AsyncApp, AvailableSpace,
     BackgroundExecutor, BorrowAppContext, Bounds, Capslock, ClipboardItem, DisplayId, DrawPhase,
@@ -391,6 +392,21 @@ impl TestAppContext {
     /// This will return the most recent value from `write_to_clipboard`.
     pub fn read_from_clipboard(&self) -> Option<ClipboardItem> {
         self.test_platform.read_from_clipboard()
+    }
+
+    /// Simulates another program holding the clipboard, the way a Wayland selection behaves: the synchronous read
+    /// returns `None`, and every async read waits until [`TestAppContext::answer_clipboard_reads`] delivers `item`.
+    /// The payload read gets `item` whole; the text read gets only its text entries, or failing those its images, as
+    /// Wayland's text read takes from a mixed offer. A later `write_to_clipboard` ends the simulation, and reads still
+    /// waiting then resolve to `None`.
+    pub fn simulate_foreign_clipboard(&self, item: ClipboardItem) {
+        self.test_platform.simulate_foreign_clipboard(item)
+    }
+
+    /// Delivers the simulated foreign clipboard's contents to every async read waiting for them, and returns how many
+    /// there were. The readers' tasks run when the executor next does (`run_until_parked`).
+    pub fn answer_clipboard_reads(&self) -> usize {
+        self.test_platform.answer_clipboard_reads()
     }
 
     /// Simulates choosing a File in the platform's "Open" dialog.

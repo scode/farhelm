@@ -623,6 +623,158 @@ fn up_and_down_reach_the_fields_owner_and_leave_the_field_alone(cx: &mut TestApp
     );
 }
 
+// ---- Another program's clipboard ----------------------------------------------------------------------------------
+
+/// The masked field the SSH sign-in prompt asks its password with ([`TextInputState::new_masked`]).
+fn masked(window: &mut Window, cx: &mut gpui::App) -> TextInputState {
+    TextInputState::new_masked(window, cx)
+}
+
+/// Hand the clipboard to another program holding `text`, as a copy in another app does on Wayland: the field's paste
+/// can no longer read it at once and has to wait for its contents ([`TestAppContext::simulate_foreign_clipboard`]).
+fn set_foreign_clipboard(cx: &mut VisualTestContext, text: &str) {
+    cx.simulate_foreign_clipboard(gpui::ClipboardItem::new_string(text.into()));
+}
+
+/// What a test does between a paste and the arrival of the clipboard's contents.
+type Step<'a> = Box<dyn Fn(&mut VisualTestContext) + 'a>;
+
+/// Put `text` into the field as its owner would, and settle.
+fn set_field_text(cx: &mut VisualTestContext, field: &gpui::Entity<Field>, text: &'static str) {
+    cx.update(|window, cx| {
+        let state = field.read(cx).state.clone();
+        state.set_text(text, window, cx);
+    });
+    redraw(cx);
+}
+
+/// Let the other program's clipboard contents arrive for every read waiting on them, settle what that wakes, and
+/// return how many reads were waiting.
+fn clipboard_arrives(cx: &mut VisualTestContext) -> usize {
+    let answered = cx.answer_clipboard_reads();
+    redraw(cx);
+    answered
+}
+
+/// Why this matters: on Wayland another program's clipboard arrives through a pipe that program writes when it gets
+/// around to it, and a text field used to wait for it on the window's own thread, so a slow or hung program froze
+/// the whole window for up to four seconds per paste (SPEC.md, "Terminal experience": Farhelm stays responsive
+/// during clipboard operations). The vendored GPUI's synchronous read now gives nothing for another program's
+/// clipboard, and the field's paste must then take the async read rather than paste nothing. Both ways a user pastes
+/// into a field reach that path: the keyboard's shortcut, and the Edit menu's Paste, which the field hands to Kit.
+///
+/// Specification: with another program holding the clipboard, in each kind of field (the single-line one, the
+/// growing box, and the masked field the SSH sign-in prompt uses), the paste shortcut and the menu's Paste each
+/// insert nothing at once and leave exactly one read waiting; once the contents arrive the field holds them, reported
+/// as one `Changed`.
+#[gpui::test]
+fn a_paste_waits_for_another_programs_clipboard_from_the_keyboard_and_the_menu(
+    cx: &mut TestAppContext,
+) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[
+            ("line", TextInputState::new),
+            ("area", growing_box),
+            ("masked", masked),
+        ],
+    );
+    for (selector, field) in ["line", "area", "masked"].into_iter().zip(&fields) {
+        for (way, paste) in [
+            (
+                "the shortcut",
+                (|cx| keys(cx, PASTE)) as fn(&mut VisualTestContext),
+            ),
+            ("the menu", |cx| from_menu(cx, EditCommand::Paste)),
+        ] {
+            set_field_text(cx, field, "");
+            take(cx, field);
+            set_foreign_clipboard(cx, "from elsewhere");
+            focus_field(cx, selector, field);
+            paste(cx);
+            assert_eq!(
+                take(cx, field),
+                (String::new(), vec![]),
+                "{selector}, {way}: nothing is pasted before the contents arrive"
+            );
+            assert_eq!(
+                clipboard_arrives(cx),
+                1,
+                "{selector}, {way}: the paste asked for the contents once"
+            );
+            assert_eq!(
+                take(cx, field),
+                ("from elsewhere".into(), vec![TextInputEvent::Changed]),
+                "{selector}, {way}: the contents were pasted as one edit"
+            );
+        }
+    }
+}
+
+/// Why this matters: once a field's paste waits for another program, the user can carry on before the text arrives.
+/// Text that then landed in a field the user had since typed into, moved the cursor in or left would go where they no
+/// longer meant it, into a password field among others. Kit drops such a late paste; this pins that it still does
+/// for Farhelm's fields on the path a Wayland paste now always takes.
+///
+/// The same Kit check drops the second of two pastes made before the first one's text arrives (both were aimed at the
+/// field as it was, and the first one changed it), so a held or doubled Ctrl+V pastes once; SPEC.md says so.
+///
+/// Specification: with another program holding the clipboard, a paste into a field that holds "ab", followed before
+/// the contents arrive by typing "c", by moving the cursor left, by focusing the other field, or by pasting again,
+/// leaves both fields as they were after that step ("abc", "ab", "ab" and empty) or, after the second paste, the
+/// contents pasted once; a paste followed by nothing pastes.
+#[gpui::test]
+fn a_late_clipboard_reply_is_dropped_after_an_edit_a_cursor_move_or_leaving_the_field(
+    cx: &mut TestAppContext,
+) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[
+            ("first", TextInputState::new),
+            ("second", TextInputState::new),
+        ],
+    );
+    let (first, second) = (&fields[0], &fields[1]);
+    let steps: [(&str, Step<'_>, usize, &str); 5] = [
+        ("typing", Box::new(|cx| keys(cx, "c")), 1, "abc"),
+        (
+            "moving the cursor",
+            Box::new(|cx| keys(cx, "left")),
+            1,
+            "ab",
+        ),
+        (
+            "leaving the field",
+            Box::new(|cx| focus_field(cx, "second", second)),
+            1,
+            "ab",
+        ),
+        (
+            "pasting again",
+            Box::new(|cx| keys(cx, PASTE)),
+            2,
+            "abfrom elsewhere",
+        ),
+        ("nothing", Box::new(|_| {}), 1, "abfrom elsewhere"),
+    ];
+    for (step, then, reads, expected) in steps {
+        set_field_text(cx, first, "ab");
+        focus_field(cx, "first", first);
+        keys(cx, "end");
+        take(cx, first);
+        set_foreign_clipboard(cx, "from elsewhere");
+        keys(cx, PASTE);
+        then(cx);
+        assert_eq!(
+            clipboard_arrives(cx),
+            reads,
+            "{step}: the reads the pastes made"
+        );
+        assert_eq!(take(cx, first).0, expected, "{step}: the first field");
+        assert_eq!(take(cx, second).0, "", "{step}: the second field");
+    }
+}
+
 // ---- The Edit menu -------------------------------------------------------------------------------------------------
 
 /// Dispatch the Edit menu's action for `command` to the focused element, as a click on the Mac menu item does.
@@ -636,7 +788,8 @@ fn clipboard_text(cx: &mut VisualTestContext) -> Option<String> {
     cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
 }
 
-/// Put `text` on the clipboard, as another program would.
+/// Put `text` on the clipboard as this app's own copy, which a paste reads at once (unlike another program's, which
+/// [`set_foreign_clipboard`] simulates).
 fn set_clipboard(cx: &mut VisualTestContext, text: &str) {
     cx.update(|_, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.into())));
 }

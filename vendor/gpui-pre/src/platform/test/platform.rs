@@ -1,3 +1,4 @@
+// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
 #[cfg(any(test, feature = "test-support"))]
 use crate::NoopTextSystem;
 #[cfg(any(test, feature = "test-support"))]
@@ -38,6 +39,8 @@ pub(crate) struct TestPlatform {
     displays_changed_callback: RefCell<Option<Box<dyn FnMut()>>>,
     active_cursor: Mutex<CursorStyle>,
     current_clipboard_item: Mutex<Option<ClipboardItem>>,
+    /// Another program's clipboard, while a test simulates one ([`TestPlatform::simulate_foreign_clipboard`]).
+    foreign_clipboard: RefCell<Option<ForeignClipboard>>,
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     current_primary_item: Mutex<Option<ClipboardItem>>,
     #[cfg(target_os = "macos")]
@@ -59,6 +62,14 @@ pub(crate) struct TestPlatform {
     menus: RefCell<Vec<OwnedMenu>>,
     pub(crate) app_lifecycle_callback: RefCell<Option<Box<dyn FnMut(AppLifecyclePhase)>>>,
     pub(crate) memory_warning_callback: RefCell<Option<Box<dyn FnMut()>>>,
+}
+
+/// A clipboard another program holds, the way a Wayland selection behaves: the synchronous read cannot see it, and an
+/// async read waits until its contents arrive, which here is when the test answers it.
+struct ForeignClipboard {
+    item: ClipboardItem,
+    /// The async reads still waiting for the contents, oldest first.
+    waiting: Vec<oneshot::Sender<ClipboardItem>>,
 }
 
 #[derive(Clone)]
@@ -253,6 +264,7 @@ impl TestPlatform {
             active_window: Default::default(),
             expect_restart: Default::default(),
             current_clipboard_item: Mutex::new(None),
+            foreign_clipboard: RefCell::new(None),
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             current_primary_item: Mutex::new(None),
             #[cfg(target_os = "macos")]
@@ -269,6 +281,42 @@ impl TestPlatform {
             app_lifecycle_callback: Default::default(),
             memory_warning_callback: Default::default(),
         })
+    }
+
+    /// Hand the clipboard to another program holding `item`, as a copy in another app does on Wayland: from now on
+    /// the synchronous read sees nothing and each async read waits for [`TestPlatform::answer_clipboard_reads`]. A
+    /// write of this app's own ends it, and the reads still waiting resolve to nothing, as a new selection cancels
+    /// them on Wayland.
+    pub(crate) fn simulate_foreign_clipboard(&self, item: ClipboardItem) {
+        *self.current_clipboard_item.lock() = None;
+        *self.foreign_clipboard.borrow_mut() = Some(ForeignClipboard {
+            item,
+            waiting: Vec::new(),
+        });
+    }
+
+    /// Queue an async read on another program's clipboard, if one holds it: the receiver gets the item when the test
+    /// answers, or is dropped (the read resolves to nothing) when this app writes its own.
+    fn wait_for_foreign_clipboard(&self) -> Option<oneshot::Receiver<ClipboardItem>> {
+        let mut foreign = self.foreign_clipboard.borrow_mut();
+        let foreign = foreign.as_mut()?;
+        let (answer, answered) = oneshot::channel();
+        foreign.waiting.push(answer);
+        Some(answered)
+    }
+
+    /// Deliver the foreign clipboard's contents to every async read waiting for them, and say how many there were.
+    pub(crate) fn answer_clipboard_reads(&self) -> usize {
+        let mut foreign = self.foreign_clipboard.borrow_mut();
+        let Some(foreign) = foreign.as_mut() else {
+            return 0;
+        };
+        let waiting = std::mem::take(&mut foreign.waiting);
+        let answered = waiting.len();
+        for read in waiting {
+            read.send(foreign.item.clone()).ok();
+        }
+        answered
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -793,10 +841,53 @@ impl Platform for TestPlatform {
     }
 
     fn read_from_clipboard(&self) -> Option<ClipboardItem> {
+        if self.foreign_clipboard.borrow().is_some() {
+            return None;
+        }
         self.current_clipboard_item.lock().clone()
     }
 
+    /// Answers at once from this app's own clipboard, and waits for the test's answer while another program holds it
+    /// ([`TestPlatform::simulate_foreign_clipboard`]). Another program's mixed item is read the way Wayland's text
+    /// read reads a mixed offer: its text, or failing that its image, never its files, so that a test can tell this
+    /// read from the payload read.
+    fn read_from_clipboard_async(
+        &self,
+    ) -> Task<Result<Option<ClipboardItem>, crate::ClipboardReadError>> {
+        let Some(answered) = self.wait_for_foreign_clipboard() else {
+            return Task::ready(Ok(self.current_clipboard_item.lock().clone()));
+        };
+        self.foreground_executor.spawn(async move {
+            let item = answered.await.ok();
+            let only = |keep: fn(&crate::ClipboardEntry) -> bool| {
+                let entries: Vec<_> = item
+                    .iter()
+                    .flat_map(|item| &item.entries)
+                    .filter(|entry| keep(entry))
+                    .cloned()
+                    .collect();
+                (!entries.is_empty()).then_some(ClipboardItem { entries })
+            };
+            Ok(
+                only(|entry| matches!(entry, crate::ClipboardEntry::String(_)))
+                    .or_else(|| only(|entry| matches!(entry, crate::ClipboardEntry::Image(_)))),
+            )
+        })
+    }
+
+    /// As [`Platform::read_from_clipboard_async`], answering another program's item whole: files, images and text.
+    fn read_from_clipboard_payload_async(
+        &self,
+    ) -> Task<Result<Option<ClipboardItem>, crate::ClipboardReadError>> {
+        let Some(answered) = self.wait_for_foreign_clipboard() else {
+            return Task::ready(Ok(self.current_clipboard_item.lock().clone()));
+        };
+        self.foreground_executor
+            .spawn(async move { Ok(answered.await.ok()) })
+    }
+
     fn write_to_clipboard(&self, item: ClipboardItem) {
+        self.foreign_clipboard.borrow_mut().take();
         *self.current_clipboard_item.lock() = Some(item);
     }
 

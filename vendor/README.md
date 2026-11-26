@@ -1255,7 +1255,8 @@ These trees came from a private GPUI prototype of Farhelm, which built and measu
 re-derived. They are the prototype's trees minus its two measurement-only layers (per-draw CPU attribution and a
 frame-wake counter for one test), plus the change notices below, Farhelm's `frame-source`, `no-kde-blur`,
 `wayland-drop-position`, `hitbox-occlusion`, `mixed-font-ellipsis`, `zoomed-open` and `reduce-motion-observer` layers,
-and one addition to the bridge layer (an element's selected state).
+and two additions to prototype layers: an element's selected state in the bridge layer, and the attachment-clipboard
+layer's split into a text read and a payload read, with Wayland's synchronous read limited to this app's own copy.
 
 ### What is here
 
@@ -1293,7 +1294,7 @@ retained. So is its small test app (`gpui/testapp/`): the in-app crate inherits 
 
 The GPUI crates and gpui-agent are Apache-2.0 only; each tree keeps its license file (`LICENSE-APACHE`, and
 `gpui-agent/LICENSE`). Apache-2.0 requires modified files to say so. The `modified-notices` layer puts a one-line
-`Modified for Farhelm` comment at the top of every file an earlier layer changed or added (32 files; the bridge's
+`Modified for Farhelm` comment at the top of every file an earlier layer changed or added (34 files; the bridge's
 `gpui/Cargo.lock` is left without one, because cargo rewrites lockfiles), the same marker the terminal crates use, so
 one search finds every modified vendored file. The later `hitbox-occlusion` layer marks its own new test,
 `mixed-font-ellipsis` the two files it changes, and `reduce-motion-observer` its new test. Unlike the terminal crates'
@@ -1316,18 +1317,18 @@ Here's what each layer changes and why, in application order. Sizes are `git app
 | `capture-alpha`          | gpui-pre-wgpu 6 / 1                                                                 | Screenshot colors on premultiplied-alpha surfaces           |
 | `gpui-agent`             | gpui-agent 11 / 11, 29 / 11 and a lockfile refresh                                  | Build the bridge against these gpui-pre 0.3.12 trees        |
 | `native-key`             | gpui-pre 354 / 11, gpui-pre-linux 89 / 4, gpui-pre-macos 27 / 17                    | Physical key identity and the original Shift on key events  |
-| `attachment-clipboard`   | gpui-pre-linux 406 / 2, gpui-pre-macos 92 / 0                                       | Files, images, then text for async paste                    |
+| `attachment-clipboard`   | gpui-pre 131 / 0, gpui-pre-linux 614 / 18, gpui-pre-macos 93 / 0                    | Text-first and files-first async paste; no blocking read    |
 | `activation-token`       | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                               | Activate a window with another client's Wayland token       |
 | `frame-source`           | gpui-pre-macos 10 / 1                                                               | Keep the lower-latency frame source on macOS 14 and later   |
 | `no-kde-blur`            | gpui-pre-linux 4 / 36, gpui-agent 0 / 14                                            | Drop the KDE-blur fallback and its LGPL-bundling crate      |
 | `wayland-drop-position`  | gpui-pre-linux 57 / 21                                                              | Keep motion while Wayland reads the drag's file list        |
-| `modified-notices`       | gpui-pre 12, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 7      | The license's change notices (above)                        |
+| `modified-notices`       | gpui-pre 14, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 7      | The license's change notices (above)                        |
 | `hitbox-occlusion`       | gpui-pre 125 / 0                                                                    | Check whether mouse-blocking hitboxes cover a panel         |
 | `mixed-font-ellipsis`    | gpui-pre 119 / 28                                                                   | Fit an end ellipsis using the actual fonts on the line      |
 | `zoomed-open`            | gpui-pre 11 / 1, gpui-pre-macos 15 / 5                                              | Restore maximized Mac windows before they appear            |
 | `reduce-motion-observer` | gpui-pre 54 / 0                                                                     | Notify animation drivers when the motion preference changes |
 
-Without the bridge's own patches and the notices, the GPUI changes come to 2,048 added and 233 removed lines, tests
+Without the bridge's own patches and the notices, the GPUI changes come to 2,388 added and 249 removed lines, tests
 included.
 
 - **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
@@ -1358,11 +1359,21 @@ included.
   original key-down keeps its repeat flag where upstream forced it off, so held-key filters can behave differently. The
   layer adds fields to `KeyDownEvent` and `KeyUpEvent`, so the unpatched `gpui-pre-windows` and `gpui-pre-web` crates
   would not compile against it; neither is a Farhelm target.
-- **attachment-clipboard.** The async clipboard read on Wayland and macOS gives local files first priority, then images,
-  then text. On Wayland, a URI list with no local files can fall back to image or text from the captured offer. Loss of
-  keyboard focus, a new selection or a destroyed offer cancels the pending paste. Requesting the MIME flavor stays on
-  the platform thread and reading the pipe runs in the background. The synchronous clipboard API that text fields use
-  reads text first.
+- **attachment-clipboard.** Two async clipboard reads, one per kind of paste. `read_from_clipboard_payload_async`, a
+  `Platform` method the layer adds for a paste that can attach files or an image (the terminal's), gives local files
+  first priority on Wayland and macOS, then images, then text; elsewhere it is the text read. On Wayland, a URI list
+  with no local files can fall back to image or text from the captured offer. Upstream's `read_from_clipboard_async`
+  stays the text read: text first, then an image, with CRLF made LF as the synchronous read made it. Kit's text fields
+  paste through it whenever the synchronous read gives nothing, and on Wayland the synchronous read now gives nothing
+  for another program's selection: reading its pipe there blocked the event loop, and the window with it, for as long as
+  that program took (up to the four-second pipe timeout), so only this app's own copy is answered synchronously. Loss of
+  keyboard focus, a new selection or a destroyed offer cancels a pending Wayland read. Requesting the MIME flavor stays
+  on the platform thread and reading the pipe runs in the background. macOS reads the pasteboard on the main thread
+  either way, text first for text fields as before. For tests, `TestAppContext::simulate_foreign_clipboard` and
+  `answer_clipboard_reads` make the test platform's clipboard behave like another program's Wayland selection: the
+  synchronous read sees nothing and each async read waits until the test answers it. The text read then gets only the
+  item's text, or failing that its image, and the payload read the whole item, so a test can tell which read a paste
+  used.
 - **activation-token.** `Window::activate_window_with_token` activates a window with an xdg-activation token another
   client obtained, which a second launch needs to bring the running app's window forward on Wayland. Upstream can only
   request its own token, which compositors usually refuse. Other platforms fall back to plain activation.
@@ -1446,6 +1457,7 @@ git apply --directory=vendor/gpui-agent patches/gpui/gpui-agent/gpui-agent-gpui-
 git apply --directory=vendor/gpui-pre patches/gpui/native-key/gpui-pre-0.3.12.patch
 git apply --directory=vendor/gpui-pre-linux patches/gpui/native-key/gpui-pre-linux-0.3.12.patch
 git apply --directory=vendor/gpui-pre-macos patches/gpui/native-key/gpui-pre-macos-0.3.12.patch
+git apply --directory=vendor/gpui-pre patches/gpui/attachment-clipboard/gpui-pre-0.3.12.patch
 git apply --directory=vendor/gpui-pre-linux patches/gpui/attachment-clipboard/gpui-pre-linux-0.3.12.patch
 git apply --directory=vendor/gpui-pre-macos patches/gpui/attachment-clipboard/gpui-pre-macos-0.3.12.patch
 git apply --directory=vendor/gpui-pre patches/gpui/activation-token/gpui-pre-0.3.12.patch
@@ -1473,9 +1485,10 @@ git apply --directory=vendor/gpui-pre patches/gpui/reduce-motion-observer/gpui-p
   from a `target/` left by building its CLI in the checkout).
 
 The original sequence through `modified-notices` was checked end to end on 2026-11-14. The Linux tree was reproduced
-again with `wayland-drop-position` on 2026-11-19. The 2026-11-13 comparison with the prototype recovered its trees by
-dropping Farhelm's later layers and the bridge layer's selected state, and adding its two measurement layers back to
-`gpui-pre`.
+again with `wayland-drop-position` on 2026-11-19, and the core, Linux and macOS trees with the attachment-clipboard
+layer's read split on 2026-11-26. The 2026-11-13 comparison with the prototype recovered its trees by dropping Farhelm's
+later layers and the bridge layer's selected state, and adding its two measurement layers back to `gpui-pre`; a
+comparison now would also have to drop the attachment-clipboard layer's read split.
 
 Layers touch overlapping files, so to check one layer by itself with `git apply --reverse --check`, first reverse every
 later layer in a disposable copy.
@@ -1509,6 +1522,14 @@ terminal crates' tests (minutes, since it builds GPUI on its own; `.agents/valid
 
 ```sh
 cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata --test driver_record --test hitbox_occlusion --test reduce_motion
+```
+
+The attachment-clipboard layer's Wayland tests (flavor order of the text and payload reads, file lists, fallback and
+cancellation) are unit tests of the Linux tree. They run from the checkout root as a package of the workspace's graph,
+so that the tree builds against the patched core it needs (a few minutes the first time):
+
+```sh
+cargo test -p gpui-pre-linux --lib attachment_clipboard
 ```
 
 ### Staying out of the workspace's checks

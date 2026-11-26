@@ -8636,10 +8636,11 @@ fn a_paste_goes_nowhere_unless_the_terminal_is_live(cx: &mut TestAppContext) {
 /// is dropped rather than typed into the new attachment, which the user may not have seen yet. The stream's own stamp
 /// check does the dropping; this pins that the terminal sends with the stamp it was given, not the one live now.
 ///
-/// NOTE: The test calls the stamped send directly, because the test platform's clipboard answers at once and cannot
-/// hold a read across a reconnect. So two things about a slow read are not exercised: that `paste` stamps the group
-/// with the attachment live when the user asked, and that a second paste waits for the first. Both are a few lines
-/// in `AttachedTerminal::paste`, read by review.
+/// NOTE: The test calls the stamped send directly, because it was written when the test platform's clipboard answered
+/// at once and could not hold a read across a reconnect. So two things about a slow read are not exercised yet: that
+/// `paste` stamps the group with the attachment live when the user asked, and that a second paste waits for the
+/// first. Both are a few lines in `AttachedTerminal::paste`, read by review; `simulate_foreign_clipboard` can now hold
+/// the read for a test of either.
 #[gpui::test]
 fn input_made_for_an_earlier_attachment_is_dropped(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -8703,6 +8704,57 @@ fn only_the_clipboards_text_is_pasted(cx: &mut TestAppContext) {
         h.sent(),
         [(paste("text", true), true)],
         "the premise: text alone pastes"
+    );
+}
+
+/// Why this matters: the vendored GPUI has two async clipboard reads, and only the payload read keeps files ahead of
+/// text; the other one, which text fields use, prefers text. If the terminal's paste took the text read, a Finder copy
+/// on macOS or a file manager's copy on Wayland would type the file's path into the program instead of attaching the
+/// file, and every test that writes this app's own clipboard would still pass, since its own copy answers both reads
+/// whole.
+///
+/// Specification: with another program holding a clipboard of a file and text beside it, a paste waits for one read
+/// and, once the contents arrive, types nothing; with the same program holding text alone, the same paste types that
+/// text once it arrives.
+#[gpui::test]
+fn a_paste_from_another_programs_clipboard_reads_files_before_text(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let file = gpui::ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+        vec![std::path::PathBuf::from("/tmp/copied.png")].into(),
+    ));
+    h.cx.simulate_foreign_clipboard(ClipboardItem {
+        entries: vec![
+            file,
+            gpui::ClipboardEntry::String(gpui::ClipboardString::new("text".into())),
+        ],
+    });
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "nothing is typed before the contents arrive");
+    assert_eq!(
+        h.cx.answer_clipboard_reads(),
+        1,
+        "the paste read the clipboard once"
+    );
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "the file wins over the text beside it");
+
+    h.cx.simulate_foreign_clipboard(ClipboardItem::new_string("text".into()));
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert_eq!(
+        h.cx.answer_clipboard_reads(),
+        1,
+        "the premise: a second read"
+    );
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [(paste("text", true), true)],
+        "the premise: another program's text alone pastes"
     );
 }
 

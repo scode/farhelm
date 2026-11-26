@@ -1366,7 +1366,7 @@ impl AttachedTerminal {
         self.live = false;
         // A paste still reading the clipboard is stamped with this stream's attachment, and the next stream counts its
         // stamps from 1 again, so it could match the restart's attachment: drop it, as going inert does. Only review
-        // checks this line: the test clipboard answers at once, so no test can fault while a paste is still reading.
+        // checks this line so far; `simulate_foreign_clipboard` can now hold a test's read while the stream faults.
         self.paste = None;
         // A count that a restart's hold was about to forget stands again: this fault is part of the same recovery.
         self.forget_faults = None;
@@ -1659,19 +1659,20 @@ impl AttachedTerminal {
     /// cannot end early are all the supervisor's (`grid_input.rs`), so nothing here rewrites the text.
     ///
     /// The clipboard is read asynchronously, because SPEC.md has nothing in Farhelm stall on a slow or hung clipboard
-    /// and Wayland's synchronous read blocks the main thread on another program's pipe. Only Wayland's read is really
-    /// asynchronous in the vendored GPUI: the macOS read answers at once from the main thread, so a hung pasteboard
-    /// there still stalls the window, which is the vendored clipboard layer's to fix. So the paste is stamped with
-    /// the attachment that was live when the user asked, and goes nowhere if a different one is live by the time the
-    /// text arrives. Each paste waits for the one before it, so two quick pastes reach the program in the order asked
-    /// even if their reads finish the other way round.
+    /// and Wayland's synchronous read cannot see another program's clipboard at all (waiting on its pipe would block
+    /// the main thread). It is the payload read, which prefers files and images; a text field's paste reads text first
+    /// instead. Only Wayland's read is really asynchronous in the vendored GPUI: the macOS read answers at once from
+    /// the main thread, so a hung pasteboard there still stalls the window (SPEC.md allows that). So the paste is
+    /// stamped with the attachment that was live when the user asked, and goes nowhere if a different one is live by
+    /// the time the text arrives. Each paste waits for the one before it, so two quick pastes reach the program in the
+    /// order asked even if their reads finish the other way round.
     fn paste(&mut self, _: &actions::Paste, _: &mut Window, cx: &mut Context<Self>) {
         if self.retired {
             return;
         }
         // Read even when nothing is live: text then goes nowhere, but a file or an image must be refused visibly.
         let attachment = self.attachment.filter(|_| self.is_live());
-        let read = cx.read_from_clipboard_async();
+        let read = cx.read_from_clipboard_payload_async();
         let earlier = self.paste.take();
         self.paste = Some(cx.spawn(async move |owner, cx| {
             if let Some(earlier) = earlier {

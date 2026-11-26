@@ -1850,6 +1850,10 @@ impl App {
     }
 
     /// Reads data from the platform clipboard.
+    ///
+    /// On Wayland this answers only this app's own copy, and `None` while another program holds the clipboard:
+    /// reading that program's data means waiting for it on the main thread. Code that can await should use
+    /// [`App::read_from_clipboard_async`] or [`App::read_from_clipboard_payload_async`].
     pub fn read_from_clipboard(&self) -> Option<ClipboardItem> {
         self.platform.read_from_clipboard()
     }
@@ -1865,6 +1869,17 @@ impl App {
         &self,
     ) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>> {
         self.platform.read_from_clipboard_async()
+    }
+
+    /// Reads data from the platform clipboard for a paste that can take files or an image, resolving once the
+    /// contents are available.
+    ///
+    /// Where the platform can tell, local files come first, then an image, then text; a text field's paste uses
+    /// [`App::read_from_clipboard_async`] instead, which prefers text.
+    pub fn read_from_clipboard_payload_async(
+        &self,
+    ) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>> {
+        self.platform.read_from_clipboard_payload_async()
     }
 
     /// Sets the text rendering mode for the application.

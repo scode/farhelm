@@ -1,0 +1,214 @@
+diff --git a/src/app/test_context.rs b/src/app/test_context.rs
+index d1797d5..d9f67a6 100644
+--- a/src/app/test_context.rs
++++ b/src/app/test_context.rs
+@@ -393,6 +393,21 @@ impl TestAppContext {
+         self.test_platform.read_from_clipboard()
+     }
+
++    /// Simulates another program holding the clipboard, the way a Wayland selection behaves: the synchronous read
++    /// returns `None`, and every async read waits until [`TestAppContext::answer_clipboard_reads`] delivers `item`.
++    /// The payload read gets `item` whole; the text read gets only its text entries, or failing those its images, as
++    /// Wayland's text read takes from a mixed offer. A later `write_to_clipboard` ends the simulation, and reads still
++    /// waiting then resolve to `None`.
++    pub fn simulate_foreign_clipboard(&self, item: ClipboardItem) {
++        self.test_platform.simulate_foreign_clipboard(item)
++    }
++
++    /// Delivers the simulated foreign clipboard's contents to every async read waiting for them, and returns how many
++    /// there were. The readers' tasks run when the executor next does (`run_until_parked`).
++    pub fn answer_clipboard_reads(&self) -> usize {
++        self.test_platform.answer_clipboard_reads()
++    }
++
+     /// Simulates choosing a File in the platform's "Open" dialog.
+     pub fn simulate_new_path_selection(
+         &self,
+diff --git a/src/app.rs b/src/app.rs
+index 02c8651..3f51dd2 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -1833,6 +1833,10 @@ impl App {
+     }
+
+     /// Reads data from the platform clipboard.
++    ///
++    /// On Wayland this answers only this app's own copy, and `None` while another program holds the clipboard:
++    /// reading that program's data means waiting for it on the main thread. Code that can await should use
++    /// [`App::read_from_clipboard_async`] or [`App::read_from_clipboard_payload_async`].
+     pub fn read_from_clipboard(&self) -> Option<ClipboardItem> {
+         self.platform.read_from_clipboard()
+     }
+@@ -1850,6 +1854,17 @@ impl App {
+         self.platform.read_from_clipboard_async()
+     }
+
++    /// Reads data from the platform clipboard for a paste that can take files or an image, resolving once the
++    /// contents are available.
++    ///
++    /// Where the platform can tell, local files come first, then an image, then text; a text field's paste uses
++    /// [`App::read_from_clipboard_async`] instead, which prefers text.
++    pub fn read_from_clipboard_payload_async(
++        &self,
++    ) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>> {
++        self.platform.read_from_clipboard_payload_async()
++    }
++
+     /// Sets the text rendering mode for the application.
+     pub fn set_text_rendering_mode(&mut self, mode: TextRenderingMode) {
+         self.text_rendering_mode.set(mode);
+diff --git a/src/platform/test/platform.rs b/src/platform/test/platform.rs
+index 9d112b3..7fb27a9 100644
+--- a/src/platform/test/platform.rs
++++ b/src/platform/test/platform.rs
+@@ -38,6 +38,8 @@ pub(crate) struct TestPlatform {
+     displays_changed_callback: RefCell<Option<Box<dyn FnMut()>>>,
+     active_cursor: Mutex<CursorStyle>,
+     current_clipboard_item: Mutex<Option<ClipboardItem>>,
++    /// Another program's clipboard, while a test simulates one ([`TestPlatform::simulate_foreign_clipboard`]).
++    foreign_clipboard: RefCell<Option<ForeignClipboard>>,
+     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+     current_primary_item: Mutex<Option<ClipboardItem>>,
+     #[cfg(target_os = "macos")]
+@@ -61,6 +63,14 @@ pub(crate) struct TestPlatform {
+     pub(crate) memory_warning_callback: RefCell<Option<Box<dyn FnMut()>>>,
+ }
+
++/// A clipboard another program holds, the way a Wayland selection behaves: the synchronous read cannot see it, and an
++/// async read waits until its contents arrive, which here is when the test answers it.
++struct ForeignClipboard {
++    item: ClipboardItem,
++    /// The async reads still waiting for the contents, oldest first.
++    waiting: Vec<oneshot::Sender<ClipboardItem>>,
++}
++
+ #[derive(Clone)]
+ /// A fake screen capture source, used for testing.
+ pub struct TestScreenCaptureSource {}
+@@ -253,6 +263,7 @@ impl TestPlatform {
+             active_window: Default::default(),
+             expect_restart: Default::default(),
+             current_clipboard_item: Mutex::new(None),
++            foreign_clipboard: RefCell::new(None),
+             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+             current_primary_item: Mutex::new(None),
+             #[cfg(target_os = "macos")]
+@@ -271,6 +282,42 @@ impl TestPlatform {
+         })
+     }
+
++    /// Hand the clipboard to another program holding `item`, as a copy in another app does on Wayland: from now on
++    /// the synchronous read sees nothing and each async read waits for [`TestPlatform::answer_clipboard_reads`]. A
++    /// write of this app's own ends it, and the reads still waiting resolve to nothing, as a new selection cancels
++    /// them on Wayland.
++    pub(crate) fn simulate_foreign_clipboard(&self, item: ClipboardItem) {
++        *self.current_clipboard_item.lock() = None;
++        *self.foreign_clipboard.borrow_mut() = Some(ForeignClipboard {
++            item,
++            waiting: Vec::new(),
++        });
++    }
++
++    /// Queue an async read on another program's clipboard, if one holds it: the receiver gets the item when the test
++    /// answers, or is dropped (the read resolves to nothing) when this app writes its own.
++    fn wait_for_foreign_clipboard(&self) -> Option<oneshot::Receiver<ClipboardItem>> {
++        let mut foreign = self.foreign_clipboard.borrow_mut();
++        let foreign = foreign.as_mut()?;
++        let (answer, answered) = oneshot::channel();
++        foreign.waiting.push(answer);
++        Some(answered)
++    }
++
++    /// Deliver the foreign clipboard's contents to every async read waiting for them, and say how many there were.
++    pub(crate) fn answer_clipboard_reads(&self) -> usize {
++        let mut foreign = self.foreign_clipboard.borrow_mut();
++        let Some(foreign) = foreign.as_mut() else {
++            return 0;
++        };
++        let waiting = std::mem::take(&mut foreign.waiting);
++        let answered = waiting.len();
++        for read in waiting {
++            read.send(foreign.item.clone()).ok();
++        }
++        answered
++    }
++
+     #[cfg(any(test, feature = "test-support"))]
+     pub(crate) fn simulate_new_path_selection(
+         &self,
+@@ -793,10 +840,53 @@ impl Platform for TestPlatform {
+     }
+
+     fn read_from_clipboard(&self) -> Option<ClipboardItem> {
++        if self.foreign_clipboard.borrow().is_some() {
++            return None;
++        }
+         self.current_clipboard_item.lock().clone()
+     }
+
++    /// Answers at once from this app's own clipboard, and waits for the test's answer while another program holds it
++    /// ([`TestPlatform::simulate_foreign_clipboard`]). Another program's mixed item is read the way Wayland's text
++    /// read reads a mixed offer: its text, or failing that its image, never its files, so that a test can tell this
++    /// read from the payload read.
++    fn read_from_clipboard_async(
++        &self,
++    ) -> Task<Result<Option<ClipboardItem>, crate::ClipboardReadError>> {
++        let Some(answered) = self.wait_for_foreign_clipboard() else {
++            return Task::ready(Ok(self.current_clipboard_item.lock().clone()));
++        };
++        self.foreground_executor.spawn(async move {
++            let item = answered.await.ok();
++            let only = |keep: fn(&crate::ClipboardEntry) -> bool| {
++                let entries: Vec<_> = item
++                    .iter()
++                    .flat_map(|item| &item.entries)
++                    .filter(|entry| keep(entry))
++                    .cloned()
++                    .collect();
++                (!entries.is_empty()).then_some(ClipboardItem { entries })
++            };
++            Ok(
++                only(|entry| matches!(entry, crate::ClipboardEntry::String(_)))
++                    .or_else(|| only(|entry| matches!(entry, crate::ClipboardEntry::Image(_)))),
++            )
++        })
++    }
++
++    /// As [`Platform::read_from_clipboard_async`], answering another program's item whole: files, images and text.
++    fn read_from_clipboard_payload_async(
++        &self,
++    ) -> Task<Result<Option<ClipboardItem>, crate::ClipboardReadError>> {
++        let Some(answered) = self.wait_for_foreign_clipboard() else {
++            return Task::ready(Ok(self.current_clipboard_item.lock().clone()));
++        };
++        self.foreground_executor
++            .spawn(async move { Ok(answered.await.ok()) })
++    }
++
+     fn write_to_clipboard(&self, item: ClipboardItem) {
++        self.foreign_clipboard.borrow_mut().take();
+         *self.current_clipboard_item.lock() = Some(item);
+     }
+
+diff --git a/src/platform.rs b/src/platform.rs
+index ff19aff..71ea2d1 100644
+--- a/src/platform.rs
++++ b/src/platform.rs
+@@ -598,6 +598,17 @@ pub trait Platform: 'static {
+         Task::ready(Ok(self.read_from_clipboard()))
+     }
+
++    /// Reads the clipboard for a paste that can take files or an image, resolving once its contents are available.
++    ///
++    /// [`Platform::read_from_clipboard_async`] answers a text field: on a mixed clipboard it prefers text, as the
++    /// synchronous read does. This one answers a paste that can attach a payload: platforms that can tell override it
++    /// to prefer local files, then an image, then text. The default is the text read.
++    fn read_from_clipboard_payload_async(
++        &self,
++    ) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>> {
++        self.read_from_clipboard_async()
++    }
++
+     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+     fn read_from_primary(&self) -> Option<ClipboardItem>;
+     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
