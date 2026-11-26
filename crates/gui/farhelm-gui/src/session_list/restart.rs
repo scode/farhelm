@@ -6,8 +6,9 @@
 //! otherwise. Ported from the old app's `restart_consequence`, `restart_prompt_stops_agent` (`status.rs`), the header's
 //! Restart button, `direct_restart_stops_agent`, `offer_clause`, `feedback_note`, `not_captured_clause` and
 //! `restart_button_label` (`session_view.rs`), and `restart_session` (`api.rs`) at the reference commit. The old row
-//! menu had no Restart, so the open session's header is the one place that offers it here. Here's the TLDR of the
-//! rules:
+//! menu had no Restart, and neither does this app's: the open session's header and its interrupted card offer it for one
+//! session, and the marked bar's Restart/Replace (`super::bulk`) sends it for each marked session that can resume.
+//! Here's the TLDR of the rules:
 //!
 //! - **Offered only when the conversation can be resumed.** The session's `restart_offer` (the supervisor's, never
 //!   re-derived here) decides. When it is not Resume, the header still draws Restart, greyed but focusable, and its
@@ -249,8 +250,9 @@ fn asks(row: &SessionRow, skipped: bool) -> bool {
 /// The consent a Restart that asked nothing carries: it stops a working agent only when the question was skipped by the
 /// preference and the click showed the agent working, as the old `direct_restart_stops_agent` decided. With
 /// confirmations on, a click that asked nothing showed an idle, waiting or unknown agent, which the supervisor stops
-/// without consent anyway.
-fn direct_consent(row: &SessionRow, skipped: bool) -> bool {
+/// without consent anyway. A bulk Restart/Replace of the marked sessions (`super::bulk`) never asks either, so it sends
+/// each Restart this consent too.
+pub(super) fn direct_consent(row: &SessionRow, skipped: bool) -> bool {
     skipped && row.info.status == SessionStatus::Running
 }
 
@@ -348,6 +350,26 @@ pub(crate) fn send(key: &str, stop_if_running: bool, cx: &mut App) {
     if menu::refuse_for_host_change(key, Work::Restart, cx) {
         return;
     }
+    match start(key, stop_if_running, |_| {}, cx) {
+        Ok(()) | Err(NotStarted::Retired | NotStarted::Path(_)) => {}
+        Err(refused) => tracing::debug!(?refused, "a Restart was not sent"),
+    }
+}
+
+/// [`send`] for a caller that has to know what happened: the bulk Restart/Replace of the marked sessions
+/// (`super::bulk`), which shows a refused start on the row and moves its host's queue on when each Restart settles.
+/// Says why nothing was sent, and otherwise starts the wait's clock and runs `then` once the Restart has settled; a
+/// reset drops `then` with the Restart's own waiting.
+///
+/// Unlike [`send`] it does not check for a host change in flight: the caller does, with
+/// [`menu::refuse_for_host_change`], since that refusal leaves its own line on the row and must not be mistaken for the
+/// busy refusal this returns.
+pub(super) fn start(
+    key: &str,
+    stop_if_running: bool,
+    then: impl FnOnce(&mut App) + 'static,
+    cx: &mut App,
+) -> Result<(), NotStarted> {
     // A successful reply that published a terminal lets the recovery card give way before the listing catches up.
     // If the supervisor could not publish the new terminal, its reply keeps the card in place.
     let session = key.to_owned();
@@ -364,16 +386,17 @@ pub(crate) fn send(key: &str, stop_if_running: bool, cx: &mut App) {
                     .unwrap_or_default();
                 crate::session_pane::card::restart_finished(&session, terminal_missing, cx);
             }
+            then(cx);
         },
     );
-    match started {
+    match &started {
         Ok(()) => outcome::start_clock(key, Work::Restart, cx),
-        Err(NotStarted::Retired) => {}
         Err(NotStarted::Path(_)) => {
             tracing::warn!("a session key that cannot be a path segment was not restarted");
         }
-        Err(refused) => tracing::debug!(?refused, "a Restart was not sent"),
+        Err(NotStarted::Retired | NotStarted::Busy(_)) => {}
     }
+    started
 }
 
 /// Whether `key`'s Restart is in flight in this window, from the moment its request is sent until the helm answers.

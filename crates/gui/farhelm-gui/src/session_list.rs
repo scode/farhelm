@@ -190,6 +190,9 @@ pub(crate) use row::abbreviate_home;
 mod bulk_tests;
 
 #[cfg(test)]
+mod bulk_start_tests;
+
+#[cfg(test)]
 mod compact_tests;
 
 #[cfg(test)]

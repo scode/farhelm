@@ -1,5 +1,5 @@
-//! Bulk Stop and Delete of the marked sessions shown ([`super::marking`]), the question they ask, and the line any
-//! bulk action leaves on a row it skipped.
+//! Bulk Stop, Delete and Restart/Replace of the marked sessions shown ([`super::marking`]), the question Stop and
+//! Delete ask, and the line any bulk action leaves on a row it skipped.
 //!
 //! SPEC.md, "Session list" (the batch and bulk question paragraphs) and "Lifecycle operations" (Skip session
 //! confirmations). Ported from the old app's `list/lifecycle.rs` (`admit_batch`, `run_paced`, `DeleteSnapshot`,
@@ -51,6 +51,35 @@
 //!   other hosts' included: a queued Delete is held in the operation store as a Delete, which the list's settle
 //!   already counts as one in flight, so it never opens a session still waiting to be deleted. A Stop batch holds
 //!   nothing back.
+//!
+//! **Restart/Replace.** The bar offers it while every marked session it would act on has ended or lost its terminal
+//! ([`startable`]), the state a host reboot leaves a fleet in, so that one press starts them all again instead of one
+//! at a time:
+//!
+//! - **Restart when possible, Replace when not**, its hover help. Each session gets its own Restart when its
+//!   conversation can be resumed ([`super::restart::offered`]), and its own Replace otherwise ([`How::of`]), so a
+//!   session that can resume is never started over. Each is the request its row's action sends when it asks nothing:
+//!   Restart with the consent of a click that asked nothing, and Replace with the drawn row's Delete guard.
+//! - **Asks nothing.** The press runs at once, as a Restart of an ended session does. Since Replace's own question is
+//!   skipped, a row whose Replace would end something it still shows running (a terminal tab, or a live agent beside a
+//!   missing terminal) is left out with [`REPLACE_WOULD_END`]'s line, unless Skip session confirmations is on, when the
+//!   row's own Replace would not ask either. A guard cannot stand in for the question: the helm creates the replacement
+//!   before it removes the source, so a refused removal leaves both sessions.
+//! - **Paced as Stop and Delete are**, in the same per-host queues ([`Queued`]): one request at a time per host, hosts
+//!   independently, each row held in the operation store until its turn, a refusal on its own row, and the batch's own
+//!   marks cleared once it finishes. A row shows "Restarting…" or "Replacing…" once its request has waited two seconds
+//!   ([`super::outcome::row_wait_line`]), and a Replace's YOLO question asks on its row ([`super::replace_yolo`]).
+//! - **What it leaves out.** A retired session, silently and keeping its mark, as Stop leaves it; a session whose
+//!   environment is being deleted, with that reason; one whose environment is suspended, stopped or changing, with
+//!   [`ENVIRONMENT_FROZEN`]'s line; one already starting (a second press), silently; and, at its turn, one whose
+//!   commands are refused ([`not_started`]), one that changed since the press ([`CHANGED_WHILE_WAITING`]), or any row
+//!   while a host change is in flight ([`super::menu::refuse_for_host_change`]). While a host change is in flight the
+//!   bar draws it busy with that reason ([`super::menu::launch_wait`]), and while no target could start it draws it
+//!   unavailable with [`NONE_CAN_START`]. A session on a host the helm cannot reach is still sent, as the open
+//!   session's header sends it, and the helm's refusal stays on its row.
+//! - **Focus and marks.** A press from the keyboard hands focus to "N marked", since the button goes once a restarted
+//!   session lists as running, and a Replace counts "moved on" from the press however late its turn comes. The batch clears its own
+//!   targets' marks when it finishes, as Stop's and Delete's do; a row it left out keeps its mark.
 //!
 //! **The not-started line.** A bulk action that skips a row leaves "<action>: not started, " and the operation store's
 //! shared reason on the row ([`not_started`]), in the store's slot for the session, so the row, its menu, and the open
@@ -105,7 +134,7 @@ use super::environment::Environment;
 use super::environment_delete::{self, Lane};
 use super::row_marks::{self, Locality};
 use super::status::{self, EndedWords, Live};
-use super::{SessionList, delete, menu, outcome, retired, stop};
+use super::{SessionList, delete, menu, outcome, replace, restart, retired, stop};
 use crate::components::{HoverHelp, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText, Line};
@@ -356,26 +385,206 @@ impl Target {
             }
         }
     }
+}
 
-    /// Hold this target's row in the operation store as its work, pending until its turn ([`Self::release`]).
-    fn hold(&self, cx: &mut App) -> Result<(), NotStarted> {
-        let Some(operations) = session::current_operations(cx) else {
-            return Err(NotStarted::Retired);
-        };
-        let work = self.work();
+/// Hold `key`'s row in the operation store as `work`, pending until its turn in a batch ([`release`]), so its row shows
+/// that work pending and its own menu, the header and the shortcuts refuse it meanwhile.
+///
+/// A held Restart or Replace reads as that work in flight, so any wait clock an earlier request of the key left behind
+/// goes with the hold ([`outcome::forget_clock`]): the row's wait line counts from its own request, once it is sent.
+fn hold(key: &str, work: Work, cx: &mut App) -> Result<(), NotStarted> {
+    let Some(operations) = session::current_operations(cx) else {
+        return Err(NotStarted::Retired);
+    };
+    operations.update(cx, |operations, cx| {
+        operations.hold(&OpKey::session(key), work, cx)
+    })?;
+    outcome::forget_clock(key, cx);
+    Ok(())
+}
+
+/// End `key`'s hold at its turn, right before its request starts in the hold's place. (Only a reset ends a hold
+/// otherwise, with the store.)
+fn release(key: &str, cx: &mut App) {
+    if let Some(operations) = session::current_operations(cx) {
         operations.update(cx, |operations, cx| {
-            operations.hold(&OpKey::session(&self.key), work, cx)
-        })
+            operations.release(&OpKey::session(key), cx)
+        });
     }
+}
 
-    /// End this target's hold at its turn, right before its request starts in the hold's place. (Only a reset ends a
-    /// hold otherwise, with the store.)
-    fn release(&self, cx: &mut App) {
-        if let Some(operations) = session::current_operations(cx) {
-            operations.update(cx, |operations, cx| {
-                operations.release(&OpKey::session(&self.key), cx)
+// ---- What a Restart/Replace target is -------------------------------------------------------------------------------
+
+/// What a bulk Restart/Replace sends one marked session: the row's own Restart when its conversation can be resumed, and
+/// its own Replace otherwise, each as that action sends it when it asks nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum How {
+    /// Resume the session's own conversation ([`super::restart`]), with the consent a Restart that asked nothing carries
+    /// ([`restart::direct_consent`]): it stops a working agent only when Skip session confirmations is on.
+    Restart { stop_if_running: bool },
+    /// Start the session over ([`super::replace`]), its source's removal guarded as `DeleteGuard` says.
+    Replace(DeleteGuard),
+}
+
+impl How {
+    /// The name a Replace's not-started line leads with, also for a row that gets no Replace ([`StartTarget::how`]).
+    const REPLACE: &'static str = "Replace";
+
+    /// What `row` gets, with Skip session confirmations as `skipped`, or `None` for a row the batch must not Replace
+    /// unasked. Never a Replace of a session that can resume: SPEC.md, "Lifecycle operations", makes Restart the one way
+    /// a conversation survives. A Replace with confirmations skipped carries the drawn row's own guard, as the row's
+    /// Replace does then. With confirmations on, the row's own Replace would ask, so the batch replaces only a row
+    /// showing nothing alive, and with that guard. Anything else (a terminal tab still open, or a live agent beside a
+    /// missing terminal) gets `None`: the helm creates the replacement before it removes the source, so a guard
+    /// refusing that removal would leave two sessions rather than none, and the row's own Replace question is where
+    /// ending what still runs is authorized.
+    fn of(row: &SessionRow, skipped: bool) -> Option<How> {
+        if restart::offered(row) {
+            return Some(How::Restart {
+                stop_if_running: restart::direct_consent(row, skipped),
             });
         }
+        if skipped {
+            return Some(How::Replace(delete::guard(row)));
+        }
+        delete::shows_nothing_alive(row).then_some(How::Replace(DeleteGuard::NothingAlive))
+    }
+
+    /// The work its row is held as and sends.
+    fn work(self) -> Work {
+        match self {
+            How::Restart { .. } => Work::Restart,
+            How::Replace(_) => Work::Replace,
+        }
+    }
+
+    /// The name its not-started line leads with ([`not_started`]); the store's prefix for its work says the same.
+    fn label(self) -> &'static str {
+        match self {
+            How::Restart { .. } => "Restart",
+            How::Replace(_) => How::REPLACE,
+        }
+    }
+}
+
+/// One marked session as the bar's Restart/Replace drew it: its key, its host's registry id (one request at a time goes
+/// to each), and what it gets ([`How::of`]), frozen from the row and the confirmations preference of the same frame, so
+/// a press sends what the presented bar would have.
+#[derive(Clone, Debug, PartialEq)]
+struct StartTarget {
+    key: String,
+    host: i64,
+    /// `None` for a row the batch must not Replace unasked ([`How::of`]), which keeps its mark and gets
+    /// [`REPLACE_WOULD_END`]'s line.
+    how: Option<How>,
+    /// Whether its environment was frozen or being deleted when the bar drew ([`frozen_or_deleting`]), so that the bar
+    /// can tell whether any target can start at all ([`DrawnStart::none_can_start`]). The press reads it again.
+    held_back: bool,
+}
+
+/// A held or sent row of a bulk Restart/Replace: a [`StartTarget`] that gets a request, with what its turn needs to
+/// send it as the press asked.
+struct QueuedStart {
+    key: String,
+    host: i64,
+    how: How,
+    /// Skip session confirmations as the bar drew it, which [`How::of`] reads again at the row's turn
+    /// ([`Queued::changed_since_press`]).
+    skipped: bool,
+    /// The press of the bar's button, which a Replace counts "moved on" from ([`replace::start`]).
+    mark: Mark,
+}
+
+/// The marked bar's Restart/Replace's element id.
+pub(super) const START_ID: &str = "session-marked-start";
+
+/// The marked bar's Restart/Replace's label: both verbs, since one press restarts the sessions that can resume and
+/// replaces the rest.
+pub(super) const START_LABEL: &str = "Restart/Replace";
+
+/// The marked bar's Restart/Replace's hover help, the maintainer's words for the one rule a user needs before pressing.
+pub(super) const START_HELP: &str = "Restart when possible, Replace when not";
+
+/// Why a bulk Restart/Replace left a row out whose Replace would end something that may still run there ([`How::of`]):
+/// a terminal tab, or an agent whose status is live or unknown beside a missing terminal. The app's own words: the old
+/// app had no bulk start.
+pub(super) const REPLACE_WOULD_END: &str = "not started, its program or a terminal tab may still be running, and \
+                                            Replace would end it. Use Replace from the session's menu to confirm.";
+
+/// Why a bulk Restart/Replace did not send a row that changed while it waited for its turn on its host
+/// ([`Queued::changed_since_press`]): what it would get now differs from what the bar showed at the press, so sending
+/// either would act on a state the user never saw. The app's own words, as for [`REPLACE_WOULD_END`].
+pub(super) const CHANGED_WHILE_WAITING: &str =
+    "not started, the session changed while it waited for its turn. Try again.";
+
+/// The marked bar's Restart/Replace's hover help while no marked session it would act on can start from the bar
+/// ([`DrawnStart::none_can_start`]), as Stop and Delete say why while they are drawn unavailable.
+pub(super) const NONE_CAN_START: &str = "None of the marked sessions can start from here: each may still have \
+                                         something running that Replace would end, or its environment is \
+                                         suspended, stopped, changing or being deleted";
+
+/// Why a bulk Restart/Replace left a row out whose environment is suspended, stopped or changing, where the supervisor's
+/// lifecycle verbs are withheld ([`super::environment::Environment::frozen`]). The app's own words, as for
+/// [`REPLACE_WOULD_END`]; an environment being deleted gives its own reason instead.
+pub(super) const ENVIRONMENT_FROZEN: &str =
+    "not started, its environment is suspended, stopped or changing. Resume it, then try again.";
+
+/// Whether the environment of the session `collections` files under `row` is being deleted, or is suspended, stopped
+/// or changing ([`super::environment::Environment::frozen`]): the supervisor's lifecycle verbs are withheld there.
+fn frozen_or_deleting(row: &SessionRow, collections: &Collections) -> bool {
+    Environment::of(row, collections).is_some_and(|environment| environment.frozen())
+}
+
+/// Whether `row` is a session a bulk Restart/Replace is for: its program has ended (stopped, exited, interrupted by a
+/// host reboot or a Farhelm update, or never started), or its terminal is gone, as after a host reboot. The bar offers
+/// the action only while every marked session it would act on is one ([`super::marking::Projection`]'s `start`).
+pub(super) fn startable(row: &SessionRow) -> bool {
+    row.info.status.has_ended() || row.info.terminal_missing
+}
+
+/// The marked bar's authority for one Restart/Replace, as [`DrawnAction`] is for a Stop or a Delete: the store that
+/// supplied the frame (a reset invalidates the press even if the same keys come back) and each marked session shown
+/// that is not a retired one (which supports Delete only, and keeps its mark, as a bulk Stop leaves it), in the order
+/// shown.
+#[derive(PartialEq)]
+pub(super) struct DrawnStart {
+    store: EntityId,
+    targets: Vec<StartTarget>,
+    /// Skip session confirmations as this frame read it.
+    skipped: bool,
+}
+
+impl DrawnStart {
+    /// Capture what each of `shown` gets from the rows and confirmations preference in `collections`, from `store`.
+    pub(super) fn capture(shown: &[String], store: EntityId, collections: &Collections) -> Self {
+        let skipped = menu::skips_questions(collections);
+        let targets = shown
+            .iter()
+            .filter_map(|key| {
+                let row = collections.get::<SessionRow>(key)?;
+                (!retired::is(row)).then(|| StartTarget {
+                    key: key.clone(),
+                    host: row.host,
+                    how: How::of(row, skipped),
+                    held_back: frozen_or_deleting(row, collections),
+                })
+            })
+            .collect();
+        Self {
+            store,
+            targets,
+            skipped,
+        }
+    }
+
+    /// Whether no target could start from the bar now: each would be left out at the press, as one whose Replace would
+    /// end something still running or one in an environment that withholds the request. The bar then draws the button
+    /// unavailable with [`NONE_CAN_START`] as its help, as the plan offers it only while at least one marked session can
+    /// be restarted or replaced.
+    pub(super) fn none_can_start(&self) -> bool {
+        self.targets
+            .iter()
+            .all(|target| target.how.is_none() || target.held_back)
     }
 }
 
@@ -400,7 +609,115 @@ struct Batch {
     targets: Vec<String>,
     /// Each host still busy with the batch, with its rows not sent yet, each held in the operation store. A host stays
     /// while its last request is in flight, with nothing left queued, and goes when that request settles.
-    queues: HashMap<i64, VecDeque<Target>>,
+    queues: HashMap<i64, VecDeque<Queued>>,
+}
+
+/// One row a batch holds and sends in its host's turn: a bulk Stop's or Delete's [`Target`], which a question may have
+/// drawn, or a bulk Restart/Replace's start, which never asks. One queue serves every bulk lifecycle action, so each
+/// paces per host the same way, holds its rows the same way and clears the batch's marks the same way; only the
+/// confirmable actions carry what a question froze. A Stop's or Delete's target is boxed, since it is several times a
+/// start's size and a batch's queues hold either.
+enum Queued {
+    Lifecycle(Box<Target>),
+    Start(QueuedStart),
+}
+
+impl Queued {
+    /// The session's key.
+    fn key(&self) -> &str {
+        match self {
+            Queued::Lifecycle(target) => &target.key,
+            Queued::Start(start) => &start.key,
+        }
+    }
+
+    /// The registry id of the session's host, whose queue the row waits in.
+    fn host(&self) -> i64 {
+        match self {
+            Queued::Lifecycle(target) => target.host,
+            Queued::Start(start) => start.host,
+        }
+    }
+
+    /// Whether this row gets its environment's whole-environment Delete, which only the first such row sends.
+    fn whole(&self) -> bool {
+        match self {
+            Queued::Lifecycle(target) => target.whole(),
+            Queued::Start(_) => false,
+        }
+    }
+
+    /// The work the row is held as, and then sends.
+    fn work(&self) -> Work {
+        match self {
+            Queued::Lifecycle(target) => target.work(),
+            Queued::Start(start) => start.how.work(),
+        }
+    }
+
+    /// The name its not-started line leads with ([`not_started`]).
+    fn label(&self) -> &'static str {
+        match self {
+            Queued::Lifecycle(target) => target.label(),
+            Queued::Start(start) => start.how.label(),
+        }
+    }
+
+    /// Whether a start's row changed while it waited for its turn so that it would get something else now (a session
+    /// that resumes now, or runs again, say): then it is not sent and its row says why ([`CHANGED_WHILE_WAITING`]). A
+    /// row that no longer counts as ended or as missing its terminal ([`startable`]), or whose [`How::of`] differs
+    /// from the press's, has changed; a row the store no longer holds is sent all the same, for the helm to answer. A Stop or a Delete
+    /// carries its own preconditions to the helm instead, so it never changes here.
+    fn changed_since_press(&self, cx: &App) -> bool {
+        let Queued::Start(start) = self else {
+            return false;
+        };
+        let Some(store) = session::current_store(cx) else {
+            return false;
+        };
+        store
+            .read(cx)
+            .collections()
+            .get::<SessionRow>(&start.key)
+            .is_some_and(|row| !startable(row) || How::of(row, start.skipped) != Some(start.how))
+    }
+
+    /// Refuse a start while a host change is in flight, leaving the row the reason ([`menu::refuse_for_host_change`]),
+    /// as the row's own Restart and Replace do; a Stop or a Delete starts no session and never waits for one. Checked
+    /// at the row's turn, not only when the bar drew, since a host change can begin while the batch waits.
+    fn waits_for_host_change(&self, cx: &mut App) -> bool {
+        match self {
+            Queued::Lifecycle(_) => false,
+            Queued::Start(start) => menu::refuse_for_host_change(&start.key, start.how.work(), cx),
+        }
+    }
+
+    /// Send the row's request, running `then` once it has settled, told whether the helm answered an environment
+    /// Delete with the 504 that says it carries on (never for any other request). A Replace settles in `window`, where
+    /// a YOLO question for it would show on its row.
+    fn start(
+        &self,
+        then: impl FnOnce(bool, &mut App) + 'static,
+        window: AnyWindowHandle,
+        cx: &mut App,
+    ) -> Result<(), NotStarted> {
+        match self {
+            Queued::Lifecycle(target) => target.start(then, cx),
+            Queued::Start(start) => match start.how {
+                How::Restart { stop_if_running } => {
+                    restart::start(&start.key, stop_if_running, |cx| then(false, cx), cx)
+                }
+                How::Replace(guard) => replace::start(
+                    &start.key,
+                    guard,
+                    start.mark,
+                    window,
+                    |cx| then(false, cx),
+                    cx,
+                ),
+            },
+        }
+    }
 }
 
 /// A bulk question's targets as frozen when it was asked: one shared value, which the list keeps to reconcile against,
@@ -544,7 +861,14 @@ impl SessionList {
         // An environment Delete is never skipped, so a batch holding one always asks (the old `needs_confirmation`).
         let must_ask = targets.iter().any(|target| target.environment.is_some());
         if !must_ask && (drawn.skips_questions || !targets.iter().any(|target| target.asks)) {
-            self.run_batch(targets, window, cx);
+            self.run_batch(
+                targets
+                    .into_iter()
+                    .map(|target| Queued::Lifecycle(Box::new(target)))
+                    .collect(),
+                window,
+                cx,
+            );
             return;
         }
         self.ask_bulk(action, targets.into(), &mark, window, cx);
@@ -614,10 +938,11 @@ impl SessionList {
         let current = self.current.current(cx);
         current.bulk.question = None;
         let marks = &current.marks;
-        let admitted: Vec<Target> = targets
+        let admitted: Vec<Queued> = targets
             .iter()
             .filter(|target| marks.contains(&target.key) && shown.contains(&target.key))
             .cloned()
+            .map(|target| Queued::Lifecycle(Box::new(target)))
             .collect();
         // Before the batch runs: a batch that finishes at once hands focus on from the count as the bar goes.
         let count = self.marking.count_focus().clone();
@@ -631,27 +956,32 @@ impl SessionList {
     /// store and queue them by host, and send each host's first. Of the targets that get one environment's
     /// whole-environment Delete, only the first held is queued; the rest send nothing of their own, since that one
     /// Delete destroys them with everything else in it, and the batch still clears their marks.
-    fn run_batch(&mut self, targets: Vec<Target>, window: &mut Window, cx: &mut Context<Self>) {
+    fn run_batch(&mut self, targets: Vec<Queued>, window: &mut Window, cx: &mut Context<Self>) {
         let mut hosts: Vec<i64> = Vec::new();
-        let mut queues: HashMap<i64, VecDeque<Target>> = HashMap::new();
+        let mut queues: HashMap<i64, VecDeque<Queued>> = HashMap::new();
         let mut wholes: HashSet<i64> = HashSet::new();
-        let keys = targets.iter().map(|target| target.key.clone()).collect();
+        let keys = targets
+            .iter()
+            .map(|target| target.key().to_owned())
+            .collect();
         for target in targets {
-            if target.whole() && wholes.contains(&target.host) {
+            let host = target.host();
+            if target.whole() && wholes.contains(&host) {
                 continue;
             }
-            let held = !menu::refused(&target.key, cx) && target.hold(cx).is_ok();
+            let held =
+                !menu::refused(target.key(), cx) && hold(target.key(), target.work(), cx).is_ok();
             if !held {
-                not_started(&target.key, target.work(), target.label(), cx);
+                not_started(target.key(), target.work(), target.label(), cx);
                 continue;
             }
             if target.whole() {
-                wholes.insert(target.host);
+                wholes.insert(host);
             }
-            if !queues.contains_key(&target.host) {
-                hosts.push(target.host);
+            if !queues.contains_key(&host) {
+                hosts.push(host);
             }
-            queues.entry(target.host).or_default().push_back(target);
+            queues.entry(host).or_default().push_back(target);
         }
         let current = self.current.current(cx);
         let id = current.bulk.next;
@@ -692,11 +1022,24 @@ impl SessionList {
             };
             // The release and the start below (or the not-started line) happen in this one update, which no frame
             // and no observer runs inside, so nothing ever sees the row free between its hold and its request.
-            target.release(cx);
+            release(target.key(), cx);
             // The hold refused everything else on the row, so this finds the row as admission left it; checked all the
             // same, since a refusal here must leave a line rather than a request.
-            if menu::refused(&target.key, cx) {
-                not_started(&target.key, target.work(), target.label(), cx);
+            if menu::refused(target.key(), cx) {
+                not_started(target.key(), target.work(), target.label(), cx);
+                continue;
+            }
+            if target.changed_since_press(cx) {
+                leave_line(
+                    target.key(),
+                    target.work(),
+                    target.label(),
+                    CHANGED_WHILE_WAITING,
+                    cx,
+                );
+                continue;
+            }
+            if target.waits_for_host_change(cx) {
                 continue;
             }
             let (list, handle) = (cx.weak_entity(), window.window_handle());
@@ -711,10 +1054,10 @@ impl SessionList {
                     })
                 });
             };
-            match target.start(next, cx) {
+            match target.start(next, handle, cx) {
                 Ok(()) => return,
                 Err(NotStarted::Busy(_)) => {
-                    not_started(&target.key, target.work(), target.label(), cx)
+                    not_started(target.key(), target.work(), target.label(), cx)
                 }
                 // Inert, or a key no helm serves (logged where it was built): nothing to show on a row.
                 Err(NotStarted::Retired | NotStarted::Path(_)) => {}
@@ -740,9 +1083,9 @@ impl SessionList {
         };
         let queued = std::mem::take(queue);
         for target in queued {
-            target.release(cx);
+            release(target.key(), cx);
             leave_line(
-                &target.key,
+                target.key(),
                 target.work(),
                 target.label(),
                 AFTER_CARRIES_ON,
@@ -765,6 +1108,74 @@ impl SessionList {
             cx.notify();
         }
         self.settle(cx);
+    }
+
+    // ---- Restart/Replace ---------------------------------------------------------------------------------------------
+
+    /// The bar's Restart/Replace was pressed: start the targets the presented bar drew ([`DrawnStart`]) as one batch,
+    /// asking nothing (the module docs' "Restart/Replace"). A reset invalidates the press, and a bulk question still
+    /// open leaves it in charge, as for Stop and Delete. A row whose Restart or Replace is already held or in flight
+    /// (an earlier press, a double click) is left alone without a line, since it is starting already. A row that
+    /// cannot start now keeps its mark and gets a line saying why: its environment being deleted or frozen, or a
+    /// Replace that would end something it may still run. The rest go to [`Self::run_batch`], whose admission refuses
+    /// a busy row and whose turns refuse a changed row or a start while a host change is in flight.
+    ///
+    /// When the button itself holds focus (a press from the keyboard), focus moves to "N marked" before the batch runs,
+    /// as a confirmed bulk question's does: the button goes from the bar as soon as a restarted session lists as
+    /// running, which would otherwise drop keyboard focus partway. A click that left focus elsewhere (on macOS a click
+    /// need not focus the button, so the open session's terminal may still hold it) leaves focus where it is.
+    pub(super) fn bulk_start(
+        &mut self,
+        drawn: &DrawnStart,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mark = Mark::take(cx);
+        if self.bulk_question_open(window, cx)
+            || session::current_store(cx).is_none_or(|store| store.entity_id() != drawn.store)
+        {
+            return;
+        }
+        let mut queued = Vec::with_capacity(drawn.targets.len());
+        for target in &drawn.targets {
+            let key = &target.key;
+            if matches!(
+                outcome::in_flight(key, cx),
+                Some(Work::Restart | Work::Replace)
+            ) {
+                continue;
+            }
+            let (work, label) = match target.how {
+                Some(how) => (how.work(), how.label()),
+                None => (Work::Replace, How::REPLACE),
+            };
+            // Read now rather than when the bar drew: an environment that began deleting, suspended or started
+            // changing since would refuse the request anyway, and its line says why where the helm's would not.
+            let refusal = super::environment::deleting_reason(key, cx).or_else(|| {
+                super::environment::of_key(key, cx)
+                    .is_some_and(|environment| environment.frozen())
+                    .then_some(ENVIRONMENT_FROZEN)
+            });
+            match (refusal, target.how) {
+                (Some(reason), _) => leave_line(key, work, label, reason, cx),
+                (None, None) => leave_line(key, work, label, REPLACE_WOULD_END, cx),
+                (None, Some(how)) => queued.push(Queued::Start(QueuedStart {
+                    key: key.clone(),
+                    host: target.host,
+                    how,
+                    skipped: drawn.skipped,
+                    mark,
+                })),
+            }
+        }
+        if queued.is_empty() {
+            return;
+        }
+        if self.marking.start_focus().is_focused(window) {
+            let count = self.marking.count_focus().clone();
+            focus::focus_control(&count, &mark, window, cx);
+        }
+        self.run_batch(queued, window, cx);
     }
 
     // ---- Rewording -----------------------------------------------------------------------------------------------------
