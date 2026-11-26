@@ -248,20 +248,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   can attribute to the bounded request, beyond the launcher-only triage budget. Plan:
   `plans/queue/launcher-late-wake-failures.md`.
 
-- **Require the fresh-clone warning before Replace with can act.** In Replace with, a recent setup can switch the
-  destination from the source's managed checkout to a fresh clone. On a suspended host, the same Enter can start waking
-  the host. On a connected host, a second press can launch once the preview returns while the old frame still shows the
-  source folder. The replacement leaves the source's changes behind and can move its checkout to Trash. Bind the launch
-  to the checkout consequence actually shown. A warning laid out inside the scrollable form can be clipped, and GPUI can
-  replace a visible draw before presenting it. The triage attempt tracked prepaint visibility but the next-frame
-  callback could admit it before the clipped replacement frame. Establish actual presentation or keep the disclosure
-  visible through the press. Bind it to the current checkout and carry the admitted consent through hook settings, host
-  wake and checkout preview. A newer frame with an unrelated change to the source's tab count should not cancel a launch
-  whose consent already covered it. A changed checkout requires new consent. See `SPEC.md` under “Managed checkouts” and
-  “One GUI at a time” and `SPEC_impl.md` under “Questions: the prompt”. Test both recent-setup paths, a visible draw
-  replaced by a clipped frame before presentation, and a successful continuation after a wait. Update the documented
-  Enter behavior and key hint if the fill now needs another press. Plan: `plans/queue/launcher-visible-consent.md`.
-
 - **Show container recipe admission failures before recording build ownership.** An explicit Rebuild can answer Accepted
   before a fresh Podman check fails. The existing recipe place record keeps that failure visible after the job ends.
   Suppressing the record alone loses the reason if the old host check still says Ready, for example after a refresh
@@ -363,17 +349,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   unavailable and then verified gone. A pending close's first sweep can fail before the failure branch that advances the
   retry deadline. Advance the deadline on every failed automatic retry and assert that cleanup waits until the new
   deadline. Plan: `plans/queue/supervisor-tab-close-retry.md`.
-
-- **Ignore Enter on a clipped recent setup.** In the session launcher's empty command pane, highlight a recent setup
-  with the arrow keys and scroll it out of view. Enter can still launch that setup or replace the source session. Keep
-  the highlight and consume Enter until a frame has shown the whole row again, as SPEC.md's “One GUI at a time”
-  requires. In the launcher search view (`launcher/view/search.rs` and `launcher/view/search/start.rs`), extend the
-  existing Enter action snapshot with the row's visibility after layout and scroll clipping, including the ancestor
-  clip. Invalidate it when the row disappears or is clipped. The next visible frame authorizes a fresh press. Preserve
-  the existing stale-choice refusal if the setup disappears before dispatch. Test partial and full clipping by scrolling
-  a selected row, then reveal it and verify the next Enter sends the stored setup's distinct model. The fix exceeds the
-  triage size gate because the existing snapshot is taken before layout, and the regression needs a scrollable pane and
-  a real Replace request. Plan: `plans/queue/launcher-visible-consent.md`.
 
 - **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
   out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
