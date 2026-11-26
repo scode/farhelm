@@ -546,8 +546,9 @@ finished during relaunch. Leave the manual Update actions untouched. Require
 candidate remote connected and call remote_version. Call continuity_remote_after
 to compare the live original process with the retained sample from before
 candidate relaunch.''',
-        'reopen': '''Call continuity_reopen_before. Quit the candidate normally through native UI,
-then call launch. Require usable candidate, both connected hosts, retained
+        'reopen': '''Call continuity_reopen_before, bind the running candidate, then call
+brick_ui with target farhelm, method quit and args []. After the app exits,
+call launch and bind the new candidate. Require usable candidate, both connected hosts, retained
 sessions and responsiveness. Call versions, remote_version, inspect_state and
 continuity_reopen_after. Capture final native image.''',
         'p2-feedback-send': '''Call prior_receipts. This is the separately approved P2 send after all runnable P0 checks passed.

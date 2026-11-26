@@ -61,13 +61,15 @@ reactive field value before submitting. For the actual Restart to update
 button first capture its visible menu, then use method restart with its center
 coordinates as args [[x,y]], never ordinary click or an accessibility index.
 That action clicks once, waits for the candidate process, and rebinds only after
-observing it running. It never launches an absent Farhelm. Native images are
+observing it running. It never launches an absent Farhelm. For the reopen
+checkpoint, bind the running Farhelm, take the before sample, then use method
+quit with args [] to send Command-Q once. Native images are
 returned unchanged. An AX-plus-screenshot request can return only menu AX text:
 that is no captured image. Dismiss the menu normally and request the actual
 acceptance screenshot. Tool/permission failures stop the attempt.''',
         'inputSchema': {'type': 'object', 'properties': {
             'target': {'type': 'string', 'enum': ['desktop', 'finder', 'farhelm']},
-            'method': {'type': 'string', 'enum': sorted(set(METHODS) | {'getState', 'bind', 'restart'})},
+            'method': {'type': 'string', 'enum': sorted(set(METHODS) | {'getState', 'bind', 'restart', 'quit'})},
             'args': {'type': 'array', 'items': {}}},
             'required': ['target', 'method', 'args'], 'additionalProperties': False}}
 
@@ -99,6 +101,15 @@ class NativeUI:
             code = 'await cua.getState();'
         elif method == 'bind' and target != 'desktop' and not args:
             code = self.bind_code(target)
+        elif method == 'quit' and target == 'farhelm' and not args:
+            if self.operations.task['check_id'] != 'reopen' or 'reopen_quit' in self.operations.completed:
+                raise RuntimeError('native Quit is only available once for a reopen attempt')
+            before = self.operations.observations.get('continuity_reopen_before')
+            if target not in self.bound or before is None:
+                raise RuntimeError('bind the candidate and take the before sample before native Quit')
+            if self.operations.version()['desktop_pids'] != before['desktop_pids']:
+                raise RuntimeError('the before-sample app is absent or changed before native Quit')
+            code = f'await {variable}.pressKey("super+q");'
         elif method == 'restart' and target == 'farhelm' and len(args) == 1:
             point = args[0]
             if (not isinstance(point, list) or len(point) != 2 or any(
@@ -145,6 +156,11 @@ so frame evidence cannot silently borrow a previous screenshot's calibration.
 """
         if parameters['method'] == 'bind':
             self.bound.add(parameters['target'])
+        if parameters['method'] == 'quit':
+            # A provider acknowledgment proves the request, while the fixed
+            # launch gate independently checks that the old app really exited.
+            self.operations.completed.add('reopen_quit')
+            self.bound.discard(parameters['target'])
         task = self.operations.task
         needs_geometry = task['check_id'] == 'window-drag' or (
             task['check_id'] == 'native-preflight' and not task['pass_id'].startswith('p0-'))

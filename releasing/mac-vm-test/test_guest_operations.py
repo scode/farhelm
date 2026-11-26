@@ -1077,6 +1077,101 @@ bonus upgrades still need original-process continuity from before the relaunch.
             operations.dispatch('continuity_remote_after')
         runner.assert_not_called()
 
+    def test_reopen_requires_a_quit_and_new_app_between_exported_samples(self):
+        """Only one attempt's before, quit, launch and after observations can pass guest finalization."""
+        self.value.update(check_id='reopen', pass_id='upgrade-v0.29.0')
+        pids = [101]
+
+        def launch(argv, **kwargs):
+            """Model the managed app launch independently of its reported PID."""
+            self.assertEqual(argv[0], '/usr/bin/open')
+            self.assertEqual(pids, [])
+            pids.append(202)
+            return subprocess.CompletedProcess(argv, 0, b'', b'')
+
+        operations = self.operations(runner=mock.Mock(side_effect=launch))
+        operations.version = mock.Mock(side_effect=lambda: {
+            'installed': '0.30.0', 'bundle': '0.30.0', 'desktop_running': bool(pids),
+            'desktop_pids': pids.copy(), 'running_versions': ['0.30.0'], 'cli': {'stdout': 'farhelm 0.30.0\n'}})
+        before = {'pid': 103, 'start_ticks': 200, 'boot_id': '8503c7ff-c9c5-4d1c-9d14-bc7abe52671e', 'counter': 5}
+        after = dict(before, counter=12)
+        operations.ssh = mock.Mock(side_effect=[{'stdout': json.dumps(value)} for value in (before, [], after)])
+        self.assertEqual(operations.dispatch('continuity_reopen_after')['status'], 'not-ready')
+        self.assertEqual(operations.dispatch('launch')['status'], 'not-ready')
+        operations.ssh.assert_not_called()
+        self.assertEqual(operations.dispatch('continuity_reopen_before')['observation'],
+                         {'desktop_pids': [101], 'sample': before})
+        responses = []
+        native = types.SimpleNamespace(stdin=io.StringIO(), stdout=io.StringIO(
+            '\n'.join(json.dumps({'jsonrpc': '2.0', 'id': number, 'result': {'content': []}})
+                      for number in (1, 2)) + '\n'))
+        calls = [json.dumps({'jsonrpc': '2.0', 'id': number, 'method': 'tools/call',
+                            'params': {'name': 'brick_ui', 'arguments': {
+                                'target': 'farhelm', 'method': method, 'args': []}}})
+                 for number, method in enumerate(('bind', 'quit'), 1)]
+        serve(self.value, self.output, native, calls, responses.append, operations)
+        self.assertTrue(all(not reply['result'].get('isError') for reply in responses))
+        self.assertIn('reopen_quit', operations.completed)
+        self.assertIn('pressKey("super+q")', json.loads(native.stdin.getvalue().splitlines()[1])
+                      ['params']['arguments']['code'])
+        self.assertEqual(operations.dispatch('launch')['status'], 'not-ready')
+        operations.runner.assert_not_called()
+        pids.clear()
+        self.assertEqual(operations.dispatch('launch')['observation']['running']['desktop_pids'], [202])
+        operations.dispatch('versions')
+        operations.dispatch('remote_version')
+        self.assertEqual(operations.dispatch('continuity_reopen_after')['observation'],
+                         {'before': before, 'after': after})
+        claim = {'status': 'pass', 'detail': 'Fictional quit and relaunch across counter reads.'}
+        accepted = managed_result(self.value, self.output, claim)
+        self.assertEqual(accepted['status'], 'pass')
+        name = next(ref for ref in accepted['evidence'] if ref.endswith('-reopen-transition.json'))
+        path = self.output / 'work' / name
+        transition = json.loads(path.read_bytes())
+        self.assertEqual(transition['quit'], {'requested': True, 'desktop_pids': []})
+        self.assertEqual(transition['after'], {'desktop_pids': [202], 'sample': after})
+
+        for invalid, reason in (
+                (dict(transition, identity=dict(transition['identity'], attempt='previous-attempt')), 'different attempt'),
+                (dict(transition, quit={'requested': True, 'desktop_pids': [101]}), 'did not witness'),
+                (dict(transition, quit={'requested': False, 'desktop_pids': []}), 'did not witness'),
+                (dict(transition, launched_desktop_pids=[101]), 'new app process'),
+                (dict(transition, after=dict(transition['after'], sample=before)), 'exported counter samples')):
+            with self.subTest(reason=reason):
+                write_json(path, invalid, replace=True)
+                with self.assertRaisesRegex(TesterError, reason):
+                    managed_result(self.value, self.output, claim)
+
+    def test_reopen_does_not_reuse_a_before_sample_from_an_earlier_attempt(self):
+        """Old pass-wide data cannot stand in for this attempt observing the original app."""
+        self.value.update(check_id='reopen', pass_id='upgrade-v0.29.0')
+        write_json(self.pass_dir / 'managed-state.json', {'receipts': [], 'reopen_before': {'counter': 5}})
+        self.value['attempt'] = 'reopen-retry'
+        runner = mock.Mock()
+        operations = self.operations(runner=runner)
+        self.assertEqual(operations.dispatch('continuity_reopen_after')['status'], 'not-ready')
+        self.assertEqual(operations.dispatch('launch')['status'], 'not-ready')
+        runner.assert_not_called()
+        self.assertIsNone(operations.continuity_receipts)
+
+    def test_an_unexpected_desktop_exit_cannot_authorize_reopen_launch(self):
+        """An absent desktop only proves Quit after the guest's native request was acknowledged."""
+        self.value.update(check_id='reopen', pass_id='upgrade-v0.29.0')
+        runner = mock.Mock()
+        operations = self.operations(runner=runner)
+        running = {'installed': '0.30.0', 'bundle': '0.30.0', 'desktop_running': True,
+                   'desktop_pids': [101], 'running_versions': ['0.30.0']}
+        operations.version = mock.Mock(side_effect=[running, running])
+        operations.ssh = mock.Mock(return_value={'stdout': json.dumps({'counter': 5})})
+        operations.dispatch('continuity_reopen_before')
+        self.assertIn('continuity_reopen_before', operations.completed)
+        operations.version = mock.Mock(return_value=dict(running, desktop_running=False, desktop_pids=[]))
+        response = operations.dispatch('launch')
+        self.assertEqual(response['status'], 'not-ready')
+        self.assertIn('native Quit', response['detail'])
+        self.assertNotIn('launch', operations.completed)
+        runner.assert_not_called()
+
     def test_native_failure_record_omits_image_payload(self):
         """The latch remains small even when a provider returns a screenshot beside its error."""
         operations = self.operations()

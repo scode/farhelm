@@ -1237,7 +1237,8 @@ systemd or SSH substrate ran.
   actions, native restart readiness after manual installation, durable completed-update evidence without transient
   progress images, exact native update-channel readouts without mandatory tooltip images, normal Finder readiness with
   verified menu dismissal, conditional product confirmations, terminal-host-only old-session survival and Restart,
-  automatic remote upgrade with continuity bound to the pre-relaunch receipt and attempt-local exports on deferral,
+  automatic remote upgrade with continuity bound to the pre-relaunch receipt, attempt-local exports on deferral, and
+  reopen continuity bound to a witnessed quit and fresh app process across guest, import and saved verdict checks,
   remote menu Remove/re-add and Uninstall sequencing, independent resource-preservation/removal receipts, restart
   process handoffs, calibrated window measurements, gesture-trace and bonus gesture-readiness gates, failure gates and
   evidence import with fictional fixtures, including the P0/P1/P2 tier order, scoped signed-announcement launch and

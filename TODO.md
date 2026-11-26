@@ -413,12 +413,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   triage size gate because the existing snapshot is taken before layout, and the regression needs a scrollable pane and
   a real Replace request.
 
-- **Bind the brick test's reopen samples to an app relaunch.** The bonus checkpoint currently checks that the remote
-  process and its counter survived between samples. The samples can come from the same app lifetime. Require this
-  attempt's before sample, a witnessed quit and fresh app identity, then the after sample. Carry that ordering through
-  guest receipt validation and host import. The counter and version checks alone cannot establish the transition. Plan:
-  `plans/queue/brick-test-reopen-and-retry-fixes.md`.
-
 - **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
   out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
   its version, so a case can report a verdict for the wrong binary. Cover both timeouts and cancellation during
