@@ -59,3 +59,88 @@ The updater containment fix remains on TODO. The screen capture and Restart chan
 The independent source reviews passed after corrections. The publication tests simulate a full-disk failure and an
 unreadable journal and prove that recovery remains possible. The hook tests pin a same-identity ignored report and an
 actual committed Codex callback. They also cover Grok's maximum-length ID and earlier log lines.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round. Since its PRs were based, main gained the Welcome empty-pane change, a planning PR
+that queued eight plans for triaged review outcomes, and a TODO entry; none of them touches hook reports, the drift
+checks or the screen capture tool, and the rebase applied without conflicts.
+
+Although both PRs are titled `test:`, #5022 also changes what the supervisor writes to a session's hook log: an `acked`
+line now ends with a tab and `committed gen=<number>` when the report was saved for that launch, or `ignored` when it
+left the saved conversation unchanged. Your plan decision "No release note needed" covers leaving it without a changelog
+entry, so the title stays; the custom agent page below covers the part outside Farhelm that reads that line.
+
+#### Fixes made while landing
+
+Both inside [#5022](https://github.com/scode/farhelm/pull/5022/changes); the landing's independent review found no
+blocker.
+
+- **The custom agent contract page documented the old hook log line (first should-fix).** It told custom agent authors
+  that a healthy report logs `acked conv-123 -`, so a check matching that whole line would fail against a working
+  integration. The page's three examples now show the tab and `committed gen=<number>`, and its contract changelog has
+  an entry saying what changed and how to match the line; the command line and flags are unchanged. The CLI shows this
+  page as `farhelm custom-agent spec`.
+- **A per-harness decision sat in shared code (second should-fix).** Which harness's acknowledgment carries the full
+  conversation ID as `id=` (only Grok's) was decided in the hook report module; it now lives with the other per-harness
+  reporting decisions, as AGENTS.md's code rules ask. It behaves the same.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. The checks below ran on
+the plan's PRs rebased onto main as it stood at the start of the landing (`8cd1f7ef`), which applied without conflicts;
+every file's change was exactly what the executor pushed until the two landing fixes inside #5022.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `9902ff4b-2ea9-40a8-8f78-35005a410f83`), before the fixes: all 8731 passed, with no runtime `SKIPPED` lines. That
+  covers the supervisor's hook report and screen fixture tests, the CLI's hook command and the drift checks' own unit
+  tests.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings`, on the test worker, before the fixes:
+  passed; the first two again after them.
+- After the fixes, the supervisor's library tests, `cargo nextest run -p farhelm-supervisor --lib`, on the test worker
+  (recorder run `15377036-0207-4fcd-816b-388609e05a81`): all 1645 passed, including the hook report tests that read the
+  moved Grok ID.
+- The desktop app's end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run
+  `bd09b025-5f5c-4522-a249-3e4448a0b1a6`), before the fixes: of its 49 steps, 48 passed and one was skipped by design on
+  Linux (paste), including the step whose conversation is reported through the hook.
+- The screen capture tool's own tests, `python3 -B scripts/test-capture-agent-screens.py`, locally (recorder run
+  `1ffe145e-7547-4e97-ad8b-f5339b9f2fa1`): all 16 passed.
+- The docs website build, `bun install --frozen-lockfile && bun run build` in `website/`, locally, before and after the
+  fixes: passed.
+- `python3 scripts/check-agents-md.py`, `python3 releasing/check-changelog.py format`, `cargo fmt --all -- --check` and
+  `python -B scripts/check-test-sleeps.py`, locally: passed. `dprint check`, locally: this plan's files pass; it fails
+  only on over-long lines in the triage outcomes archive, which main has had since an earlier triage record (#4978)
+  landed. No PR fixes them yet; a formatting-only one would, and I recommend it, as earlier rounds' notes did.
+
+Reused across the fixes: the workspace, desktop clippy and smoke runs, since the fixes move one function without
+changing it and edit a docs page. The executor's runs were focused selections on an older base, and everything they
+covered ran again above.
+
+Skipped: the live drift tests against real agents and a screen re-capture, which spend vendor turns and need an explicit
+request (`docs/harness-drift-tests.md`); the desktop app's own tests, since nothing in it changed; a Mac run; and CI,
+which runs only on demand.
+
+#### What the report says that is no longer true
+
+- Nothing.
+
+#### Things you should know that the report does not say
+
+- **The stricter drift checks have not yet run against real agents.** The Codex, Antigravity and Grok checks now need a
+  saved report for the resumed launch, and Grok's stricter check applies to every Grok drift case, not only Restart. The
+  plan kept live drift runs out of scope, so the first real drift run is what validates these checks; read a Grok
+  failure there with this change in mind.
+- **SPEC_impl.md under-describes when an acknowledgment is `ignored`.** It names a subordinate Stop and an identity that
+  is already saved, but Grok callbacks other than session start, a Stop whose reporting process cannot be checked, an
+  Antigravity Stop whose transcript does not verify, and a Codex report that is not resumable yet are also `ignored`. It
+  also does not mention Grok's `id=`. The hook troubleshooting page has the user-facing version; a sentence in
+  SPEC_impl.md would close the gap.
+- **Smaller points the review noticed.** The log reader ignores the conversation ID on `write-failed` lines, and one
+  test asserts that as if the line had none; the screen capture tool's recovery survives a stopped process, as
+  documented, but not a power loss in the middle of a write, which stops the next run with an error rather than
+  corrupting fixtures; the Grok-only `id=` field may be more than the check needs; and one loader error message reads as
+  if the test held the version lock that the capture tool holds. None needs a follow-up on its own.
