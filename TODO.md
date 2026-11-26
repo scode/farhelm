@@ -71,6 +71,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
   user when blocked through farhelm. Plan: `plans/queue/agent-blocked-notifications.md`.
 
+- **Let agents enable Tailscale when adding a host.** Make it possible for agents to support directly enabling tailscale
+  when adding a host. Also audit for any other gaps between GUI and agent capabilities when adding or removing hosts.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
