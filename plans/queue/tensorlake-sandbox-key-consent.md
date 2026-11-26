@@ -1,43 +1,70 @@
 # Goal: Bind leftover sandbox consent to the saved Tensorlake key
 
-In Settings -> Tensorlake, close any open leftover-sandbox Delete confirmation and invalidate stale discovered rows
-whenever the Tensorlake API key is cleared, replaced, or in the middle of a key write (from either key form), so Delete
-can never run against sandboxes belonging to a different key.
+In Settings -> Tensorlake, immediately close any open leftover-sandbox Delete confirmation and clear stale discovered
+rows, cleanups, and errors whenever the saved Tensorlake API key is cleared or replaced (from either
+`Settings -> Tensorlake` or `Settings -> Credentials`), so Delete can never act on stale rows from a previous key.
 
 **Source TODO entry (removed in the last code PR):** `Bind leftover sandbox consent to the saved Tensorlake key.` under
 `## Plan follow-ups` in `TODO.md`.
 
 ## Acceptance criteria
 
-- Starting a Tensorlake API key Save or Clear from either key form (`Settings -> Tensorlake` or
-  `Settings -> Credentials`) immediately retires any open leftover-sandbox Delete confirmation, clears stale discovered
-  rows/refusals/cleanups, and prevents Confirm from queuing a Delete behind the pending key write.
-- A successful key write without account data, or a server error / ambiguous reply after the helm may have stored the
-  key, invalidates prior consent immediately, re-reads the account, and requires a fresh discovery list before offering
-  Delete again.
-- On a definite refusal, the key form keeps its draft and error; once the fresh list returns, any unfinished cleanup
-  reported by the helm is shown.
-- GUI tests cover both key forms, a held write, a re-read after an ambiguous reply, and stale discovery; light and dark
-  captures of the replacement view are checked.
+- Replacing or clearing the Tensorlake API key from either key form (`Settings -> Tensorlake` or
+  `Settings -> Credentials`) immediately retires any open leftover-sandbox Delete confirmation (`question`, `asked`) and
+  clears `last_discovered`, `cleanups`, `delete_failure`, `discovery_error`, and `checked_at` (without clearing
+  `deleting` while an orphan Delete is still in flight), requiring a fresh discovery list before offering Delete again.
+- When a key write returns `Outcome::Done` with an empty or undecodable body, `TensorlakeAccount::key_saved` clears
+  `self.settings = None`, starts `Self::read(cx)`, and calls `cx.notify()` immediately (leaving `acknowledged()`
+  unchanged for `create_without_asking`). In `Sandboxes::follow_account`, when `account.key_saves()` changes while
+  `account.settings().is_none()`, immediately retire the prompt and clear stale rows/errors as above, bump `self.round`,
+  reset **`self.key = None`** (never recording `Some((old_bool, n + 1))`, which would short-circuit the equality check
+  when the follow-up read answers and skip starting `read(cx)`), reset **`self.checking = false`**, and call
+  **`cx.notify()`** before returning — so the retired prompt repaints immediately, stale `read()`/`delete()` replies see
+  `list.key != key`, and the subsequent account read starts a fresh discovery read when a key is saved.
+- `Sandboxes::delete()` captures `let key = self.key` before sending: on settlement it always resets `deleting = false`,
+  and updates `last_discovered` / `cleanups` / `delete_failure` or triggers `read(cx)` only when `list.key == key`, so a
+  late reply from an earlier key cannot pollute a new key's list or resurrect the hidden Sandboxes section after Clear.
+- On a definite key-write refusal, the key form keeps its draft and error; once the fresh list returns after a key
+  change, any unfinished cleanup reported by the helm is shown.
+- Update `SPEC_impl.md:7396-7403` to note that both Clear and key replacement retire any open leftover-sandbox Delete
+  confirmation and clear cached discovery state (including across empty or undecodable replies).
+- GUI tests cover both key forms (`Place::Tensorlake` and `Place::Credentials`), an empty/undecodable `Done` reply
+  (verifying immediate prompt retirement AND that the follow-up read triggers fresh discovery), stale discovery
+  rejection, and an in-flight orphan Delete racing a key change; light and dark captures of the replacement view are
+  checked if visuals change.
 
 ## Decisions already made
 
-- Clean standalone Settings -> Tensorlake fix with no open product forks.
+- **Drop slow-helm / in-flight latency machinery:** Under the maintainer's low-latency helm rule for Settings (and
+  because the helm's `delete_orphan` re-reads and re-validates the current key on disk at deletion time), do not add a
+  `key_writes_in_flight` counter, held-write tests, or 5xx generation bumps. Keep the fix to the non-latency
+  `Sandboxes::follow_account` / `key_saved` / `delete` invariants above.
+- **Independent of `settings-wait-while-saving`:** Runs cleanly before or after `settings-wait-while-saving.md` with no
+  queue dependency.
 - **Review gate:** Single fresh-context Opus 5.5 agent at high effort with the general review charter below.
 
 ## Implementation outline and requirement sources
 
-- **User request & decisions:** `TODO.md` ("Bind leftover sandbox consent to the saved Tensorlake key.").
-- **Binding repository constraints:** `SPEC.md` ("Keyboard focus", "Settings", "Sandbox sessions") and `SPEC_impl.md`.
-- **Planner-proposed implementation choices (scope-reviewed):**
-  - Reuse `TensorlakeAccount`'s existing `key_saves` generation counter
-    (`crates/gui/farhelm-gui/src/settings/tensorlake_key.rs:119`) and `Sandboxes::follow_account` / `round` gating
-    (`crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs:154-225`).
-  - Track `key_writes_in_flight` on `TensorlakeAccount` (covering both `Place::Tensorlake` and `Place::Credentials`),
-    bumping `key_saves` when a key Save or Clear starts and on ambiguous/5xx replies or empty account data.
-  - In `Sandboxes::follow_account`, clear `question`, `asked`, `delete_failure`, `last_discovered`, `checked_at`, and
-    `cleanups` on generation/key change so stale rows and confirmations disappear immediately and Confirm cannot queue
-    behind a pending key write.
+- **User request & decisions:** `TODO.md` ("Bind leftover sandbox consent to the saved Tensorlake key.") narrowed by the
+  settled low-latency helm simplification decision above.
+- **Binding repository constraints:** `SPEC.md` ("Keyboard focus", "Settings", "Sandbox sessions") and `SPEC_impl.md`
+  (`7396-7403`).
+- **Planner-proposed implementation choices (two rounds of dual Neon + Opus reviews, 1 PR):**
+  - Reuse `TensorlakeAccount`'s existing `key_saves` counter (`crates/gui/farhelm-gui/src/settings/tensorlake_key.rs`)
+    and `Sandboxes::follow_account` / `round` gating (`crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs`).
+  - In `TensorlakeAccount::key_saved`, when `body` is `None` or fails to decode, set `self.settings = None`, call
+    `Self::read(cx)`, and call `cx.notify()` (preserving `acknowledged()` for `create_without_asking` so
+    `a_done_save_whose_answer_does_not_decode_reads_the_account_again` stays intact).
+  - In `Sandboxes::follow_account`, handle a `key_saves` change before requiring `account.settings().is_some()`:
+    - When `account.settings()` is `None` and `key_saves` changed, clear `question`, `asked`, `delete_failure`,
+      `discovery_error`, `last_discovered`, `checked_at`, and `cleanups` (leaving `deleting` untouched), bump
+      `self.round`, set `self.key = None`, set `self.checking = false`, and call `cx.notify()` before returning.
+    - When `account.settings()` is `Some(settings)` and `self.key != Some((settings.api_key_set, key_saves))`, retire
+      and clear the same fields, bump `self.round`, update `self.key`, and start a fresh `self.read(cx)` when
+      `settings.api_key_set` is true.
+  - In `Sandboxes::delete()`, capture `let key = self.key;` and guard the reply's state updates and follow-up `read(cx)`
+    on `list.key == key` (always resetting `list.deleting = false`).
+  - Update `SPEC_impl.md:7396-7403`, add focused tests, and remove the `TODO.md` entry.
 
 ## Scope reassessment
 

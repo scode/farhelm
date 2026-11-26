@@ -129,7 +129,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   item’s size allowance. The triage decision asked only to reveal a page when one section is affected and to name each
   custom-agent draft in one sentence (size S); the separate rows, labels, scroll stop and new screenshots above are the
   plan executor's proposal, not a decision, and a smaller fix that meets the decision is fine. Plan:
-  `plans/queue/settings-close-save-hardening.md`.
+  `plans/queue/settings-wait-while-saving.md`.
 
 - **Keep credential delivery reports visible when Settings closes.** A replacement saved through Save and Close can
   reach storage while some hosts miss delivery. `crates/gui/farhelm-gui/src/settings/credentials/editor.rs` sends the
@@ -146,7 +146,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   required evidence together exceed this item's size allowance. The triage decision asked only to keep Settings open on
   Credentials when a close-save returns delivery warnings (size S); the rules above for a deferred reveal, retiring the
   old close and a later Save are the plan executor's proposal, not a decision. Plan:
-  `plans/queue/settings-close-save-hardening.md`.
+  `plans/queue/settings-wait-while-saving.md`.
 
 - **Wait for credential saves after Back or Cancel.** A credential editor can start Save, then close while the helm
   still owns the write. Settings can close without waiting or offer Discard for another draft, and a refused write has
@@ -160,7 +160,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   whose Discard must be absent. Assert that another editor's draft survives the refusal, and review the visible result
   in light and dark. See `SPEC.md` under “Settings” and “Credentials”. This needs receipt ownership outside the editor,
   integration with the multi-form close, and a new visible refusal with tests and references. The complete change
-  exceeds this triage item's size allowance. Plan: `plans/queue/settings-close-save-hardening.md`.
+  exceeds this triage item's size allowance. Plan: `plans/queue/settings-wait-while-saving.md`.
 
 - **Show a failed hook setup save after Settings closes.** A person can turn off Set up conversation hooks on all hosts
   for Grok or Antigravity and close Settings before the helm answers. If the write fails, the previous consent can still
@@ -178,7 +178,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the close decision for staged drafts. The triage assessment left the fix's shape open (hold the close, or a notice
   that survives it); choosing both, and an agent-specific notice with a retry route, is the plan executor's proposal,
   not a decision. Those paths and their test and visual evidence exceed this triage item's size allowance. Plan:
-  `plans/queue/settings-hook-save-notice.md`.
+  `plans/queue/settings-wait-while-saving.md`.
 
 - **Reveal the credential editor when Save and Close fails.** Resolving a Tensorlake key conflict from the Credentials
   overview footer can leave that overview in front of a retained credential draft. Save and Close still submits the
@@ -190,7 +190,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the same editor shows both the error and the retained draft. Capture the mounted error and staged draft in both
   appearances. The tested reveal, interaction test, and dedicated golden fixture together exceeded this triage item's
   size allowance. The separate independent-save follow-up covers a refusal that arrives while the close question is
-  still open. Plan: `plans/queue/settings-close-save-hardening.md`.
+  still open. Plan: `plans/queue/settings-wait-while-saving.md`.
 
 - **Stop Settings Save and Close when an independent save fails.** An editor can save on its own while a page Save waits
   for another write. If the editor fails before the page finishes, Save and Close must show its reason and stop before
@@ -204,7 +204,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   neither a retry nor the queued post-clone command. A newer unanswered or dismissed question must preserve the original
   page Save's post-clone write with its original draft. See `SPEC.md` under “Settings” and “One GUI at a time”. Deferred
   because separating receipt ownership and testing and capturing the revealed refusal exceeded this Settings triage
-  item's size allowance. Plan: `plans/queue/settings-close-save-hardening.md`.
+  item's size allowance. Plan: `plans/queue/settings-wait-while-saving.md`.
 
 - **Bind Settings footer Save and Discard to the page and drafts shown.** Navigation can move Save to another page's
   draft, including a different replacement for the one stored Tensorlake key. A late save refusal can move Discard to
@@ -218,7 +218,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   token. Test a held press across a page change and a down after the new footer is installed but before it is shown,
   followed by release after presentation. Cover a later same-page edit and an ordinary Save. The complete correction
   exceeded the triage size limit. See `SPEC.md` under “One GUI at a time” and `SPEC_impl.md` under “Questions: the
-  prompt”. Plan: `plans/queue/settings-close-save-hardening.md`.
+  prompt”. Plan: `plans/queue/settings-wait-while-saving.md`.
 
 - **Keep checkout notices after an agent Delete times out.** If an approved agent Delete outlasts the supervisor's reply
   budget and then leaves a checkout on disk, keep the checkout path and reason in the notices bell. The target host's
