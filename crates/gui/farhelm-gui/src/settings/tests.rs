@@ -87,7 +87,12 @@ pub(super) fn section_button(section: Section) -> &'static str {
 
 /// Select a section through the sidebar. The agent pages can be outside the clipped part of the navigation.
 pub(super) fn click_section(cx: &mut VisualTestContext, section: Section) {
-    let selector = section_button(section);
+    click_nav(cx, section_button(section));
+}
+
+/// Click the navigation row drawn under `selector`, scrolling the navigation to it first: a registered custom agent's
+/// row (`settings-section-custom-<id>`) has an id of its own that [`section_button`] cannot name.
+pub(super) fn click_nav(cx: &mut VisualTestContext, selector: &'static str) {
     let viewport = bounds(cx, "settings-navigation-region");
     let row = bounds(cx, selector);
     if row.bottom() > viewport.bottom() || row.top() < viewport.top() {
@@ -272,7 +277,9 @@ pub(super) fn heading(cx: &mut VisualTestContext) -> Option<String> {
 
 /// The catalog owns navigation even when it is empty. An external delete before a PUT settles takes the user
 /// back to Add while retaining the draft and its receipt. A confirmed Delete retires the draft.
-/// Close Save explains why the open Delete confirmation blocks the write. Cancel clears that explanation.
+/// Delete asks the shared inline question, frozen on the registration's name and ID and starting on Cancel, since a
+/// deleted registration is gone for good; Escape there cancels it, keeps Settings open and returns focus to Delete,
+/// and an accepted Save and Close takes an unanswered Delete question away and saves the draft (the newer answer wins).
 /// The previews and sidebar hover help isolate registered text so it cannot reorder the surrounding app words.
 /// The retained draft also exposes the deletion and recovery instructions as a screen-reader status.
 /// A busy key refuses either write with the shared reason and leaves the draft available for retry.
@@ -386,11 +393,12 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
         Some("Not saved: another operation was in progress. Try again.")
     );
     click(cx, "custom-agent-delete");
-    click(cx, "custom-agent-confirm-delete");
+    click(cx, "prompt-confirm");
     assert_eq!(
         label(cx, "custom-agent-error").as_deref(),
         Some("Not deleted: another operation was in progress. Try again.")
     );
+    assert!(!drawn(cx, "prompt"), "the answered question is gone");
     assert!(drawn(cx, "custom-agent-save") && sent(&mut helm).is_empty());
     cx.update(|_, cx| operations.update(cx, |store, cx| store.release(&key, cx)));
     reach(cx, "custom-agent-save");
@@ -503,36 +511,123 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     assert_eq!(heading(cx).as_deref(), Some(DISPLAY_NAME));
     assert!(drawn(cx, "custom-agent-command") && sent(&mut helm).is_empty());
 
-    // Changes and Reply arrive together. A deliberate Delete abandons this edit instead of retaining it for recovery.
+    // Delete asks first with the shared inline question, frozen on the registration's name and ID and starting on
+    // Cancel. Escape there cancels the Delete, keeps Settings open and returns focus to Delete.
     fill(cx, "custom-agent-command", "~/bin/example-v3");
     assert!(cx.update(|_, cx| super::draft_changed_for_opened(
         Section::CustomAgent("example-code".into()),
         cx
     )));
-    click(cx, "custom-agent-delete");
+    reach(cx, "custom-agent-delete");
+    keys(cx, "space");
     assert!(sent(&mut helm).is_empty(), "Delete asks first");
-    assert!(drawn(cx, "custom-agent-confirm-delete"));
-    keys(cx, "escape");
     assert_eq!(
         label(cx, "prompt").as_deref(),
-        Some("Save changes before closing?")
+        Some("Delete this custom agent?")
     );
-    click(cx, "prompt-confirm");
+    let consequence =
+        label(cx, "custom-agent-delete-consequence").expect("the question names the registration");
+    assert!(
+        consequence.starts_with("Delete Example Code")
+            && consequence
+                .ends_with("(example-code)? Existing sessions keep their saved resume command."),
+        "{consequence}"
+    );
     assert_eq!(
-        label(cx, "custom-agent-error").as_deref(),
-        Some("Save was blocked. Choose Cancel to keep editing.")
+        focused_id(cx).as_deref(),
+        Some("prompt-cancel"),
+        "a Delete that cannot be undone starts on Cancel"
     );
-    assert!(painted(cx).contains("Delete this custom agent?"));
-    assert!(drawn(cx, "custom-agent-confirm-delete"));
-    assert!(sent(&mut helm).is_empty(), "neither action sent a write");
-    click(cx, "custom-agent-keep");
-    assert!(!drawn(cx, "custom-agent-error"));
+    assert!(
+        !drawn(cx, "settings-footer-close"),
+        "the question owns the footer"
+    );
+    keys(cx, "escape");
+    assert!(!drawn(cx, "prompt"), "Escape cancelled the Delete");
+    assert_eq!(
+        heading(cx).as_deref(),
+        Some(DISPLAY_NAME),
+        "Settings stays open"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("custom-agent-delete"),
+        "focus returns to Delete"
+    );
     assert!(
         painted(cx).contains("~/bin/example-v3"),
         "the draft remains"
     );
+    assert!(sent(&mut helm).is_empty(), "Cancel sends nothing");
+
+    // With the Delete question unanswered, an accepted "Save changes before closing?" takes the question away and
+    // saves the draft. Escape from a field is Settings' own close.
+    keys(cx, "space");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    into_view(cx, "custom-agent-command");
+    click(cx, "custom-agent-command");
+    // Kit's field takes focus on its own input element, whatever the field's id.
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("input-state"),
+        "the premise: Escape is pressed from the field"
+    );
+    assert!(
+        drawn(cx, "prompt"),
+        "the premise: the Delete question is still unanswered"
+    );
+    keys(cx, "escape");
+    assert!(painted(cx).contains("Save changes before closing?"));
+    // Both questions are drawn now and both confirming answers are `prompt-confirm`, so the label tells the close
+    // question's Save from the Delete question's Delete, which Enter must not press.
+    let focused = frame(cx)
+        .into_iter()
+        .find(|node| node.flags.focused && node.element_id.is_some())
+        .map(|node| (node.element_id, node.label));
+    assert_eq!(
+        focused
+            .map(|(id, label)| (
+                id.map(|id| id.to_string()),
+                label.map(|label| label.to_string())
+            ))
+            .unwrap_or_default(),
+        (Some("prompt-confirm".into()), Some("Save".into())),
+        "the close question starts on its Save"
+    );
+    keys(cx, "enter");
+    let (saved, body) = one_command(&mut helm, Method::Put, "/api/custom-agents/example-code");
+    assert_eq!(
+        body["command"], "~/bin/example-v3",
+        "Save and Close saved the draft"
+    );
+    assert!(
+        !painted(cx).contains("Delete this custom agent?"),
+        "the unanswered Delete question is gone"
+    );
+    helm.push(CollectionChanges {
+        collection,
+        meta: meta(&["example-code"]),
+        upsert: vec![KeyedEntry {
+            key: "example-code".into(),
+            value: body.clone(),
+        }],
+        remove: vec![],
+    });
+    helm.reply(saved, 200, Some(body));
+    settle(cx);
+    assert!(!any_open(cx), "the saved close closed Settings");
+
+    // Changes and Reply arrive together. A deliberate Delete abandons this edit instead of retaining it for recovery.
+    open_settings(cx);
+    click_nav(cx, "settings-section-custom-example-code");
+    assert_eq!(
+        heading(cx).as_deref(),
+        Some(DISPLAY_NAME),
+        "the reopened registration"
+    );
+    fill(cx, "custom-agent-command", "~/bin/example-v4");
     click(cx, "custom-agent-delete");
-    click(cx, "custom-agent-confirm-delete");
+    click(cx, "prompt-confirm");
     let (delete, _) = one_command(&mut helm, Method::Delete, "/api/custom-agents/example-code");
     helm.push(CollectionChanges {
         collection,

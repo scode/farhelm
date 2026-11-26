@@ -400,6 +400,8 @@ linux/settings-custom-agent-busy-save--dark.png 32d7adb0a8086c360bb2d920e39b0788
 linux/settings-custom-agent-busy-save--light.png 81e3b537b5499434da6efe7c697eda0af5e54402
 linux/settings-custom-agent-catalog-unavailable--dark.png eb1f4c1dcb5c085d49efb215291648f517427a31
 linux/settings-custom-agent-catalog-unavailable--light.png 90e320552af9a251db21da06eb20fe4e527910d1
+linux/settings-custom-agent-delete--dark.png ae13490638244a0bbd694efdb41a4a2538c7bc87
+linux/settings-custom-agent-delete--light.png aa4564cf6cb8cd4f4f0042080d1b3230fb493b02
 linux/settings-custom-agent-dirty--dark.png d451e223835f78efc619e46535281a135b401f58
 linux/settings-custom-agent-dirty--light.png d56ef0fbf007f4b6eef4db7aab8fe7e38d2f0eab
 linux/settings-custom-agent-empty--dark.png 2cd9f25869a65c7c8950dc1c420e32726936e2e2
@@ -408,8 +410,6 @@ linux/settings-custom-agent-long-name--dark.png 5bcdd803b43678a071e7704f74e92ad9
 linux/settings-custom-agent-long-name--light.png d0e8303880749e4cf0cc626cc11b0d41a243ada3
 linux/settings-custom-agent-nav-tooltip--dark.png 281d1f67b054be300960740b48860882a0198675
 linux/settings-custom-agent-nav-tooltip--light.png fc27cbea6599e54db2aae6261244dae15c36fb4f
-linux/settings-custom-agent-save-blocked-by-delete--dark.png e99f332b583124e92f30ee133dba1c42340456ff
-linux/settings-custom-agent-save-blocked-by-delete--light.png 54c02cff4d92148e8558bd1ad981b328bcd2fb50
 linux/settings-custom-agent-save-refused--dark.png c3cd43914e4485e436ec4af75ce7c38c91cb1038
 linux/settings-custom-agent-save-refused--light.png 90a21210069201c7e855ed87938767695acbfa3a
 linux/settings-grok--dark.png ac5cfbf9a2a44e14c72621c1557a3c68aaabae20
