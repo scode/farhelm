@@ -74,3 +74,61 @@ checklist, reviewed the PR in two rounds.
   - **Low:** SPEC.md's agent Delete paragraph and notices paragraph, two code docstrings and two test docstrings still
     described the old behavior.
 - **Round 2:** found nothing.
+
+### Landing
+
+#### What landed with it
+
+This round landed supervisor-tab-close-retry first (a failed terminal tab close keeps the tab and retries), then this
+plan. The two touch separate code. Since this plan's base, main had gained a change keeping Replace with in the source
+session's folder (#5081), a spec change letting Enter pick a list highlight that has scrolled out of view (#5082), Stop
+and Restart ending an agent that outlived its killed terminal host (#5083), an unrelated container-host change (#5084)
+and TODO entries (#5085, #5089). None touches the helm's handling of agent requests or the notices bell, so nothing
+interacted. An independent reviewer and I confirmed the change does what the report says: one place covers Deletes of
+ordinary sessions and of sessions in a container or sandbox environment, the bell gets the notice at most once per
+deleted session, a failure to record it is logged, and nothing changed in the app or between the helm and the app.
+
+#### Fixes made while landing
+
+None. The independent review found nothing to fix.
+
+#### Worth knowing
+
+- **This corrects the report: the bell gets every notice an agent's Delete produces, not only checkout notices.** For a
+  session in a container, that can be a "Session deleted on ⟨host⟩" entry saying that stopping its container could not
+  be confirmed, with no checkout path in it. That is arguably more useful, but SPEC.md says only checkout notices go to
+  the bell. If you want the spec to match, changing "checkout notice" to "Delete notice" in its agent Delete sentence
+  would do it.
+- **One case still loses the notice.** If the asking agent's request is cut off while its Delete is still running, the
+  notice reaches neither the agent nor the bell. I did not check whether the Delete itself still finishes in that case.
+  That is outside what the plan decided to cover. Not worth a follow-up unless it is seen to happen.
+
+Nothing from the landing needs a follow-up unless you want the spec wording above changed; say so and it becomes a Plan
+follow-ups entry.
+
+#### Checks
+
+Run once for the whole round, on supervisor-tab-close-retry and agent-delete-late-notice stacked in that order on main
+as it stood when the landing started; what main gained since each plan's base is in each plan's notes. The only landing
+fixes, two spec corrections to supervisor-tab-close-retry, change only SPEC.md and SPEC_impl.md, so these runs still
+cover what merged. The test worker is an aarch64 Linux machine with a systemd user manager:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean.
+- On the test worker, `cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm-gui`,
+  recorded run d8896d2e-d92c-4d1e-8121-ea0329db3284: 7,416 passed, 17 skipped (tests marked ignored). That is every test
+  of the shared message types, the helm, the supervisor and the desktop app, wider than either executor's selection.
+- On the test worker, the end-to-end tests of host tabs (including supervisor-tab-close-retry's three new ones),
+  terminal tabs, tab edge cases, host terminals and every test whose name contains `delete`
+  (`cargo nextest run -p farhelm --test e2e` filtered to `host_tabs`, `terminal_tabs`, `tab_lifecycle_edges`,
+  `host_terminals` and `delete`), recorded run 0ffb2472-3094-47e8-9b62-3e09fc4aa544: 85 passed, and none skipped for
+  lack of systemd.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown: passed, and `dprint check` on both specs again after
+  supervisor-tab-close-retry's spec fixes.
+
+Reused: nothing. Skipped: the screenshot comparison and the desktop app's end-to-end smoke test, since nothing drawn
+changed; the Podman suites, since neither plan changes how containers are started or stopped. agent-delete-late-notice's
+Delete of a session in a container or sandbox is covered by the helm tests above, which use a stand-in for the
+environment instead of a real container.

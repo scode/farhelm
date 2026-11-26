@@ -39,3 +39,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`podman-host-verification`](reports/podman-host-verification.report.md) landed 2026-11-26 in #5084: Verify container host identity with cheap sanity checks and record concurrent SSH config policy
 - [`supervisor-outliving-programs`](reports/supervisor-outliving-programs.report.md) landed 2026-11-26 in #5083: Root Stop and Restart cleanup at surviving pinned children and record SIGHUP/SIGKILL policy
 - [`supervisor-tab-close-retry`](reports/supervisor-tab-close-retry.report.md) landed 2026-11-26 in #5087: Fix in-memory shell-tab close retry bugs and record Linux systemd/unscoped cleanup policy
+- [`agent-delete-late-notice`](reports/agent-delete-late-notice.report.md) landed 2026-11-26 in #5088: Always record agent-Delete leftover-checkout warnings in the notices bell
