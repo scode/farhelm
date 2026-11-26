@@ -25,6 +25,7 @@ use crate::hosts::{HostTerminal, Liveness};
 use crate::procs::ProcessIdentity;
 use farhelm_proto::io::parse_control;
 use farhelm_proto::{FrameKind, TerminalSelector};
+use std::sync::atomic::Ordering;
 
 /// How long any wait in these tests may take before it fails.
 const WAIT: Duration = Duration::from_secs(10);
@@ -100,6 +101,7 @@ pub(crate) fn host_row(id: &str, socket: &Path) -> StoredSession {
         omp_reporter_asset: None,
         omp_launch_program: None,
         launch_hooked: false,
+        handoff_marker_expected: false,
         launch_boot_ended: false,
         id: id.to_string(),
         parent: None,
@@ -3508,10 +3510,18 @@ async fn grid_fixture(
 /// ending in `ReplayComplete`, and input routed through the attachment's
 /// grid input side. Spec: the attach is answered `Attached`, then the
 /// client's screen shows `hello from the host` and `ReplayComplete` arrives;
-/// a `text` input of `typed` then reaches the host's child.
+/// a `text` input of `typed` then reaches the host's child. A line submitted
+/// during preparation is still sent. A later line starts the hooked launch's
+/// warning clock after the same terminal reaches agent handoff.
 #[farhelm_testtrace::test]
 async fn a_grid_client_attaches_a_host_agent_and_types_into_it() {
-    let (_state, sup, host, test_host) = grid_fixture(SupervisorTimeouts::default()).await;
+    let (state, sup, host, test_host) = grid_fixture(SupervisorTimeouts::default()).await;
+    let entry = sup.sessions.lock().await["s1"].clone();
+    entry.run.hooked.store(true, Ordering::Relaxed);
+    entry.run.handoff_seen.store(false, Ordering::Relaxed);
+    let launch = LaunchArtifacts::for_launch(state.path(), &entry.info.id, entry.generation);
+    assert!(!launch.handoff().exists());
+    assert!(entry.run.first_input.lock().unwrap().is_none());
     test_host.output(b"hello from the host\r\n");
     let mut peer = GridPeer::connect(&sup).await;
 
@@ -3538,6 +3548,28 @@ async fn a_grid_client_attaches_a_host_agent_and_types_into_it() {
         test_host.received()
     );
     assert!(host.status().caught_up);
+
+    let enter = br#"{"t":"key","key":"Enter","code":"Enter","kc":13,"mods":0}"#.to_vec();
+    peer.writer
+        .write_frame(&Frame::data(2, enter.clone()))
+        .await
+        .expect("write the preparation Enter");
+    assert!(test_host.received_becomes(b"typed\r", WAIT).await);
+    {
+        // The pump can write before the connection accounts for the line.
+        // Input does that accounting before releasing the attachment lock.
+        let _attachments = sup.attachments.lock().await;
+        assert!(entry.run.first_input.lock().unwrap().is_none());
+    }
+    std::fs::create_dir_all(launch.spec().parent().unwrap()).unwrap();
+    std::fs::write(launch.handoff(), []).unwrap();
+    peer.writer
+        .write_frame(&Frame::data(2, enter))
+        .await
+        .expect("write the agent Enter");
+    assert!(test_host.received_becomes(b"typed\r\r", WAIT).await);
+    let _attachments = sup.attachments.lock().await;
+    assert!(entry.run.first_input.lock().unwrap().is_some());
 }
 
 /// An attach to a startup placeholder is refused as unavailable before

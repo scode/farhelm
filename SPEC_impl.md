@@ -4332,20 +4332,29 @@ no path values are stored in the notice.
   artifacts are cleaned once after successful accepted-create evidence preservation and removal, with failed cleanup
   retried. Report-backed identities still refresh under their capture claim because accepted reports and decision-time
   Restart can change the row after the agent stops. An injected launch holding no identity warns once after 65 seconds
-  from the first input frame delivered to the agent's terminal that holds an Enter (`capture::submits_a_line`): a
-  carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends `ESC CR` to insert a newline), in a frame
-  the grid input path queued for the agent's terminal host. A bracketed paste is judged whole and never counts: its
-  newlines reach the agent as carriage returns (the supervisor's grid input encoder converts them), inside the paste
-  markers. The terminal's automatic replies to the agent TUI's own queries (device attributes, cursor position, colour
-  answers, focus reports) never carry a carriage return, so an agent the user opened but has not typed into cannot trip
-  it. An Enter while the latest screen reading before delivery is `Waiting` answers a recognized dialog and does not
-  start the clock. An outdated waiting reading can defer the clock to the next Enter; no capture runs on the input path.
-  With no reading yet, or no dedicated reader, the existing submitted-line rule applies. The spawn records whether its
-  argv received the hook before the agent's terminal host starts, fenced by launch generation. Reload restores that
-  flag; older rows default unhooked and stay unchecked. The anchor is an in-memory monotonic instant, reset with the
-  diagnostic latch on every relaunch and supervisor restart, so a picked-up launch starts its clock at the next
-  qualifying Enter after reload rather than recovering the time of an earlier Enter. A Resume carries its identity and
-  therefore stays silent even if its new hook never reports. The warning changes no offer or admission rule.
+  from the first input frame queued for the agent's terminal after handoff that holds an Enter
+  (`capture::submits_a_line`): a carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends `ESC CR`
+  to insert a newline), in a frame the grid input path queued for the agent's terminal host. A bracketed paste is judged
+  whole and never counts: its newlines reach the agent as carriage returns (the supervisor's grid input encoder converts
+  them), inside the paste markers. The terminal's automatic replies to the agent TUI's own queries (device attributes,
+  cursor position, colour answers, focus reports) never carry a carriage return, so an agent the user opened but has not
+  typed into cannot trip it. An Enter while the latest screen reading before delivery is `Waiting` answers a recognized
+  dialog and does not start the clock. An outdated waiting reading can defer the clock to the next Enter; no capture
+  runs on the input path. With no reading yet, or no dedicated reader, the existing submitted-line rule applies. The
+  spawn records whether its argv received the hook before the agent's terminal host starts, fenced by launch generation.
+  The shim publishes a private `.handoff` file for that generation immediately before exec, after checkout preparation,
+  directory entry and the Claude trust edit. The input path checks for the marker before queueing input, outside the
+  shared attachment lock. It caches proof for that launch and uses the proof from before the frame when deciding whether
+  to start the timer. A failed exec clears its marker, and the warning is suppressed once a startup Error is known. If
+  the shim cannot write an otherwise absent marker, the launch can proceed with the warning unarmed. A retaken create
+  clears the marker before reusing its generation. Settled Error cleanup, Delete and startup sweeping retire it with the
+  rest of the shim's evidence. Create and Restart record that the shim will produce this marker. Earlier session rows
+  default to expecting no marker, so a supervisor that picks one up can still time a hooked launch with the older shim.
+  Reload also restores whether the launch received the hook. Rows from before that hook flag default unhooked and stay
+  unchecked. The anchor is an in-memory monotonic instant, reset with the diagnostic latch on every relaunch and
+  supervisor restart, so a picked-up launch starts its clock at the next qualifying Enter after reload rather than
+  recovering the time of an earlier Enter. A Resume carries its identity and therefore stays silent even if its new hook
+  never reports. The warning changes no offer or admission rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's agent terminal's root process (see the shared framework below).

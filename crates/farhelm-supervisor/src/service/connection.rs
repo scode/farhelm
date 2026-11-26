@@ -9,13 +9,14 @@
 //! (`super::grid_stream`), which reports how it ended through
 //! [`report_forwarder_end`].
 
-use super::capture::note_first_input;
+use super::capture::{handoff_seen_before_input, note_first_input, submits_a_line};
 use super::channels::ConnectionChannels;
 use super::core::{Supervisor, error_kind};
 use super::handlers::{handle_control, handle_restricted_control};
 use super::terminals::{ActiveAttach, AttachmentKey, TerminalId, join_forwarder};
 use super::uploads::{UPLOAD_PRIORITY_QUEUE, UploadCommand, UploadRoute, UploadSignal};
 use anyhow::Context;
+use farhelm_proto::grid::GridInput;
 use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, parse_control, read_hello, report_hello_skew,
     write_frame_before_stall,
@@ -474,6 +475,20 @@ where
                     // ends (`stale_route` below) rather than mid-arm.
                     let stale_route = if let Some(route) = channels.input(frame.channel) {
                         let entry = &route.entry;
+                        let input = GridInput::decode(&frame.body);
+                        // Skip the metadata probe for frames that cannot
+                        // submit a line. A key or the end of a paste can
+                        // depend on the attachment's encoder, which still
+                        // makes the decision under the lock before queueing.
+                        let may_submit = match &input {
+                            Ok(GridInput::Key { .. }) => true,
+                            Ok(GridInput::Text { data }) => submits_a_line(data.as_bytes()),
+                            Ok(GridInput::Paste { last, .. }) => *last,
+                            Ok(GridInput::Mouse { .. } | GridInput::Focus { .. }) | Err(_) => false,
+                        };
+                        let handed_off = route.key.terminal == TerminalId::Agent
+                            && may_submit
+                            && handoff_seen_before_input(&sup.state_dir, entry).await;
                         // Save the reading before delivering input: an Enter
                         // can dismiss a dialog before the send returns. The
                         // activity leaf lock is released before any await or
@@ -514,7 +529,7 @@ where
                         // hold — no gap where a takeover could interleave.
                         let send_result = match attachments.get_mut(&route.key) {
                             Some(a) if a.channel == frame.channel && a.notify.same_channel(&tx) => {
-                                Some(a.input.send_input(&frame.body))
+                                Some(a.input.send_input(input))
                             }
                             _ => None,
                         };
@@ -534,7 +549,7 @@ where
                         if route.key.terminal == TerminalId::Agent
                             && matches!(send_result, Some(Ok(true)))
                         {
-                            note_first_input(entry, before_input);
+                            note_first_input(entry, before_input, handed_off);
                         }
                         match send_result {
                             Some(Ok(_)) => false,

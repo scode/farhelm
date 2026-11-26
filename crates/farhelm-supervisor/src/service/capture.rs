@@ -10,7 +10,11 @@
 
 use super::core::{SessionEntry, Supervisor};
 use crate::agent_kind::screen_reader::ScreenState;
+use crate::launch::LaunchArtifacts;
+use crate::store::LastOutcome;
+use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use tracing::warn;
 
@@ -123,6 +127,9 @@ impl Supervisor {
     /// a report committed between this pass's mirror refresh and the tripwire
     /// is not in the capture state yet, and a notification, unlike the log
     /// line, must be true when recorded (the plan's M10).
+    /// The same admission checks for a startup error that may be committed
+    /// during this pass. An exec that failed after publishing handoff had no
+    /// agent to receive the prompt.
     ///
     /// A launch already told that its OMP reporter does not match is not told
     /// again that its hook never reported: it is the same cause, and that
@@ -169,8 +176,31 @@ impl Supervisor {
     }
 }
 
-/// Start the launch's diagnostic clock on the first submitted line delivered
-/// to its agent terminal outside a recognized dialog.
+/// Snapshot the launch's handoff proof before input is queued.
+///
+/// An Enter queued during preparation may return just as the marker appears.
+/// Reading afterward would let that later handoff qualify an earlier line.
+/// Look outside the attachment lock so a filesystem delay cannot hold up other
+/// terminals. A missed marker gets another chance on the next frame.
+pub(super) async fn handoff_seen_before_input(state_dir: &Path, entry: &SessionEntry) -> bool {
+    if !entry.run.hooked.load(Ordering::Relaxed) {
+        return false;
+    }
+    if entry.run.handoff_seen.load(Ordering::Relaxed) {
+        return true;
+    }
+    let artifacts = LaunchArtifacts::for_launch(state_dir, &entry.info.id, entry.generation);
+    let seen = tokio::fs::symlink_metadata(artifacts.handoff())
+        .await
+        .is_ok_and(|metadata| metadata.is_file());
+    if seen {
+        entry.run.handoff_seen.store(true, Ordering::Relaxed);
+    }
+    seen
+}
+
+/// Start the launch's diagnostic clock on the first submitted line queued
+/// after shim handoff to its agent terminal, outside a recognized dialog.
 ///
 /// A launch can sit idle indefinitely before Codex has a prompt to report, so
 /// launch time is not a useful anchor, and neither is any input at all: the
@@ -188,10 +218,10 @@ impl Supervisor {
 /// `before_input` must be the latest reading taken before delivery:
 /// answering a dialog can dismiss it before the send completes, but that Enter
 /// gave the agent no prompt to report. An outdated waiting reading can defer
-/// the clock to another Enter; it must not produce an early warning. Nothing
-/// is persisted or spawned from the input path.
-pub(crate) fn note_first_input(entry: &SessionEntry, before_input: ScreenState) {
-    if before_input == ScreenState::Waiting {
+/// the clock to another Enter. Handoff must also be the reading from before
+/// delivery, even when another attachment has since seen the marker.
+pub(crate) fn note_first_input(entry: &SessionEntry, before_input: ScreenState, handed_off: bool) {
+    if !handed_off || before_input == ScreenState::Waiting {
         return;
     }
     entry
@@ -377,6 +407,12 @@ fn report_liveness_tripwire(
         if now.saturating_duration_since(at) < timeout {
             continue;
         }
+        if matches!(
+            *entry.run.outcome.lock().expect("outcome mutex poisoned"),
+            LastOutcome::Error { .. }
+        ) {
+            continue;
+        }
         let warn_now = {
             let state = entry.run.capture.lock().expect("capture mutex poisoned");
             let first =
@@ -487,6 +523,55 @@ mod tests {
         }
     }
 
+    /// The same terminal can take an Enter for preparation and then take one
+    /// for the agent. A later handoff must not turn preparation input into a
+    /// prompt, and only proof for this attempt qualifies the next line.
+    #[farhelm_testtrace::test]
+    async fn a_preparation_enter_stays_quiet_until_a_later_agent_enter() {
+        let state = StateDir::new();
+        let mut entry = entry(AgentKind::Claude, true, None, false);
+        Arc::get_mut(&mut entry).unwrap().generation = 1;
+        entry.run.handoff_seen.store(false, Ordering::Relaxed);
+        let old = LaunchArtifacts::for_launch(state.path(), &entry.info.id, 0);
+        let current = LaunchArtifacts::for_launch(state.path(), &entry.info.id, 1);
+        std::fs::create_dir_all(current.spec().parent().unwrap()).unwrap();
+        std::fs::write(old.handoff(), []).unwrap();
+        std::fs::write(current.waypoint(), []).unwrap();
+        std::os::unix::fs::symlink(old.handoff(), current.handoff()).unwrap();
+
+        let during_preparation = handoff_seen_before_input(state.path(), &entry).await;
+        assert!(!during_preparation);
+        assert!(!entry.run.handoff_seen.load(Ordering::Relaxed));
+
+        std::fs::remove_file(current.handoff()).unwrap();
+        std::fs::write(current.handoff(), []).unwrap();
+        let after_handoff = handoff_seen_before_input(state.path(), &entry).await;
+        assert!(after_handoff);
+
+        // The marker and the shared latch can both arrive before that first
+        // frame is accounted for. Only the proof taken before it counts.
+        note_first_input(&entry, ScreenState::Idle, during_preparation);
+        assert!(entry.run.first_input.lock().unwrap().is_none());
+        let entries = [entry];
+        assert!(
+            report_liveness_tripwire(
+                &entries,
+                REPORT_WARNING_AFTER,
+                Instant::now() + REPORT_WARNING_AFTER,
+            )
+            .is_empty()
+        );
+
+        note_first_input(&entries[0], ScreenState::Idle, after_handoff);
+        let first = entries[0].run.first_input.lock().unwrap().unwrap();
+        let deadline = first + REPORT_WARNING_AFTER;
+        assert_eq!(
+            report_liveness_tripwire(&entries, REPORT_WARNING_AFTER, deadline).len(),
+            1
+        );
+        assert!(report_liveness_tripwire(&entries, REPORT_WARNING_AFTER, deadline).is_empty());
+    }
+
     /// An accepted report before expiry suppresses the warning, just as an
     /// identity carried across Resume does. A launch that never received a
     /// hook or never took input has no diagnostic deadline at all.
@@ -545,7 +630,7 @@ mod tests {
                 "{conversation}".into(),
             ]),
         };
-        seed_silent_hook_session(sup, id, captured, launch).await;
+        seed_silent_hook_session(sup, id, captured, launch, false).await;
     }
 
     /// Seed the line deadline and hook latch with the same launch in the
@@ -555,6 +640,7 @@ mod tests {
         id: &str,
         captured: Option<&str>,
         launch: farhelm_proto::SessionLaunch,
+        handoff_marker_expected: bool,
     ) {
         let snapshot = IntegrationSnapshot::of(&launch);
         sup.store
@@ -567,6 +653,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: true,
+                    handoff_marker_expected,
                     launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
@@ -636,7 +723,7 @@ mod tests {
                     .is_some_and(farhelm_proto::RestartReadiness::due_by_first_prompt),
             "the launch would be eligible for a warning if it had a resume command"
         );
-        seed_silent_hook_session(&sup, "resume-off", None, no_resume).await;
+        seed_silent_hook_session(&sup, "resume-off", None, no_resume, false).await;
 
         sup.capture_pass(true).await;
         sup.capture_pass(true).await;
@@ -770,8 +857,10 @@ mod tests {
                     "reload alone must add no notification"
                 );
 
-                note_first_input(&entry, ScreenState::Working);
-                assert!(entry.run.first_input.lock().unwrap().is_some());
+                let handed_off = handoff_seen_before_input(state.path(), &entry).await;
+                assert_eq!(handed_off, hooked, "an older hooked launch needs no marker");
+                note_first_input(&entry, ScreenState::Working, handed_off);
+                assert_eq!(entry.run.first_input.lock().unwrap().is_some(), hooked);
                 sup.capture_pass(true).await;
                 assert_eq!(
                     sup.store
@@ -782,11 +871,11 @@ mod tests {
                     usize::from(hooked && restart > 0),
                     "a new Enter has not exhausted its budget"
                 );
-                *entry.run.first_input.lock().unwrap() = Some(
-                    Instant::now()
+                if let Some(at) = entry.run.first_input.lock().unwrap().as_mut() {
+                    *at = at
                         .checked_sub(REPORT_WARNING_AFTER + Duration::from_secs(1))
-                        .unwrap(),
-                );
+                        .unwrap();
+                }
                 sup.capture_pass(true).await;
                 sup.capture_pass(true).await;
                 let notifications = sup.store.session_notifications("reloaded").await.unwrap();
@@ -804,6 +893,75 @@ mod tests {
                 prior_warning = Some(notifications);
             }
         }
+    }
+
+    /// A reload during preparation remembers that the current shim still
+    /// owes a marker. Absence suppresses the clock until that shim hands off.
+    #[farhelm_testtrace::test]
+    async fn a_reloaded_current_launch_still_waits_for_handoff() {
+        let state = StateDir::new();
+        let id = "reloaded-current";
+        let sup = Supervisor::new(state.path()).await.unwrap();
+        seed_silent_hook_session(
+            &sup,
+            id,
+            None,
+            farhelm_proto::SessionLaunch::plain_command("agent"),
+            true,
+        )
+        .await;
+        drop(sup);
+
+        let sup = Supervisor::new(state.path()).await.unwrap();
+        let entry = sup.sessions.lock().await.get(id).cloned().unwrap();
+        assert!(entry.run.hooked.load(Ordering::Relaxed));
+        assert!(entry.run.first_input.lock().unwrap().is_none());
+        let artifacts = LaunchArtifacts::for_launch(state.path(), id, entry.generation);
+        assert!(!artifacts.handoff().exists());
+        assert!(!handoff_seen_before_input(state.path(), &entry).await);
+
+        std::fs::create_dir_all(artifacts.spec().parent().unwrap()).unwrap();
+        std::fs::write(artifacts.handoff(), []).unwrap();
+        assert!(handoff_seen_before_input(state.path(), &entry).await);
+    }
+
+    /// The shim publishes handoff immediately before exec. A viewer can
+    /// submit a line in the interval before exec fails, but a startup error
+    /// takes the place of the hook warning even if the mirror is still stale.
+    #[farhelm_testtrace::test]
+    async fn exec_failure_after_handoff_suppresses_the_hook_warning() {
+        let state = StateDir::new();
+        let sup = Supervisor::new(state.path()).await.unwrap();
+        let id = "failed-exec";
+        silent_hook_session(&sup, id, None).await;
+        let entry = sup.sessions.lock().await[id].clone();
+        assert!(entry.run.first_input.lock().unwrap().unwrap().elapsed() >= REPORT_WARNING_AFTER);
+        assert!(entry.snapshot.resume_template.is_some());
+        let failure = crate::store::Transition::SentinelError {
+            detail: "exec failed".to_string(),
+            address: None,
+            inferred: false,
+        };
+        sup.store
+            .transition(id, entry.generation, failure)
+            .await
+            .unwrap();
+        let stored = sup.store.session(id).await.unwrap().unwrap();
+        assert!(matches!(stored.outcome, LastOutcome::Error { .. }));
+        assert_eq!(*entry.run.outcome.lock().unwrap(), LastOutcome::Running);
+        sup.notify_hook_silent(&entry).await;
+        assert!(
+            sup.store
+                .session_notifications(id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        *entry.run.outcome.lock().unwrap() = stored.outcome;
+        assert!(
+            report_liveness_tripwire(&[entry], REPORT_WARNING_AFTER, Instant::now()).is_empty()
+        );
     }
 
     /// A late accepted identity must resolve the existing silent-hook warning,
@@ -1118,17 +1276,17 @@ mod tests {
         let entry = entry_with(None, crate::store::LastOutcome::Running);
         assert!(entry.run.first_input.lock().unwrap().is_none());
 
-        note_first_input(&entry, ScreenState::Waiting);
+        note_first_input(&entry, ScreenState::Waiting, true);
         assert!(entry.run.first_input.lock().unwrap().is_none());
 
-        note_first_input(&entry, ScreenState::Idle);
+        note_first_input(&entry, ScreenState::Idle, true);
         let first = entry
             .run
             .first_input
             .lock()
             .unwrap()
             .expect("prompt anchor");
-        note_first_input(&entry, ScreenState::Working);
+        note_first_input(&entry, ScreenState::Working, true);
         assert_eq!(*entry.run.first_input.lock().unwrap(), Some(first));
     }
 
@@ -1142,7 +1300,7 @@ mod tests {
         assert_ne!(before_input, ScreenState::Waiting, "unsampled fixture");
         assert!(entry.run.first_input.lock().unwrap().is_none());
 
-        note_first_input(&entry, before_input);
+        note_first_input(&entry, before_input, true);
 
         assert!(entry.run.first_input.lock().unwrap().is_some());
     }

@@ -57,6 +57,7 @@ async fn prepare_grok(
                 omp_reporter_asset: None,
                 omp_launch_program: None,
                 launch_hooked: false,
+                handoff_marker_expected: false,
                 launch_boot_ended: false,
                 persistent_hook_setup: PersistentHookSetup::NotRequested,
                 setup_persistent_hooks_on_create: requested,

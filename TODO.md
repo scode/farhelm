@@ -280,16 +280,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   long shared flag prefix and different final arguments. The complete fix exceeds the triage size gate. Plan:
   `plans/queue/launcher-consent-and-custom-agent-fixes.md`.
 
-- **Start the missing-hook warning clock after the agent starts.** In a fresh managed checkout's terminal, pressing
-  Enter during the clone or post-clone command can start the missing conversation-hook timer. SPEC.md's Status section
-  ties the warning to a submitted line the agent received. Keep sending input during preparation. In
-  `service/connection.rs` and `service/capture.rs`, arm the timer on the first accepted Enter after generation-bound
-  evidence that the shim handed off to the agent. The launcher waypoint marks an earlier shell step and checkout Ready
-  precedes the trust edit and agent exec. A reliable handoff signal needs recovery and cleanup rules so a prior launch
-  cannot arm this one. Test that a preparation Enter stays quiet after the deadline and that an Enter delivered to the
-  agent can still start the once-per-launch warning. The triage plan deferred the handoff work and its lifecycle tests.
-  Plan: `plans/queue/hooks-restart-and-antigravity-fixes.md`.
-
 - **Make Wayland text-field paste nonblocking.** Pasting into a text field such as an SSH sign-in answer can freeze the
   window while another app supplies clipboard data. [Terminal experience](SPEC.md#terminal-experience) requires Farhelm
   to stay responsive during clipboard operations on Wayland. Kit's Paste checks the synchronous read before its async

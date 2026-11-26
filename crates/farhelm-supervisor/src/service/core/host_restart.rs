@@ -1611,6 +1611,7 @@ mod tests {
                     launch_scoped: scoped,
                     launch_boot_ended: false,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     omp_launch_program: None,
                     omp_reporter_asset: None,
                     capture_ownership_version: 0,

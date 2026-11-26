@@ -387,7 +387,7 @@ pub(crate) async fn clear_launch_artifacts_fail_closed(
 impl LaunchArtifacts {
     /// Retain every file-removal failure before a refused create settles its key.
     /// The caller has confirmed the terminal's absence and swept this attempt's processes;
-    /// no consumer remains for its spec, sentinel or waypoint. Attempt every file
+    /// no consumer remains for its spec or any of its markers. Attempt every file
     /// so one obstruction cannot strand the other leftovers. Missing files are
     /// already clean, and every other failure joins the error recorded for retry.
     pub(super) async fn remove_failed_create_fail_closed(
@@ -410,6 +410,11 @@ impl LaunchArtifacts {
             error = error.context(cleanup);
         }
         if let Err(cleanup) =
+            Self::remove_file_fail_closed(self.handoff(), "the failed create's handoff").await
+        {
+            error = error.context(cleanup);
+        }
+        if let Err(cleanup) =
             Self::remove_file_fail_closed(self.host(), "the failed create's host record").await
         {
             error = error.context(cleanup);
@@ -418,15 +423,15 @@ impl LaunchArtifacts {
     }
 
     /// Remove a failed create's files after its process and terminal cleanup attempts.
-    /// Keep the original spec → status → waypoint order and attempt every file;
-    /// cleanup warnings must not replace the create failure being unwound.
+    /// Attempt every file. Cleanup warnings must preserve the create failure being unwound.
     pub(super) async fn remove_failed_create_best_effort(&self) -> bool {
         let spec_removed = Self::remove_file_best_effort(self.spec(), "launch spec").await;
         let status_removed =
             Self::remove_file_best_effort(self.status(), "launch status file").await;
         let waypoint_removed =
             Self::remove_file_best_effort(self.waypoint(), "launch waypoint").await;
-        spec_removed && status_removed && waypoint_removed
+        let handoff_removed = Self::remove_file_best_effort(self.handoff(), "launch handoff").await;
+        spec_removed && status_removed && waypoint_removed && handoff_removed
     }
 
     /// Remove a launch's host record once its host is confirmed ended.
@@ -440,8 +445,8 @@ impl LaunchArtifacts {
     }
 
     /// Retain every cleanup error when Delete has removed a relaunch's row.
-    /// Spec → status → waypoint removals all run even if an earlier one fails;
-    /// appending to the caller's teardown errors preserves their existing precedence.
+    /// All removals run even if an earlier one fails.
+    /// Appending to the caller's teardown errors preserves their existing precedence.
     pub(super) async fn remove_deleted_relaunch_fail_closed(&self, errors: &mut Vec<String>) {
         if let Err(error) = Self::remove_file_fail_closed(self.spec(), "launch spec").await {
             errors.push(error);
@@ -453,11 +458,14 @@ impl LaunchArtifacts {
         {
             errors.push(error);
         }
+        if let Err(error) = Self::remove_file_fail_closed(self.handoff(), "launch handoff").await {
+            errors.push(error);
+        }
     }
 
     /// Preserve the existing confirmed-absent restart cleanup before its sweep.
-    /// Only spec and waypoint are removed, in that order; the sentinel remains.
-    /// Both failures contextualize the existing launch error without skipping the
+    /// Remove the input spec and readiness markers. Keep the failure sentinel.
+    /// Unlink failures contextualize the existing launch error without skipping the
     /// caller's later process sweep or changing its final disposition.
     pub(super) async fn remove_unconsumed_relaunch_fail_closed(
         &self,
@@ -470,6 +478,11 @@ impl LaunchArtifacts {
         }
         if let Err(cleanup) =
             Self::remove_file_fail_closed(self.waypoint(), "the failed relaunch's waypoint").await
+        {
+            error = error.context(cleanup);
+        }
+        if let Err(cleanup) =
+            Self::remove_file_fail_closed(self.handoff(), "the failed relaunch's handoff").await
         {
             error = error.context(cleanup);
         }
@@ -486,12 +499,13 @@ impl LaunchArtifacts {
         let spec_removed = Self::remove_file_best_effort(self.spec(), "leftover launch spec").await;
         let waypoint_removed =
             Self::remove_file_best_effort(self.waypoint(), "launch waypoint").await;
+        let handoff_removed = Self::remove_file_best_effort(self.handoff(), "launch handoff").await;
         // Not the host record: an error settles the agent, not its terminal
         // host, which may still run (holding the failed launch's final
         // screen) with nothing else naming its socket while the row's `terminal_address`
         // is empty. It goes only with a confirmed end of that host, or with
         // the retry that found nothing left of the launch.
-        status_removed && spec_removed && waypoint_removed
+        status_removed && spec_removed && waypoint_removed && handoff_removed
     }
 
     /// Clear reused paths before a retaken create can publish a new launch there.
@@ -504,6 +518,7 @@ impl LaunchArtifacts {
     async fn clear_for_retake_fail_closed(&self) -> Result<(), String> {
         Self::remove_file_fail_closed(self.status(), "the previous launch's sentinel").await?;
         Self::remove_file_fail_closed(self.waypoint(), "the previous launch's waypoint").await?;
+        Self::remove_file_fail_closed(self.handoff(), "the previous launch's handoff").await?;
         Self::remove_file_fail_closed(self.spec(), "the previous launch's spec").await?;
         // Only reached once the retry's evidence found the old record's
         // starter gone and nothing at its socket.
@@ -742,7 +757,7 @@ impl LaunchArtifacts {
                         .keys()
                         .any(|session_id| staged_name_belongs_to(&name, session_id))
             } else if let Some((id, owner)) = crate::launch::parse_launch_file_name(&name) {
-                // Names are `<id>.<generation>.json|status|waypoint|held|launched|host`:
+                // Names are `<id>.<generation>.json|status|waypoint|handoff|held|launched|host`:
                 // launch files are per-LAUNCH (`launch::spec_path_for_launch`), the
                 // last two the session hold's marks. Two rules:
                 //
@@ -947,7 +962,8 @@ mod tests {
         let waypoint = crate::launch::waypoint_path_for_spec(&spec);
         let held = crate::session_hold::held_mark_path(&spec);
         let launched = crate::session_hold::launched_mark_path(&spec);
-        for path in [&spec, &status, &waypoint, &held, &launched] {
+        let handoff = spec.with_extension("handoff");
+        for path in [&spec, &status, &waypoint, &handoff, &held, &launched] {
             let name = path.file_name().unwrap().to_string_lossy();
             assert_eq!(
                 crate::launch::parse_launch_file_name(&name),
@@ -1344,10 +1360,10 @@ mod tests {
         assert!(!spec.exists() && !waypoint.exists());
     }
 
-    /// Waypoints become unnecessary once Error is durable, and cleanup must
-    /// remove them alongside the spec and sentinel before latching success.
+    /// A durable Error retires the shim's progress markers along with its spec
+    /// and sentinel. Cleanup can latch success only once the whole set is gone.
     #[farhelm_testtrace::test]
-    async fn settled_launch_cleanup_removes_all_three_artifacts() {
+    async fn settled_launch_cleanup_removes_the_shim_artifacts() {
         let state = StateDir::new();
         let store = SessionStore::open(&state.path().join("cleanup.db"), true)
             .await
@@ -1356,11 +1372,13 @@ mod tests {
         std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
         let status = crate::launch::status_path_for_spec(&spec);
         let waypoint = crate::launch::waypoint_path_for_spec(&spec);
-        for path in [&spec, &status, &waypoint] {
+        let handoff = spec.with_extension("handoff");
+        let paths = [&spec, &status, &waypoint, &handoff];
+        for path in paths {
             std::fs::write(path, b"fixture").unwrap();
         }
         assert!(cleanup_launch_artifacts(state.path(), &store, "settled", 1).await);
-        assert!(!spec.exists() && !status.exists() && !waypoint.exists());
+        assert!(paths.into_iter().all(|path| !path.exists()));
     }
 
     /// A sentinel obstruction must keep cleanup retryable without retaining the
@@ -1387,7 +1405,7 @@ mod tests {
         assert!(artifacts.remove_settled_best_effort().await);
     }
 
-    /// A retake must stop at the first obstruction in sentinel → waypoint → spec
+    /// A retake must stop at the first obstruction in sentinel → waypoint → handoff → spec
     /// order, because it cannot publish over evidence it failed to remove. Directory
     /// obstructions exercise real unlink failures without permission or uid assumptions.
     #[farhelm_testtrace::test]
@@ -1420,8 +1438,15 @@ mod tests {
         assert!(artifacts.spec().is_file());
 
         std::fs::remove_dir(artifacts.waypoint()).unwrap();
+        std::fs::create_dir(artifacts.handoff()).unwrap();
+        let error = artifacts.clear_for_retake_fail_closed().await.unwrap_err();
+        assert!(error.starts_with("removing the previous launch's handoff ("));
+        assert!(artifacts.spec().is_file());
+        std::fs::remove_dir(artifacts.handoff()).unwrap();
+        std::fs::write(artifacts.handoff(), b"").unwrap();
+
         artifacts.clear_for_retake_fail_closed().await.unwrap();
-        assert!(!artifacts.spec().exists());
+        assert!(!artifacts.spec().exists() && !artifacts.handoff().exists());
         artifacts.clear_for_retake_fail_closed().await.unwrap();
     }
 

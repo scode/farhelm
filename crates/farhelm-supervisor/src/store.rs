@@ -90,7 +90,7 @@ use subtle::ConstantTimeEq;
 /// database has ever had, and the template every later one follows.
 /// Public because the supervisor's hello reports it and the helm's Update
 /// refuses a host whose reported schema is above this build's.
-pub const SCHEMA_VERSION: i64 = 39;
+pub const SCHEMA_VERSION: i64 = 40;
 
 /// The supervisor remembers its owner even with no live helm connection.
 pub(crate) struct StoredHelmOwner {
@@ -894,6 +894,8 @@ pub struct PriorRun {
     pub launch_boot_ended: bool,
     /// The previous run's hook diagnostic, restored with its setup result.
     launch_hooked: bool,
+    /// Whether the prior launch's shim was responsible for a handoff marker.
+    handoff_marker_expected: bool,
     /// Setup result of the previous run in its stored form, restored with the previous terminal on a definitive abort.
     persistent_hook_setup: Option<String>,
     /// The kind of terminal the previous run's `terminal_address` names
@@ -909,7 +911,7 @@ pub struct PriorRun {
 /// whether it may open a new generation: the outcome quartet, the terminal
 /// address, the current generation, the captured conversation, the current
 /// launch's scope selection, ownership provenance, boot-finality proof and
-/// terminal kind, persistent hook setup, and hook diagnostic — in that order.
+/// terminal kind, persistent hook setup, hook diagnostic and handoff expectation in that order.
 ///
 /// Named only because the tuple is wide enough that clippy (rightly) asks
 /// for it; it has exactly one producer and one consumer, both inside that
@@ -924,6 +926,7 @@ type RelaunchBasisColumns = (
     i64,
     String,
     Option<String>,
+    i64,
     i64,
 );
 
@@ -1464,6 +1467,10 @@ pub struct StoredSession {
     /// silent-hook warning can start at the next qualifying Enter. Rows from
     /// before schema 29 default false; their argv cannot be reconstructed.
     pub launch_hooked: bool,
+    /// Whether this launch's shim publishes a marker when preparation ends.
+    /// Recorded before starting the host. A migrated row can belong to a live
+    /// shim that never writes this marker, so its default preserves Enter timing.
+    pub handoff_marker_expected: bool,
     /// What Farhelm did to install the vendor's persistent hooks for this launch.
     pub persistent_hook_setup: PersistentHookSetup,
     /// The accepted create's opt-in, retained so recovery uses the same consent after a supervisor stops mid-create.
@@ -1601,7 +1608,11 @@ pub(crate) struct StoredSessionNotification {
 /// container for each cleanup, even while the previous warning is unresolved.
 #[derive(Clone, Copy)]
 pub(crate) enum NotificationAdmission {
-    Once { unless_captured: bool },
+    Once {
+        unless_captured: bool,
+    },
+    /// A startup error means no agent could receive the submitted prompt.
+    HookSilent,
     RefreshChanged,
 }
 
@@ -1789,7 +1800,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  terminal_kind TEXT NOT NULL
                      CHECK (terminal_kind IN ('tmux', 'host')),
                  persistent_hook_setup TEXT,
-                 setup_persistent_hooks_on_create INTEGER NOT NULL DEFAULT 0
+                 setup_persistent_hooks_on_create INTEGER NOT NULL DEFAULT 0,
+                 handoff_marker_expected INTEGER NOT NULL DEFAULT 0
              ) STRICT;
 
              CREATE TABLE supervisor_meta (
@@ -1861,7 +1873,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  generation INTEGER NOT NULL,
                  PRIMARY KEY (session_id, generation)
              ) STRICT;
-             PRAGMA user_version = 39;
+             PRAGMA user_version = 40;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2674,6 +2686,23 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
             .context("migrating schema from version 38 to 39")?;
         version = 39;
     }
+    if version == 39 {
+        // A running pre-upgrade shim cannot publish the marker. Some
+        // migration fixtures rewind only the version stamp on a newer table.
+        let has_marker: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'handoff_marker_expected')",
+            [],
+            |row| row.get(0),
+        )?;
+        let add = if has_marker {
+            ""
+        } else {
+            "ALTER TABLE sessions ADD COLUMN handoff_marker_expected INTEGER NOT NULL DEFAULT 0;"
+        };
+        conn.execute_batch(&format!("BEGIN; {add} PRAGMA user_version = 40; COMMIT;"))
+            .context("migrating schema from version 39 to 40")?;
+        version = 40;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -3052,9 +3081,9 @@ fn insert_session_row(
           generation, launch_scoped, parent, session_token, \
           last_activity_at, last_work_started_at, conversation_source, session_launch, \
           capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked, launch_boot_ended, \
-          terminal_kind, persistent_hook_setup, setup_persistent_hooks_on_create) \
+          terminal_kind, persistent_hook_setup, setup_persistent_hooks_on_create, handoff_marker_expected) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
         rusqlite::params![
             row.id,
             row.title,
@@ -3084,6 +3113,7 @@ fn insert_session_row(
             row.terminal_kind.column(),
             encode_persistent_hook_setup(&row.persistent_hook_setup)?,
             row.setup_persistent_hooks_on_create,
+            row.handoff_marker_expected,
         ],
     )
     .context("inserting session row")?;
@@ -3135,7 +3165,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, terminal_address, \
                                last_activity_at, last_work_started_at, conversation_source, \
                                session_launch, \
                                capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked, launch_boot_ended, \
-                               terminal_kind, persistent_hook_setup, setup_persistent_hooks_on_create";
+                               terminal_kind, persistent_hook_setup, setup_persistent_hooks_on_create, handoff_marker_expected";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -3184,6 +3214,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             omp_reporter_asset: r.get(20)?,
             omp_launch_program: r.get(21)?,
             launch_hooked: r.get::<_, i64>(22)? != 0,
+            handoff_marker_expected: r.get(27)?,
             persistent_hook_setup: PersistentHookSetup::default(),
             setup_persistent_hooks_on_create: r.get(26)?,
             launch_boot_ended: r.get::<_, i64>(23)? != 0,
@@ -4778,7 +4809,8 @@ impl SessionStore {
                         .query_row(
                             "SELECT outcome_state, exit_code, annotation, error_detail, \
                      terminal_address, generation, captured_conversation, launch_scoped, \
-                     capture_ownership_version, launch_boot_ended, terminal_kind, persistent_hook_setup, launch_hooked \
+                     capture_ownership_version, launch_boot_ended, terminal_kind, persistent_hook_setup, launch_hooked, \
+                     handoff_marker_expected \
                      FROM sessions WHERE id = ?1",
                             rusqlite::params![id],
                             |r| {
@@ -4793,6 +4825,7 @@ impl SessionStore {
                                     r.get(10)?,
                                     r.get(11)?,
                                     r.get(12)?,
+                                    r.get(13)?,
                                 ))
                             },
                         )
@@ -4809,6 +4842,7 @@ impl SessionStore {
                         prior_kind,
                         persistent_hook_setup,
                         launch_hooked,
+                        handoff_marker_expected,
                     )) = current
                     else {
                         return Ok(RelaunchDecision::Gone);
@@ -4835,6 +4869,7 @@ impl SessionStore {
                         launch_boot_ended: launch_boot_ended != 0,
                         persistent_hook_setup,
                         launch_hooked: launch_hooked != 0,
+                        handoff_marker_expected: handoff_marker_expected != 0,
                         terminal_kind: TerminalKind::from_column(&prior_kind)
                             .with_context(|| format!("session {id}"))?,
                     };
@@ -4851,7 +4886,7 @@ impl SessionStore {
                         "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, terminal_address = '', generation = ?6, launch_scoped = ?7, \
                  omp_reporter_asset = NULL, omp_launch_program = NULL, launch_hooked = 0, launch_boot_ended = 0, \
-                 persistent_hook_setup = NULL, \
+                 persistent_hook_setup = NULL, handoff_marker_expected = 1, \
                  codex_report_pin = NULL, terminal_kind = COALESCE(?8, terminal_kind) \
                  WHERE id = ?1",
                         rusqlite::params![
@@ -4933,6 +4968,7 @@ impl SessionStore {
         let scoped = i64::from(prior.scoped);
         let launch_boot_ended = i64::from(prior.launch_boot_ended);
         let launch_hooked = i64::from(prior.launch_hooked);
+        let handoff_marker_expected = prior.handoff_marker_expected;
         let persistent_hook_setup = prior.persistent_hook_setup.clone();
         let cleared_capture = prior.cleared_capture.clone();
         self.conn
@@ -4946,7 +4982,7 @@ impl SessionStore {
                      captured_conversation = CASE WHEN ?10 THEN ?11 ELSE captured_conversation END, \
                      conversation_source = CASE WHEN ?10 THEN ?12 ELSE conversation_source END, \
                      capture_ownership_version = CASE WHEN ?10 THEN ?13 ELSE capture_ownership_version END, \
-                     terminal_kind = ?14, persistent_hook_setup = ?15, launch_hooked = ?16 \
+                     terminal_kind = ?14, persistent_hook_setup = ?15, launch_hooked = ?16, handoff_marker_expected = ?17 \
                      WHERE id = ?1 AND generation = ?7",
                     rusqlite::params![
                         id,
@@ -4965,6 +5001,7 @@ impl SessionStore {
                         kind,
                         persistent_hook_setup,
                         launch_hooked,
+                        handoff_marker_expected,
                     ],
                 )
                 .context("restoring the outcome a failed restart replaced")?;
@@ -6769,9 +6806,10 @@ fn record_notification_within(
     recorded_at: i64,
     admission: NotificationAdmission,
 ) -> anyhow::Result<bool> {
-    let (unless_captured, refresh_changed) = match admission {
-        NotificationAdmission::Once { unless_captured } => (unless_captured, false),
-        NotificationAdmission::RefreshChanged => (false, true),
+    let (unless_captured, refresh_changed, unless_launch_failed) = match admission {
+        NotificationAdmission::Once { unless_captured } => (unless_captured, false, false),
+        NotificationAdmission::HookSilent => (true, false, true),
+        NotificationAdmission::RefreshChanged => (false, true, false),
     };
     let reopened = tx.execute(
                         "UPDATE session_notifications SET \
@@ -6780,8 +6818,9 @@ fn record_notification_within(
                          WHERE session_id = ?1 AND generation = ?2 AND kind = ?3 \
                          AND (resolved_at IS NOT NULL OR (?7 AND text <> ?5)) \
                          AND EXISTS (SELECT 1 FROM sessions WHERE id = ?1 AND generation = ?2 \
-                                     AND (?6 = 0 OR captured_conversation IS NULL))",
-                        rusqlite::params![id, generation, kind, recorded_at, text, unless_captured, refresh_changed],
+                                     AND (?6 = 0 OR captured_conversation IS NULL) \
+                                     AND (?8 = 0 OR outcome_state <> 'error'))",
+                        rusqlite::params![id, generation, kind, recorded_at, text, unless_captured, refresh_changed, unless_launch_failed],
                     ).context("refreshing a session notification")?;
     // Reopening adds no row, so it must not trim history.
     if reopened > 0 {
@@ -6797,8 +6836,17 @@ fn record_notification_within(
                                     ?3, ?2, ?4, ?5 \
                              WHERE EXISTS (SELECT 1 FROM sessions \
                                            WHERE id = ?1 AND generation = ?2 \
-                                           AND (?6 = 0 OR captured_conversation IS NULL))",
-            rusqlite::params![id, generation, kind, recorded_at, text, unless_captured],
+                                           AND (?6 = 0 OR captured_conversation IS NULL) \
+                                           AND (?7 = 0 OR outcome_state <> 'error'))",
+            rusqlite::params![
+                id,
+                generation,
+                kind,
+                recorded_at,
+                text,
+                unless_captured,
+                unless_launch_failed
+            ],
         )
         .context("recording a session notification")?;
     if added > 0 {
@@ -7286,6 +7334,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     id: id.to_string(),
                     parent: None,
@@ -10211,6 +10260,38 @@ mod tests {
         assert_eq!(reopened.session("old-launch").await.unwrap().unwrap(), row);
     }
 
+    /// An upgraded supervisor can pick up a live launch from the previous
+    /// build. Preserve its hook policy without requiring a marker its shim
+    /// doesn't write.
+    #[farhelm_testtrace::test]
+    async fn handoff_migration_keeps_older_hooked_launches_eligible() {
+        let (dir, store) = fresh_store().await;
+        let mut row = launching_row("older-shim");
+        row.launch_hooked = true;
+        row.handoff_marker_expected = true;
+        store.insert_session(row, None).await.unwrap();
+        let saved = store.session("older-shim").await.unwrap().unwrap();
+        assert!(saved.launch_hooked && saved.handoff_marker_expected);
+        drop(store);
+
+        let path = dir.path().join("supervisor.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE sessions DROP COLUMN handoff_marker_expected; PRAGMA user_version = 39;",
+            )
+            .unwrap();
+            assert!(
+                conn.prepare("SELECT handoff_marker_expected FROM sessions")
+                    .is_err()
+            );
+        }
+        let migrated = SessionStore::open(&path, true).await.unwrap();
+        let row = migrated.session("older-shim").await.unwrap().unwrap();
+        assert!(row.launch_hooked);
+        assert!(!row.handoff_marker_expected);
+    }
+
     /// Schema 29 cannot distinguish an old-boot exit from same-boot absence.
     /// Migration must retain the row and leave finality unknown, rather than
     /// inventing reboot evidence that would suppress a late launch failure.
@@ -10402,6 +10483,7 @@ mod tests {
         let reset = store.session("hook-policy").await.unwrap().unwrap();
         assert_eq!(reset.generation, claim.generation);
         assert!(!reset.launch_hooked);
+        assert!(reset.handoff_marker_expected);
         assert_eq!(
             reset.persistent_hook_setup,
             PersistentHookSetup::NotRequested
@@ -10451,6 +10533,7 @@ mod tests {
         );
         let restored = store.session("hook-policy").await.unwrap().unwrap();
         assert!(restored.launch_hooked);
+        assert!(!restored.handoff_marker_expected);
         assert_eq!(
             restored.persistent_hook_setup,
             PersistentHookSetup::Installed
@@ -10719,6 +10802,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
@@ -10781,6 +10865,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     id: "s1".to_string(),
                     title: "demo".to_string(),
@@ -11423,6 +11508,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: Some("parent-7".to_string()),
@@ -11508,6 +11594,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
@@ -11655,6 +11742,7 @@ mod tests {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         launch_hooked: false,
+                        handoff_marker_expected: false,
                         launch_boot_ended: false,
                         parent: None,
                         title: "structured launch".to_string(),
@@ -12722,6 +12810,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
@@ -12803,6 +12892,7 @@ mod tests {
             omp_reporter_asset: None,
             omp_launch_program: None,
             launch_hooked: false,
+            handoff_marker_expected: false,
             launch_boot_ended: false,
             canonical_cwd: None,
             id: id.to_string(),
@@ -14547,6 +14637,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     created_at: ORIGINAL_CREATED_AT,
                     last_activity_at: ORIGINAL_ACTIVITY_AT,
@@ -14571,6 +14662,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     created_at: RETRY_CREATED_AT,
                     last_activity_at: RETRY_ACTIVITY_AT,
@@ -14665,6 +14757,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     created_at: CREATED,
                     last_activity_at: CREATED,
@@ -14789,6 +14882,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
@@ -15288,6 +15382,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     launch_hooked: false,
+                    handoff_marker_expected: false,
                     launch_boot_ended: false,
                     id: "s1".to_string(),
                     parent: None,
@@ -16043,6 +16138,7 @@ mod tests {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         launch_hooked: false,
+                        handoff_marker_expected: false,
                         launch_boot_ended: false,
                         created_at: *created_at,
                         last_activity_at: *created_at,
@@ -16823,6 +16919,7 @@ mod tests {
             omp_reporter_asset: None,
             omp_launch_program: None,
             launch_hooked: false,
+            handoff_marker_expected: false,
             launch_boot_ended: false,
             id: "s1".to_string(),
             parent: None,

@@ -1032,11 +1032,23 @@ async fn pump_finished(input: &HostAttach, within: Duration) -> bool {
 async fn keys_and_text_reach_the_program() {
     let (host, test_host) = host_with(1000).await;
     let (mut input, _failure) = HostAttach::new(host.clone());
-    assert!(!input.send_input(KEY_A).expect("a key is taken"));
+    assert!(
+        !input
+            .send_input(GridInput::decode(KEY_A))
+            .expect("a key is taken")
+    );
     let text = br#"{"t":"text","data":"hi"}"#;
-    assert!(!input.send_input(text).expect("text is taken"));
+    assert!(
+        !input
+            .send_input(GridInput::decode(text))
+            .expect("text is taken")
+    );
     let enter = br#"{"t":"key","key":"Enter","code":"Enter","kc":13,"mods":0}"#;
-    assert!(input.send_input(enter).expect("Enter is taken"));
+    assert!(
+        input
+            .send_input(GridInput::decode(enter))
+            .expect("Enter is taken")
+    );
     received(&test_host, b"ahi\r").await;
 }
 
@@ -1052,10 +1064,14 @@ async fn keys_and_text_reach_the_program() {
 async fn a_bracketed_paste_is_wrapped_once() {
     let (host, test_host) = bracketed_host().await;
     let (mut input, _failure) = HostAttach::new(host.clone());
-    assert!(!input.send_input(&paste("one\n", false)).expect("a part"));
     assert!(
         !input
-            .send_input(&paste("two", true))
+            .send_input(GridInput::decode(&paste("one\n", false)))
+            .expect("a part")
+    );
+    assert!(
+        !input
+            .send_input(GridInput::decode(&paste("two", true)))
             .expect("the last part")
     );
     received(&test_host, b"\x1b[200~one\rtwo\x1b[201~").await;
@@ -1074,8 +1090,12 @@ async fn a_bracketed_paste_is_wrapped_once() {
 async fn a_paste_whose_last_part_never_arrives_writes_nothing() {
     let (host, test_host) = bracketed_host().await;
     let (mut input, _failure) = HostAttach::new(host.clone());
-    input.send_input(&paste("one", false)).expect("a part");
-    input.send_input(&paste("two", false)).expect("a part");
+    input
+        .send_input(GridInput::decode(&paste("one", false)))
+        .expect("a part");
+    input
+        .send_input(GridInput::decode(&paste("two", false)))
+        .expect("a part");
     drop(input);
     host.send_input(b"after").await.expect("taken");
     received(&test_host, b"after").await;
@@ -1095,8 +1115,12 @@ async fn a_paste_whose_last_part_never_arrives_writes_nothing() {
 async fn empty_paste_parts_add_nothing() {
     let (host, test_host) = host_with(1000).await;
     let (mut input, _failure) = HostAttach::new(host.clone());
-    input.send_input(&paste("", false)).expect("a part");
-    input.send_input(&paste("", true)).expect("the last part");
+    input
+        .send_input(GridInput::decode(&paste("", false)))
+        .expect("a part");
+    input
+        .send_input(GridInput::decode(&paste("", true)))
+        .expect("the last part");
     host.send_input(b"after").await.expect("taken");
     received(&test_host, b"after").await;
 
@@ -1104,7 +1128,9 @@ async fn empty_paste_parts_add_nothing() {
     test_host.output(mode);
     processed(&host, mode.len() as u64).await;
     for (data, last) in [("", false), ("abc", false), ("", false), ("", true)] {
-        input.send_input(&paste(data, last)).expect("a part");
+        input
+            .send_input(GridInput::decode(&paste(data, last)))
+            .expect("a part");
     }
     received(&test_host, b"after\x1b[200~abc\x1b[201~").await;
 }
@@ -1131,7 +1157,9 @@ async fn empty_paste_parts_add_nothing() {
 async fn answers_and_other_input_never_land_inside_a_paste() {
     let (host, test_host) = bracketed_host().await;
     let (mut input, _failure) = HostAttach::new(host.clone());
-    input.send_input(&paste("one", false)).expect("a part");
+    input
+        .send_input(GridInput::decode(&paste("one", false)))
+        .expect("a part");
     let query = b"\x1b[c";
     test_host.output(query);
     processed(&host, 8 + query.len() as u64).await;
@@ -1140,7 +1168,9 @@ async fn answers_and_other_input_never_land_inside_a_paste() {
     test_host.hold_input().await;
     let part = "x".repeat(32 * 1024);
     for at in 0..10 {
-        input.send_input(&paste(&part, at == 9)).expect("a part");
+        input
+            .send_input(GridInput::decode(&paste(&part, at == 9)))
+            .expect("a part");
     }
     // Three `MAX_INPUT` pieces fill the input window; a fourth does not
     // fit (`hosts::client::INPUT_WINDOW`).
@@ -1184,7 +1214,9 @@ async fn a_paste_cut_short_by_a_lost_connection_is_closed_first() {
     let (mut input, mut failure) = HostAttach::new(host.clone());
     let part = "p".repeat(32 * 1024);
     for at in 0..10 {
-        input.send_input(&paste(&part, at == 9)).expect("a part");
+        input
+            .send_input(GridInput::decode(&paste(&part, at == 9)))
+            .expect("a part");
     }
     let encoded = [&b"\x1b[200~"[..], part.repeat(10).as_bytes(), b"\x1b[201~"].concat();
     let first = &encoded[..terminal_host::protocol::MAX_INPUT];
@@ -1222,13 +1254,14 @@ async fn a_paste_cut_short_by_a_lost_connection_is_closed_first() {
 async fn a_takeover_writes_nothing_of_a_half_collected_paste() {
     let (host, test_host) = bracketed_host().await;
     let (mut old, _old_failure) = HostAttach::new(host.clone());
-    old.send_input(&paste("old", false)).expect("a part");
+    old.send_input(GridInput::decode(&paste("old", false)))
+        .expect("a part");
     let (mut new, _new_failure) = HostAttach::new(host.clone());
     let old_pump = {
         drop(old.cancel.take());
         old
     };
-    new.send_input(KEY_A).expect("a key");
+    new.send_input(GridInput::decode(KEY_A)).expect("a key");
     received(&test_host, b"a").await;
     assert!(pump_finished(&old_pump, WAIT).await, "the old pump stopped");
 
@@ -1236,7 +1269,7 @@ async fn a_takeover_writes_nothing_of_a_half_collected_paste() {
     let mut ended = Vec::new();
     for _ in 0..5 {
         let (mut input, _failure) = HostAttach::new(host.clone());
-        input.send_input(KEY_A).expect("a key");
+        input.send_input(GridInput::decode(KEY_A)).expect("a key");
         ended.push(input);
     }
     assert!(
@@ -1273,7 +1306,9 @@ async fn a_paste_past_the_backlog_writes_nothing() {
     let part_bytes = 32 * 1024;
     let part = paste(&"p".repeat(part_bytes), false);
     let fitting_parts = (INPUT_BACKLOG - crate::grid_input::PASTE_START.len()) / part_bytes;
-    input.send_input(&part).expect("the first part fits");
+    input
+        .send_input(GridInput::decode(&part))
+        .expect("the first part fits");
     // Send the fence behind anything the first part might have queued.
     input.reserve(1).unwrap();
     input
@@ -1281,7 +1316,7 @@ async fn a_paste_past_the_backlog_writes_nothing() {
         .unwrap();
     received(&test_host, b"f").await;
     let mut taken = 1;
-    while input.send_input(&part).is_ok() {
+    while input.send_input(GridInput::decode(&part)).is_ok() {
         taken += 1;
         assert!(taken <= fitting_parts, "the backlog never refused a part");
     }
@@ -1311,9 +1346,13 @@ async fn a_paste_past_the_backlog_writes_nothing() {
 async fn broken_input_is_refused() {
     let (host, test_host) = host_with(1000).await;
     let (mut input, _failure) = HostAttach::new(host.clone());
-    assert!(input.send_input(b"not json").is_err());
-    input.send_input(&paste("abc", false)).expect("a part");
-    let refused = input.send_input(KEY_A).expect_err("a key inside a paste");
+    assert!(input.send_input(GridInput::decode(b"not json")).is_err());
+    input
+        .send_input(GridInput::decode(&paste("abc", false)))
+        .expect("a part");
+    let refused = input
+        .send_input(GridInput::decode(KEY_A))
+        .expect_err("a key inside a paste");
     assert!(
         format!("{refused:#}").contains("middle of a paste"),
         "{refused:#}"
@@ -1359,7 +1398,7 @@ async fn input_does_not_wait_on_the_emulator() {
     // time this.)
     let (input, taken, took) = tokio::task::spawn_blocking(move || {
         let started = std::time::Instant::now();
-        let taken = input.send_input(KEY_A).is_ok();
+        let taken = input.send_input(GridInput::decode(KEY_A)).is_ok();
         let took = started.elapsed();
         let _ = release.send(());
         (input, taken, took)
