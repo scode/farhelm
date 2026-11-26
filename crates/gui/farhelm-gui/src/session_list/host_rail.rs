@@ -713,13 +713,7 @@ fn avatar(
     // Shift+F10, the keyboard's way to a context menu, as the old avatar took it. Any other modifier is some other
     // chord's, and a held key does not open it again.
     .on_key_down(move |event, window, cx| {
-        let keystroke = &event.keystroke;
-        let modifiers = &keystroke.modifiers;
-        if keystroke.key == "f10"
-            && modifiers.shift
-            && !(modifiers.control || modifiers.alt || modifiers.platform || modifiers.function)
-            && !event.is_held
-        {
+        if crate::components::is_context_menu_key(event) {
             cx.stop_propagation();
             let _ = keyed.update(cx, |list, cx| list.open_avatar_menu(id, window, cx));
         }

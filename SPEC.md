@@ -2596,6 +2596,16 @@ rows and **Unpin** only to pinned ones. **Mark read**, **Mark unread**, **Mute**
 rows whose own menus offer that action. Metadata choices reuse the ordinary writes and row-local errors, and clear marks
 once their eligible writes have been dispatched.
 
+A right press anywhere on a session row, its status dot, notification bell and pin grip included, opens that row's
+actions menu at the pointer, kept inside the window, with the same commands as its ⋯ button, which still shows on hover
+and focus. A right press on a group header opens the group's menu the same way. Shift+F10 on a focused row or group
+header, or on a control inside it, opens its menu beside the row, where ⋯ opens it. A right press while another row's
+menu or the marked menu is open closes that menu and opens the new one in the same press. With two or more marked rows
+displayed, a right press on a marked row opens a combined menu instead: the bar's applicable lifecycle actions
+(**Restart/Replace**, **Stop**, **Delete**), then a divider and the metadata actions, each acting as the bar's control
+does. A right press on an unmarked row then opens that row's own menu and leaves the marks as they are, and with exactly
+one row marked, a right press on it opens its own menu.
+
 Each bulk Stop, Delete or Restart/Replace batch runs one request at a time on each host, with different hosts
 progressing independently; a second batch started while the first is still running has its own pace, so it can send to a
 host the first batch is also working on. Accepted queued rows remain pending until their completions finish; filtering

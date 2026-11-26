@@ -1323,6 +1323,33 @@ fn a_submenu_near_the_right_edge_opens_to_the_left_of_its_trigger() {
     );
 }
 
+/// Why this matters: a context menu opened by a right press opens where the user pressed, whatever its anchor (the
+/// row's ⋯ button, which only decides when it closes), and a press near the page's right or bottom edge must still
+/// leave the whole menu inside the page (SPEC.md, "Session list": "at the pointer, kept inside the window").
+///
+/// Specification, in [`linux_content_area`] (right edge 1621, bottom edge 1055): a 246 by 300 menu at a press at
+/// 300, 400 has its top-left corner there, far from its anchor at 1500, 300; at a press at 1500, 1000 it is shifted
+/// back to end at the area's right and bottom edges, at 1375, 755.
+#[test]
+fn a_menu_at_a_press_opens_there_and_stays_inside_the_content_area() {
+    let anchor = rect(1500., 300., 100., 24.);
+    let size = gpui::size(px(246.), px(300.));
+    let at = |x: f32, y: f32| {
+        layers::popover_origin(
+            Some(anchor),
+            &layers::Placement::AtPoint(point(px(x), px(y))),
+            size,
+            linux_content_area(),
+        )
+    };
+    assert_eq!(at(300., 400.), point(px(300.), px(400.)), "at the press");
+    assert_eq!(
+        at(1500., 1000.),
+        point(px(1375.), px(755.)),
+        "shifted back inside the content area"
+    );
+}
+
 // ---- Layers: a popover as wide as its anchor, and one that never takes focus -----------------------------------------
 
 /// A floating list's content: a surface with a height but no width of its own, so it is as wide as its layer makes it,

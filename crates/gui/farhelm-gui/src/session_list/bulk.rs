@@ -763,6 +763,13 @@ fn reconciled(asked: &Asked, collections: &Collections) -> Vec<Target> {
 /// The marked bar's Stop's element id.
 pub(super) const STOP_ID: &str = "session-marked-stop";
 
+/// The marked bar's Stop's help, and its item's in a right press's marked menu.
+pub(super) const STOP_HELP: &str =
+    "Stop the marked sessions currently shown and close their terminal tabs";
+
+/// The marked bar's Delete's help, and its item's in a right press's marked menu.
+pub(super) const DELETE_HELP: &str = "Delete the marked sessions currently shown";
+
 /// The marked bar's Delete's element id.
 pub(super) const DELETE_ID: &str = "session-marked-delete";
 

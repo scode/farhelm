@@ -336,15 +336,33 @@ pub(super) fn draw_header(
             .bg(pin_drag::lifted_fill(palette, false))
             .shadow(pin_drag::lifted_shadow(palette));
     }
-    focus::track(
-        div()
-            .id(format!("session-group-{id}-item"))
-            .child(head)
-            .children(refusal),
-        item_focus,
-        focus::OnPress::Keep,
-    )
-    .into_any_element()
+    // A live header's context menu, as a row's: a right press anywhere on the header, or Shift+F10 while one of its
+    // controls holds focus ([`SessionList::open_context_menu`]). A header no longer live draws no menu button, so it
+    // opens nothing.
+    let mut item = div()
+        .id(format!("session-group-{id}-item"))
+        .child(head)
+        .children(refusal);
+    if header.live {
+        let (pressed, pressed_key) = (list.clone(), key.clone());
+        let (keyed, keyed_key) = (list.clone(), key.clone());
+        item = item
+            .on_mouse_down(gpui::MouseButton::Right, move |event, window, cx| {
+                cx.stop_propagation();
+                let _ = pressed.update(cx, |list, cx| {
+                    list.open_context_menu(&pressed_key, Some(event.position), window, cx);
+                });
+            })
+            .on_key_down(move |event, window, cx| {
+                if crate::components::is_context_menu_key(event) {
+                    cx.stop_propagation();
+                    let _ = keyed.update(cx, |list, cx| {
+                        list.open_context_menu(&keyed_key, None, window, cx);
+                    });
+                }
+            });
+    }
+    focus::track(item, item_focus, focus::OnPress::Keep).into_any_element()
 }
 
 // Membership choices

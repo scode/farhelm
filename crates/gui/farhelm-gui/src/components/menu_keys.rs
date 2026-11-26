@@ -10,6 +10,9 @@
 //! Neither draws anything or takes focus itself: [`toggle_arrow_keys`] goes on the toggle (through its button's
 //! `on_key_down`), and [`home_end_keys`] on the open menu's panel. Each key is taken only without modifiers, and a held
 //! Down or Up opens nothing, so a key still held from closing the menu does not open it again.
+//!
+//! [`is_context_menu_key`] is the keyboard's way to a context menu, Shift+F10, for the controls that open one without
+//! being its toggle: a host rail avatar, and a session row or group header.
 
 use gpui::{App, FocusHandle, KeyDownEvent, Window};
 
@@ -66,4 +69,17 @@ pub fn home_end_keys(
         let mark = Mark::take(cx);
         focus::focus_in_layer(target, &mark, window, cx);
     }
+}
+
+/// Whether `event` is Shift+F10, the keyboard's way to open a context menu, as the old app's avatars and the
+/// platforms' own lists take it. Any other modifier held with it makes it some other chord's, and a held key does not
+/// count, so a key still held after the menu closed does not open it again. The caller stops the event's propagation
+/// when it opens a menu for it.
+pub fn is_context_menu_key(event: &KeyDownEvent) -> bool {
+    let keystroke = &event.keystroke;
+    let modifiers = &keystroke.modifiers;
+    keystroke.key == "f10"
+        && modifiers.shift
+        && !(modifiers.control || modifiers.alt || modifiers.platform || modifiers.function)
+        && !event.is_held
 }
