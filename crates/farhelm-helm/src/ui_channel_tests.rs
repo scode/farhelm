@@ -1991,6 +1991,95 @@ async fn a_container_check_reaches_the_connected_ui_when_it_starts_and_when_it_e
     );
 }
 
+/// A tagged Resume's outcome is recorded on the helm's own task, often long
+/// after the launcher that sent it got its carries-on reply, so the launcher
+/// learns it only when the feed bump that recording makes brings the host's
+/// entry again. Without that bump the outcome would sit in the helm's memory
+/// until something else happened to change the hosts list.
+///
+/// Specified, with both Resumes sent outside the channel (so only a feed bump
+/// can bring a change) to the local host, which refuses Resume before anything
+/// changes, and with its actor settled first so no connection change bumps the
+/// feed meanwhile: the snapshot's local entry has no `wake_outcome`; an
+/// untagged Resume (`{}`) records nothing and bumps nothing; a tagged one
+/// pushes the entry with a failed outcome under its tag whose reason is the
+/// refusal's own text; and the one bump between them is announced only once
+/// that outcome is in place (seen from inside the bump).
+#[farhelm_testtrace::test]
+async fn a_tagged_resume_outcome_reaches_the_connected_ui() {
+    use farhelm_proto::ui_channel::{HostView, WakeOutcome, WakeResult};
+    let mut harness = rest_harness::FleetBuilder::new().await.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness
+        .await_state(local, |state| state.phase() == "unreachable-reprobing")
+        .await;
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
+        panic!("the first message is the snapshot");
+    };
+    assert_eq!(collections[1].collection, Collection::Hosts, "premise");
+    let wake_outcome_of = |entries: &[KeyedEntry]| {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.key == HostView::key(local))
+            .expect("the local host's entry is among the hosts sent");
+        serde_json::from_value::<HostView>(entry.value.clone())
+            .expect("a host entry")
+            .wake_outcome
+    };
+    assert_eq!(
+        wake_outcome_of(&collections[1].entries),
+        None,
+        "premise: no tagged Resume of this host has ended"
+    );
+
+    // What a re-read would see at the instant of each bump. The recording
+    // releases its map before bumping, so the observer may read it. Weak, so
+    // the manager's own feed does not keep the manager alive.
+    let manager = Arc::downgrade(&harness.manager);
+    let at_bumps = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let record = Arc::clone(&at_bumps);
+    harness.manager.events().observe_bumps(move || {
+        if let Some(manager) = manager.upgrade() {
+            record.lock().unwrap().push(manager.wake_outcome(local));
+        }
+    });
+
+    let resume = format!("/api/hosts/{local}/resume");
+    let untagged = http(&harness, "POST", &resume, serde_json::json!({})).await;
+    assert_eq!(
+        untagged,
+        StatusCode::CONFLICT,
+        "premise: the local host refuses Resume"
+    );
+    assert!(
+        at_bumps.lock().unwrap().is_empty(),
+        "an untagged refusal records nothing, so nothing bumps"
+    );
+    let tagged = http(
+        &harness,
+        "POST",
+        &resume,
+        serde_json::json!({ "request": "wake-local" }),
+    )
+    .await;
+    assert_eq!(tagged, StatusCode::CONFLICT);
+    let expected = WakeOutcome {
+        request: "wake-local".into(),
+        outcome: WakeResult::Failed {
+            reason: "Suspend and Resume are available only for environment hosts".into(),
+        },
+    };
+    let pushed = changes_of(&mut ws, Collection::Hosts).await;
+    assert_eq!(wake_outcome_of(&pushed.upsert), Some(expected.clone()));
+    assert_eq!(
+        *at_bumps.lock().unwrap(),
+        [Some(expected)],
+        "one bump, announced once the outcome it announces is in place"
+    );
+}
+
 /// Stand-in commands for the helm's Podman check that record every command
 /// and refuse it, so a test can show that nothing it did started a check.
 #[derive(Default)]

@@ -75,6 +75,7 @@ pub(crate) fn host(id: i64, kind: &str, state: HostStateView) -> HostView {
         state,
         incarnation: 1,
         trash_epoch: 0,
+        wake_outcome: None,
     }
 }
 

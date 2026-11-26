@@ -1430,6 +1430,16 @@ pub struct ConnectionManager {
     sealed: Mutex<HashMap<HostId, SealedHost>>,
     /// Woken when a seal is noted, so the finisher need not poll.
     sealed_wake: tokio::sync::Notify,
+    /// The latest tagged Resume's terminal outcome per host, which the hosts
+    /// list overlays onto each host's entry (`HostView::wake_outcome`;
+    /// [`Self::record_wake_outcome`]).
+    ///
+    /// Latest per host and memory only, because its one reader is the client
+    /// that sent that Resume and is still waiting for it, within the same helm
+    /// process: an older outcome, or one from before a restart, answers no
+    /// question anybody is still asking. Removing a registered host drops its
+    /// entry ([`Self::forget_wake_outcome`]).
+    wake_outcomes: Mutex<HashMap<HostId, farhelm_proto::ui_channel::WakeOutcome>>,
     /// Per-host cache-write locks shared by every actor incarnation. Keeping
     /// these outside the actor handles preserves write serialization while a
     /// dead connection worker is replaced. Spawning takes the actor-map mutex
@@ -1796,6 +1806,7 @@ impl ConnectionManager {
             environment_delete_turns: Arc::new(Mutex::new(HashMap::new())),
             sealed: Mutex::new(HashMap::new()),
             sealed_wake: tokio::sync::Notify::new(),
+            wake_outcomes: Mutex::new(HashMap::new()),
             cache_locks: Mutex::new(HashMap::new()),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         })
@@ -2935,6 +2946,59 @@ impl ConnectionManager {
             }
         }
         self.events.bump();
+    }
+
+    /// Publish how a tagged Resume of `host` ended, replacing whatever an
+    /// earlier one left, and bump the fleet feed so the UI channel re-reads
+    /// the hosts list and pushes the changed entry.
+    ///
+    /// The caller decides what counts as terminal; see
+    /// `tensorlake::lifecycle::record_wake`, the only caller (from
+    /// `bounded`), for why a busy refusal is not recorded.
+    ///
+    /// Last writer wins, and that is safe although the record lands after the
+    /// Resume released the host's provisioning lock: nothing awaits between
+    /// that release and this insert, while a second Resume of the host has to
+    /// finish a store read and its provider's calls before it can record, so a
+    /// later Resume's outcome is never overwritten by an earlier one's.
+    pub(crate) fn record_wake_outcome(
+        &self,
+        host: HostId,
+        outcome: farhelm_proto::ui_channel::WakeOutcome,
+    ) {
+        self.wake_outcomes
+            .lock()
+            .expect("wake outcome map mutex poisoned")
+            .insert(host, outcome);
+        self.events.bump();
+    }
+
+    /// The latest tagged Resume outcome recorded for `host`, if any (see
+    /// [`Self::wake_outcomes`]).
+    pub(crate) fn wake_outcome(
+        &self,
+        host: HostId,
+    ) -> Option<farhelm_proto::ui_channel::WakeOutcome> {
+        self.wake_outcomes
+            .lock()
+            .expect("wake outcome map mutex poisoned")
+            .get(&host)
+            .cloned()
+    }
+
+    /// Drop a removed host's recorded Resume outcome; called by the shared
+    /// removal of a registered host (`delete_registered_host`).
+    ///
+    /// Host ids are never reused (`store::HostId`), and the hosts list shows
+    /// only registered hosts, so a leftover entry (a registration rolled back
+    /// by another path, say) could never reach another host or a list; this
+    /// only keeps the map from growing with every removed host. No bump: the
+    /// host's entry leaves the hosts list with its removal.
+    pub(crate) fn forget_wake_outcome(&self, host: HostId) {
+        self.wake_outcomes
+            .lock()
+            .expect("wake outcome map mutex poisoned")
+            .remove(&host);
     }
 
     /// Whether `host` is sealed and its last destruction failed: the one
@@ -13551,6 +13615,7 @@ mod tests {
             environment_delete_turns: Arc::new(Mutex::new(HashMap::new())),
             sealed: Mutex::new(HashMap::new()),
             sealed_wake: tokio::sync::Notify::new(),
+            wake_outcomes: Mutex::new(HashMap::new()),
             cache_locks: Mutex::new(HashMap::new()),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         };

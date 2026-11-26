@@ -90,6 +90,7 @@ pub(crate) mod tests {
             state,
             incarnation: 0,
             trash_epoch: 0,
+            wake_outcome: None,
         }
     }
 

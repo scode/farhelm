@@ -2761,8 +2761,9 @@ impl ProvisioningService {
 
     /// Delete `host`'s registry row and everything this helm keeps for it:
     /// its cached sessions (by cascade), its retained progress, its pending
-    /// confirmation ids, its busy marker, its connection actor and its
-    /// cache-write lock. Returns whether an actor was running.
+    /// confirmation ids, its busy marker, its connection actor, its
+    /// cache-write lock and its last tagged Resume outcome. Returns whether an
+    /// actor was running.
     ///
     /// The caller must already hold the host's provisioning lock. Two
     /// callers share this: the hosts panel's Remove, which takes that lock
@@ -2807,6 +2808,7 @@ impl ProvisioningService {
         let stopped = self.manager.stop_actor(host).await;
         self.delivery.forget(host);
         self.manager.forget_cache_lock(host);
+        self.manager.forget_wake_outcome(host);
         drop(serialized);
         if let Some(files) = destination {
             self.cleanup_tailscale_route(&row, files, true).await;

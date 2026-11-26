@@ -271,13 +271,19 @@ An environment host's Suspend and Resume (`POST /api/hosts/{id}/suspend` and `/r
 of the accepted form, because their outcome already lands in the pushed host state). A Tensorlake Suspend may wait 60
 seconds for its sandbox and a Resume 120, and a container's change waits on its container host's commands. Suspend and
 Resume reply 504 at the bound to say that the work carries on. The change keeps the host's provisioning lock until it
-ends, and the host's state in the hosts and session lists then shows how it ended, a late failure reaching only the
-helm's log. Tensorlake's refusals before anything changes (a busy host, a host that is not an environment, no account
-key) are local and answer as before; a container host checks its container over SSH first, inside the bound. Stop and
-suspend is one command with one reply, so one bound covers its Stop and its Suspend together. The helm's 504 at that
-bound carries the `StopAndSuspendReplyBound` marker and says that the operation may or may not still be running. A 504
-from the supervisor's Stop is an ordinary failure and arrives without the marker. The environment only suspends after a
-clean Stop.
+ends, and the host's state in the hosts and session lists then shows how it ended. A Resume whose body carries a request
+tag (`{"request": "..."}`; no body and `{}` are untagged) also has its terminal outcome, ready or failed with the same
+reason its error reply would carry, published on that host's entry in the hosts list, so the client that sent it learns
+a late failure of its own Resume. Only the latest tagged outcome per host is kept, in the helm's memory: the next tagged
+Resume of that host replaces it, and a helm restart loses it. An untagged Resume is never recorded, and neither is a
+busy refusal, which the sender sees in its reply and may retry. A Resume that ends abnormally (its task panics) records
+nothing, and its sender falls back to its own deadline. A late failure of a Suspend or of an untagged Resume still
+reaches only the helm's log. Tensorlake's refusals before anything changes (a busy host, a host that is not an
+environment, no account key) are local and answer as before; a container host checks its container over SSH first,
+inside the bound. Stop and suspend is one command with one reply, so one bound covers its Stop and its Suspend together.
+The helm's 504 at that bound carries the `StopAndSuspendReplyBound` marker and says that the operation may or may not
+still be running. A 504 from the supervisor's Stop is an ordinary failure and arrives without the marker. The
+environment only suspends after a clean Stop.
 
 A session's environment Delete (`DELETE /api/sessions/{id}?delete_environment_session=true`), the warned
 whole-environment Delete (`?delete_sandbox=true`) and the Retry of a failed destruction

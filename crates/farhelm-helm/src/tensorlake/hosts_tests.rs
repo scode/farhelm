@@ -1834,13 +1834,30 @@ async fn lifecycle_host_with_headers(
     host: HostId,
     verb: &str,
 ) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
+    lifecycle_host_with_body(harness, host, verb, None).await
+}
+
+/// [`lifecycle_host_with_headers`] with an optional JSON body, sent with a
+/// JSON content type the way the UI channel routes a command's body. `None`
+/// sends no body and no content type, as the hosts panel's Resume arrives.
+async fn lifecycle_host_with_body(
+    harness: &crate::rest_harness::Harness,
+    host: HostId,
+    verb: &str,
+    body: Option<serde_json::Value>,
+) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
     use tower::ServiceExt as _;
-    let request = axum::http::Request::builder()
+    let builder = axum::http::Request::builder()
         .method("POST")
         .uri(format!("/api/hosts/{host}/{verb}"))
-        .header("host", "127.0.0.1:7433")
-        .body(axum::body::Body::empty())
-        .unwrap();
+        .header("host", "127.0.0.1:7433");
+    let request = match body {
+        Some(body) => builder
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string())),
+        None => builder.body(axum::body::Body::empty()),
+    }
+    .unwrap();
     let response = harness.router().oneshot(request).await.unwrap();
     let status = response.status();
     let headers = response.headers().clone();
@@ -2736,6 +2753,233 @@ async fn lifecycle_outcomes_before_and_after_the_reply_bound_in_each_direction()
             harness.await_state(host, HostState::is_connected).await;
         }
     }
+}
+
+/// `host`'s `wake_outcome` as the hosts list serves it, read through the same
+/// assembly `GET /api/hosts` and the UI channel's hosts collection use.
+async fn wake_outcome_of(
+    harness: &crate::rest_harness::Harness,
+    host: HostId,
+) -> Option<farhelm_proto::ui_channel::WakeOutcome> {
+    crate::hosts::host_views(&harness.state)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|view| view.id == host)
+        .expect("the host is listed")
+        .wake_outcome
+}
+
+/// Wait until `host`'s entry in the hosts list carries an outcome tagged
+/// `request`, re-reading after each fleet feed bump (the signal the UI
+/// channel re-reads on), and return it.
+async fn await_wake_outcome(
+    harness: &crate::rest_harness::Harness,
+    host: HostId,
+    request: &str,
+) -> farhelm_proto::ui_channel::WakeOutcome {
+    // Subscribed before the first read, so a bump between the read and the
+    // wait still wakes the wait.
+    let mut events = harness.state.manager.events().subscribe();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(outcome) = wake_outcome_of(harness, host)
+                .await
+                .filter(|outcome| outcome.request == request)
+            {
+                return outcome;
+            }
+            events
+                .changed()
+                .await
+                .expect("the fleet feed outlives the test");
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "no outcome tagged {request} reached host {host}'s entry; it shows {:?}",
+            harness.state.manager.wake_outcome(host)
+        )
+    })
+}
+
+/// The point of tagging a Resume: past the 20-second reply bound the
+/// launcher's only answer is the carries-on 504, and before the outcome was
+/// recorded a failure after that reached only the helm's log, so the launcher
+/// waited out its whole minute and then reported a generic failure.
+///
+/// Spec, with Tensorlake's resume call held at a gate past the bound and then
+/// failing with its own words: the 504 arrives while nothing is recorded yet
+/// (the Resume has not ended); once it fails, the host's entry carries the
+/// tag with a failed outcome whose reason is the provider's failure as the
+/// error reply would have worded it. A second tagged Resume, which succeeds,
+/// replaces that outcome with a ready one under its own tag, in place by the
+/// time its reply arrives.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn a_tagged_resume_publishes_its_late_failure_and_the_next_one_replaces_it() {
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-host-k7q2-gpu-dev-m3x9",
+        SandboxStatus::Suspended,
+    );
+    let gate = Arc::new(Gate::default());
+    {
+        let mut state = api.0.lock().unwrap();
+        state.resume_gate = Some(gate.clone());
+        state.failures.push((
+            "resume",
+            TensorlakeError::Transport("injected late failure".into()),
+        ));
+    }
+    let (harness, host) = sandbox_helm(&api, true).await;
+    harness
+        .await_state(host, |state| matches!(state, HostState::Suspended { .. }))
+        .await;
+    assert_eq!(wake_outcome_of(&harness, host).await, None, "premise");
+
+    let harness = Arc::new(harness);
+    let request = tokio::spawn({
+        let harness = harness.clone();
+        async move {
+            lifecycle_host_with_body(
+                &harness,
+                host,
+                "resume",
+                Some(serde_json::json!({ "request": "wake-late" })),
+            )
+            .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(10), gate.entered.notified())
+        .await
+        .unwrap();
+    assert!(matches!(
+        harness.state.manager.state(host),
+        Some(HostState::TensorlakeChanging {
+            direction: LifecycleDirection::Resuming,
+            ..
+        })
+    ));
+    tokio::time::advance(crate::sessions::HOST_REPLY_BOUND).await;
+    let (status, _, body) = request.await.unwrap();
+    assert_eq!(
+        (status, body.as_str()),
+        (
+            axum::http::StatusCode::GATEWAY_TIMEOUT,
+            still_changing_text(true).as_str()
+        )
+    );
+    assert_eq!(
+        wake_outcome_of(&harness, host).await,
+        None,
+        "a Resume still running at its reply has no outcome yet"
+    );
+
+    gate.release.notify_one();
+    let failed = await_wake_outcome(&harness, host, "wake-late").await;
+    assert_eq!(
+        failed.outcome,
+        farhelm_proto::ui_channel::WakeResult::Failed {
+            reason: format!(
+                "Tensorlake could not resume this host: {}",
+                TensorlakeError::Transport("injected late failure".into())
+            ),
+        }
+    );
+
+    // The failed call left the sandbox suspended; let the actor settle on
+    // that before the second Resume, which now goes through at once.
+    harness
+        .await_state(host, |state| matches!(state, HostState::Suspended { .. }))
+        .await;
+    api.0.lock().unwrap().resume_gate = None;
+    let (status, _, body) = lifecycle_host_with_body(
+        &harness,
+        host,
+        "resume",
+        Some(serde_json::json!({ "request": "wake-ready" })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(
+        wake_outcome_of(&harness, host).await,
+        Some(farhelm_proto::ui_channel::WakeOutcome {
+            request: "wake-ready".into(),
+            outcome: farhelm_proto::ui_channel::WakeResult::Ready,
+        }),
+        "the later tagged Resume replaced the earlier outcome"
+    );
+}
+
+/// Only a sender that tagged its Resume reads an outcome, and only a terminal
+/// one: the hosts panel and session controls send no tag, and the launcher
+/// retries a busy refusal itself, so recording that refusal as a failure would
+/// make a launcher reading the hosts list give up on a host it only had to
+/// wait for.
+///
+/// Spec, on a connected sandbox whose Resume succeeds at once: a Resume with
+/// no body and one with `{}` both succeed and leave no outcome; a tagged one
+/// records a ready outcome; a tagged one refused because another operation
+/// holds the host (with the busy marker) leaves that earlier outcome in place.
+#[farhelm_testtrace::test]
+async fn only_a_tagged_resume_that_is_not_refused_as_busy_is_recorded() {
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-host-k7q2-gpu-dev-m3x9",
+        SandboxStatus::Running,
+    );
+    let (harness, host) = sandbox_helm(&api, true).await;
+    harness.await_state(host, HostState::is_connected).await;
+    assert_eq!(wake_outcome_of(&harness, host).await, None, "premise");
+
+    for body in [None, Some(serde_json::json!({}))] {
+        let (status, _, reply) =
+            lifecycle_host_with_body(&harness, host, "resume", body.clone()).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body:?}: {reply}");
+        assert_eq!(
+            wake_outcome_of(&harness, host).await,
+            None,
+            "{body:?}: an untagged Resume records nothing"
+        );
+    }
+
+    let first = farhelm_proto::ui_channel::WakeOutcome {
+        request: "wake-first".into(),
+        outcome: farhelm_proto::ui_channel::WakeResult::Ready,
+    };
+    let (status, _, reply) = lifecycle_host_with_body(
+        &harness,
+        host,
+        "resume",
+        Some(serde_json::json!({ "request": "wake-first" })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{reply}");
+    assert_eq!(wake_outcome_of(&harness, host).await, Some(first.clone()));
+
+    let lock = harness.state.manager.try_host_provision_lock(host).unwrap();
+    let (status, headers, reply) = lifecycle_host_with_body(
+        &harness,
+        host,
+        "resume",
+        Some(serde_json::json!({ "request": "wake-busy" })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{reply}");
+    assert_eq!(
+        headers
+            .get(farhelm_proto::http::HOST_BUSY_HEADER)
+            .map(|value| value.to_str().unwrap()),
+        Some(farhelm_proto::http::HOST_BUSY_OPERATION),
+        "premise: this is the busy refusal"
+    );
+    drop(lock);
+    assert_eq!(
+        wake_outcome_of(&harness, host).await,
+        Some(first),
+        "a busy refusal is not recorded and does not replace the earlier outcome"
+    );
 }
 
 // ---------------------------------------------------------------------------

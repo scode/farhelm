@@ -8,6 +8,7 @@
 //! the change itself runs to its end on a task of its own.
 
 use super::api::{ApiKey, SandboxStatus, TensorlakeError};
+use crate::environment::lifecycle::HostBusy;
 use crate::{
     AppState,
     manager::HostState,
@@ -17,7 +18,11 @@ use axum::{
     extract::{Path, State},
     response::{IntoResponse, Response},
 };
-use farhelm_proto::{ErrorKind, tensorlake::LifecycleDirection};
+use farhelm_proto::{
+    ErrorKind,
+    tensorlake::LifecycleDirection,
+    ui_channel::{ResumeHostBody, WakeOutcome, WakeResult},
+};
 use std::{sync::Arc, time::Duration};
 
 /// `POST /api/hosts/{id}/suspend`: suspend an environment host, only after
@@ -28,18 +33,25 @@ pub(crate) async fn suspend(
     State(state): State<Arc<AppState>>,
     Path(host): Path<HostId>,
 ) -> Response {
-    bounded(state, host, false).await
+    bounded(state, host, false, None).await
 }
 
 /// `POST /api/hosts/{id}/resume`: resume explicitly, then let the actor
 /// establish a fresh connection. A 200 means Tensorlake reports running;
 /// connection readiness follows separately. Past the host reply bound the
 /// reply is [`still_changing`]'s 504 instead (see [`bounded`]).
+///
+/// The body is optional ([`ResumeHostBody`]): no body and `{}` are the same
+/// untagged Resume the hosts panel and session controls send, and a body
+/// with a `request` tag also has the Resume's terminal outcome published on
+/// the host's entry in the hosts list (see [`bounded`]).
 pub(crate) async fn resume(
     State(state): State<Arc<AppState>>,
     Path(host): Path<HostId>,
+    body: Option<axum::Json<ResumeHostBody>>,
 ) -> Response {
-    bounded(state, host, true).await
+    let request = body.and_then(|axum::Json(body)| body.request);
+    bounded(state, host, true, request).await
 }
 
 /// Run one route's Suspend or Resume on a task of its own, answering by
@@ -55,22 +67,70 @@ pub(crate) async fn resume(
 /// container host can meet the bound before that check ends; the 504's words
 /// stay true then too. A change still running at the bound answers with
 /// [`still_changing`]'s 504 and carries on under its provisioning lock and
-/// connection hold, so a second click meanwhile meets the busy refusal. Its outcome lands in the host's pushed state: Suspended once
-/// confirmed, a fresh connection after a Resume, or, after a failure, the same
-/// reconnect any failed change ends in, its reason reaching only the helm's log.
+/// connection hold, so a second click meanwhile meets the busy refusal. Its
+/// outcome lands in the host's pushed state: Suspended once confirmed, a fresh
+/// connection after a Resume, or, after a failure, the same reconnect any
+/// failed change ends in. A failure's reason then reaches only the helm's log,
+/// unless the change is a Resume carrying a `request` tag: that one's
+/// terminal outcome, success or failure (busy refusals and panics aside), is
+/// published on the host's entry in the hosts list ([`record_wake`]), so the
+/// launcher that sent it learns a late failure of its own Resume instead of
+/// waiting out its minute.
 /// The migration's orchestrator decided on 2026-11-15 that these routes take
 /// this bound rather than the accepted form, because that outcome already
 /// reaches the client through the pushed host state.
 ///
 /// The routes sit in the router's cancellable group, outside its ownership
 /// layer, so this task is also what keeps a dropped caller from cancelling
-/// the change partway and stranding its hold.
-async fn bounded(state: Arc<AppState>, host: HostId, resume: bool) -> Response {
+/// the change partway and stranding its hold. Recording here, on that task,
+/// is what makes the outcome independent of whether the caller still waits.
+/// `request` is always `None` for a Suspend.
+async fn bounded(
+    state: Arc<AppState>,
+    host: HostId,
+    resume: bool,
+    request: Option<String>,
+) -> Response {
     crate::sessions::within_host_reply_bound_saying(
-        async move { answer(change(&state, host, resume).await) },
+        async move {
+            let result = change(&state, host, resume).await;
+            if let Some(request) = request {
+                record_wake(&state, host, request, &result);
+            }
+            answer(result)
+        },
         still_changing(if resume { "resuming" } else { "suspending" }),
     )
     .await
+}
+
+/// Publish a tagged Resume's terminal outcome on `host`'s hosts-list entry:
+/// `Ready` on success, `Failed` with the text [`answer`] would put in the
+/// error reply otherwise.
+///
+/// A busy refusal ([`HostBusy`]) is the one outcome left unrecorded. It is
+/// not terminal for the sender: it arrives at once, in the reply, before
+/// this Resume changed anything, and the launcher answers it by retrying
+/// within its own minute. Recording it as `Failed` would make a sender
+/// that reads the hosts list give up on a host that only needed waiting
+/// for.
+///
+/// A Resume that ends abnormally (its task panics before `change` returns)
+/// records nothing: the sender's own deadline is then its only answer, as it
+/// was before tagged Resumes existed.
+fn record_wake(state: &AppState, host: HostId, request: String, result: &anyhow::Result<()>) {
+    let outcome = match result {
+        Ok(()) => WakeResult::Ready,
+        Err(error) if crate::find_cause::<HostBusy>(error).is_some() => return,
+        // The same spelling `http_error` gives the reply's body, so a sender
+        // that reads either sees one sentence.
+        Err(error) => WakeResult::Failed {
+            reason: format!("{error:#}"),
+        },
+    };
+    state
+        .manager
+        .record_wake_outcome(host, WakeOutcome { request, outcome });
 }
 
 /// The text of the 504 a host's Suspend or Resume answers when it is still
