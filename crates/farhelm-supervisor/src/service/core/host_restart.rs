@@ -92,6 +92,8 @@
 //! session then holds no terminal, the old runtime is stopped, and both
 //! generations' hosts stay reachable through their records or tags.
 
+use std::collections::HashSet;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -99,7 +101,7 @@ use std::time::Duration;
 use farhelm_proto::{ErrorKind, SessionInfo, SessionLaunch, TabInfo};
 use tracing::{info, warn};
 
-use super::host_launch::{HostLeft, HostSpawnFailure, SpawnedInHost};
+use super::host_launch::{AtRecordedSocket, HostLeft, HostSpawnFailure, SpawnedInHost};
 use super::{
     FarhelmArgsMode, RELAUNCH_COLS, RELAUNCH_ROWS, RelaunchFailure, Relaunched, RequestError,
     SessionEntry, ShellSource, SimulatedCrash, Supervisor, truncate_for_error,
@@ -109,7 +111,7 @@ use crate::hosts::HostTerminal;
 use crate::launch::LaunchArtifacts;
 use crate::service::sweep::{
     ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree,
-    reap_process_tree_with_podman_deadline,
+    reap_process_tree_with_podman_deadline, reap_recorded_scope,
 };
 use crate::store::{LastOutcome, Transition};
 
@@ -768,14 +770,28 @@ impl Supervisor {
             "relaunching session {} in a new terminal host",
             truncate_for_error(id)
         ));
-        if let HostLeft::MayRemain { socket } = left
-            && let Err(why) = self.end_launch_host(None, &socket, id).await
-        {
-            return RelaunchFailure::ambiguous(error.context(format!(
-                "a terminal host may still be running at {} ({why}), so the launch is kept as a \
-                 launching record rather than unwound",
-                socket.display()
-            )));
+        let unresolved_scope = |error| RelaunchFailure {
+            scope_cleanup_unconfirmed: scope.is_some(),
+            ..RelaunchFailure::ambiguous(error)
+        };
+        if let HostLeft::MayRemain { socket } = left {
+            let ended = match self.end_launch_host(None, &socket, id).await {
+                Ok(()) => {
+                    // Shutdown can confirm one process ended while a second stage
+                    // that has yet to bind can still start. Fence the record before
+                    // an apparently empty scope can settle this launch.
+                    self.confirm_failed_restart_host_gone(artifacts, &HashSet::new())
+                        .await
+                }
+                Err(error) => Err(anyhow::Error::msg(error)),
+            };
+            if let Err(why) = ended {
+                return unresolved_scope(error.context(format!(
+                    "a terminal host may still be running at {} ({why:#}), so the launch is kept as a \
+                     launching record rather than unwound",
+                    socket.display()
+                )));
+            }
         }
         let mut error = artifacts
             .remove_unconsumed_relaunch_fail_closed(error)
@@ -794,7 +810,7 @@ impl Supervisor {
         )
         .await
         {
-            return RelaunchFailure::ambiguous(error.context(format!(
+            return unresolved_scope(error.context(format!(
                 "and the failed launch's process tree could not be swept ({sweep:#})"
             )));
         }
@@ -813,9 +829,9 @@ impl Supervisor {
     /// Tear down a host relaunch whose session's row is gone (a delete
     /// committed while it ran): its agent's process tree, its new host, and
     /// the old host it was replacing, with their launch records once each
-    /// is confirmed ended, and the launch's files. A saved scope obligation
-    /// lets the new host's record go once its host is gone. With the session
-    /// row gone, the error must name what cleanup could not confirm.
+    /// is confirmed ended, and the launch's files. The replacement's record stays
+    /// with any unresolved scope cleanup so startup can fence the recorded start.
+    /// With the row gone, the error must name what cleanup could not confirm.
     async fn tear_down_relaunch_deleted_meanwhile(
         &self,
         id: &str,
@@ -841,23 +857,19 @@ impl Supervisor {
         if let Err(error) = swept {
             teardown.push(format!("the new agent's process tree ({error:#})"));
         }
-        let mut scope_cleanup_persisted = false;
-        if scope.is_some() && !tree_ended {
-            match self
+        if scope.is_some()
+            && !tree_ended
+            && let Err(error) = self
                 .store
                 .record_pending_scope_cleanup(id, generation)
                 .await
-            {
-                Ok(()) => scope_cleanup_persisted = true,
-                Err(error) => {
-                    warn!(session = %id, generation, error = %format!("{error:#}"),
-                        "could not save the failed restart's scope cleanup for the next start");
-                    teardown.push(format!("saving the new agent's scope cleanup ({error:#})"));
-                }
-            }
+        {
+            warn!(session = %id, generation, error = %format!("{error:#}"),
+                "could not save the failed restart's scope cleanup for the next start");
+            teardown.push(format!("saving the new agent's scope cleanup ({error:#})"));
         }
         match self.end_launch_host(Some(new), new.socket(), id).await {
-            Ok(()) if tree_ended || scope_cleanup_persisted => {
+            Ok(()) if tree_ended => {
                 artifacts.remove_host_record_best_effort().await;
             }
             Ok(()) => {}
@@ -896,9 +908,10 @@ impl Supervisor {
         RelaunchFailure::ambiguous(RequestError::new(ErrorKind::Conflict, message).into())
     }
 
-    /// Retry recorded cleanup before serving under the state directory's lock.
-    /// Host discovery can skip an empty database. These obligations name exact launches that were already
-    /// torn down as far as possible, so they remain actionable with no sessions or host records.
+    /// Confirm exact launch cleanup before serving, even when no session rows remain.
+    /// Older obligations may have no record because the previous supervisor removed it
+    /// after confirming the host gone. If a record exists, its starter must be fenced
+    /// before an empty scope can satisfy the obligation.
     pub(super) async fn retry_pending_scope_cleanups(&self, deadline: tokio::time::Instant) {
         // Leave enough of the remaining startup budget for the ordinary signals and confirmation after the
         // optional Podman stop.
@@ -915,21 +928,64 @@ impl Supervisor {
                     return;
                 }
             };
+            if pending.is_empty() {
+                return;
+            }
+            let known = match self.store.known_session_ids().await {
+                Ok(known) => known,
+                Err(error) => {
+                    warn!(error = %format!("{error:#}"), "could not identify sessions to protect during restart scope cleanup");
+                    return;
+                }
+            };
+            let held = self.held_terminals().await;
             for (id, generation) in pending {
                 if let Some(unit) = crate::scope::unit_name(&id, generation) {
-                    if let Err(error) = reap_process_tree_with_podman_deadline(
-                        &self.seams.scopes,
-                        ScopeUnits::recorded(Some(unit)),
-                        None,
-                        &id,
-                        &SweepTarget::AgentOnly,
-                        ScopeKillFailure::Refuse,
-                        Some(podman_deadline),
-                    )
-                    .await
+                    let restored = known.contains(&id);
+                    if restored {
+                        match self.store.session(&id).await {
+                            Ok(Some(row)) if row.generation == generation => {
+                                warn!(session = %id, generation,
+                                    "the restored session still owns the pending restart scope");
+                                continue;
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                warn!(session = %id, generation, error = %format!("{error:#}"),
+                                    "could not check which generation the restored session owns");
+                                continue;
+                            }
+                        }
+                    }
+                    let artifacts = LaunchArtifacts::for_launch(&self.state_dir, &id, generation);
+                    if let Err(error) = self
+                        .confirm_failed_restart_host_gone(&artifacts, &held.sockets)
+                        .await
                     {
                         warn!(session = %id, generation, error = %format!("{error:#}"),
+                            "restart scope cleanup is waiting for its recorded host start");
+                        continue;
+                    }
+                    let sweep = if restored {
+                        reap_recorded_scope(&self.seams.scopes, unit, &id, podman_deadline).await
+                    } else {
+                        reap_process_tree_with_podman_deadline(
+                            &self.seams.scopes,
+                            ScopeUnits::recorded(Some(unit)),
+                            None,
+                            &id,
+                            &SweepTarget::AgentOnly,
+                            ScopeKillFailure::Refuse,
+                            Some(podman_deadline),
+                        )
+                        .await
+                    };
+                    if let Err(error) = sweep {
+                        warn!(session = %id, generation, error = %format!("{error:#}"),
                             "restart scope cleanup is still unconfirmed");
+                        continue;
+                    }
+                    if !artifacts.remove_host_record_best_effort().await {
                         continue;
                     }
                 } else {
@@ -949,6 +1005,52 @@ impl Supervisor {
             warn!(
                 "restart scope cleanup ran out of startup time; remaining obligations stay for the next start"
             );
+        }
+    }
+
+    /// Settle the exact record before cleanup can trust a vacant scope. If a live terminal
+    /// still holds the socket, it may be part of a restored session and must stay connected.
+    ///
+    /// This also runs when an ordinary failed Restart unwinds with its row still present, not
+    /// only for a deleted session: it can wait for a still-running first stage, end it with the
+    /// verified signal and remove its socket before the unwind removes the record.
+    async fn confirm_failed_restart_host_gone(
+        &self,
+        artifacts: &LaunchArtifacts,
+        held_sockets: &HashSet<OsString>,
+    ) -> anyhow::Result<()> {
+        let path = artifacts.host();
+        match tokio::fs::symlink_metadata(path).await {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => anyhow::bail!("the failed restart's launch record is not a regular file"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(anyhow::Error::new(error)
+                    .context("checking the failed restart's launch record"));
+            }
+        }
+        let Some(record) = super::read_launch_record(path).await? else {
+            return Ok(());
+        };
+        crate::hosts::existing_hosts_dir(&std::path::absolute(&self.state_dir)?)?;
+        let socket = self.recorded_socket(&record)?;
+        if socket
+            .file_name()
+            .is_some_and(|name| held_sockets.contains(name))
+        {
+            anyhow::bail!("the recorded socket is still held by a terminal");
+        }
+        match self.settle_launch_record(&record, &socket).await {
+            Ok(AtRecordedSocket::Gone) => {
+                self.remove_ended_socket(&socket).await;
+                Ok(())
+            }
+            Ok(AtRecordedSocket::Answered { .. }) => {
+                anyhow::bail!("the recorded host at {} is still running", socket.display())
+            }
+            Ok(AtRecordedSocket::NoAnswer(error)) => Err(error.into()),
+            Ok(AtRecordedSocket::NoInfo { error, .. }) => Err(error.into()),
+            Err(error) => Err(anyhow::Error::msg(error)),
         }
     }
 }
@@ -1001,6 +1103,7 @@ mod tests {
             )
             .await;
         assert_eq!(failure.disposition, RelaunchDisposition::Ambiguous);
+        assert!(failure.scope_cleanup_unconfirmed);
         assert!(format!("{:#}", failure.error).contains(&scope));
         assert!(artifacts.host().exists());
     }
@@ -1028,7 +1131,7 @@ mod tests {
                 ScopeManager::fake_reprobing(false, false, Arc::new(|_| {})),
             )
             .await;
-            store_launching_row(&sup, &id, generation, true).await;
+            store_launching_row(&sup, &id, generation, true, None).await;
             let row = sup
                 .store
                 .session(&id)
@@ -1039,7 +1142,7 @@ mod tests {
             assert_eq!(row.generation, generation);
             let other_id = uuid::Uuid::new_v4().to_string();
             if unrelated_session {
-                store_launching_row(&sup, &other_id, 0, true).await;
+                store_launching_row(&sup, &other_id, 0, true, None).await;
             }
             sup.store
                 .delete_session(&id, None)
@@ -1069,8 +1172,8 @@ mod tests {
                 .await;
             assert!(format!("{:#}", failure.error).contains(&unit));
             assert!(
-                !artifacts.host().exists(),
-                "the confirmed gone host's record can go"
+                artifacts.host().exists(),
+                "the host record is still needed while the scope is unresolved"
             );
             let obligation = [(id.clone(), generation)];
             assert_eq!(
@@ -1088,6 +1191,10 @@ mod tests {
             assert_eq!(
                 sup.store.pending_scope_cleanups().await.unwrap(),
                 obligation
+            );
+            assert!(
+                artifacts.host().exists(),
+                "another failed sweep keeps the record"
             );
             serving.abort();
             assert!(serving.await.unwrap_err().is_cancelled());
@@ -1112,6 +1219,10 @@ mod tests {
             );
             let serving = serve_until_answering(&sup).await;
             assert!(sup.store.pending_scope_cleanups().await.unwrap().is_empty());
+            assert!(
+                !artifacts.host().exists(),
+                "successful cleanup retires the record"
+            );
             {
                 let operations = observed.lock().unwrap();
                 let signal = ScopeOp::Kill {
@@ -1144,6 +1255,309 @@ mod tests {
         }
     }
 
+    /// A failed first stage can leave a scope even after the session's row is gone.
+    /// Ordinary Delete waits for the lifecycle claim, so remove the row at the start seam.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_failed_replacement_keeps_scope_cleanup_when_its_row_is_deleted() {
+        use super::super::{FaultHooks, RelaunchPlan};
+        use crate::scope::ScopeManager;
+        use std::os::unix::fs::PermissionsExt;
+
+        let state = StateDir::new();
+        let id = uuid::Uuid::new_v4().to_string();
+        let sup = supervisor_with_scopes(&state, ScopeManager::disabled()).await;
+        store_launching_row(&sup, &id, 0, false, None).await;
+        drop(sup);
+
+        let program = state.path().join("refusing-host");
+        std::fs::write(&program, "#!/bin/sh\ncat >/dev/null\nexit 1\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let db_path = state.path().join("supervisor.db");
+        let delete_id = id.clone();
+        let on_start = move || {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    let store = crate::store::SessionStore::open(&db_path, false).await?;
+                    let row = store.session(&delete_id).await?.expect("replacement row");
+                    assert_eq!(row.generation, 1);
+                    assert!(row.launch_scoped);
+                    store.delete_session(&delete_id, None).await?;
+                    Ok(())
+                })
+            })
+        };
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                host_program: Some(program),
+                scopes: Arc::new(ScopeManager::fake_failing_kills(Arc::new(|_| {}))),
+                faults: FaultHooks {
+                    host_start_interrupt: Some(Arc::new(on_start)),
+                    ..FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let entry = sup.sessions.lock().await[&id].clone();
+        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
+        let _lifecycle = sup.lifecycle_locks.claim(&id).await;
+        let error = sup
+            .relaunch(
+                &entry,
+                &snapshot,
+                RelaunchPlan {
+                    setup_persistent_hooks: false,
+                    clear_capture: false,
+                    argv: vec!["sh".into(), "-c".into(), "exit 0".into()],
+                    launch_cwd: state.path().to_string_lossy().into_owned(),
+                    restart_with: None,
+                    seed: None,
+                },
+            )
+            .await
+            .expect_err("the replacement failed before confirmation");
+        assert!(
+            format!("{error:#}").contains("process tree could not be swept"),
+            "{error:#}"
+        );
+        assert!(sup.store.session(&id).await.unwrap().is_none());
+        assert_eq!(
+            sup.store.pending_scope_cleanups().await.unwrap(),
+            [(id.clone(), 1)]
+        );
+        assert!(
+            LaunchArtifacts::for_launch(state.path(), &id, 1)
+                .host()
+                .is_file()
+        );
+    }
+
+    /// A host starter can create a scope after an early check found it absent. The startup
+    /// deadline preserves both pieces of evidence until a later attempt can fence that starter.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn pending_restart_cleanup_checks_its_starter_before_its_scope() {
+        use super::super::{FaultHooks, host_launch::LaunchHostRecord};
+        use crate::scope::{ScopeManager, ScopeOp};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let state = StateDir::new();
+        let id = uuid::Uuid::new_v4().to_string();
+        let name = crate::hosts::free_host_name(state.path()).unwrap();
+        let socket = name.socket_in(&crate::hosts::hosts_dir(state.path()));
+        let mut child = tokio::process::Command::new("/usr/bin/python3")
+            .args([
+                "-u",
+                "-c",
+                "import os, socket, sys\nprint('ready')\nassert input() == 'start'\ns = socket.socket(socket.AF_UNIX)\ns.bind(sys.argv[1])\ns.listen()\nprint('bound')\nassert input() == 'stop'\ns.close()\nos.unlink(sys.argv[1])",
+            ])
+            .arg(&socket)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut gate = child.stdin.take().unwrap();
+        let mut progress = BufReader::new(child.stdout.take().unwrap()).lines();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), progress.next_line())
+                .await
+                .unwrap()
+                .unwrap()
+                .as_deref(),
+            Some("ready"),
+        );
+        let starter = crate::hosts::HostProcess::current(child.id().unwrap()).unwrap();
+        let artifacts = LaunchArtifacts::for_launch(state.path(), &id, 1);
+        let unit = crate::scope::unit_name(&id, 1).unwrap();
+        let scope_ops = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let track_scope_ops: crate::scope::ScopeOpSink = Arc::new({
+            let scope_ops = Arc::clone(&scope_ops);
+            move |op| scope_ops.lock().unwrap().push(op.clone())
+        });
+        let absent_scope = Arc::new(ScopeManager::fake_vanishing(
+            0,
+            Arc::clone(&track_scope_ops),
+        ));
+        let waited_for_starter = Arc::new(AtomicBool::new(false));
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::clone(&absent_scope),
+                faults: FaultHooks {
+                    launch_starter_waiting: Some(Arc::new({
+                        let waited_for_starter = Arc::clone(&waited_for_starter);
+                        move || waited_for_starter.store(true, Ordering::Relaxed)
+                    })),
+                    ..FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        std::fs::write(
+            artifacts.host(),
+            LaunchHostRecord {
+                socket: name,
+                starter,
+            }
+            .encode(),
+        )
+        .unwrap();
+        sup.store
+            .record_pending_scope_cleanup(&id, 1)
+            .await
+            .unwrap();
+        assert!(starter.is_running().unwrap());
+        assert!(!socket.exists());
+        assert!(absent_scope.available().await);
+        assert!(!absent_scope.exists(&unit).await.unwrap());
+        scope_ops.lock().unwrap().clear();
+
+        sup.retry_pending_scope_cleanups(tokio::time::Instant::now() + Duration::from_secs(2))
+            .await;
+        assert!(
+            waited_for_starter.load(Ordering::Relaxed),
+            "the retry reached the starter fence"
+        );
+        assert!(starter.is_running().unwrap());
+        assert!(
+            !scope_ops
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|op| matches!(op, ScopeOp::Exists(_)))
+        );
+        assert!(artifacts.host().is_file());
+        assert_eq!(
+            sup.store.pending_scope_cleanups().await.unwrap(),
+            [(id.clone(), 1)]
+        );
+
+        gate.write_all(b"start\n").await.unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), progress.next_line())
+                .await
+                .unwrap()
+                .unwrap()
+                .as_deref(),
+            Some("bound"),
+        );
+        assert!(
+            socket.exists(),
+            "the held starter could still bring up a host"
+        );
+        // An orderly host end removes its socket. The scope can still outlive
+        // the host, so the next startup sees a live scope at the same identity.
+        gate.write_all(b"stop\n").await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), child.wait())
+                .await
+                .unwrap()
+                .unwrap()
+                .success()
+        );
+        assert!(!starter.is_running().unwrap());
+        assert!(!socket.exists());
+        drop(sup);
+        let scopes = ScopeManager::fake_vanishing_after_signal("SIGTERM", track_scope_ops);
+        let sup = supervisor_with_scopes(&state, scopes).await;
+        sup.retry_pending_scope_cleanups(tokio::time::Instant::now() + Duration::from_secs(5))
+            .await;
+        {
+            let operations = scope_ops.lock().unwrap();
+            let signal = ScopeOp::Kill {
+                unit: unit.clone(),
+                signal: "SIGTERM".into(),
+            };
+            let sent = operations
+                .iter()
+                .position(|op| op == &signal)
+                .expect("retry signalled the replacement's scope");
+            assert!(operations[sent + 1..].contains(&ScopeOp::Exists(unit)));
+        }
+        assert!(!artifacts.host().exists());
+        assert!(sup.store.pending_scope_cleanups().await.unwrap().is_empty());
+    }
+
+    /// An empty old scope would normally trigger the process-marker fallback. A restored
+    /// session or a retained create reservation can own the same marker.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn pending_restart_cleanup_leaves_the_restored_sessions_process_running() {
+        use super::super::tests::serve_until_answering;
+        use crate::store::{DedupScope, IntentClaim};
+
+        for reservation_only in [false, true] {
+            let state = StateDir::new();
+            let id = uuid::Uuid::new_v4().to_string();
+            let scopes = crate::scope::ScopeManager::fake_vanishing(0, Arc::new(|_| {}));
+            let sup = supervisor_with_scopes(&state, scopes).await;
+            let claim = reservation_only.then(|| IntentClaim {
+                intent_key: "restored-start".into(),
+                fingerprint: "restored-start".into(),
+                dedup_scope: DedupScope::Permanent,
+            });
+            store_launching_row(&sup, &id, 2, false, claim).await;
+            if reservation_only {
+                sup.store.delete_session(&id, None).await.unwrap();
+                assert!(sup.store.session(&id).await.unwrap().is_none());
+                assert_eq!(
+                    sup.store.known_session_ids().await.unwrap(),
+                    HashSet::from([id.clone()]),
+                    "the reservation alone owns the ID",
+                );
+            }
+            sup.store
+                .record_pending_scope_cleanup(&id, 1)
+                .await
+                .unwrap();
+            let mut new_agent = tokio::process::Command::new("/bin/sleep")
+                .arg("60")
+                .env(crate::launch::SESSION_ID_ENV_VAR, &id)
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap();
+            let pid = new_agent.id().unwrap();
+            let environs = std::fs::read(format!("/proc/{pid}/environ")).unwrap();
+            let marker = format!("{}={id}", crate::launch::SESSION_ID_ENV_VAR);
+            assert!(
+                environs
+                    .split(|&byte| byte == 0)
+                    .any(|item| item == marker.as_bytes())
+            );
+            assert!(new_agent.try_wait().unwrap().is_none());
+
+            let serving = serve_until_answering(&sup).await;
+            assert!(sup.store.pending_scope_cleanups().await.unwrap().is_empty());
+            assert_eq!(
+                sup.store
+                    .session(&id)
+                    .await
+                    .unwrap()
+                    .map(|row| row.generation),
+                if reservation_only { None } else { Some(2) },
+            );
+            assert!(sup.store.known_session_ids().await.unwrap().contains(&id));
+            assert!(
+                new_agent.try_wait().unwrap().is_none(),
+                "the restored session stays alive"
+            );
+            new_agent.kill().await.unwrap();
+            serving.abort();
+            assert!(serving.await.unwrap_err().is_cancelled());
+        }
+    }
+
     /// Give each start a new manager observation against the same isolated database.
     #[cfg(target_os = "linux")]
     async fn supervisor_with_scopes(
@@ -1163,9 +1577,15 @@ mod tests {
         .expect("open supervisor")
     }
 
-    /// Plant the durable row a Restart has written before confirming its replacement's terminal address.
+    /// Plant an unconfirmed host row. A claim lets the fixture leave the ID known after removing the row.
     #[cfg(target_os = "linux")]
-    async fn store_launching_row(sup: &Supervisor, id: &str, generation: i64, scoped: bool) {
+    async fn store_launching_row(
+        sup: &Supervisor,
+        id: &str,
+        generation: i64,
+        scoped: bool,
+        claim: Option<crate::store::IntentClaim>,
+    ) {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
@@ -1198,7 +1618,7 @@ mod tests {
                     persistent_hook_setup: Default::default(),
                     setup_persistent_hooks_on_create: false,
                 },
-                None,
+                claim,
             )
             .await
             .expect("insert launching row");

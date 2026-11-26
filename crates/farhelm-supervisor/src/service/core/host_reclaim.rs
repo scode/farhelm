@@ -96,6 +96,10 @@
 //!   reclaim looked, and a socket nothing serves is gone only once no live
 //!   process names it. When nothing serves the socket then, its file and the
 //!   record are removed; a host that answers is left, with the warning above.
+//!   A launch record that a pending Restart cleanup in `supervisor.db` names,
+//!   and its socket, are not reclaim's: the startup retry of that cleanup
+//!   settles them, and the two run side by side under one startup budget, so
+//!   only one of them may touch a given record.
 //! - **Tab records of a known session that the reload did not keep**: the
 //!   reload adopts every tab record's host it can, keeps a placeholder for
 //!   one it cannot use, and drops a tab whose host it found gone, leaving
@@ -211,10 +215,10 @@ struct ReclaimRecord {
 }
 
 /// What the terminals on the session map hold, as the reclaim must leave it.
-struct Held {
+pub(super) struct Held {
     /// The socket file names of every terminal on the map: agent terminals
     /// and tabs, runtimes and placeholders alike. Never contacted.
-    sockets: HashSet<OsString>,
+    pub(super) sockets: HashSet<OsString>,
     /// The tab ids each session on the map holds in its cell, by session:
     /// a known session's tab record whose tab is not here was dropped by
     /// the reload.
@@ -508,8 +512,17 @@ impl Supervisor {
             );
             return None;
         }
-        let held = self.held_terminals().await;
-        let listed = self.reclaimable_records(&stored, &held).await?;
+        let mut held = self.held_terminals().await;
+        let pending = match self.store.pending_scope_cleanups().await {
+            Ok(pending) => pending.into_iter().collect(),
+            Err(error) => {
+                warn!(error = %format!("{error:#}"),
+                    "could not read pending restart cleanups; reclaiming no terminal host this start");
+                return None;
+            }
+        };
+        let listed = self.reclaimable_records(&stored, &held, &pending).await?;
+        held.sockets.extend(listed.scope_retry_sockets);
         Some(Discovery {
             judge: Judge {
                 stored,
@@ -528,7 +541,7 @@ impl Supervisor {
     /// ([`Supervisor::restarting_tabs`]). Before the bind no Restart can run,
     /// so that map is empty at the reclaim; it is read anyway, so that a tab
     /// a Restart holds can never look like an unknown one.
-    async fn held_terminals(&self) -> Held {
+    pub(super) async fn held_terminals(&self) -> Held {
         let sessions = self.sessions.lock().await;
         let mut held = Held {
             sockets: HashSet::new(),
@@ -578,8 +591,14 @@ impl Supervisor {
     /// and nothing is reclaimed this start (module docs, "What is known, and
     /// what is an orphan"). A record to settle that is not a regular file,
     /// cannot be read, or names a socket a terminal on the map holds is left
-    /// where it is, logged.
-    async fn reclaimable_records(&self, stored: &HashSet<String>, held: &Held) -> Option<Listed> {
+    /// where it is, logged. A pending Restart cleanup owns its exact launch record, including
+    /// the socket it names. The generic scan skips that socket until the retry settles it.
+    async fn reclaimable_records(
+        &self,
+        stored: &HashSet<String>,
+        held: &Held,
+        pending: &HashSet<(String, i64)>,
+    ) -> Option<Listed> {
         let mut listed = Listed::default();
         let launch_dir = self.state_dir.join("launch");
         let incomplete = |error: &dyn std::fmt::Display| {
@@ -631,12 +650,16 @@ impl Supervisor {
                     .recorded_tabs
                     .insert((session_id.to_string(), tab_id.to_string()));
             }
-            let kind = if !stored.contains(session_id) {
-                RecordKind::Unbacked
+            let kind = if matches!(of, LaunchFileOf::Launch(generation)
+                if pending.contains(&(session_id.to_string(), generation)))
+            {
+                None
+            } else if !stored.contains(session_id) {
+                Some(RecordKind::Unbacked)
             } else {
                 match (of, held.tabs.get(session_id)) {
                     (LaunchFileOf::Tab(tab_id), Some(tabs)) if !tabs.contains(tab_id) => {
-                        RecordKind::DroppedTab
+                        Some(RecordKind::DroppedTab)
                     }
                     // An agent launch's record stays with its session
                     // (Delete settles it), and a known session the map
@@ -685,13 +708,17 @@ impl Supervisor {
                      leaving both as they are");
                 continue;
             }
-            listed.records.push(ReclaimRecord {
-                path,
-                session_id: session_id.to_string(),
-                kind,
-                record,
-                socket,
-            });
+            if let Some(kind) = kind {
+                listed.records.push(ReclaimRecord {
+                    path,
+                    session_id: session_id.to_string(),
+                    kind,
+                    record,
+                    socket,
+                });
+            } else if let Some(name) = socket.file_name() {
+                listed.scope_retry_sockets.insert(name.to_os_string());
+            }
         }
         listed.records.sort_by(|a, b| a.path.cmp(&b.path));
         Some(listed)
@@ -873,6 +900,8 @@ struct Listed {
     recorded_tabs: HashSet<(String, String)>,
     /// The records to settle.
     records: Vec<ReclaimRecord>,
+    /// Sockets owned by the parallel Restart scope retry.
+    scope_retry_sockets: HashSet<OsString>,
 }
 
 /// Remove the socket file of `host`, which the scan found nothing serving,
