@@ -15,6 +15,7 @@ use std::rc::Rc;
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::LaunchHarness;
+use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionState, HostView, KeyedEntry,
     PREFERENCES_KEY, Preferences,
@@ -277,6 +278,7 @@ pub(super) fn heading(cx: &mut VisualTestContext) -> Option<String> {
 /// A busy key refuses either write with the shared reason and leaves the draft available for retry.
 /// An unreadable catalog exposes the helm's reason on the first read and preserves the page on a failed refresh.
 /// Settings search finds the saved agent by its name, ID and command, and opens the editor without a read.
+/// When a push matches the in-flight save before its reply, Save keeps focus and another push cannot replace the edit.
 #[gpui::test]
 fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppContext) {
     const DISPLAY_NAME: &str = "Example Code סוכן";
@@ -391,9 +393,34 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     );
     assert!(drawn(cx, "custom-agent-save") && sent(&mut helm).is_empty());
     cx.update(|_, cx| operations.update(cx, |store, cx| store.release(&key, cx)));
-    click(cx, "custom-agent-save");
+    reach(cx, "custom-agent-save");
+    keys(cx, "space");
     let (update, edited) = one_command(&mut helm, Method::Put, "/api/custom-agents/example-code");
     assert_eq!(edited["command"], "~/bin/example-v2");
+    let mut pushed = CollectionChanges {
+        collection,
+        meta: meta(&["example-code"]),
+        upsert: vec![KeyedEntry {
+            key: "example-code".into(),
+            value: edited.clone(),
+        }],
+        remove: vec![],
+    };
+    for command in ["~/bin/example-v2", "~/bin/external-edit"] {
+        pushed.upsert[0].value["command"] = json!(command);
+        helm.push(pushed.clone());
+        settle(cx);
+        cx.update(|_, cx| {
+            let store = session::current_store(cx).expect("the helm is connected");
+            let catalog = store.read(cx).collections();
+            let saved = catalog.get::<CustomAgent>("example-code").unwrap();
+            assert_eq!(saved.command, command, "the catalog applied this push");
+        });
+        assert_eq!(focused_id(cx).as_deref(), Some("custom-agent-save"));
+        assert!(painted(cx).contains("~/bin/example-v2"));
+        keys(cx, "space");
+        assert!(sent(&mut helm).is_empty(), "Save is still busy");
+    }
     helm.push(CollectionChanges {
         collection,
         meta: meta(&[]),

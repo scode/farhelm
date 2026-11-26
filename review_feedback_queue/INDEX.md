@@ -103,10 +103,6 @@ consequences.
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
   failure above it, and leaves the launch refusal stuck even after an in-flight toggle succeeds.
 
-- [`trailing-custom-agent-settings-busy-save-button-and-saw-saved-restore.md`](trailing-custom-agent-settings-busy-save-button-and-saw-saved-restore.md)
-  — While a custom-agent save is in flight, a pushed catalog update can disable the busy Save button (causing it to drop
-  keyboard focus) or overwrite the fields being saved with a subsequent external update.
-
 - [`trailing-custom-agent-settings-dirty-close-prompt-collapses-multiple-agents.md`](trailing-custom-agent-settings-dirty-close-prompt-collapses-multiple-agents.md)
   — When two or more custom-agent pages have unsaved changes, the 'Save changes before closing?' prompt lists only a
   single 'Custom agent' and jumps Settings to whichever custom-agent draft sorts first rather than staying on the page

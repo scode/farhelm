@@ -132,26 +132,6 @@
   file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## trailing-custom-agent-settings-busy-save-button-and-saw-saved-restore.md
-
-- Outcome: `fix code`.
-- Assessment: While a custom-agent save is in flight, an update pushed from the helm can turn the busy Save button into
-  a disabled one, so it drops keyboard focus. A second push can overwrite the fields mid-save. Verified: Partly correct.
-  The rule exists: SPEC_impl.md "Drafts" says "While a save is in flight its Save button is busy rather than disabled".
-  The button is `.disabled(!this.dirty(cx)).busy(busy)` (`settings/custom_agents.rs:580- 583`), and `saw_saved` ignores
-  `busy` (`custom_agents.rs:301-310`). In normal saves dirty stays true until the reply, so the rule holds. Part 1 needs
-  a frame between the save's own pushed change and its reply. That is unverified, and item 81 assumes the opposite
-  ordering. Part 2 needs a second write from another client, which no shipped control produces (see the header).
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: discard. The established part is timing-dependent and costs only
-  focus, and the rest has no shipped route. Alternatively, a one-line `disabled` fix. Size S. Size gate: about 100 lines
-  of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## trailing-custom-agent-settings-dirty-close-prompt-collapses-multiple-agents.md
 
 - Outcome: `fix code`.
