@@ -91,7 +91,7 @@ pub(super) fn spare(
     .content(super::card::switch_copy(SPARE_LABEL, SPARE_HELP, cx))
     .focus(focus)
     .checked(spare.shown())
-    .disabled(!spare.available())
+    .value_unknown(!spare.available())
     .on_toggle(on_toggle);
     let link = Button::new(
         SPARE_DOCS_ID,

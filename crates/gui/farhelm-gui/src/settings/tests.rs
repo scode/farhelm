@@ -2543,6 +2543,14 @@ fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mu
     assert_eq!(switch_on(cx, TrustAgent::Claude.id()), Some(true));
     assert!(accessible_help_contains(
         cx,
+        "persistent hosts created with Add host"
+    ));
+    assert!(accessible_help_contains(
+        cx,
+        "a session's own sandbox or container"
+    ));
+    assert!(accessible_help_contains(
+        cx,
         "can rarely undo Farhelm's edit"
     ));
     assert!(!drawn(cx, TrustAgent::Codex.id()));
@@ -2563,6 +2571,10 @@ fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mu
     assert!(sent(&mut helm).is_empty(), "Codex's late read was retained");
     assert_eq!(available(cx, TrustAgent::Codex.id()), Some(true));
     assert_eq!(switch_on(cx, TrustAgent::Codex.id()), Some(false));
+    assert!(accessible_help_contains(
+        cx,
+        "persistent hosts created with Add host"
+    ));
     assert!(!drawn(cx, TrustAgent::Claude.id()));
     click(cx, TrustAgent::Codex.id());
     let (save, _) = one_put(&mut helm, TRUST_PATHS[1]);
@@ -2614,7 +2626,7 @@ fn grok_hook_setup_and_its_hint_are_independent_settings(cx: &mut TestAppContext
     });
     settle(cx);
     assert_eq!(heading(cx).as_deref(), Some("Grok"));
-    assert_eq!(available(cx, agent.id()), Some(false));
+    assert_switch_unavailable(cx, agent.id(), super::hook_settings::LABEL);
     let reads = sent_reads(&mut helm);
     let [(read, path)] = reads.as_slice() else {
         panic!("only the Grok setup read: {reads:?}")
@@ -2834,8 +2846,8 @@ fn the_hint_switches_are_the_shared_dismissals_inverted(cx: &mut TestAppContext)
 }
 
 /// The trust hint opens Antigravity's own page and waits for its switch to become available before taking focus.
-/// The unread switch must not report a saved off value. Escape returns focus to the opening button, even when it
-/// did not have focus when Settings opened.
+/// The unread trust switch and the unreadable hook switch report no saved off value. A failed hook read must not
+/// interfere with trust's focus handoff. Escape returns focus to the opening button even if it started elsewhere.
 #[gpui::test]
 fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut TestAppContext) {
     let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
@@ -2853,21 +2865,29 @@ fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut Test
         dialog_holds_focus(cx),
         "the dialog itself holds focus while the reads are out"
     );
-    assert_eq!(available(cx, TrustAgent::Antigravity.id()), Some(false));
-    let switch = frame(cx)
-        .into_iter()
-        .find(|node| node.element_id.as_deref() == Some(TrustAgent::Antigravity.id()))
-        .expect("the unread trust switch is drawn");
-    assert_eq!((switch.role, switch.toggled), (Some(Role::Label), None));
-    let unavailable = format!("{}. Unavailable.", TrustAgent::Antigravity.label());
-    assert_eq!(switch.label.as_deref(), Some(unavailable.as_str()));
-    assert_eq!(switch.value.as_deref(), Some(unavailable.as_str()));
-    let reads = sent_reads(&mut helm);
-    assert_eq!(
-        reads.first().map(|(_, path)| path.as_str()),
-        Some(TRUST_PATHS[4])
+    assert_switch_unavailable(
+        cx,
+        TrustAgent::Antigravity.id(),
+        TrustAgent::Antigravity.label(),
     );
-    answer_trust(&mut helm, &reads, false, cx);
+    let reads = sent_reads(&mut helm);
+    let [(trust, trust_path), (hook, hook_path)] = reads.as_slice() else {
+        panic!("expected Antigravity's trust and hook reads: {reads:?}");
+    };
+    assert_eq!(trust_path, TRUST_PATHS[4]);
+    assert_eq!(hook_path, "/api/agent-hook-setup/antigravity");
+    helm.reply(
+        *trust,
+        200,
+        Some(json!({ "enabled": false, "hint_dismissed": false })),
+    );
+    helm.reply(*hook, 503, Some(json!("fixture hook read refused")));
+    settle(cx);
+    assert_switch_unavailable(
+        cx,
+        crate::hook_setup::HookAgent::Antigravity.id(),
+        super::hook_settings::LABEL,
+    );
     let switch = frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(TrustAgent::Antigravity.id()))
@@ -2901,6 +2921,20 @@ pub(super) fn available(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
         .map(|node| node.flags.focusable)
+}
+
+/// Adapters can infer off from the switch role alone. While the value is unknown, expose its name and unavailability
+/// as text and keep it out of keyboard navigation.
+fn assert_switch_unavailable(cx: &mut VisualTestContext, id: &str, label: &str) {
+    let node = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .unwrap_or_else(|| panic!("unavailable switch {id} is drawn"));
+    let unavailable = format!("{label}. Unavailable.");
+    assert_eq!((node.role, node.toggled), (Some(Role::Label), None), "{id}");
+    assert_eq!(node.label.as_deref(), Some(unavailable.as_str()), "{id}");
+    assert_eq!(node.value.as_deref(), Some(unavailable.as_str()), "{id}");
+    assert!(!node.flags.focusable, "{id}");
 }
 
 /// Whether the topmost dialog itself (its container, not a control in it) holds focus.
@@ -3113,6 +3147,11 @@ fn checkouts_reads_its_routes_once_and_stays_locked_until_they_answer(cx: &mut T
     assert_eq!(text(cx, Field::Folder), "", "read-only until read");
     assert_eq!(text(cx, Field::PostClone), "", "read-only until read");
     assert!(!drawn(cx, FOOTER_SAVE));
+    assert_switch_unavailable(
+        cx,
+        super::checkouts::SPARE_ID,
+        super::checkouts::SPARE_LABEL,
+    );
     click(cx, super::checkouts::SPARE_ID);
     assert_eq!(sent(&mut helm), [], "nothing saves before the reads answer");
 
@@ -3430,6 +3469,11 @@ fn the_spare_switch_saves_through_its_route_and_a_refusal_restores_it(cx: &mut T
     helm.reply(reads[1].0, 200, Some(json!({ "command": null })));
     helm.reply(reads[2].0, 503, Some(json!("fixture spare read refused")));
     settle(cx);
+    assert_switch_unavailable(
+        cx,
+        super::checkouts::SPARE_ID,
+        super::checkouts::SPARE_LABEL,
+    );
     click(cx, super::checkouts::SPARE_ID);
     assert_eq!(sent(&mut helm), [], "no toggle over an unknown choice");
     assert_eq!(

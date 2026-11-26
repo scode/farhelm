@@ -57,10 +57,10 @@ const CLAUDE_TRUST_RISK: &str = "The repository's Claude hooks and commands can 
      it tries to remove the entry when it archives the checkout.";
 const FLAG_TRUST_RISK: &str = "As when you approve it yourself, repository hooks, settings and commands are then trusted. This \
      is why the switch is off by default.";
-const FLAG_TRUST_LAUNCHES: &str = "On local, SSH and persistent recipe hosts, this setting applies to structured launches \
-     in any folder. It covers New, Clone, Restart with, Replace with, Replace as guarded instead and launches an agent \
+const TRUST_LAUNCHES: &str = "On local hosts, SSH hosts and persistent hosts created with Add host, this setting applies \
+     to structured launches. It covers New, Clone, Restart with, Replace with, Replace as guarded instead and launches an agent \
      requests, including a folder the agent chooses for a request Farhelm approves without asking. Structured launches \
-     in a session's own sandbox or container trust automatically. Plain Restart and any Replace that reuses the saved \
+     in a session's own sandbox or container trust the workspace by default. Plain Restart and any Replace that reuses the saved \
      command keep the saved trust choice.";
 pub(super) const CAUTION: [&str; 3] = [
     "Claude has no supported way to do this. Farhelm edits the settings file selected by the login shell \
@@ -223,7 +223,7 @@ impl TrustAgent {
         };
         [
             Some(self.tooltip()),
-            (!self.has_caution()).then_some(FLAG_TRUST_LAUNCHES),
+            (!self.has_caution()).then_some(TRUST_LAUNCHES),
             Some(risk),
             self.caveat(),
         ]
@@ -241,9 +241,7 @@ impl TrustAgent {
                 "When you choose Claude Code as the agent, Farhelm marks the folder trusted in Claude's settings file \
                  before it starts. This also applies when you start Claude Code in a new managed checkout. Farhelm \
                  skips your home directory and its parents, including /. Claude's trust covers everything inside \
-                 those directories, so Claude may still ask there. On installed hosts, New, Clone, Restart with and \
-                 Replace with use this setting. Sandbox and container sessions apply workspace trust automatically. \
-                 Restart and Replace keep the session's saved launch."
+                 those directories, so Claude may still ask there."
             }
             TrustAgent::Codex => {
                 "Farhelm passes Codex a per-launch trust option. Codex keeps its saved configuration."
@@ -264,13 +262,11 @@ impl TrustAgent {
     /// their mechanism with which launches use it, then the risk (SPEC.md: "Their help states that the repository's
     /// hooks, settings and commands may then run as if the user had approved them").
     pub(super) fn help(self) -> Vec<String> {
+        let launch_help = format!("{} {TRUST_LAUNCHES}", self.mechanism());
         match self {
-            TrustAgent::Claude => vec![self.mechanism().to_owned()],
+            TrustAgent::Claude => vec![launch_help],
             TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi | TrustAgent::Antigravity => {
-                let mut paragraphs = vec![
-                    format!("{} {FLAG_TRUST_LAUNCHES}", self.mechanism()),
-                    FLAG_TRUST_RISK.to_owned(),
-                ];
+                let mut paragraphs = vec![launch_help, FLAG_TRUST_RISK.to_owned()];
                 paragraphs.extend(self.caveat().map(str::to_owned));
                 paragraphs
             }
@@ -278,13 +274,14 @@ impl TrustAgent {
     }
 
     /// A last help paragraph for an agent whose option has a consequence the mechanism sentence does not cover:
-    /// Antigravity's option replaces its saved trust list for the launch, and the user's own Custom `--settings`
-    /// wins over it (SPEC.md: "Custom permission options supplying `--settings` or `--settings=...` take precedence").
+    /// Antigravity's option replaces its saved trust list for the launch. The helm checks Custom flags on a
+    /// best-effort basis so it can leave a user's own settings in effect.
     fn caveat(self) -> Option<&'static str> {
         match self {
             TrustAgent::Antigravity => Some(
-                "For this launch, the option replaces Antigravity's saved list of trusted folders. Custom permission \
-                 flags that include --settings or --settings=… take precedence.",
+                "For this launch, the option replaces Antigravity's saved list of trusted folders. Farhelm makes a \
+                 best-effort check for --settings or --settings=… in Custom permission flags and skips its own option \
+                 when it finds one.",
             ),
             TrustAgent::Claude | TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => None,
         }
