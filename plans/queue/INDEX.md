@@ -5,7 +5,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 63f9ef] `session-right-click-menu.md` — Open session and bulk context menus on right-click (after `bulk-start-sessions.md`)
 - [in-flight ecd2fd] `launcher-late-wake-failures.md` — Report request-tagged late wake failures for suspended sandboxes and stopped containers
 - [in-flight 97032f] `podman-recipe-admission.md` — Report pre-admission container recipe Rebuild failures without creating empty build records (after `podman-host-verification.md`)
-- [pending] `podman-proxy-free-images.md` — Keep build-time host proxy config out of captured Podman recipe images (after `podman-host-verification.md`)
+- [in-flight ae4852] `podman-proxy-free-images.md` — Keep build-time host proxy config out of captured Podman recipe images (after `podman-host-verification.md`)
 - [in-flight a2468d] `supervisor-stop-pending-launch.md` — Refuse Stop on unconfirmed terminal-less launches in favor of Delete or Restart
 - [complete] `supervisor-tab-close-retry.md` — Fix in-memory shell-tab close retry bugs and record Linux systemd/unscoped cleanup policy
 - [complete] `agent-delete-late-notice.md` — Always record agent-Delete leftover-checkout warnings in the notices bell
