@@ -1561,6 +1561,10 @@ content cannot displace those actions. The save-as-template panel remains inline
 open search results before closing that panel. Hover help shows the held host's name. Project registration (associating
 metadata with a directory) is optional convenience and never a prerequisite.
 
+Both launcher tabs keep a saved custom agent choice visible while its registration list loads or a read fails. The
+launcher can still use a retained entry. When the entry is absent, Launch waits and says whether the list is loading or
+the read failed. A successful list that omits the saved ID offers deletion advice.
+
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
 accept a second launch or be replaced with another draft. Launches and changes to the host registry still exclude each
@@ -2266,20 +2270,22 @@ submission and focus-return behavior.
   harness or folder, and Clone can change the host. The launcher shows the current settings and marks edited fields, and
   its primary action is inactive until a setting changes or a conversation selector is entered. For an agent launch with
   a stored resume command, it is available even without a captured conversation; then its conversation field is required
-  and explains why. A registered custom agent also needs a current registration that supports resumption. If the
-  registration changes while the launcher is open, the launcher explains why it cannot restart and stops requiring a
-  conversation until the agent can resume again. Cursor and OpenCode have no stored resume command, so they do not gain
-  Restart with. Muse launches created before conversation tracking retain their missing resume command until recreated.
-  The launcher's ordinary controls, templates, validation and Enter rules apply. Its primary action reads "Restart", or
-  "Stop and restart" while the shown agent is working. The form shows the held agent type, host and folder, and the
-  action's accessible name includes them. A working agent is stopped first with the user's confirmation on that action;
-  a live agent in any other status is stopped first without it, as for Restart. The edited launch is validated exactly
-  as a create validates it before anything is stopped, so an invalid edit leaves the agent running and the dialog open
-  with the reason. A refusal leaves the dialog and its edits visible with the reason. The held folder never uses or
-  updates the per-host folder default; its advisory check still applies. Restart with runs the resume command, so an
-  edited start command of a command launch takes effect the next time it is cloned or replaced. Command launches offer
-  this action exactly when Restart is. Its entry in the header's Restart menu remains visible but greyed out otherwise,
-  with a hover tooltip and accessible description explaining why.
+  and explains why. A registered custom agent also needs a current registration that supports resumption. The editor can
+  open on the saved resume command while the registration list is loading or unreadable. It keeps the required
+  conversation field visible, explains the wait beside it and holds Restart until it has a usable entry. A known
+  deletion or loss of resumption explains why Restart is unavailable and removes the conversation requirement. Cursor
+  and OpenCode have no stored resume command, so they do not gain Restart with. Muse launches created before
+  conversation tracking retain their missing resume command until recreated. The launcher's ordinary controls,
+  templates, validation and Enter rules apply. Its primary action reads "Restart", or "Stop and restart" while the shown
+  agent is working. The form shows the held agent type, host and folder, and the action's accessible name includes them.
+  A working agent is stopped first with the user's confirmation on that action; a live agent in any other status is
+  stopped first without it, as for Restart. The edited launch is validated exactly as a create validates it before
+  anything is stopped, so an invalid edit leaves the agent running and the dialog open with the reason. A refusal leaves
+  the dialog and its edits visible with the reason. The held folder never uses or updates the per-host folder default;
+  its advisory check still applies. Restart with runs the resume command, so an edited start command of a command launch
+  takes effect the next time it is cloned or replaced. Command launches offer this action exactly when Restart is. Its
+  entry in the header's Restart menu remains visible but greyed out otherwise, with a hover tooltip and accessible
+  description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
   fresh-conversation counterpart to restart's resumed one unless the user names a conversation for this start. A session
   in a managed checkout starts on a managed checkout of the same repository, named `<title>-clone` with the first free

@@ -20,6 +20,7 @@
 //! An agent switch that made the shown permission more dangerous puts up the red banner, with Undo, and outlines the
 //! permission choices (`escalation`); the draft decides when.
 
+use crate::launcher::custom_registration::CustomRegistration;
 use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::launcher::{EFFORT_ORDER, compatible_efforts};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
@@ -148,14 +149,12 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let agent = self
-            .store
-            .read(cx)
-            .collections()
-            .get::<CustomAgent>(id)
-            .cloned();
+        let collections = self.store.read(cx).collections();
+        let agent = collections.get::<CustomAgent>(id).cloned();
         let Some(agent) = agent else {
-            self.notice = Some("That custom agent is no longer registered".into());
+            self.notice = CustomRegistration::read(collections, id)
+                .refusal("That custom agent is no longer registered")
+                .map(str::to_owned);
             cx.notify();
             return;
         };
@@ -425,15 +424,12 @@ impl Launcher {
                         HoverHelp::tooltip(format!("Use custom agent {}", agent.id)),
                     )
                 })
-                .chain(missing.into_iter().map(|id| {
-                    option(
-                        id,
-                        id,
-                        HoverHelp::tooltip(
-                            "This custom agent is unavailable. Choose another agent to launch.",
-                        ),
-                    )
-                    .disabled(true)
+                .chain(missing.into_iter().filter_map(|id| {
+                    let help = custom_registration_help(
+                        &self.draft.agent.custom_registration,
+                        "This custom agent was deleted. Choose another agent to launch.",
+                    )?;
+                    Some(option(id, id, help).disabled(true))
                 }));
             options.fold(
                 chips.separated_named_chips(
@@ -678,6 +674,27 @@ impl Launcher {
         )
         .into_any_element()
     }
+}
+
+/// Explain a retained choice. The failed read's reason is host text and keeps its own direction and accessible name.
+pub(super) fn custom_registration_help(
+    registration: &CustomRegistration,
+    deleted: &'static str,
+) -> Option<HoverHelp> {
+    custom_registration_words(registration, deleted).map(HoverHelp::sentence)
+}
+
+/// Share the status between the retained choice, the conversation field and the launch button.
+pub(super) fn custom_registration_words(
+    registration: &CustomRegistration,
+    deleted: &'static str,
+) -> Option<HostSentence> {
+    let words = registration.refusal(deleted)?;
+    let line = HostSentence::new("custom-registration-status").text(words);
+    Some(match registration {
+        CustomRegistration::Unavailable(error) => line.text(". ").host(error),
+        _ => line,
+    })
 }
 
 /// A line of warning-colored words below the affected control, announced politely as a

@@ -15,6 +15,7 @@ use super::{
 use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::host_text::{HostSentence, HostText};
+use crate::launcher::custom_registration::CustomRegistration;
 use crate::launcher::draft::harness_label;
 use crate::launcher::request::capitalized;
 use crate::theme::{self, metrics};
@@ -31,10 +32,14 @@ impl Launcher {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let blocker = self.custom_restart_refusal(cx);
+        let waiting_for_registration = blocker.is_some()
+            && self.draft.requires_conversation()
+            && self.draft.agent.custom_registration.is_unread();
         let offered = harness.filter(|harness| {
-            blocker.is_none()
-                && (self.draft.offers_conversation()
-                    || (harness.uses_custom_catalog() && !self.draft.conversation.is_empty()))
+            waiting_for_registration
+                || (blocker.is_none()
+                    && (self.draft.offers_conversation()
+                        || (harness.uses_custom_catalog() && !self.draft.conversation.is_empty())))
         });
         let label = offered.map(conversation_label);
         let (required, conversation_error) = self.conversation_attention(blocker);
@@ -42,7 +47,9 @@ impl Launcher {
         let must_open = required || conversation_error.is_some() || wrapper_error.is_some();
         self.more_options_open |= must_open;
         let mut fields = Vec::new();
-        if let Some(reason) = blocker {
+        if let Some(reason) = blocker
+            && !waiting_for_registration
+        {
             fields.push(
                 choices::status_line("launcher-custom-restart-blocked", reason, palette)
                     .into_any_element(),
@@ -61,22 +68,36 @@ impl Launcher {
                         "launcher-conversation",
                         &self.conversation,
                         label,
-                        HoverHelp::tooltip(format!(
-                            "{label}: start {} on this conversation, this start only",
-                            harness_label(harness)
-                        )),
+                        HoverHelp::tooltip(if waiting_for_registration {
+                            format!("{label}: the conversation to restart once the registration is available")
+                        } else {
+                            format!("{label}: start {} on this conversation, this start only", harness_label(harness))
+                        }),
                     ),
                     palette,
                 )
                 .into_any_element(),
             );
+            if waiting_for_registration
+                && let Some(words) =
+                    choices::custom_registration_words(&self.draft.agent.custom_registration, "")
+            {
+                fields.push(
+                    choices::status_line("launcher-custom-restart-blocked", words, palette)
+                        .when(
+                            self.draft.agent.custom_registration == CustomRegistration::Loading,
+                            |line| line.text_color(theme::color(palette.fg_1)),
+                        )
+                        .into_any_element(),
+                );
+            }
             if let Some(error) = conversation_error {
                 fields.push(
                     choices::status_line("launcher-conversation-error", error, palette)
                         .into_any_element(),
                 );
             }
-            if required {
+            if required && !waiting_for_registration {
                 fields.push(
                     help_line(
                         "Farhelm has no captured conversation to resume. Enter its ID or session file to restart here.",
@@ -91,8 +112,16 @@ impl Launcher {
                 }
                 NamedConversationCapture::Never => true,
             };
-            if warn_about_capture
-                || (harness.uses_custom_catalog() && !self.draft.agent.custom_reporting)
+            if !waiting_for_registration
+                && (warn_about_capture
+                    || (harness.uses_custom_catalog()
+                        && matches!(
+                            self.draft.agent.custom_registration,
+                            super::CustomRegistration::Present {
+                                supports_reporting: false,
+                                ..
+                            }
+                        )))
             {
                 fields.push(
                     help_line(
@@ -247,10 +276,15 @@ impl Launcher {
             .into_any_element()
     }
 
-    /// Keep a conversation error or requirement only while the current registration can use the field.
+    /// Keep the required selector open while the catalog is unread. Validation of the entered name waits for an
+    /// actual registration to declare what it supports.
     fn conversation_attention(&self, blocker: Option<&str>) -> (bool, Option<String>) {
         if blocker.is_some() {
-            return (false, None);
+            return (
+                self.draft.requires_conversation()
+                    && self.draft.agent.custom_registration.is_unread(),
+                None,
+            );
         }
         (
             self.draft.requires_conversation(),

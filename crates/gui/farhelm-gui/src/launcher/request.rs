@@ -36,6 +36,7 @@
 //! host's checkout folder changed since. Since the GUI sends no request keys, the old app's retained attempts for an
 //! ambiguous fresh-checkout create ("Retry reconciles the original request at this path") have no counterpart here.
 
+use super::custom_registration::CustomRegistration;
 use farhelm_helm_client::Collections;
 use farhelm_proto::conversation::validate_launch_conversation;
 use farhelm_proto::launcher::{LaunchCatalogModel, TemplateNameKind, compatible_efforts};
@@ -283,12 +284,14 @@ impl LaunchDraft {
                 }
             }
             Tab::Command => {
-                if self.command.custom_registration_missing {
-                    return Some(if self.holds(Field::AgentType) {
+                if self.command.custom_agent.is_some()
+                    && let Some(reason) = self.command.custom_registration.refusal(if self.holds(Field::AgentType) {
                         "The custom agent registration was deleted. Register it again to use Restart with."
                     } else {
                         "The custom agent registration was deleted. Choose Custom to keep using this command."
-                    }.into());
+                    })
+                {
+                    return Some(reason.to_owned());
                 }
                 if self.command.command.trim().is_empty() {
                     return Some("Enter an agent command before launching".to_owned());
@@ -342,8 +345,12 @@ impl LaunchDraft {
             if selection.custom_agent.is_none() {
                 return Some("Choose a registered custom agent before launching".into());
             }
-            if self.agent.custom_registration_missing {
-                return Some("The selected custom agent is no longer registered".into());
+            if let Some(reason) = self
+                .agent
+                .custom_registration
+                .refusal("The selected custom agent is no longer registered")
+            {
+                return Some(reason.to_owned());
             }
             for (field, value) in [
                 ("model", selection.model.as_deref()),
@@ -537,11 +544,20 @@ impl LaunchDraft {
             .then_some(self.conversation.as_str())
     }
 
-    /// A name can only be acted on by a registration with a resume command.
+    /// A name needs a resume command to launch. A required selector in Restart with stays editable while its
+    /// registration is unread, so the user can keep or enter the name while the launch waits.
     pub(super) fn offers_conversation(&self) -> bool {
         self.agent.harness.is_some_and(|harness| {
             harness.offers_named_conversation()
-                && (!harness.uses_custom_catalog() || self.agent.custom_resumption)
+                && (!harness.uses_custom_catalog()
+                    || matches!(
+                        self.agent.custom_registration,
+                        CustomRegistration::Present {
+                            supports_resumption: true,
+                            ..
+                        }
+                    )
+                    || (self.requires_conversation() && self.agent.custom_registration.is_unread()))
         })
     }
 
@@ -581,7 +597,13 @@ impl LaunchDraft {
                 .harness
                 .is_some_and(LaunchHarness::uses_custom_catalog)
             && !self.conversation.is_empty()
-            && !self.agent.custom_resumption
+            && matches!(
+                self.agent.custom_registration,
+                CustomRegistration::Present {
+                    supports_resumption: false,
+                    ..
+                }
+            )
         {
             return Some(if self.requires_conversation() {
                 "This custom agent no longer supports resumption."

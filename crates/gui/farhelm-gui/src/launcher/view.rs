@@ -64,6 +64,7 @@ use gpui::{
     Window, div, px, svg,
 };
 
+use super::custom_registration::CustomRegistration;
 use super::draft::{
     Catalog, FOLDER_INSTALLATION_MOVED, Field, FolderDefault, Install, LaunchDraft, Mode, Tab,
     harness_label, remembered_permission,
@@ -1309,10 +1310,8 @@ impl Launcher {
         if !matches!(self.draft.mode, Mode::RestartWith(_)) || self.draft.tab != Tab::Agent {
             return None;
         }
-        super::entry::custom_restart_refusal(
-            self.draft.agent.custom_agent.as_deref(),
-            self.store.read(cx).collections(),
-        )
+        let id = self.draft.agent.custom_agent.as_deref()?;
+        CustomRegistration::read(self.store.read(cx).collections(), id).restart_refusal()
     }
 
     /// Whether the source of a Replace with or Restart with has a request in flight under its own key (a Stop, a
@@ -2283,17 +2282,20 @@ impl Launcher {
             )
             .options(options)
             .chosen(chosen);
-            // Keep the deleted ID visible so the user can repair the choice without losing the command text.
-            let agent_select = match self.draft.command.custom_agent.as_deref() {
-                Some(id) if collections.get::<CustomAgent>(id).is_none() => agent_select.retained(
+            // Keep a missing declaration visible without losing the command text when its list is unread.
+            let agent_select = if let Some(id) = self.draft.command.custom_agent.as_deref()
+                && let Some(help) = choices::custom_registration_help(
+                    &self.draft.command.custom_registration,
+                    "Choose Custom to run this command without the deleted registration",
+                ) {
+                agent_select.retained(
                     HostSentence::new("retained-custom-agent")
                         .host(&HostText::from_host(id))
                         .accessible_name(),
-                    HoverHelp::tooltip(
-                        "Choose Custom to run this command without the deleted registration",
-                    ),
-                ),
-                _ => agent_select,
+                    help,
+                )
+            } else {
+                agent_select
             };
             fields.push(
                 row(
@@ -2401,24 +2403,14 @@ impl Launcher {
     /// Refresh after catalog pushes and before dispatch, including template launches prepared out of sight.
     fn refresh_custom_capabilities(&mut self, cx: &App) {
         let collections = self.store.read(cx).collections();
-        let selected_custom = self
-            .draft
-            .agent
-            .custom_agent
-            .as_deref()
-            .and_then(|id| collections.get::<CustomAgent>(id));
-        self.draft.agent.custom_resumption =
-            selected_custom.is_some_and(|agent| agent.supports_resumption);
-        self.draft.agent.custom_reporting =
-            selected_custom.is_some_and(|agent| agent.supports_reporting);
-        self.draft.agent.custom_registration_missing =
-            self.draft.agent.custom_agent.is_some() && selected_custom.is_none();
-        self.draft.command.custom_registration_missing = self
-            .draft
-            .command
-            .custom_agent
-            .as_deref()
-            .is_some_and(|id| collections.get::<CustomAgent>(id).is_none());
+        let registration = |id: Option<&str>| {
+            id.map(|id| CustomRegistration::read(collections, id))
+                .unwrap_or_default()
+        };
+        self.draft.agent.custom_registration =
+            registration(self.draft.agent.custom_agent.as_deref());
+        self.draft.command.custom_registration =
+            registration(self.draft.command.custom_agent.as_deref());
     }
 }
 
@@ -2879,30 +2871,39 @@ impl Render for Launcher {
         } else {
             "Not launched."
         };
-        let alert =
-            match (&refusal, &self.refusal_words(cx)) {
-                (Some(reason), _) if self.pressed => Some(reason.append_to(
+        let unread_registration = self
+            .draft
+            .selected_custom_registration()
+            .filter(|registration| registration.is_unread());
+        // The catalog speaks even before a press and independently of a host or form refusal. Leave its
+        // status in place when the press would repeat the same reason.
+        let registration_reason =
+            unread_registration.and_then(|registration| registration.refusal(""));
+        let alert = match (&refusal, &self.refusal_words(cx)) {
+            (Some(reason), _) if self.pressed && Some(reason.0.as_str()) != registration_reason => {
+                Some(reason.append_to(
                     HostSentence::new("launcher-refusal-words").text(format!("{lead} ")),
-                )),
-                // The helm's timeout reply is not a refusal: the create may still happen, and its words say so.
-                // Words complete as they stand are shown without the lead too: an environment create's failed run, which
-                // the helm already words "Not launched. …", and the launcher's own words for an unknown outcome.
-                (_, Some(words))
-                    if self
-                        .refused
-                        .as_ref()
-                        .is_some_and(|refused| refused.may_still_start || refused.complete) =>
-                {
-                    Some(HostSentence::new("launcher-refusal-words").host(words))
-                }
-                (_, Some(words)) => Some(
-                    HostSentence::new("launcher-refusal-words")
-                        .text(format!("{lead} "))
-                        .host(words)
-                        .text(self.refusal_suffix()),
-                ),
-                _ => None,
-            };
+                ))
+            }
+            // The helm's timeout reply is not a refusal: the create may still happen, and its words say so.
+            // Words complete as they stand are shown without the lead too: an environment create's failed run, which
+            // the helm already words "Not launched. …", and the launcher's own words for an unknown outcome.
+            (_, Some(words))
+                if self
+                    .refused
+                    .as_ref()
+                    .is_some_and(|refused| refused.may_still_start || refused.complete) =>
+            {
+                Some(HostSentence::new("launcher-refusal-words").host(words))
+            }
+            (_, Some(words)) => Some(
+                HostSentence::new("launcher-refusal-words")
+                    .text(format!("{lead} "))
+                    .host(words)
+                    .text(self.refusal_suffix()),
+            ),
+            _ => None,
+        };
         let alert = match &self.note {
             Some(Note::WakeRefusal(reason)) => {
                 Some(reason.clone().prepend_text(format!("{lead} ")))
@@ -2923,6 +2924,16 @@ impl Render for Launcher {
                 .role(Role::Status)
                 .aria_label(SharedString::from(words.clone()))
                 .child(words)
+        });
+        let registration_status = unread_registration.and_then(|registration| {
+            let words = choices::custom_registration_words(registration, "")?;
+            Some(
+                choices::status_line("launcher-custom-registration-status", words, palette)
+                    .when(*registration == CustomRegistration::Loading, |line| {
+                        line.text_color(theme::color(palette.fg_1))
+                    })
+                    .into_any_element(),
+            )
         });
         // What a press of Launch has to say, in the old footer's order: the warning about what it stops of its source
         // first (Replace with's, or Restart with's while the agent works), then the YOLO question or the sandbox
@@ -2954,7 +2965,8 @@ impl Render for Launcher {
             || hook_saved.is_some()
             || save_refusal.is_some()
             || question.is_some()
-            || alert.is_some())
+            || alert.is_some()
+            || registration_status.is_some())
         .then(|| {
             let last = question.or(alert);
             div()
@@ -2965,6 +2977,7 @@ impl Render for Launcher {
                 .children(note)
                 .children(hook_saved)
                 .children(save_refusal)
+                .children(registration_status)
                 .children(last)
         });
 
