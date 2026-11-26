@@ -105,3 +105,74 @@ For #5081, the reviewer traced every way the folder could still move in Replace 
 All of that was done. The fixes were not reviewed again, but the full test pass, the screenshot comparison and the
 website build listed above all ran after them. One small code tidy-up the reviewer suggested, with no effect on
 behavior, was left as is and documented.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round. Since its base, main had gained a change to maintainer tooling for agent records
+(#5080), and while it landed, new TODO entries (#5085); neither touches the app. An independent reviewer and I checked
+the plan against the launcher work that landed just before its base: the wrapper command the launcher now remembers for
+each custom agent (#5073, #5074) still loads in templates, and the session list's Restart/Replace (#5072) is unaffected.
+The reviewer traced every way the folder could still change in Replace with (the folder field, Browse, the folder list,
+search rows, recent setups, templates, quick launch, number keys and Enter) and found none. New and Clone are unchanged.
+
+#### Fixes made while landing
+
+One more test could no longer fail; whether or not it is the one the executor's review flagged, it still could not. The
+test covers this case: in Replace with you press Enter on a template the dialog refuses while the agent's model list is
+still loading. If a different template with the same name then appears and the list finishes loading, nothing from the
+refused press may apply to the draft. The replacement template set only a command, which the launcher refuses on an
+agent launch anyway, so the test passed whether or not the refused template's changes were wrongly kept. It now sets
+only the session's name, which Replace with accepts, so a wrongly kept edit would change the draft.
+
+#### Worth knowing
+
+- **Recent setups in the session's own folder are refused too.** Replace with shows the recent setups that match the
+  session's folder, so nearly every one it shows is in that very folder, and all of them are now disabled with "this
+  dialog keeps destination fixed for replace", although taking one would move nothing. The new Replace with screenshot
+  shows exactly that: both recent setups greyed out. The executor did what the plan's acceptance criteria say (refuse
+  recent setups in Replace with outright), so I landed it as built. The report's reason, "every recent setup also sets a
+  folder", is true, but for a setup in the same folder nothing would be dropped. If you want recent setups usable in
+  Replace with when they ran in the session's own folder, refusing only those that ran elsewhere, made a new sandbox or
+  container, or used a managed checkout would be a follow-up. It would also bring back the "⏎ Replace" Enter hint on
+  those rows, and would change SPEC.md, the docs and one screenshot. This is narrower than the report's second
+  follow-up, which would let any recent setup fill in the agent choices and drop its folder.
+- **The report's follow-up about the helm is slightly off.** It says the helm accepts a folder-changing Replace with
+  "from the command line or its API". The `farhelm` command line has no Replace; only the helm's API does. The follow-up
+  itself (have the helm refuse it) stands.
+- **Leftovers for a later cleanup.** A few pieces of the removed fresh-clone path remain as code that can no longer do
+  anything. The report says the stale comments and the notes recording how the launcher was carried over from the old
+  app were updated; a few were missed: some code comments and one test still quote SPEC.md wording that has since
+  changed, and those notes still name a test that no longer exists. None of this changes behavior.
+
+#### Checks
+
+Run on the plan's two PRs exactly as the executor pushed them, stacked on main as it stood when the landing started, as
+described above. The test worker is an aarch64 Linux machine:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean.
+- On the test worker, `cargo nextest run -p farhelm-gui -p farhelm-desktop`, recorded run
+  2ef0a447-add6-4764-a944-d665c98190f4: 3,696 passed, 4 skipped (tests marked ignored). That is every desktop app test.
+- On the test worker, the desktop app's end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), recorded run
+  fdcdfe2e-e3b6-4c45-bc7f-5251f81dfbab: 48 of the 49 steps passed; the paste step runs only on a Mac and was skipped, as
+  it always is on Linux. It opens the launcher as New, Replace with and Clone.
+- Locally, every screenshot scene compared with its approved picture (`python3 scripts/check-gui-goldens.py`), recorded
+  run f0b21f61-bcc2-4dac-b9c9-e53ed5c706b6: every picture matched, the launcher's changed ones included. I also looked
+  at the new Replace with picture myself.
+- Locally, `python3 -B scripts/test-gui-screenshot-batch.py`, which checks the screenshot scene list against the golden
+  manifest, recorded run 07ec1e47-794d-4e1a-a293-7ad1fd4ba4d4: passed.
+- Locally, the docs website build (`bun install --frozen-lockfile && bun run build` in `website/`): all 41 pages built.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown, docs pages and scene list: passed.
+- After the landing fix above, on the test worker, the launcher's search tests
+  (`cargo nextest run -p farhelm-gui --lib -E 'test(/launcher::search_view_tests::/)'`), recorded run
+  04d9a334-febe-496f-af2d-cd550c80b929: all 60 passed. An earlier attempt, recorded run
+  268a4f6b-ec78-4021-a5ea-5be744542a0b, failed only on an extra check I had added to the fixed test and then dropped:
+  after the template was replaced, the open search no longer listed it. I did not check whether that is intended or
+  older than this plan; no product test failed.
+
+Reused: nothing. Skipped: the helm's, the supervisor's and the end-to-end Rust tests, since only the desktop app, the
+specs and the docs pages changed.
