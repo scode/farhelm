@@ -72,3 +72,73 @@ selection.
 All four source reviews passed after corrections. Review led to changes in the Update error status and Uninstall
 recovery wording and aligned the upload fixtures with the cancellation reply. The four reviewable changes match their
 original diffs after rebase, with main's triage records preserved.
+
+### Landing
+
+#### What landed with it
+
+This plan landed first of three in its round, before the spec and comment updates (`triage-spec-and-comment-updates`)
+and the queue discards (`triage-queue-discards`), which change no code. Since its PRs were based, main gained the agent
+request and container approval triage, the host menu and terminal triage, the hook warning and Antigravity fixes and
+time limits for the screenshot comparison. The rebase met only conflicts in the shared triage records. The landing's
+independent review found no interaction: in particular the plan's stronger Replace history test still tells its cases
+apart after the agent request and container approval triage changed how a launch is recorded in repository history, and
+this round's workspace run covers the plan's tests on the rebased tree, which the executor's runs did not.
+
+#### Fixes made while landing
+
+- **Two changelog drafts described the change in the wrong terms (the review's should-fix).** The Podman one named the
+  mechanism ("reads less metadata"); it now says what stops failing for users (image retirement during a recipe's
+  Rebuild or Delete, recipe builds, the leftover container list) and that the size that triggered it was not measured.
+  The desktop one led with a window takeover race that cannot happen in the shipped app; it now leads with the upload
+  cancel and tells the curator that its premise is unverified and the takeover part is not worth an entry. Both inside
+  their own PRs, [#5031](https://github.com/scode/farhelm/pull/5031/changes) and
+  [#5034](https://github.com/scode/farhelm/pull/5034/changes).
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the round's three plans stacked in queue order on main as it stood at the start of the landing (`491df5c5`), with the
+shared triage records' conflicts kept both ways (by hand for one review queue index block in the spec plan's PR and the
+open outcomes file in the discards plan's PR, then checked: the queue's 21 feedback files, its 21 index entries and the
+21 open outcomes agree). Every other change is exactly what the executors pushed until the landing fixes, which change
+only a SPEC.md sentence and two changelog drafts.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `0368f541-87a9-4191-8302-5b438567d5bf`): all 8765 passed, with no runtime `SKIPPED` lines. That includes the
+  provisioning, Podman, upload, UI channel and runtime tests the plans added or changed, on the rebased tree.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings`, on the test worker: passed.
+- The desktop app's end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run
+  `19013678-79f1-4d2e-9e1b-0271274e62f8`): of its 49 steps, 48 passed and one (paste) was skipped by design on Linux.
+- `python3 scripts/check-agents-md.py`, `python3 releasing/check-changelog.py format` (again after the fixes),
+  `cargo fmt --all -- --check` and `python -B scripts/check-test-sleeps.py`, locally: passed. `dprint check`, locally:
+  it fails only on over-long lines in the triage outcomes archive: main's earlier ones and the new entries of the
+  provisioning, Podman and runtime plan (the other two plans' entries pass); no PR fixes them yet; a formatting-only one
+  would, and I recommend it, as earlier rounds' notes did.
+
+Reused across the fixes: every run above, since they change no code. The executors' runs were on older bases, and
+everything they covered ran again above.
+
+Skipped: the screenshot comparison and the desktop app's outer shell tests, since no drawing code or desktop shell code
+changed; real Podman and Tensorlake hosts and a Mac run, which no automated check here reaches; and CI, which runs only
+on demand.
+
+#### What the report says that is no longer true
+
+- Nothing.
+
+#### Things you should know that the report does not say
+
+- **Half of the desktop fix addresses a case users cannot hit.** The takeover notice fix in #5034 matters only when a
+  second window takes over the first, which the shipped desktop app, with its one window, never does; the upload cancel
+  half is the part users can meet, and its premise is unverified (the changelog draft now says both).
+- **One regression in Uninstall would go unnoticed.** The new test checks Uninstall's new refusal of a path containing a
+  newline on its own, so a later change that again stripped newlines before that check would pass the tests. The check
+  is right today; I recommend no follow-up unless that part of Uninstall changes again.
+- **Smaller points the review noticed.** SPEC_impl.md does not mention Uninstall's new refusal of a path with a newline;
+  one Update message says an identity is "on record" when it was only seen at planning; the desktop channel's doc
+  comment does not say its drain is now bounded by the write deadline; one archived triage note implies test coverage of
+  a tab hangup path that does not exist; and the plan's new archive entries are not wrapped. None needs a follow-up on
+  its own.
