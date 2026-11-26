@@ -200,8 +200,8 @@ linux/launcher-narrow--dark.png 77b51948026c85a00a65a0f73aaba405bdee3607
 linux/launcher-narrow--light.png 0ed34e8c68f7e69620a1a278a91a6b3dfb179820
 linux/launcher-new--dark.png e7ea34e10d9fad793cefb44581a8774f7f3eed48
 linux/launcher-new--light.png 3bd2eab508c77aae17c0165041e1899f7f434d87
-linux/launcher-new-container--dark.png 8d2486e578d07b0affdda4bc00a0ecac249d7340
-linux/launcher-new-container--light.png b80dfca4019253a0fd024aa90a571f8105269ce2
+linux/launcher-new-container--dark.png 3b799ecd341215bdbd9ab61c3e7db331488a98cf
+linux/launcher-new-container--light.png e45f8780664583c186dd064b165f2c7dd2607d91
 linux/launcher-new-sandbox-checkout--dark.png 780d91c87bf28e4c57f491b16f6e7667ca14b061
 linux/launcher-new-sandbox-checkout--light.png 18d3b755107b493be317d9b7885e6ae30a32a3f8
 linux/launcher-renamed-custom-search--dark.png 68e597cbd66917743aad096222cb4db333f58032

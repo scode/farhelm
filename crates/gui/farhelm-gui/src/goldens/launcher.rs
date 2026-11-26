@@ -4,9 +4,12 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
 use farhelm_proto::tensorlake::SshKeyStatus;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionState, HelmMarker, KeyedEntry, Preferences,
+    Collection, CollectionChanges, CollectionState, ContainerCheckView, HelmMarker, HostView,
+    KeyedEntry, Preferences,
 };
-use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchTarget, Place};
+use farhelm_proto::{
+    LaunchEffort, LaunchHarness, LaunchPermission, LaunchTarget, Place, RecipePlaceView,
+};
 use gpui::{App, AppContext as _, Entity, IntoElement as _, Window, div, point, px};
 use serde_json::json;
 
@@ -511,7 +514,7 @@ pub(super) fn launcher_host_menu_setup(state: &SceneState, window: &mut Window, 
     setup(state, LauncherScene::HostMenu, window, cx);
 }
 
-/// Take New container through the host menu so the capture shows what replaces an editable folder.
+/// Take New container through the host menu. Capture after the selected recipe's build status reaches the view.
 pub(super) fn launcher_container_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Container, window, cx);
 }
@@ -821,8 +824,51 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
             }],
         });
     }
+    if scene == LauncherScene::Container {
+        extra.extend(ready_container_place());
+    }
     session_list_scene_preferring(state, &rows, preferences_state(preferences), extra, cx);
     state.after.set(Some(open_new_with_claude));
+}
+
+/// The fleet's current local host has passed its Podman check and already built Development. Push both records
+/// together because the host's own readiness takes precedence over the recipe's state in the launcher note.
+fn ready_container_place() -> [CollectionState; 2] {
+    const HOST: i64 = 1;
+    let mut registry = super::scene_host_registry();
+    let local = registry
+        .entries
+        .iter_mut()
+        .find(|entry| entry.key == HostView::key(HOST))
+        .expect("the scene fleet includes the default container host");
+    local.value["container_check"] = json!(ContainerCheckView {
+        checked_at: Some(1_800_000_000),
+        refreshing: false,
+        usable: true,
+        reason: None,
+    });
+    let build = RecipePlaceView {
+        recipe: "Development".into(),
+        place: Place::PodmanHost(HOST),
+        ready: true,
+        building: false,
+        reason: None,
+        unavailable_reason: None,
+        built_at: None,
+        prepared_at: None,
+        step: None,
+        cleanup_pending: false,
+    };
+    let key = RecipePlaceView::key(&build.recipe, build.place);
+    let places = CollectionState {
+        collection: Collection::RecipePlaces,
+        meta: meta(&[key.as_str()]),
+        entries: vec![KeyedEntry {
+            key,
+            value: json!(build),
+        }],
+    };
+    [registry, places]
 }
 
 /// Both scenes have a stored resume command, no captured conversation, and a registration without resumption.
@@ -1999,24 +2045,42 @@ fn wait_for_environment_rows(
     }
 }
 
-/// A stable frame from before the popover closed would miss the fields the scene needs to show.
+const CONTAINER_READY_NOTE: &str = "Ready on Local (this machine)";
+
+/// A visible Recipe field can still accompany an unsettled check. Require the whole ready sentence to be painted
+/// before capturing either appearance, since the status node can carry a label while its text is clipped.
 fn wait_for_container(
     _: &Entity<SessionList>,
     state: &SceneState,
     window: &mut Window,
     _: &mut App,
 ) {
-    if let Some(recipe) = window
-        .driver_nodes()
-        .iter()
-        .find(|node| node.element_id.as_deref() == Some("launcher-recipe"))
-    {
+    let nodes = window.driver_nodes();
+    let ready_status = nodes.iter().any(|node| {
+        node.element_id.as_deref() == Some("launcher-place-note")
+            && node.label.as_deref() == Some(CONTAINER_READY_NOTE)
+            && !node.visible_bounds.is_empty()
+    });
+    let ready_shown = ready_status
+        && texts_within(nodes, "launcher-place-note")
+            .iter()
+            .any(|line| {
+                // HostSentence isolates host text for display. The isolates do not change the words being checked.
+                line.text.replace(['\u{2066}', '\u{2069}'], "") == CONTAINER_READY_NOTE
+                    && !line.visible_bounds.is_empty()
+                    && line.visible_bounds == line.bounds
+            });
+    if ready_shown {
+        let recipe = nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some("launcher-recipe"))
+            .expect("the ready note belongs to a drawn Recipe field");
         assert_eq!(
             recipe.value.as_deref(),
             Some("Development"),
             "the fixture recipe was available when New container was picked"
         );
-        assert!(window.driver_nodes().iter().any(|node| {
+        assert!(nodes.iter().any(|node| {
             node.element_id.as_deref() == Some("launcher-environment-notice")
                 && node.label.as_deref()
                     == Some("Deleting the last session removes this container and its files.")
@@ -2025,6 +2089,32 @@ fn wait_for_container(
     } else {
         state.after.set(Some(wait_for_container));
     }
+}
+
+/// On staging exhaustion, show whether the chosen host and recipe reached their ready status and whether its
+/// painted text was clipped. The same staging budget still governs the menu and launcher interactions.
+pub(super) fn container_staging_status(state: &SceneState, window: &Window) -> Option<String> {
+    if !state
+        .keep
+        .borrow()
+        .iter()
+        .any(|item| item.downcast_ref::<LauncherScene>() == Some(&LauncherScene::Container))
+    {
+        return None;
+    }
+    let nodes = window.driver_nodes();
+    let find = |id| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+    };
+    let host = find("launcher-container-host").and_then(|node| node.value.as_deref());
+    let recipe = find("launcher-recipe").and_then(|node| node.value.as_deref());
+    let status = find("launcher-place-note").and_then(|node| node.label.as_deref());
+    let painted = find("launcher-place-note").map(|_| texts_within(nodes, "launcher-place-note"));
+    Some(format!(
+        "expected to paint {CONTAINER_READY_NOTE:?} with the Development recipe. Host {host:?}, recipe {recipe:?}, status {status:?}, painted lines {painted:?}"
+    ))
 }
 
 /// The capture must contain the recipe and the whole Folder invitation in the same frame. The driver's text bounds

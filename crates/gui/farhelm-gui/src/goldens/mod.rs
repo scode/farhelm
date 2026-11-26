@@ -79,7 +79,7 @@ use crate::terminal::attached::AttachedTerminal;
 use crate::theme::{self, Preference};
 use crate::{root, session, test_support};
 use farhelm_helm_client::fake::FakeHelm;
-use farhelm_proto::ui_channel::CollectionState;
+use farhelm_proto::ui_channel::{Collection, CollectionState};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement,
     Pixels, Render, Styled, Window, WindowAppearance, div, point, px, size,
@@ -337,6 +337,7 @@ fn session_list_scene_preferring(
 }
 
 /// Draw the sidebar with a prepared listing when its collection metadata is part of the scene, as with a group roster.
+/// A supplied host registry replaces the default fixture so each snapshot carries one authoritative host collection.
 fn session_list_scene_with_listing(
     state: &SceneState,
     sessions: CollectionState,
@@ -346,6 +347,23 @@ fn session_list_scene_with_listing(
 ) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
+    let mut snapshot = vec![sessions, preferences];
+    if !extra
+        .iter()
+        .any(|state| state.collection == Collection::Hosts)
+    {
+        snapshot.push(scene_host_registry());
+    }
+    snapshot.extend(extra);
+    helm.connect(snapshot);
+    state.lists.borrow_mut().push(cx.new(SessionList::new));
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+}
+
+/// Keep the fleet's rail and host identities when a scene needs to specialize just one host in the snapshot.
+fn scene_host_registry() -> CollectionState {
     let mut registry = hosts(&[
         local(),
         remote(2, "deploy@buildbox.example.invalid"),
@@ -356,13 +374,7 @@ fn session_list_scene_with_listing(
         "cause": "transport-failure",
         "last_error": "timed out",
     });
-    let mut snapshot = vec![sessions, preferences, registry];
-    snapshot.extend(extra);
-    helm.connect(snapshot);
-    state.lists.borrow_mut().push(cx.new(SessionList::new));
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
+    registry
 }
 
 /// The fleet of [`session_list_setup`], which the row menu and Delete scenes draw too. Each row lists the helm
@@ -2204,7 +2216,11 @@ fn settle(
             anyhow::ensure!(
                 remaining_staging > 0,
                 "after-draw interaction still pending after {MAX_STAGING_FRAMES} frames{}",
-                toolbar_unready.map_or_else(String::new, |reason| format!(": {reason}"))
+                toolbar_unready
+                    .or(cx.update_window(window, |_, window, cx| {
+                        launcher::container_staging_status(&view.read(cx).state, window)
+                    })?)
+                    .map_or_else(String::new, |reason| format!(": {reason}"))
             );
             remaining_staging -= 1;
             previous = None;
