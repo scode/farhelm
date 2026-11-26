@@ -126,11 +126,15 @@ pub struct HistoryPaths<'a> {
     pub display_cwd: &'a str,
 }
 
-/// An existing session-owned environment can supply a global checkout suggestion without teaching the
-/// launcher a new ordinary setup. Its replay fence is independent of the ordinary history window.
+/// Which history projections a successful create may update.
 #[derive(PartialEq, Eq)]
 pub(crate) enum HistoryScope {
     All,
+    /// An ordinary host still records accepted intent. Keeping repo provenance also keeps its transient
+    /// checkout path out of folder suggestions.
+    WithoutRepositorySuggestion,
+    /// A user checkout in an existing session-owned environment uses a separate replay window to keep
+    /// earlier setup and folder suggestions intact.
     RepositoryOnly,
 }
 
@@ -9766,7 +9770,9 @@ impl HelmStore {
                 && record_launch_history(&tx, &create, explicit_selection.as_ref())?;
             // An environment's independent replay key can outlive the original installation. Use the same
             // novelty boundary as its other launcher history so a retained replay cannot promote a repository.
-            if let Some(repo) = github_repo.as_deref().filter(|_| environment_target.is_none() || environment_changed) {
+            if scope == HistoryScope::All
+                && let Some(repo) = github_repo.as_deref().filter(|_| environment_target.is_none() || environment_changed)
+            {
                 repository_history::record(&tx, repo)?;
             }
 

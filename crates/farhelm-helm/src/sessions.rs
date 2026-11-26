@@ -2151,7 +2151,8 @@ async fn record_created_history(
         explicit_selection,
         ..
     } = acceptance;
-    if environment_target.is_some() && origin != CreateOrigin::User {
+    let user_launch = origin == CreateOrigin::User;
+    if environment_target.is_some() && !user_launch {
         return Ok(false);
     }
     // A fresh request's cwd is not its accepted destination: the target
@@ -2167,7 +2168,12 @@ async fn record_created_history(
         let manager = Arc::clone(&state.manager);
         let captured = claim.clone();
         let environment = environment_target.is_some();
-        let has_repository = github_repo.is_some();
+        let user_checkout = user_launch && github_repo.is_some();
+        let ordinary_scope = if user_launch {
+            store::HistoryScope::All
+        } else {
+            store::HistoryScope::WithoutRepositorySuggestion
+        };
         match store::CachedRow::new(claim.host, session.clone()) {
             Ok(checked) => {
                 state
@@ -2200,8 +2206,8 @@ async fn record_created_history(
                                             if identity == &captured.identity)
                             })?;
                             let scope = if environment || !status.is_session_owned {
-                                store::HistoryScope::All
-                            } else if has_repository {
+                                ordinary_scope
+                            } else if user_checkout {
                                 store::HistoryScope::RepositoryOnly
                             } else {
                                 return None;
@@ -2293,12 +2299,9 @@ pub(crate) struct CreateSpec {
 
 /// Whose successful create may shape the user's launch suggestions.
 ///
-/// The shared creation pipeline serves both client REST requests and relay
-/// requests from agents. They produce the same session side effects except
-/// for the explicit selection recorded for remembered launch settings and
-/// recent setups, which belong to the user rather than an agent that happens
-/// to create a structured session (SPEC.md: only explicit GUI selections
-/// shape GUI defaults and suggestions).
+/// The shared creation pipeline serves both client REST requests and agent
+/// relay requests. Helm-wide repository suggestions require a user launch.
+/// Recent setups and remembered launch settings require an explicit GUI selection.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CreateOrigin {
     User,

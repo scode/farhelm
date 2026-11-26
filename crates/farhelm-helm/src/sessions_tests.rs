@@ -508,10 +508,11 @@ async fn a_recipe_checkout_uses_its_environment_home_without_setup() {
     assert_new_environment_checkout(None, "/environment-home").await;
 }
 
-/// Register a recipe host through the same routes as provisioning. The
-/// caller can exercise both ownership policies against a scripted supervisor.
+/// Register a recipe host through the same store as provisioning. A standalone
+/// supervisor can serve history tests once the initial list is ready. Pass a
+/// peer when the test needs to control the checkout exchange itself.
 async fn environment_checkout_harness(
-    peer: tokio::io::DuplexStream,
+    peer: Option<tokio::io::DuplexStream>,
     sessions: Vec<farhelm_proto::SessionInfo>,
     session_owned: bool,
 ) -> (rest_harness::Harness, store::HostId) {
@@ -541,11 +542,74 @@ async fn environment_checkout_harness(
         *script = rest_harness::HostScript {
             identity: Some("fresh-recipe-install".into()),
             sessions,
-            peer: Some(peer),
+            peer,
             ..rest_harness::HostScript::default()
         }
     });
     (h, host)
+}
+
+/// The same ownership policy covers ordinary hosts and session-owned hosts.
+/// Accepted agent checkouts keep their transient paths out of folder history
+/// and leave the user checkout as the sole shared repository suggestion.
+#[farhelm_testtrace::test]
+async fn only_user_checkouts_teach_global_repository_history() {
+    use super::{CreateAcceptance, CreateOrigin, host_client, record_created_history};
+
+    for session_owned in [false, true] {
+        let (h, host) = environment_checkout_harness(None, Vec::new(), session_owned).await;
+        h.manager.sync_registry().await.unwrap();
+        let identity = "fresh-recipe-install";
+        h.await_refreshed_as(host, identity, 0).await;
+        assert_eq!(
+            h.manager.status(host).unwrap().is_session_owned,
+            session_owned
+        );
+        let (claim, _) = host_client(&h.state, host).unwrap();
+        let user_repo = farhelm_proto::parse_github_repo("acme/user").unwrap();
+        let agent = CreateOrigin::Agent {
+            agent_wrapper_supplied: false,
+            wrapper_approved: false,
+        };
+        for (id, time, origin, repo) in [
+            ("user-checkout", 1, CreateOrigin::User, user_repo.clone()),
+            (
+                "agent-checkout",
+                2,
+                agent,
+                farhelm_proto::parse_github_repo("acme/agent").unwrap(),
+            ),
+        ] {
+            let session = rest_harness::session(id, time);
+            record_created_history(
+                &h.state,
+                &claim,
+                &session,
+                CreateAcceptance {
+                    environment_target: None,
+                    origin,
+                    github_repo: Some(repo),
+                    requested_cwd: String::new(),
+                    accept_result: None,
+                    explicit_selection: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            h.store.global_github_repository_history().await.unwrap(),
+            [user_repo],
+            "session_owned={session_owned}",
+        );
+        assert!(
+            h.store
+                .folder_history(host, identity)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
 }
 
 /// Read the next control frame a scripted environment peer receives.
@@ -578,7 +642,7 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
     use farhelm_proto::launcher::TemplateNameKind;
 
     let (client_side, peer) = tokio::io::duplex(64 * 1024);
-    let (h, owned) = environment_checkout_harness(client_side, Vec::new(), true).await;
+    let (h, owned) = environment_checkout_harness(Some(client_side), Vec::new(), true).await;
     if let Some(root) = root {
         h.store.set_checkout_root(None, root).await.unwrap();
     }
@@ -738,7 +802,8 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
 
     let (client, peer) = tokio::io::duplex(64 * 1024);
     let (h, host) =
-        environment_checkout_harness(client, vec![rest_harness::session("source", 1)], true).await;
+        environment_checkout_harness(Some(client), vec![rest_harness::session("source", 1)], true)
+            .await;
     assert!(
         h.store
             .resolve_checkout_config(None)
@@ -6778,7 +6843,7 @@ async fn assert_workspace_trust_dispatch(
         let (harness, host) = if matches!(target, TrustFixtureHost::Local) {
             spliced_replace_harness(client_side, vec![source]).await
         } else {
-            environment_checkout_harness(client_side, vec![source], owned).await
+            environment_checkout_harness(Some(client_side), vec![source], owned).await
         };
         let fleet = harness.fleet.clone();
         let peer = tokio::spawn(async move {

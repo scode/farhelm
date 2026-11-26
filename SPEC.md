@@ -2155,12 +2155,12 @@ visible notice that the checkout was not archived, naming the path left behind a
 result is shown, the notice is shown with it. If Delete or Replace has already answered with a timeout, the checkout
 notice appears in the navigation rail's notices bell once the host reports the outcome of the removal.
 
-Repository suggestions come from successful Managed checkout launches across the helm, newest repository first. The same
-history is available for any destination, including new environments and hosts that are offline. Removing a host or its
-environment keeps its repositories in the history. The launcher filters the history as you type and always offers a
-valid manually entered pair. Suggestions neither scan host folders nor search GitHub. A saved repository setup remembers
-repository intent and agent choices: using it obtains a new preview and creates a new checkout, rather than reopening
-its prior directory. Fresh creates do not populate ordinary folder history with ephemeral paths; an explicit
+Only successful user-initiated Managed checkout launches contribute new repository suggestions. The helm shares the
+history across all destinations, newest repository first, including for new environments and offline hosts. Removing a
+host or its environment keeps its repositories in the history. The launcher filters the history as you type and always
+offers a valid manually entered pair. Suggestions neither scan host folders nor search GitHub. A saved repository setup
+remembers repository intent and agent choices: using it obtains a new preview and creates a new checkout, rather than
+reopening its prior directory. Fresh creates do not populate ordinary folder history with ephemeral paths; an explicit
 existing-directory launch can still do so.
 
 Unlabelled search retains ordinary matching. Leading `name:`, `host:`, `harness:`, `model:`, `effort:`, `perms:`,

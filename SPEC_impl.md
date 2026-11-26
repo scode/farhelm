@@ -5364,9 +5364,9 @@ selection, independently of their previous ephemeral cwd.
 
 Schema 102 adds bounded helm-wide repository history. Migration seeds it from preserved ordinary and environment launch
 intent, using the stored timestamps across installations and the helm's admission time for a launch represented in both
-tables. New writes follow successful create admission order and survive host removal and adoption. A fresh checkout in
-an existing session-owned environment has its own bounded replay window so it can contribute a repository without aging
-the host's earlier setup or changing remembered settings.
+tables. New writes require a user-initiated checkout, follow successful create admission order, and survive host removal
+and adoption. A user checkout in an existing session-owned environment has its own bounded replay window so it can
+contribute a repository without aging the host's earlier setup or changing remembered settings.
 
 `LaunchHarness::omitted_permission` is the one per-harness fact for new request defaults. The helm fills omissions
 before validation and still refuses unsupported explicit choices. Every harness that offers Guarded defaults to it.
