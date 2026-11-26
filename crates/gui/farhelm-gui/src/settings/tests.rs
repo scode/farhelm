@@ -492,6 +492,13 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
             ));
         }
     }
+    assert_eq!(
+        label(
+            cx,
+            "settings-result-custom-example-code-custom-agent-command"
+        ),
+        Some(format!("{DISPLAY_NAME}, Command"))
+    );
     keys(cx, "enter");
     assert_eq!(heading(cx).as_deref(), Some(DISPLAY_NAME));
     assert!(drawn(cx, "custom-agent-command") && sent(&mut helm).is_empty());
@@ -2626,6 +2633,8 @@ fn trust_failure(cx: &mut VisualTestContext, agent: TrustAgent) -> Option<String
 /// row's key and shows on while it is in flight, then stays on once the helm answers. In a later opening Antigravity
 /// sends `{"enabled": true}` to its route and a refusal restores off with "Could not save or read Antigravity trust settings:" and
 /// the helm's words.
+/// The Antigravity help names the scope of consent before the press because an agent can choose the folder and launch
+/// without showing another approval to the user.
 #[gpui::test]
 fn a_trust_switch_saves_through_its_route_and_a_refusal_restores_it(cx: &mut TestAppContext) {
     let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
@@ -2653,6 +2662,10 @@ fn a_trust_switch_saves_through_its_route_and_a_refusal_restores_it(cx: &mut Tes
 
     keys(cx, "escape");
     open_trust_at(&mut helm, cx, &gear, TrustAgent::Antigravity);
+    assert!(accessible_help_contains(
+        cx,
+        "a folder the agent chooses for a request Farhelm approves without asking"
+    ));
     assert!(accessible_help_contains(
         cx,
         "repository hooks, settings and commands are then trusted"

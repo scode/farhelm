@@ -400,6 +400,15 @@ fn settings_search_narrows_sections_and_reports_their_match_counts(cx: &mut Test
         sent(&mut helm).is_empty(),
         "displaying counts does not read their sections"
     );
+    type_query(cx, "no settings");
+    for agent in [LaunchHarness::Cursor, LaunchHarness::Goose] {
+        let section = Section::Agent(agent);
+        let id = format!("settings-result-{}-settings-agent-empty", section.key());
+        assert_eq!(
+            label(cx, &id),
+            Some(format!("{}, {}", section.label(), super::NO_AGENT_SETTINGS))
+        );
+    }
     type_query(cx, "wallpaper");
     assert!(sections(cx).is_empty());
     assert!(result_ids(cx).is_empty());
