@@ -385,20 +385,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   retry deadline. Advance the deadline on every failed automatic retry and assert that cleanup waits until the new
   deadline.
 
-- **Keep hook setup from launching into a folder that arrived later.** In the launcher, pick Grok or Antigravity to open
-  the Restart hook question. Switch to a connected host whose remembered folder is still loading and choose **Set up and
-  launch**. A history reply can settle the folder while the all-hosts setting saves. The continuation then launches in a
-  folder the question had yet to show. Bind the continuation in `launcher/view/hook_question.rs` to the readiness,
-  destination and source warning shown with the answer, per SPEC.md's “One GUI at a time”. Save the setting and leave
-  launch to a new press when the shown launch was refused or its destination changed. An unchanged sleeping host can
-  legitimately wake and prepare a folder or checkout, so a missing launch request is insufficient to tell which answer
-  was safe. Wake can take its folder from a newly selected session before the next frame. Settle that default before
-  comparing. For disposable environments, compare the actual placement and ignore any retained host choice from the
-  ordinary launcher. The fix and test exceed the triage size gate once they cover these paths. Reproduce from New with
-  no open session and Folder untouched. Use the real host picker and hold the new host's history reply until the setting
-  write starts. Draw the settled folder before replying to the write. Verify the write succeeds and only a fresh press
-  starts the session in the settled folder. Plan: `plans/queue/launcher-consent-and-custom-agent-fixes.md`.
-
 - **Ignore Enter on a clipped recent setup.** In the session launcher's empty command pane, highlight a recent setup
   with the arrow keys and scroll it out of view. Enter can still launch that setup or replace the source session. Keep
   the highlight and consume Enter until a frame has shown the whole row again, as SPEC.md's “One GUI at a time”

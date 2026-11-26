@@ -990,6 +990,10 @@ hook setup questions keep their source warnings live until the user answers. Eac
 moment. Plain Replace's guarded answer can carry over a concurrent rename. It keeps the original host incarnation, saved
 launch choices and Delete guard.
 
+The hook-setup answer continues only if the answered launch was available and its destination still matches. If the
+launch cannot proceed, a successful save gets a status beside the launch button that asks for a fresh press. **Launch
+without** makes no settings write.
+
 This is the structural fix for the old GUI's largest bug class: an action that ran on state the user was not shown.
 
 The same rule starts at the control that asks the question or sends the request directly. Its handlers carry the drawn

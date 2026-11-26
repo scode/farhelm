@@ -17,10 +17,10 @@ use farhelm_proto::ui_channel::CollectionChanges;
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
-use super::draft::{FolderDefault, LaunchDraft, Tab};
+use super::draft::{FolderDefault, LaunchDraft, Mode, Tab};
 use super::entry::open_new;
 use super::entry_tests::window_with;
-use super::view_tests::{click_in_body, draft, name_of, read, shown_refusal};
+use super::view_tests::{Field, click_in_body, draft, focused, name_of, read, shown_refusal};
 use crate::layers;
 use crate::test_support::{self, any_open, settle};
 
@@ -206,6 +206,151 @@ fn a_host_change_waits_for_the_new_hosts_folder(cx: &mut TestAppContext) {
         "/srv/nine",
         "the field shows it"
     );
+}
+
+/// Saving Restart setup can outlive a host's history read. A pending default offered no launch at the answer, so the
+/// saved setting must leave the newly shown folder for the next press.
+#[gpui::test]
+fn hook_setup_does_not_launch_into_a_folder_that_arrived_during_the_save(cx: &mut TestAppContext) {
+    hook_setup_during_folder_history(cx, None, None);
+}
+
+/// An explicit folder is already usable while history loads. An advisory default arriving during the save cannot
+/// take away the accepted press for that same explicit folder.
+#[gpui::test]
+fn hook_setup_keeps_a_typed_folder_when_history_arrives_during_the_save(cx: &mut TestAppContext) {
+    hook_setup_during_folder_history(cx, Some("/srv/typed-folder"), None);
+}
+
+/// A real input edit retires the answered question while its write is pending. The save still needs a visible
+/// acknowledgment, and only a fresh press may use the edited folder.
+#[gpui::test]
+fn hook_setup_reports_the_save_after_the_user_edits_the_destination(cx: &mut TestAppContext) {
+    hook_setup_during_folder_history(cx, Some("/srv/typed-folder"), Some("/srv/edited-folder"));
+}
+
+/// Answer the host's history after the settings write has gone out, then show the updated folder before releasing
+/// the write. An explicit folder authorizes the first press unless the user edits it before the save reply.
+fn hook_setup_during_folder_history(
+    cx: &mut TestAppContext,
+    typed: Option<&str>,
+    edited: Option<&str>,
+) {
+    let (mut helm, cx) = new_without_a_session(cx);
+    assert_eq!(cx.update(|_, cx| crate::local_state::selected(cx)), None);
+    assert!(matches!(draft(cx).mode, Mode::New));
+    assert!(answer(&mut helm, cx, Some(&remote_history())).is_empty());
+    if let Some(folder) = typed {
+        click_in_body(cx, "launcher-folder");
+        assert!(focused(cx, Field::Folder));
+        test_support::select_all_text(cx);
+        cx.simulate_input(folder);
+        settle(cx);
+        assert_eq!(draft(cx).folder.value(), folder);
+        assert!(answer(&mut helm, cx, Some(&remote_history())).is_empty());
+    }
+
+    test_support::click(cx, "launcher-harness-Grok");
+    let reads = sent(&mut helm, cx);
+    let [read_hook] = &reads[..] else {
+        panic!("one setup read expected, got {reads:?}");
+    };
+    assert_eq!(read_hook.path, "/api/agent-hook-setup/grok");
+    helm.reply(read_hook.id, 200, Some(json!({"enabled": false})));
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "prompt-confirm").as_deref(),
+        Some("Set up and launch")
+    );
+
+    test_support::click(cx, "launcher-host");
+    test_support::click(cx, "launcher-host-option-9");
+    let pending = draft(cx);
+    assert_eq!(pending.host, Some(9));
+    assert_eq!(pending.folder_default, FolderDefault::Pending);
+    assert_eq!(pending.folder.value(), typed.unwrap_or("~"));
+    assert_eq!(pending.folder.is_touched(), typed.is_some());
+    assert_eq!(
+        name_of(cx, "prompt-confirm").as_deref(),
+        Some("Set up and launch")
+    );
+    let reads = sent(&mut helm, cx);
+    let [history_read] = &reads[..] else {
+        panic!("one history read expected, got {reads:?}");
+    };
+    assert_eq!(history_read.path, "/api/launch-history?host=9");
+
+    test_support::click(cx, "prompt-confirm");
+    let writes = sent(&mut helm, cx);
+    let [write] = &writes[..] else {
+        panic!("one setup write expected while history is pending, got {writes:?}");
+    };
+    assert_eq!(write.path, read_hook.path);
+    assert_eq!(write.body, Some(json!({"enabled": true})));
+
+    let mut history = remote_history();
+    for launch in history["launches"].as_array_mut().unwrap() {
+        launch["host"] = json!(9);
+    }
+    helm.reply(history_read.id, 200, Some(history));
+    settle(cx);
+    assert_eq!(draft(cx).folder_default, FolderDefault::Settled);
+    let destination = typed.unwrap_or("/srv/remote-work");
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.folder.text(cx).to_string()),
+        destination
+    );
+    assert!(
+        sent(&mut helm, cx).is_empty(),
+        "the setting write is still out"
+    );
+
+    if let Some(folder) = edited {
+        assert!(
+            name_of(cx, "prompt-confirm").is_some(),
+            "the answered question is still shown"
+        );
+        click_in_body(cx, "launcher-folder");
+        assert!(focused(cx, Field::Folder));
+        test_support::select_all_text(cx);
+        cx.simulate_input(folder);
+        settle(cx);
+        assert_eq!(draft(cx).folder.value(), folder);
+        assert!(
+            name_of(cx, "prompt-confirm").is_none(),
+            "the edit retired the pending continuation"
+        );
+    }
+    let destination = edited.unwrap_or(destination);
+
+    helm.reply(write.id, 204, None);
+    settle(cx);
+    assert!(
+        name_of(cx, "prompt-confirm").is_none(),
+        "the save succeeded"
+    );
+    if typed.is_none() || edited.is_some() {
+        assert!(any_open(cx), "the draft stays open after the save");
+        assert_eq!(
+            name_of(cx, "launcher-hook-setup-saved").as_deref(),
+            Some(
+                "Restart setup was saved. The launch changed. Review it, then press Launch again."
+            ),
+        );
+        assert!(
+            sent(&mut helm, cx).is_empty(),
+            "the old answer launched nothing"
+        );
+        test_support::click(cx, "launcher-launch");
+    }
+    let creates = sent(&mut helm, cx);
+    let [create] = &creates[..] else {
+        panic!("one create into {destination} expected, got {creates:?}");
+    };
+    assert_eq!(create.path, "/api/sessions");
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["host"], 9);
+    assert_eq!(body["cwd"], destination);
 }
 
 /// A history read that fails settles New's folder on `~`, which a visible launcher launches into as any `~`. Why: the

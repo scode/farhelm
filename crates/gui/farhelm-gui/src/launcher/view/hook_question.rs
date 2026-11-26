@@ -3,6 +3,7 @@
 
 use std::{cell::Cell, rc::Rc};
 
+use farhelm_proto::LaunchTarget;
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{App, AppContext as _, Context, WeakEntity, Window};
 
@@ -11,7 +12,8 @@ use crate::components::{HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::hook_setup::HookAgent;
 use crate::host_text::HostSentence;
-use crate::launcher::draft::Tab;
+use crate::launcher::draft::{FolderDefault, Install, Tab};
+use crate::launcher::request::Preview;
 use crate::operations::{OpKey, Outcome};
 use crate::prompt::{self, Answer, Attempt, Inline, Question};
 use crate::session;
@@ -24,21 +26,59 @@ pub(super) struct HookQuestion {
     inline: Option<Inline<HookAnswer>>,
 }
 
-/// The hook write names the chosen agent. Its launch keeps the source warning shown when the answer was accepted.
-#[derive(Clone, Copy, PartialEq)]
+/// The setting can save even when the displayed draft cannot launch. The launch half of an answer belongs to the
+/// destination and source warning shown together when the user pressed it.
+#[derive(Clone, PartialEq)]
 pub(super) struct HookAnswer {
     agent: HookAgent,
+    shown_launch: Option<ShownHookLaunch>,
+}
+
+/// A launch that was available in the frame with the hook question. A resumable host can be available before it has
+/// a connection, so a compiled request alone cannot record that a wake was offered.
+#[derive(Clone, PartialEq)]
+struct ShownHookLaunch {
     source: SourceConsent,
+    destination: HookDestination,
+}
+
+/// Use the actual placement for a new environment. An existing host's ordinary folder follows its default until the
+/// user edits it. A managed checkout uses its previewed directory, or its naming policy when the host needs a wake.
+#[derive(Clone, PartialEq)]
+enum HookDestination {
+    Disposable(LaunchTarget),
+    Host {
+        installation: Install,
+        checkout: bool,
+        folder: String,
+        folder_default: Option<FolderDefault>,
+        can_wake: bool,
+    },
 }
 
 impl HookQuestion {
-    /// Keep the unanswered question in step with the warning drawn beside it, even across a store update.
-    pub(super) fn show_source(&self, source: SourceConsent, cx: &mut App) {
+    /// Keep the unanswered question in step with the launch drawn beside it. A save in flight keeps the earlier
+    /// snapshot even if a read settles in the meantime.
+    pub(super) fn show_launch(
+        &self,
+        launcher: &Launcher,
+        source: SourceConsent,
+        ready: bool,
+        cx: &mut App,
+    ) {
         if let Some(inline) = &self.inline {
+            let shown_launch =
+                ready
+                    .then(|| launcher.hook_destination(cx))
+                    .flatten()
+                    .map(|destination| ShownHookLaunch {
+                        source,
+                        destination,
+                    });
             inline.refresh_value(
                 HookAnswer {
                     agent: self.agent,
-                    source,
+                    shown_launch,
                 },
                 cx,
             );
@@ -55,6 +95,38 @@ fn offer_slot(tab: Tab) -> usize {
 }
 
 impl Launcher {
+    /// Describe an available launch after the caller settles its default folder and checks its refusals. Use the
+    /// presented path for a connected checkout. A sleeping checkout instead shows the name it will allocate on wake.
+    fn hook_destination(&self, cx: &App) -> Option<HookDestination> {
+        Some(if let Some(target) = &self.draft.target {
+            HookDestination::Disposable(target.clone())
+        } else {
+            let host = self.chosen_host(cx)?;
+            let can_wake = self.draft.can_wake(host);
+            let checkout = self.draft.checkout.is_some();
+            let folder = if !checkout {
+                self.draft.folder.value().to_owned()
+            } else if can_wake {
+                self.draft.checkout_title()
+            } else if let Preview::Ready(preview) = self.checkout_preview(cx) {
+                preview.binding.cwd.clone()
+            } else {
+                return None;
+            };
+            HookDestination::Host {
+                installation: Install::of(host),
+                checkout,
+                folder,
+                // History can settle the retained default while an explicitly chosen folder stays ready.
+                folder_default: self
+                    .draft
+                    .folder_is_the_default()
+                    .then_some(self.draft.folder_default),
+                can_wake,
+            }
+        })
+    }
+
     fn hook_agent(&self) -> Option<HookAgent> {
         let harness = match self.draft.tab {
             Tab::Agent => self.draft.agent.harness,
@@ -203,7 +275,7 @@ fn ask(
         ),
         HookAnswer {
             agent,
-            source: SourceConsent::default(),
+            shown_launch: None,
         },
     )
     .summary(HostSentence::new("hook-setup-consent").text(agent.consent()))
@@ -226,7 +298,15 @@ fn ask(
             Tier::Neutral,
         ),
         move |answer, window, cx| {
-            continue_launch(&launcher, pick, answer.source, Mark::take(cx), window, cx);
+            continue_launch(
+                &launcher,
+                pick,
+                answer.shown_launch,
+                false,
+                Mark::take(cx),
+                window,
+                cx,
+            );
         },
     )
     .starts_on_cancel()
@@ -240,28 +320,54 @@ fn ask(
     )
 }
 
-/// Clear the matching question before pressing Launch. A one-off answer runs inside the question's own update,
-/// and a successful setting write settles its attempt later. Neither can read the question to see if it closed.
+/// Spend only the launch shown with this answer. A history read or a new selected session can settle the default
+/// before the next frame, so compare after settling it. A one-off answer runs inside the question's own update and
+/// a save settles later. In both cases identify the question by its pick without reading the inline prompt itself.
+/// Tell the user a confirmed save succeeded even when the launch needs a fresh press.
 fn continue_launch(
     launcher: &WeakEntity<Launcher>,
     pick: u64,
-    source: SourceConsent,
+    shown_launch: Option<ShownHookLaunch>,
+    setting_saved: bool,
     mark: Mark,
     window: &mut Window,
     cx: &mut App,
 ) {
     let _ = launcher.update(cx, |launcher, cx| {
-        if launcher
+        if !launcher
+            .layer
+            .is_some_and(|layer| crate::layers::is_open(layer, window, cx))
+        {
+            return;
+        }
+        let same_question = launcher
             .hook_question
             .as_ref()
-            .is_some_and(|state| state.pick == pick)
-            && launcher
-                .layer
-                .is_some_and(|layer| crate::layers::is_open(layer, window, cx))
-        {
-            launcher.hook_question = None;
-            launcher.press_at(Some(source), mark, window, cx);
+            .is_some_and(|state| state.pick == pick);
+        if !same_question {
+            // An edit retires the pending launch, but the successful host setting still belongs to this form.
+            if setting_saved {
+                launcher.hook_setup_saved = Some(true);
+                cx.notify();
+            }
+            return;
         }
+        launcher.hook_question = None;
+        if launcher.draft.target.is_none() && launcher.settle_folder_default(cx) {
+            launcher.sync_fields(window, cx);
+        }
+        launcher.refresh_custom_capabilities(cx);
+        let ready = launcher.refusal(cx).is_none();
+        if let Some(shown) = shown_launch.as_ref()
+            && ready
+            && launcher.hook_destination(cx).as_ref() == Some(&shown.destination)
+        {
+            // The helm checks this guard against the source it finds. A newer warning cannot widen the answer.
+            launcher.press_at(Some(shown.source), mark, window, cx);
+        } else if setting_saved {
+            launcher.hook_setup_saved = Some(shown_launch.is_some() || ready);
+        }
+        cx.notify();
     });
 }
 
@@ -306,7 +412,15 @@ fn save(
                     attempt.succeeded(cx);
                     if enable {
                         let _ = cx.update_window(handle, |_, window, cx| {
-                            continue_launch(&continuing, pick, answer.source, mark, window, cx);
+                            continue_launch(
+                                &continuing,
+                                pick,
+                                answer.shown_launch,
+                                true,
+                                mark,
+                                window,
+                                cx,
+                            );
                         });
                     }
                 }
