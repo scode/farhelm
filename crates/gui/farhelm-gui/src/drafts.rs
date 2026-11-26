@@ -93,6 +93,12 @@ impl<T: Clone + PartialEq> Draft<T> {
         self.refusal.as_ref()
     }
 
+    /// Depict a settled refusal without synthesizing a second operation in the screenshot fixture.
+    #[cfg(test)]
+    pub(crate) fn refuse_for_golden(&mut self, words: HostText) {
+        self.refusal = Some(words);
+    }
+
     /// The user changed the field to `value`. Marks it touched even when `value` equals what was loaded: someone who
     /// retypes a title means it, and no comparison can tell that apart from not editing. Returns whether the draft
     /// took the edit.

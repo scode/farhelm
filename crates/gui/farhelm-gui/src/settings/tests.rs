@@ -3621,6 +3621,7 @@ fn discarding_an_ntfy_clear_unlocks_the_token_field(cx: &mut TestAppContext) {
 #[gpui::test]
 fn close_save_stops_at_the_first_failure_and_shows_that_page(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    cx.simulate_resize(size(px(720.), px(560.)));
     show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
     fill(cx, Field::PostClone.selector(), "make setup");
     click(cx, section_button(Section::Notifications));
@@ -3650,6 +3651,10 @@ fn close_save_stops_at_the_first_failure_and_shows_that_page(cx: &mut TestAppCon
     assert_eq!(
         label_of(cx, "ntfy-error").as_deref(),
         Some("fixture: cannot save alerts")
+    );
+    assert!(
+        shows_whole(cx, "ntfy-error", DIALOG_BODY),
+        "the refusal is visible without scrolling"
     );
     assert_eq!(sent(&mut helm), [], "the other page sent no write");
     click(cx, section_button(Section::Checkouts));
@@ -4276,6 +4281,15 @@ fn the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing(cx: &mut Te
     assert_eq!(sent(&mut helm), [], "the key held the form back");
     assert_eq!(busy_line(cx, "ntfy"), busy_alert());
 
+    cx.simulate_resize(size(px(720.), px(560.)));
+    click(cx, section_button(Section::Sessions));
+    keys(cx, "escape");
+    click(cx, "prompt-confirm");
+    assert!(!drawn(cx, "prompt"));
+    assert_eq!(sent(&mut helm), []);
+    assert!(shows_whole(cx, "ntfy-busy", DIALOG_BODY));
+
+    cx.simulate_resize(size(px(1600.), px(1000.)));
     helm.reply(id, 204, None);
     settle(cx);
     let (id, _) = save_ntfy(&mut helm, cx);

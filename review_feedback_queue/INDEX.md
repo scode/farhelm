@@ -71,9 +71,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`settings-close-save-can-hide-notification-refusal.md`](settings-close-save-can-hide-notification-refusal.md) — Save
-  and Close can take the user to Notifications while leaving the relevant error below the viewport.
-
 - [`settings-close-save-can-hide-credential-error.md`](settings-close-save-can-hide-credential-error.md) — Settings can
   keep a failed credential save’s explanation behind the Credentials overview.
 

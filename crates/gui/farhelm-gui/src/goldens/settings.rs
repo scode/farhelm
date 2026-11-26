@@ -1106,6 +1106,17 @@ pub(super) fn settings_notifications_setup(state: &SceneState, window: &mut Wind
     settings_scene(state, crate::settings::Section::Notifications, window, cx);
 }
 
+/// Pin the error above the actions at the minimum window size. The interaction tests drive the actual close and reply.
+pub(super) fn ntfy_refusal_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    window.set_driver_enabled(true);
+    settings_notifications_setup(state, window, cx);
+    stage_draft(
+        state,
+        crate::settings::Section::Notifications,
+        DraftStep::ShowNtfyRefusal,
+    );
+}
+
 /// Edited screens use the real form subscription after the initial reads settle, so the footer and field dots
 /// come from the same draft state as an edit typed in the app.
 struct DraftScene {
@@ -1121,6 +1132,7 @@ enum DraftStep {
     EditNotifications,
     AskToClose,
     ShowKeyConflict,
+    ShowNtfyRefusal,
     Done,
 }
 
@@ -1197,6 +1209,20 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
     let section = match step {
         DraftStep::Edit | DraftStep::OpenNotifications => draft.section.clone(),
         DraftStep::EditNotifications => Section::Notifications,
+        DraftStep::ShowNtfyRefusal => {
+            if window.driver_nodes().iter().any(|node| {
+                node.element_id.as_deref() == Some("ntfy-error")
+                    && !node.visible_bounds.is_empty()
+                    && node.visible_bounds == node.bounds
+            }) {
+                draft.step.set(DraftStep::Done);
+            } else {
+                window.defer(cx, |window, cx| {
+                    let _ = settings::stage_ntfy_refusal(window, cx);
+                });
+            }
+            return div().into_any_element();
+        }
         DraftStep::ShowKeyConflict => {
             let step = draft.step.clone();
             window.defer(cx, move |window, cx| {
@@ -1255,6 +1281,7 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
             DraftStep::VerifyDraft
             | DraftStep::AskToClose
             | DraftStep::ShowKeyConflict
+            | DraftStep::ShowNtfyRefusal
             | DraftStep::Done => {
                 unreachable!("these steps do not edit a field")
             }

@@ -81,6 +81,27 @@ pub(crate) fn stage_settled_key_conflict(window: &mut Window, cx: &mut App) -> O
     Some(())
 }
 
+/// Seed the refusal once the Notifications draft exists, then let Settings reveal it at actual layout.
+#[cfg(test)]
+pub(crate) fn stage_ntfy_refusal(window: &mut Window, cx: &mut App) -> Option<()> {
+    let dialog = layers::last_opened::<SettingsDialog>(cx)?;
+    let alerts = dialog.read(cx).ntfy.clone()?;
+    let form = alerts.read(cx);
+    if form.search_focus(super::ntfy::Switch::Enabled).is_none() || form.save_refused() {
+        return None;
+    }
+    if form.edit_state() == EditState::Clean {
+        form.topic_input().edit_for_golden("lab/alerts", window, cx);
+    } else {
+        alerts.update(cx, NtfyAlerts::refuse_topic_for_golden);
+        dialog.update(cx, |dialog, cx| {
+            dialog.scroll_to_close_refusal(cx);
+            cx.notify();
+        });
+    }
+    Some(())
+}
+
 type OnSaveSettled = Box<dyn FnOnce(bool, &mut App)>;
 
 /// The dialog can join an explicit Save that a form already sent, or wait on one it just started. The continuation
@@ -547,6 +568,9 @@ impl SettingsDialog {
         if saved {
             self.advance_batch(window, cx);
         } else {
+            let closing = batch.close
+                || matches!(batch.after, AfterBatch::SaveAndClose(_))
+                || matches!(batch.after, AfterBatch::Question(layer) if layers::is_open(layer, window, cx));
             if let Some(Batch {
                 after: AfterBatch::Question(layer),
                 ..
@@ -555,6 +579,9 @@ impl SettingsDialog {
                 layers::close(layer, window, cx);
             }
             self.reveal_edit_failure(&edit, window, cx);
+            if closing {
+                self.scroll_to_close_refusal(cx);
+            }
         }
     }
 
@@ -665,6 +692,19 @@ impl SettingsDialog {
             self.show(section, window, cx);
         }
         cx.notify();
+    }
+
+    /// Notifications puts the ntfy refusal below its form and the sound controls. Scroll after selecting the
+    /// section and let the next layout measure the full page, including the new error.
+    fn scroll_to_close_refusal(&mut self, cx: &App) {
+        if self.shown == Section::Notifications
+            && self
+                .ntfy
+                .as_ref()
+                .is_some_and(|alerts| alerts.read(cx).save_refused())
+        {
+            self.scroll_to_ntfy_refusal = true;
+        }
     }
 
     fn finish_close(&self, window: &mut Window, cx: &mut App) {
@@ -815,6 +855,7 @@ impl SettingsDialog {
                             dialog.show_credential_key(cx);
                         }
                         dialog.reveal_save_failure(section, window, cx);
+                        dialog.scroll_to_close_refusal(cx);
                         if let Some(editor) = rejected.and_then(|editor| editor.upgrade()) {
                             let save = editor.read(cx).save_focus();
                             crate::focus::focus_in_layer(&save, &Mark::take(cx), window, cx);
