@@ -1880,10 +1880,10 @@ already accepted attempt or its retries.
 
 New, Clone, Restart with, Replace with and agent-requested launches use the destination's workspace trust policy.
 Structured launches in a session's own sandbox or container automatically trust where supported by Claude Code, Codex,
-Muse, Pi and Antigravity. Local, SSH and persistent recipe hosts follow Settings. For launches that carry Custom
-permission flags, Farhelm makes a best-effort check for trust overrides and skips its own trust argument when it
-recognizes one. Plain Restart and the Replace answers that reuse the saved command keep the stored choice. **Replace as
-guarded instead** uses the same policy as Replace with.
+Muse, Pi and Antigravity. Local hosts, SSH hosts and persistent hosts created with Add host follow Settings. For
+launches that carry Custom permission flags, Farhelm makes a best-effort check for trust overrides and skips its own
+trust argument when it recognizes one. Plain Restart and the Replace answers that reuse the saved command keep the
+stored choice. **Replace as guarded instead** uses the same policy as Replace with.
 
 For agents that require a change to their own settings file, Farhelm applies workspace trust at launch of that agent,
 after preparing the working directory. Settings offers an off-by-default choice under **Agents → Claude Code** to answer
@@ -1903,8 +1903,8 @@ accepted trade-off of editing Claude's file. Trust allows repository hooks and c
 launch-time editor protects the session's home directory and its parents, including the filesystem root. If the selected
 config already trusts the exact home directory, a launch there requires no edit or warning. Claude inherits trust in
 directories beneath a trusted project. Farhelm also skips the edit when the login shell supplies no usable absolute home
-directory or sets `CLAUDE_CONFIG_DIR` to a relative path. The session still starts and Claude may ask as usual. The edit
-on installed hosts is explicitly opt-in and best effort.
+directory or sets `CLAUDE_CONFIG_DIR` to a relative path. The session still starts and Claude may ask as usual. On hosts
+that follow Settings, the edit is opt-in. It is best effort on every host.
 
 Farhelm offers Claude's trust hint for a structured Claude launch.
 
@@ -1918,19 +1918,19 @@ opened. A failed Don't show again save restores the band with an adjacent error 
 leaving the session drops the error. If the corrective settings read also fails, only the save error appears until trust
 is known to be off again, without the normal explanation or its actions. A stored dismissal also drops the error.
 
-The Settings pages for Codex, Muse and Pi each offer their own off-by-default trust switch for installed hosts. An
-inherited spawn uses the same destination policy as Clone. Codex receives a per-launch trusted directory override, Muse
-receives `--trust-workspace`, and Pi receives `--approve` for project settings and extensions. The agent keeps its saved
-configuration. The help explains that the repository's hooks, settings and commands may run as if the user had approved
-them. An accepted fresh-checkout retry retains its original trust choice. An ordinary keyed retry whose resolved launch
-changes may refuse the reused key. This includes a retry across the workspace-trust upgrade if the original attempt used
-a symlink and stored its canonical path.
+The Settings pages for Codex, Muse and Pi each offer their own off-by-default trust switch for hosts that follow
+Settings. An inherited spawn uses the same destination policy as Clone. Codex receives a per-launch trusted directory
+override, Muse receives `--trust-workspace`, and Pi receives `--approve` for project settings and extensions. The agent
+keeps its saved configuration. The help explains that the repository's hooks, settings and commands may run as if the
+user had approved them. An accepted fresh-checkout retry retains its original trust choice. An ordinary keyed retry
+whose resolved launch changes may refuse the reused key. This includes a retry across the workspace-trust upgrade if the
+original attempt used a symlink and stored its canonical path.
 
-Antigravity has its own off-by-default switch for installed hosts. The per-launch `--settings` argument names the
-canonical working directory on the session's host when it can be resolved and represented as text. Otherwise it uses the
-submitted path. It replaces the saved trust list for that process and leaves the settings file alone. Custom permission
-options supplying `--settings` or `--settings=...` are covered by the best-effort check above. Literal Command launches
-supply their own arguments.
+Antigravity has its own off-by-default switch for hosts that follow Settings. The per-launch `--settings` argument names
+the canonical working directory on the session's host when it can be resolved and represented as text. Otherwise it uses
+the submitted path. It replaces the saved trust list for that process and leaves the settings file alone. Custom
+permission options supplying `--settings` or `--settings=...` are covered by the best-effort check above. Literal
+Command launches supply their own arguments.
 
 Codex, Muse and Antigravity show the same nonmodal discovery hint while their recognized trust question is current in
 the agent terminal, their switch is off, and their own hint has not been dismissed. The hint names the agent, offers

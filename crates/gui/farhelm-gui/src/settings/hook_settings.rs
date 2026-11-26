@@ -58,7 +58,7 @@ pub(super) fn row(
                 .content(contents)
                 .accessible_description(format!("{} {}", agent.consent(), agent.removal()))
                 .checked(checked)
-                .disabled(!available)
+                .value_unknown(!available)
                 .focus(&switch.focus)
                 .on_toggle(move |_, window, cx| {
                     if let Some(&enabled) = toggle.shown() {

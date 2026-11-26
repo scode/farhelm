@@ -16,20 +16,6 @@
   file and its index entry.
 - Execution: ``planned in `plans/queue/triage-launcher-safety.md` ``.
 
-## trailing-unread-hook-and-spare-switches-read-as-off.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed by source (`crates/gui/farhelm-gui/src/settings/hook_settings.rs:47-54`,
-  `settings/checkouts.rs:84-95`, `components/checkbox.rs:282-306`): both switches still use `.disabled(...)` instead of
-  `.value_unknown(...)` (unlike `agent_trust.rs:457-469`), so screen readers hear `Role::Switch` + `aria_toggled(False)`
-  while unread/unreadable.
-- Decision: Q8 ("User-visible wording & screen-reader accuracy"): maintainer picked "Fix all 5 as recommended".
-  (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Switch the hook-setup and spare-checkout Settings switches to `.value_unknown(...)` matching
-  `agent_trust.rs`, and add regression tests verifying screen-reader state while unread/unreadable (estimate S, ~25-35
-  lines). Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
-
 ## trailing-stored-trust-chip-credits-settings-switch.md
 
 - Outcome: `fix spec+code`.
@@ -43,22 +29,6 @@
   this session when it started. Repository hooks, settings and commands can run without asking."), update
   `SPEC.md:4721-4722` to match, and add/update tests (and goldens if affected) (estimate S, ~20-35 lines). Remove the
   feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
-
-## trailing-settings-trust-help-misdescribes-persistent-hosts.md
-
-- Outcome: `fix spec+code`.
-- Assessment: Confirmed by source (`crates/gui/farhelm-gui/src/settings/agent_trust.rs:235-237,267-269`;
-  `SPEC.md:1885,1899,1907` vs `SPEC.md:1861-1863` and `workspace_trust.rs:29-37`): Settings help on all five agent pages
-  (and those three `SPEC.md` lines) say "installed hosts" / "Sandbox and container sessions apply workspace trust
-  automatically", omitting that persistent recipe hosts created with Add host follow Settings rather than trusting
-  automatically.
-- Decision: Q8 ("User-visible wording & screen-reader accuracy"): maintainer picked "Fix all 5 as recommended".
-  (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Align the workspace-trust Settings help copy in `agent_trust.rs` and `SPEC.md:1885,1899,1907`
-  with `SPEC.md:1861-1863` (distinguishing a session's own disposable sandbox/container from installed and persistent
-  hosts created with Add host), and update affected tests/goldens (estimate S, ~15-25 lines). Remove the feedback file
-  and its index entry.
 - Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
 
 ## trailing-disposable-trust-hint-says-off-by-default.md
@@ -85,19 +55,6 @@
   (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
 - Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
   guards a user-facing behavior; otherwise make no change (estimate ~12-15 lines). Either way remove the feedback file
-  and its index entry, and record in Execution which way it went.
-- Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
-
-## trailing-switch-warning-description-untested.md
-
-- Outcome: `other`.
-- Assessment: Confirmed as a test-only coverage gap (`settings/tests.rs:2403-2412` checks separate `Role::Label` help
-  text rather than `node.description` on the workspace-trust and hook-setup switches; `agent_trust.rs:465` and
-  `hook_settings.rs:50` wire `aria_description` correctly).
-- Decision: Q10 ("Pure product-test coverage gaps"): maintainer picked "Re-apply Nov 21 rule + fix security-binding test
-  (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
-  guards a user-facing behavior; otherwise make no change (estimate ~15-20 lines). Either way remove the feedback file
   and its index entry, and record in Execution which way it went.
 - Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
 

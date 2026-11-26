@@ -36,18 +36,8 @@ consequences.
 - [`trailing-trust-hint-late-refusal-untested.md`](trailing-trust-hint-late-refusal-untested.md) — No test covers a
   trust hint save refusal that lands while the hint is already dismissed.
 
-- [`trailing-unread-hook-and-spare-switches-read-as-off.md`](trailing-unread-hook-and-spare-switches-read-as-off.md) —
-  The hook setup and spare-checkout switches read as a saved "off" to screen readers while their setting is unread.
-
 - [`trailing-stored-trust-chip-credits-settings-switch.md`](trailing-stored-trust-chip-credits-settings-switch.md) —
   Restart and prompt approval cards explain a session's stored trust by a Settings switch that may now be off.
-
-- [`trailing-switch-warning-description-untested.md`](trailing-switch-warning-description-untested.md) — No test checks
-  that the trust and hook switches carry their warning for screen readers.
-
-- [`trailing-settings-trust-help-misdescribes-persistent-hosts.md`](trailing-settings-trust-help-misdescribes-persistent-hosts.md)
-  — Settings trust help says sandbox and container sessions trust automatically, but persistent recipe hosts follow the
-  switch.
 
 - [`trailing-disposable-trust-hint-says-off-by-default.md`](trailing-disposable-trust-hint-says-off-by-default.md) — In
   a session's own sandbox, the trust hint says trust is off by default and points to a switch that does not apply there.

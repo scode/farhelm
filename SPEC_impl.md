@@ -5473,10 +5473,10 @@ adds no trust flag and cannot undo trust from `--yolo` or vendor settings. Pi tr
 `--no-approve`, independent of Pi's YOLO tool mode. The false branches remain for old stored launches, including plain
 Restart and Replace; new composition uses true or omission. Older selection JSON without the field continues to decode.
 
-Antigravity true adds `--settings` with the canonical-directory JSON slot. Its switch applies to structured launches on
-installed hosts in plain folders as well as managed checkouts. The supervisor resolves the directory when it fills the
-slot. The compiler puts the trust option and the conversation selector before a bare `--`. Editing a stored launch's
-trust choice preserves both its literal Custom tail and the selector placement already saved for that session.
+Antigravity true adds `--settings` with the canonical-directory JSON slot. Where trust follows Settings, this switch
+applies to structured launches in plain folders as well as managed checkouts. The supervisor resolves the directory when
+it fills the slot. The compiler puts the trust option and the conversation selector before a bare `--`. Editing a stored
+launch's trust choice preserves both its literal Custom tail and the selector placement already saved for that session.
 
 Before enabling automatic trust, the helm makes a best-effort check of Custom option words before a bare `--`. It
 recognizes Antigravity `--settings` and `--settings=...`, Pi `--approve` and `--no-approve`, and Codex `-c` or
