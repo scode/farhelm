@@ -3839,8 +3839,8 @@
       "reference": null
     },
     {
-      "golden": "settings-custom-agent-save-blocked-by-delete",
-      "title": "A custom agent close blocked by its pending Delete, with Cancel and Delete still open",
+      "golden": "settings-custom-agent-delete",
+      "title": "A custom agent's Delete question in the pinned footer, starting on Cancel",
       "reference": null
     },
     {

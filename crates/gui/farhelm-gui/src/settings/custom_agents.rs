@@ -1,9 +1,18 @@
 //! Helm-wide custom agent registrations. The pushed catalog owns navigation, and each open editor owns its draft.
+//!
+//! Delete asks first with the shared inline question in the pinned footer, as a recipe's Delete does
+//! (SPEC_impl.md, "Questions: the prompt"; `settings/recipes/editor/leaving.rs`). It starts on Cancel, because a
+//! deleted registration is gone for good, and it is frozen on the registration's stable ID, which is what the Delete
+//! sends, with the display name it had when asked. Escape on the question cancels it and keeps Settings open; focus
+//! then returns to Delete, whose focus handle the editor keeps across the frames the question replaces it in. An
+//! accepted "Save changes before closing?" takes an unanswered Delete question away and saves the draft, rather than
+//! refusing the save while it is open: the newer question's answer wins, as the recipe editor's own leave question
+//! takes its Delete question away (`leaving.rs`, `ask_leave`).
 
 use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::ui_channel::{ApiPath, Availability, Collection, Method};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Div, Entity, InteractiveElement as _,
+    AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, InteractiveElement as _,
     IntoElement as _, ParentElement as _, Render, Role, SharedString,
     StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, px,
 };
@@ -15,8 +24,10 @@ use super::{
 use crate::components::{
     Button, Checkbox, HoverHelp, TextInput, TextInputEvent, TextInputState, Tier,
 };
+use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText, Line};
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
+use crate::prompt::{self, Answer, Inline, Question};
 use crate::{session, store::HelmStore, theme};
 
 pub(super) const COMMAND_HELP: &str = "Program name on PATH (e.g. my-agent), absolute path (/opt/bin/my-agent), or ~/path. Used as-is on every host and environment.";
@@ -190,8 +201,14 @@ impl SettingsDialog {
                     editor.saw_saved(saved, window, cx);
                 } else {
                     editor.removed = true;
-                    // The retained draft can be registered again once this Delete question is gone.
-                    if std::mem::take(&mut editor.confirm_delete) {
+                    // The registration is gone, so an open Delete question goes too, with any refusal shown beside
+                    // it, and the retained draft can be registered again. An answered question stays held until the
+                    // next one, so only an open one clears the error.
+                    if editor
+                        .delete_question
+                        .take()
+                        .is_some_and(|question| question.is_open(cx))
+                    {
                         editor.error = None;
                     }
                     cx.notify();
@@ -223,7 +240,11 @@ pub(super) struct Editor {
     generated_id: Option<String>,
     saving: bool,
     deleting: bool,
-    confirm_delete: bool,
+    /// The Delete question, while it is up in the footer's place, frozen on the registration's stable ID.
+    delete_question: Option<Inline<String>>,
+    /// Delete's focus handle. The question replaces the button while it is up, and an answer returns focus to what
+    /// held it when the question opened, so the handle has to outlive the frames that do not draw the button.
+    delete_focus: FocusHandle,
     error: Option<HostText>,
 }
 
@@ -253,7 +274,8 @@ impl Editor {
             reporting: false,
             saving: false,
             deleting: false,
-            confirm_delete: false,
+            delete_question: None,
+            delete_focus: cx.focus_handle().tab_stop(true),
             error: None,
         };
         this.restore(window, cx);
@@ -369,11 +391,6 @@ impl Editor {
         if self.busy() {
             return false;
         }
-        if self.confirm_delete {
-            // Close can request Save even while the inline question owns this editor's actions.
-            self.fail("Save was blocked. Choose Cancel to keep editing.", cx);
-            return false;
-        }
         let draft = self.draft(cx);
         if let Err(reason) = draft.validate() {
             self.fail(reason, cx);
@@ -438,6 +455,9 @@ impl Editor {
             .inspect_err(|reason| self.fail_start("Not saved:", Some(reason), cx))
             .is_ok();
         if sent {
+            // Only Settings' "Save changes before closing?" can save while the Delete question owns the footer. Its
+            // answer is the newer decision, so the question goes unanswered (the module docs).
+            self.delete_question = None;
             self.saving = true;
             self.set_read_only(cx);
             self.edited(cx);
@@ -445,24 +465,73 @@ impl Editor {
         sent
     }
 
-    /// A successful Delete ends this editor's ownership of its draft, including when no frame saw the pending delete.
-    fn delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(saved) = self.stored.as_ref() else {
+    /// Delete: ask the inline question in the footer's place (the module docs). Nothing for a registration not saved
+    /// yet or already removed, or while a save or delete is out.
+    fn ask_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(saved) = self.stored.as_ref().filter(|_| !self.removed) else {
             return;
         };
-        if self.busy() || !self.confirm_delete {
+        if self.busy() {
             return;
         }
-        let Ok(path) = ApiPath::api(&["custom-agents", &saved.id]) else {
+        let mark = Mark::take(cx);
+        let id = saved.id.clone();
+        let question = Question::new(
+            "Delete this custom agent?",
+            Answer::new(
+                "Delete",
+                HoverHelp::tooltip("Delete this registration"),
+                Tier::Danger,
+            ),
+            id.clone(),
+        )
+        .line(
+            HostSentence::new("custom-agent-delete-consequence")
+                .text("Delete ")
+                .host(&HostText::from_host(saved.display_name.as_str()))
+                .text(" (")
+                .host(&HostText::from_host(id.as_str()))
+                .text(")? Existing sessions keep their saved resume command."),
+        )
+        .cancel_answer(Answer::new(
+            "Cancel",
+            HoverHelp::tooltip("Keep this registration"),
+            Tier::Neutral,
+        ))
+        // SPEC.md, "Opening and closing": a risky action that cannot be undone starts on Cancel.
+        .starts_on_cancel();
+        let editor = cx.weak_entity();
+        self.delete_question = Some(prompt::ask_inline(
+            question,
+            &mark,
+            move |id, window, cx| {
+                let _ = editor.update(cx, |editor, cx| editor.delete(id, window, cx));
+            },
+            window,
+            cx,
+        ));
+        cx.notify();
+    }
+
+    /// The confirmed Delete of the registration `id`, the stable ID its question was frozen on. A successful Delete
+    /// ends this editor's ownership of its draft, including when no frame saw the pending delete. A Delete the store
+    /// or the request refuses to start keeps the draft and says why in the footer, where the question no longer is.
+    /// Nothing happens, silently, for a registration already gone or while another write is out: the question is not
+    /// asked then, and a save that starts takes an open one away, so only a race reaches that.
+    fn delete(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.stored.is_none() || self.removed || self.busy() {
+            return;
+        }
+        let Ok(path) = ApiPath::api(&["custom-agents", &id]) else {
+            self.fail("Not deleted: Farhelm could not build the request.", cx);
             return;
         };
         let Some(operations) = session::current_operations(cx) else {
-            self.confirm_delete = false;
             self.fail_start("Not deleted:", None, cx);
             return;
         };
-        let key = OpKey::custom_agent(&saved.id);
-        let editor_key = Some(saved.id.clone());
+        let key = OpKey::custom_agent(&id);
+        let editor_key = Some(id);
         let owner = cx.entity_id();
         let parent = self.parent.clone();
         let view = cx.weak_entity();
@@ -499,7 +568,6 @@ impl Editor {
                     }
                     let _ = view.update(cx, |editor, cx| {
                         editor.deleting = false;
-                        editor.confirm_delete = false;
                         editor.set_read_only(cx);
                         if let Outcome::Refused(refusal) = &settled.outcome {
                             editor.error = Some(refusal.words.clone());
@@ -508,10 +576,7 @@ impl Editor {
                     });
                 })
             })
-            .inspect_err(|reason| {
-                self.confirm_delete = false;
-                self.fail_start("Not deleted:", Some(reason), cx);
-            })
+            .inspect_err(|reason| self.fail_start("Not deleted:", Some(reason), cx))
             .is_ok();
         if sent {
             self.deleting = true;
@@ -607,38 +672,17 @@ impl Editor {
         let this = editor.read(cx);
         let weak = editor.downgrade();
         let busy = this.busy();
-        let confirming = this.confirm_delete;
+        // The pinned action row sizes its children by their contents. Give the whole question the available width so
+        // its consequence wraps inside the footer before Cancel and Delete are laid out, as the recipe editor does.
+        let question = this
+            .delete_question
+            .as_ref()
+            .filter(|question| question.is_open(cx))
+            .map(|question| div().min_w_0().w_full().child(question.clone()));
+        let confirming = question.is_some();
         let mut row = div().flex().justify_end().gap(px(8.));
-        if confirming {
-            let cancel = weak.clone();
-            row = row
-                .child(
-                    button(
-                        "custom-agent-keep",
-                        "Cancel",
-                        "Keep this registration",
-                        Tier::Neutral,
-                    )
-                    .disabled(busy)
-                    .on_click(move |_, _, cx| {
-                        let _ = cancel.update(cx, |editor, cx| {
-                            editor.confirm_delete = false;
-                            editor.edited(cx);
-                        });
-                    }),
-                )
-                .child(
-                    button(
-                        "custom-agent-confirm-delete",
-                        "Delete",
-                        "Delete this registration",
-                        Tier::Danger,
-                    )
-                    .busy(busy)
-                    .on_click(move |_, window, cx| {
-                        let _ = weak.update(cx, |editor, cx| editor.delete(window, cx));
-                    }),
-                );
+        if let Some(question) = question {
+            row = row.child(question);
         } else {
             let delete = weak.clone();
             let discard = weak.clone();
@@ -650,12 +694,10 @@ impl Editor {
                         "Remove this registration from the launcher",
                         Tier::DangerGhost,
                     )
+                    .focus(&this.delete_focus)
                     .disabled(busy)
-                    .on_click(move |_, _, cx| {
-                        let _ = delete.update(cx, |editor, cx| {
-                            editor.confirm_delete = true;
-                            editor.edited(cx);
-                        });
+                    .on_click(move |_, window, cx| {
+                        let _ = delete.update(cx, |editor, cx| editor.ask_delete(window, cx));
                     })
                 }))
                 .child(
@@ -689,19 +731,10 @@ impl Editor {
                     }),
                 );
         }
-        let error = this.error.as_ref().map(|reason| {
+        // The question draws its own words, so a refusal stays beside it rather than in its place.
+        let notice = this.error.as_ref().map(|reason| {
             choices::failure_outcome("custom-agent-error", reason, cx).into_any_element()
         });
-        // A refused Save leaves Delete armed, so its consequences still belong beside the buttons.
-        let notice = if confirming {
-            Some(div().flex().flex_col().gap(px(4.))
-                .children(error)
-                .child("Delete this custom agent? Existing sessions keep their saved resume command.")
-                .into_any_element()
-            )
-        } else {
-            error
-        };
         (row.into_any_element(), notice, confirming)
     }
 }
@@ -742,24 +775,21 @@ pub(crate) fn stage_custom_agent_draft(window: &mut Window, cx: &mut App) {
     });
 }
 
-/// Show the existing editor's refusal when Close attempts to save while its Delete question is on screen.
+/// Open the registered editor's Delete question, as its Delete button does, so the golden shows it in the footer.
 #[cfg(test)]
-pub(crate) fn show_close_delete_refusal_for_golden(window: &mut Window, cx: &mut App) {
+pub(crate) fn ask_custom_agent_delete_for_golden(window: &mut Window, cx: &mut App) {
     let editor = crate::layers::last_opened::<SettingsDialog>(cx)
         .and_then(|dialog| dialog.read(cx).custom_editor().cloned())
         .expect("the registered custom agent is open");
-    editor
-        .read(cx)
-        .command
-        .clone()
-        .edit_for_golden("~/bin/acme-code-updated", window, cx);
-    // The edit's queued change event clears earlier errors before the next action can set one.
-    window.defer(cx, move |window, cx| {
-        editor.update(cx, |editor, cx| {
-            assert!(editor.dirty(cx));
-            editor.confirm_delete = true;
-            assert!(!editor.save(window, cx));
-        });
+    editor.update(cx, |editor, cx| {
+        editor.ask_delete(window, cx);
+        assert!(
+            editor
+                .delete_question
+                .as_ref()
+                .is_some_and(|question| question.is_open(cx)),
+            "the golden's registration must have an open Delete question"
+        );
     });
 }
 

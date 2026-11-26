@@ -1930,10 +1930,10 @@ static SCENES: &[Scene] = &[
         setup: settings_custom_agent_long_name_setup,
     },
     Scene {
-        name: "settings-custom-agent-save-blocked-by-delete",
+        name: "settings-custom-agent-delete",
         size: (800., 900.),
         draw: settings_scroll_end,
-        setup: settings_custom_agent_close_delete_refusal_setup,
+        setup: settings_custom_agent_delete_setup,
     },
     Scene {
         name: "settings-custom-agent-busy-save",

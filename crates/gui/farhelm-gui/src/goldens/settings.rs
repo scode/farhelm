@@ -78,8 +78,8 @@ struct SettingsFixture {
     custom_agent_save_refusal: bool,
     /// Fill the Add form before measuring the five dirty fields.
     custom_agent_dirty_add: bool,
-    /// Show the Save refusal while the existing registration's Delete confirmation owns the footer.
-    custom_agent_close_delete_refusal: bool,
+    /// Open the existing registration's Delete question, which then owns the footer.
+    custom_agent_delete_question: bool,
 }
 
 /// `entries` as a pushed collection's first snapshot, each filed under the key `key` gives it, in their order.
@@ -124,7 +124,7 @@ fn settings_scene_with(
         custom_agents,
         custom_agent_save_refusal,
         custom_agent_dirty_add,
-        custom_agent_close_delete_refusal,
+        custom_agent_delete_question,
     } = fixture;
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -181,8 +181,8 @@ fn settings_scene_with(
             if custom_agent_dirty_add {
                 crate::settings::stage_custom_agent_draft(window, cx);
             }
-            if custom_agent_close_delete_refusal {
-                crate::settings::show_close_delete_refusal_for_golden(window, cx);
+            if custom_agent_delete_question {
+                crate::settings::ask_custom_agent_delete_for_golden(window, cx);
             }
             if let Some(query) = search {
                 crate::settings::search_for_opened(query, window, cx);
@@ -360,8 +360,8 @@ pub(super) fn settings_custom_agent_nav_tooltip(
     div().into_any_element()
 }
 
-/// Show the blocked close's explanation alongside the still-open Cancel and Delete controls.
-pub(super) fn settings_custom_agent_close_delete_refusal_setup(
+/// A registered custom agent's Delete question in the pinned footer, with its frozen name and ID, Cancel and Delete.
+pub(super) fn settings_custom_agent_delete_setup(
     state: &SceneState,
     window: &mut Window,
     cx: &mut App,
@@ -371,7 +371,7 @@ pub(super) fn settings_custom_agent_close_delete_refusal_setup(
         crate::settings::Section::CustomAgent("acme-code".into()),
         SettingsFixture {
             custom_agents: Some(super::custom_agent_state()),
-            custom_agent_close_delete_refusal: true,
+            custom_agent_delete_question: true,
             ..SettingsFixture::default()
         },
         window,
