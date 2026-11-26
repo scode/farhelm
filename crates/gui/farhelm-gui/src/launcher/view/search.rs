@@ -190,7 +190,7 @@ pub(super) struct SearchBox {
     inline_results: bool,
     /// The field retains focus. Down explicitly starts navigating the empty pane and Up from the first row clears it.
     start_highlight: Option<SetupSource>,
-    /// In Replace with, Enter can retire the source. Its displayed start row (or the main action) authorizes the key.
+    /// Enter uses the displayed start row or main action. A resize can withdraw the row before its next frame is shown.
     start_enter_frame: ActionFrame<Option<SetupSource>>,
     /// The last child revealed by keyboard navigation, so drawing after a mouse wheel does not undo the scroll.
     pub(super) pane_revealed: Option<usize>,
@@ -326,7 +326,7 @@ impl Launcher {
             let row = command_pane_fits(window)
                 .then(|| self.search_box.start_highlight.clone())
                 .flatten();
-            if matches!(self.draft.mode, Mode::ReplaceWith { .. })
+            if !matches!(self.draft.mode, Mode::RestartWith(_))
                 && !self
                     .search_box
                     .start_enter_frame
@@ -710,7 +710,7 @@ impl Launcher {
             self.search_box.typed_choice = choice;
             self.open_search(window, cx);
         }
-        if matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
+        if !matches!(self.draft.mode, Mode::RestartWith(_)) {
             if self.search.text(cx).is_empty() {
                 self.search_box.start_enter_frame.capture(
                     self.search_box.start_highlight.clone(),

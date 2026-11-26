@@ -15,7 +15,7 @@ use serde_json::json;
 use super::draft::LaunchDraft;
 use super::view::{recent_folders_for_tests as recent_folders, tail_label_for_tests as tail_label};
 use super::view_tests::{
-    click_in_body, draft, fixture_hosts, launcher_with_hosts, name_of, read, shown_refusal,
+    click_in_body, codex, draft, fixture_hosts, launcher_with_hosts, name_of, read, shown_refusal,
 };
 use crate::layers;
 use crate::test_support::{self, keys, settle};
@@ -142,14 +142,45 @@ fn focus_folder(cx: &mut VisualTestContext) {
 fn a_history_reply_cannot_turn_folder_enter_into_replace_before_presentation(
     cx: &mut TestAppContext,
 ) {
-    let (mut helm, cx) = super::entry_tests::window_with(cx, Some("a"));
+    let (helm, cx) = super::entry_tests::window_with(cx, Some("a"));
     assert!(cx.update(|window, cx| super::entry::open_replace_with("a", window, cx)));
     settle(cx);
+    assert_history_reply_drops_enter(helm, cx, "host=9", "/api/sessions/a/replace");
+}
+
+/// A late history reply can clear New's highlighted folder. Enter still belongs to that pick until redraw.
+#[gpui::test]
+fn a_history_reply_cannot_turn_new_folder_enter_into_a_launch(cx: &mut TestAppContext) {
+    let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
+    draft.choose_harness(farhelm_proto::LaunchHarness::Codex, None, None);
+    let (helm, cx) = launcher_with_hosts(cx, draft, fixture_hosts(&[0]));
+    assert_history_reply_drops_enter(helm, cx, "host=1", "/api/sessions");
+}
+
+/// A prefilled Clone can already launch, so a lost folder pick must also consume its queued Enter.
+#[gpui::test]
+fn a_history_reply_cannot_turn_clone_folder_enter_into_a_launch(cx: &mut TestAppContext) {
+    let source = super::draft_tests::session(codex(None, None, None));
+    let (helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::clone_of(&source, Some(1)),
+        fixture_hosts(&[0]),
+    );
+    assert_history_reply_drops_enter(helm, cx, "host=1", "/api/sessions");
+}
+
+/// Offer Home before history returns, then dispatch Enter with changed rows that have been drawn but never shown.
+fn assert_history_reply_drops_enter(
+    mut helm: FakeHelm,
+    cx: &mut VisualTestContext,
+    host: &str,
+    route: &str,
+) {
     let reads = history_reads(&mut helm, cx);
-    let [(read, path)] = &reads[..] else {
+    let [(read, path)] = reads.as_slice() else {
         panic!("one history read, got {reads:?}")
     };
-    assert!(path.ends_with("host=9"), "{path}");
+    assert!(path.ends_with(host), "{path}");
     focus_folder(cx);
     keys(cx, "down");
     test_support::show_next_frame(cx);
@@ -172,15 +203,13 @@ fn a_history_reply_cannot_turn_folder_enter_into_replace_before_presentation(
         super::view_tests::selected_state(cx, "launcher-folder-0"),
         Some(false)
     );
+    let after_reply = draft(cx);
     // Raw input sees the drawn frame without presenting it, as with a queued key behind the reply.
     cx.simulate_keystrokes("enter");
-    let replace = "/api/sessions/a/replace";
-    assert!(super::launch_tests::sent_to(&mut helm, cx, replace).is_empty());
+    assert!(super::launch_tests::sent_to(&mut helm, cx, route).is_empty());
+    assert_eq!(draft(cx), after_reply, "the queued Enter picks nothing");
     keys(cx, "enter");
-    assert_eq!(
-        super::launch_tests::sent_to(&mut helm, cx, replace).len(),
-        1
-    );
+    assert_eq!(super::launch_tests::sent_to(&mut helm, cx, route).len(), 1);
 }
 
 /// A template batch can change the filter while the folder field still holds focus. Enter cannot pick the row that

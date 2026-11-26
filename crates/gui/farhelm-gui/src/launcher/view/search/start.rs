@@ -305,11 +305,21 @@ impl Launcher {
                             &entry.selection,
                             collections,
                         )));
+                    // A Replace with row has separate pointer and keyboard actions. The key cap's separate
+                    // node does not give the selected option's name the Enter consequence.
                     let label = if !disabled
                         && entry.selection.container.is_none()
                         && matches!(self.draft.mode, super::Mode::ReplaceWith { .. })
                     {
-                        format!("Fill from recent setup: {}", whole.accessible_name()).into()
+                        let name = whole.accessible_name();
+                        if active {
+                            format!(
+                                "{name}. Click to fill the form. Enter replaces and deletes the source session."
+                            )
+                            .into()
+                        } else {
+                            format!("Fill from recent setup: {name}").into()
+                        }
                     } else {
                         whole.accessible_name()
                     };

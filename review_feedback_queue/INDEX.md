@@ -15,15 +15,7 @@ consequences.
 
 ## High priority: material UX degradation
 
-- [`trailing-replace-with-recent-named-fill-enter-replaces.md`](trailing-replace-with-recent-named-fill-enter-replaces.md)
-  — In Replace with, a screen reader announces a highlighted recent setup as "Fill from recent setup" while Enter on it
-  replaces and deletes the source session; highest if the "⏎ Replace" key cap is not announced with it.
-
 ## Other: correctness, diagnostics, cleanup, or convenience
-
-- [`trailing-launcher-new-clone-enter-after-vanished-pick.md`](trailing-launcher-new-clone-enter-after-vanished-pick.md)
-  — In New and Clone, Return on a highlighted template or folder row can launch instead of picking when the highlight
-  vanished before the redraw; only Replace with is guarded.
 
 - [`trailing-launcher-held-escape-discards-draft.md`](trailing-launcher-held-escape-discards-draft.md) — Holding Escape
   with typed results or the Save as template panel open can close the whole launcher and discard its draft; the fix
