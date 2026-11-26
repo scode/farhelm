@@ -1002,8 +1002,9 @@ pub(crate) struct CreateReq {
     /// The user's compiled launch at environment admission. Provisioning can take
     /// minutes, so catalog edits made while it runs must not change the command
     /// or capabilities this request starts with. Destination trust still applies at create.
+    /// The registration it was compiled from rides along for the same reason.
     #[serde(skip)]
-    prepared_user_launch: Option<SessionLaunch>,
+    prepared_user_launch: Option<(SessionLaunch, Option<crate::custom_agents::Registration>)>,
     /// Sent only by this create, never retained as a recent setup or launch.
     prompt: Option<String>,
     /// A selector for this start only, never part of history or templates.
@@ -1259,8 +1260,8 @@ impl CreateReq {
         // The public selectors still describe the recipe launch for history.
         // Compile their copy so a catalog edit cannot swap the executable
         // after admission. Agent launches already carry their approved command.
-        let launch = match &self.agent {
-            Some(agent) => agent.launch.as_launch().clone(),
+        let (launch, registration) = match &self.agent {
+            Some(agent) => (agent.launch.as_launch().clone(), None),
             None => create_mode(store, &mut self.clone()).await?,
         };
         launch
@@ -1272,7 +1273,7 @@ impl CreateReq {
             .map(|id| launches::named_start(&launch, id.clone()).map_err(invalid_request))
             .transpose()?;
         if self.agent.is_none() {
-            self.prepared_user_launch = Some(launch);
+            self.prepared_user_launch = Some((launch, registration));
         }
         Ok(named_start)
     }
@@ -1840,17 +1841,18 @@ async fn create_session_request(
     crate::precondition::incarnation_holds(&claim, req.expected_incarnation)?;
     // An agent's approved launch keeps the trust its card showed; a user's
     // create decides trust now, for the folder it lands in.
-    let mode = match approved {
-        Some(approved) => approved,
+    let (mode, custom_registration) = match approved {
+        Some(approved) => (approved, None),
         None => {
-            let mode = ordinary_mode
+            let (mode, registration) = ordinary_mode
                 .expect("fresh and agent requests returned or took their own launch above");
-            normalize_launch_workspace_trust(
+            let mode = normalize_launch_workspace_trust(
                 state,
                 mode,
                 TrustDestination::for_host(claim.is_session_owned),
             )
-            .await?
+            .await?;
+            (mode, registration)
         }
     };
     let named_start = req
@@ -1882,6 +1884,7 @@ async fn create_session_request(
             github_checkout: None,
             confirm_yolo: req.confirm_yolo,
             settings_from_source: false,
+            custom_registration,
             parent: None,
             spawned: false,
             request_fingerprint: None,
@@ -1967,6 +1970,7 @@ async fn do_create_session_with_environment(
         accept_result,
         mut github_checkout,
         settings_from_source,
+        custom_registration,
         parent,
         spawned,
         request_fingerprint,
@@ -2027,6 +2031,9 @@ async fn do_create_session_with_environment(
         }
         _ => None,
     };
+    // Paired with the selection it was compiled for; without a selection
+    // there is nothing to remember on it.
+    let custom_registration = custom_registration.filter(|_| explicit_selection.is_some());
     // A create matched by its request can come back as an EARLIER attempt's
     // session, created from what the request resolved to then: a template it
     // names, or a clone's source, may have moved the folder since. The
@@ -2081,6 +2088,7 @@ async fn do_create_session_with_environment(
             requested_cwd,
             accept_result,
             explicit_selection,
+            custom_registration,
         },
     )
     .await
@@ -2105,6 +2113,9 @@ struct CreateAcceptance {
     /// a remote host controls (SPEC.md: only explicit GUI selections shape
     /// GUI defaults and suggestions).
     explicit_selection: Option<farhelm_proto::LaunchSelection>,
+    /// The registration `explicit_selection` was compiled from, for a custom
+    /// agent; see [`CreateSpec::custom_registration`].
+    custom_registration: Option<crate::custom_agents::Registration>,
 }
 
 /// Apply the same source veto, cache, history and default effects to first
@@ -2160,6 +2171,7 @@ async fn record_created_history(
         github_repo,
         requested_cwd,
         explicit_selection,
+        custom_registration,
         ..
     } = acceptance;
     let user_launch = origin == CreateOrigin::User;
@@ -2203,6 +2215,7 @@ async fn record_created_history(
                         },
                         github_repo.as_ref(),
                         explicit_selection.as_ref(),
+                        custom_registration,
                         environment_target.as_ref(),
                         move || {
                             // Db::call owns SQLite before this check. Adoption
@@ -2293,6 +2306,13 @@ pub(crate) struct CreateSpec {
     /// remembered defaults or recent setup (SPEC.md: only explicit GUI
     /// selections shape GUI defaults and suggestions).
     pub(crate) settings_from_source: bool,
+    /// The custom agent registration `mode` was compiled from, when this
+    /// create compiled a custom selection. Only then may it remember a wrapper
+    /// for that agent, and only on that registration: by the time the create
+    /// succeeds the agent may have been deleted, or deleted and registered
+    /// again under the same ID. `None` for every other create, agent-originated
+    /// ones included.
+    pub(crate) custom_registration: Option<crate::custom_agents::Registration>,
     /// The organizational parent a `farhelm spawn` records, forwarded to the
     /// supervisor as given. `None` for every other create: the GUI and
     /// `farhelm agent create` record none (SPEC.md, Session list).
@@ -2453,6 +2473,10 @@ async fn create_fresh_session_resolved(
         } else {
             None
         },
+        // A lost-reply acceptance compiles nothing, so it cannot tell which
+        // registration the original attempt ran: it remembers no custom
+        // agent wrapper rather than guess.
+        custom_registration: None,
     };
     // Agent checkout requests inspect the retained attempt and gate its
     // original launch before reaching this pipeline. A second reconciliation
@@ -2487,20 +2511,24 @@ async fn create_fresh_session_resolved(
         let config = checkout_config_for(state, claim.host).await?;
         let github_checkout = github_checkout_resolution(&req, client_identity.clone(), &config)
             .expect("fresh request requires resolution")?;
-        let mode = match approved {
+        let (mode, registration) = match approved {
             // An agent's approval already fixed this trust choice. Reading
             // Settings again here must not change the approved launch.
-            Some(approved) => approved,
-            None => configured_launch_workspace_trust(
-                create_mode(&state.store, &mut req).await?,
-                &config,
-                TrustDestination::for_host(claim.is_session_owned),
-            )?,
+            Some(approved) => (approved, None),
+            None => {
+                let (launch, registration) = create_mode(&state.store, &mut req).await?;
+                let mode = configured_launch_workspace_trust(
+                    launch,
+                    &config,
+                    TrustDestination::for_host(claim.is_session_owned),
+                )?;
+                (mode, registration)
+            }
         };
-        Ok((github_checkout, mode))
+        Ok((github_checkout, mode, registration))
     }
     .await;
-    let (github_checkout, mode) = match prepared {
+    let (github_checkout, mode, custom_registration) = match prepared {
         Ok(prepared) => prepared,
         Err(local_error) => {
             let Some(key) = intent_key else {
@@ -2547,6 +2575,7 @@ async fn create_fresh_session_resolved(
             accept_result: acceptance.accept_result,
             confirm_yolo: req.confirm_yolo,
             settings_from_source: false,
+            custom_registration,
             parent: None,
             spawned: false,
             request_fingerprint: None,
@@ -2670,10 +2699,14 @@ pub(crate) async fn create_agent_checkout(
 /// both are worth making loudly rather than picking a winner. A body naming
 /// BOTH an agent launch and a command launch has no honest reading; a body
 /// naming NEITHER says nothing about what to run at all.
+///
+/// The second half of the result is the custom agent registration the launch
+/// was compiled from, if any; it travels with the launch to the history write
+/// so remembered settings land on that registration only.
 async fn create_mode(
     store: &store::HelmStore,
     req: &mut CreateReq,
-) -> anyhow::Result<SessionLaunch> {
+) -> anyhow::Result<(SessionLaunch, Option<crate::custom_agents::Registration>)> {
     if let Some(message) = req.retired.refusal() {
         return Err(invalid_request(message.to_string()));
     }
@@ -2749,19 +2782,23 @@ pub(crate) fn resolve_launch_request(
 
 /// Read the one registration a fresh selection uses. A plain Restart or clone keeps its compiled launch and never
 /// crosses this boundary, so later catalog edits cannot rewrite those commands.
+///
+/// Also returns which registration that was, when there was one, so that a successful create remembers its wrapper
+/// on that registration and no other (see `crate::custom_agents::Registration`).
 async fn resolve_registered_launch(
     store: &store::HelmStore,
     request: LaunchRequest,
-) -> anyhow::Result<SessionLaunch> {
+) -> anyhow::Result<(SessionLaunch, Option<crate::custom_agents::Registration>)> {
     let id = match &request {
         LaunchRequest::Agent { selection } => selection.custom_agent.as_deref(),
         LaunchRequest::Command(command) => command.custom_agent.as_deref(),
     };
-    let custom = match id {
+    let registered = match id {
         Some(id) => store.custom_agent(id).await?,
         None => None,
     };
-    resolve_launch_request(request, custom.as_ref())
+    let launch = resolve_launch_request(request, registered.as_ref().map(|found| &found.agent))?;
+    Ok((launch, registered.map(|found| found.registration)))
 }
 
 #[cfg(test)]
@@ -3442,8 +3479,10 @@ async fn resolve_and_restart_session(
     let id = key.session_id.as_str();
     // Resolved before routing: a malformed edit is the caller's to fix
     // wherever the session lives.
+    // Restart with records no launch history or remembered settings, so the
+    // registration the edit was compiled from is not needed past this point.
     let with = match with {
-        Some(request) => Some(resolve_registered_launch(&state.store, request).await?),
+        Some(request) => Some(resolve_registered_launch(&state.store, request).await?.0),
         None => None,
     };
     if let Some(value) = conversation.as_ref() {
@@ -4840,15 +4879,22 @@ async fn replace_session_inner(
     // never sends it again (SPEC.md's initial-prompt rules).
     // `do_create_session` validates it against the launch mode.
     let prompt = with.as_mut().and_then(|body| body.prompt.take());
-    let (mode, cwd, title, cols, rows) = match (with, with_mode) {
-        (Some(with), Some(mode)) => {
+    let (mode, custom_registration, cwd, title, cols, rows) = match (with, with_mode) {
+        (Some(with), Some((mode, registration))) => {
             let mode = normalize_launch_workspace_trust(
                 state,
                 mode,
                 TrustDestination::for_host(claim.is_session_owned),
             )
             .await?;
-            (mode, with.cwd, with.title, with.cols, with.rows)
+            (
+                mode,
+                registration,
+                with.cwd,
+                with.title,
+                with.cols,
+                with.rows,
+            )
         }
         // The two halves travel together: `with_mode` is `Some` exactly
         // when `with` is, since both come from the same `Option` above.
@@ -4856,6 +4902,8 @@ async fn replace_session_inner(
             let mode = retain_stored_launch_workspace_trust(&source)?;
             (
                 mode,
+                // A plain Replace compiles nothing and remembers nothing.
+                None,
                 source.cwd,
                 // Copied verbatim, empty string included — the same rule
                 // `clone_for_agent` follows and for the same reason: deriving
@@ -4904,6 +4952,7 @@ async fn replace_session_inner(
             accept_result: Some(replacement_result_check(id)),
             confirm_yolo,
             settings_from_source,
+            custom_registration,
             parent: None,
             spawned: false,
             request_fingerprint: None,

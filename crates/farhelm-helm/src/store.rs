@@ -211,10 +211,16 @@ fn upsert_folder_history(
 /// SPEC.md's rule is that only what the user explicitly selects in the GUI
 /// may shape GUI defaults and suggestions. Agent-originated creates and a
 /// plain Replace (whose settings come from the source row) pass none.
+///
+/// A custom agent's wrapper is remembered on the registration
+/// `custom_registration` names, the one the launch was compiled from, and
+/// only while that registration still holds the selection's ID; see
+/// [`crate::custom_agents::remember_wrapper_prefix`].
 fn record_launch_history(
     tx: &rusqlite::Transaction<'_>,
     create: &AdmittedCreate<'_>,
     explicit_selection: Option<&LaunchSelection>,
+    custom_registration: Option<crate::custom_agents::Registration>,
 ) -> anyhow::Result<bool> {
     let Some(selection) = explicit_selection else {
         return Ok(false);
@@ -278,7 +284,25 @@ fn record_launch_history(
                 .map(serde_json::from_str)
                 .transpose()?
                 .unwrap_or_default();
-        if let Some(prefix) = &selection.wrapper_prefix {
+        // A custom agent's prefix belongs to its registration, not to the
+        // harness every registration shares, so it never goes in this map;
+        // dropping any custom key also retires the shared slot older builds
+        // wrote, rather than carrying it forward on every launch.
+        wrappers.retain(|harness, _| !harness.uses_custom_catalog());
+        if selection.harness.uses_custom_catalog() {
+            // Without the registration the launch was compiled from there is
+            // no telling whose prefix this is, so nothing is remembered.
+            if let (Some(id), Some(registration)) =
+                (selection.custom_agent.as_deref(), custom_registration)
+            {
+                crate::custom_agents::remember_wrapper_prefix(
+                    tx,
+                    id,
+                    registration,
+                    selection.wrapper_prefix.as_deref(),
+                )?;
+            }
+        } else if let Some(prefix) = &selection.wrapper_prefix {
             wrappers.insert(selection.harness, prefix.clone());
         } else {
             wrappers.remove(&selection.harness);
@@ -350,7 +374,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 102;
+pub(crate) const SCHEMA_VERSION: i64 = 103;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -3248,7 +3272,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 102;",
+              PRAGMA user_version = 103;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
             custom_agents_schema = crate::custom_agents::SCHEMA,
@@ -5270,7 +5294,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         version = 99;
     }
     if version == 99 {
-        tx.execute_batch(crate::custom_agents::SCHEMA)
+        tx.execute_batch(crate::custom_agents::SCHEMA_V100)
             .context("creating the custom agent catalog")?;
         tx.execute_batch("PRAGMA user_version = 100;")
             .context("migrating helm.db to schema version 100")?;
@@ -5300,6 +5324,12 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 102;")
             .context("migrating helm.db to schema version 102")?;
         version = 102;
+    }
+    if version == 102 {
+        crate::custom_agents::migrate_registration_seq(&tx)?;
+        tx.execute_batch("PRAGMA user_version = 103;")
+            .context("migrating helm.db to schema version 103")?;
+        version = 103;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -6237,8 +6267,17 @@ impl HelmStore {
                             // forwarded to a client that has no flag for it.
                             remembered_permissions: remembered_permissions
                                 .filter(|word| is_known_remembered_permissions_word(word)),
-                            remembered_wrapper_prefixes: serde_json::from_str(&row.get::<_, String>(19)?)
-                                .map_err(|error| rusqlite::Error::FromSqlConversionFailure(19, rusqlite::types::Type::Text, Box::new(error)))?,
+                            // A custom agent's key here is the shared slot older
+                            // builds wrote for every registration at once. Which
+                            // registration it was for cannot be recovered, so it
+                            // is dropped rather than offered to all of them.
+                            remembered_wrapper_prefixes: serde_json::from_str::<std::collections::BTreeMap<farhelm_proto::LaunchHarness, Vec<String>>>(&row.get::<_, String>(19)?)
+                                .map_err(|error| rusqlite::Error::FromSqlConversionFailure(19, rusqlite::types::Type::Text, Box::new(error)))?
+                                .into_iter()
+                                .filter(|(harness, _)| !harness.uses_custom_catalog())
+                                .collect(),
+                            // Read below from the catalog, which holds it per registration.
+                            remembered_custom_wrapper_prefixes: Default::default(),
                             remembered_workspace_trust: None,
                             skip_host_remove_confirmation: row.get(5)?,
                             skip_host_setup_confirmation: row.get(6)?,
@@ -6255,6 +6294,11 @@ impl HelmStore {
                 .optional()
                 .map(Option::unwrap_or_default)
                 .context("reading the client preference")
+                .and_then(|mut preferences| {
+                    preferences.remembered_custom_wrapper_prefixes =
+                        crate::custom_agents::remembered_wrapper_prefixes(conn)?;
+                    Ok(preferences)
+                })
         })
 .await
     }
@@ -9555,6 +9599,7 @@ impl HelmStore {
             paths,
             github_repo,
             explicit_selection,
+            None,
             environment_target,
             || Some(((), HistoryScope::All)),
         )
@@ -9568,6 +9613,11 @@ impl HelmStore {
     /// The caller defines current authority and allowed history projections. Storage knows no connection manager.
     /// Its transactional identity check still closes an adoption committed
     /// before the caller's live authority was republished.
+    ///
+    /// `custom_registration` is the catalog registration a custom agent
+    /// selection was compiled from. Without it a custom launch remembers no
+    /// wrapper; the storage-only forms above pass none, since they cannot
+    /// know which registration ran.
     #[allow(
         clippy::too_many_arguments,
         reason = "adds a write-boundary authority guard to the established history inputs"
@@ -9580,6 +9630,7 @@ impl HelmStore {
         paths: HistoryPaths<'_>,
         github_repo: Option<&farhelm_proto::GithubRepo>,
         explicit_selection: Option<&LaunchSelection>,
+        custom_registration: Option<crate::custom_agents::Registration>,
         environment_target: Option<&farhelm_proto::LaunchTarget>,
         current: impl FnOnce() -> Option<(G, HistoryScope)> + Send + 'static,
     ) -> anyhow::Result<bool> {
@@ -9767,7 +9818,7 @@ impl HelmStore {
             // authority must reject obsolete completions after both bounded
             // keys have gone; storage identity alone cannot recognize A-to-B-to-A.
             let launch_changed = (environment_target.is_none() || environment_changed)
-                && record_launch_history(&tx, &create, explicit_selection.as_ref())?;
+                && record_launch_history(&tx, &create, explicit_selection.as_ref(), custom_registration)?;
             // An environment's independent replay key can outlive the original installation. Use the same
             // novelty boundary as its other launcher history so a retained replay cannot promote a repository.
             if scope == HistoryScope::All
@@ -10766,6 +10817,7 @@ mod tests {
                     paths,
                     Some(&repo),
                     Some(&selection),
+                    None,
                     None,
                     || Some(((), HistoryScope::RepositoryOnly)),
                 )
@@ -11978,6 +12030,315 @@ mod tests {
                 .len(),
             1,
             "the associated folder is admitted by the same session boundary"
+        );
+    }
+
+    use std::collections::BTreeMap;
+
+    /// Register a custom agent through the catalog's own write, as Settings
+    /// does, and return the registration that row is.
+    async fn register_custom_agent(
+        store: &HelmStore,
+        id: &str,
+    ) -> crate::custom_agents::Registration {
+        let agent: farhelm_proto::custom_agents::CustomAgent =
+            serde_json::from_value(serde_json::json!({
+                "id": id, "display_name": id, "command": format!("~/bin/{id}"),
+                "supports_reporting": false, "supports_resumption": false,
+            }))
+            .expect("fixture custom agent");
+        store
+            .save_custom_agent(&agent, true)
+            .await
+            .expect("register the custom agent");
+        store
+            .custom_agent(id)
+            .await
+            .expect("read the registration")
+            .expect("just registered")
+            .registration
+    }
+
+    /// Record one successful user launch whose explicit selection is
+    /// `selection`, compiled (for a custom agent) from `registration`, through
+    /// the guarded write production ingress uses.
+    async fn record_explicit_launch(
+        store: &HelmStore,
+        host: HostId,
+        seq: u64,
+        selection: &LaunchSelection,
+        registration: Option<crate::custom_agents::Registration>,
+    ) {
+        let entry = SessionInfo {
+            creation_seq: Some(seq),
+            cwd: format!("/work/{seq}"),
+            ..session(&format!("launch-{seq}"), 100 + i64::try_from(seq).unwrap())
+        };
+        store
+            .record_create_history_with_environment_if_current(
+                host,
+                "identity-a",
+                &admitted_row(host, &entry),
+                HistoryPaths {
+                    canonical_cwd: &entry.cwd,
+                    display_cwd: &entry.cwd,
+                },
+                None,
+                Some(selection),
+                registration,
+                None,
+                || Some(((), HistoryScope::All)),
+            )
+            .await
+            .expect("record the launch");
+    }
+
+    /// A user's selection of `harness` (and, for the custom catalog, the
+    /// registered agent `custom_agent`) launched with `prefix`.
+    fn wrapped_selection(
+        harness: farhelm_proto::LaunchHarness,
+        custom_agent: Option<&str>,
+        prefix: Option<&[&str]>,
+    ) -> LaunchSelection {
+        LaunchSelection {
+            custom_agent: custom_agent.map(str::to_owned),
+            permission_flags: None,
+            harness,
+            model: None,
+            effort: None,
+            permissions: None,
+            wrapper_prefix: prefix
+                .map(|words| words.iter().map(|word| (*word).to_owned()).collect()),
+            container: None,
+            workspace_trust: None,
+        }
+    }
+
+    /// The remembered prefixes the next New reads, per custom agent ID.
+    async fn custom_wrappers(store: &HelmStore) -> BTreeMap<String, Vec<String>> {
+        store
+            .preferences()
+            .await
+            .expect("read preferences")
+            .remembered_custom_wrapper_prefixes
+    }
+
+    /// Spec: a successful launch of a registered custom agent remembers its
+    /// wrapper prefix for that registration alone (an unwrapped launch
+    /// forgets it), and touches neither another custom agent's prefix nor any
+    /// built-in agent type's. A custom launch with no known registration
+    /// remembers nothing.
+    ///
+    /// Why: every custom agent used to share one `custom` slot, so launching
+    /// one custom agent with a wrapper preloaded it for every other, and an
+    /// unwrapped launch of one erased the rest's.
+    #[farhelm_testtrace::test]
+    async fn custom_agent_wrappers_are_remembered_per_registration() {
+        use farhelm_proto::LaunchHarness::{Codex, Custom};
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "custom.example", "identity-a").await;
+        let acme = register_custom_agent(&store, "acme").await;
+        let beta = register_custom_agent(&store, "beta").await;
+        assert_ne!(acme, beta, "two registrations are told apart");
+
+        record_explicit_launch(
+            &store,
+            host,
+            1,
+            &wrapped_selection(Codex, None, Some(&["codex-wrap"])),
+            None,
+        )
+        .await;
+        record_explicit_launch(
+            &store,
+            host,
+            2,
+            &wrapped_selection(Custom, Some("acme"), Some(&["acme-wrap", "--"])),
+            Some(acme),
+        )
+        .await;
+        record_explicit_launch(
+            &store,
+            host,
+            3,
+            &wrapped_selection(Custom, Some("beta"), Some(&["beta-wrap"])),
+            Some(beta),
+        )
+        .await;
+        assert_eq!(
+            custom_wrappers(&store).await,
+            BTreeMap::from([
+                (
+                    "acme".to_owned(),
+                    vec!["acme-wrap".to_owned(), "--".to_owned()]
+                ),
+                ("beta".to_owned(), vec!["beta-wrap".to_owned()]),
+            ]),
+            "each registration keeps its own prefix"
+        );
+
+        record_explicit_launch(
+            &store,
+            host,
+            4,
+            &wrapped_selection(Custom, Some("acme"), None),
+            Some(acme),
+        )
+        .await;
+        let preferences = store.preferences().await.unwrap();
+        assert_eq!(
+            preferences.remembered_custom_wrapper_prefixes,
+            BTreeMap::from([("beta".to_owned(), vec!["beta-wrap".to_owned()])]),
+            "an unwrapped launch forgets only its own registration's prefix"
+        );
+        assert_eq!(
+            preferences.remembered_wrapper_prefixes,
+            BTreeMap::from([(Codex, vec!["codex-wrap".to_owned()])]),
+            "custom launches neither write nor erase a built-in type's prefix"
+        );
+
+        record_explicit_launch(
+            &store,
+            host,
+            5,
+            &wrapped_selection(Custom, Some("beta"), None),
+            None,
+        )
+        .await;
+        assert_eq!(
+            custom_wrappers(&store).await.get("beta"),
+            Some(&vec!["beta-wrap".to_owned()]),
+            "without the registration it was compiled from, a custom launch neither clears nor sets a prefix"
+        );
+    }
+
+    /// Spec: the shared `custom` entry older builds kept in the built-in map is
+    /// ignored: it is not offered for any registration, and the next launch
+    /// rewrites the map without it, while built-in entries beside it stay.
+    ///
+    /// Why: which registration that prefix was for cannot be recovered, so
+    /// offering it to every custom agent would repeat the leak this change
+    /// removes.
+    #[farhelm_testtrace::test]
+    async fn a_legacy_shared_custom_wrapper_is_ignored_and_retired() {
+        use farhelm_proto::LaunchHarness::{Claude, Codex, Custom};
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "legacy.example", "identity-a").await;
+        register_custom_agent(&store, "acme").await;
+        let legacy = serde_json::to_string(&BTreeMap::from([
+            (Custom, vec!["shared-wrap".to_owned()]),
+            (Codex, vec!["codex-wrap".to_owned()]),
+        ]))
+        .unwrap();
+        {
+            let db = store.conn();
+            let conn = db.lock();
+            conn.execute(
+                "INSERT INTO preferences (singleton, remembered_wrapper_prefixes) VALUES (1, ?1)",
+                [&legacy],
+            )
+            .unwrap();
+        }
+        let raw_column = |store: &HelmStore| -> String {
+            let db = store.conn();
+            let conn = db.lock();
+            conn.query_row(
+                "SELECT remembered_wrapper_prefixes FROM preferences WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert!(
+            raw_column(&store).contains("custom"),
+            "premise: the legacy slot is stored"
+        );
+
+        let preferences = store.preferences().await.unwrap();
+        assert_eq!(
+            preferences.remembered_wrapper_prefixes,
+            BTreeMap::from([(Codex, vec!["codex-wrap".to_owned()])]),
+            "the shared slot is not read back"
+        );
+        assert_eq!(preferences.remembered_wrapper(Custom, Some("acme")), None);
+
+        record_explicit_launch(
+            &store,
+            host,
+            1,
+            &wrapped_selection(Claude, None, Some(&["claude-wrap"])),
+            None,
+        )
+        .await;
+        let stored: BTreeMap<farhelm_proto::LaunchHarness, Vec<String>> =
+            serde_json::from_str(&raw_column(&store)).unwrap();
+        assert_eq!(
+            stored,
+            BTreeMap::from([
+                (Codex, vec!["codex-wrap".to_owned()]),
+                (Claude, vec!["claude-wrap".to_owned()]),
+            ]),
+            "the next write drops the shared slot and keeps the built-in entries"
+        );
+    }
+
+    /// Spec: deleting a custom agent forgets its remembered prefix, and a
+    /// launch compiled from a registration that has since been deleted (or
+    /// deleted and registered again under the same ID) writes nothing when it
+    /// succeeds; the new registration starts empty and remembers only its own
+    /// launches.
+    ///
+    /// Why: a launch reports success long after it read the catalog. Without
+    /// the registration fence an old launch would bring a deleted agent's
+    /// prefix back, or hand it to an unrelated agent that reused the ID.
+    #[farhelm_testtrace::test]
+    async fn deleting_a_custom_agent_forgets_its_wrapper_and_fences_late_launches() {
+        use farhelm_proto::LaunchHarness::Custom;
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "delete.example", "identity-a").await;
+        let first = register_custom_agent(&store, "acme").await;
+        let wrapped = |prefix: &[&str]| wrapped_selection(Custom, Some("acme"), Some(prefix));
+        record_explicit_launch(&store, host, 1, &wrapped(&["first-wrap"]), Some(first)).await;
+        assert_eq!(
+            custom_wrappers(&store).await.get("acme"),
+            Some(&vec!["first-wrap".to_owned()]),
+            "premise: the first registration remembers its prefix"
+        );
+
+        store.delete_custom_agent("acme".into()).await.unwrap();
+        assert!(
+            custom_wrappers(&store).await.is_empty(),
+            "Delete forgets the prefix"
+        );
+        record_explicit_launch(&store, host, 2, &wrapped(&["late-wrap"]), Some(first)).await;
+        assert!(
+            custom_wrappers(&store).await.is_empty(),
+            "a launch finishing after Delete writes nothing back"
+        );
+        assert!(
+            store.custom_agent("acme").await.unwrap().is_none(),
+            "nor recreates the row"
+        );
+
+        let second = register_custom_agent(&store, "acme").await;
+        assert_ne!(
+            first, second,
+            "a re-registration under the same ID is a new registration"
+        );
+        assert!(
+            custom_wrappers(&store).await.is_empty(),
+            "the new registration starts empty"
+        );
+        record_explicit_launch(&store, host, 3, &wrapped(&["stale-wrap"]), Some(first)).await;
+        assert!(
+            custom_wrappers(&store).await.is_empty(),
+            "the old registration's launch cannot write onto the new one"
+        );
+        record_explicit_launch(&store, host, 4, &wrapped(&["second-wrap"]), Some(second)).await;
+        assert_eq!(
+            custom_wrappers(&store).await.get("acme"),
+            Some(&vec!["second-wrap".to_owned()]),
+            "the new registration remembers its own launches"
         );
     }
 
@@ -14641,6 +15002,7 @@ mod tests {
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
+                remembered_custom_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
@@ -14692,6 +15054,7 @@ mod tests {
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
+                remembered_custom_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
@@ -14742,6 +15105,7 @@ mod tests {
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
+                remembered_custom_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
@@ -14841,6 +15205,7 @@ mod tests {
                 visit_history: Vec::new(),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
+                remembered_custom_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
@@ -19166,6 +19531,7 @@ mod tests {
                 visit_history: Vec::new(),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
+                remembered_custom_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: None,
                 skip_host_setup_confirmation: None,
@@ -19267,6 +19633,7 @@ mod tests {
                 visit_history: Vec::new(),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
+                remembered_custom_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: None,
                 skip_host_setup_confirmation: None,

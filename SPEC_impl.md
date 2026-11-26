@@ -5255,6 +5255,20 @@ launch replaces or clears its own agent type's entry in the same transaction tha
 prefix removes that entry. Agent-origin launches and command launches leave the map alone. An older helm refuses this
 schema.
 
+Helm schema 103 keeps a custom agent's remembered wrapper prefix on its catalog row
+(`custom_agents.remembered_wrapper_prefix`) rather than in that map, whose one `custom` key every registration shared. A
+launch of a custom agent writes only that registration's prefix, in the same transaction that records the launch, and
+leaves the built-in entries alone; the helm drops a legacy `custom` key when it reads the map and when it next writes
+it, because the registration it belonged to cannot be recovered. The preferences projection lists the rows' prefixes as
+`remembered_custom_wrapper_prefixes`, keyed by ID. The write is fenced on the registration the launch was compiled from:
+the migration rebuilds the catalog with an `AUTOINCREMENT` `registration_seq` (existing rows numbered in ID order, none
+remembering a prefix), the helm reads it with the definition when it compiles the launch, and the update matches both
+the ID and that number. Deleting the row drops its prefix; a launch that finishes after its agent was deleted, or
+deleted and registered again under the same ID, updates nothing. Motivation: the ID alone cannot tell a re-registration
+from the original, `created_at` has one-second resolution, and SQLite reuses a plain rowid once the largest row is
+deleted. A lost-reply acceptance of a fresh-checkout create compiles nothing, so it remembers no custom agent prefix. An
+older helm refuses this schema.
+
 Helm schema 66 adds `preferences.visit_history`, a JSON list of at most 32 full session references, newest first without
 duplicates. Each non-null `last_selected` write prepends its reference, removes its previous occurrence and caps the
 list in the same database transaction as the sparse preference write. Null clears both selection and visits; omission
@@ -9204,11 +9218,12 @@ Restart with, clone and replace, inheritance, the YOLO guard and mark, and the i
 
 #### Custom agents
 
-Helm schema 100 stores user registrations in `custom_agents`, a strict table keyed by immutable `id` with serialized
-definition and creation and update timestamps. Authenticated CRUD under `/api/custom-agents` updates the pushed
-`Collection::CustomAgents`. The desktop uses it for the editor and the registered agent's current name. The ID travels
-with the launch selection and a template may store it as part of its agent choice. The same JSON string representation
-covers built-in effort levels and custom text.
+Helm schema 100 stores user registrations in `custom_agents`, a strict table with a unique, immutable `id`, serialized
+definition and creation and update timestamps. Since schema 103 its key is `registration_seq`, a registration number
+that is never reused, so a registration deleted and made again under the same `id` is a different row. Authenticated
+CRUD under `/api/custom-agents` updates the pushed `Collection::CustomAgents`. The desktop uses it for the editor and
+the registered agent's current name. The ID travels with the launch selection and a template may store it as part of its
+agent choice. The same JSON string representation covers built-in effort levels and custom text.
 
 `LaunchHarness::Custom` compiles a registered agent once at launch admission, composing literal argv with its optional
 model and effort. A named start takes the one-time `AgentVerb::Create.conversation` selector and the same resume flag as

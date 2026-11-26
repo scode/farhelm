@@ -790,10 +790,22 @@ pub struct Preferences {
     /// to a client that could not act on it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remembered_permissions: Option<String>,
-    /// Last explicitly launched prefix for each agent type. An absent key
-    /// means New should start without a wrapper for that type.
+    /// Last explicitly launched prefix for each built-in agent type. An absent
+    /// key means New should start without a wrapper for that type. Custom
+    /// agents never appear here: one key cannot say which registration a
+    /// prefix belongs to, so they use
+    /// [`Self::remembered_custom_wrapper_prefixes`] instead, and the helm
+    /// drops a legacy shared custom entry when it reads this map.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub remembered_wrapper_prefixes: std::collections::BTreeMap<crate::LaunchHarness, Vec<String>>,
+    /// Last explicitly launched prefix for each registered custom agent, keyed
+    /// by its catalog ID. An absent key means that registration starts without
+    /// a wrapper. The helm keeps each prefix with its registration, so a
+    /// deleted agent's entry disappears with it and a new registration under
+    /// the same ID starts empty. Read both maps through
+    /// [`Self::remembered_wrapper`] rather than picking one by hand.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub remembered_custom_wrapper_prefixes: std::collections::BTreeMap<String, Vec<String>>,
     /// Retired wire field. Reads are always unset; the historical database
     /// column is retained, but trust now comes from managed-checkout Settings.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -871,6 +883,28 @@ pub struct Preferences {
     /// Play a sound when a host asks for SSH sign-in. Unset means on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sound_ssh_sign_in: Option<bool>,
+}
+
+impl Preferences {
+    /// The wrapper prefix New loads for an agent choice: the built-in type's
+    /// entry, or, for a custom agent, the entry of the registration
+    /// `custom_agent` names. A custom choice with no registration selected
+    /// has no remembered prefix, because nothing says whose it would be.
+    pub fn remembered_wrapper(
+        &self,
+        harness: crate::LaunchHarness,
+        custom_agent: Option<&str>,
+    ) -> Option<&[String]> {
+        if harness.uses_custom_catalog() {
+            custom_agent
+                .and_then(|id| self.remembered_custom_wrapper_prefixes.get(id))
+                .map(Vec::as_slice)
+        } else {
+            self.remembered_wrapper_prefixes
+                .get(&harness)
+                .map(Vec::as_slice)
+        }
+    }
 }
 
 /// The widths [`Preferences::sidebar_width`] may hold, in logical pixels

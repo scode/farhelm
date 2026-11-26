@@ -52,7 +52,7 @@ async fn a_recipe_create_carries_the_admitted_custom_agent_snapshot() {
         "the current definition no longer supports a named start"
     );
     assert!(matches!(request.origin(), super::CreateOrigin::User));
-    let admitted = super::create_mode(&h.store, &mut request).await.unwrap();
+    let (admitted, _) = super::create_mode(&h.store, &mut request).await.unwrap();
     assert_eq!(
         admitted.start_argv().unwrap(),
         ["first-agent", "--model", "sparse", "{farhelm_args}"]
@@ -102,6 +102,7 @@ mod captured_create_history {
                 container: None,
                 workspace_trust: None,
             }),
+            custom_registration: None,
         }
     }
 
@@ -163,6 +164,7 @@ mod captured_create_history {
                 wrapper_approved: false,
             },
             explicit_selection: None,
+            custom_registration: None,
             ..intent("agent-recipe", host, false)
         };
         let session = rest_harness::session("agent-created", 100);
@@ -180,6 +182,7 @@ mod captured_create_history {
         let session = rest_harness::session("user-created", 101);
         let raw_user = CreateAcceptance {
             explicit_selection: None,
+            custom_registration: None,
             ..intent("user-recipe", host, false)
         };
         assert!(
@@ -592,6 +595,7 @@ async fn only_user_checkouts_teach_global_repository_history() {
                     requested_cwd: String::new(),
                     accept_result: None,
                     explicit_selection: None,
+                    custom_registration: None,
                 },
             )
             .await
@@ -1558,6 +1562,136 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
     assert_eq!(history["folders"][0]["canonical_cwd"], "/srv/repo/project");
     assert_eq!(history["folders"][0]["canonical_proven"], true);
     peer.await.expect("join scripted supervisor");
+}
+
+/// Spec: an ordinary client create of a registered custom agent with a
+/// wrapper remembers that wrapper for that agent's registration alone, and a
+/// create of another custom agent without one leaves the first agent's
+/// wrapper as it was (the store tests cover clearing an agent's own).
+///
+/// Why: the registration that fences the write is read when the launch
+/// compiles and must travel through the create pipeline to the history
+/// transaction. The store tests hand it in directly, so only a request driven
+/// through `POST /api/sessions` shows that a client create still carries it;
+/// dropping it anywhere on the way would silently stop custom agents from
+/// remembering anything.
+#[farhelm_testtrace::test]
+async fn a_custom_agent_create_remembers_its_wrapper_for_that_registration() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .expect("complete supervisor handshake");
+        for (seq, id) in [(1, "acme-session"), (2, "beta-session")] {
+            let request = parse_control(
+                &reader
+                    .read_frame()
+                    .await
+                    .expect("read create frame")
+                    .expect("create frame present"),
+            )
+            .expect("decode create frame");
+            let ControlMsg::CreateSession { req_id, .. } = request else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            // The reply's launch is the host's account, which never shapes
+            // remembered settings; a plain command keeps that obvious.
+            writer
+                .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session: SessionInfo {
+                        persistent_hook_setup: Default::default(),
+                        terminal_missing: false,
+                        screen_yolo: false,
+                        claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
+                        agent_kind: farhelm_proto::AgentKind::Generic,
+                        parent: None,
+                        id: id.into(),
+                        title: id.into(),
+                        created_at: 1_700_000_000,
+                        last_activity_at: 1_700_000_000,
+                        last_work_started_at: 0,
+                        creation_seq: Some(seq),
+                        cwd: "/work".into(),
+                        canonical_cwd: None,
+                        invocation: "custom".into(),
+                        launch: farhelm_proto::SessionLaunch::plain_command("custom"),
+                        status: farhelm_proto::SessionStatus::Unknown,
+                        annotation: None,
+                        restart_offer: farhelm_proto::RestartOffer::default(),
+                        tabs: Vec::new(),
+                        github_repo: None,
+                        working_copy: None,
+                        notifications: Vec::new(),
+                    },
+                }))
+                .await
+                .expect("reply to create");
+        }
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    // A custom agent launches as YOLO and the fixture's host asks first; that
+    // guard is not what this test is about (see `yolo_guard`'s own tests).
+    allow_yolo_here(&harness.store).await;
+    for id in ["acme-code", "beta-code"] {
+        let (status, body) = post_text(
+            &harness,
+            "/api/custom-agents",
+            serde_json::json!({
+                "id": id, "display_name": id, "command": id,
+                "supports_resumption": false, "supports_reporting": false
+            }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::CREATED, "{body}");
+    }
+    let create = |agent: &str, wrapper: serde_json::Value| {
+        serde_json::json!({
+            "cwd": "/work",
+            "launch": { "harness": "custom", "custom_agent": agent, "wrapper_prefix": wrapper },
+        })
+    };
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions",
+        create("acme-code", serde_json::json!(["acme-env", "--"])),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let (_, preferences) = get_json(&harness, "/api/preferences").await;
+    assert_eq!(
+        preferences["remembered_custom_wrapper_prefixes"],
+        serde_json::json!({ "acme-code": ["acme-env", "--"] }),
+        "the create remembers its wrapper for its own registration"
+    );
+    assert_eq!(
+        preferences.get("remembered_wrapper_prefixes"),
+        None,
+        "and never in the built-in map"
+    );
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions",
+        create("beta-code", serde_json::Value::Null),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let (_, preferences) = get_json(&harness, "/api/preferences").await;
+    assert_eq!(
+        preferences["remembered_custom_wrapper_prefixes"],
+        serde_json::json!({ "acme-code": ["acme-env", "--"] }),
+        "an unwrapped launch of another agent leaves acme-code's prefix alone"
+    );
+    peer.await.expect("scripted supervisor finished");
 }
 
 /// A successful STRUCTURED launch is the only kind that may move the
@@ -9689,6 +9823,7 @@ async fn a_create_with_another_entries_suffix_returns_its_own_prefix() {
                     requested_cwd: "/work".into(),
                     accept_result: None,
                     explicit_selection: None,
+                    custom_registration: None,
                 },
             )
             .await

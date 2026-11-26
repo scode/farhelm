@@ -17,13 +17,61 @@ use rusqlite::OptionalExtension as _;
 
 use crate::{AppState, SupervisorError, http_error, store::HelmStore};
 
-/// Shared by the fresh schema and the migration so both admit the same catalog rows.
-pub(crate) const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS custom_agents (
+/// The catalog as schema 100 created it, which the step to schema 100 still creates so that the later
+/// rebuild ([`migrate_registration_seq`]) runs on the shape every older database has.
+pub(crate) const SCHEMA_V100: &str = "CREATE TABLE IF NOT EXISTS custom_agents (
     id TEXT PRIMARY KEY,
     spec_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 ) STRICT;";
+
+/// The current catalog, for the fresh schema and the rebuild in [`migrate_registration_seq`].
+///
+/// `registration_seq` tells registrations apart when an ID is deleted and registered again. It is
+/// `AUTOINCREMENT` because only that keeps SQLite from handing a deleted row's number to the next one
+/// (a plain rowid is reused once the largest row is gone), and `created_at` has one-second
+/// resolution, so neither the ID nor a timestamp can prove a launch came from the row that is there
+/// now. `remembered_wrapper_prefix` is the JSON word list of this registration's last explicitly
+/// launched wrapper, or NULL for none; keeping it on the row means deleting the registration drops
+/// it in the same statement.
+pub(crate) const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS custom_agents (
+    registration_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    spec_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    remembered_wrapper_prefix TEXT
+) STRICT;";
+
+/// Which catalog row a launch was compiled from: the row's `registration_seq`.
+///
+/// A launch can take minutes between reading its registration and reporting success, and in
+/// between the user may delete that agent or delete it and register the same ID again. Memory the
+/// launch writes on success is fenced on this value, so it lands only on the registration the
+/// launch actually used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Registration(pub(crate) i64);
+
+/// A catalog entry together with the registration it belongs to.
+pub(crate) struct RegisteredAgent {
+    pub(crate) agent: CustomAgent,
+    pub(crate) registration: Registration,
+}
+
+/// Rebuild schema 102's catalog into [`SCHEMA`]'s shape, keeping every row's ID, definition and
+/// timestamps. Existing rows are numbered in ID order and start with no remembered wrapper: the
+/// shared custom-agent wrapper they had before cannot be attributed to any one of them.
+pub(crate) fn migrate_registration_seq(tx: &rusqlite::Transaction<'_>) -> anyhow::Result<()> {
+    tx.execute_batch(&format!(
+        "ALTER TABLE custom_agents RENAME TO custom_agents_v102;
+         {SCHEMA}
+         INSERT INTO custom_agents (id, spec_json, created_at, updated_at)
+             SELECT id, spec_json, created_at, updated_at FROM custom_agents_v102 ORDER BY id;
+         DROP TABLE custom_agents_v102;"
+    ))
+    .context("adding custom agent registration numbers")
+}
 
 impl HelmStore {
     /// Read one ordered catalog snapshot without contacting any launch host. The UI channel can project it on any
@@ -39,20 +87,25 @@ impl HelmStore {
             .await
     }
 
-    /// Take the capabilities and command for one launch from the same row, before the helm builds either argv.
-    pub(crate) async fn custom_agent(&self, id: &str) -> anyhow::Result<Option<CustomAgent>> {
+    /// Take the capabilities and command for one launch from the same row, before the helm builds either argv,
+    /// with the registration that row is, so that what the launch later remembers can be fenced on it.
+    pub(crate) async fn custom_agent(&self, id: &str) -> anyhow::Result<Option<RegisteredAgent>> {
         let id = id.to_owned();
         self.conn()
             .call("reading a custom agent", move |conn| {
-                let spec: Option<String> = conn
+                let row: Option<(String, i64)> = conn
                     .query_row(
-                        "SELECT spec_json FROM custom_agents WHERE id = ?1",
+                        "SELECT spec_json, registration_seq FROM custom_agents WHERE id = ?1",
                         [&id],
-                        |row| row.get(0),
+                        |row| Ok((row.get(0)?, row.get(1)?)),
                     )
                     .optional()?;
-                spec.map(|json| {
-                    serde_json::from_str(&json).context("decoding a saved custom agent")
+                row.map(|(json, seq)| {
+                    Ok(RegisteredAgent {
+                        agent: serde_json::from_str(&json)
+                            .context("decoding a saved custom agent")?,
+                        registration: Registration(seq),
+                    })
                 })
                 .transpose()
             })
@@ -61,7 +114,11 @@ impl HelmStore {
 
     /// Apply a valid definition in one SQL statement. Create refuses an existing ID. Save refuses to recreate a
     /// deleted registration, so an open editor cannot put it back after another writer removes it.
-    async fn save_custom_agent(&self, agent: &CustomAgent, create: bool) -> anyhow::Result<()> {
+    pub(crate) async fn save_custom_agent(
+        &self,
+        agent: &CustomAgent,
+        create: bool,
+    ) -> anyhow::Result<()> {
         agent
             .validate()
             .map_err(|reason| crate::sessions::invalid_request(reason.into()))?;
@@ -92,8 +149,9 @@ impl HelmStore {
         })
     }
 
-    /// Drop only the registration. Templates and sessions can continue showing its stable ID.
-    async fn delete_custom_agent(&self, id: String) -> anyhow::Result<()> {
+    /// Drop only the registration, and with it the wrapper prefix it remembers, since both live on its row.
+    /// Templates and sessions can continue showing its stable ID.
+    pub(crate) async fn delete_custom_agent(&self, id: String) -> anyhow::Result<()> {
         let changed = self
             .conn()
             .call("deleting a custom agent", move |conn| {
@@ -106,6 +164,54 @@ impl HelmStore {
             Ok(())
         }
     }
+}
+
+/// Every registration's remembered wrapper prefix, keyed by ID, for the shared preferences projection.
+/// Registrations without one, or whose stored prefix does not decode, are left out, which the GUI reads as "start
+/// without a wrapper".
+pub(crate) fn remembered_wrapper_prefixes(
+    conn: &rusqlite::Connection,
+) -> anyhow::Result<std::collections::BTreeMap<String, Vec<String>>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, remembered_wrapper_prefix FROM custom_agents
+         WHERE remembered_wrapper_prefix IS NOT NULL ORDER BY id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut prefixes = std::collections::BTreeMap::new();
+    for row in rows {
+        let (id, json) = row?;
+        // Only the helm writes this column, but it is a convenience: one entry that does not decode reads as "no
+        // remembered prefix" rather than failing the whole preferences read, which tunnels, updates and approvals
+        // also depend on.
+        if let Ok(prefix) = serde_json::from_str(&json) {
+            prefixes.insert(id, prefix);
+        }
+    }
+    Ok(prefixes)
+}
+
+/// Remember `prefix` (or, for `None`, no wrapper) as the last explicitly launched wrapper of the registration
+/// a successful launch was compiled from, inside the caller's history transaction.
+///
+/// The update is fenced on both the ID and `registration`, so a launch whose agent was deleted while it ran
+/// writes nothing, and one whose agent was deleted and registered again under the same ID cannot hand its
+/// prefix to the new registration. Neither is an error: the memory is a convenience for the next New.
+pub(crate) fn remember_wrapper_prefix(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    registration: Registration,
+    prefix: Option<&[String]>,
+) -> anyhow::Result<()> {
+    let json = prefix.map(serde_json::to_string).transpose()?;
+    tx.execute(
+        "UPDATE custom_agents SET remembered_wrapper_prefix = ?1
+         WHERE id = ?2 AND registration_seq = ?3",
+        rusqlite::params![json, id, registration.0],
+    )
+    .context("remembering a custom agent's wrapper prefix")?;
+    Ok(())
 }
 
 /// Report a registration that disappeared before a catalog edit or deletion, or between a launch's
@@ -322,6 +428,95 @@ mod tests {
             StatusCode::NOT_FOUND
         );
         assert!(h.store.custom_agents().await.unwrap().is_empty());
+    }
+
+    /// Spec: opening a schema 102 database keeps every registered agent's ID, definition and timestamps, numbers
+    /// the registrations in ID order with nothing remembered yet, and never hands a deleted registration's number to
+    /// a later one, even when the deleted one had the largest.
+    ///
+    /// Why: the number is what fences a launch's remembered wrapper to the registration it ran from, so a reused
+    /// number would let a late launch of a deleted agent write onto a new agent registered under the same ID.
+    #[farhelm_testtrace::test]
+    async fn schema_102_numbers_registrations_that_are_never_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open_fixture(&path).await.unwrap();
+        {
+            let db = store.conn();
+            let conn = db.lock();
+            conn.execute_batch(&format!(
+                "DROP TABLE custom_agents;
+                 {SCHEMA_V100}
+                 INSERT INTO custom_agents (id, spec_json, created_at, updated_at) VALUES
+                     ('zeta', '{{\"id\":\"zeta\",\"display_name\":\"Zeta\",\"command\":\"zeta\",\"supports_reporting\":false,\"supports_resumption\":false}}', 5, 6),
+                     ('acme', '{{\"id\":\"acme\",\"display_name\":\"Acme\",\"command\":\"acme\",\"supports_reporting\":true,\"supports_resumption\":false}}', 7, 8);
+                 PRAGMA user_version = 102;"
+            ))
+            .unwrap();
+            let (version, numbered): (i64, bool) = conn
+                .query_row(
+                    "SELECT (SELECT user_version FROM pragma_user_version),
+                            EXISTS (SELECT 1 FROM pragma_table_info('custom_agents')
+                                    WHERE name = 'registration_seq')",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                (version, numbered),
+                (102, false),
+                "premise: a schema 102 catalog"
+            );
+        }
+        drop(store);
+        let reopened = HelmStore::open_fixture(&path).await.unwrap();
+        let ids: Vec<String> = reopened
+            .custom_agents()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|agent| agent.id)
+            .collect();
+        assert_eq!(ids, ["acme", "zeta"], "every registration survives");
+        let rows: Vec<(i64, String, i64, i64)> = {
+            let db = reopened.conn();
+            let conn = db.lock();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT registration_seq, id, created_at, updated_at FROM custom_agents
+                     WHERE remembered_wrapper_prefix IS NULL ORDER BY registration_seq",
+                )
+                .unwrap();
+            stmt.query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+        };
+        assert_eq!(
+            rows,
+            [(1, "acme".to_owned(), 7, 8), (2, "zeta".to_owned(), 5, 6)],
+            "numbered in ID order, timestamps kept, nothing remembered"
+        );
+
+        reopened.delete_custom_agent("zeta".into()).await.unwrap();
+        let agent: CustomAgent =
+            serde_json::from_value(json!({"id":"zeta", "display_name":"Zeta again",
+            "command":"zeta", "supports_reporting":false, "supports_resumption":false}))
+            .unwrap();
+        reopened.save_custom_agent(&agent, true).await.unwrap();
+        let again = reopened
+            .custom_agent("zeta")
+            .await
+            .unwrap()
+            .unwrap()
+            .registration;
+        assert_eq!(
+            again,
+            Registration(3),
+            "the deleted largest number is not handed out again"
+        );
     }
 
     /// Opening yesterday's database creates the catalog without rewriting its pre-existing tables.
