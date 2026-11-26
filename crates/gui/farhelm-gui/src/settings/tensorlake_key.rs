@@ -109,7 +109,8 @@ fn test_message(result: TestResult) -> String {
 /// value than the answer before it. That is why taking an answer whole is safe here, where the old form, whose requests
 /// could overtake each other, copied only the field its control owned.
 pub(super) struct TensorlakeAccount {
-    /// The helm's settings: the read's answer, then each done save's. `None` until the read answers.
+    /// The helm's settings: the read's answer, then each done save's. `None` until the read answers, and again after a
+    /// done Save or Clear of the key whose answer did not decode, until the read that follows it answers.
     settings: Option<Settings>,
     /// Why the last read failed, until a read answers.
     unreadable: Option<HostText>,
@@ -130,13 +131,15 @@ impl TensorlakeAccount {
         }
     }
 
-    /// The helm's settings as last answered; `None` until the read answers, and while it keeps failing.
+    /// The helm's settings as last answered; `None` until the read answers, while it keeps failing, and after a key
+    /// save whose answer did not decode until the account is read again.
     pub(super) fn settings(&self) -> Option<&Settings> {
         self.settings.as_ref()
     }
 
-    /// Whether the helm has an API key saved, once the account has been read: `None` before then and while the read
-    /// failed, which each form treats in its own way (the key form stays locked; Recipes counts no key).
+    /// Whether the helm has an API key saved, once the account has been read: `None` before then, while the read failed,
+    /// and while a key save whose answer did not decode is being read again, which each form treats in its own way (the
+    /// key form stays locked; Recipes counts no key).
     pub(super) fn key_set(&self) -> Option<bool> {
         self.settings.as_ref().map(|settings| settings.api_key_set)
     }
@@ -151,9 +154,10 @@ impl TensorlakeAccount {
         self.unreadable.as_ref()
     }
 
-    /// Read the account again: Retry loading after a failed read, and the SSH key group after a Create SSH key the helm
-    /// did not answer as done, whose key may still be on its way ([`super::tensorlake_ssh_key`]). Until the read answers,
-    /// what the account showed stays shown.
+    /// Read the account again: Retry loading after a failed read, the SSH key group after a Create SSH key the helm did
+    /// not answer as done, whose key may still be on its way ([`super::tensorlake_ssh_key`]), and a key save whose answer
+    /// did not decode ([`TensorlakeAccount::key_saved`]). Until the read answers, what the account showed stays shown,
+    /// except after that key save, which forgets the settings first.
     pub(super) fn read_again(&mut self, cx: &mut Context<Self>) {
         self.unreadable = None;
         Self::read(cx);
@@ -189,20 +193,38 @@ impl TensorlakeAccount {
         self.take_answer(body, cx);
     }
 
-    /// A done Save or Clear of the key answered with `body`: [`TensorlakeAccount::acknowledged`], and one more key save
-    /// counted.
+    /// A done Save or Clear of the key answered with `body`: one more key save counted, then the helm's settings
+    /// taken whole, or, when they do not decode, forgotten and read again.
+    ///
+    /// Unlike [`TensorlakeAccount::acknowledged`], an answer that does not decode forgets the settings until that read
+    /// answers, and says so at once. The key changed, so what the account held describes the previous key, and the
+    /// list of Sandboxes not on this helm must stop offering that key's rows now, not when the read answers
+    /// ([`super::tensorlake_sandboxes`]). Every control the account locks while it is unread is locked for that read
+    /// too, and a load error left from an earlier failed read is dropped with it ([`TensorlakeAccount::read_again`]).
     fn key_saved(&mut self, body: Option<serde_json::Value>, cx: &mut Context<Self>) {
         self.key_saves += 1;
-        self.take_answer(body, cx);
+        match decoded(body) {
+            Some(settings) => self.answered(Ok(settings), cx),
+            None => {
+                self.settings = None;
+                self.read_again(cx);
+            }
+        }
     }
 
     /// [`TensorlakeAccount::acknowledged`]'s work.
     fn take_answer(&mut self, body: Option<serde_json::Value>, cx: &mut Context<Self>) {
-        match body.map(serde_json::from_value::<Settings>) {
-            Some(Ok(settings)) => self.answered(Ok(settings), cx),
-            Some(Err(_)) | None => Self::read(cx),
+        match decoded(body) {
+            Some(settings) => self.answered(Ok(settings), cx),
+            None => Self::read(cx),
         }
     }
+}
+
+/// The settings a done save answered with, or `None` when it answered with none or with something that does not
+/// decode as them.
+fn decoded(body: Option<serde_json::Value>) -> Option<Settings> {
+    body.and_then(|body| serde_json::from_value(body).ok())
 }
 
 // ---- The form -----------------------------------------------------------------------------------------------------
