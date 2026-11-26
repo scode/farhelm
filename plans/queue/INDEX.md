@@ -7,7 +7,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `custom-agent-per-reg-wrappers.md` — Remember command wrapper defaults per custom agent registration
 - [in-flight c93efa] `custom-agent-delete-prompt.md` — Port Settings custom-agent Delete to the shared inline confirmation prompt
 - [in-flight e425a3] `tensorlake-sandbox-key-consent.md` — Bind Settings leftover-sandbox Delete confirmation and list to the active Tensorlake key
-- [pending] `launcher-visible-consent.md` — Lock host and destination in Replace with and record launcher list Enter visibility rule
+- [in-flight e6d1f9] `launcher-visible-consent.md` — Lock host and destination in Replace with and record launcher list Enter visibility rule
 - [pending] `launcher-late-wake-failures.md` — Report request-tagged late wake failures for suspended sandboxes and stopped containers
 - [pending] `podman-host-verification.md` — Verify container host identity with cheap sanity checks and record concurrent SSH config policy
 - [pending] `podman-recipe-admission.md` — Report pre-admission container recipe Rebuild failures without creating empty build records (after `podman-host-verification.md`)
