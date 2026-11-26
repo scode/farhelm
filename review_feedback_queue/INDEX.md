@@ -155,18 +155,6 @@ consequences.
   Duplicate clicked just after switching templates can act on the newly opened template, writing automatic updates into
   an older template the user never saw (pre-existing).
 
-- [`trailing-host-setup-frozen-skip-ignores-later-restore.md`](trailing-host-setup-frozen-skip-ignores-later-restore.md)
-  — Turning "Set up new hosts without asking" off while a host check is running no longer brings back the setup
-  confirmation for that attempt.
-
-- [`trailing-tensorlake-rerun-reads-skip-setting-late.md`](trailing-tensorlake-rerun-reads-skip-setting-late.md) —
-  Tensorlake Re-run reads "Create Tensorlake sandboxes without asking" after the plan arrives, so turning it on during
-  the check skips the billed-creation confirmation.
-
-- [`trailing-host-refusal-remove-reads-live-skip.md`](trailing-host-refusal-remove-reads-live-skip.md) — Remove in the
-  host refusal dialog reads "Remove hosts without asking" at the press, so a just-changed setting can forget the host
-  without the confirmation the dialog implied.
-
 - [`trailing-spec-impl-custom-agent-id-letter.md`](trailing-spec-impl-custom-agent-id-letter.md) — SPEC_impl.md says
   registered custom agent IDs start with a letter, but they may start with a digit.
 

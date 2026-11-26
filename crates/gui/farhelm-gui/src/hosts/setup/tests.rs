@@ -74,9 +74,9 @@ fn preferences(on: bool) -> CollectionState {
 }
 
 /// Apply a preference change from elsewhere while the original probe is still outstanding.
-fn turn_on_skip_after_probe(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
-    assert!(cx.update(|_, cx| super::asks_first(cx)));
-    let preference = preferences(true);
+fn change_skip_after_probe(helm: &mut FakeHelm, cx: &mut VisualTestContext, skip: bool) {
+    assert_eq!(cx.update(|_, cx| super::asks_first(cx)), skip);
+    let preference = preferences(skip);
     helm.push(CollectionChanges {
         collection: preference.collection,
         meta: preference.meta,
@@ -84,7 +84,7 @@ fn turn_on_skip_after_probe(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
         remove: Vec::new(),
     });
     settle(cx);
-    assert!(!cx.update(|_, cx| super::asks_first(cx)));
+    assert_eq!(cx.update(|_, cx| super::asks_first(cx)), !skip);
 }
 
 /// Offer setup for a Tailscale draft so a refused setup has to restore the route along with its text fields.
@@ -236,7 +236,7 @@ fn a_plan_opens_the_setup_confirmation_in_place_of_add_host(cx: &mut TestAppCont
     type_text(cx, "dev@newbox");
     click(cx, "add-host-submit");
     let (probe, _) = one_probe(&mut helm);
-    turn_on_skip_after_probe(&mut helm, cx);
+    change_skip_after_probe(&mut helm, cx, true);
     helm.reply(probe, 200, Some(plan_reply()));
     settle(cx);
     assert_eq!(
@@ -273,6 +273,28 @@ fn a_plan_opens_the_setup_confirmation_in_place_of_add_host(cx: &mut TestAppCont
     assert_eq!(answers, ["Cancel", "Set up, don't ask again", "Set up"]);
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
     assert_eq!(helm.commands(), [], "nothing was sent before an answer");
+}
+
+/// Restoring the question while Add is checking the host takes effect before installation can start.
+#[gpui::test]
+fn add_asks_when_setup_confirmation_is_restored_during_the_probe(cx: &mut TestAppContext) {
+    let (mut helm, cx, _add) = open_rail_with(cx, vec![preferences(true)]);
+    assert!(!cx.update(|_, cx| super::asks_first(cx)));
+    open_dialog(cx);
+    type_text(cx, "dev@newbox");
+    click(cx, "add-host-submit");
+    let (probe, _) = one_probe(&mut helm);
+    change_skip_after_probe(&mut helm, cx, false);
+    helm.reply(probe, 200, Some(plan_reply()));
+    settle(cx);
+    assert_eq!(
+        label(cx, "prompt").as_deref(),
+        Some("Set up host · dev@newbox")
+    );
+    assert!(
+        helm.commands().is_empty(),
+        "installation waits for an answer"
+    );
 }
 
 /// Whether Add host's destination field is drawn, and what it holds.
@@ -839,7 +861,7 @@ fn remove_starts_during_host_setup_sign_in_and_defers_ready_replay(cx: &mut Test
 /// paths (none) and no new entry, under the host's key, while the row reads "Setting up…"; the plan opens "Set up host
 /// · build-box" with focus on Set up; Set up sends `POST /api/hosts/provision` for `p-1` under the host's key, focus
 /// returns to the row's toggle, and a refusal of it shows under the row with nothing opened.
-/// The prompt uses the preference at Re-run, even if a preferences push turns on skipping while the probe is out.
+/// The preference in the Re-run frame can require a question even if skipping is enabled while the probe is out.
 #[gpui::test]
 fn re_run_probes_the_registered_destination_and_sets_up_under_the_hosts_key(
     cx: &mut TestAppContext,
@@ -864,7 +886,7 @@ fn re_run_probes_the_registered_destination_and_sets_up_under_the_hosts_key(
     assert_eq!(work(&key, cx), Some(Work::Probe));
     assert_eq!(label(cx, "host-status-2").as_deref(), Some("Setting up…"));
 
-    turn_on_skip_after_probe(&mut helm, cx);
+    change_skip_after_probe(&mut helm, cx, true);
     helm.reply(probe, 200, Some(plan_reply()));
     settle(cx);
     assert_eq!(
@@ -883,6 +905,25 @@ fn re_run_probes_the_registered_destination_and_sets_up_under_the_hosts_key(
     settle(cx);
     assert_eq!(label(cx, "host-error-2").as_deref(), Some(USED));
     assert!(!any_open(cx), "a rerun's refusal opens nothing");
+}
+
+/// Restoring the question during Re-run takes effect before the held plan can install on a registered host.
+#[gpui::test]
+fn rerun_asks_when_setup_confirmation_is_restored_during_the_probe(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel_with_a_failed_setup(cx, true);
+    assert!(!cx.update(|_, cx| super::asks_first(cx)));
+    let probe = choose_rerun(&mut helm, cx);
+    change_skip_after_probe(&mut helm, cx, false);
+    helm.reply(probe, 200, Some(plan_reply()));
+    settle(cx);
+    assert_eq!(
+        label(cx, "prompt").as_deref(),
+        Some("Set up host · build-box")
+    );
+    assert!(
+        helm.commands().is_empty(),
+        "installation waits for an answer"
+    );
 }
 
 /// The rerun's probe can find the host is now a manual install, and its answer outlives the menu that asked, so it has
@@ -938,13 +979,25 @@ fn a_refused_tensorlake_setup_rerun_keeps_the_failed_progress(cx: &mut TestAppCo
 
     click(cx, "host-menu-toggle-2");
     click(cx, "host-menu-rerun");
-    let (probe, body) = one_probe(&mut helm);
+    let sent = helm.commands();
+    let [read, probe] = sent.as_slice() else {
+        panic!("expected the press-time account read and the probe: {sent:?}");
+    };
     assert_eq!(
-        body,
-        json!({ "target": { "kind": "tensorlake-host", "host": 2 } })
+        (read.method, read.path.as_str()),
+        (Method::Get, "/api/tensorlake")
     );
+    assert_eq!(
+        (probe.method, probe.path.as_str()),
+        (Method::Post, "/api/hosts/probe")
+    );
+    assert_eq!(
+        probe.body.as_ref(),
+        Some(&json!({ "target": { "kind": "tensorlake-host", "host": 2 } }))
+    );
+    helm.reply(read.id, 500, Some(json!("account unavailable")));
     let reason = "this host's Tensorlake sandbox is suspended, so Farhelm cannot reach it; resume the sandbox first, then try again";
-    helm.reply(probe, 409, Some(json!(reason)));
+    helm.reply(probe.id, 409, Some(json!(reason)));
     settle(cx);
 
     assert_eq!(label(cx, "host-error-2").as_deref(), Some(reason));

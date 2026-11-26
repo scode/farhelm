@@ -15,9 +15,9 @@
 //! it for a refused setup and, with "Remove hosts without asking" on, Remove, which take it as their pieces of the port
 //! arrive ([`Refusal::of`] takes the action's words).
 //!
-//! Close in the footer and the header's × dismiss the refusal. When shown, Remove opens the host removal question.
-//! The refusal keeps the host snapshot from when it opened, so it stays readable if the registry stops listing the
-//! host meanwhile.
+//! Close in the footer and the header's × dismiss the refusal. Remove takes its confirmation choice from the
+//! presented footer. The refusal keeps the host snapshot from when it opened, so it stays readable if the registry
+//! stops listing the host meanwhile.
 
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::{HelmMarker, HostView};
@@ -33,6 +33,7 @@ use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Dialog, LayerId};
 use crate::operations::OpKey;
+use crate::prompt::ActionFrame;
 use crate::theme::{self, metrics};
 
 /// The host's mark in the header's tile, as the other host dialogs draw it.
@@ -62,8 +63,8 @@ const REMOVE_HELP: &str =
 pub(crate) struct Refusal {
     /// The action the helm refused, as the title names it ("Update host").
     action: &'static str,
-    /// The host by registry id, which Remove removes.
-    host: i64,
+    /// The registry entry whose identity the dialog shows and whose removal it offers.
+    host: HostView,
     /// The host's name as its row shows it.
     name: HostText,
     /// The host's full destination (its name for a host without one), which the body shows whole however the title is
@@ -86,7 +87,7 @@ impl Refusal {
     ) -> Refusal {
         Refusal {
             action,
-            host: view.id,
+            host: view.clone(),
             name: display_name(view),
             destination: HostText::from_host(view.destination.as_deref().unwrap_or(&view.name)),
             icon: view.icon,
@@ -109,6 +110,7 @@ pub(crate) fn open(
         refusal,
         close: cx.focus_handle().tab_stop(true),
         layer: None,
+        remove_frame: ActionFrame::default(),
     });
     // Close is the dialog's main action, which Enter presses while the dialog itself holds focus (SPEC.md: "If a dialog
     // container itself has focus, Enter presses its enabled main action"), as the old dialog's Enter closed it. A click
@@ -182,6 +184,8 @@ struct RefusalDialog {
     close: FocusHandle,
     /// Set right after the layer opens; what both Close controls close.
     layer: Option<LayerId>,
+    /// Remove and its confirmation policy become eligible together when the footer frame is presented.
+    remove_frame: ActionFrame<(HostView, bool)>,
 }
 
 /// A click handler that closes the dialog through the layer manager, as Escape does.
@@ -195,7 +199,7 @@ fn dismiss(dialog: WeakEntity<RefusalDialog>) -> impl Fn(&ClickEvent, &mut Windo
 }
 
 impl Render for RefusalDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
         let refusal = &self.refusal;
@@ -246,8 +250,12 @@ impl Render for RefusalDialog {
         .on_click(dismiss(weak.clone()));
         // `.host-refusal-remove`: after Close, as the old footer drew it. The mark is this click's, taken before the
         // dialog closes, so Remove host's question opens through it.
-        let host = refusal.host;
         let remove = refusal.remove_instead.then(|| {
+            let frame = self.remove_frame.capture(
+                (refusal.host.clone(), super::remove::asks_first(cx)),
+                (),
+                window,
+            );
             let close = dismiss(weak.clone());
             Button::new(
                 "host-refusal-remove",
@@ -257,9 +265,12 @@ impl Render for RefusalDialog {
             )
             .tier(Tier::Danger)
             .on_click(move |event, window, cx| {
+                let Some((drawn, asks)) = frame.shown() else {
+                    return;
+                };
                 let mark = Mark::take(cx);
                 close(event, window, cx);
-                super::remove::start(host, &mark, window, cx);
+                super::remove::start_shown(drawn, *asks, &mark, window, cx);
             })
         });
         DialogFrame::new(

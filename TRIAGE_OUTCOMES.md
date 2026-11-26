@@ -49,31 +49,6 @@
   index entry.
 - Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
-## trailing-host-refusal-remove-reads-live-skip.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC_impl.md "Questions: the prompt" (`996-1000`): "The same rule starts at the control
-  that asks the question or sends the request directly. Its handlers carry the drawn session key, row, skip preference
-  and the parts of the environment's state that determine the command. The prompt's `when_shown` signal admits an action
-  snapshot after presentation. ... The question and request use the snapshot that admitted the press." SPEC.md "One GUI
-  at a time" (`5871-5873`): "By default, a pointer or keyboard action uses the target, consent and preconditions from
-  the frame the user was shown, or is ignored when that frame has not yet been shown or its target is no longer in
-  view." Exact sibling precedent: `trailing-hosts-menu-remove-reads-live-skip-confirmation.md` (PR #4849) was recorded
-  as clearly settled under the same rule. Code: `crates/gui/farhelm-gui/src/hosts/refusal.rs:249-264` calls
-  `super::remove::start(host, &mark, window, cx)`, which reads live `listed(host, cx)` and live `remove::asks_first(cx)`
-  (`remove.rs:136-141`), unlike `hosts/menu.rs:515-542`, which snapshots `(view, asks)` in an `ActionFrame` and calls
-  `remove::start_shown`. Verified: confirmed by source inspection. Fix follows directly: snapshot the drawn host view
-  and `remove::asks_first(cx)` in `hosts/refusal.rs` with `ActionFrame` and call `remove::start_shown`. Size estimate
-  ~30-60 lines with a GPUI test.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-25 triage, main `5af40d23e`.) The maintainer can revise it.
-- Completion criteria: Snapshot the drawn host view and `remove::asks_first(cx)` via `ActionFrame` in
-  `crates/gui/farhelm-gui/src/hosts/refusal.rs` and invoke `remove::start_shown` (matching `hosts/menu.rs:515-542`),
-  with a regression test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
-  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
-  feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
-
 ## uninstall-newline-stripping-defeats-state-inside-lib-guard.md
 
 - Outcome: `fix code`.
@@ -155,38 +130,6 @@
   `SPEC.md` (and `SPEC_impl.md` if applicable) to specify this explicitly as best-effort detection ONLY — never
   documented or promised as a guarantee. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
-
-## trailing-host-setup-frozen-skip-ignores-later-restore.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed by source (`crates/gui/farhelm-gui/src/hosts/add.rs:948-968,1127,1313`; `menu.rs:419-424,454`;
-  `setup.rs:799-824`): PR #4849 froze `asks_before_setup` at press time so turning skip ON mid-probe cannot skip
-  confirmation, which caused turning "Set up new hosts without asking" OFF mid-probe to be ignored for that attempt
-  (tension between `SPEC.md:2686-2687` and `SPEC_impl.md:996-1000`).
-- Decision: Q7 ("Skip-confirmation preference timing during in-flight host probes"): maintainer picked "Fix code (both):
-  safety wins in both directions" with note: "only if it stays simple. if this turns complicated it is not worth it -
-  kick back into todo list." (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Check `asks_before_setup || setup::asks_first(cx)` when the plan settles (in `hosts/add.rs` and
-  `hosts/setup.rs`) so turning skip OFF mid-probe restores the confirmation while turning skip ON mid-probe still cannot
-  skip it, with a regression test (estimate S, ~15-35 lines). Only implement if it stays simple; if it turns
-  complicated, kick it back into `TODO.md` with an explanation instead. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
-
-## trailing-tensorlake-rerun-reads-skip-setting-late.md
-
-- Outcome: `fix code`.
-- Assessment: Partly correct. Confirmed that Tensorlake Re-run reads `GET /api/tensorlake` only when the probe settles
-  (`crates/gui/farhelm-gui/src/hosts/setup.rs:804-812,858-899`), so turning "Create Tensorlake sandboxes without asking"
-  ON while waiting in the probe queue skips the billed-creation confirmation. Reviewer misstated that Tensorlake probes
-  wait on interactive SSH sign-in (they do not, though they share `plan_slots`).
-- Decision: Q7 ("Skip-confirmation preference timing during in-flight host probes"): maintainer picked "Fix code (both):
-  safety wins in both directions" with note: "only if it stays simple. if this turns complicated it is not worth it -
-  kick back into todo list." (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Snapshot or read `create_without_asking` before probing Tensorlake Re-run and ask for
-  confirmation if either the pre-probe or post-probe value says to ask, with a regression test (estimate S-M, ~40-80
-  lines). Only implement if it stays simple; if it turns complicated, kick it back into `TODO.md` with an explanation
-  instead. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
 ## trailing-unread-hook-and-spare-switches-read-as-off.md
 

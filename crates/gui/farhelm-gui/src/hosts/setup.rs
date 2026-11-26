@@ -8,9 +8,10 @@
 //! `.provisioning-plan*` rules in `app.css`, all at reference commit `24bc0580`. Here's the TLDR of its rules:
 //!
 //! - **Three ways on from a plan.** A probe's plan goes on in one of three ways ([`crate::hosts::add`]'s `settled`
-//!   picks). With "Set up new hosts without asking" on ([`asks_first`]), it is submitted at once and Add host closes,
-//!   as the old app's remembered answer did. Otherwise, if the user has not moved on since Add, Add host closes and the
-//!   confirmation opens in its place (the old dialog swapped to it). If they have moved on, nothing opens (SPEC.md,
+//!   picks). A manual Add closes and submits at once when the pressed frame and the preference at settlement
+//!   ([`asks_first`]) both allow setup without asking. An agent's Add always requires confirmation. If confirmation is
+//!   required and the user has not moved on since Add, the confirmation replaces Add host as in the old dialog. If
+//!   they have moved on, nothing opens (SPEC.md,
 //!   "Keyboard focus": a result after the user moved on opens no dialog), and Add host, still open, says that Farhelm
 //!   is not running there and that Add shows what setting it up changes ([`MOVED_ON`]).
 //! - **The confirmation** is a question of the prompt ([`confirm`]), frozen on the [`Offer`] the probe returned:
@@ -44,8 +45,8 @@
 //!   Tensorlake sandbox's rerun instead asks the helm to plan creating the sandbox the host names again
 //!   (`tensorlake-host`), and its plan opens the sandbox's creation question below, titled with the host's name and
 //!   drawn with its mark, without Back, since there is no form to go back to; whether it asks is Tensorlake's own
-//!   "Create Tensorlake sandboxes without asking", read from the account as the plan arrives, and a read that fails
-//!   asks, as the old rerun did.
+//!   "Create Tensorlake sandboxes without asking". The account must allow skipping both at the press and when the
+//!   plan arrives. A failed account read requires the question.
 //! - **During a launch.** A submission and a rerun refuse to start while a session launch is in flight
 //!   ([`super::launch_in_flight`]), as Add does. A new host's Add host reopens saying so, as for a helm refusal, while
 //!   the user has not moved on, and otherwise the Hosts panel's line says "Add host: not started, …", as it prefixes a
@@ -723,9 +724,9 @@ pub(crate) fn rerun_command(host: &HostView, how: SetupRerun) -> Result<Command,
 
 /// Run `host`'s failed setup again, the host menu's Re-run, with `mark` the [`Mark`] taken in its click handler: probe
 /// the host under its own key as its kind says ([`HostKind::setup_rerun`]), and go on from the plan as the module docs
-/// say. An SSH host's plan uses the drawn "Set up new hosts without asking" choice, even after sign-in. A Tensorlake
-/// sandbox's is its creation question ("Create Tensorlake sandbox · <name>", with no Back), skipped only by
-/// Tensorlake's own "Create Tensorlake sandboxes without asking", read when the plan arrives ([`ask_or_create`]). Sends
+/// say. SSH asks if the choice in the pressed frame requires it or the user restores confirmation while the probe is
+/// out. Tensorlake uses its own creation question ("Create Tensorlake sandbox · <name>", with no Back) and requires
+/// an acknowledged skip preference both at the press and when the plan arrives ([`read_sandbox_skip`]). Sends
 /// nothing for a kind with no rerun, an SSH host with no destination, or while work on the host is out. While a session
 /// launch is in flight ([`super::launch_in_flight`]) it sends nothing either, and says so on the Hosts panel's line:
 /// "Re-run <host>: not started, …" ([`not_started`]).
@@ -762,6 +763,12 @@ pub(crate) fn rerun(
     let handle = window.window_handle();
     let probed = key.clone();
     let id = host.id;
+    let skips_at_press = Rc::new(Cell::new(false));
+    if how == SetupRerun::Tensorlake {
+        // Both commands use the ordered lane, so the account read precedes the probe without holding its host key.
+        let skips_at_press = Rc::clone(&skips_at_press);
+        read_sandbox_skip(cx, move |skips, _| skips_at_press.set(skips));
+    }
     let started = setup_sign_in::plan(key, command, mark, handle, cx, move |result, mark, cx| {
         let settled = match result {
             Ok(settled) => settled,
@@ -798,14 +805,16 @@ pub(crate) fn rerun(
                     steps,
                 } => Ok((
                     offer(probe_id, confirmation, steps, None),
-                    asks_before_setup,
+                    asks_before_setup || asks_first(cx),
                 )),
             },
             SetupRerun::Tensorlake => match add::read_plan(&settled.outcome) {
                 Ok(plan) => {
                     let creates = Some(plan.resources);
                     let offer = offer(plan.probe_id, plan.confirmation, plan.steps, creates);
-                    ask_or_create(offer, handle, cx);
+                    read_sandbox_skip(cx, move |skips_now, cx| {
+                        settle_sandbox_rerun(offer, skips_at_press.get() && skips_now, handle, cx);
+                    });
                     return;
                 }
                 Err(problem) => Err(problem),
@@ -855,38 +864,32 @@ fn note_rerun(probed: &OpKey, problem: HostText, cx: &mut App) {
     }
 }
 
-/// A Tensorlake sandbox's rerun plan, `offer`: submit it without asking when Tensorlake's own "Create Tensorlake
-/// sandboxes without asking" is on, else ask its creation question. Whether to ask is read from the account
-/// (`GET /api/tensorlake`) as the plan arrives, never from the SSH setup preference; a read that fails, or cannot be
-/// sent, asks, as the old rerun asked when its settings read failed. The question opens only while the user has not
-/// moved on since the Re-run, and otherwise the row says to run it again.
-fn ask_or_create(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
+/// Read the acknowledged Tensorlake choice at either decision point. Only an affirmative account reply authorizes a
+/// skip, so an unavailable or failed read requires the question.
+fn read_sandbox_skip(cx: &mut App, settle: impl FnOnce(bool, &mut App) + 'static) {
     let path = match ApiPath::api(&["tensorlake"]) {
         Ok(path) => path,
         // A constant path always builds; were it not to, asking is the safe way on.
         Err(error) => {
             tracing::debug!(?error, "Tensorlake account read not built");
-            settle_sandbox_rerun(offer, false, window, cx);
+            settle(false, cx);
             return;
         }
     };
-    // The offer goes to whichever of the read's answer or its failure to send comes first; only one ever does.
-    let pending = Rc::new(Cell::new(Some(offer)));
+    let pending = Rc::new(Cell::new(Some(settle)));
     let answered = Rc::clone(&pending);
     let sent =
         crate::operations::read::<Settings>(path, add::ACCOUNT_ROUTE, cx, move |read, cx| {
-            let Some(offer) = answered.take() else {
-                return;
-            };
-            let skips = read.is_ok_and(|account| account.create_without_asking);
-            settle_sandbox_rerun(offer, skips, window, cx);
+            if let Some(settle) = answered.take() {
+                settle(read.is_ok_and(|account| account.create_without_asking), cx);
+            }
         });
-    if !sent && let Some(offer) = pending.take() {
-        settle_sandbox_rerun(offer, false, window, cx);
+    if !sent && let Some(settle) = pending.take() {
+        settle(false, cx);
     }
 }
 
-/// Go on with a Tensorlake sandbox's rerun plan once whether to ask is known ([`ask_or_create`]).
+/// The creation question still belongs to the Re-run press. If the user has moved on, the host row tells them to rerun.
 fn settle_sandbox_rerun(offer: Offer, skips: bool, window: AnyWindowHandle, cx: &mut App) {
     if skips {
         submit(offer, window, cx);
