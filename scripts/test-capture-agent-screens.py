@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise capture privacy and terminal host ownership using synthetic screens and stand-ins."""
 
+import errno
 import importlib.util
 import io
 import subprocess
@@ -276,6 +277,156 @@ class CaptureHarnessTests(unittest.TestCase):
             pair = fixtures / harness / "1.2.3"
             self.assertEqual((pair / "idle-fresh-prompt.txt").read_text(), f"{harness} screen")
             self.assertEqual((pair / "idle-fresh-prompt.title").read_text(), f"{harness} title\n")
+
+
+class CapturePublicationTests(unittest.TestCase):
+    """A fixture's title and grid must come from the same capture after a failed publication or a restart."""
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.target = self.root / "fixtures" / "stub" / "1.2.3"
+        self.target.mkdir(parents=True)
+        self.screen = self.target / "idle-fresh.txt"
+        self.title = self.target / "idle-fresh.title"
+        self.screen.write_text("previous screen")
+        self.title.write_text("previous title\n")
+        self.journal = self.target / capture.PUBLICATION_JOURNAL
+
+    def test_failed_title_swap_restores_old_pair_and_keeps_validated_staging(self):
+        """Fail after replacing the grid so retaining the original title requires an actual rollback."""
+        farhelm = self.root / "farhelm"
+        farhelm.touch()
+        work = self.root / "work"
+        work.mkdir()
+        scrubber = mock.Mock(scrub=lambda text: text, check=lambda _text: None)
+
+        def drive(_term, rec, _work):
+            rec.save("idle", "extra", "new scenario screen", "new scenario title")
+            rec.save("idle", "fresh", "replacement screen", "replacement title")
+
+        replace = capture.os.replace
+        copy = capture.shutil.copy2
+        out_of_space = False
+
+        def fail_title(src, dst):
+            nonlocal out_of_space
+            if src == self.journal / "new" / self.title.name:
+                self.assertEqual(self.screen.read_text(), "replacement screen", "the first swap must succeed")
+                self.assertTrue((self.target / "idle-extra.title").exists(), "the new pair must already be installed")
+                out_of_space = True
+                raise OSError(errno.ENOSPC, "simulated title write failure")
+            replace(src, dst)
+
+        def copy_while_space_remains(src, dst):
+            if out_of_space:
+                raise OSError(errno.ENOSPC, "rollback cannot allocate another payload")
+            return copy(src, dst)
+
+        with (
+            mock.patch.dict(capture.HARNESSES, {"stub": ([], drive)}, clear=True),
+            mock.patch.object(capture, "harness_version", return_value="1.2.3"),
+            mock.patch.object(capture, "FIXTURES_ROOT", self.target.parent.parent),
+            mock.patch.object(capture, "Terminal"),
+            mock.patch.object(capture.Scrubber, "for_host", return_value=scrubber),
+            mock.patch.object(capture.tempfile, "mkdtemp", return_value=work),
+            mock.patch.object(capture.os, "replace", side_effect=fail_title),
+            mock.patch.object(capture.shutil, "copy2", side_effect=copy_while_space_remains),
+            mock.patch.object(capture.sys, "stderr", io.StringIO()) as err,
+        ):
+            self.assertEqual(capture.main(["--farhelm", str(farhelm), "--no-test"]), 1)
+        self.assertEqual(self.screen.read_text(), "previous screen")
+        self.assertEqual(self.title.read_text(), "previous title\n")
+        self.assertFalse((self.target / "idle-extra.txt").exists())
+        self.assertFalse((self.target / "idle-extra.title").exists())
+        self.assertFalse(self.journal.exists())
+        self.assertEqual((work / "stub-fixtures" / self.screen.name).read_text(), "replacement screen")
+        self.assertEqual((work / "stub-fixtures" / self.title.name).read_text(), "replacement title\n")
+        self.assertEqual((work / "stub-fixtures" / "idle-extra.txt").read_text(), "new scenario screen")
+        self.assertIn(f"scratch kept at {work}", err.getvalue())
+
+    def test_next_capture_recovers_a_process_that_exited_between_pair_renames(self):
+        """A process exit bypasses exception handling. The next capture restores the pair before it drives the agent."""
+        staging = self.root / "staged"
+        staging.mkdir()
+        (staging / self.screen.name).write_text("replacement screen")
+        (staging / self.title.name).write_text("replacement title\n")
+        publisher = """
+import os
+from pathlib import Path
+import runpy
+import sys
+
+script, staging, target = map(Path, sys.argv[1:])
+sys.path.insert(0, str(script.parent))
+capture = runpy.run_path(str(script))
+rec = capture["Recorder"](staging, None, captured=["idle-fresh"])
+replace = os.replace
+
+def crash_before_title(src, dst):
+    if src.parent.name == "new" and dst.suffix == ".title":
+        os._exit(42)
+    replace(src, dst)
+
+os.replace = crash_before_title
+capture["publish_fixture_pairs"](rec, target)
+"""
+        crashed = subprocess.run(
+            [sys.executable, "-B", "-c", publisher, capture.__file__, str(staging), str(self.target)],
+            timeout=10, capture_output=True, text=True,
+        )
+        self.assertEqual(crashed.returncode, 42, crashed.stderr)
+        self.assertTrue((self.journal / "manifest.json").is_file(), "crash reached the forward swap")
+        self.assertEqual(self.screen.read_text(), "replacement screen")
+        self.assertEqual(self.title.read_text(), "previous title\n")
+
+        lstat = Path.lstat
+
+        def fail_manifest_stat(path):
+            if path == self.journal / "manifest.json":
+                raise OSError(errno.EIO, "simulated journal stat failure")
+            return lstat(path)
+
+        # Recovery must leave the journal and backups intact when it cannot establish the manifest's state.
+        with mock.patch.object(Path, "lstat", fail_manifest_stat):
+            with self.assertRaisesRegex(OSError, "simulated journal stat failure"):
+                capture.recover_fixture_publication(self.target)
+        self.assertTrue((self.journal / "manifest.json").is_file())
+        self.assertEqual((self.journal / "old" / self.screen.name).read_text(), "previous screen")
+        self.assertEqual((self.journal / "old" / self.title.name).read_text(), "previous title\n")
+        self.assertEqual(self.screen.read_text(), "replacement screen")
+
+        def drive(_term, _rec, _work):
+            self.assertEqual(self.screen.read_text(), "previous screen")
+            self.assertEqual(self.title.read_text(), "previous title\n")
+            self.assertFalse(self.journal.exists())
+
+        with (
+            mock.patch.dict(capture.HARNESSES, {"stub": ([], drive)}, clear=True),
+            mock.patch.object(capture, "harness_version", return_value="1.2.3"),
+            mock.patch.object(capture, "FIXTURES_ROOT", self.target.parent.parent),
+            mock.patch.object(capture, "Terminal"),
+            mock.patch.object(capture.sys, "stderr", io.StringIO()),
+        ):
+            capture.capture_harness("stub", self.root / "farhelm", self.root, capture.Scrubber(), ui_only=False)
+        self.assertEqual((staging / self.screen.name).read_text(), "replacement screen")
+        self.assertEqual((staging / self.title.name).read_text(), "replacement title\n")
+
+    def test_cleanup_failure_leaves_a_committed_pair_for_the_next_run(self):
+        """Once the manifest is gone, restoring old backups would undo a complete replacement."""
+        staging = self.root / "staged"
+        staging.mkdir()
+        rec = capture.Recorder(staging, capture.Scrubber())
+        rec.save("idle", "fresh", "replacement screen", "replacement title")
+        with mock.patch.object(capture.shutil, "rmtree", side_effect=OSError("simulated cleanup failure")):
+            with self.assertRaisesRegex(capture.CapturePublicationError, "new fixture pairs are installed"):
+                capture.publish_fixture_pairs(rec, self.target)
+        self.assertTrue(self.journal.is_dir())
+        self.assertFalse((self.journal / "manifest.json").exists())
+        with capture.lock_fixture_version(self.target):
+            capture.recover_fixture_publication(self.target)
+        self.assertFalse(self.journal.exists())
+        self.assertEqual(self.screen.read_text(), "replacement screen")
+        self.assertEqual(self.title.read_text(), "replacement title\n")
 
 
 if __name__ == "__main__":

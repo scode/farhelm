@@ -36,17 +36,21 @@ scrubbing is refused.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import getpass
+import json
 import os
 import pathlib
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 
@@ -64,6 +68,7 @@ TERMINAL_ROWS = 42
 
 POLL_SECONDS = 0.5
 EXPECTED_STATES = ("working", "waiting", "idle", "unknown")
+PUBLICATION_JOURNAL = ".capture-publish"
 
 # Claude's spinner line: a rotating glyph, a present-participle verb ending in an ellipsis, then the elapsed timer.
 CLAUDE_SPINNER = re.compile(r"^\S \S+… \(\d+s\b", re.MULTILINE)
@@ -788,6 +793,125 @@ def harness_version(argv: list[str]) -> str:
     return match.group(0)
 
 
+class CapturePublicationError(RuntimeError):
+    """A failed publication needs its validated staging directory for recovery or retry."""
+
+
+@contextmanager
+def lock_fixture_version(target: pathlib.Path):
+    """Use the version directory as the lock, so readers can share it and no lock file needs committing."""
+    try:
+        directory = os.open(target, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fcntl.flock(directory, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(directory)
+    except (OSError, ValueError) as error:
+        raise CapturePublicationError(f"could not finish fixture publication in {target}: {error}") from error
+
+
+def fixture_pair_names(stem: str) -> tuple[str, str]:
+    """Names in a recovered journal must be fixture basenames in the locked directory."""
+    if not re.fullmatch(r"(?:working|waiting|idle|unknown)-[a-zA-Z0-9_-]+", stem):
+        raise ValueError(f"invalid capture fixture stem {stem!r}")
+    return f"{stem}.txt", f"{stem}.title"
+
+
+def publication_path_exists(path: pathlib.Path, file_type: int) -> bool:
+    """Only a missing entry means absence. An unreadable journal or pair must stay recoverable."""
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return False
+    if stat.S_IFMT(mode) != file_type:
+        raise ValueError(f"unexpected file type in fixture publication: {path}")
+    return True
+
+
+def recover_fixture_publication(target: pathlib.Path) -> None:
+    """Roll back an interrupted swap using backups kept intact until every pair is restored."""
+    journal = target / PUBLICATION_JOURNAL
+    if not publication_path_exists(journal, stat.S_IFDIR):
+        return
+    manifest = journal / "manifest.json"
+    if publication_path_exists(manifest, stat.S_IFREG):
+        prior = json.loads(manifest.read_text())
+        if not isinstance(prior, dict) or not all(isinstance(value, bool) for value in prior.values()):
+            raise ValueError("invalid capture publication manifest")
+        pairs = [(fixture_pair_names(stem), existed) for stem, existed in prior.items()]
+        for names, existed in pairs:
+            if existed and not all(
+                publication_path_exists(journal / "old" / name, stat.S_IFREG) for name in names
+            ):
+                raise ValueError(f"missing backup for capture fixture pair {names}")
+        restore = journal / "restore"
+        for names, existed in pairs:
+            for name in names:
+                destination = target / name
+                if existed:
+                    # Link the saved inode without allocating the contents again after a disk-space failure.
+                    # Keep the backup link through replace, so a second interruption can retry rollback.
+                    replacement = restore / name
+                    replacement.unlink(missing_ok=True)
+                    os.link(journal / "old" / name, replacement)
+                    os.replace(replacement, destination)
+                else:
+                    destination.unlink(missing_ok=True)
+        manifest.unlink()
+    # With no manifest, either the replacement never started or a complete pair set is already visible.
+    shutil.rmtree(journal)
+
+
+def publish_fixture_pairs(rec: Recorder, target: pathlib.Path) -> None:
+    """Stage both sides of every replacement before allowing a version's first fixture to move."""
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise CapturePublicationError(f"could not create fixture directory {target}: {error}") from error
+    with lock_fixture_version(target):
+        recover_fixture_publication(target)
+        journal = target / PUBLICATION_JOURNAL
+        journal.mkdir()
+        try:
+            new = journal / "new"
+            old = journal / "old"
+            new.mkdir()
+            old.mkdir()
+            (journal / "restore").mkdir()
+            prior = {}
+            pairs = []
+            for stem in sorted(set(rec.captured)):
+                names = fixture_pair_names(stem)
+                existing = [publication_path_exists(target / name, stat.S_IFREG) for name in names]
+                if any(existing) and not all(existing):
+                    raise ValueError(f"fixture {stem!r} already has an incomplete pair")
+                prior[stem] = all(existing)
+                pairs.append(names)
+                for name in names:
+                    shutil.copy2(rec.staging / name, new / name)
+                    if prior[stem]:
+                        shutil.copy2(target / name, old / name)
+            manifest = journal / "manifest.json"
+            pending = journal / "manifest.pending"
+            pending.write_text(json.dumps(prior))
+            os.replace(pending, manifest)
+            for names in pairs:
+                for name in names:
+                    os.replace(new / name, target / name)
+            # Removing the manifest commits the swap. A crash during removal of backups now only needs cleanup.
+            manifest.unlink()
+        except BaseException:
+            recover_fixture_publication(target)
+            raise
+        try:
+            shutil.rmtree(journal)
+        except OSError as error:
+            raise CapturePublicationError(
+                f"new fixture pairs are installed in {target}. Run capture again to finish journal cleanup: {error}"
+            ) from error
+
+
 def capture_harness(
     name: str, farhelm: pathlib.Path, work_root: pathlib.Path, scrubber: Scrubber, ui_only: bool
 ) -> Recorder:
@@ -802,6 +926,13 @@ def capture_harness(
 
     version_argv, drive = HARNESSES[name]
     version = harness_version(version_argv)
+    target = FIXTURES_ROOT / name / version
+    try:
+        if publication_path_exists(target, stat.S_IFDIR):
+            with lock_fixture_version(target):
+                recover_fixture_publication(target)
+    except (OSError, ValueError) as error:
+        raise CapturePublicationError(f"could not check for unfinished fixtures in {target}: {error}") from error
     work = work_root / name
     work.mkdir()
     staging = work_root / f"{name}-fixtures"
@@ -828,10 +959,7 @@ def capture_harness(
     if not rec.captured:
         print(f"{name} {version}: nothing captured; leaving existing fixtures alone", file=sys.stderr)
         return rec
-    target = FIXTURES_ROOT / name / version
-    target.mkdir(parents=True, exist_ok=True)
-    for new in staging.iterdir():
-        shutil.copy2(new, target / new.name)
+    publish_fixture_pairs(rec, target)
     retained = sorted(
         old.stem for old in target.glob("*.txt") if old.stem not in rec.captured and "-derived-" not in old.stem
     )
@@ -885,11 +1013,19 @@ def main(argv: list[str] | None = None) -> int:
     work_root = pathlib.Path(tempfile.mkdtemp(prefix="fhc-", dir="/tmp"))
     scrubber = Scrubber.for_host(work_root)
     results: dict[str, Recorder] = {}
+    retain_work = args.keep_work
     try:
         for name in args.harness or sorted(HARNESSES):
             results[name] = capture_harness(name, args.farhelm, work_root, scrubber, args.ui_only)
+    except CapturePublicationError as error:
+        retain_work = True
+        print(error, file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        retain_work = True
+        raise
     finally:
-        if args.keep_work:
+        if retain_work:
             print(f"scratch kept at {work_root}", file=sys.stderr)
         else:
             shutil.rmtree(work_root, ignore_errors=True)
