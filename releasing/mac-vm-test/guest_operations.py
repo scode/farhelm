@@ -28,7 +28,7 @@ from urllib.request import urlopen
 from checkpoint_contract import (ANNOUNCEMENTS_TEST_PATH, REMOTE_MAC_PASS, SIDES,
                                  available_operations, fixed_operations, host_identity,
                                  is_bonus_pass, prerequisite_checks, require_applicable_operation,
-                                 require_remote_host_start)
+                                 require_remote_host_start, require_reopen_transition)
 from guest_ui import NativeUI, tool_definition, wait_running
 from window_geometry import calibrate, select_frame
 
@@ -475,7 +475,8 @@ repeating the mistake past the bound stops an unproductive attempt.
             if operation in self.completed and operation in (
                     'install_previous', 'install_candidate', 'launch', 'launch_override',
                     'launch_announcements', 'relaunch_announcements',
-                    'host_survival', 'remote_host_survival'):
+                    'host_survival', 'remote_host_survival',
+                    'continuity_reopen_before', 'continuity_reopen_after'):
                 raise RuntimeError('managed mutation or one-time observation already completed; it cannot be replayed')
             value = self.perform(operation)
             name = self.receipt(operation.replace('_', '-'), value)
@@ -745,8 +746,13 @@ print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regu
                 raise RuntimeError('no staged announcement launch to clear')
             if check == 'update-relaunch' and self.task['pass_id'].startswith('p0-'):
                 raise RuntimeError('P0 relaunch must use the already-running app updater')
-            if self.version()['desktop_running']:
-                if check == 'p2-announcements':
+            if check == 'reopen' and 'continuity_reopen_before' not in self.completed:
+                raise ObservationNotReady('sample the original process with continuity_reopen_before before Quit')
+            if check == 'reopen' and 'reopen_quit' not in self.completed:
+                raise ObservationNotReady('use the structured native Quit action before managed launch')
+            stopped = self.version()
+            if stopped['desktop_running']:
+                if check in ('p2-announcements', 'reopen'):
                     raise ObservationNotReady('wait for the candidate app to exit after native Quit')
                 raise RuntimeError('quit the app normally through native UI before managed launch')
             logs = self.pass_dir / 'managed-logs'
@@ -764,10 +770,15 @@ print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regu
             self.state['launch_stdout'] = str(stdout)
             self.receipt('launch-command', receipt)
             expected = previous if check == 'old-fixture' or operation == 'launch_override' else candidate
-            running = wait_running(self, expected.removeprefix('v'), label='launch')
+            before_pids = (self.observations['continuity_reopen_before']['desktop_pids'] if check == 'reopen'
+                           else None)
+            running = wait_running(self, expected.removeprefix('v'), label='launch', previous_pids=before_pids)
             if check == 'p2-announcements':
                 path = self.check_announcement_launch(running, operation == 'launch_announcements')
                 return {'command': receipt, 'running': running, 'announcement_override': path}
+            if check == 'reopen':
+                return {'command': receipt, 'running': running,
+                        'quit': {'requested': True, 'desktop_pids': stopped['desktop_pids']}}
             return {'command': receipt, 'running': running}
         if operation == 'versions':
             return self.version()
@@ -1064,6 +1075,8 @@ the historical upgrade fixtures expose the same bounded observation contract.
 The candidate can update the remote host as soon as it launches. The final
 sample of the earlier continuity-before checkpoint is the remote update's
 baseline, even when that update completes before the next turn observes it.
+Reopen samples belong to the attempt that observed the app exit and come back.
+A later attempt starts with its own running app and before sample.
 """
         directory = '~/farhelm-brick-test/counter-' + self.task['run_id']
         if operation == 'continuity_command':
@@ -1072,15 +1085,24 @@ baseline, even when that update completes before the next turn observes it.
                   'm=runpy.run_path(str(Path.home()/"farhelm-brick-test/continuity.py")); '
                   f'print(json.dumps(m["sample"](Path({directory!r}).expanduser())))')
         if operation == 'continuity_reopen_before':
+            running = self.version()
+            candidate = self.context['candidate'].removeprefix('v')
+            pids = running['desktop_pids']
+            if (not pids or running['installed'] != candidate or running['bundle'] != candidate
+                    or candidate not in running['running_versions']):
+                raise RuntimeError('sample before Quit while the candidate app is running')
             sample = json.loads(self.ssh(script)['stdout'])
-            self.state['reopen_before'] = sample
-            return sample
+            if self.version()['desktop_pids'] != pids:
+                raise RuntimeError('candidate app changed while taking the before-Quit sample')
+            return {'desktop_pids': pids, 'sample': sample}
         if operation == 'continuity_remote_after':
             if 'remote_version' not in self.completed:
                 raise ObservationNotReady('confirm the connected candidate remote with remote_version first')
             before = self.prior_value('continuity-before', 'continuity_before')['after']
         elif operation == 'continuity_reopen_after':
-            before = self.state.get('reopen_before')
+            if not {'continuity_reopen_before', 'launch'} <= self.completed:
+                raise ObservationNotReady('sample before Quit, then quit and call launch before the after sample')
+            before = self.observations['continuity_reopen_before']['sample']
         else:
             before = self.state.get('original_counter')
         if before is None:
@@ -1100,6 +1122,15 @@ baseline, even when that update completes before the next turn observes it.
             for key in ('pid', 'start_ticks', 'boot_id'):
                 if original[key] != after[key]:
                     raise RuntimeError('original continuity process was replaced')
+        if operation == 'continuity_reopen_after':
+            launch = self.observations['launch']
+            identity = {key: self.task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
+            transition = {'identity': identity, 'before': self.observations['continuity_reopen_before'],
+                          'quit': launch['quit'],
+                          'launched_desktop_pids': launch['running']['desktop_pids'],
+                          'after': {'desktop_pids': self.version()['desktop_pids'], 'sample': after}}
+            require_reopen_transition(transition, identity, before, after)
+            self.receipt('reopen-transition', transition)
         self.state['original_counter'] = after
         before_name = f'managed-counter-{operation}-before.json'
         after_name = f'managed-counter-{operation}-after.json'

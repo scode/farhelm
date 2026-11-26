@@ -34,7 +34,8 @@ from verify_release import require_comment
 from guest_tester import execution_calls, native_events, native_image_digests, request as tester_request, RESULT_STATES
 from guest_workflow import (copy_credentials, execute as execute_guest, cancel as cancel_guest, require_setup,
                             source_url, task_for, Unavailable, CheckStopped, CleanupPending)
-from checkpoint_contract import REMOTE_MAC_PASS, prerequisite_checks, turn_timeout
+from checkpoint_contract import (REMOTE_MAC_PASS, prerequisite_checks, reopen_quit_call, reopen_transition_ref,
+                                 require_reopen_transition, turn_timeout)
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -484,6 +485,7 @@ callers that omit it still reread evidence when revalidating a retained result.
         if current_before['counter'] < previous_after['counter']:
             raise Refused('continuity milestone replays an earlier observation')
         require_progress(previous_after, current_after)
+    return current_before, current_after
 
 
 # Persisted workflow state outlives the process supervising Tart. That separation
@@ -786,6 +788,8 @@ retained outcome.
                         or execution.get('result', {}).get('identity') != identity):
                     raise Refused('native tester receipt does not match this checkpoint')
                 calls = execution_calls(task, events)
+                if check_id == 'reopen' and not any(reopen_quit_call(call) for call in calls):
+                    raise Refused('reopen did not use the structured native Quit action')
                 image_digests = native_image_digests(events) if calls else set()
                 if spec['gui'] and (not calls or not any(hashlib.sha256(v).hexdigest() in native_image_digests(events)
                                                         for v in contents if is_image(v))):
@@ -815,10 +819,12 @@ retained outcome.
                 raise Refused('select the update path from a fresh latest observation first')
             if check_id == 'update-discovery' and entry['update_path'] not in ('ordinary', 'override'):
                 raise Refused('a manual installer cannot prove click-to-upgrade discovery')
-            if spec['continuity']:
+            if spec['continuity'] or check_id == 'reopen':
                 if before is None or after is None:
                     raise Refused('continuity requires independent before/after receipts')
-                continuity_chain(self.directory, entry, check_id, before, after, contents=validated)
+                samples = continuity_chain(self.directory, entry, check_id, before, after, contents=validated)
+                if check_id == 'reopen':
+                    self.check_reopen_transition(pass_id, references, native, samples, validated)
             if check_id == 'artifact-verification':
                 target = self.data['plan']['candidate']
                 values = []
@@ -1719,6 +1725,24 @@ including the larger bound for the guest-native event stream.
             return bool(preflight.get('sha256')) and self.result_evidence_retained(preflight)
         return True
 
+    def check_reopen_transition(self, pass_id, references, native, samples, contents):
+        """Bind the reopen witness to the attempt and counter receipts the host is accepting.
+
+Import passes the exact bytes it hashes. A retained verdict repeats the check
+against the saved task and witness after checking their recorded hashes.
+Historical host-GUI records have a run and pass but no guest attempt ID.
+"""
+        def read(ref):
+            """Reuse import's bounded artifact reads when they are available."""
+            return json.loads(contents[ref] if ref in contents else artifact(self.directory, ref))
+
+        try:
+            attempt = read(native['task'])['attempt'] if self.data.get('gui_backend') == 'guest-native' else None
+            identity = {'attempt': attempt, 'run_id': self.data['run_id'], 'pass_id': pass_id, 'check_id': 'reopen'}
+            require_reopen_transition(read(reopen_transition_ref(references)), identity, *samples)
+        except (KeyError, TypeError, ValueError) as error:
+            raise Refused('reopen transition evidence is invalid: ' + str(error)) from error
+
     def verdict(self, entry):
         """Missing, invalidated or skipped checks cannot become a release pass.
 
@@ -1744,9 +1768,12 @@ history counts only for the checks being judged and for the pass-wide preflight.
             if not self.result_evidence_retained(result):
                 return 'could not run'
             try:
-                if 'continuity' in result:
-                    continuity_chain(self.directory, entry, check_id)
-            except (OSError, ValueError, RuntimeError, KeyError, tarfile.TarError):
+                if 'continuity' in result or check_id == 'reopen':
+                    samples = continuity_chain(self.directory, entry, check_id)
+                    if check_id == 'reopen':
+                        self.check_reopen_transition(entry['id'], result['evidence'], result.get('native', {}),
+                                                     samples, {})
+            except (OSError, ValueError, RuntimeError, KeyError, TypeError, tarfile.TarError):
                 return 'could not run'
         return 'pass'
 

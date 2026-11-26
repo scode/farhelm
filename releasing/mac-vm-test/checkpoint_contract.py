@@ -26,6 +26,43 @@ def is_bonus_pass(pass_id):
     return not pass_id.startswith('p0-') and pass_id != REMOTE_MAC_PASS
 
 
+def require_new_desktop_pids(before, launched, observed):
+    """Bind an observation to a newly launched desktop, distinct from the previous app."""
+    if any(not isinstance(pids, list) or not pids or any(type(pid) is not int or pid <= 0 for pid in pids)
+           for pids in (before, launched, observed)):
+        raise ValueError('desktop process observations need nonempty lists of positive PIDs')
+    if set(before) & set(launched) or not set(observed) <= set(launched):
+        raise ValueError('the observation does not belong to a new app process')
+
+
+def reopen_transition_ref(references):
+    """Select the one transition receipt this attempt exports beside its counter samples."""
+    matches = [ref for ref in references if isinstance(ref, str)
+               and ref.rsplit('/', 1)[-1].endswith('-reopen-transition.json')]
+    if len(matches) != 1:
+        raise ValueError('reopen needs one quit and relaunch transition receipt')
+    return matches[0]
+
+
+def reopen_quit_call(call):
+    """Recognize a successful structured Quit in the native event stream."""
+    return call.get('tool') == 'brick_ui' and call.get('arguments') == {
+        'target': 'farhelm', 'method': 'quit', 'args': []}
+
+
+def require_reopen_transition(transition, identity, before, after):
+    """Prove that this attempt's two exported counter samples span its owned desktop relaunch."""
+    if transition['identity'] != identity:
+        raise ValueError('reopen transition belongs to a different attempt or checkpoint')
+    quit_witness = transition['quit']
+    if quit_witness['requested'] is not True or quit_witness['desktop_pids'] != []:
+        raise ValueError('reopen transition did not witness the app exit before launch')
+    require_new_desktop_pids(transition['before']['desktop_pids'], transition['launched_desktop_pids'],
+                             transition['after']['desktop_pids'])
+    if transition['before']['sample'] != before or transition['after']['sample'] != after:
+        raise ValueError('reopen transition does not match the exported counter samples')
+
+
 # Each side of the pair has its own fixed observation of terminal hosts and of
 # session rows; the old-session checkpoint for that side compares against the
 # `old-sessions` receipts of the same operations.

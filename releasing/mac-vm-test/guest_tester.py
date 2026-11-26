@@ -21,7 +21,9 @@ import subprocess
 import time
 
 from checkpoint_contract import (EffectFailure, old_session_side, require_old_session, relaunch_checks_app_only,
-                                 fixed_operations, required_operations, require_remote_host_effect, is_bonus_pass)
+                                 fixed_operations, required_operations, require_remote_host_effect, is_bonus_pass,
+                                 reopen_quit_call, reopen_transition_ref, require_new_desktop_pids,
+                                 require_reopen_transition)
 from window_geometry import require_drag_delivery, require_window_trace
 
 
@@ -297,6 +299,7 @@ failure that would stop the pair's remaining P0 checks.
     else:
         raise TesterError('managed tester retained no operation receipts')
     expected = required_operations(task['check_id'], task['pass_id'], task['context'].get('update_path'))
+    identity = {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
     if value['status'] == 'pass':
         missing = expected - set(record['completed'])
         if missing:
@@ -342,13 +345,21 @@ failure that would stop the pair's remaining P0 checks.
                 try:
                     name = next(item for item in record['receipts'] if item.endswith('-restart-transition.json'))
                     transition = json.loads((root / 'work' / name).read_text())
-                    before = set(transition['before']['desktop_pids'])
-                    after = set(transition['after']['desktop_pids'])
+                    require_new_desktop_pids(transition['before']['desktop_pids'], transition['after']['desktop_pids'],
+                                             versions['desktop_pids'])
                 except (StopIteration, OSError, ValueError, KeyError, TypeError) as error:
-                    raise TesterError('managed relaunch premise needs the owned restart transition') from error
-                final = set(versions.get('desktop_pids', []))
-                if not after or after & before or not final or not final <= after:
-                    raise TesterError('managed relaunch premise was not established by a new app process')
+                    raise TesterError('managed relaunch premise needs the owned restart transition to a new app') from error
+            if task['check_id'] == 'reopen':
+                try:
+                    refs = record['continuity']
+                    selected = [reopen_transition_ref(record['receipts']), refs['before'], refs['after']]
+                    transition, before, after = [
+                        json.loads(evidence_file(root / 'work', ref).read_bytes()) for ref in selected]
+                    require_reopen_transition(transition, identity, before, after)
+                    require_new_desktop_pids(transition['before']['desktop_pids'], transition['launched_desktop_pids'],
+                                             versions['desktop_pids'])
+                except (OSError, ValueError, KeyError, TypeError, TesterError) as error:
+                    raise TesterError('managed reopen premise failed: ' + str(error)) from error
         if task['check_id'] in ('codex-conversation', 'seed-state', 'codex-resume'):
             state = record['observations']['inspect_state']
             sessions = state.get('supervisor.db', {}).get('sessions', [])
@@ -375,8 +386,7 @@ failure that would stop the pair's remaining P0 checks.
                 (require_drag_delivery if bonus_preflight else require_window_trace)(trace['observations'])
             except (OSError, ValueError, RuntimeError, TypeError, KeyError) as error:
                 raise TesterError('managed window measurement premise failed: ' + str(error)) from error
-    return {'identity': {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')},
-            **value, 'evidence': record['receipts'], 'continuity': record['continuity']}
+    return {'identity': identity, **value, 'evidence': record['receipts'], 'continuity': record['continuity']}
 
 
 def execution_calls(task, events):
@@ -601,6 +611,9 @@ not discard an otherwise safe screenshot or failure receipt.
             and task['check_id'] == 'update-relaunch' and not any(
                 call.get('arguments', {}).get('method') == 'restart' for call in calls)):
         raise TesterError('managed update did not use the owned native restart transition')
+    if (value['status'] == 'pass' and task['check_id'] == 'reopen'
+            and not any(reopen_quit_call(call) for call in calls)):
+        raise TesterError('reopen did not use the structured native Quit action')
     bonus_preflight = task['check_id'] == 'native-preflight' and is_bonus_pass(task['pass_id'])
     if (value['status'] == 'pass' and task['context'].get('managed_operations')
             and (task['check_id'] == 'window-drag' or bonus_preflight)):

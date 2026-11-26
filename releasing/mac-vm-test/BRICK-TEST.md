@@ -666,6 +666,11 @@ Record `continuity-before`, then `remote-update`, then `reopen`. Every later pai
 start at or beyond the previous milestone's final counter, and advance further. Saved verdicts recheck this chain;
 reusing an old advancing pair or observing a replacement process cannot satisfy another milestone.
 
+The reopen attempt also retains a `*-reopen-transition.json` receipt. It binds the counter samples to the running
+candidate before Quit, the native Quit request and the observation that the app exited, and the new app process observed
+after managed launch. A saved reopen result without this receipt remains historical evidence and counts as could not run
+when the coordinator rechecks it.
+
 ## Record evidence and finish
 
 After each named P0, P1 and P2 check, and each planned bonus checkpoint, inspect the recorded result and send the
@@ -705,6 +710,12 @@ Record failures as `--status fail` and unavailable checks as `--status could-not
 Accepted observations retain artifact hashes; changed or missing bytes invalidate a later pass verdict. Existing
 observations cannot be overwritten. Correct mistakes by retaining the original history and starting a new pass/run after
 reconciliation, following operator policy.
+
+A historical host-GUI `reopen` pass also supplies a `*-reopen-transition.json` via `--evidence`. Its `identity` contains
+the run's `run_id`, the observed `pass_id`, `check_id` set to `reopen` and `attempt` set to JSON `null`. Its `before`
+and `after` each contain the observed `desktop_pids` list and a `sample` matching the corresponding counter receipt. The
+`quit` object records `requested: true` and an empty `desktop_pids` list observed before launch. `launched_desktop_pids`
+holds the new process list witnessed at launch. Use only retained observations from the same transition.
 
 `python3 -B releasing/mac-vm-test/brick_test.py cleanup "$test_run" <pass>` rechecks successful evidence, cleanly shuts
 down both owned guests, verifies stopped state, deletes only unchanged recorded clones and verifies absence. Wait for

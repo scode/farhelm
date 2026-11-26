@@ -22,7 +22,7 @@ import uuid
 from unittest import mock
 
 from brick_test import (REPO, UPGRADE_FLOOR, Run, Source, artifact, checks, metadata, plan, priority_entry, smoke,
-                        tier, version)
+                        subset, tier, version)
 from checkpoint_contract import REMOTE_MAC_PASS
 from control import Control, Refused, atomic_json
 from machine_profile import Profile
@@ -444,6 +444,17 @@ class WorkflowTests(unittest.TestCase):
         p.write_bytes(value)
         return name
 
+    def reopen_transition(self, pass_id, before, after):
+        """Supply explicit app-lifetime evidence beside the historical fixture's counter receipts."""
+        def observation(pids, ref):
+            """Bind a distinct desktop to an already exported counter sample."""
+            return {'desktop_pids': pids, 'sample': json.loads(artifact(self.run.directory, ref))}
+        return {'identity': {'attempt': None, 'run_id': self.run.data['run_id'], 'pass_id': pass_id,
+                             'check_id': 'reopen'},
+                'before': observation([101], before), 'quit': {'requested': True, 'desktop_pids': []},
+                'launched_desktop_pids': [202],
+                'after': observation([202], after)}
+
     def prepare(self, pass_id='fresh'):
         """Establish live owned guests before testing any result or cleanup behavior."""
         children = []
@@ -706,9 +717,9 @@ a pass must record, so an older fresh pass stays completable as planned.
         remote = pair('remote', 2, 3)
         replacement = pair('replacement', 2, 3, pid=99)
         with self.run.locked():
-            def record(check, refs):
+            def record(check, refs, extra=()):
                 """Drive the production evidence gates with GUI and typed command receipts."""
-                self.run.record('upgrade-v0.24.0', check, 'pass', [image, *refs],
+                self.run.record('upgrade-v0.24.0', check, 'pass', [image, *refs, *extra],
                                 'Synthetic continuity contract only.', *refs)
             with self.assertRaisesRegex(Refused, 'preceding continuity'):
                 record('remote-update', remote)
@@ -720,7 +731,16 @@ a pass must record, so an older fresh pass stays completable as planned.
             record('remote-update', remote)
             with self.assertRaisesRegex(Refused, 'replays'):
                 record('reopen', remote)
-            record('reopen', pair('reopen', 3, 4))
+            reopened = pair('reopen', 3, 4)
+            with self.assertRaisesRegex(Refused, 'transition receipt'):
+                record('reopen', reopened)
+            transition = self.reopen_transition('upgrade-v0.24.0', *reopened)
+            same_app = dict(transition, launched_desktop_pids=[101])
+            ref = self.evidence_file('managed-reopen-transition.json', json.dumps(same_app).encode())
+            with self.assertRaisesRegex(Refused, 'new app process'):
+                record('reopen', reopened, [ref])
+            self.evidence_file(ref, json.dumps(transition).encode())
+            record('reopen', reopened, [ref])
 
     def test_saved_verdict_rechecks_cross_milestone_identity_with_all_checks_present(self):
         """Legacy accepted replacements must not pass or authorize cleanup after upgrading the harness.
@@ -749,11 +769,23 @@ artifact corruption as competing causes of the new refusal.
                     before = self.evidence_file(check_id + '-before.json', json.dumps(dict(identity, counter=low)).encode())
                     after = self.evidence_file(check_id + '-after.json', json.dumps(dict(identity, counter=low + 1)).encode())
                     refs.extend([before, after])
+                if check_id == 'reopen':
+                    transition = self.reopen_transition(entry['id'], before, after)
+                    transition_ref = self.evidence_file('managed-reopen-transition.json', json.dumps(transition).encode())
+                    refs.append(transition_ref)
                 self.run.record('upgrade-v0.24.0', check_id, 'pass', refs,
                                 'Complete synthetic acceptance fixture; no product behavior was tested.', before, after)
             self.assertEqual(len(entry['results']), 10)
             self.assertEqual(self.run.verdict(entry), 'pass')
             result = entry['results']['reopen']
+            # Keep the recorded digest current to exercise the receipt linkage
+            # check itself, rather than the earlier artifact-integrity gate.
+            mismatched = dict(transition, after=dict(transition['after'], sample=transition['before']['sample']))
+            for value, expected in ((mismatched, 'could not run'), (transition, 'pass')):
+                raw = json.dumps(value).encode()
+                self.evidence_file(transition_ref, raw)
+                result['sha256'][transition_ref] = hashlib.sha256(raw).hexdigest()
+                self.assertEqual(self.run.verdict(entry), expected)
             for role, counter in (('before', 3), ('after', 4)):
                 ref = result['continuity'][role]
                 self.evidence_file(ref, json.dumps(dict(identity, pid=99, counter=counter)).encode())
@@ -763,6 +795,63 @@ artifact corruption as competing causes of the new refusal.
             with self.assertRaisesRegex(Refused, 'incomplete or failed'):
                 self.run.cleanup('upgrade-v0.24.0')
         self.assertFalse(any(call[1] == 'delete' for call in self.model.calls))
+
+    def test_native_reopen_import_and_verdict_bind_the_quit_to_the_current_attempt(self):
+        """A genuine-looking capture and advancing counter pair cannot borrow another guest attempt's witness."""
+        from test_guest_tester import events, result, task
+
+        pass_id = 'upgrade-v0.24.0'
+        self.prepare(pass_id)
+        image = self.evidence_file('frame.png', PNG)
+        counter = {'pid': 42, 'start_ticks': 100, 'boot_id': '00000000-0000-0000-0000-000000000001'}
+        checks = ['continuity-before', 'remote-update', 'reopen']
+        with self.run.locked():
+            entry = self.run.selected(pass_id)
+            for index, check in enumerate(checks, 1):
+                before, after = (self.evidence_file(f'{check}-{role}.json', json.dumps(dict(counter, counter=n)).encode())
+                                 for role, n in (('before', index), ('after', index + 1)))
+                if check != 'reopen':
+                    self.run.record(pass_id, check, 'pass', [image, before, after],
+                                    'Synthetic predecessor receipts.', before, after)
+            transition = self.reopen_transition(pass_id, before, after)
+            witness = 'managed-reopen-transition.json'
+            envelope = dict(task(), run_id=self.run.data['run_id'], pass_id=pass_id,
+                            check_id='reopen', attempt='current-attempt')
+            outcome = result(envelope)
+            outcome.update(evidence=[image, witness, before, after], continuity={'before': before, 'after': after})
+            native = {key: self.evidence_file(name, json.dumps(value).encode()) for key, name, value in (
+                ('task', 'task.json', envelope), ('execution', 'execution.json', {'status': 'pass', 'result': outcome}))}
+            native['events'] = 'events.jsonl'
+            screenshot, completed = events(PNG, tool='brick_ui')
+            quit_event = {'type': 'item.completed', 'item': {'type': 'mcp_tool_call', 'server': 'cua_repl',
+                          'tool': 'brick_ui', 'status': 'completed', 'arguments': {
+                              'target': 'farhelm', 'method': 'quit', 'args': []}}}
+            entry['native_preflight'] = {'sha256': {image: hashlib.sha256(PNG).hexdigest()}}
+            entry['tester'] = {'phase': 'running', 'check_id': 'reopen', 'attempt': envelope['attempt'],
+                               'termination_observed': True}
+
+            with mock.patch.dict(self.run.data, gui_backend='guest-native'), mock.patch.dict(
+                    self.run.profile.values, guest_tester={'settings': envelope['settings']}):
+                def record_attempt(attempt, event_rows):
+                    """Hold the task, samples and capture fixed while changing only the Quit evidence."""
+                    transition['identity']['attempt'] = attempt
+                    self.evidence_file(witness, json.dumps(transition).encode())
+                    self.evidence_file(native['events'], '\n'.join(map(json.dumps, event_rows)).encode())
+                    self.run.record(pass_id, 'reopen', 'pass', outcome['evidence'], 'Synthetic native reopen.',
+                                    before, after, native=native, in_flight=True)
+
+                with self.assertRaisesRegex(Refused, 'structured native Quit'):
+                    record_attempt(envelope['attempt'], [screenshot, completed])
+                with self.assertRaisesRegex(Refused, 'different attempt'):
+                    record_attempt('previous-attempt', [quit_event, screenshot, completed])
+                self.assertNotIn('reopen', entry['results'])
+                record_attempt(envelope['attempt'], [quit_event, screenshot, completed])
+                self.assertEqual(self.run.verdict(subset(entry, checks)), 'pass')
+                transition['identity']['attempt'] = 'previous-attempt'
+                raw = json.dumps(transition).encode()
+                self.evidence_file(witness, raw)
+                entry['results']['reopen']['sha256'][witness] = hashlib.sha256(raw).hexdigest()
+                self.assertEqual(self.run.verdict(subset(entry, checks)), 'could not run')
 
     def test_latest_is_reobserved_before_install_and_promotion_is_reported(self):
         """Promotion during old-state seeding must change path and invalidate pre-promotion coverage."""
