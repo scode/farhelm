@@ -31,6 +31,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit asking the YOLO question on hosts whose supervisor reports no installation identity.** On 2026-11-26 the
+  landing monitor, landing `launcher-consent-and-custom-agent-fixes` (#4999, #5003, #5029, #5037), blocked it because
+  its YOLO fix stopped the launcher from asking the YOLO question at all on such hosts, and answered the block on your
+  behalf: the launcher asks as before while the one-time answer goes straight back to the connection that refused the
+  launch, and requires a verified installation only when the answer would outlive that connection (a host wake, or a
+  reconnect before the launch is sent). The alternative was to keep the plan as built, so those hosts could not use the
+  one-time answer at all and their users would have to turn off asking before YOLO. Plan:
+  `plans/queue/launcher-consent-and-custom-agent-fixes.md`.
+
 - **Revisit Clone and Replace with starting old no-permission sessions as YOLO.** On 2026-11-23 the landing monitor,
   landing `remove-own-setting-permission` (#4669, #4672, #4673, fix #4685), accepted a consequence of migrating old
   agent sessions that never chose a permission to YOLO: Clone, Replace with and Restart with of such a session now
