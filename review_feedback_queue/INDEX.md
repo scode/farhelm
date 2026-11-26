@@ -25,18 +25,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`provisioning-orphan-sweep-deletes-concurrent-helm-upload.md`](provisioning-orphan-sweep-deletes-concurrent-helm-upload.md)
-  — Two helms provisioning the same host concurrently can delete each other's active staging temporary via the orphan
-  sweep (no liveness check); the victim run fails visibly and retryably (cross-helm premise unverified).
-
-- [`release-payload-cache-misses-private-dir-hardening.md`](release-payload-cache-misses-private-dir-hardening.md) — The
-  release payload cache is created umask-dependent without symlink refusal, unlike the deliberately hardened sibling
-  directory cache; protected today only by the 0700 state dir (hardening consistency).
-
-- [`podman-settle-claim-incumbent-state-non-atomic.md`](podman-settle-claim-incumbent-state-non-atomic.md) — A place
-  claim transfer reads the incumbent's live identity refusal non-atomically; if it resolves to Connected in the window,
-  the claim still moves (benign routing shift between twins on the same machine; resource guards hold).
-
 - [`trailing-drift-copyback-runs-while-agent-may-live.md`](trailing-drift-copyback-runs-while-agent-may-live.md) — A
   Grok or Antigravity drift case copies refreshed vendor files back once its terminal hosts end, even when the agent may
   still be running (failed Delete sweep, failed create, detached process), so a later vendor save such as a refreshed
@@ -62,10 +50,6 @@ consequences.
   capture-timing drift check treats prompt-timed and reply-timed agents alike, so a vendor drift between "at the first
   prompt" and "after the first reply" would go unnoticed.
 
-- [`trailing-release-notes-recapture-parks-on-tooltip-field.md`](trailing-release-notes-recapture-parks-on-tooltip-field.md)
-  — Recapturing the v0.42.0 Antigravity release-notes picture parks the pointer on the Conversation field, so its
-  tooltip would be drawn into the picture (from source; not seen in a capture).
-
 - [`trailing-brick-cleanup-refuses-untested-remote-mac-pair.md`](trailing-brick-cleanup-refuses-untested-remote-mac-pair.md)
   — After a stop-after-P0 request, brick-test cleanup refuses a prepared but untested remote Mac pair and demands a
   retention decision for machines with no evidence.
@@ -90,13 +74,6 @@ consequences.
   A stale "Start, and don't ask again on this host" answer closes the YOLO question with nothing started and no reason,
   sometimes after the host setting was already saved.
 
-- [`trailing-hook-hint-keeps-stale-save-error.md`](trailing-hook-hint-keeps-stale-save-error.md) — The hook setup hint
-  brings back an old Don't show again error after a later dismissal and re-enable (previously triaged as no change under
-  the cheap-fix rule).
-
-- [`trailing-trust-hint-hide-survives-reconnect.md`](trailing-trust-hint-hide-survives-reconnect.md) — A trust hint
-  hidden with × can stay hidden for a new trust question that began while the app was disconnected (premise unverified).
-
 - [`trailing-trust-hint-late-refusal-untested.md`](trailing-trust-hint-late-refusal-untested.md) — No test covers a
   trust hint save refusal that lands while the hint is already dismissed.
 
@@ -108,10 +85,6 @@ consequences.
 
 - [`trailing-switch-warning-description-untested.md`](trailing-switch-warning-description-untested.md) — No test checks
   that the trust and hook switches carry their warning for screen readers.
-
-- [`trailing-relative-claude-lock-in-old-cleanup-records.md`](trailing-relative-claude-lock-in-old-cleanup-records.md) —
-  Claude trust cleanup records written with a relative `CLAUDE_CONFIG_DIR` before the fix keep a relative lock path
-  (likely unpopulated).
 
 - [`trailing-settings-trust-help-misdescribes-persistent-hosts.md`](trailing-settings-trust-help-misdescribes-persistent-hosts.md)
   — Settings trust help says sandbox and container sessions trust automatically, but persistent recipe hosts follow the

@@ -50267,3 +50267,90 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: complete. Change `ruqlmlvnzolysnvuwvyskvtkquyuvkyv`, bookmark
   `plan/triage-spec-and-comment-updates/01-spec-and-comment-updates`.
   [Draft PR #5040](https://github.com/scode/farhelm/pull/5040/changes).
+
+## trailing-release-notes-recapture-parks-on-tooltip-field.md
+
+- Outcome: `discard`.
+- Assessment: Confirmed by source geometry and timing (`scripts/docs-shots/release-notes.py:157-166`,
+  `gui-agent.py: 1858-1861,1877`, `launcher/view.rs:1642-1665`, `layers/tooltip.rs:15,74`); not observed visually.
+  Published release shots are frozen and human-reviewed if ever recaptured.
+- Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
+  items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (discarded per triage). Change `opulpvmorrnzzqmvyoolqlqxpnzrkotl`, bookmark
+  `plan/triage-queue-discards/01-queue-discards`, https://github.com/scode/farhelm/pull/5042/changes.
+
+## provisioning-orphan-sweep-deletes-concurrent-helm-upload.md
+
+- Outcome: `discard`.
+- Assessment: Confirmed in source (`crates/farhelm-helm/src/provisioning/backend.rs:735-814,1235,1430,1764-1770`;
+  cross-helm overlap not live-executed): two separate helms provisioning the same host simultaneously can delete each
+  other's active staging temp file, causing a fail-closed, visible, retryable failure with existing binary/data intact.
+- Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
+  6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (discarded per triage). Change `opulpvmorrnzzqmvyoolqlqxpnzrkotl`, bookmark
+  `plan/triage-queue-discards/01-queue-discards`, https://github.com/scode/farhelm/pull/5042/changes.
+
+## release-payload-cache-misses-private-dir-hardening.md
+
+- Outcome: `discard`.
+- Assessment: Confirmed in source (`crates/farhelm-helm/src/provisioning/release_payloads.rs:822,1364` vs
+  `payloads.rs:455-475,1212-1215`): the release payload cache uses plain `create_dir_all` inside `helm_state_dir`, which
+  is `0700` on all production callers (`supervisor/src/lib.rs:119-126`). Zero user-facing impact today.
+- Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
+  6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (discarded per triage). Change `opulpvmorrnzzqmvyoolqlqxpnzrkotl`, bookmark
+  `plan/triage-queue-discards/01-queue-discards`, https://github.com/scode/farhelm/pull/5042/changes.
+
+## podman-settle-claim-incumbent-state-non-atomic.md
+
+- Outcome: `discard`.
+- Assessment: Confirmed in source (`crates/farhelm-helm/src/environment/podman_probe.rs:606-642`,
+  `store/podman.rs:425-501`): if an unused twin host entry finishes verifying identity between reading live actor state
+  and committing `claim_podman_place`, the unused place claim still transfers — a benign routing-preference shift
+  between twins on the same machine+UID with zero containers/images/helpers.
+- Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
+  6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (discarded per triage). Change `opulpvmorrnzzqmvyoolqlqxpnzrkotl`, bookmark
+  `plan/triage-queue-discards/01-queue-discards`, https://github.com/scode/farhelm/pull/5042/changes.
+
+## trailing-hook-hint-keeps-stale-save-error.md
+
+- Outcome: `discard`.
+- Assessment: Confirmed in source
+  (`crates/gui/farhelm-gui/src/session_pane/hook_band.rs:39-44,66-83,96-117,143-149, 194-204`). Exact re-report of
+  `hook-hint-can-repaint-old-dismissal-error.md`, already closed as no-change in PR #4863 under the 2026-11-24
+  cheap-polish threshold (`TRIAGE_OUTCOMES_ARCHIVE.md:45849-45872`).
+- Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
+  6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (discarded per triage). Change `opulpvmorrnzzqmvyoolqlqxpnzrkotl`, bookmark
+  `plan/triage-queue-discards/01-queue-discards`, https://github.com/scode/farhelm/pull/5042/changes.
+
+## trailing-trust-hint-hide-survives-reconnect.md
+
+- Outcome: `discard`.
+- Assessment: Confirmed in desktop source
+  (`crates/gui/farhelm-gui/src/session_pane/trust_band.rs:145-151,213-217, 495-500`; gap-during-disconnect unverified):
+  local × hides intentionally survive transient reconnects so brief disconnects do not re-show dismissed hints.
+- Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
+  6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (discarded per triage). Change `opulpvmorrnzzqmvyoolqlqxpnzrkotl`, bookmark
+  `plan/triage-queue-discards/01-queue-discards`, https://github.com/scode/farhelm/pull/5042/changes.
+
+## trailing-relative-claude-lock-in-old-cleanup-records.md
+
+- Outcome: `discard`.
+- Assessment: Confirmed in source (`crates/farhelm-supervisor/src/agent_kind/claude/trust.rs:49-60,120-139,264-281`;
+  `launch.rs:1986-1999`): pre-#4902 checkout cleanup records written under a relative `CLAUDE_CONFIG_DIR` retain a
+  relative `lock_path`. Practically unpopulated in the wild, and `TODO.md:125-129` (Immediate) already plans to drop
+  post-clone Claude trust edits.
+- Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
+  6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Remove the feedback file and its index entry without changing code or spec.
+- Execution: complete (discarded per triage). Change `opulpvmorrnzzqmvyoolqlqxpnzrkotl`, bookmark
+  `plan/triage-queue-discards/01-queue-discards`, https://github.com/scode/farhelm/pull/5042/changes.
