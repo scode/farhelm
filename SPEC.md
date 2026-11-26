@@ -1331,7 +1331,7 @@ agent choice is independent of that destination:
   prefix clears it. Quick launch applies those same edits before starting the agent. A template whose field does not
   apply to what the launcher holds when it is applied, such as a model while the launch kind is command or a model the
   chosen agent type does not offer, is refused with a message naming the field, and nothing from it is applied. So is a
-  template that changes a field the current launcher mode holds fixed, such as the host in Replace with or a field held
+  template that changes a field the current launcher mode holds, such as Replace with's host or folder, or a field held
   by Restart with (Lifecycle operations below). A template names an ordinary host by its recorded install identity,
   exactly like the host default below, so a registry row retargeted to another install makes the template's host field
   inapplicable rather than silently aiming at the successor. An environment target uses a separate immutable recipe name
@@ -1543,9 +1543,9 @@ explanation below the field. A separate scrolling column beside the form shows u
 templates while the field is empty. The row remains marked and the form names its source across hand edits. Reset clears
 the mark, another fill sets it, and permission Undo restores the previous mark. Down from the empty field moves a
 keyboard highlight into the list. Up from its first row returns Enter to the field's Launch action. Enter on a
-highlighted template applies it. In Replace with, a highlighted recent setup's key cap reads "⏎ Replace", since Enter
-there replaces, and so deletes, the source. The list adds no Tab stops. A mouse pick returns focus to the command field.
-With text in the field, grouped results take over the column and the form dims while staying editable. Escape or
+highlighted template applies it. Replace with and Restart with show recent setups disabled with the reason, since each
+setup sets the destination those modes hold. The list adds no Tab stops. A mouse pick returns focus to the command
+field. With text in the field, grouped results take over the column and the form dims while staying editable. Escape or
 clicking outside the results hides them and keeps the query. When the window is too narrow to fit both sides, the column
 is hidden and typed results appear below the field. Use `recent:` and `tl:` to reach setups and templates there. When a
 Recent setup with saved Custom approval flags is highlighted, the flag words wrap below the scrolling results in either
@@ -1859,14 +1859,11 @@ host. It works with both launch kinds. Selecting a folder or editing the ordinar
 existing-directory launch without changing the agent choice. Clone of a session in a managed checkout starts on a
 managed checkout of that repository, preferring its current checkout association over its launch provenance. This
 includes sessions opened in an existing checkout and replacements of the session that created it. A source in a checkout
-subdirectory clones to the new checkout's top level. Clone of other sessions, Replace with, and plain Replace start from
-the source's actual directory; a managed checkout then requires an explicit repository selection, a saved repository
-setup, or a template that sets one. While Replace with still shows the source's folder, the launcher names its managed
-checkout and says the replacement keeps working in it with its changes. If the source has a managed checkout, choosing
-Managed checkout in Replace with warns under Where that the replacement starts from a fresh clone without the source
-checkout's changes. If Replace removes the checkout's last session, the checkout moves to that host's trash. In a
-session's own sandbox or container, this is trash inside the environment, which is discarded when the environment is
-deleted. `farhelm agent clone` keeps its existing-directory behavior.
+subdirectory clones to the new checkout's top level. Clone of other sessions and plain Replace start from the source's
+actual directory; for Clone, a managed checkout then requires an explicit repository selection, a saved repository
+setup, or a template that sets one. Replace with keeps the source's directory and cannot choose a managed checkout
+(Lifecycle operations); when that directory is in one, the launcher names the checkout and says the replacement keeps
+working in it with its changes. `farhelm agent clone` keeps its existing-directory behavior.
 
 The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. A session's own
 sandbox or container uses its configured checkout folder, with its home as the fallback. Managed checkout in these
@@ -1996,11 +1993,11 @@ environment.
 If a managed-checkout preview failure ends a launch's wake preparation, the launcher reopens with a refusal alert that
 gives the preview's reason.
 
-Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no repository ignore
-an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
-remains unnamed. Whenever a checkout launch is unnamed, the name field shows the `repo-N` it will get as placeholder
-text. Choosing an existing folder again restores the source's original directory and copied title; choosing the source
-repository again restores Clone's default name, unless the user has edited it.
+Clone into a different repository, and Clone of a source with no repository, ignore an untouched copied title: the
+session is unnamed and gets the lowest available `repo-N`. An empty source title also remains unnamed. Whenever a
+checkout launch is unnamed, the name field shows the `repo-N` it will get as placeholder text. Choosing an existing
+folder again restores the source's original directory and copied title; choosing the source repository again restores
+Clone's default name, unless the user has edited it.
 
 Repository input is a GitHub owner/repository pair, not a URL, branch selector or shell fragment. The owner has 1–39
 ASCII letters, digits or hyphens, starts and ends alphanumeric, and has no consecutive hyphens. The repository has 1–100
@@ -2281,7 +2278,7 @@ submission and focus-return behavior.
   command's resume choice remain refused. Search results and recent setups that set a held field show as disabled even
   when they name its current value. Their help explains which field stays fixed. A template containing only equal held
   values applies silently as nothing. The held agent type, host and folder remain visible. Replace with can change the
-  harness or folder, and Clone can change the host. The launcher shows the current settings and marks edited fields, and
+  harness, and Clone can change the folder or host. The launcher shows the current settings and marks edited fields, and
   its primary action is inactive until a setting changes or a conversation selector is entered. For an agent launch with
   a stored resume command, it is available even without a captured conversation; then its conversation field is required
   and explains why. A registered custom agent also needs a current registration that supports resumption. The editor can
@@ -2322,24 +2319,25 @@ submission and focus-return behavior.
   the reply, the sidebar, session header and interrupted-session card share a spinner, the host and elapsed seconds,
   updated about once a second. The status disappears on the reply. A refusal keeps its ordinary explanation, including
   partial failure of the source's removal.
-- **Replace with** opens the same editable create form clone opens, pre-filled with the source's host, existing
-  directory, title, and launch even when the source belongs to a GitHub checkout, so every field can be edited before
-  launching — the key use is starting an equivalent session on a different harness or effort. Launching creates the new
-  session and then deletes the source, with exactly Replace's create-then-delete contract and failure reporting (the
-  same asymmetry: an untouched source on a failed create, both ids named on a failed removal). Unlike clone, it keeps
-  the source's own host — clone is the way to start a session on a different host. Offered wherever clone and replace
-  are offered. Clone, replace with, and New are one launcher — same layout, same controls, same search, same validation
-  — differing only in what is pre-filled when they open and in what launching does (create; create then delete the
-  source). When Folder holds the source's own folder in a managed checkout, a checkout mark and a line below Folder name
-  that checkout and explain that the replacement keeps working in it with its changes. For a source in a managed
-  checkout, selecting Managed checkout warns below Where that the replacement starts from a fresh clone and that
-  replacing the old checkout's last session moves it to the host's trash, as described under Managed checkouts. Its
-  launch button confirms the delete. While the source's main program or any tab is alive, the launcher shows Replace's
-  warning about the source beside it, following the source's state as the client sees it while the launcher stays open,
-  and launching carries the precondition matching what the launcher showed at the click (see the confirmation rule
-  below). A source that has more alive by then, such as one restarted while the launcher was open, is kept: the new
-  session is still created first, with no liveness check before it, and the user gets Replace's both-sessions-exist
-  error.
+- **Replace with** opens the same create form clone opens, pre-filled with the source's host, existing directory, title,
+  and launch, to replace what runs in the session in place: the agent or command, model, effort, permissions, wrapper
+  prefix, initial prompt, conversation selector and title can all be edited before launching — the key use is starting
+  an equivalent session on a different harness or effort. The host and the destination stay the source's: its folder,
+  and the managed checkout or repository that folder belongs to. Their controls are held as Restart with's are (Folder
+  is shown read-only, with no Where switch, Browse or repository field). As there, search results and recent setups that
+  set them are refused even when they name the current values, while a template may repeat them and is refused only when
+  it would change them. Clone is the way to start a session in a different folder, repository or host. Launching creates
+  the new session and then deletes the source, with exactly Replace's create-then-delete contract and failure reporting
+  (the same asymmetry: an untouched source on a failed create, both ids named on a failed removal). Offered wherever
+  clone and replace are offered. Clone, replace with, and New are one launcher — same layout, same controls, same
+  search, same validation — differing only in what is pre-filled when they open, what they hold, and in what launching
+  does (create; create then delete the source). When the source's folder is in a managed checkout, a checkout mark and a
+  line below Folder name that checkout and explain that the replacement keeps working in it with its changes. Its launch
+  button confirms the delete. While the source's main program or any tab is alive, the launcher shows Replace's warning
+  about the source beside it, following the source's state as the client sees it while the launcher stays open, and
+  launching carries the precondition matching what the launcher showed at the click (see the confirmation rule below). A
+  source that has more alive by then, such as one restarted while the launcher was open, is kept: the new session is
+  still created first, with no liveness check before it, and the user gets Replace's both-sessions-exist error.
 - **Delete** removes the session and its stored state, in any state, terminating the agent or shell and its tabs if
   running. The confirmation names the main program or open tabs when present, unless session confirmations are skipped
   (below). Deletion may make partial progress before failing, including removing attachment files while retaining the

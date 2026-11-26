@@ -78,7 +78,9 @@ pub enum Tab {
 pub enum Mode {
     New,
     Clone,
-    /// Replace with: a create on the source's own host, then the source's delete.
+    /// Replace with: a create on the source's own host and in its own folder or checkout, then the source's delete. It
+    /// changes only what runs there (agent or command, model, effort, permissions, wrapper, prompt, title); Clone is
+    /// how a session moves to another folder, repository or host (SPEC.md, "Replace with").
     ReplaceWith {
         source: String,
     },
@@ -563,7 +565,8 @@ impl LaunchDraft {
         draft
     }
 
-    /// Replace with `source`: as Clone, but on the source's own host, which the mode holds (SPEC.md, "Replace with").
+    /// Replace with `source`: as Clone, but on the source's own host and folder, which the mode holds (SPEC.md,
+    /// "Replace with"). It never starts a managed checkout: a source in one keeps working in that checkout's folder.
     pub fn replace_with(source: &str, session: &SessionInfo, host: Option<i64>) -> LaunchDraft {
         let mut draft = LaunchDraft::seeded(
             Mode::ReplaceWith {
@@ -735,7 +738,7 @@ impl LaunchDraft {
     pub fn holds(&self, field: Field) -> bool {
         match &self.mode {
             Mode::New | Mode::Clone => false,
-            Mode::ReplaceWith { .. } => field == Field::Host,
+            Mode::ReplaceWith { .. } => matches!(field, Field::Host | Field::Destination),
             Mode::RestartWith(_) => true,
         }
     }
@@ -1197,7 +1200,7 @@ impl LaunchDraft {
 
     /// Whether Launch is refused because the folder the user took on one installation would launch on another
     /// ([`FOLDER_INSTALLATION_MOVED`]). Only for a folder destination this draft may change: a managed checkout puts the
-    /// folder aside, and Restart with keeps its own.
+    /// folder aside, and Replace with and Restart with keep their own.
     pub fn folder_installation_moved(&self, hosts: &[HostView]) -> bool {
         self.folder.is_touched()
             && self.checkout.is_none()
@@ -1270,7 +1273,8 @@ impl LaunchDraft {
 
     /// The Where row's choice: a folder, or a managed checkout. Choosing Folder brings back the folder the draft held
     /// before, untouched by the checkout; choosing Managed checkout starts with an empty repository field. Choosing the
-    /// kind already chosen changes nothing, so it never drops a chosen repository. Restart with holds its destination.
+    /// kind already chosen changes nothing, so it never drops a chosen repository. Replace with and Restart with hold
+    /// their destination, so there it changes nothing.
     pub fn choose_destination(&mut self, kind: DestinationKind) {
         if self.holds(Field::Destination) || kind == self.destination_kind() {
             return;
@@ -1312,7 +1316,7 @@ impl LaunchDraft {
     /// Choose `repo` for a managed checkout: from the repository field's suggestions, or from wherever else names a
     /// repository the way a hand choice does (the composer search's `gh:owner/repo`). The destination becomes a managed
     /// checkout of it, and the helm is asked for a new preview even when it is the repository already chosen. Refused,
-    /// changing nothing, where the mode holds the destination (Restart with).
+    /// changing nothing, where the mode holds the destination (Replace with and Restart with).
     pub fn choose_repository(&mut self, repo: GithubRepo) {
         if self.holds(Field::Destination) {
             return;
@@ -1343,9 +1347,9 @@ impl LaunchDraft {
     ///   `-50`. A fixed name, or one the user typed, is exact and stays a conflict when taken.
     /// - Clone into its source's own repository, with the copied title untouched and not empty, defaults to
     ///   `<title>-clone`, numbered the same way.
-    /// - Otherwise a copied title the user has not edited is ignored ("Replace with into a managed checkout, Clone into a
-    ///   different repository, and Clone of a source with no repository ignore an untouched copied title: the session
-    ///   is unnamed").
+    /// - Otherwise a copied title the user has not edited is ignored ("Clone into a different repository, and Clone of
+    ///   a source with no repository, ignore an untouched copied title: the session is unnamed"). Replace with never
+    ///   reaches here: it holds its folder, so it never has a checkout.
     ///
     /// The name field shows this value while a checkout is chosen, and the copied title again when Folder is chosen
     /// back; the preview and the create use it alike.

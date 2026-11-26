@@ -1580,7 +1580,7 @@ static SCENES: &[Scene] = &[
         setup: launcher_results_setup,
     },
     Scene {
-        name: "launcher-replace-typed-recent",
+        name: "launcher-typed-recent",
         size: (1080., 1160.),
         draw: session_lists_then,
         setup: launcher_recent_fill_setup,
@@ -1638,12 +1638,6 @@ static SCENES: &[Scene] = &[
         size: (1080., 1160.),
         draw: session_lists_then,
         setup: launcher_replace_setup,
-    },
-    Scene {
-        name: "launcher-replace-checkout-in-sandbox",
-        size: (1080., 1160.),
-        draw: session_lists_then,
-        setup: sandbox_replace_setup,
     },
     Scene {
         name: "launcher-narrow",

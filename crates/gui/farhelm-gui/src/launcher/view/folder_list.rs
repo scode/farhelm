@@ -11,7 +11,8 @@
 //!   seeded or picked (the open session's, `~`, a Clone's, a row taken) shows them all; once the user types in the
 //!   field, only those holding what is typed, ignoring case, until the next pick. With none: "No recent folders".
 //! - **Reset**: Home (`~` on the chosen host) and Local home (`~` on this machine, which also makes the local host the
-//!   target). Local home is left out where the launcher keeps its host fixed (Replace with).
+//!   target). Local home is left out where the launcher keeps its host fixed. No mode that holds the host shows this
+//!   list today (Replace with and Restart with hold the folder too), so that rule only guards a future one.
 //! - **Keys.** No row is highlighted until an arrow moves to one (Down from nothing is the first, Up the last; both
 //!   wrap); Enter then takes it without launching, and with nothing highlighted Enter launches as from any field (SPEC.md:
 //!   "In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with no

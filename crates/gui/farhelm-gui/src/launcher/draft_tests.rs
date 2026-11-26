@@ -892,7 +892,8 @@ fn clone_seeds_command_and_legacy_launches_on_the_command_tab() {
 }
 
 /// Which fields each mode holds fixed (SPEC.md, "Restart with" and "Replace with"): New and Clone none, Replace with
-/// the host, Restart with launch kind, agent type, host, destination, name and prompt.
+/// the host and destination (it replaces what runs in the session, in place), Restart with launch kind, agent type,
+/// host, destination, name and prompt.
 #[test]
 fn each_mode_holds_its_own_fields() {
     let source = session(agent_launch(selection(LaunchHarness::Codex), true));
@@ -913,7 +914,7 @@ fn each_mode_holds_its_own_fields() {
             .iter()
             .filter(|field| replace.holds(**field))
             .collect::<Vec<_>>(),
-        [&Field::Host]
+        [&Field::Host, &Field::Destination]
     );
     let restart = LaunchDraft::restart_with("s1", &source, Some(1))
         .expect("an agent launch with a resume command");

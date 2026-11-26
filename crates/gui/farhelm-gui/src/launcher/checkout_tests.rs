@@ -17,7 +17,7 @@ use farhelm_proto::{AcceptedGithubPreview, CheckoutPreviewBinding, GithubRepo};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
-use super::draft::{DestinationKind, LaunchDraft, Mode, Tab};
+use super::draft::{DestinationKind, LaunchDraft, Tab};
 use super::request::{
     Account, CONVERSATION_IN_CHECKOUT, Preview, Recipes, SELECT_REPOSITORY, Target,
     UNVERIFIED_HOST, WAIT_FOR_PREVIEW,
@@ -131,12 +131,12 @@ fn restart_with_holds_its_destination() {
     assert_eq!(draft, before);
 }
 
-/// SPEC.md: "Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no
-/// repository ignore an untouched copied title: the session is unnamed", and choosing Folder again "restores the
-/// source's original directory and copied title". Why: a copied title would otherwise name the new checkout's folder
-/// after another session without the user asking. Specified: for Clone and Replace with, an untouched copied title gives
-/// an empty checkout name and the field shows it empty, the folder destination shows the title again, and a name the
-/// user types is kept; New's typed name is always kept.
+/// SPEC.md: "Clone into a different repository, and Clone of a source with no repository, ignore an untouched copied
+/// title: the session is unnamed", and choosing Folder again "restores the source's original directory and copied
+/// title". Why: a copied title would otherwise name the new checkout's folder after another session without the user
+/// asking. Specified: for Clone, an untouched copied title gives an empty checkout name and the field shows it empty,
+/// the folder destination shows the title again, and a name the user types is kept; New's typed name is always kept.
+/// Replace with never reaches a checkout: it holds the source's folder, so choosing a repository changes nothing.
 #[test]
 fn a_checkout_ignores_an_untouched_copied_title() {
     let session = super::draft_tests::session(farhelm_proto::SessionLaunch::Command(
@@ -148,21 +148,29 @@ fn a_checkout_ignores_an_untouched_copied_title() {
             resume: None,
         },
     ));
-    for mut draft in [
-        LaunchDraft::clone_of(&session, Some(1)),
-        LaunchDraft::replace_with("a", &session, Some(1)),
-    ] {
-        assert!(matches!(draft.mode, Mode::Clone | Mode::ReplaceWith { .. }));
-        assert!(!session.title.is_empty(), "the premise: a title to copy");
-        draft.choose_repository(repo("acme", "bar"));
-        assert_eq!(draft.checkout_title(), "", "the copied title is ignored");
-        assert_eq!(draft.shown_name(), "");
-        draft.choose_destination(DestinationKind::Folder);
-        assert_eq!(draft.shown_name(), session.title, "Folder shows it again");
-        draft.choose_destination(DestinationKind::Checkout);
-        draft.edit_name("Fix parser".into());
-        assert_eq!(draft.checkout_title(), "Fix parser", "a typed name is kept");
-    }
+    let mut draft = LaunchDraft::clone_of(&session, Some(1));
+    assert!(!session.title.is_empty(), "the premise: a title to copy");
+    draft.choose_repository(repo("acme", "bar"));
+    assert_eq!(draft.checkout_title(), "", "the copied title is ignored");
+    assert_eq!(draft.shown_name(), "");
+    draft.choose_destination(DestinationKind::Folder);
+    assert_eq!(draft.shown_name(), session.title, "Folder shows it again");
+    draft.choose_destination(DestinationKind::Checkout);
+    draft.edit_name("Fix parser".into());
+    assert_eq!(draft.checkout_title(), "Fix parser", "a typed name is kept");
+
+    let mut replace = LaunchDraft::replace_with("a", &session, Some(1));
+    replace.choose_repository(repo("acme", "bar"));
+    replace.choose_destination(DestinationKind::Checkout);
+    assert_eq!(
+        replace.checkout, None,
+        "Replace with holds the source's folder"
+    );
+    assert_eq!(
+        replace.shown_name(),
+        session.title,
+        "and keeps its copied title"
+    );
     let mut new = LaunchDraft::new(Some(1), "~".into(), None);
     new.edit_name("mine".into());
     new.choose_repository(repo("acme", "bar"));
@@ -2010,7 +2018,8 @@ fn guarded_waiting(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext
     guarded_waiting_named(cx, None, "/api/sessions")
 }
 
-/// Wait at the guarded answer's fresh preview, for a New or Replace request, optionally with a template base name.
+/// Wait at the guarded answer's fresh preview of New's create to `route`, optionally with a template base name. Only
+/// New and Clone wait on one: Replace with holds the source's folder and never starts a managed checkout.
 fn guarded_waiting_named<'a>(
     cx: &'a mut TestAppContext,
     base: Option<&str>,
@@ -2023,9 +2032,6 @@ fn guarded_waiting_named<'a>(
     );
     let _ = draft.choose_harness(farhelm_proto::LaunchHarness::Codex, None, None);
     draft.choose_permissions(Some(farhelm_proto::LaunchPermission::Yolo));
-    if route == REPLACE_A {
-        draft.mode = Mode::ReplaceWith { source: "a".into() };
-    }
     draft.choose_repository(repo("acme", "bar"));
     if let Some(base) = base {
         draft.edit_name(base.into());
@@ -2052,10 +2058,6 @@ fn guarded_waiting_named<'a>(
         Some(json!("YOLO launches on host1 need --yolo")),
     );
     settle(cx);
-    if route == REPLACE_A {
-        show_source(&mut helm, cx, json!({"state": "exited", "exit_code": 0}));
-        assert_eq!(name_of(cx, "launcher-source-warning"), None);
-    }
     assert_eq!(
         name_of(cx, "prompt-alternative-0").as_deref(),
         Some("Start guarded session instead"),
@@ -2071,45 +2073,29 @@ fn guarded_waiting_named<'a>(
     (helm, cx, preview)
 }
 
-const REPLACE_A: &str = "/api/sessions/a/replace";
-
-/// Push the source independently of checkout preview settlement, as the helm does when its agent exits or restarts.
-fn show_source(helm: &mut FakeHelm, cx: &mut VisualTestContext, status: Value) {
-    use crate::session_list::tests::{change, listing_meta, session};
-    helm.push(change(
-        listing_meta(&["a"], 1, false),
-        &[session("a").status(status)],
-        &[],
-    ));
-    settle(cx);
-}
-
 /// SPEC.md: the YOLO question's guarded answer starts "the same launch guarded instead"; switching to Guarded is an
 /// agent-choice change, which "invalidate[s] an undispatched preview". The old launcher waited for the new preview and
 /// then submitted once (its `GuardedSubmitStamp`); refusing instead would turn the answer into a dead end. Specified:
-/// once the new preview answers ready, one Replace goes out with that preview, guarded and without YOLO consent.
-/// The restarted source must still be protected by the ended-and-tabless warning shown when the user answered.
+/// once the new preview answers ready, one create goes out with that preview, guarded and without YOLO consent. (This
+/// ran through Replace with until Replace with stopped offering a managed checkout; the wait itself is New's.)
 #[gpui::test]
 fn the_guarded_answer_waits_for_the_new_preview_then_launches_once(cx: &mut TestAppContext) {
-    let (mut helm, cx, preview) = guarded_waiting_named(cx, None, REPLACE_A);
-    show_source(&mut helm, cx, json!({"state": "running"}));
-    assert!(name_of(cx, "launcher-source-warning").is_some());
+    let (mut helm, cx, preview) = guarded_waiting(cx);
     helm.reply(
         preview.id,
         200,
         Some(preview_reply("/work/bar-1", "bar-1", 3)),
     );
     settle(cx);
-    let creates = to(&sent(&mut helm, cx), REPLACE_A);
+    let creates = to(&sent(&mut helm, cx), "/api/sessions");
     let [create] = &creates[..] else {
         panic!("one create once ready, not {}", creates.len());
     };
     let body = create.body.as_ref().unwrap();
-    assert_eq!(body["only_if_nothing_alive"], json!(true));
-    assert_eq!(body["with"]["launch"]["permissions"], json!("guarded"));
+    assert_eq!(body["launch"]["permissions"], json!("guarded"));
     assert_eq!(body["confirm_yolo"], json!(false));
     assert_eq!(
-        body["with"]["github_checkout"]["preview"]["cwd"],
+        body["github_checkout"]["preview"]["cwd"],
         json!("/work/bar-1")
     );
 }

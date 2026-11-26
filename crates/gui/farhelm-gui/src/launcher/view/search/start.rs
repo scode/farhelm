@@ -160,7 +160,7 @@ impl Launcher {
             }
             Err(RecentRefusal::Retired) => self.notice = Some(RETIRED_CONTAINER_REASON.into()),
             Err(RecentRefusal::Stale) => self.refuse_stale_choice(None, window, cx),
-            Err(RecentRefusal::Held | RecentRefusal::KeepsEnvironment) => {}
+            Err(RecentRefusal::Held) => {}
         }
         cx.notify();
     }
@@ -305,24 +305,7 @@ impl Launcher {
                             &entry.selection,
                             collections,
                         )));
-                    // A Replace with row has separate pointer and keyboard actions. The key cap's separate
-                    // node does not give the selected option's name the Enter consequence.
-                    let label = if !disabled
-                        && entry.selection.container.is_none()
-                        && matches!(self.draft.mode, super::Mode::ReplaceWith { .. })
-                    {
-                        let name = whole.accessible_name();
-                        if active {
-                            format!(
-                                "{name}. Click to fill the form. Enter replaces and deletes the source session."
-                            )
-                            .into()
-                        } else {
-                            format!("Fill from recent setup: {name}").into()
-                        }
-                    } else {
-                        whole.accessible_name()
-                    };
+                    let label = whole.accessible_name();
                     let help = super::recent_hover(
                         whole,
                         entry.selection.wrapper_prefix.is_some(),
@@ -339,7 +322,7 @@ impl Launcher {
                             "",
                             active && !disabled,
                             selected,
-                            recent_enter_cap(&self.draft.mode),
+                            RETURN_KEY.into(),
                             palette,
                             collections,
                         ),
@@ -559,17 +542,6 @@ fn recent_choice(
         )
     })
     .into_any_element()
-}
-
-/// The key cap a highlighted recent setup shows. In Replace with, Enter on it replaces the source session, which
-/// deletes that session, so the cap names the verb, as the old recent strip's "⏎ Replace" hint did; elsewhere Enter
-/// launches the setup and the bare key says enough. Only one row is highlighted at a time, so the cap's id is unique.
-fn recent_enter_cap(mode: &super::Mode) -> SharedString {
-    if matches!(mode, super::Mode::ReplaceWith { .. }) {
-        format!("{RETURN_KEY} Replace").into()
-    } else {
-        RETURN_KEY.into()
-    }
 }
 
 /// Explain a result's effect where the group and name alone leave it unclear. The row keeps the same full accessible
