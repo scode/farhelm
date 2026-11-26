@@ -132,26 +132,6 @@
   file and its index entry.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## settings-close-can-miss-detached-credential-save.md
-
-- Outcome: `fix code`.
-- Assessment: If you press Save in a credential editor and then leave it with Back or Cancel while the save is still
-  running, Settings forgets about that save. Closing Settings can then offer Discard and close without waiting, so a
-  refusal of the credential save is never shown. Verified: confirmed. Back and Cancel stay active while saving
-  (`credentials/editor.rs:507-517,608-619`) and drop the editor (`leave`, `:465-476`); the close inventory sees
-  credential saves only through the mounted editor or a batch's `active` list (`editing.rs:267-283`). SPEC.md Settings
-  paragraph (2573-2574): "Discard is absent while a save is in flight. A close that saves waits for pending operations".
-  The fix needs a place to track admitted saves independently of editors (operation store or dialog), a design choice.
-- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
-  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
-  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
-  prompt contracts. Recommendation for reference: fix code — track admitted Settings saves by operation key so the close
-  question sees them; size M. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
-  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
-  the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## settings-close-can-hide-credential-delivery-warnings.md
 
 - Outcome: `fix code`.

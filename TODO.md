@@ -60,6 +60,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Wait for credential saves after Back or Cancel.** A credential editor can start Save, then close while the helm
+  still owns the write. Settings can close without waiting or offer Discard for another draft, and a refused write has
+  no editor left to show its reason. In `crates/gui/farhelm-gui/src/settings/credentials/editor.rs`, Back and Cancel
+  remove the editor through `Credentials::close_editor`; `settings/editing.rs` includes only the mounted editor and
+  saves already owned by its batch. Track each admitted credential write by attempt after its editor leaves. Include all
+  outstanding saves in the close question and join them on Save. On refusal, stop the close and show the reason in
+  Credentials without replacing a newer editor or resending the write. Keep independently authorized saves and later
+  close decisions separate as described in “Stop Settings Save and Close when an independent save fails”. Test Back and
+  Cancel with a real pending request, both successful and refused replies, and another draft whose Save must wait and
+  whose Discard must be absent. Assert that another editor's draft survives the refusal, and review the visible result
+  in light and dark. See `SPEC.md` under “Settings” and “Credentials”. This needs receipt ownership outside the editor,
+  integration with the multi-form close, and a new visible refusal with tests and references. The complete change
+  exceeds this triage item's size allowance.
+
 - **Show a failed hook setup save after Settings closes.** A person can turn off Set up conversation hooks on all hosts
   for Grok or Antigravity and close Settings before the helm answers. If the write fails, the previous consent can still
   apply to later launches and the reason is gone. `crates/gui/farhelm-gui/src/settings/editing.rs` inventories staged
