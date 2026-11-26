@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `session-right-click-menu.md` — Open session and bulk context menus on right-click (after `bulk-start-sessions.md`)
 - [in-flight 2dbcca] `restart-with-generation-sync.md` — Bind Restart-with launch settings with the replacement generation before startup reports
 - [in-flight 7ce017] `custom-agent-per-reg-wrappers.md` — Remember command wrapper defaults per custom agent registration
-- [in-flight 7b9930] `wayland-async-text-paste.md` — Make Wayland desktop text-field paste nonblocking and text-first
+- [complete] `wayland-async-text-paste.md` — Make Wayland desktop text-field paste nonblocking and text-first
 - [pending] `custom-agent-delete-prompt.md` — Port Settings custom-agent Delete to the shared inline confirmation prompt
 - [held] `tensorlake-sandbox-key-consent.md` — Bind Settings leftover-sandbox Delete confirmation and list to the active Tensorlake key
 - [pending] `launcher-visible-consent.md` — Lock host and destination in Replace with and record launcher list Enter visibility rule
