@@ -55,14 +55,6 @@ consequences.
   An upload cancelled while the host is publishing it can be reported to the user as "definitely not published" although
   the host's answer says the outcome is unknown (reachability premise unverified; recorded higher).
 
-- [`helm-agent-create-dispatch-logs-asking-session-unescaped.md`](helm-agent-create-dispatch-logs-asking-session-unescaped.md)
-  — The helm's agent-create audit log writes the supervisor-reported asking session id unescaped (every sibling site
-  escapes it), allowing forged log lines or a disguised asker.
-
-- [`preapproved-agent-requests-skip-deleting-session-refusal.md`](preapproved-agent-requests-skip-deleting-session-refusal.md)
-  — While a session is being deleted, a new request from it that the host already allows without asking is carried out
-  instead of refused, deviating from the deny-until-delete-finishes contract (no new authority granted).
-
 - [`provisioning-orphan-sweep-deletes-concurrent-helm-upload.md`](provisioning-orphan-sweep-deletes-concurrent-helm-upload.md)
   — Two helms provisioning the same host concurrently can delete each other's active staging temporary via the orphan
   sweep (no liveness check); the victim run fails visibly and retryably (cross-helm premise unverified).
@@ -134,10 +126,6 @@ consequences.
 
 - [`trailing-tab-shell-hangup-delete-wiring-untested.md`](trailing-tab-shell-hangup-delete-wiring-untested.md) — No test
   would notice if Delete stopped giving macOS tab shells their hangup, which would again lose their shell history.
-
-- [`trailing-agent-create-connection-binding-untested.md`](trailing-agent-create-connection-binding-untested.md) — No
-  test covers binding an agent-requested session to the host connection the user approved, so the fix could regress
-  silently.
 
 - [`trailing-reposted-notice-not-revealed.md`](trailing-reposted-notice-not-revealed.md) — In an overflowing notice
   stack, a repeated connection-lost or opt-out-refused notice stays scrolled out of view instead of being revealed
