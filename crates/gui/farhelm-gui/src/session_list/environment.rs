@@ -91,7 +91,7 @@ use serde_json::json;
 use super::status::HostLookup;
 use super::{menu, outcome};
 use crate::components::{HoverHelp, Tier};
-use crate::environment_ui::{ProviderUi, target_label};
+use crate::environment_ui::{ProviderUi, StopTarget, target_label};
 use crate::hosts::identity::phase;
 use crate::launcher::launch::host_lifecycle_refusal;
 use crate::operations::{self, Command, NotStarted, OpKey, Outcome, Settled, Work};
@@ -395,8 +395,17 @@ pub(crate) struct Asked {
     pub(crate) host: i64,
     pub(crate) verb: Verb,
     pub(crate) guard: SessionStopRequest,
-    /// A Stop and suspend confirmation names the program from the clicked row.
-    stopped_program: Option<&'static str>,
+    /// The Stop and suspend confirmation and its guards use the same clicked row.
+    stops: Option<StopTarget>,
+}
+
+/// Keep row-menu and confirmation wording aligned with the row state that supplies Stop's guards.
+pub(super) fn stop_target(row: &SessionRow) -> StopTarget {
+    match (row.info.status.has_ended(), row.info.tabs.is_empty()) {
+        (false, _) => StopTarget::Program(super::stop::program_word(row)),
+        (true, false) => StopTarget::Tabs,
+        (true, true) => StopTarget::EndedWithoutTabs,
+    }
 }
 
 /// The part of an environment's state that decides which command its controls offer. Keep the provider and phase
@@ -454,7 +463,7 @@ pub(crate) fn begin_shown(
         host,
         verb,
         guard: super::stop::guard(&target.row),
-        stopped_program: stop.then(|| super::stop::program_word(&target.row)),
+        stops: stop.then(|| stop_target(&target.row)),
     };
     if verb == Verb::Resume {
         send(asked, cx);
@@ -544,7 +553,7 @@ pub(crate) fn question(asked: &Asked, ui: ProviderUi) -> Question<Asked> {
         ui.suspend_title(stop),
         Answer::new(
             if stop { "Stop and suspend" } else { "Suspend" },
-            HoverHelp::tooltip(ui.suspend_action(asked.stopped_program)),
+            HoverHelp::tooltip(ui.suspend_action(asked.stops)),
             Tier::Danger,
         )
         .disabled_while(move |cx| host_lifecycle_refusal(host, cx)),
@@ -552,12 +561,12 @@ pub(crate) fn question(asked: &Asked, ui: ProviderUi) -> Question<Asked> {
     )
     .line(format!(
         "{}{}",
-        ui.suspend_question(asked.stopped_program),
+        ui.suspend_question(asked.stops),
         ui.suspend_help()
     ))
     .cancel_answer(Answer::new(
         "Cancel",
-        HoverHelp::tooltip(ui.suspend_cancel(asked.stopped_program)),
+        HoverHelp::tooltip(ui.suspend_cancel(asked.stops)),
         Tier::Neutral,
     ))
     .keeps_focus_on_empty_click()
@@ -606,7 +615,7 @@ pub(super) fn stop_and_suspend(key: &str, host: i64, guard: SessionStopRequest, 
             host,
             verb: Verb::StopAndSuspend,
             guard,
-            stopped_program: None,
+            stops: None,
         },
         cx,
     );
@@ -621,7 +630,7 @@ pub(crate) fn resume(key: &str, host: i64, cx: &mut App) {
             host,
             verb: Verb::Resume,
             guard: SessionStopRequest::default(),
-            stopped_program: None,
+            stops: None,
         },
         cx,
     );

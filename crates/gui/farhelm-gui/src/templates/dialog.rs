@@ -627,8 +627,8 @@ impl TemplatesDialog {
         self.leave_question = asked.zip(window.focused(cx));
     }
 
-    /// A leave answer belongs to the editor instance it asked about, even if another editor has the same name.
-    fn is_open_editor(&self, name_field: &FocusHandle, cx: &App) -> bool {
+    /// A footer press or leave answer belongs to its editor instance, even if another editor has the same name.
+    pub(super) fn is_open_editor(&self, name_field: &FocusHandle, cx: &App) -> bool {
         self.editor
             .as_ref()
             .and_then(|editor| editor.name_focus(cx))

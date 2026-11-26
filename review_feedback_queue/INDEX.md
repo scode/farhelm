@@ -151,10 +151,6 @@ consequences.
   A stale "Start, and don't ask again on this host" answer closes the YOLO question with nothing started and no reason,
   sometimes after the host setting was already saved.
 
-- [`trailing-templates-stale-save-duplicate-footer.md`](trailing-templates-stale-save-duplicate-footer.md) — Save or
-  Duplicate clicked just after switching templates can act on the newly opened template, writing automatic updates into
-  an older template the user never saw (pre-existing).
-
 - [`trailing-spec-impl-custom-agent-id-letter.md`](trailing-spec-impl-custom-agent-id-letter.md) — SPEC_impl.md says
   registered custom agent IDs start with a letter, but they may start with a digit.
 
@@ -213,6 +209,3 @@ consequences.
 
 - [`trailing-symlinked-claude-json-permanent-warning.md`](trailing-symlinked-claude-json-permanent-warning.md) — A
   symlinked `~/.claude.json` leaves a permanent amber warning that misnames the cause.
-
-- [`trailing-menu-stop-and-suspend-exited-shell-wording.md`](trailing-menu-stop-and-suspend-exited-shell-wording.md) —
-  The row menu's Stop and suspend still offers to stop a shell that has already exited.

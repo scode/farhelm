@@ -143,6 +143,7 @@ use crate::components::{
     HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, Role, Tier, home_end_keys,
     menu_separator, submenu, toggle_arrow_keys,
 };
+use crate::environment_ui::StopTarget;
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::entry;
@@ -1365,7 +1366,7 @@ impl RowMenu {
         };
         let mut items = vec![toggle.disabled(unavailable)];
         if !resume {
-            let program = stop::program_word(row);
+            let stops = environment::stop_target(row);
             items.push(
                 MenuItem::new(
                     "session-menu-stop-and-suspend",
@@ -1373,14 +1374,18 @@ impl RowMenu {
                     "Stop and suspend",
                     HoverHelp::tooltip(
                         launch_refusal.map_or_else(
-                            || environment.ui.suspend_action(Some(program)),
+                            || environment.ui.suspend_action(Some(stops)),
                             str::to_owned,
                         ),
                     ),
                     Role::MenuItem,
                 )
                 .description(launch_refusal.map_or_else(
-                    || format!("End this session's {program} and tabs, then suspend the whole environment"),
+                    || match stops {
+                        StopTarget::EndedWithoutTabs => "Finish stopping this session, then suspend the whole environment".into(),
+                        StopTarget::Tabs => "Close this session's terminal tabs, then suspend the whole environment".into(),
+                        StopTarget::Program(program) => format!("End this session's {program} and tabs, then suspend the whole environment"),
+                    },
                     str::to_owned,
                 ))
                 .danger()

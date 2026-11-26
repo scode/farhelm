@@ -26,29 +26,6 @@
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
-## trailing-templates-stale-save-duplicate-footer.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC.md "One GUI at a time" (`5871-5873`): "By default, a pointer or keyboard action uses
-  the target, consent and preconditions from the frame the user was shown, or is ignored when that frame has not yet
-  been shown or its target is no longer in view." Exact sibling precedent:
-  `template-delete-can-target-unshown-editor.md` (PR #4832) was recorded as clearly settled under the same rule. Code:
-  `crates/gui/farhelm-gui/src/templates/editor.rs:1286- 1306` binds Delete (`:1309-1328`) to the drawn template's name,
-  but Save (`:1286-1291`) and Duplicate (`:1293-1306`) capture no editor identity and call `dialog.save_editor` /
-  `dialog.duplicate` (`dialog.rs:468-506`), acting on whatever editor is currently mounted.
-  `dialog.is_open_editor(&self, name_field, cx)` (`dialog.rs:630-637`) already exists to verify the drawn editor
-  instance. Verified: confirmed by source inspection (two-click timing unmeasured). Fix follows directly: bind Save and
-  Duplicate footer clicks to the drawn editor's `name_focus` and ignore when `!self.is_open_editor(&name_focus, cx)`.
-  Size estimate ~30-50 lines with a regression test.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-25 triage, main `5af40d23e`.) The maintainer can revise it.
-- Completion criteria: Bind the Templates editor footer's Save and Duplicate buttons to the drawn editor instance (via
-  `name_focus` / `is_open_editor`) so stale clicks after switching templates are ignored, and add a regression test.
-  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
-  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
-  index entry.
-- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
-
 ## uninstall-newline-stripping-defeats-state-inside-lib-guard.md
 
 - Outcome: `fix code`.
@@ -190,20 +167,6 @@
   update `SPEC.md:1887-1917` to state that the hint applies only where the Settings switch applies, and add a regression
   test (estimate S, ~25-40 lines). Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
-
-## trailing-menu-stop-and-suspend-exited-shell-wording.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed by source (`crates/gui/farhelm-gui/src/session_list/menu.rs:1318,1365-1387`;
-  `session_list/environment.rs:457,540-564`; `environment_ui.rs:797-847`): unlike the ordinary Stop confirmation fixed
-  in PR #4931 (`stop.rs:128-176`), the row menu's Stop and suspend ignores `status.has_ended()` and still offers to stop
-  and keep an already-exited shell when only terminal tabs remain open.
-- Decision: Q8 ("User-visible wording & screen-reader accuracy"): maintainer picked "Fix all 5 as recommended".
-  (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Give the row menu's Stop and suspend item (tooltip, description, and confirmation/Cancel copy) a
-  tab-only variant when the session's main program has already ended while tabs remain, matching PR #4931's wording, and
-  add a regression test/golden (estimate S, ~40-70 lines). Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-gui-hosts-menus-and-terminal.md` ``.
 
 ## trailing-spec-file-click-release-wording.md
 

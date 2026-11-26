@@ -1267,6 +1267,8 @@ impl Editor {
             .bg(theme::color(palette.bg_1))
             .border_t_1()
             .border_color(theme::color(palette.border_dim));
+        // A row press can replace the editor before its old footer is redrawn.
+        let name_focus = self.name_focus(cx);
         let save = Button::new(
             "templates-save",
             "Save",
@@ -1285,8 +1287,16 @@ impl Editor {
         })
         .on_click({
             let weak = weak.clone();
+            let name_focus = name_focus.clone();
             move |_, window, cx| {
-                let _ = weak.update(cx, |dialog, cx| dialog.save_editor(window, cx));
+                let _ = weak.update(cx, |dialog, cx| {
+                    if name_focus
+                        .as_ref()
+                        .is_some_and(|name| dialog.is_open_editor(name, cx))
+                    {
+                        dialog.save_editor(window, cx);
+                    }
+                });
             }
         });
         // Duplicate, for a stored template only, before Save, as the old footer ordered them.
@@ -1301,7 +1311,14 @@ impl Editor {
             .tier(Tier::Neutral)
             .busy(busy)
             .on_click(move |_, window, cx| {
-                let _ = weak.update(cx, |dialog, cx| dialog.duplicate(window, cx));
+                let _ = weak.update(cx, |dialog, cx| {
+                    if name_focus
+                        .as_ref()
+                        .is_some_and(|name| dialog.is_open_editor(name, cx))
+                    {
+                        dialog.duplicate(window, cx);
+                    }
+                });
             })
         });
         // A click can still reach this frame's footer after the list has opened another editor. The stored name and
