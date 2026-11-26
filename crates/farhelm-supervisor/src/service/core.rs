@@ -2827,9 +2827,10 @@ enum RelaunchDisposition {
     /// the session has, and a failure to build a REPLY has no standing to
     /// revise that.
     ///
-    /// The independent error still surfaces, but the published state stands
-    /// and restart-with still attempts its post-spawn bundle write. The next
-    /// list describes the session's saved settings correctly.
+    /// The independent error still surfaces, but the published state stands,
+    /// Restart with's launch included (stored with the generation, and never
+    /// restored once published). The next list describes the session's saved
+    /// settings correctly.
     Published,
 }
 
@@ -3283,26 +3284,12 @@ pub fn hook_log_path(state_dir: &Path, session_id: &str) -> PathBuf {
 fn renamed_entry(entry: &SessionEntry, title: String) -> Arc<SessionEntry> {
     let mut info = entry.info.clone();
     info.title = title;
-    same_launch_entry(entry, info, entry.snapshot.clone())
-}
-
-/// Replace metadata for the published launch without splitting its mutable cells.
-///
-/// Rename and restart-with both change durable metadata after a launch is
-/// published. Readers with an older `Arc` may still update capture, outcome,
-/// or activity for that same generation, so the replacement shares those
-/// cells and keeps the terminal and generation from the current entry.
-fn same_launch_entry(
-    entry: &SessionEntry,
-    info: SessionInfo,
-    snapshot: IntegrationSnapshot,
-) -> Arc<SessionEntry> {
     Arc::new(SessionEntry {
         info,
         terminal: entry.terminal.clone(),
         run: entry.run.clone(),
         session: entry.session.clone(),
-        snapshot,
+        snapshot: entry.snapshot.clone(),
         canonical_cwd: entry.canonical_cwd.clone(),
         generation: entry.generation,
         scope: entry.scope.clone(),
@@ -3358,6 +3345,13 @@ fn republished_terminal(definitive: bool, prior: Option<HostTerminal>) -> Option
 /// the old launch's shim can no longer write.
 /// A new cell joins one of the two groups, which decides its sharing here
 /// and in [`renamed_entry`].
+///
+/// The integration snapshot is derived from `info`'s launch, never carried
+/// over from `entry`: after a Restart with the two describe different
+/// launches, and the listing's restart offer is computed from the snapshot,
+/// so the previous entry's would offer what the replaced launch allowed.
+/// Every entry's snapshot is `IntegrationSnapshot::of` its launch, so for a
+/// plain restart this is the same value.
 fn relaunched_entry(
     entry: &SessionEntry,
     info: SessionInfo,
@@ -3373,6 +3367,7 @@ fn relaunched_entry(
         .lock()
         .expect("capture mutex poisoned")
         .clone();
+    let snapshot = IntegrationSnapshot::of(&info.launch);
     Arc::new(SessionEntry {
         info,
         terminal,
@@ -3417,7 +3412,7 @@ fn relaunched_entry(
         // place. Monotonicity across processes and clock steps is still
         // the store's predicate to enforce.
         session: entry.session.clone(),
-        snapshot: entry.snapshot.clone(),
+        snapshot,
         canonical_cwd: entry.canonical_cwd.clone(),
         generation,
         scope,
@@ -4101,10 +4096,14 @@ struct Relaunched {
     tabs: Vec<TabInfo>,
 }
 
-/// The validated metadata to adopt only if this relaunch's spawn succeeds.
+/// Restart with's validated replacement launch and its integration snapshot,
+/// which the relaunch runs and publishes in place of the session's own.
 ///
-/// The integration snapshot is resolved before destructive work. Carrying it
-/// here avoids another fallible resolution after the new process is running.
+/// The launch is stored with the generation the relaunch opens, and a
+/// definitive failure's abort restores the previous one. The snapshot is
+/// `IntegrationSnapshot::of` the launch, carried for the spawn's hook
+/// decisions and the reply's offer; the published entry derives an equal
+/// one from the same launch.
 struct RestartWithBundle {
     launch: SessionLaunch,
     snapshot: IntegrationSnapshot,
@@ -4264,9 +4263,12 @@ pub(crate) struct SessionEntry {
     /// ([`SessionCells`]).
     pub(crate) session: SessionCells,
     /// This session's integration snapshot (PLAN_M3.md item 7), resolved at
-    /// create and replaced only after restart-with successfully spawns. The
-    /// kind remains fixed; the snapshot follows the persisted launch bundle
-    /// so later capture and restart-offer work sees the new template.
+    /// create. A Restart with's entry carries the replacement launch's,
+    /// whether it was published or republished after a failure that kept the
+    /// replacement in the row; only a definitive failure's abort brings the
+    /// previous one back. The kind remains fixed; the snapshot follows the
+    /// stored launch so later capture and restart-offer work sees its
+    /// template.
     pub(crate) snapshot: IntegrationSnapshot,
     /// This session's working directory with symlinks, `.`/`..`, and a
     /// trailing slash resolved away, resolved at create and immutable
@@ -12769,6 +12771,11 @@ impl Supervisor {
     /// "exited, stopped by user" over a session that may be running would
     /// be a worse lie than an honest "unknown".
     ///
+    /// Restart with's launch follows the same rule. The generation is opened
+    /// with it, so only a definitive failure's abort puts the previous launch
+    /// back; after any other failure the row and the re-published entry both
+    /// keep the replacement, the launch an agent may now be running under.
+    ///
     /// A failure that arrives AFTER the new generation was published
     /// ([`RelaunchDisposition::Published`]) restores nothing at all. The
     /// restoration below rebuilds the entry from the PRE-restart one, so
@@ -12816,6 +12823,11 @@ impl Supervisor {
                 // startup) this is where the row becomes a host row; a
                 // definitive failure's abort restores its old kind.
                 Some(TerminalKind::Host),
+                // Restart with's launch goes into the row with the generation
+                // that runs it, before its program can report: report
+                // admission reads the conversation-reporting setting from the
+                // row. A definitive failure's abort restores the old launch.
+                restart_with.as_ref().map(|bundle| &bundle.launch),
             )
             .await
             .context("opening a new launch generation for this restart")?;
@@ -12918,15 +12930,21 @@ impl Supervisor {
         // about to be replaced, so the client is told to reattach rather than
         // left watching a terminal that is going away.
         self.detach_for_restart(&id).await;
-        let mut relaunched = self
+        // The launch this generation runs. Restart with's replacement is
+        // already the row's (stored with the generation above), and the new
+        // entry is built from it at publication, so neither a report nor the
+        // reply sees the previous launch's settings beside the new program.
+        // Until then the current entry, and so a listing, keeps describing the
+        // previous run, which a definitive failure republishes.
+        let (selected_launch, selected_snapshot) = match &restart_with {
+            Some(bundle) => (&bundle.launch, &bundle.snapshot),
+            None => (&entry.info.launch, &entry.snapshot),
+        };
+        let relaunched = self
             .relaunch_into_terminal(
                 entry,
-                restart_with
-                    .as_ref()
-                    .map_or(&entry.info.launch, |bundle| &bundle.launch),
-                restart_with
-                    .as_ref()
-                    .map_or(&entry.snapshot, |bundle| &bundle.snapshot),
+                selected_launch,
+                selected_snapshot,
                 claim.generation,
                 launch_scope_unit(&id, claim.generation, claim.scoped),
                 argv,
@@ -12935,53 +12953,6 @@ impl Supervisor {
                 setup_persistent_hooks,
             )
             .await;
-        // Publication, rather than reply construction, is the boundary at
-        // which a spawned generation becomes this session's live run. Some
-        // post-spawn failures publish it and withhold only the reply; those
-        // runs need the new bundle just as much as an `Ok` reply does.
-        let published = match &relaunched {
-            Ok(_) => true,
-            Err(failure) => failure.disposition == RelaunchDisposition::Published,
-        };
-        if published && let Some(bundle) = restart_with {
-            if let Err(error) = self
-                .store
-                .update_launch(&id, claim.generation, &bundle.launch)
-                .await
-            {
-                // The new agent is already running. A bundle-write error
-                // must never turn an otherwise successful relaunch into an
-                // error reply that invites a second spawn.
-                warn!(
-                    session = %id,
-                    error = %format!("{error:#}"),
-                    "restart-with agent spawned but its launch settings were not saved"
-                );
-            } else {
-                let mut sessions = self.sessions.lock().await;
-                let current = sessions
-                    .get_mut(&id)
-                    .expect("a published relaunch has a session entry");
-                assert_eq!(
-                    current.generation, claim.generation,
-                    "restart-with must update the generation it spawned"
-                );
-                let mut live_info = current.info.clone();
-                live_info.invocation = bundle.launch.display_command();
-                live_info.agent_kind = bundle.launch.agent_kind();
-                live_info.launch = bundle.launch;
-                *current = same_launch_entry(current, live_info.clone(), bundle.snapshot);
-                if let Ok(info) = &mut relaunched {
-                    info.invocation = live_info.invocation;
-                    info.agent_kind = live_info.agent_kind;
-                    info.launch = live_info.launch;
-                }
-                drop(sessions);
-                // The launch settings changed after `publish_relaunched`'s
-                // own hint may already have gone out.
-                self.hint_sessions_changed();
-            }
-        }
         match relaunched {
             Ok(info) => Ok(info),
             // The relaunch got as far as publishing its new generation and
@@ -13017,6 +12988,11 @@ impl Supervisor {
                     },
                 );
                 let mut launch_boot_ended = false;
+                // Whether the row describes the previous launch again: only
+                // once a definitive failure's abort has applied. Otherwise it
+                // keeps the launch this generation was opened with, which
+                // is the one an agent may be running.
+                let mut previous_launch_restored = false;
                 if definitive {
                     // Confirmed absence of the replacement makes the
                     // previous run's outcome safe to restore.
@@ -13026,6 +13002,7 @@ impl Supervisor {
                         .await
                     {
                         Ok(restored) => {
+                            previous_launch_restored = restored;
                             launch_boot_ended = restored && claim.prior.launch_boot_ended;
                             if restored && clear_capture {
                                 // Restore what the generation transaction read,
@@ -13078,6 +13055,14 @@ impl Supervisor {
                 // An ambiguous restart can have prepared its own hook files. Publish the result for the
                 // generation the store kept, even when the launch never returned a terminal handle.
                 let mut recovered_info = entry.info.clone();
+                // The entry describes the launch the row now holds, as the
+                // scope above follows the outcome: the previous one after an
+                // applied abort, the selected one otherwise.
+                if !previous_launch_restored {
+                    recovered_info.invocation = selected_launch.display_command();
+                    recovered_info.agent_kind = selected_launch.agent_kind();
+                    recovered_info.launch = selected_launch.clone();
+                }
                 let still_exists = match self.store.session(&id).await {
                     Ok(Some(row)) => {
                         recovered_info.persistent_hook_setup = row.persistent_hook_setup;
@@ -13182,10 +13167,11 @@ impl Supervisor {
     /// republish the entry, replacing the old host.
     ///
     /// `launch` and `snapshot` describe the selected execution, including
-    /// Restart with's replacement before it is durably published. Reading
-    /// them from `entry` here would run the old shell source with the new
-    /// literal arguments; the entry deliberately remains the prior run until
-    /// publication succeeds.
+    /// Restart with's replacement, which the row already holds but the
+    /// session's entry does not until publication. Reading them from `entry`
+    /// here would run the old shell source with the new literal arguments;
+    /// the entry deliberately remains the prior run until publication
+    /// succeeds.
     ///
     /// `launch_cwd` is the directory the caller VERIFIED against this
     /// session's recorded identity ([`ensure_cwd_identity`]), which is what
@@ -13280,9 +13266,18 @@ impl Supervisor {
     /// holding the previous `Arc` is holding a description of the previous
     /// run, and every durable write it attempts is fenced out by the
     /// generation it carries.
+    ///
+    /// `launch` and `snapshot` are the launch this generation runs, which
+    /// for a Restart with is the replacement rather than `entry`'s. The
+    /// reply's launch, kind and restart offer come from them, and the
+    /// published entry carries the same launch (deriving its snapshot from
+    /// it), so neither the reply nor a later listing can describe the
+    /// replaced launch beside the new program.
     async fn publish_relaunched(
         &self,
         entry: &SessionEntry,
+        launch: &SessionLaunch,
+        snapshot: &IntegrationSnapshot,
         generation: i64,
         result: Relaunched,
     ) -> SessionInfo {
@@ -13296,7 +13291,7 @@ impl Supervisor {
         } = result;
         let restart_offer = {
             let capture = entry.run.capture.lock().expect("capture mutex poisoned");
-            entry.snapshot.restart_offer(
+            snapshot.restart_offer(
                 capture.committed_conversation(),
                 capture.committed_ownership_version().unwrap_or(0),
             )
@@ -13334,9 +13329,9 @@ impl Supervisor {
             creation_seq: entry.info.creation_seq,
             cwd: entry.info.cwd.clone(),
             canonical_cwd: entry.info.canonical_cwd.clone(),
-            invocation: entry.info.invocation.clone(),
-            agent_kind: entry.snapshot.kind,
-            launch: entry.info.launch.clone(),
+            invocation: launch.display_command(),
+            agent_kind: snapshot.kind,
+            launch: launch.clone(),
             // Deliberately not a fabricated live status: whether the agent's
             // own `exec` inside the new terminal succeeds is a
             // separate question this reply cannot answer. `ListSessions`
@@ -20781,6 +20776,234 @@ pub(crate) mod tests {
             .map_err(|failure| failure.error)
             .expect("describe the restarted session");
         assert!(reply.terminal_missing, "a late host loss reaches the reply");
+    }
+
+    /// A report that reaches the supervisor while a Restart with is still in
+    /// progress is judged by the new launch's conversation-reporting setting,
+    /// in both directions.
+    ///
+    /// Why: a custom agent reports its conversation as soon as it starts,
+    /// while its restart is still publishing it. Restart with used to save
+    /// the edited launch only after publication, so such a report was judged
+    /// by the previous launch: refused although the user had just turned
+    /// reporting on, or let through although they had just turned it off.
+    /// The e2e tests of the same scenario cannot hold the restart where that
+    /// gap was; this one stops it in the relaunch window with the window
+    /// gate and reports for the new generation from inside it.
+    ///
+    /// Specified: for a custom agent restarted with reporting switched from on
+    /// to off (a plain Restart with over a captured conversation) and from
+    /// off to on (a named Restart with), a report for the new generation sent
+    /// while the restart is held in its window, with the session off the map,
+    /// is refused as "conversation reporting is disabled for this launch"
+    /// exactly when the new launch turns reporting off. The report's process
+    /// chain is a stand-in that no corridor accepts, so with reporting on it
+    /// is refused later, for its chain, which is the observable that tells
+    /// the two settings apart. Released, the restart succeeds, and its reply
+    /// carries the new launch.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_report_during_a_restart_with_is_judged_by_the_new_reporting_setting() {
+        assert_report_in_restart_window(true, false).await;
+        assert_report_in_restart_window(false, true).await;
+    }
+
+    /// One direction of
+    /// [`a_report_during_a_restart_with_is_judged_by_the_new_reporting_setting`]:
+    /// a custom agent created with reporting `before`, restarted with it
+    /// `after`, reporting from inside the held relaunch window.
+    async fn assert_report_in_restart_window(before: bool, after: bool) {
+        let (reached_tx, reached_rx) = tokio::sync::oneshot::channel::<()>();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let reached = Arc::new(std::sync::Mutex::new(Some(reached_tx)));
+        let release = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+        let gate: RestartWindowGate = Arc::new(move || {
+            let reached = Arc::clone(&reached);
+            let release = Arc::clone(&release);
+            Box::pin(async move {
+                if let Some(tx) = reached.lock().expect("gate mutex").take() {
+                    let _ = tx.send(());
+                }
+                if let Some(rx) = release.lock().await.take() {
+                    let _ = rx.await;
+                }
+            })
+        });
+        let mut seams = host_seams();
+        seams.faults.restart_window_gate = Some(gate);
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            seams,
+        )
+        .await
+        .expect("supervisor");
+        let launch = |reporting: bool| SessionLaunch::Agent {
+            custom_reporting: Some(reporting),
+            selection: farhelm_proto::LaunchSelection {
+                custom_agent: Some("stand-in".into()),
+                harness: LaunchHarness::Custom,
+                model: None,
+                effort: None,
+                permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                wrapper_prefix: None,
+                container: None,
+                workspace_trust: None,
+                permission_flags: None,
+            },
+            start: vec![
+                "sh".into(),
+                "-c".into(),
+                "exec sleep 300".into(),
+                "{farhelm_args}".into(),
+            ],
+            resume: Some(vec![
+                "sh".into(),
+                "-c".into(),
+                "exec sleep 300".into(),
+                "farhelm-test-resume".into(),
+                "{conversation}".into(),
+                "{farhelm_args}".into(),
+            ]),
+        };
+        let created = sup
+            .create_session(
+                CreateInputs {
+                    setup_persistent_hooks: false,
+                    prompt: None,
+                    named_start: None,
+                    cwd: "/tmp",
+                    parent: None,
+                    github_checkout: None,
+                    launch: launch(before),
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
+            .await
+            .expect("create the custom agent session");
+        // A plain Restart with needs a Resume offer, which a reporting launch
+        // has once it holds a conversation. The off-to-on direction starts
+        // from an offer without reporting, which only a named start may
+        // restart from.
+        let named = if before {
+            sup.record_conversation_for_test(&created.id, TEST_CONVERSATION)
+                .await;
+            assert_eq!(
+                crate::service::status::session_restart_offer(
+                    sup.sessions
+                        .lock()
+                        .await
+                        .get(&created.id)
+                        .expect("the session is published")
+                ),
+                RestartOffer::Resume,
+                "fixture premise: Restart with is offered"
+            );
+            None
+        } else {
+            Some(farhelm_proto::NamedConversationStart {
+                conversation: "conv-named".into(),
+                argv: IntegrationSnapshot::of(&launch(after))
+                    .filled_named_resume_argv("conv-named")
+                    .expect("the resume command fills with a named conversation"),
+            })
+        };
+
+        let mut restart = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            let id = created.id.clone();
+            let replacement = launch(after);
+            async move {
+                sup.restart_session_named(
+                    &id,
+                    true,
+                    Some(replacement),
+                    None,
+                    named,
+                    Default::default(),
+                )
+                .await
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            tokio::select! {
+                reached = reached_rx => reached.expect("the restart window gate reports arrival"),
+                done = &mut restart => panic!(
+                    "the restart finished before reaching its relaunch window: {done:?}"
+                ),
+            }
+        })
+        .await
+        .expect("the restart neither reached its relaunch window nor finished within 30 s");
+        assert!(
+            !sup.sessions.lock().await.contains_key(&created.id),
+            "test premise: the session is off the map inside the window"
+        );
+        let generation = sup
+            .store
+            .session(&created.id)
+            .await
+            .expect("read the row")
+            .expect("the row exists")
+            .generation;
+        let report = ReportedConversation {
+            vendor: farhelm_proto::ReportVendor::Custom,
+            conversation: "conv-during".into(),
+            source: "startup".into(),
+            transcript_path: None,
+            hook_event_name: None,
+            ancestry: Some(vec![crate::procs::ChainLink {
+                pid: 900_001,
+                ppid: 1,
+                start: 1,
+                exe: b"/opt/test/farhelm".to_vec(),
+                argv: Some(vec![b"farhelm".to_vec()]),
+                cwd: None,
+            }]),
+            launch_generation: Some(generation),
+        };
+        let refusal = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            sup.report_conversation(&created.id, report),
+        )
+        .await
+        .expect("the report is answered while the restart is held")
+        .expect_err("a stand-in chain is never admitted");
+        let disabled = refusal
+            .to_string()
+            .contains("conversation reporting is disabled for this launch");
+        assert_eq!(
+            disabled, !after,
+            "reporting {before} -> {after}: the report is judged by the new launch: {refusal}"
+        );
+        if after {
+            // Past the reporting check, the stand-in chain is what refuses
+            // it, rather than anything earlier (a generation mismatch, a
+            // missing row) that would also not mention the setting.
+            assert!(
+                refusal
+                    .to_string()
+                    .contains("not the supported hook invocation"),
+                "reporting {before} -> {after}: refused for its chain: {refusal}"
+            );
+        }
+
+        release_tx.send(()).expect("release the restart window");
+        let published = tokio::time::timeout(std::time::Duration::from_secs(30), restart)
+            .await
+            .expect("the restart finishes once released")
+            .expect("restart task")
+            .expect("restart succeeds");
+        assert_eq!(published.launch, launch(after));
+        let host = sup
+            .agent_host_for_test(&created.id)
+            .await
+            .expect("replacement host");
+        assert!(host.shutdown().await.expect("end replacement host").ended);
     }
 
     /// Named Goose Restart with must retire the old capture everywhere, but

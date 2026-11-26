@@ -905,6 +905,12 @@ pub struct PriorRun {
     /// failure of that restart must leave the row as it was, its old pane
     /// id read as one.
     pub terminal_kind: TerminalKind,
+    /// The stored launch, as its serialized column, that a Restart with's
+    /// replacement launch overwrote when the generation opened; `None` when
+    /// the relaunch kept the session's launch. A definitive abort puts it
+    /// back, so a Restart with that started nothing outside the database
+    /// leaves the session's settings as they were.
+    replaced_launch: Option<String>,
 }
 
 /// The columns [`SessionStore::begin_relaunch`] reads before deciding
@@ -1374,8 +1380,10 @@ pub struct StoredSession {
     /// are derived from it ([`StoredSession::agent_kind`],
     /// [`farhelm_proto::SessionLaunch::display_command`]) rather than stored
     /// beside it, so the three can never disagree. Only Restart with
-    /// changes it, through [`SessionStore::update_launch`]; the launch kind
-    /// and agent type stay fixed across that.
+    /// changes it, as it opens the new generation
+    /// ([`SessionStore::begin_relaunch_named`]), and a definitive abort puts
+    /// the previous one back ([`SessionStore::abort_relaunch`]); the launch
+    /// kind and agent type stay fixed across that.
     pub launch: farhelm_proto::SessionLaunch,
     /// Where the agent's terminal is, read by
     /// [`StoredSession::terminal_kind`]: the terminal host's socket name for
@@ -4761,16 +4769,16 @@ impl SessionStore {
     ///   10): a host that lost its user manager between two launches must
     ///   not leave the new run claiming a scope nothing created.
     ///
-    /// The create-time snapshot is untouched here. Restart-with may update
-    /// invocation, launch, and template only after its new process spawns;
-    /// the kind and cwd remain fixed.
+    /// The stored launch is untouched here. Restart with replaces it through
+    /// [`Self::begin_relaunch_named`], in this same transaction; the kind
+    /// and cwd remain fixed either way.
     pub async fn begin_relaunch(
         &self,
         id: &str,
         basis: OfferBasis,
         scope_available: bool,
     ) -> anyhow::Result<RelaunchDecision> {
-        self.begin_relaunch_named(id, basis, scope_available, false, None)
+        self.begin_relaunch_named(id, basis, scope_available, false, None, None)
             .await
     }
 
@@ -4788,6 +4796,16 @@ impl SessionStore {
     /// supervisor that dies before the confirmation must look for that
     /// launch where it ran, by its host's tag, not for an old pane. The
     /// previous kind rides in [`PriorRun`] for an abort to restore.
+    ///
+    /// `replacement_launch`, when given, is Restart with's edited launch,
+    /// stored as the session's launch in this same transaction. It has to be
+    /// in the row before the new generation's program can run: report
+    /// admission reads the launch's conversation-reporting setting from the
+    /// row, and a startup report from the new program judged under the
+    /// previous launch's setting would be admitted or refused wrongly. The
+    /// overwritten launch rides in [`PriorRun`], so a definitive abort
+    /// restores it; any other outcome keeps the replacement, because its
+    /// program has started or may have.
     pub async fn begin_relaunch_named(
         &self,
         id: &str,
@@ -4795,9 +4813,14 @@ impl SessionStore {
         scope_available: bool,
         clear_capture: bool,
         kind: Option<TerminalKind>,
+        replacement_launch: Option<&farhelm_proto::SessionLaunch>,
     ) -> anyhow::Result<RelaunchDecision> {
         let id = id.to_string();
         let kind = kind.map(TerminalKind::column);
+        let replacement_launch = replacement_launch
+            .map(serde_json::to_string)
+            .transpose()
+            .context("serializing the restart-with launch")?;
         self.conn
             .call(
                 "relaunch generation task panicked",
@@ -4872,6 +4895,18 @@ impl SessionStore {
                         handoff_marker_expected: handoff_marker_expected != 0,
                         terminal_kind: TerminalKind::from_column(&prior_kind)
                             .with_context(|| format!("session {id}"))?,
+                        replaced_launch: if replacement_launch.is_some() {
+                            Some(
+                                tx.query_row(
+                                    "SELECT session_launch FROM sessions WHERE id = ?1",
+                                    [&id],
+                                    |r| r.get(0),
+                                )
+                                .context("reading the launch a restart-with replaces")?,
+                            )
+                        } else {
+                            None
+                        },
                     };
                     let generation = generation + 1;
                     let (state, exit_code, annotation, error_detail) =
@@ -4903,6 +4938,13 @@ impl SessionStore {
                     .context("opening a new launch generation for a restart")?;
                     if clear_capture {
                         tx.execute("UPDATE sessions SET captured_conversation = NULL, conversation_source = NULL, capture_ownership_version = 0 WHERE id = ?1", [&id])?;
+                    }
+                    if let Some(launch) = &replacement_launch {
+                        tx.execute(
+                            "UPDATE sessions SET session_launch = ?2 WHERE id = ?1",
+                            rusqlite::params![id, launch],
+                        )
+                        .context("storing the restart-with launch with its generation")?;
                     }
                     tx.commit().context("committing the launch generation")?;
                     Ok(RelaunchDecision::Claimed(RelaunchClaim {
@@ -4937,6 +4979,7 @@ impl SessionStore {
     /// is the truth and this one's prior run is ancient history.
     ///
     /// When a named relaunch withdrew capture, an abort restores its capture columns alongside the prior outcome.
+    /// When a Restart with stored its replacement launch, an abort restores the launch it replaced.
     /// The Codex reporting-process pin, OMP reporter asset and launch program stay cleared: they
     /// authorize one launch, not the conversation, so a later launch must
     /// establish its own pair. The outcome, terminal address, kind and scope
@@ -4971,6 +5014,7 @@ impl SessionStore {
         let handoff_marker_expected = prior.handoff_marker_expected;
         let persistent_hook_setup = prior.persistent_hook_setup.clone();
         let cleared_capture = prior.cleared_capture.clone();
+        let replaced_launch = prior.replaced_launch.clone();
         self.conn
             .call(
                 "relaunch abort task panicked",
@@ -4982,7 +5026,8 @@ impl SessionStore {
                      captured_conversation = CASE WHEN ?10 THEN ?11 ELSE captured_conversation END, \
                      conversation_source = CASE WHEN ?10 THEN ?12 ELSE conversation_source END, \
                      capture_ownership_version = CASE WHEN ?10 THEN ?13 ELSE capture_ownership_version END, \
-                     terminal_kind = ?14, persistent_hook_setup = ?15, launch_hooked = ?16, handoff_marker_expected = ?17 \
+                     terminal_kind = ?14, persistent_hook_setup = ?15, launch_hooked = ?16, handoff_marker_expected = ?17, \
+                     session_launch = COALESCE(?18, session_launch) \
                      WHERE id = ?1 AND generation = ?7",
                     rusqlite::params![
                         id,
@@ -5002,6 +5047,7 @@ impl SessionStore {
                         persistent_hook_setup,
                         launch_hooked,
                         handoff_marker_expected,
+                        replaced_launch,
                     ],
                 )
                 .context("restoring the outcome a failed restart replaced")?;
@@ -5565,40 +5611,6 @@ impl SessionStore {
                         )
                         .context("renaming a session")?
                         > 0)
-                },
-            )
-            .await
-    }
-
-    /// Persist Restart with's new launch only after its process has
-    /// spawned, fenced to the generation that performed that spawn.
-    ///
-    /// A zero-row update is a failed fence, not a successful save: the
-    /// relaunch may be running, but later restarts still see the old launch.
-    pub async fn update_launch(
-        &self,
-        id: &str,
-        generation: i64,
-        launch: &farhelm_proto::SessionLaunch,
-    ) -> anyhow::Result<()> {
-        let id = id.to_string();
-        let launch = serde_json::to_string(launch).context("serializing restart-with launch")?;
-        self.conn
-            .call(
-                "restart-with launch task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<()> {
-                    let changed = conn
-                        .execute(
-                            "UPDATE sessions SET session_launch = ?1 \
-                             WHERE id = ?2 AND generation = ?3",
-                            rusqlite::params![launch, id, generation],
-                        )
-                        .context("persisting restart-with launch")?;
-                    anyhow::ensure!(
-                        changed == 1,
-                        "restart-with launch update did not match its launch generation"
-                    );
-                    Ok(())
                 },
             )
             .await
@@ -7264,20 +7276,31 @@ mod tests {
         insert_running_with_scope(store, id, false).await;
     }
 
-    /// A missed generation fence must not masquerade as saved restart settings.
+    /// Restart with's launch is stored with the generation that will run it,
+    /// and only a definitive abort of that same generation takes it back.
     ///
-    /// The caller returns a successful spawn with the old bundle on write
-    /// failure. Treating SQLite's zero-row success as a saved bundle would
-    /// make its reply and live entry disagree with the durable row.
+    /// Why: report admission reads the launch's conversation-reporting
+    /// setting from this row, so the replacement has to be there before its
+    /// program can report, and a Restart with that started nothing must leave
+    /// the session's settings as they were. Spec: opening a generation with a
+    /// replacement launch stores it (with the derived invocation and resume
+    /// template) in the same transaction; aborting that generation restores
+    /// the previous launch; an abort fenced out by a newer generation changes
+    /// nothing, so the launch stays the replacement that newer run kept; and a
+    /// relaunch without a replacement, aborted, leaves the launch alone.
     #[farhelm_testtrace::test]
-    async fn restart_with_bundle_refuses_a_stale_generation() {
+    async fn restart_with_launch_is_stored_with_its_generation_and_restored_by_its_abort() {
         let (_dir, store) = fresh_store().await;
-        insert_running(&store, "restart-with-fence").await;
-        let before = store
-            .session("restart-with-fence")
-            .await
-            .expect("read prior row")
-            .expect("row exists");
+        let id = "restart-with-launch";
+        insert_running(&store, id).await;
+        let read = || async {
+            store
+                .session(id)
+                .await
+                .expect("read the row")
+                .expect("the row exists")
+        };
+        let before = read().await;
         let selection = farhelm_proto::LaunchSelection {
             custom_agent: None,
             permission_flags: None,
@@ -7299,23 +7322,59 @@ mod tests {
             ]),
             Some(selection),
         );
-        let error = store
-            .update_launch("restart-with-fence", before.generation + 1, &replacement)
-            .await
-            .expect_err("a stale generation cannot save settings");
-        assert!(
-            error
-                .to_string()
-                .contains("did not match its launch generation")
+        assert_ne!(before.launch, replacement, "premise: the launch changes");
+
+        let open = async |launch: Option<&farhelm_proto::SessionLaunch>| {
+            claimed(
+                store
+                    .begin_relaunch_named(id, uncaptured_basis(), false, false, None, launch)
+                    .await
+                    .expect("open a generation"),
+            )
+        };
+        let claim = open(Some(&replacement)).await;
+        let opened = read().await;
+        assert_eq!(opened.generation, claim.generation);
+        assert_eq!(opened.launch, replacement);
+        assert_eq!(opened.invocation(), replacement.display_command());
+        assert_eq!(
+            opened.resume_template(),
+            replacement
+                .resume_argv()
+                .expect("the resume command splits")
         );
-        let after = store
-            .session("restart-with-fence")
-            .await
-            .expect("read row after refused update")
-            .expect("row remains");
-        assert_eq!(after.invocation(), before.invocation());
-        assert_eq!(after.launch, before.launch);
-        assert_eq!(after.resume_template(), before.resume_template());
+        assert!(
+            store
+                .abort_relaunch(id, claim.generation, &claim.prior)
+                .await
+                .expect("abort the generation")
+        );
+        assert_eq!(read().await.launch, before.launch, "the abort restores it");
+
+        let stale = open(Some(&replacement)).await;
+        let newer = open(None).await;
+        assert!(
+            !store
+                .abort_relaunch(id, stale.generation, &stale.prior)
+                .await
+                .expect("a fenced-out abort")
+        );
+        assert_eq!(
+            read().await.launch,
+            replacement,
+            "a stale abort restores nothing"
+        );
+        assert!(
+            store
+                .abort_relaunch(id, newer.generation, &newer.prior)
+                .await
+                .expect("abort a relaunch that kept its launch")
+        );
+        assert_eq!(
+            read().await.launch,
+            replacement,
+            "no replacement, nothing restored"
+        );
     }
 
     /// Seed a running session with an explicit `launch_scoped` value —
@@ -9684,7 +9743,14 @@ mod tests {
         };
 
         let RelaunchDecision::Claimed(claim) = store
-            .begin_relaunch_named("moving", basis(), false, false, Some(TerminalKind::Host))
+            .begin_relaunch_named(
+                "moving",
+                basis(),
+                false,
+                false,
+                Some(TerminalKind::Host),
+                None,
+            )
             .await
             .unwrap()
         else {
@@ -9715,7 +9781,7 @@ mod tests {
         );
 
         let RelaunchDecision::Claimed(_) = store
-            .begin_relaunch_named("moving", basis(), false, false, None)
+            .begin_relaunch_named("moving", basis(), false, false, None, None)
             .await
             .unwrap()
         else {
@@ -16400,6 +16466,7 @@ mod tests {
                     },
                     false,
                     true,
+                    None,
                     None,
                 )
                 .await

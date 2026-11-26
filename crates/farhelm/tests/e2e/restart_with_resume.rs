@@ -9,6 +9,7 @@ use crate::boot_id_durable_outcome::listed;
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::hook_identity::{
     ServeTask, attach_ready, hook_log, hook_log_at, report as report_conversation, report_client,
+    wait_for_hook_log_words,
 };
 use crate::structured_launches::{
     FakeHarness, fake_agent_launch, fake_harness, fake_harness_with_script, observed_argv,
@@ -1694,4 +1695,276 @@ async fn a_restart_clears_a_previous_launch_error() {
         "the failed launch's sentinel must not outlive the launch it described: {}",
         sentinel.display()
     );
+}
+
+// ---------------------------------------------------------------------
+// Restart with changing whether conversation reporting is on
+// ---------------------------------------------------------------------
+
+/// The conversation a [`startup_reporting_agent`]'s first run reports.
+const STARTUP_CONVERSATION: &str = "conv-first";
+
+/// Write a custom agent into `dir` that reports a conversation the moment it
+/// starts, as a custom agent's startup hook does, then prints
+/// `STARTUP-REPORTED:<id>` and waits. A first run (`start <id>`) reports
+/// `<id>`; a resume (`resume <conversation>`) reports `after-<conversation>`,
+/// so the report a restart's program made is told apart from the first run's.
+///
+/// Reporting at startup is the point: it is the first thing the restarted
+/// program does, so the tests see how the very first report under the new
+/// launch is judged. Whether it reaches the supervisor before or after the
+/// restart finishes publishing depends on timing here; the supervisor's
+/// `a_report_during_a_restart_with_is_judged_by_the_new_reporting_setting`
+/// holds the restart open to pin the in-progress case.
+fn startup_reporting_agent(dir: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+    let path = dir.join("startup-reporter");
+    std::fs::write(
+        &path,
+        r#"#!/bin/sh
+case "$1" in
+    start) id="$2" ;;
+    resume) id="after-$2" ;;
+    *) exit 91 ;;
+esac
+farhelm custom-agent report-conversation --id "$id" || exit 92
+printf 'STARTUP-REPORTED:%s\n' "$id"
+read -r finish
+"#,
+    )
+    .expect("write the startup-reporting agent");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+        .expect("make the startup-reporting agent executable");
+    path
+}
+
+/// A custom-agent launch of [`startup_reporting_agent`]'s `program` with
+/// conversation reporting set to `reporting`. Every other field is the same
+/// whichever way `reporting` goes, so Restart with between two of these
+/// changes the reporting setting and nothing else.
+fn startup_reporting_launch(
+    program: &std::path::Path,
+    reporting: bool,
+) -> farhelm_proto::SessionLaunch {
+    let program = program.to_string_lossy().into_owned();
+    let words = |words: &[&str]| {
+        words
+            .iter()
+            .map(|word| word.to_string())
+            .collect::<Vec<_>>()
+    };
+    farhelm_proto::SessionLaunch::Agent {
+        selection: farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Custom,
+            custom_agent: Some("startup-reporter".into()),
+            model: None,
+            effort: None,
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            permission_flags: None,
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        },
+        start: words(&[&program, "start", STARTUP_CONVERSATION, "{farhelm_args}"]),
+        resume: Some(words(&[
+            &program,
+            "resume",
+            farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER,
+            "{farhelm_args}",
+        ])),
+        custom_reporting: Some(reporting),
+    }
+}
+
+/// Attach to `session` and wait until its program has made its startup
+/// report of `conversation`, then apply waiting reports and wait for the
+/// hook log's `count`th `word` line: the report's outcome, whichever way it
+/// went.
+async fn startup_report_settles(
+    h: &Harness,
+    session: &str,
+    conversation: &str,
+    word: &str,
+    count: usize,
+) {
+    let (_, mut seen, mut rx) = h
+        .client
+        .attach_live(session, WIDE_COLS, ROWS)
+        .await
+        .expect("attach to the startup-reporting agent");
+    wait_for(
+        &mut rx,
+        &mut seen,
+        &format!("STARTUP-REPORTED:{conversation}"),
+        20,
+    )
+    .await;
+    h.sup.reconcile_for_test().await;
+    wait_for_hook_log_words(h.state.path(), session, word, count).await;
+}
+
+/// A Restart with that turns conversation reporting off refuses the startup
+/// report of the program it starts, and its reply offers what the new launch
+/// allows.
+///
+/// Why: Restart with's launch used to reach the database and the session
+/// only after its program was published, so the reply's restart offer was
+/// computed from the previous launch, and a report the program made as it
+/// started could be judged under the previous setting. The reply's offer is
+/// what this end-to-end test pins; the report half it checks only as an
+/// outcome, since the timing that exposed it is not under its control.
+/// Spec: a custom agent created
+/// with reporting on, whose first report was accepted (offer Resume), is
+/// restarted with the same launch with reporting off; the reply and the
+/// listing offer `NoConversationReporting`; the stored launch is the new one;
+/// the restarted program's startup report is refused as disabled for this
+/// launch, and the captured conversation stays the first run's.
+#[farhelm_testtrace::test]
+async fn a_restart_with_turning_reporting_off_refuses_its_programs_startup_report() {
+    let work = farhelm_teststate::tempdir().expect("agent working directory");
+    let program = startup_reporting_agent(work.path());
+    let (h, _fixtures) = fixture_harness_with_seams(|_| {}).await;
+    let serving = ServeTask::spawn(&h.sup, h.state.path()).await;
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            startup_reporting_launch(&program, true),
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .expect("create the reporting custom agent");
+    startup_report_settles(&h, &session.id, STARTUP_CONVERSATION, "acked", 1).await;
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some(STARTUP_CONVERSATION),
+        "premise: the first run's report was accepted: {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "premise: Restart with is offered"
+    );
+
+    let off = startup_reporting_launch(&program, false);
+    let restarted = h
+        .client
+        .restart_session_with(&session.id, true, Some(off.clone()), None)
+        .await
+        .expect("restart with reporting off");
+    assert_eq!(
+        restarted.restart_offer,
+        farhelm_proto::RestartOffer::NoConversationReporting,
+        "the reply's offer is the new launch's"
+    );
+    assert_eq!(restarted.launch, off);
+    assert_eq!(durable_launch_bundle(&h, &session.id).await, off);
+    let after = format!("after-{STARTUP_CONVERSATION}");
+    startup_report_settles(&h, &session.id, &after, "refused", 1).await;
+    let log = hook_log(&h, &session.id);
+    assert!(
+        log.contains("conversation reporting is disabled for this launch"),
+        "{log}"
+    );
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some(STARTUP_CONVERSATION),
+        "the refused report captured nothing: {log}"
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::NoConversationReporting
+    );
+    serving.stop().await;
+}
+
+/// A named Restart with that turns conversation reporting on accepts the
+/// startup report of the program it starts, and its reply does not offer
+/// what the previous launch allowed.
+///
+/// Why: the other direction of the reporting-off test above. With the
+/// launch applied after publication, the reply described the session as one
+/// without conversation reporting, and the new program's startup report
+/// could be refused under the previous "reporting off", losing the
+/// conversation the user just named. As above, the reply is what this test
+/// pins and the report it checks as an outcome. Spec: a custom agent created with
+/// reporting off has its first report refused (offer
+/// `NoConversationReporting`); a named Restart with of the same launch with
+/// reporting on replies with an offer other than `NoConversationReporting`
+/// and stores the new launch; the restarted program's startup report is
+/// accepted, and the session offers Resume of that conversation.
+#[farhelm_testtrace::test]
+async fn a_named_restart_with_turning_reporting_on_accepts_its_programs_startup_report() {
+    let work = farhelm_teststate::tempdir().expect("agent working directory");
+    let program = startup_reporting_agent(work.path());
+    let (h, _fixtures) = fixture_harness_with_seams(|_| {}).await;
+    let serving = ServeTask::spawn(&h.sup, h.state.path()).await;
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            startup_reporting_launch(&program, false),
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .expect("create the non-reporting custom agent");
+    startup_report_settles(&h, &session.id, STARTUP_CONVERSATION, "refused", 1).await;
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::NoConversationReporting,
+        "premise: reporting is off: {}",
+        hook_log(&h, &session.id)
+    );
+
+    let on = startup_reporting_launch(&program, true);
+    let named_conversation = "conv-named";
+    let named = farhelm_proto::NamedConversationStart {
+        conversation: named_conversation.into(),
+        argv: farhelm_supervisor::agent_kind::IntegrationSnapshot::of(&on)
+            .filled_named_resume_argv(named_conversation)
+            .expect("the resume command fills with a named conversation"),
+    };
+    let restarted = h
+        .client
+        .restart_session_named(&session.id, true, Some(on.clone()), None, Some(named))
+        .await
+        .expect("named restart with reporting on");
+    // Not compared with one value: the startup report may already have been
+    // accepted when the reply is built (Resume), or not yet (NotCaptured).
+    assert_ne!(
+        restarted.restart_offer,
+        farhelm_proto::RestartOffer::NoConversationReporting,
+        "the reply's offer is the new launch's"
+    );
+    assert_eq!(restarted.launch, on);
+    assert_eq!(durable_launch_bundle(&h, &session.id).await, on);
+    let after = format!("after-{named_conversation}");
+    startup_report_settles(&h, &session.id, &after, "acked", 1).await;
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some(after.as_str()),
+        "{}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::Resume
+    );
+    serving.stop().await;
 }

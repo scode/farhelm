@@ -232,6 +232,27 @@ pub(crate) fn failing_host_program(dir: &Path, flag: &Path, unusable: Option<&Pa
     )
 }
 
+/// [`history_session`]'s launch with its resume command edited in a way the
+/// agent ignores (a different positional word `sh -c` hands it unread): what
+/// a Restart with sends to change a session's stored settings without
+/// changing what its program does, so the stored and listed launch alone
+/// tell which launch a failed restart left behind.
+fn edited_history_launch(launch: &farhelm_proto::SessionLaunch) -> farhelm_proto::SessionLaunch {
+    let farhelm_proto::SessionLaunch::Command(command) = launch else {
+        panic!("premise: a history session is a command launch: {launch:?}");
+    };
+    let mut edited = command.clone();
+    edited.resume = Some(
+        command
+            .resume
+            .as_deref()
+            .expect("premise: a history session resumes")
+            .replace("farhelm-test-resume", "farhelm-test-edited"),
+    );
+    assert_ne!(edited.resume, command.resume, "premise: the edit applied");
+    farhelm_proto::SessionLaunch::Command(edited)
+}
+
 /// A crash seam that fires once, at `stage`.
 pub(crate) fn crash_once_at(stage: HostRestartStage) -> (HostRestartFault, Arc<AtomicBool>) {
     let fired = Arc::new(AtomicBool::new(false));
@@ -780,6 +801,15 @@ struct Interrupted {
 /// the supervisor and start the next one on the same state directory: what
 /// the interruption tests share.
 async fn interrupted_restart(stage: HostRestartStage) -> Interrupted {
+    interrupted_restart_with(stage, false).await
+}
+
+/// [`interrupted_restart`], sent as a Restart with of
+/// [`edited_history_launch`] when `edit` is set. Before the supervisor is
+/// dropped it then checks that the edited launch is both the stored and the
+/// listed one: the interrupted restart's program was started under it, so
+/// neither may name the launch it replaced.
+async fn interrupted_restart_with(stage: HostRestartStage, edit: bool) -> Interrupted {
     let stack = Stack::new().await;
     let (crash, fired) = crash_once_at(stage);
     let (sup, client) = stack.supervisor(crashing_seams(crash)).await;
@@ -788,14 +818,22 @@ async fn interrupted_restart(stage: HostRestartStage) -> Interrupted {
     let old_pid = host_process(&old_socket).expect("the old host's process");
     drop(old);
 
+    let edited = edit.then(|| edited_history_launch(&session.launch));
     client
-        .restart_session(&session.id, true)
+        .restart_session_with(&session.id, true, edited.clone(), None)
         .await
         .expect_err("the restart is interrupted");
     assert!(
         fired.load(Ordering::SeqCst),
         "premise: the crash seam fired"
     );
+    if let Some(edited) = &edited {
+        assert_eq!(
+            &stored_row(stack.state.path(), &session.id).await.launch,
+            edited
+        );
+        assert_eq!(&listed(&client, &session.id).await.launch, edited);
+    }
     let record = std::fs::read_to_string(record_path(stack.state.path(), &session.id, 1))
         .expect("the new launch's record");
     let new_name = record
@@ -917,6 +955,132 @@ async fn a_restart_interrupted_after_its_new_host_started_converges_at_the_next_
 #[farhelm_testtrace::test]
 async fn a_restart_interrupted_before_the_old_host_ended_converges_at_the_next_start() {
     assert_converged(interrupted_restart(HostRestartStage::BeforeOldHostEnded).await).await;
+}
+
+/// A Restart with interrupted after its new host started keeps its launch,
+/// in the session and the database, through the next start.
+///
+/// Why: Restart with stores its launch with the generation it opens, before
+/// the new program can report under it, and an ambiguous failure must keep
+/// it: an agent may be running that was started with those settings, and
+/// putting the replaced launch back would have its reports and the next
+/// Restart judged by settings it never ran with. Spec: a Restart with of an
+/// edited launch, crashed by the fault seam at `ReplacementStarted`, fails;
+/// the stored and listed launch are the edited one; the next supervisor's
+/// stored and listed launch are the edited one, and it converges as a plain
+/// interrupted restart does.
+#[farhelm_testtrace::test]
+async fn an_interrupted_restart_with_keeps_its_launch_through_the_next_start() {
+    let interrupted = interrupted_restart_with(HostRestartStage::ReplacementStarted, true).await;
+    let edited = edited_history_launch(&interrupted.session.launch);
+    let id = &interrupted.session.id;
+    assert_eq!(
+        stored_row(interrupted.stack.state.path(), id).await.launch,
+        edited
+    );
+    assert_eq!(listed(&interrupted.client, id).await.launch, edited);
+    assert_converged(interrupted).await;
+}
+
+/// A Restart with whose new host refuses to start keeps the session's
+/// previous launch; one that starts stores the new launch.
+///
+/// Why: Restart with stores its launch as it opens the generation, before
+/// anything starts, so a definitive failure (nothing outside the database
+/// was left running) must take it back with the rest of the previous run,
+/// or the session would show and later resume with settings no run of it
+/// used. Spec: with host starts refused, a Restart with of an edited launch
+/// fails; the stored and listed launch are the original; with host starts
+/// allowed again, the same Restart with succeeds, its reply and the stored
+/// and listed launch are the edited one, and the new host runs the resumed
+/// program.
+#[farhelm_testtrace::test]
+async fn a_refused_restart_with_keeps_the_previous_launch() {
+    let stack = Stack::new().await;
+    let fixture = farhelm_teststate::tempdir().expect("fixture directory");
+    let flag = fixture.path().join("refuse");
+    let program = failing_host_program(fixture.path(), &flag, None);
+    let (sup, client) = stack
+        .supervisor(SupervisorSeams {
+            host_program: Some(program),
+            ..host_seams()
+        })
+        .await;
+    let (session, old) = history_session(&client, &sup, stack.work.path()).await;
+    drop(old);
+    let edited = edited_history_launch(&session.launch);
+
+    std::fs::write(&flag, b"").expect("make host starts refuse");
+    client
+        .restart_session_with(&session.id, true, Some(edited.clone()), None)
+        .await
+        .expect_err("the replacement host refuses to start");
+    std::fs::remove_file(&flag).expect("let host starts work again");
+    let row = stored_row(stack.state.path(), &session.id).await;
+    assert_ne!(
+        row.outcome,
+        LastOutcome::Launching,
+        "premise: a definitive failure"
+    );
+    assert_eq!(row.launch, session.launch);
+    assert_eq!(listed(&client, &session.id).await.launch, session.launch);
+
+    let restarted = client
+        .restart_session_with(&session.id, true, Some(edited.clone()), None)
+        .await
+        .expect("the restart with succeeds once hosts start again");
+    assert_eq!(restarted.launch, edited);
+    assert_eq!(
+        stored_row(stack.state.path(), &session.id).await.launch,
+        edited
+    );
+    assert_eq!(listed(&client, &session.id).await.launch, edited);
+    let new = agent_host(&sup, &session.id).await;
+    wait_for_screen(&new, RESUMED).await;
+    let new_pid = host_process(new.socket()).expect("the new host's process");
+    end_runtime(&new, new_pid).await;
+    drop(client);
+    drop(sup);
+}
+
+/// A Restart with whose confirmation write fails keeps its launch: the new
+/// program was published and runs under it.
+///
+/// Why: a failure after the new generation is published withholds only the
+/// reply, and must not take the launch settings back from the agent that is
+/// running with them. Spec: with the fault seam failing the confirmation, a
+/// Restart with of an edited launch fails saying the confirmation in the
+/// database failed; the new host runs the resumed program; the stored and
+/// listed launch are the edited one.
+#[farhelm_testtrace::test]
+async fn a_restart_with_whose_confirmation_fails_keeps_its_launch() {
+    let fault: HostRestartFault = Arc::new(|stage| {
+        if stage == HostRestartStage::Confirmation {
+            anyhow::bail!("the database refused the write");
+        }
+        Ok(())
+    });
+    let h = harness_with_seams(SupervisorTimeouts::default(), crashing_seams(fault)).await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let (session, old) = history_session(&h.client, &h.sup, work.path()).await;
+    drop(old);
+    let edited = edited_history_launch(&session.launch);
+
+    let failed = h
+        .client
+        .restart_session_with(&session.id, true, Some(edited.clone()), None)
+        .await
+        .expect_err("the confirmation write fails");
+    assert!(
+        format!("{failed:#}").contains("confirming the relaunch in the database"),
+        "{failed:#}"
+    );
+    let new = agent_host(&h.sup, &session.id).await;
+    wait_for_screen(&new, RESUMED).await;
+    assert_eq!(stored_row(h.state.path(), &session.id).await.launch, edited);
+    assert_eq!(listed(&h.client, &session.id).await.launch, edited);
+    let new_pid = host_process(new.socket()).expect("the new host's process");
+    end_runtime(&new, new_pid).await;
 }
 
 /// The superseded-host rule leaves an earlier host it cannot read alone,

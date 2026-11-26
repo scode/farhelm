@@ -3188,7 +3188,7 @@ pub(crate) async fn type_without_supervisor(state: &std::path::Path, session_id:
 /// is `word`. Hook runs fired while no supervisor runs leave no other
 /// witness this test can wait on: there is no supervisor to attach a
 /// terminal through.
-async fn wait_for_hook_log_words(
+pub(crate) async fn wait_for_hook_log_words(
     state: &std::path::Path,
     session_id: &str,
     word: &str,

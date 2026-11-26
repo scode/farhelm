@@ -360,6 +360,8 @@ impl Supervisor {
                 );
                 self.publish_relaunched(
                     entry,
+                    launch,
+                    snapshot,
                     generation,
                     Relaunched {
                         terminal,
@@ -391,6 +393,8 @@ impl Supervisor {
         let info = self
             .publish_relaunched(
                 entry,
+                launch,
+                snapshot,
                 generation,
                 Relaunched {
                     terminal,
