@@ -9,7 +9,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight e425a3] `tensorlake-sandbox-key-consent.md` — Bind Settings leftover-sandbox Delete confirmation and list to the active Tensorlake key
 - [in-flight e6d1f9] `launcher-visible-consent.md` — Lock host and destination in Replace with and record launcher list Enter visibility rule
 - [in-flight ecd2fd] `launcher-late-wake-failures.md` — Report request-tagged late wake failures for suspended sandboxes and stopped containers
-- [pending] `podman-host-verification.md` — Verify container host identity with cheap sanity checks and record concurrent SSH config policy
+- [in-flight 0cbef9] `podman-host-verification.md` — Verify container host identity with cheap sanity checks and record concurrent SSH config policy
 - [pending] `podman-recipe-admission.md` — Report pre-admission container recipe Rebuild failures without creating empty build records (after `podman-host-verification.md`)
 - [pending] `podman-proxy-free-images.md` — Keep build-time host proxy config out of captured Podman recipe images (after `podman-host-verification.md`)
 - [pending] `supervisor-outliving-programs.md` — Root Stop and Restart cleanup at surviving pinned children and record SIGHUP/SIGKILL policy
