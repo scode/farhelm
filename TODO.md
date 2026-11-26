@@ -62,7 +62,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Point the landing tooling README at the agent records doc.** `scripts/plans-landing/README.md` describes the landing
   monitor's records but never says where agent records are documented; add one line pointing to
-  `.agents/agent-records.md`. This is also the first plan to run on agent records, so keep it to that one line.
+  `.agents/agent-records.md`. This is also the first plan to run on agent records, so keep it to that one line. Plan:
+  `plans/queue/landing-readme-agent-records.md`.
 
 - **Start several selected sessions at once.** When multiple sessions are selected we need to be able to start sessions
   if all the marked ones are stopped.
