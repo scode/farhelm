@@ -2504,6 +2504,16 @@ session keeps its explanation about the reboot or update.
 Container sessions' tabs, file links and downloads use the ordinary supervisor rules inside their container. Retired
 containerized sessions offer no terminal or tab access.
 
+### Empty main pane
+
+When the session listing proves the fleet is empty, the main pane shows **Welcome to Farhelm**. The agent marks follow
+the launcher's order, with a name for each supported agent. **Start a session** opens the same launcher as New in the
+session list and is disabled whenever New is unavailable. **Add a remote host** and **Send feedback** open their dialogs
+and get focus back when the dialog closes. **Read Get started** opens the first-session guide.
+
+Before the listing is read, the pane shows **Loading sessions…**. It stays blank while there are sessions but none is
+open, or while the listing cannot prove that the fleet is empty.
+
 ### Session list
 
 Environment-session marks, metadata, suspended rows and menu actions follow [Sandbox sessions](#sandbox-sessions) and
@@ -3903,10 +3913,12 @@ from a control that holds it, such as the session filter or a header button. Thi
 land in a terminal unexpectedly, in exchange for never having to click back into it. A short delay before the terminal
 takes focus back is a possible later mitigation, not a rule.
 
-With no terminal on screen, focus rests on New when there are no sessions, and on a stopped session's card when the
-selected session has stopped. Enter on that card does nothing, so typing that was already under way cannot restart
-anything; Tab reaches its Restart and Replace. While the selected session's host cannot be reached, focus rests on its
-Session unavailable card, whose text the keys scroll (the old app left nothing focused there).
+With no terminal on screen and an empty fleet, focus rests on **Start a session** in the main pane. Enter opens the
+launcher, and Tab reaches the three links below it. While Start a session is disabled, the window has no home control.
+When the first session appears, a terminal can take focus once the focused Welcome control leaves the pane. When the
+selected session has stopped, focus rests on its card. Enter on that card does nothing, so typing that was already under
+way cannot restart anything. Tab reaches its Restart and Replace. While the selected session's host cannot be reached,
+focus rests on its Session unavailable card, whose text the keys scroll.
 
 Choosing a session, including the one already selected, focuses its terminal.
 

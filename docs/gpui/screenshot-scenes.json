@@ -2817,6 +2817,16 @@
       "reference": "welcome-dialog"
     },
     {
+      "golden": "welcome-empty-pane",
+      "title": "Welcome in the empty main pane at the default window size",
+      "reference": "empty-fleet"
+    },
+    {
+      "golden": "welcome-empty-pane-narrow",
+      "title": "Welcome in the empty main pane at a narrow window size",
+      "reference": "empty-fleet"
+    },
+    {
       "golden": "whats-new-dialog",
       "title": "What's new from two releases with the upgrade range, full entries, category marks and a screenshot link"
     },

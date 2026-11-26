@@ -2242,9 +2242,7 @@ fn assert_whole_on_one_line(nodes: &[gpui::DriverNode]) {
 
 /// A root view drawing the pane alone across the window, wired as every root view is. It also keeps a session list,
 /// undrawn, because the list owns the selection rules: without one nothing opens a session, and the pane has no top row
-/// to draw. The pane gets that list's New handle, as the main view passes it. The list is not drawn, so neither is New,
-/// and the focus coordinator counts an undrawn home as none; these layout tests' fleets are not empty, so New is never
-/// home in them anyway.
+/// to draw.
 struct PaneOnly {
     pane: Entity<SessionPane>,
     _list: Entity<SessionList>,
@@ -2296,8 +2294,7 @@ fn every_action_is_whole_and_reachable_in_a_650_pixel_pane() {
         .open_window(size(px(650.), px(300.)), |window, cx| {
             let view = cx.new(|cx| {
                 let list = cx.new(SessionList::new);
-                let new = list.read(cx).new_focus().clone();
-                let pane = cx.new(|cx| SessionPane::new(new, window, cx));
+                let pane = cx.new(|cx| SessionPane::new(window, cx));
                 kept.replace(Some(pane.clone()));
                 PaneOnly {
                     pane,
@@ -2392,8 +2389,7 @@ impl RealPane {
             .open_window(size(px(width), px(300.)), |window, cx| {
                 let view = cx.new(|cx| {
                     let list = cx.new(SessionList::new);
-                    let new = list.read(cx).new_focus().clone();
-                    let pane = cx.new(|cx| SessionPane::new(new, window, cx));
+                    let pane = cx.new(|cx| SessionPane::new(window, cx));
                     kept.replace(Some(pane.downgrade()));
                     PaneOnly {
                         pane,
@@ -2993,8 +2989,7 @@ fn an_environment_sessions_actions_stay_whole_in_a_650_pixel_pane() {
         .open_window(size(px(650.), px(300.)), |window, cx| {
             let view = cx.new(|cx| {
                 let list = cx.new(SessionList::new);
-                let new = list.read(cx).new_focus().clone();
-                let pane = cx.new(|cx| SessionPane::new(new, window, cx));
+                let pane = cx.new(|cx| SessionPane::new(window, cx));
                 PaneOnly {
                     pane,
                     _list: list,

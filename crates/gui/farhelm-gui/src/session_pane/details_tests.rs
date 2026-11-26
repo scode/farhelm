@@ -127,14 +127,11 @@ pub(super) struct PaneOnly {
 }
 
 impl PaneOnly {
-    /// The harness's root view. The pane gets the kept list's New handle, as the main view passes it, but the list is
-    /// not drawn, so neither is New: over an empty fleet the focus coordinator counts that undrawn home as none, and
-    /// focus rests on the window's root, not on a handle that takes no keys.
+    /// The harness's root view. An undrawn session list still chooses the session whose details the pane shows.
     pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let list = cx.new(SessionList::new);
-        let new = list.read(cx).new_focus().clone();
         PaneOnly {
-            pane: cx.new(|cx| SessionPane::new(new, window, cx)),
+            pane: cx.new(|cx| SessionPane::new(window, cx)),
             _list: list,
             root: root::attach(window, cx),
         }

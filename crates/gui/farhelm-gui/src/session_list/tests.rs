@@ -1035,19 +1035,13 @@ fn a_pushed_change_draws_the_list_once(cx: &mut TestAppContext) {
     );
 }
 
-/// An empty fleet is announced only on proof (SPEC.md: "An unfiltered empty fleet still says 'No sessions'"; the old
-/// pane's three honest states). Specified: an available, complete, empty listing paints "No sessions" in the list and
-/// "No sessions — create one" in the pane, with the count 0.
+/// A complete empty listing shows "No sessions" with count 0 in the list and Welcome in the pane. The two surfaces
+/// tell the user what happened and give them a way to start.
 #[gpui::test]
 fn an_empty_fleet_says_so_in_the_list_and_the_pane(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, vec![listing(&[], &[])]);
     let texts = painted(&frame(cx));
-    for line in [
-        "No sessions",
-        "No sessions — create one",
-        "0",
-        "Recently active",
-    ] {
+    for line in ["No sessions", crate::welcome::TITLE, "0", "Recently active"] {
         assert!(texts.iter().any(|text| text == line), "{line}: {texts:?}");
     }
     assert_eq!(selected(cx), None);
@@ -1058,9 +1052,8 @@ fn an_empty_fleet_says_so_in_the_list_and_the_pane(cx: &mut TestAppContext) {
 /// the placeholder is a statement about the fleet, so it must go with the first session the helm reports, one made
 /// from the command line or by an agent included, and that session opens by the ordinary automatic choice (SPEC.md,
 /// "Session list"). The rule is a pure function tested on its own (`a_selection_settles_only_on_evidence`); this pins
-/// the list and the pane applying it to a pushed listing. Specified: over a proven empty fleet showing "No sessions —
-/// create one", a pushed listing of p opens p, which is remembered and named in the session query; neither "No
-/// sessions" line is painted any more, and the details bar names p's title.
+/// the list and the pane applying it to a pushed listing. A pushed listing of p opens p, which is remembered and
+/// named in the session query. Welcome and the list's empty label disappear, and the details bar shows p's title.
 #[gpui::test]
 fn a_session_pushed_into_an_empty_fleet_replaces_the_placeholder_and_opens(
     cx: &mut TestAppContext,
@@ -1069,8 +1062,8 @@ fn a_session_pushed_into_an_empty_fleet_replaces_the_placeholder_and_opens(
     assert!(
         painted(&frame(cx))
             .iter()
-            .any(|text| text == "No sessions — create one"),
-        "the premise: the placeholder shows"
+            .any(|text| text == crate::welcome::TITLE),
+        "the premise: Welcome shows"
     );
 
     fake.push(change(
@@ -1082,7 +1075,7 @@ fn a_session_pushed_into_an_empty_fleet_replaces_the_placeholder_and_opens(
     assert_eq!(selected(cx).as_deref(), Some("p"));
     assert_eq!(sent(&mut fake), [remembered("p"), named("p")]);
     let texts = painted(&frame(cx));
-    for gone in ["No sessions", "No sessions — create one"] {
+    for gone in ["No sessions", crate::welcome::TITLE] {
         assert!(!texts.iter().any(|text| text == gone), "{gone}: {texts:?}");
     }
     assert_eq!(
@@ -1280,17 +1273,15 @@ fn a_stale_running_row_holds_no_pulse(cx: &mut TestAppContext) {
 
 // ---- The rules as pure functions -----------------------------------------------------------------------------------
 
-/// Which listings may say "No sessions" and what the pane says: only an available, complete listing with no rows is an
-/// empty fleet; a failed or cut one with no rows claims nothing, and before the list is read the pane says it is
-/// loading.
+/// Welcome needs an available, complete listing with no rows. A failed or cut listing with no rows leaves the pane
+/// blank, and before the list is read the pane says it is loading.
 #[test]
 fn only_a_complete_available_empty_listing_is_an_empty_fleet() {
+    use session_pane::EmptyState;
+
     let empty = collections(vec![listing(&[], &[])]);
     assert!(empty_fleet(&empty));
-    assert_eq!(
-        session_pane::placeholder(Some(&empty)),
-        "No sessions — create one"
-    );
+    assert_eq!(session_pane::empty_state(Some(&empty)), EmptyState::Welcome);
 
     let mut failed = listing(&[], &[]);
     failed.meta.availability = Availability::Unavailable {
@@ -1298,7 +1289,7 @@ fn only_a_complete_available_empty_listing_is_an_empty_fleet() {
     };
     let failed = collections(vec![failed]);
     assert!(!empty_fleet(&failed));
-    assert_eq!(session_pane::placeholder(Some(&failed)), "");
+    assert_eq!(session_pane::empty_state(Some(&failed)), EmptyState::Blank);
 
     let mut cut = listing(&[], &[]);
     cut.meta.counts = Some(ListCounts {
@@ -1311,10 +1302,10 @@ fn only_a_complete_available_empty_listing_is_an_empty_fleet() {
     let unread = collections(vec![preferences(&[], None)]);
     assert!(!empty_fleet(&unread));
     assert_eq!(
-        session_pane::placeholder(Some(&unread)),
-        "Loading sessions…"
+        session_pane::empty_state(Some(&unread)),
+        EmptyState::Loading
     );
-    assert_eq!(session_pane::placeholder(None), "");
+    assert_eq!(session_pane::empty_state(None), EmptyState::Blank);
 }
 
 /// The count never claims completeness for a cut list: a truncated listing trades the count for the warning, in SPEC's

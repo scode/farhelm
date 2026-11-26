@@ -743,8 +743,7 @@ fn home(window: &Window, cx: &App) -> Option<FocusHandle> {
 /// but key dispatch for a focus id missing from the frame starts above the root's key context, so Tab, Escape and every
 /// Farhelm binding do nothing until that handle is drawn again. GPUI's focus-lost report misses it whenever the frame
 /// before drew nothing focused either. A home goes undrawn in ordinary use: one set before its first frame (the
-/// session pane's interrupted card), and New as home (the sidebar's follow-up) while it is disabled, since a launch or
-/// a host change in flight draws it untracked, or while the Hosts panel hides the session list's column.
+/// session pane's interrupted card), or Welcome's Start a session while a launch or a host change draws it untracked.
 /// Desktop-integration found the dead keys with New as home (2026-11-15). [`settle_home`] moves a window resting on
 /// its root to home once a frame draws it.
 ///
@@ -769,9 +768,8 @@ fn resting_place(window: &Window, cx: &App) -> Option<FocusHandle> {
 
 /// After every frame: a window whose focus rests on its root (or on nothing) while no layer that holds focus is open,
 /// and whose home that frame drew, sends focus home. This is how focus reaches a home that was not drawn when focus
-/// last needed a resting place ([`drawn_home`]): the interrupted card once its first frame draws it, or New drawn
-/// enabled again once the launch is answered. It never takes focus from a control that holds it, as [`set_home`] does
-/// not.
+/// last needed a resting place ([`drawn_home`]). The interrupted card can take focus on its first frame, and Start a
+/// session can take it once enabled again. A control that still holds focus keeps it.
 ///
 /// GPUI can miss a loss when a control takes focus and disappears between frames with empty focus paths.
 /// Recover if the handle we drew for is still current and the finished frame does not contain it.

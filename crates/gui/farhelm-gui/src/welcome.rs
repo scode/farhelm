@@ -1,4 +1,7 @@
-//! The Welcome card, and the dialogs SPEC.md opens by themselves when a window starts or resets.
+//! Welcome in the empty pane, the Help menu's Welcome card, and the dialogs that open at window start or reset.
+//!
+//! [`WelcomeContent`] supplies the empty pane's first actions. The legacy startup card still opens over that pane
+//! until the rest of the Welcome change lands.
 //!
 //! SPEC.md, "Welcome card" and "Announcements". Ported from the old app's `welcome.rs` (`WelcomeDialog`), its
 //! `PreferencesGate` (the decision after the preference read) and `app_bar.rs` (`finish_welcome`, the announcement
@@ -38,6 +41,11 @@
 //! NOTE: The first-open card returns focus home when it closes (`ReturnTo::Home`): it has no originating control, and
 //! SPEC.md has it restore ordinary initial focus. The same goes for the feedback dialog it hands off to; the old app
 //! sent focus to its Help toggle after that dialog in every case.
+
+mod content;
+#[cfg(test)]
+pub(crate) use content::PANE_START_ID;
+pub(crate) use content::{PANE_PREFIX, WelcomeContent};
 
 #[cfg(test)]
 pub(crate) mod tests;

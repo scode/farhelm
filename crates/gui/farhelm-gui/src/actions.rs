@@ -229,6 +229,13 @@ pub(crate) const TEMPLATE_LIST_SHORTCUT_NAME: &str = if cfg!(target_os = "macos"
 /// binding and its row in [`TERMINAL_KEYS`]; the tests spell it out on their own.
 pub(crate) const NEW_SESSION_MAC: &str = "cmd-n";
 
+/// The key cap for New's platform binding. The Linux app has no New chord.
+pub(crate) const NEW_SESSION_SHORTCUT_NAME: Option<&str> = if cfg!(target_os = "macos") {
+    Some("⌘N")
+} else {
+    None
+};
+
 /// New's binding (Cmd+N to [`NewSession`] in [`CONTEXT`]), which [`install`] binds on macOS only. A function so the tests,
 /// which do not run on macOS, can check and bind it.
 pub(crate) fn new_session_binding() -> KeyBinding {

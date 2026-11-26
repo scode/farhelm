@@ -1,9 +1,11 @@
 //! Golden scenes for the open session's toolbar, details bar, and interrupted and unavailable cards. The scene list,
 //! `SCENES`, stays in `mod.rs`.
 
+use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::{hosts, local, remote};
 use crate::session_list::tests::{TEST_NOW, listing, preferences, session};
 use crate::session_pane::SessionPane;
+use crate::sidebar::{self, Sidebar};
 use crate::theme;
 use crate::{local_state, local_time, session, ticker};
 use farhelm_helm_client::fake::FakeHelm;
@@ -15,6 +17,58 @@ use gpui::{
 use std::cell::RefCell;
 
 use super::{SceneState, session_at_age};
+
+/// Keep the fake fleet and both columns alive for each capture. The scene view owns the window's focus and layers.
+struct WelcomePaneScene {
+    sidebar: Entity<Sidebar>,
+    pane: Entity<SessionPane>,
+    _connection: Entity<session::Connection>,
+    _helm: FakeHelm,
+}
+
+/// Mount the actual sidebar and pane over a complete empty listing. The scene records these columns without running
+/// the desktop window's startup sequence or changing the palette selected by the golden harness.
+pub(super) fn welcome_pane_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    let list = cx.new(SessionList::new);
+    let sidebar = cx.new(|cx| Sidebar::new(list, cx));
+    let pane = cx.new(|cx| SessionPane::new(window, cx));
+    helm.connect(vec![
+        listing(&[], &[]),
+        hosts(&[local()]),
+        preferences(&[], None),
+    ]);
+    state.keep.borrow_mut().push(Box::new(WelcomePaneScene {
+        sidebar,
+        pane,
+        _connection: connection,
+        _helm: helm,
+    }));
+}
+
+/// Give each column the same width it receives in the desktop at these window sizes.
+pub(super) fn welcome_pane(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let keep = state.keep.borrow();
+    let Some(scene) = keep
+        .iter()
+        .find_map(|kept| kept.downcast_ref::<WelcomePaneScene>())
+    else {
+        return div().into_any_element();
+    };
+    div()
+        .size_full()
+        .flex()
+        .child(scene.sidebar.clone())
+        .child(
+            div()
+                .flex_1()
+                .min_w(sidebar::MAIN_PANE_MIN_WIDTH)
+                .h_full()
+                .child(scene.pane.clone()),
+        )
+        .into_any_element()
+}
 
 /// Each width gets its own pane and anchors. The panes share the same snapshot, as two views of the same session would.
 struct ToolbarScene {
@@ -30,10 +84,7 @@ pub(super) fn session_toolbar_setup(state: &SceneState, window: &mut Window, cx:
     };
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    let panes = [(); 2].map(|()| {
-        let new = cx.focus_handle();
-        cx.new(|cx| SessionPane::new(new, window, cx))
-    });
+    let panes = [(); 2].map(|()| cx.new(|cx| SessionPane::new(window, cx)));
     let row = idle("a").title("Review the build").host(2).tabs(1);
     helm.connect(vec![
         listing(&["a"], &[row]),

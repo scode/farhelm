@@ -47,6 +47,7 @@ use crate::session_list::tests::{
 use crate::terminal::attached::{AttachedTerminal, STATUS_RECONNECT_ID};
 use crate::test_support::{self, click, keys, settle, terminal_focused};
 use crate::test_support::{frame, meta, started};
+use crate::welcome::PANE_START_ID;
 use crate::{focus, local_state, root};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -343,16 +344,14 @@ struct WithField {
 }
 
 impl WithField {
-    /// The root view, with the pane given the drawn list's New handle, as the main view gives it, so New is home here
-    /// over an empty fleet exactly as on the main screen.
+    /// The pane and session list share a root so the test can move between Welcome, the terminal and sidebar controls.
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let root = root::attach(window, cx);
         let list = cx.new(SessionList::new);
-        let new = list.read(cx).new_focus().clone();
         WithField {
             root,
             list,
-            pane: cx.new(|cx| SessionPane::new(new, window, cx)),
+            pane: cx.new(|cx| SessionPane::new(window, cx)),
             field: TextInputState::new(window, cx),
         }
     }
@@ -576,29 +575,116 @@ fn a_replace_question_keeps_the_keyboard_while_the_terminal_goes_live(cx: &mut T
     a_question_keeps_the_keyboard_while_the_terminal_goes_live(cx, "session-header-replace");
 }
 
-// ---- New as home with no sessions ---------------------------------------------------------------------------------
+// ---- Welcome as home with no sessions -----------------------------------------------------------------------------
 
-/// SPEC.md, "Where focus rests": "With no terminal on screen, focus rests on New when there are no sessions." Without
-/// it a window with no sessions starts with nothing focused, and the first Tab or Enter has nowhere obvious to go.
-/// Specified: a window whose first listing is complete, available and empty opens with New focused and opens no
-/// terminal stream.
+/// A keyboard user can open New from a proven empty fleet. The same action in the pane returns the sidebar to
+/// Sessions while Hosts is showing, so the new session will be visible there when it starts.
 #[gpui::test]
-fn with_no_sessions_focus_rests_on_new(cx: &mut TestAppContext) {
-    let mut fleet = open_main(cx, vec![listing(&[], &[])]);
+fn with_no_sessions_enter_opens_the_launcher_from_welcome(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, vec![listing(&[], &[]), fixture_hosts(&[0])]);
     assert_eq!(fleet.selected(), None, "the premise: nothing is open");
     assert_eq!(
         test_support::focused_id(fleet.cx).as_deref(),
-        Some(crate::session_list::NEW_ID)
+        Some(PANE_START_ID)
     );
+    test_support::keys(fleet.cx, "enter");
+    assert!(node(&frame(fleet.cx), "launcher-launch").is_some());
+    test_support::keys(fleet.cx, "escape");
+
+    click(fleet.cx, "hosts-panel-toggle");
+    assert!(node(&frame(fleet.cx), "hosts-panel").is_some());
+    click(fleet.cx, PANE_START_ID);
+    let shown = frame(fleet.cx);
+    assert!(node(&shown, "launcher-launch").is_some());
+    assert!(node(&shown, "hosts-panel").is_none());
+    assert!(node(&shown, crate::session_list::NEW_ID).is_some());
     assert!(fleet.attached().is_empty());
 }
 
-/// The same rule when the fleet empties while the window is open, which is the path a user deleting their last
-/// session takes: the terminal that held focus goes, and New, not the root, is where focus lands. Specified: with the
-/// only session a's terminal live and focused, a complete listing pushed without a closes a's stream and leaves New
-/// focused.
+/// The secondary actions follow Start a session in the Tab order. Dialogs return to their own links, so a keyboard
+/// user can continue along the row. The guide goes through the platform opener and leaves the pane available.
 #[gpui::test]
-fn removing_the_last_session_sends_focus_to_new(cx: &mut TestAppContext) {
+fn welcome_links_open_their_destinations_and_keep_the_users_place(cx: &mut TestAppContext) {
+    let fleet = open_main(cx, vec![listing(&[], &[]), fixture_hosts(&[0])]);
+    let window = fleet.cx;
+    assert_eq!(
+        test_support::focused_id(window).as_deref(),
+        Some(PANE_START_ID)
+    );
+
+    test_support::keys(window, "tab");
+    assert_eq!(
+        test_support::focused_id(window).as_deref(),
+        Some("welcome-pane-add-host")
+    );
+    test_support::keys(window, "enter");
+    assert!(node(&frame(window), "add-host-cancel").is_some());
+    test_support::keys(window, "escape");
+    assert_eq!(
+        test_support::focused_id(window).as_deref(),
+        Some("welcome-pane-add-host")
+    );
+
+    test_support::keys(window, "tab");
+    assert_eq!(
+        test_support::focused_id(window).as_deref(),
+        Some("welcome-pane-get-started")
+    );
+    test_support::keys(window, "enter");
+    assert_eq!(
+        window.opened_url().as_deref(),
+        Some(crate::welcome::GET_STARTED_URL)
+    );
+    assert_eq!(
+        test_support::focused_id(window).as_deref(),
+        Some("welcome-pane-get-started")
+    );
+
+    test_support::keys(window, "tab");
+    assert_eq!(
+        test_support::focused_id(window).as_deref(),
+        Some("welcome-pane-feedback")
+    );
+    test_support::keys(window, "enter");
+    assert!(node(&frame(window), "feedback-cancel").is_some());
+    test_support::keys(window, "escape");
+    assert_eq!(
+        test_support::focused_id(window).as_deref(),
+        Some("welcome-pane-feedback")
+    );
+}
+
+/// The marks introduce every built-in agent in the launcher's order. Names stay available to a screen reader, even
+/// when the row shows only pictures.
+#[gpui::test]
+fn welcome_marks_name_the_built_in_agents_in_launcher_order(cx: &mut TestAppContext) {
+    let fleet = open_main(cx, vec![listing(&[], &[])]);
+    let expected = crate::launcher::HARNESS_PICKER_ORDER
+        .into_iter()
+        .filter(|agent| !agent.is_shell())
+        .map(|agent| agent.display_name())
+        .collect::<Vec<_>>();
+    let nodes = frame(fleet.cx);
+    let names = nodes
+        .iter()
+        .filter(|node| {
+            node.element_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("welcome-pane-mark-"))
+        })
+        .map(|node| node.label.as_deref().expect("each mark names its agent"))
+        .collect::<Vec<_>>();
+    assert_eq!(names, expected);
+    assert_eq!(
+        node(&nodes, "welcome-pane-marks").and_then(|group| group.label.as_deref()),
+        Some(format!("Works with {}", expected.join(", ")).as_str()),
+    );
+}
+
+/// Removing the last session closes the focused terminal and transfers focus to Start a session. This lets someone
+/// who deletes their last session immediately start another.
+#[gpui::test]
+fn removing_the_last_session_sends_focus_to_welcome(cx: &mut TestAppContext) {
     let mut fleet = open_main(
         cx,
         vec![listing(&["a"], &[session("a")]), preferences(&["a"], None)],
@@ -620,21 +706,37 @@ fn removing_the_last_session_sends_focus_to_new(cx: &mut TestAppContext) {
     assert_eq!(fleet.phase(0), FakePhase::Closed);
     assert_eq!(
         test_support::focused_id(fleet.cx).as_deref(),
-        Some(crate::session_list::NEW_ID)
+        Some(PANE_START_ID)
     );
+}
+
+/// When a session created elsewhere replaces Welcome, its terminal becomes the keyboard's resting place. Focus
+/// would otherwise still name the Start button whose pane has gone away.
+#[gpui::test]
+fn the_first_session_pushed_into_an_empty_fleet_can_take_focus(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, vec![listing(&[], &[]), fixture_hosts(&[0])]);
+    assert_eq!(
+        test_support::focused_id(fleet.cx).as_deref(),
+        Some(PANE_START_ID)
+    );
+
+    fleet.push_b();
+    assert_eq!(fleet.selected().as_deref(), Some("b"));
+    assert!(node(&frame(fleet.cx), PANE_START_ID).is_none());
+    assert!(terminal_focused(fleet.cx));
 }
 
 /// The fleet can become empty while nothing is open and nothing else the pane watches moves: a listing that failed
 /// (the helm could not read it, so it claimed nothing and opened nothing) comes back complete and empty. Only the card
 /// follower's empty-fleet flag tells the pane then, so this is the test that keeps it. (The helm cannot deliver a first
 /// listing after the snapshot: a push to a collection no snapshot installed is a protocol violation, and the reset
-/// that follows syncs the pane anyway.) Its opening check also keeps the rule that New is home only on proof that the
+/// that follows syncs the pane anyway.) Its opening check also keeps the rule that Start a session is home only on proof that the
 /// fleet is empty; the unread listing's case of that rule is pinned on the shared proof itself
 /// (`session_list::tests::only_a_complete_available_empty_listing_is_an_empty_fleet`). Specified: a window whose
-/// snapshot holds a failed session listing with no rows opens nothing and does not focus New; once an available,
-/// complete, empty listing is pushed, New holds focus and still nothing is open.
+/// snapshot holds a failed session listing with no rows opens nothing and does not focus Start a session; once an available,
+/// complete, empty listing is pushed, Start a session holds focus and still nothing is open.
 #[gpui::test]
-fn a_listing_that_comes_back_empty_sends_focus_to_new(cx: &mut TestAppContext) {
+fn a_listing_that_comes_back_empty_sends_focus_to_welcome(cx: &mut TestAppContext) {
     let mut failed = listing(&[], &[]);
     failed.meta.availability = Availability::Unavailable {
         error: "down".into(),
@@ -643,8 +745,8 @@ fn a_listing_that_comes_back_empty_sends_focus_to_new(cx: &mut TestAppContext) {
     assert_eq!(fleet.selected(), None, "the premise: nothing is open");
     assert_ne!(
         test_support::focused_id(fleet.cx).as_deref(),
-        Some(crate::session_list::NEW_ID),
-        "the premise: a failed listing does not make New home"
+        Some(PANE_START_ID),
+        "the premise: a failed listing does not make Start a session home"
     );
 
     fleet
@@ -653,34 +755,32 @@ fn a_listing_that_comes_back_empty_sends_focus_to_new(cx: &mut TestAppContext) {
     settle(fleet.cx);
     assert_eq!(
         test_support::focused_id(fleet.cx).as_deref(),
-        Some(crate::session_list::NEW_ID)
+        Some(PANE_START_ID)
     );
     assert_eq!(fleet.selected(), None);
     assert!(fleet.attached().is_empty());
 }
 
-/// New is not drawn as a tab stop while it is disabled (a launch or a host change in flight), and focus on a handle
-/// the frame does not draw takes no keys at all: before the focus coordinator counted such a home as none, focus
-/// parked on the undrawn New and Tab, Escape and every Farhelm shortcut did nothing until New came back. That is a new
-/// user's first run, an empty fleet with a first launch or a first host in flight. This is the integration guard for
-/// New as that undrawn home; the coordinator's own tests cover the general rule (`focus_tests.rs`). A host probe stands
-/// in for both causes (New reads one answer for either, `launcher::entry::new_available`). Specified, over an empty
-/// fleet with New focused: with a probe in flight New is drawn disabled and focus rests on the window's root, which the
-/// per-step focus invariant checks is drawn (no control holds it); once the probe is answered, New holds focus again.
+/// Focus on an undrawn handle takes no keys at all. The root takes focus while Start a session is disabled so Tab,
+/// Escape and the shortcuts still work. A host probe exercises the availability rule it shares with New, including
+/// the return to Start a session once the probe finishes.
 #[gpui::test]
-fn while_new_is_disabled_focus_rests_on_the_root_and_returns_to_new(cx: &mut TestAppContext) {
+fn while_start_is_disabled_focus_rests_on_the_root_and_returns_to_welcome(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, vec![listing(&[], &[]), preferences(&[], None)]);
     assert_eq!(
         test_support::focused_id(fleet.cx).as_deref(),
-        Some(crate::session_list::NEW_ID),
-        "the premise: New is home"
+        Some(PANE_START_ID),
+        "the premise: Start a session is home"
     );
 
     let probe = fleet.probe_in_flight();
-    let new = node(&frame(fleet.cx), crate::session_list::NEW_ID)
+    let start = node(&frame(fleet.cx), PANE_START_ID)
         .cloned()
-        .expect("New is drawn");
-    assert!(!new.flags.focusable, "the premise: New is disabled");
+        .expect("Start a session is drawn");
+    assert!(
+        !start.flags.focusable,
+        "the premise: Start a session is disabled"
+    );
     assert_eq!(
         test_support::focused_id(fleet.cx),
         None,
@@ -690,12 +790,12 @@ fn while_new_is_disabled_focus_rests_on_the_root_and_returns_to_new(cx: &mut Tes
     settle(fleet.cx);
     assert_eq!(
         test_support::focused_id(fleet.cx).as_deref(),
-        Some(crate::session_list::NEW_ID),
-        "New drawn enabled again takes focus back"
+        Some(PANE_START_ID),
+        "Start a session drawn enabled again takes focus back"
     );
 }
 
-/// The opening both empty-fleet launch tests share: the main window over an empty fleet, with New home; the launcher
+/// The opening both empty-fleet launch tests share: the main window over an empty fleet, with Start a session home; the launcher
 /// opened on a complete Command draft (sending nothing); Launch pressed, which sends one create. Returns the fleet and
 /// that create's envelope id, to answer it by.
 fn launched_over_an_empty_fleet(cx: &mut TestAppContext) -> (Fleet<'_>, u64) {
@@ -709,8 +809,8 @@ fn launched_over_an_empty_fleet(cx: &mut TestAppContext) -> (Fleet<'_>, u64) {
     );
     assert_eq!(
         test_support::focused_id(fleet.cx).as_deref(),
-        Some(crate::session_list::NEW_ID),
-        "the premise: New is home over an empty fleet"
+        Some(PANE_START_ID),
+        "the premise: Start a session is home over an empty fleet"
     );
     fleet.cx.update(|window, cx| {
         let mark = focus::Mark::take(cx);
@@ -747,30 +847,24 @@ impl Fleet<'_> {
     }
 }
 
-/// The daily path through New as home: a user's first launch over an empty fleet. Focus goes from New (home) to the
-/// window's root while New is disabled during the create, and must end on the new session's terminal, never back on
-/// New: SPEC.md, "Who may move focus", has a launch the user waited for open "with its terminal focused". The helm
-/// pushes every change a command causes before the command's reply (SPEC_impl.md), so the listing holding the new
-/// session arrives first and makes the fleet non-empty, though it opens nothing (the list holds its automatic pick
-/// while a launch over an empty fleet decides, `session_list::selection`'s "A launch keeps an empty selection empty");
-/// the reply is what opens the session. Specified: over an empty fleet with New focused, the launcher opened on a
-/// complete Command draft and Launch pressed send one create; once the helm pushes a listing holding b and then answers
-/// the create with b, b is selected and its terminal holds focus; New holds focus after none of these steps.
+/// A first launch over an empty fleet ends with focus on the new terminal. The helm pushes the new session's listing
+/// before replying to the create, and the list holds its automatic pick until the reply. Returning to Start a session
+/// during either step could strand focus there when the terminal opens.
 #[gpui::test]
 fn a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal(cx: &mut TestAppContext) {
     let (mut fleet, create) = launched_over_an_empty_fleet(cx);
-    let new_focused = |fleet: &mut Fleet<'_>| {
-        test_support::focused_id(fleet.cx).as_deref() == Some(crate::session_list::NEW_ID)
+    let start_focused = |fleet: &mut Fleet<'_>| {
+        test_support::focused_id(fleet.cx).as_deref() == Some(PANE_START_ID)
     };
     assert!(
-        !new_focused(&mut fleet),
-        "after Launch, New does not hold focus"
+        !start_focused(&mut fleet),
+        "after Launch, Start a session does not hold focus"
     );
 
     fleet.push_b();
     assert!(
-        !new_focused(&mut fleet),
-        "after the listing, New does not hold focus"
+        !start_focused(&mut fleet),
+        "after the listing, Start a session does not hold focus"
     );
     fleet
         .helm
@@ -782,8 +876,8 @@ fn a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal(cx: &mut
         "the new session's terminal holds focus"
     );
     assert!(
-        !new_focused(&mut fleet),
-        "after the reply, New does not hold focus"
+        !start_focused(&mut fleet),
+        "after the reply, Start a session does not hold focus"
     );
 }
 

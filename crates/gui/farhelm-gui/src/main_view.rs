@@ -132,8 +132,6 @@ impl MainView {
         }
         let session_list = cx.new(SessionList::new);
         let status_sounds = cx.new(|cx| sounds::StatusSounds::new(&session_list, window, cx));
-        // The pane makes New home when there are no sessions, so it holds New's handle.
-        let new = session_list.read(cx).new_focus().clone();
         // Kit only samples the macOS setting at startup. Read it again on activation, before the layer stack's
         // activation observer starts the cues that were waiting for this window.
         #[cfg(target_os = "macos")]
@@ -156,7 +154,7 @@ impl MainView {
             drawn_banners: Vec::new(),
             sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),
             session_list,
-            session_pane: cx.new(|cx| SessionPane::new(new, window, cx)),
+            session_pane: cx.new(|cx| SessionPane::new(window, cx)),
             // After the session pane, whose first sync is deferred the same way and so runs first.
             _start_dialogs: cx.new(|cx| welcome::StartDialogs::new(window, cx)),
             _sign_in: crate::sign_in::SignIn::attach(window, cx),

@@ -55,6 +55,7 @@ pub mod request;
 pub mod search;
 pub mod view;
 mod words;
+pub(crate) use words::HARNESS_PICKER_ORDER;
 mod yolo;
 
 #[cfg(test)]

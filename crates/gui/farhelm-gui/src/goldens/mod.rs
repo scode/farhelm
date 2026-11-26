@@ -1122,6 +1122,20 @@ static SCENES: &[Scene] = &[
         setup: welcome_dialog_setup,
     },
     Scene {
+        name: "welcome-empty-pane",
+        // The desktop's initial content size plus the scene ground's inset.
+        size: (1124., 784.),
+        draw: welcome_pane,
+        setup: welcome_pane_setup,
+    },
+    Scene {
+        name: "welcome-empty-pane-narrow",
+        // The desktop's 720×560 floor plus the scene ground's 12-pixel inset on each side.
+        size: (744., 584.),
+        draw: welcome_pane,
+        setup: welcome_pane_setup,
+    },
+    Scene {
         name: "whats-new-dialog",
         size: (780., 540.),
         draw: empty,
