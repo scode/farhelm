@@ -50616,3 +50616,37 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Change `sqsmosywulztwwutzkpptykktrpnvuom`, bookmark
   `plan/triage-trust-settings-and-ui-wording/03-trust-hint-and-restart-chip-wording`.
   [Draft PR #5049](https://github.com/scode/farhelm/pull/5049/changes).
+
+## trailing-replace-with-recent-named-fill-enter-replaces.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source (`crates/gui/farhelm-gui/src/launcher/view/search/start.rs:297-309,341-352,544-564`;
+  `search.rs:308-323`; `start.rs:108-163`): in Replace with, a highlighted Recent row has
+  `.aria_label("Fill from recent setup: ...")` and a summary-only description while pressing Enter immediately replaces
+  and deletes the source session. Whether assistive technology speaks the child `⏎ Replace` label when the parent
+  `ListBoxOption` carries an explicit `aria_label` is unverified.
+- Decision: Q4 ("Replace with Recent setup Enter & screen-reader wording"): maintainer picked "Fix code: keep
+  Enter=Replace, fix screen-reader name". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Keep click=fill and Enter=replace on Recent setups in Replace with, and update the highlighted
+  option's accessible name/description so assistive technology explicitly announces that Enter replaces and deletes the
+  source session (while clicking fills), with a focused regression test (estimate S, ~20-40 lines). Remove the feedback
+  file and its index entry.
+- Execution: Fixed as decided. Change `ompztsxmropymumksxrpnrptyslnwtou`, bookmark
+  `plan/triage-launcher-safety/01-replace-recent-a11y-and-vanished-enter`,
+  [#5050](https://github.com/scode/farhelm/pull/5050/changes).
+
+## trailing-launcher-new-clone-enter-after-vanished-pick.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source (`crates/gui/farhelm-gui/src/launcher/view/search.rs:308-326,662-685`,
+  `folder_list.rs:175-182,221-249`, `history.rs:110-139`): PR #4812 scoped the presented-frame `ActionFrame` Enter
+  guards for vanished empty-pane highlights and folder dropdown highlights to `Mode::ReplaceWith`, letting Return in New
+  and Clone fall through and launch the form draft. Live folder timing unverified.
+- Decision: Q12 ("Straightforward small product fixes"): maintainer picked "Fix all 14". (2026-11-25 fewest-questions
+  triage page, main `5af40d23e`.)
+- Completion criteria: Extend the existing presented-frame `ActionFrame` Enter guards for empty-pane highlights and
+  folder dropdown highlights to New and Clone (not just Replace with), matching `SPEC.md:1235-1237` and `5871-5873`, and
+  add regression tests (estimate S, ~30-60 lines). Remove the feedback file and its index entry.
+- Execution: Fixed as decided. Change `ompztsxmropymumksxrpnrptyslnwtou`, bookmark
+  `plan/triage-launcher-safety/01-replace-recent-a11y-and-vanished-enter`,
+  [#5050](https://github.com/scode/farhelm/pull/5050/changes).

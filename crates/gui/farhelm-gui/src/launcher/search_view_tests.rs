@@ -273,6 +273,13 @@ fn enter_on_an_empty_box_presses_launch_and_spaces_do_not(cx: &mut TestAppContex
         Some("Type a search or clear the search box to launch")
     );
     keys(cx, "backspace backspace enter");
+    assert_eq!(search_text(cx), "");
+    assert_eq!(
+        shown_refusal(cx),
+        None,
+        "Enter before presentation still belongs to the query"
+    );
+    keys(cx, "enter");
     assert_eq!(
         shown_refusal(cx).as_deref(),
         Some("Not launched. Choose a structured harness before launching")
@@ -1260,7 +1267,30 @@ fn the_empty_field_can_apply_a_template_and_reset_its_source(cx: &mut TestAppCon
 #[gpui::test]
 fn narrowing_replace_with_cannot_turn_a_template_pick_into_a_launch(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(super::view_tests::codex(None, None, None));
-    let draft = LaunchDraft::replace_with("a", &source, Some(1));
+    assert_narrowing_drops_enter(
+        cx,
+        LaunchDraft::replace_with("a", &source, Some(1)),
+        "/api/sessions/a/replace",
+    );
+}
+
+/// A New launch must not take the Enter meant for a template removed by the narrow layout.
+#[gpui::test]
+fn narrowing_new_cannot_turn_a_template_pick_into_a_launch(cx: &mut TestAppContext) {
+    let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
+    draft.choose_harness(LaunchHarness::Codex, None, None);
+    assert_narrowing_drops_enter(cx, draft, "/api/sessions");
+}
+
+/// Clone has a ready draft from its source, so an unintended Enter can submit it without any further choices.
+#[gpui::test]
+fn narrowing_clone_cannot_turn_a_template_pick_into_a_launch(cx: &mut TestAppContext) {
+    let source = super::draft_tests::session(super::view_tests::codex(None, None, None));
+    assert_narrowing_drops_enter(cx, LaunchDraft::clone_of(&source, Some(1)), "/api/sessions");
+}
+
+/// Send one Enter after the pane was withdrawn, then a fresh Enter after the main action reaches the screen.
+fn assert_narrowing_drops_enter(cx: &mut TestAppContext, draft: LaunchDraft, route: &str) {
     let (mut helm, cx) = launcher_with_templates_on(cx, None, draft);
     cx.simulate_resize(gpui::size(gpui::px(1080.), gpui::px(900.)));
     answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
@@ -1271,8 +1301,9 @@ fn narrowing_replace_with_cannot_turn_a_template_pick_into_a_launch(cx: &mut Tes
 
     cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
     cx.simulate_keystrokes("enter");
-    let route = "/api/sessions/a/replace";
     assert!(super::launch_tests::sent_to(&mut helm, cx, route).is_empty());
+    assert!(cx.debug_bounds("launcher-command-pane").is_none());
+    assert!(search_focused(cx));
     keys(cx, "enter");
     assert_eq!(super::launch_tests::sent_to(&mut helm, cx, route).len(), 1);
 }

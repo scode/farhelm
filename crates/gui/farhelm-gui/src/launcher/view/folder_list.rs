@@ -62,8 +62,8 @@ pub(super) struct FolderList {
     /// the rows can change under it (typing, a history answer, the list closing), so Enter never takes a row the arrow
     /// did not reach. The launcher's draw notes where the field is for it to open under.
     pub(super) list: FieldList,
-    /// The folder field can submit Replace with only once a frame without a highlighted choice has been shown.
-    enter_can_replace: ActionFrame<bool>,
+    /// Enter can submit only after a frame has shown the field without a highlighted folder pick.
+    enter_can_submit: ActionFrame<bool>,
     /// Whether the user has typed in the field since the folder was last seeded or picked: only then do the recent
     /// folders filter by its text (SPEC.md: "Untouched prefilled fields show the newest eight; typing filters"). A picked
     /// folder is the user's own choice for a later host change, but picking is not typing, so it does not filter.
@@ -162,21 +162,21 @@ impl Launcher {
     }
 
     /// The rows may have changed under the highlight (a history answer, or the host or its connection changing), so
-    /// Enter must not take whatever row now sits at its index. In Replace with, the last shown submit intent is also
-    /// stale, even if the highlight came and went between two draws.
+    /// Enter must not take whatever row now sits at its index. A new frame must show that Enter submits the form,
+    /// even if the highlight came and went between two draws.
     pub(super) fn drop_folder_highlight(&mut self) {
         if self.folder_list.list.highlighted.take().is_some() {
-            self.folder_list.enter_can_replace.clear();
+            self.folder_list.enter_can_submit.clear();
         }
     }
 
     /// Record which meaning of Enter the user can see. GPUI can draw a changed list to dispatch a key before
-    /// presenting it, so a redraw alone cannot authorize the source session's replacement.
+    /// presenting it, so a redraw alone cannot authorize a launch or replacement.
     pub(super) fn follow_folder_list(&mut self, window: &Window, cx: &App) {
         let list = &mut self.folder_list;
         list.list.follow(window, cx);
-        if matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
-            list.enter_can_replace
+        if !matches!(self.draft.mode, Mode::RestartWith(_)) {
+            list.enter_can_submit
                 .capture(list.list.highlighted.is_none(), (), window);
         }
     }
@@ -216,15 +216,15 @@ impl Launcher {
 
     /// Enter in the folder field: take the highlighted row, returning whether it did. With nothing highlighted (or the
     /// list closed) it takes nothing and Enter launches as from any field; the list closes first, so a refused launch's
-    /// controls below the field are not left under it. With Replace with, an Enter before the current no-highlight
-    /// state is presented is consumed as well, so it cannot retire the source session.
+    /// controls below the field are not left under it. An Enter before the current no-highlight state is presented
+    /// is consumed as well, so a disappearing folder pick cannot submit the form.
     pub(super) fn folder_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let replacing = matches!(self.draft.mode, Mode::ReplaceWith { .. });
-        if replacing
+        let guard_submit = !matches!(self.draft.mode, Mode::RestartWith(_));
+        if guard_submit
             && self.folder_list.list.highlighted.is_none()
             && !self
                 .folder_list
-                .enter_can_replace
+                .enter_can_submit
                 .current()
                 .is_some_and(|action| action.shown() == Some(&true))
         {
@@ -239,10 +239,10 @@ impl Launcher {
             .highlighted
             .and_then(|index| self.folder_choices(cx).get(index).cloned())
         else {
-            // A missing row cannot turn a shown folder pick into consent to replace the session.
+            // A missing row cannot turn a shown folder pick into consent to submit the form.
             let had_pick = self.folder_list.list.highlighted.is_some();
             self.folder_list.list.close(window, cx);
-            return replacing && had_pick;
+            return guard_submit && had_pick;
         };
         self.choose_folder(choice, window, cx);
         true

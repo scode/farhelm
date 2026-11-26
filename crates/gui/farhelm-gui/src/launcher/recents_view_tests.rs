@@ -578,6 +578,12 @@ fn replace_rows_name_the_action_and_restart_rows_are_inactive(cx: &mut TestAppCo
     test_support::click(cx, "launcher-search-row");
     keys(cx, "down");
     assert!(recent_highlighted(cx, "launcher-recent-0"));
+    let name = name_of(cx, "launcher-recent-0").expect("the highlighted option has a name");
+    assert!(name.contains("recent-model"), "{name}");
+    assert!(
+        name.ends_with("Click to fill the form. Enter replaces and deletes the source session."),
+        "{name}"
+    );
     assert_eq!(
         name_of(cx, "launcher-recent-enter").as_deref(),
         Some("⏎ Replace"),
