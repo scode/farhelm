@@ -1935,7 +1935,9 @@ projections.
 Evidence is rechecked first. Clean guest shutdown remains mandatory, and each
 role's low-level manifest must prove unchanged ownership and observed absence.
 A tiered pair needs any P0 checks passed, no automation failure, and a result
-for every in-scope P1 and P2 checkpoint (a recorded skip counts). Every P1 and P2
+for every in-scope P1 and P2 checkpoint (a recorded skip counts). A pair that
+fell out of scope before testing can be cleaned up without native preflight.
+Any recorded test activity keeps that receipt required. Every P1 and P2
 result keeps its exported evidence, and a failed or unavailable one has some:
 its exported observation is what the maintainer reviews, so it needs no live
 disposable pair, and holding the pair would stall the bonus work the failure
@@ -1952,11 +1954,13 @@ approval as before; none of these paths delete retained evidence.
             results = [entry['results'][key] for key, _ in later if key in entry['results']]
             p0 = priority_entry(entry, 'P0')
             in_scope = [key for key, priority in later if priority in self.scope_tiers()]
+            needs_preflight = (p0['required'] or in_scope or entry['results']
+                               or entry.get('native_preflight') or entry.get('tester'))
             complete = (entry['phase'] == 'ready' and not entry.get('preparation_error')
                         and not entry.get('automation_failure')
                         and (not p0['required'] or self.verdict(p0) == 'pass')
                         and all(key in entry['results'] for key in in_scope)
-                        and self.native_preflight_retained(entry)
+                        and (not needs_preflight or self.native_preflight_retained(entry))
                         and self.retry_evidence_retained(entry, set(in_scope) | entry['results'].keys())
                         and all(self.result_evidence_retained(result) for result in results)
                         and all(result['status'] in ('pass', 'skipped')

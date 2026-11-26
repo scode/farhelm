@@ -25,10 +25,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`trailing-brick-cleanup-refuses-untested-remote-mac-pair.md`](trailing-brick-cleanup-refuses-untested-remote-mac-pair.md)
-  — After a stop-after-P0 request, brick-test cleanup refuses a prepared but untested remote Mac pair and demands a
-  retention decision for machines with no evidence.
-
 - [`trailing-launcher-new-clone-enter-after-vanished-pick.md`](trailing-launcher-new-clone-enter-after-vanished-pick.md)
   — In New and Clone, Return on a highlighted template or folder row can launch instead of picking when the highlight
   vanished before the redraw; only Replace with is guarded.

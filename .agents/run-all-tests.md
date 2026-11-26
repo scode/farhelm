@@ -219,9 +219,10 @@ second clippy run on floating stable is needed.
   remote menu Remove/re-add and Uninstall with independent effect receipts, old-session survival and Restart onto a new
   terminal host, calibrated window-trace and bonus gesture-readiness gates, RC and dev discovery skip continuation,
   stable discovery failure, consent-checked scope restoration, signed-announcement launch isolation and missing-feed
-  reporting, remote launcher visibility, retained permission blocks and scoped cleanup evidence. The guest-only Swift
-  helper separately needs SDK type-check and read-only runtime validation in an owned disposable guest. None establishes
-  live release product checks. Report platform skips.
+  reporting, remote launcher visibility, retained permission blocks and scoped cleanup evidence, including cleanup of
+  the prepared untested remote Mac pair after stopping at P0. The guest-only Swift helper separately needs SDK
+  type-check and read-only runtime validation in an owned disposable guest. None establishes live release product
+  checks. Report platform skips.
 - Terminal host coverage and mutation testing from `.agents/validation.md`
   (`cargo +nightly llvm-cov -p terminal-host --branch -- --test-threads=1`, and
   `RUST_TEST_THREADS=1 cargo mutants -p terminal-host` run the contained way that entry gives; both on one test thread,
