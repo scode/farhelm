@@ -1489,13 +1489,16 @@ mod tests {
         assert!(sup.store.pending_scope_cleanups().await.unwrap().is_empty());
     }
 
-    /// An empty old scope would normally trigger the process-marker fallback. A restored
-    /// session or a retained create reservation can own the same marker.
+    /// Restart cleanup must spare the process of a restored session even when only its
+    /// create reservation remains. The old scope has disappeared, so cleanup would
+    /// otherwise fall back to the session marker shared by both launches.
     #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
     async fn pending_restart_cleanup_leaves_the_restored_sessions_process_running() {
         use super::super::tests::serve_until_answering;
         use crate::store::{DedupScope, IntentClaim};
+        use std::process::Stdio;
+        use tokio::io::{AsyncBufReadExt, BufReader};
 
         for reservation_only in [false, true] {
             let state = StateDir::new();
@@ -1521,12 +1524,25 @@ mod tests {
                 .record_pending_scope_cleanup(&id, 1)
                 .await
                 .unwrap();
-            let mut new_agent = tokio::process::Command::new("/bin/sleep")
-                .arg("60")
+            // Wait until the child is executing before reading its marker from /proc.
+            // The open input pipe keeps that same process around for the cleanup check.
+            let mut new_agent = tokio::process::Command::new("/bin/sh")
+                .args(["-c", "printf 'ready\\n'; read -r unused"])
                 .env(crate::launch::SESSION_ID_ENV_VAR, &id)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
                 .kill_on_drop(true)
                 .spawn()
                 .unwrap();
+            let mut progress = BufReader::new(new_agent.stdout.take().unwrap()).lines();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(5), progress.next_line())
+                    .await
+                    .expect("the marked child did not report readiness")
+                    .unwrap()
+                    .as_deref(),
+                Some("ready"),
+            );
             let pid = new_agent.id().unwrap();
             let environs = std::fs::read(format!("/proc/{pid}/environ")).unwrap();
             let marker = format!("{}={id}", crate::launch::SESSION_ID_ENV_VAR);

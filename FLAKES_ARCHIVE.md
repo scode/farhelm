@@ -5039,3 +5039,25 @@ one as in the crash-retry entry above. The fix's evidence is shared with that en
 Class: substrate
 
 Cause: established
+
+## 2026-11-26 — closed: restored process marker read before child readiness (crates/farhelm-supervisor/src/service/core/host_restart.rs)
+
+`pending_restart_cleanup_leaves_the_restored_sessions_process_running` was the sole failure in the
+[v0.46.0-rc.1 x86 Linux release job](https://github.com/scode/farhelm/actions/runs/45864328898/job/140063397023). The
+test read its child's `/proc` environment immediately after spawning it and failed in 18 ms before it started the
+supervisor. Hosted Ubuntu 24.04 (eight CPUs, Linux 6.14.0-1017-azure, load unavailable) ran clean `db771940f` through
+`cargo nextest run --workspace --exclude farhelm-desktop` with four slots, zero retries, and locale `C.UTF-8`. The only
+`FARHELM_*` names passed to the runner were the recorder's evidence root and trace directory. Run
+`200545b8-f0a1-4cf5-96af-b7312b0c1f49` is in the release run's expiring failure artifact. The test was introduced in
+#5005. On a shared x86 Linux development machine, the exact test selected with `-p farhelm-supervisor --lib` failed four
+of ten times at the same commit (batch `301bd0a7-f269-4508-a12e-1abb8b9c9032`). Closed by #5061. The fixture child now
+reports readiness and stays alive on its input pipe before the test reads the same process's marker. The exact test
+passed ten of ten times after that change (batch `6ac7b1f5-e409-4637-a5cf-6e5fca89d7cb`).
+
+```text
+assertion failed: environs.split(|&byte| byte == 0).any(|item| item == marker.as_bytes())
+```
+
+Class: readiness
+
+Cause: established
