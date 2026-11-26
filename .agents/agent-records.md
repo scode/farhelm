@@ -3,7 +3,7 @@
 Where agents keep their logs and notes outside the repository, and everything about the `agent-records` repository that
 holds them: its layout, the host files, the records tool the unattended flows use, plain git for everyone else, tokens,
 and the backup. Read it before setting up or changing records on a host, minting or replacing a token, reading records
-for status or history, or keeping an attended flow's log (`AGENTS.md`, "Flows").
+for status or history, or keeping an attended flow's log. The fleet flow (`.agents/fleet.md`) reads it too.
 
 NOTE: This is not where the planning flows' rules live. What executors and the landing monitor write, and when they
 push, is in `plans/.agents/outside-files.md` and the files it points to. This file is the reference behind them.
