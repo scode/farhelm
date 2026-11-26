@@ -148,7 +148,8 @@ second clippy run on floating stable is needed.
   swap, using stand-ins with zero vendor turns)
 - `python3 -B scripts/test-run-harness-drift.py` (runner stand-ins verify category selection, refusal of unmatched named
   harnesses, one upgrade per harness, HTTPS installer downloads, timeouts, cancellation and verdict retention without
-  vendor turns)
+  vendor turns, and each updater's transient user scope stopping detached workers; the upgrade tests need a systemd user
+  manager and print `SKIPPED` without one)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
   `deno check scripts/tensorlake/rust-tests.ts` and

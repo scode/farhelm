@@ -1226,16 +1226,21 @@ systemd or SSH substrate ran.
   against stand-ins, including cancellation without a failing drift verdict. It also checks the once-per-harness upgrade
   step (`scripts/harness_upgrades.py`): a recipe for every drift case's binary, versions around each updater, stdin
   closed, the fallback installer only after a failed updater, HTTPS throughout the download, and a failed upgrade
-  failing the run. Run it when the runner or upgrade recipes change. Seconds and zero vendor turns. The non-ignored e2e
-  tests in `real_agent_capture::drift::tests` check the reply and recall lines, fresh accepted hook evidence, matching
-  resume arguments, captured conversation selectors, and cleanup after a panicking check without starting a vendor CLI.
-  The base module pins which harnesses it covers. Tests in `real_agent_capture::drift::private_config::tests` check the
-  private copy of a vendor's configuration (hook files and the directories above them private, everything else linked,
-  rewritten files copied back only over an unchanged original, unconfirmed teardown skips write-back, and a failed
-  replacement leaves later copies eligible but fails the case) and guard that every agent with global hook files has a
-  drift profile and hook paths that copy can hold. Run both with
-  `cargo nextest run -p farhelm --test e2e -E 'test(/^real_agent_capture::drift::/)'` when the drift test or persistent
-  hook setup changes.
+  failing the run; and each updater's transient user scope against stand-ins whose workers detach with `setsid` (a
+  worker that finishes after the updater exits waited for, one still running at the deadline or behind an overrunning
+  updater stopped with it, SIGTERM stopping the scope before the cancellation ends the run, a signal as the updater
+  starts, no user manager failing without running anything, a scope that cannot be confirmed stopped ending the run).
+  The scope tests and the stand-in updater tests (versions around each updater, stdin closed, installer order) need a
+  systemd user manager and print `SKIPPED` without one, which is missing coverage. Run it when the runner or upgrade
+  recipes change. Seconds and zero vendor turns. The non-ignored e2e tests in `real_agent_capture::drift::tests` check
+  the reply and recall lines, fresh accepted hook evidence, matching resume arguments, captured conversation selectors,
+  and cleanup after a panicking check without starting a vendor CLI. The base module pins which harnesses it covers.
+  Tests in `real_agent_capture::drift::private_config::tests` check the private copy of a vendor's configuration (hook
+  files and the directories above them private, everything else linked, rewritten files copied back only over an
+  unchanged original, unconfirmed teardown skips write-back, and a failed replacement leaves later copies eligible but
+  fails the case) and guard that every agent with global hook files has a drift profile and hook paths that copy can
+  hold. Run both with `cargo nextest run -p farhelm --test e2e -E 'test(/^real_agent_capture::drift::/)'` when the drift
+  test or persistent hook setup changes.
 - `python3 -B scripts/run-harness-drift.py` — manual, opt-in Linux checks. The default `base` category checks agent
   launch flags, conversation reports and Restart. Select categories with repeatable `--category` or pass
   `--category all`, optionally filtered by `--harness`. It upgrades each selected CLI once (`--no-upgrade` skips that).

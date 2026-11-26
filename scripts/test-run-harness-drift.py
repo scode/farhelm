@@ -4,12 +4,15 @@
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import re
 import runpy
 import signal
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 import urllib.error
@@ -308,6 +311,255 @@ class DriftRunnerTests(unittest.TestCase):
         self.assertEqual(stopped.exception.code, 128 + signal.SIGTERM)
 
 
+def require_user_manager(test: unittest.TestCase) -> None:
+    """Skip `test` when no systemd user manager answers here: missing coverage, said so, never a quiet pass."""
+    problem = harness_upgrades.user_manager_problem()
+    if problem:
+        print(f"SKIPPED {test.id()}: needs a systemd user manager ({problem})", flush=True)
+        test.skipTest("no systemd user manager")
+
+
+def process_gone(pid: int) -> bool:
+    """Whether `pid` no longer runs; a zombie counts as gone, since it can write nothing."""
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    return state in ("Z", "X")
+
+
+def detached_and_running(pid: int) -> bool:
+    """Whether `pid` runs as the leader of a session of its own, as a `setsid` worker does, out of its updater's group."""
+    try:
+        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    return fields[0] not in ("Z", "X") and int(fields[3]) == pid
+
+
+def watch_premise(path: Path) -> tuple[threading.Thread, list[bool]]:
+    """Start a thread that waits for the worker's pid in `path` and records whether it then runs detached, so a test
+    can check its premise while the code under test is still blocking the main thread."""
+    seen: list[bool] = []
+
+    def look():
+        seen.append(detached_and_running(int(wait_for_file(path))))
+
+    thread = threading.Thread(target=look, daemon=True)
+    thread.start()
+    return thread, seen
+
+
+def wait_for_file(path: Path, timeout: float = 10) -> str:
+    """The contents of `path` once a stand-in has written it, failing the test when it never appears."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists() and path.read_text().strip():
+            return path.read_text().strip()
+        time.sleep(0.05)
+    raise AssertionError(f"{path} never appeared")
+
+
+class ScopedUpdaterTests(unittest.TestCase):
+    """Every updater runs in its own transient user scope, and nothing it started outlives the upgrade step.
+
+    Why: an updater's background worker (npm's, a self-updating launcher, a detached helper) that swapped the CLI's
+    binary after the runner probed its version would make a drift verdict name the wrong release. Each test starts a
+    stand-in whose worker leaves the updater's session with `setsid`, which a process-group kill would miss, and
+    checks the worker by its own pid, never through the runner. They need a systemd user manager and are skipped,
+    loudly, without one; no vendor CLI runs.
+    """
+
+    def setUp(self):
+        require_user_manager(self)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = Path(directory.name)
+        self.env = {"PATH": "/usr/bin:/bin"}
+
+    def worker(self, body: str) -> str:
+        """Shell that starts a detached worker in a session of its own, which records its pid and then runs `body`."""
+        return (
+            f"setsid sh -c 'echo $$ > {self.dir}/worker.pid; {body}' </dev/null >/dev/null 2>&1 &"
+            f" until [ -s {self.dir}/worker.pid ]; do sleep 0.05; done"
+        )
+
+    def test_an_ordinary_exit_waits_for_a_detached_worker_to_finish(self):
+        """Spec: an updater that exits 0 while its detached worker still runs succeeds only after the worker has
+        finished its write (half a second later), and the worker is gone when the upgrade step returns."""
+        script = self.worker(f"sleep 0.5; echo swapped > {self.dir}/result") + "; exit 0"
+        ok, detail = harness_upgrades.run_updater(["sh", "-c", script], self.env, timeout=30)
+        self.assertEqual((ok, detail), (True, ""))
+        self.assertEqual((self.dir / "result").read_text(), "swapped\n")
+        self.assertTrue(process_gone(int((self.dir / "worker.pid").read_text())))
+
+    def test_a_worker_still_running_at_the_deadline_is_stopped_and_the_upgrade_fails(self):
+        """Spec: an updater that exits 0 but leaves a detached worker running past the deadline fails, saying its
+        background processes did not finish, and the worker is gone when the upgrade step returns."""
+        script = self.worker("exec sleep 1000") + "; exit 0"
+        watcher, premise = watch_premise(self.dir / "worker.pid")
+        ok, detail = harness_upgrades.run_updater(["sh", "-c", script], self.env, timeout=2)
+        watcher.join(timeout=10)
+        self.assertEqual(premise, [True], "premise: the worker ran detached before the deadline")
+        self.assertFalse(ok)
+        self.assertIn("background processes did not finish within 2 seconds", detail)
+        self.assertTrue(process_gone(int((self.dir / "worker.pid").read_text())))
+
+    def test_an_updater_past_its_deadline_is_stopped_with_its_detached_worker(self):
+        """Spec: an updater still running at the deadline fails, saying it did not finish, and both it and its
+        detached worker are gone when the upgrade step returns."""
+        script = self.worker("exec sleep 1000") + f"; echo $$ > {self.dir}/updater.pid; exec sleep 1000"
+        watcher, premise = watch_premise(self.dir / "worker.pid")
+        ok, detail = harness_upgrades.run_updater(["sh", "-c", script], self.env, timeout=2)
+        watcher.join(timeout=10)
+        self.assertEqual(premise, [True], "premise: the worker ran detached before the deadline")
+        self.assertFalse(ok)
+        self.assertIn("did not finish within 2 seconds", detail)
+        self.assertTrue(process_gone(int((self.dir / "worker.pid").read_text())))
+        self.assertTrue(process_gone(int((self.dir / "updater.pid").read_text())))
+
+    def test_sigterm_stops_the_scope_before_the_cancellation_is_raised(self):
+        """Spec: SIGTERM while the updater and its detached worker run raises `Cancelled` carrying SIGTERM, only once
+        both are gone and the scope has no processes, and the signal handlers are the ones in place before."""
+        script = self.worker("exec sleep 1000") + f"; echo $$ > {self.dir}/updater.pid; exec sleep 1000"
+        before = signal.getsignal(signal.SIGTERM)
+        units = []
+        real_popen = subprocess.Popen
+
+        def recording_popen(command, **kwargs):
+            if command[0] == "systemd-run":
+                units.extend(arg.removeprefix("--unit=") for arg in command if arg.startswith("--unit="))
+            return real_popen(command, **kwargs)
+
+        premise = []
+
+        def send_once_running():
+            wait_for_file(self.dir / "updater.pid")
+            premise.append(detached_and_running(int(wait_for_file(self.dir / "worker.pid"))))
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        sender = threading.Thread(target=send_once_running, daemon=True)
+        sender.start()
+        with patch.object(harness_upgrades.subprocess, "Popen", recording_popen):
+            with self.assertRaises(harness_upgrades.Cancelled) as cancelled:
+                harness_upgrades.run_updater(["sh", "-c", script], self.env, timeout=60)
+        sender.join(timeout=10)
+        self.assertEqual(premise, [True], "premise: the worker ran detached when SIGTERM was sent")
+        self.assertEqual(cancelled.exception.signum, signal.SIGTERM)
+        self.assertTrue(process_gone(int((self.dir / "worker.pid").read_text())))
+        self.assertTrue(process_gone(int((self.dir / "updater.pid").read_text())))
+        self.assertEqual(len(units), 1)
+        self.assertRegex(units[0], r"^farhelm-drift-upgrade-[0-9a-f-]{36}\.scope$")
+        self.assertFalse(harness_upgrades.scope_running(units[0]))
+        self.assertEqual(signal.getsignal(signal.SIGTERM), before)
+
+    def test_a_scope_that_cannot_be_confirmed_stopped_raises_instead_of_failing(self):
+        """Why: after a failed stop a worker may still swap the binary, so nothing may run after the updater; a plain
+        failed upgrade would let the fallback installer, the version probe and the cases go ahead. Spec: an updater
+        past its deadline whose scope stop reports a problem (the real stop runs, then a seam adds the problem) raises
+        `ContainmentLost` naming both the overrun and the problem."""
+        real_stop = harness_upgrades.stop_scope
+
+        def stop_then_fail(unit, child, name):
+            real_stop(unit, child, name)
+            return "injected stop failure"
+
+        with patch.object(harness_upgrades, "stop_scope", stop_then_fail):
+            with self.assertRaises(harness_upgrades.ContainmentLost) as lost:
+                harness_upgrades.run_updater(["sh", "-c", "exec sleep 1000"], self.env, timeout=2)
+        self.assertIn("did not finish within 2 seconds", str(lost.exception))
+        self.assertIn("injected stop failure", str(lost.exception))
+
+    def test_a_signal_arriving_as_the_updater_starts_still_stops_what_it_started(self):
+        """Spec: SIGTERM delivered right as the updater's process is created (before any wait) raises `Cancelled`, and
+        neither the updater's scope nor a worker it may have started is left running.
+
+        What it proves is that the handler is in place before the start (the default SIGTERM would end the test
+        process) and that an early cancellation ends cleanly. The worker has usually not started by then, so this
+        test alone does not show a running scope being stopped; the SIGTERM test above does.
+        """
+        units = []
+        real_popen = subprocess.Popen
+
+        # Patching `Popen` reaches every subprocess call, the systemctl ones included; only the updater's start signals.
+        def popen_then_signal(command, **kwargs):
+            child = real_popen(command, **kwargs)
+            if command[0] == "systemd-run":
+                units.extend(arg.removeprefix("--unit=") for arg in command if arg.startswith("--unit="))
+                signal.raise_signal(signal.SIGTERM)
+            return child
+
+        script = self.worker("exec sleep 1000") + "; exec sleep 1000"
+        with patch.object(harness_upgrades.subprocess, "Popen", popen_then_signal):
+            with self.assertRaises(harness_upgrades.Cancelled):
+                harness_upgrades.run_updater(["sh", "-c", script], self.env, timeout=60)
+        self.assertFalse(harness_upgrades.scope_running(units[0]))
+        pid_file = self.dir / "worker.pid"
+        if pid_file.exists() and pid_file.read_text().strip():
+            self.assertTrue(process_gone(int(pid_file.read_text())))
+
+
+class UpgradeContainmentTests(unittest.TestCase):
+    """What the runner does when an updater cannot be contained or is cancelled; no updater or user manager needed."""
+
+    def test_no_user_manager_fails_the_upgrade_without_running_the_updater(self):
+        """Why: an upgrade with no scope could leave a worker swapping the binary under a drift case. Spec: with no
+        user manager answering, the updater is never started and the upgrade fails naming the missing manager."""
+        with patch.object(harness_upgrades, "user_manager_problem", return_value="no bus"), patch.object(
+            harness_upgrades.subprocess, "Popen", side_effect=AssertionError("the updater must not start")
+        ):
+            ok, detail = harness_upgrades.run_updater(["fake", "update"], {"PATH": "/usr/bin:/bin"})
+        self.assertFalse(ok)
+        self.assertIn("systemd user manager", detail)
+        self.assertIn("no bus", detail)
+
+    def test_lost_containment_skips_the_fallback_installer_and_the_version_probe(self):
+        """Why: the installer or the probe could run beside a worker that survived. Spec: when the updater raises
+        `ContainmentLost`, `upgrade` lets it through without running the installer or probing the version again."""
+        recipe = harness_upgrades.Recipe("fake", ("fake", "update"), installer_url="https://example.invalid/install")
+        with tempfile.TemporaryDirectory() as directory:
+            fake = Path(directory) / "fake"
+            fake.write_text("#!/bin/sh\necho fake 1.0\n")
+            fake.chmod(0o755)
+            env = {"PATH": f"{directory}:/usr/bin:/bin"}
+            probes = []
+            real_version = harness_upgrades.version
+            with patch.object(
+                harness_upgrades, "run_updater", side_effect=harness_upgrades.ContainmentLost("scope still running")
+            ), patch.object(
+                harness_upgrades, "run_installer", side_effect=AssertionError("no installer after lost containment")
+            ), patch.object(
+                harness_upgrades, "version", lambda r, e: probes.append(1) or real_version(r, e)
+            ):
+                with self.assertRaises(harness_upgrades.ContainmentLost):
+                    harness_upgrades.upgrade(recipe, env)
+        self.assertEqual(len(probes), 1, "only the probe before the updater ran")
+
+    def test_lost_containment_ends_the_run_before_anything_else_runs(self):
+        """Why: a worker that survived a failed stop could swap a binary under the next harness's upgrade or a case.
+        Spec: `prepare` turns `ContainmentLost` from the first harness's upgrade into `SystemExit(1)` and never upgrades
+        the second."""
+        calls = []
+
+        def upgrade(recipe, env):
+            calls.append(recipe.binary)
+            raise harness_upgrades.ContainmentLost("scope still running")
+
+        with patch.object(harness_upgrades, "upgrade", upgrade):
+            with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as stopped:
+                runner["prepare"](["codex", "claude"], {}, True)
+        self.assertEqual(stopped.exception.code, 1)
+        self.assertEqual(calls, ["codex"])
+
+    def test_a_cancelled_upgrade_ends_the_run_with_128_plus_the_signal(self):
+        """Why: a cancelled upgrade must stop the run like a cancelled case, not test a half-upgraded CLI. Spec:
+        `prepare` turns `Cancelled(SIGINT)` from an upgrade into `SystemExit(128 + SIGINT)`."""
+        with patch.object(harness_upgrades, "upgrade", side_effect=harness_upgrades.Cancelled(signal.SIGINT)):
+            with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as stopped:
+                runner["prepare"](["codex"], {}, True)
+        self.assertEqual(stopped.exception.code, 128 + signal.SIGINT)
+
+
 class UpgradePhaseTests(unittest.TestCase):
     """The runner brings each harness to its latest release before testing it, and says so when it could not."""
 
@@ -325,7 +577,12 @@ class UpgradePhaseTests(unittest.TestCase):
             self.assertLessEqual(set(registered), harness_upgrades.RECIPES.keys(), category)
 
     def stand_in(self, directory, body):
-        """Write an executable `fake` CLI whose `--version` prints the file `version` beside it."""
+        """Write an executable `fake` CLI whose `--version` prints the file `version` beside it.
+
+        Its updater runs in a transient user scope like a real one (`harness_upgrades.run_updater`), so every test
+        built on it needs a systemd user manager and is skipped, loudly, without one.
+        """
+        require_user_manager(self)
         path = Path(directory) / "fake"
         path.write_text(
             "#!/bin/sh\n"
