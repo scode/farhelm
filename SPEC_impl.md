@@ -7399,22 +7399,26 @@ resource record and remains visible in Hosts. Other unowned sandboxes gain no pe
 path adds automatic startup reconciliation. The desktop list
 (`crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs`) is read only when its answer can have changed, never on
 a timer: when the opening's account first says a key is saved, on Refresh, after a key Save in this opening, after every
-answer to a Delete, and when the pushed hosts list gains or loses a Tensorlake host. No other fleet change reads it, so
-a rejected key is never resent on unrelated notices. A successful Test reads nothing, whether the list was healthy or
-failed (decided 2026-11-15); a key saved elsewhere, or a failure fixed elsewhere, shows after Refresh or reopening
-Settings.
+answer to a Delete asked under the current key, and when the pushed hosts list gains or loses a Tensorlake host. No
+other fleet change reads it, so a rejected key is never resent on unrelated notices. A successful Test reads nothing,
+whether the list was healthy or failed (decided 2026-11-15); a key saved elsewhere, or a failure fixed elsewhere, shows
+after Refresh or reopening Settings.
 
 The retained cleanup records a digest of its admitting API key. A retry with another key leaves the operation intact and
 returns a refusal before any provider mutation.
 
 The list keeps the last successful discovery, the current cleanup snapshot, and a "checked HH:MM" time in the viewer's
 local time. A saved key keeps it drawn when empty, with Refresh beside the heading, unavailable while a Delete is out.
-Each read is a round and only the newest round's answer is shown. Clear ends the round and empties both lists. Any ID in
-cleanup is removed from the remembered discovery so it cannot return when cleanup finishes during an outage. An older
-reply for the same key can supply that evidence while the newest round is still out. If discovery fails, the list shows
-the reason above the remembered rows and applies the new cleanup snapshot without advancing the checked time. A
-transport failure supplies neither snapshot and leaves the visible rows in place. A successful Delete removes its ID
-from both lists before refreshing.
+Each read is a round and only the newest round's answer is shown. A Clear or a replacement of the key, from either key
+form (Tensorlake or Credentials), ends the round, closes any open Delete confirmation, and empties both lists, the
+list's errors and the checked time at once, before any read answers. That holds also when the save's done answer cannot
+be decoded: the account then forgets its settings and reads them again, and the list reads afresh once that read says a
+key is saved. A Delete still out keeps the list busy until it answers, and its answer, refusal or success, neither
+changes the new key's list nor reads it again. Any ID in cleanup is removed from the remembered discovery so it cannot
+return when cleanup finishes during an outage. An older reply for the same key can supply that evidence while the newest
+round is still out. If discovery fails, the list shows the reason above the remembered rows and applies the new cleanup
+snapshot without advancing the checked time. A transport failure supplies neither snapshot and leaves the visible rows
+in place. A successful Delete removes its ID from both lists before refreshing.
 
 ## Feedback forwarding
 

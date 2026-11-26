@@ -229,18 +229,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   spans both sides of the relay and exceeds this triage item's size gate. Plan:
   `plans/queue/agent-delete-late-notice.md`.
 
-- **Bind leftover sandbox consent to the saved Tensorlake key.** In Settings → Tensorlake, an open leftover sandbox
-  Delete confirmation can survive clearing or replacing the API key in either key form. It can keep the old list on
-  screen or send a Delete using a different key. Apply [Keyboard focus](SPEC.md#keyboard-focus)'s rule that a question
-  closes when its subject is gone. In `settings/tensorlake_sandboxes.rs`, retire the question, old rows, and the refusal
-  on key change. Reuse the account generation in `settings/tensorlake_key.rs` to reject consent from a previous key.
-  Confirm must not queue a Delete behind a pending key write. A successful write without account data, or a server error
-  after the helm may have stored the key, invalidates prior consent immediately. Re-read the account and require a fresh
-  list before offering Delete again. Keep the draft and error on refusal, and show unfinished cleanup reported by the
-  helm's next list. Test both key forms, a held write, a re-read after an ambiguous reply, and stale discovery. Verify
-  the replacement view in light and dark. The ordering, refusal, test, and capture changes together exceeded the triage
-  size gate. Plan: `plans/queue/tensorlake-sandbox-key-consent.md`.
-
 - **Report late wake failures when launching on a suspended sandbox or stopped container.** When Resume takes longer
   than the reply deadline, a later failure can leave the session launcher waiting for a minute before it gives the wrong
   reason. A slow Podman check can fail before Starting appears. The next host row can still say Stopped and carry the

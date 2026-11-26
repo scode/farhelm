@@ -12,10 +12,17 @@
 //!   With a key it stays drawn even when empty, with its heading and Refresh (SPEC.md).
 //! - **Read when it can change, never on a timer.** The list is not pushed, and reading it lists the user's whole
 //!   Tensorlake account, so it is read only when its answer can have changed: when the account read first says a key is
-//!   saved (the opening), on Refresh, after a Save or Clear of the key in either form of this opening (a Clear empties
-//!   it at once), after every answer to a Delete, and when the pushed hosts list gains or loses a Tensorlake host, which
-//!   changes what this helm owns. It is never read again on other changes of the fleet; the old list re-read on every
-//!   fleet notice while healthy (decided by the migration's coordinator on 2026-11-15).
+//!   saved (the opening), on Refresh, after a Save or Clear of the key in either form of this opening, after every
+//!   answer to a Delete asked under the current key, and when the pushed hosts list gains or loses a Tensorlake host,
+//!   which changes what this helm owns. It is never read again on other changes of the fleet; the old list re-read on
+//!   every fleet notice while healthy (decided by the migration's coordinator on 2026-11-15).
+//! - **A key change retires the old key's list.** A Save or Clear of the key in either form (Tensorlake or
+//!   Credentials) closes an open Delete question and drops the rows, errors and checked time at once, before any read
+//!   answers, also when the save's answer could not be decoded and the account is being read again. A Delete confirmed
+//!   while the save was out then only ends its busy state when it answers: it was asked about a row the old key listed,
+//!   which the list no longer shows, and the read the key change started is ordered after it, so that read shows what
+//!   it did. Without this, the question (kept while Credentials is shown, and drawn again with Tensorlake) and the old
+//!   rows would offer to delete what the old key listed.
 //! - **Rounds.** Each read starts a new round, and only the newest round's answer is shown: two reads can be out at once
 //!   (a Tensorlake host coming while the first read is out), and the UI channel answers them in order, so without this
 //!   the older answer would end "Checking…" and show its rows for a moment before the newer one replaced them. An older
@@ -30,7 +37,8 @@
 //!   unavailable. A row whose cleanup failed offers Retry cleanup, which asks the same question; a running cleanup shows
 //!   Cleaning up…. Both come from the helm's list, so they survive closing Settings. A refused Delete shows the helm's
 //!   words under the list, and the helm's answer at its bound (the cleanup carries on) is such a refusal; either way the
-//!   list is read again, which shows how the cleanup stands.
+//!   list is read again, which shows how the cleanup stands, unless the key changed meanwhile ("A key change retires
+//!   the old key's list").
 //! - **Plain commands.** Nothing here is a saved choice, so reads go out with [`crate::operations::read`] and Deletes
 //!   with [`crate::operations::send`]. Every name, state and reason is the helm's or Tensorlake's, drawn as host text.
 //! - **Times are the viewer's.** "None found · checked HH:MM" is the hours and minutes of the last answered read in the
@@ -103,7 +111,8 @@ pub(super) struct Sandboxes {
     checked_at: Option<Option<i64>>,
     /// The current round: one more for every read started. Only the current round can replace the displayed result.
     round: u64,
-    /// The account state the list last acted on; `None` until the account read answers.
+    /// The account state the list last acted on; `None` until the account read answers, and again after a key save
+    /// retired the list while the account was unread ([`Sandboxes::follow_account`]).
     key: Option<KeyState>,
     /// The fleet's Tensorlake hosts as last seen; `None` until the hosts collection is first read whole.
     sandboxed: Option<Sandboxed>,
@@ -149,29 +158,56 @@ impl Sandboxes {
         list
     }
 
-    /// The account changed: read again if whether a key is saved, or which key it is, changed. A key cleared empties the
-    /// list at once and drops any read still out.
+    /// The account changed: read again if whether a key is saved, or which key it is, changed.
+    ///
+    /// Any Save or Clear of the key in this opening, from either key form, first retires what the list knew under the
+    /// previous key ([`Sandboxes::retire_key`]), so nothing that key listed can be shown, or deleted, as if the new
+    /// key had found it. That happens as soon as the account counts the save, even while it no longer knows the
+    /// settings (a done save whose answer did not decode): the list then holds no key at all until the account's read
+    /// answers, and reads afresh if it says a key is saved. A key cleared leaves the list empty and reading nothing.
     fn follow_account(&mut self, cx: &mut Context<Self>) {
         let account = self.account.read(cx);
-        let Some(settings) = account.settings() else {
+        let saves = account.key_saves();
+        let key_set = account.key_set();
+        // `None` before the account first answered, and after a retirement while it was unread: nothing to retire.
+        let replaced = self.key.is_some_and(|(_, seen)| seen != saves);
+        let Some(saved) = key_set else {
+            if replaced {
+                self.retire_key();
+                self.key = None;
+                cx.notify();
+            }
             return;
         };
-        let now = (settings.api_key_set, account.key_saves());
+        let now = (saved, saves);
         if self.key == Some(now) {
             return;
         }
+        // With no key saved the list reads nothing, so it is emptied even on the first answer.
+        if replaced || !saved {
+            self.retire_key();
+        }
         self.key = Some(now);
-        if now.0 {
+        if saved {
             self.read(cx);
-        } else {
-            self.round += 1;
-            self.last_discovered.clear();
-            self.cleanups.clear();
-            self.discovery_error = None;
-            self.checking = false;
-            self.checked_at = None;
         }
         cx.notify();
+    }
+
+    /// Forget everything the list knew under the key it last acted on: the open Delete question, the rows, the errors
+    /// and the checked time, and end the current round, so only the read the key change starts can be shown (one sent
+    /// earlier, while the save was out, carries the old key state and is ignored when it answers). A Delete still out
+    /// stays busy until it answers; its answer is fenced to the key state it was asked under ([`Sandboxes::delete`]).
+    fn retire_key(&mut self) {
+        self.round += 1;
+        self.checking = false;
+        self.question = None;
+        self.asked = None;
+        self.last_discovered.clear();
+        self.cleanups.clear();
+        self.discovery_error = None;
+        self.delete_failure = None;
+        self.checked_at = None;
     }
 
     /// The store changed: read again if the fleet gained or lost a Tensorlake host. The first fleet seen only becomes
@@ -320,6 +356,12 @@ impl Sandboxes {
 
     /// Read again after Delete. On success, remove the deleted ID immediately so a failed follow-up cannot keep
     /// showing it as a leftover or a cleanup that needs retrying.
+    ///
+    /// The answer touches the list only if the key state is still the one the Delete was asked under. The UI channel
+    /// answers in order, so that differs only for a Delete confirmed while a Save or Clear of the key was out: the
+    /// list has since dropped the row it was asked about, a refusal would describe a row no longer shown, and the read
+    /// the key change started is ordered after this Delete, so it already shows what the Delete did. Whatever key
+    /// state holds, the answer ends the Delete's busy state.
     fn delete(&mut self, row: OrphanSandbox, cx: &mut Context<Self>) {
         self.asked = None;
         if self.deleting {
@@ -335,6 +377,7 @@ impl Sandboxes {
             }
         };
         let list = cx.weak_entity();
+        let key = self.key;
         let sent = crate::operations::send(
             Method::Delete,
             path,
@@ -344,6 +387,10 @@ impl Sandboxes {
             move |answer, cx| {
                 let _ = list.update(cx, |list, cx| {
                     list.deleting = false;
+                    if list.key != key {
+                        cx.notify();
+                        return;
+                    }
                     match answer {
                         Ok(_) => {
                             list.last_discovered.retain(|row| row.id != id);
