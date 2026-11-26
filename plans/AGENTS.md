@@ -101,10 +101,10 @@ The rules that follow from `plans/.agents/queue.md`, "States, and the script tha
 
 Blocked sections, decisions, reports, landing notes and `REPORTS.md` land on main directly, with no PR review, in a
 repository that is or may become public. Never put absolute paths, host names, user names, scratch directories, or raw
-log excerpts in them. Name a plan's working log by its rule (`farhelm-plan-<slug>-log.md` beside the checkouts), never
-by path. Report checks as redacted commands and recorder run ids, per `.agents/test-evidence.md`. The script refuses
-text containing a home, temp or `/private/` path or the host name, and names the line; rephrase and run it again. When
-that text is the maintainer's own words, agree the rephrasing with them.
+log excerpts in them. Name a plan's working log as its record (`plan/<slug>`), never by path. Report checks as redacted
+commands and recorder run ids, per `.agents/test-evidence.md`. The script refuses text containing a home, temp or
+`/private/` path or the host name, and names the line; rephrase and run it again. When that text is the maintainer's own
+words, agree the rephrasing with them.
 
 ## Notifications
 
@@ -126,8 +126,8 @@ notifies only when it stops in a way the monitor will not pick up: a claim given
 full disk, or a drain that stops monitoring (`plans/.agents/executing.md`, "Executing one plan", and
 `plans/.agents/watching.md`, "Drain and keep monitoring"). The monitor notifies for a block it leaves for the
 maintainer, a landing it cannot finish, a problem that stops it, and what it sees in `queue status`
-(`plans/.agents/landing.md`, "Landing: "monitor for complete plans", "land the complete plans""), including an
-executor's claim that went quiet. Each place in `plans/.agents/` that says to notify is such a condition.
+(`plans/.agents/landing.md`, "Landing: "monitor for complete plans", "land the complete plans""). Each place in
+`plans/.agents/` that says to notify is such a condition.
 
 When an executor's flow or the monitor starts, check that the file exists without reading it, with
 `test -f ~/.farhelm-ntfy-topic`. If it does not, tell the maintainer the file name and ask whether to carry on without
@@ -239,8 +239,8 @@ Before step 1 of `plans/.agents/executing.md`, "Executing one plan" (reading the
 - `.agents/careful-rebase.md`
 - `.agents/validation.md`
 - `.agents/test-evidence.md`
-- the `scode-build-goal` skill's "Placing the files" section, which `plans/.agents/outside-files.md` derives the log
-  directory from
+- the `scode-build-goal` skill's "Placing the files" section, which `plans/.agents/outside-files.md` derives the
+  watchdog status file's directory from
 
 Phase files: at step 5, the plan file itself, read from the freshly fetched `main@origin` with its `## Decisions`, and
 every file it names as binding; it is the goal that step 8 runs.

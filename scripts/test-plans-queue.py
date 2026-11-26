@@ -879,7 +879,7 @@ class TransitionTest(QueueTestCase):
             {"number": 8, "ref": "plan/a/02-more", "repo": "stranger/name"},
             {"number": 9, "ref": "plan/c/02-y", "repo": None},
         ]
-        data = pq.status(h.fake, "main", self.scratch, datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc))
+        data = pq.status(h.fake, "main")
         by_slug = {p["slug"]: p for p in data["plans"]}
         self.assertEqual(by_slug["a"]["open_prs"], [])
         self.assertIn("landing, no open PRs, merged 6: finish with landed --merged", by_slug["a"]["flags"])
@@ -1510,7 +1510,7 @@ class StatusTest(QueueTestCase):
         )
         fake.pulls = [{"number": 3, "ref": "plan/b/01-x"}, {"number": 7, "ref": "plan/h/01-x"}]
         fake.closed = {4: {"ref": "plan/a/01-x", "merged": True}, 5: {"ref": "plan/d/01-x", "merged": False}}
-        data = pq.status(fake, "main", self.scratch, datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc))
+        data = pq.status(fake, "main")
         by_slug = {p["slug"]: p for p in data["plans"]}
         self.assertIn("landing, no open PRs, merged 4: finish with landed --merged", by_slug["a"]["flags"])
         self.assertTrue(any("ask the maintainer" in f for f in by_slug["d"]["flags"]))
@@ -1531,24 +1531,20 @@ class StatusTest(QueueTestCase):
         fake = FakeGitHub(base_files(index(line("complete", "a")), a=plan()))
         fake.land("main", {pq.report_path("a"): "# R\n"})
         fake.closed = {7: {"ref": "plan/a/01-x", "merged": True}, 8: {"ref": "plan/a/02-y", "merged": True}}
-        data = pq.status(fake, "main", self.scratch, datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc))
+        data = pq.status(fake, "main")
         self.assertIn(
             "complete, no open PRs, merged 7,8: claim with start-landing, finish with landed --merged",
             data["plans"][0]["flags"],
         )
 
     def test_claim_missing_from_history_is_flagged(self):
-        """A claim older than the history status reads would otherwise get no age and no flag at all."""
+        """A claim older than the history status reads gets no age, and a flag says why, so a reader does not take
+        the missing `claimed_at` for a fresh claim. The flag is informational only: nothing unattended judges whether
+        the holder is alive, so it must not read as, or wake the monitor like, a dead claim."""
         fake = FakeGitHub(base_files(index(line("in-flight 0a1b2c", "a")), a=plan()))
-        data = pq.status(fake, "main", self.scratch, datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc))
+        data = pq.status(fake, "main")
         self.assertIsNone(data["plans"][0]["claimed_at"])
-        # With no working log at all, the claim is as good as abandoned, and gets the flag the monitor notifies on.
-        # Found in review: this case used to get a flag nothing acted on.
-        self.assertTrue(any(f.startswith("possibly abandoned") for f in data["plans"][0]["flags"]))
-        (self.scratch / "farhelm-plan-a-log.md").write_text("working\n", encoding="utf-8")
-        data = pq.status(fake, "main", self.scratch, datetime.datetime.now(datetime.timezone.utc))
-        self.assertFalse(any(f.startswith("possibly abandoned") for f in data["plans"][0]["flags"]))
-        self.assertTrue(any("not in recent history" in f for f in data["plans"][0]["flags"]))
+        self.assertEqual(data["plans"][0]["flags"], ["claim commit not in recent history: its age is unknown"])
 
     def test_history_shows_each_claim_holders_commits(self):
         """An executor or monitor that crashed mid-verb uses history to see whether its own commit landed, so every
@@ -1586,25 +1582,29 @@ class StatusTest(QueueTestCase):
         ]
         self.assertEqual([entry.split(" ", 1)[1] for entry in lines], expected)
 
-    def test_old_quiet_claim_is_flagged(self):
-        """A claim over a day old whose log is missing or quiet is how a dead executor or monitor shows up. A landing
-        claim is judged by the monitor's log, since the plan's working log belongs to the executors."""
+    def test_old_claims_are_dated_but_never_judged(self):
+        """Status reads no logs and raises no "possibly abandoned" flag, for executor and landing claims alike.
+
+        Executors and the monitor may run on other hosts, with their logs in the agent records, and keeping them
+        running is the maintainer's job, done out of band; a flag judging a claim dead would make the monitor notify
+        about something nothing unattended decides any more. Specified: claims days old carry their claim time and no
+        flag at all, and neither the JSON nor the text mentions a log."""
         fake = FakeGitHub(base_files(index(line("pending", "a"), line("complete", "b")), a=plan(), b=plan()))
         fake.land("main", {pq.report_path("b"): "# R\n"})
         for verb, slug, claim in (("claim", "a", "0a1b2c"), ("start-landing", "b", "3d4e5f")):
             req = pq.Request(verb=verb, slug=slug, claim=claim)
             pq.apply(fake, req, "main", lambda t, p, c: t, sleep=lambda s: None, log=lambda s: None)
-        now = datetime.datetime(2026, 10, 5, tzinfo=datetime.timezone.utc)
-        data = pq.status(fake, "main", self.scratch, now)
+        # Open PRs on both, so that the only flag either could get is one about its claim.
+        fake.pulls = [{"number": 3, "ref": "plan/a/01-x"}, {"number": 4, "ref": "plan/b/01-x"}]
+        data = pq.status(fake, "main")
+        self.assertEqual(len(data["plans"]), 2)
         for item in data["plans"]:
             self.assertEqual(item["claimed_at"], "2026-10-02T10:00:00Z")
-            self.assertTrue(any("possibly abandoned" in f for f in item["flags"]), item)
-        # A monitor log written recently means the monitor is alive, whatever the plan's working log says.
-        (self.scratch / pq.MONITOR_LOG).write_text("alive\n", encoding="utf-8")
-        data = pq.status(fake, "main", self.scratch, datetime.datetime.now(datetime.timezone.utc))
-        by_slug = {p["slug"]: p for p in data["plans"]}
-        self.assertFalse(any("possibly abandoned" in f for f in by_slug["b"]["flags"]))
-        self.assertTrue(any("possibly abandoned" in f for f in by_slug["a"]["flags"]))
+            self.assertEqual(item["flags"], [], item)
+            self.assertFalse(any("log" in key for key in item), item)
+        rendered = pq.render_status(data)
+        self.assertNotIn("log", rendered)
+        self.assertIn("[in-flight 0a1b2c] a | PRs #3 | claimed 2026-10-02T10:00:00Z", rendered)
 
 
 class PassesTest(QueueTestCase):
@@ -1617,8 +1617,6 @@ class PassesTest(QueueTestCase):
     walk is tested against the commit subjects the script actually writes.
     """
 
-    NOW = datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc)
-
     def add_plan(self, h: Harness, slug: str, deps: tuple[str, ...] = ()) -> None:
         """Add a pending plan the way a planning PR does: its file and its INDEX.md line in one commit."""
         text = h.fake.files()[pq.INDEX_PATH] + line("pending", slug, deps=deps) + "\n"
@@ -1629,7 +1627,7 @@ class PassesTest(QueueTestCase):
         self.assertEqual(code, 0, err)
 
     def passes(self, h: Harness, slug: str) -> dict:
-        data = pq.status(h.fake, "main", self.scratch, self.NOW)
+        data = pq.status(h.fake, "main")
         return {p["slug"]: p for p in data["plans"]}[slug]
 
     def test_counts_distinct_claims_since_the_plan_was_added_and_flags_overdue(self):
@@ -1654,7 +1652,7 @@ class PassesTest(QueueTestCase):
         item = self.passes(h, "big")
         self.assertEqual(item["passes"], pq.OVERDUE_PASSES)
         self.assertTrue(item["overdue"])
-        rendered = pq.render_status(pq.status(h.fake, "main", self.scratch, self.NOW))
+        rendered = pq.render_status(pq.status(h.fake, "main"))
         self.assertIn(f"[pending] big | passed over {pq.OVERDUE_PASSES} (overdue)", rendered)
 
     def test_blocked_time_counts_but_held_and_in_flight_time_does_not(self):

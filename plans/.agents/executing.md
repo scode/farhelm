@@ -62,10 +62,16 @@ not go back to the end of the line when answered. If every eligible plan is skip
 To judge, read `queue status`, the candidates' plan files, and for unlanded work its plan file and the `gh pr diff` of
 its open PRs. Record the pick and its reasoning in the executor log.
 
+The executor log and the plan's working log are records (`plans/.agents/outside-files.md`, "Files outside the
+repository"): `cargo xtask records path executor` and `cargo xtask records path plan/<slug>` print their directories,
+and the steps below push them, per `plans/.agents/outside-files.md`, "When records are pushed", right before each step
+that changes GitHub. A failed `path` or `push` stops the flow before that step, as that file says.
+
 ## Executing one plan
 
-1. Read the executor log. If it records a claim, `jj git fetch` and run `queue status` (and `queue history <slug>` where
-   the line alone does not settle it), then go by the verb the log says you were running:
+1. Read the executor log (`log.md` in the directory `cargo xtask records path executor` prints). If it records a claim,
+   `jj git fetch` and run `queue status` (and `queue history <slug>` where the line alone does not settle it), then go
+   by the verb the log says you were running:
    - Nothing pending (you were working on the plan): if the line carries your claim id, resume at step 5; otherwise the
      claim was released while you were away.
    - `claiming`: your id on the line means the claim landed; resume at step 5. Otherwise it never landed: clear the log
@@ -84,23 +90,28 @@ its open PRs. Record the pick and its reasoning in the executor log.
 2. Apply the clean-main boundary, then run `queue status` and pick (`plans/.agents/executing.md`, "Picking: "pick a plan
    to execute", "execute the next plan""). Nothing picked: the round is over.
 3. Claim. Generate a claim id (`python3 -c 'import secrets; print(secrets.token_hex(3))'`), write slug, id and
-   `claiming` to the executor log, then `queue claim <slug> --claim <id>`. Exit 10 means someone else got there first:
-   pick again, reusing the analysis you already have for the remaining candidates. Exit 3 is ambiguous: settle it before
-   claiming anything else, by the exit-3 rule under `plans/.agents/queue.md`, "States, and the script that moves them".
-   Run `queue status`; if the line carries your id, the claim landed. If it still shows `pending`, run the same `claim`
-   again with the same id and settle that result the same way. If it shows someone else's claim, the plan is theirs:
-   clear the entry from the executor log and pick again. Never move on with a claim still uncertain: the executor log
-   records one claim, so a second pick would lose track of the first, and a first claim that landed late would then sit
-   in flight with nobody working on it.
+   `claiming` to the executor log, push it (`cargo xtask records push executor -m 'claim <slug>'`), then
+   `queue claim <slug> --claim <id>`. Exit 10 means someone else got there first: pick again, reusing the analysis you
+   already have for the remaining candidates. Exit 3 is ambiguous: settle it before claiming anything else, by the
+   exit-3 rule under `plans/.agents/queue.md`, "States, and the script that moves them". Run `queue status`; if the line
+   carries your id, the claim landed. If it still shows `pending`, run the same `claim` again with the same id and
+   settle that result the same way. If it shows someone else's claim, the plan is theirs: clear the entry from the
+   executor log and pick again. Never move on with a claim still uncertain: the executor log records one claim, so a
+   second pick would lose track of the first, and a first claim that landed late would then sit in flight with nobody
+   working on it.
 4. Re-check. Run `queue status` again. If a plan claimed since your pick conflicts with this one (the judgment under
    `plans/.agents/executing.md`, "Picking: "pick a plan to execute", "execute the next plan""), give the claim back
-   (`queue unclaim`) and pick again from step 2, whose boundary brings the checkout up to the `main` the unclaim just
-   moved. The exception is a plan that was overdue when you picked it, racing one that was not: keep the overdue one,
-   and the other plan's executor gives way. When neither or both were overdue, only the plan listed later in `INDEX.md`
-   gives way, so that two executors that claimed conflicting plans at the same moment do not both give theirs back.
+   (write `unclaiming` to the executor log, push `executor`, then `queue unclaim`) and pick again from step 2, whose
+   boundary brings the checkout up to the `main` the unclaim just moved. The exception is a plan that was overdue when
+   you picked it, racing one that was not: keep the overdue one, and the other plan's executor gives way. When neither
+   or both were overdue, only the plan listed later in `INDEX.md` gives way, so that two executors that claimed
+   conflicting plans at the same moment do not both give theirs back.
 5. Run `jj git fetch`, then read the plan file from the freshly fetched `main@origin`, including any `## Decisions`. The
    fetch in step 2 came before the pick and the claim, so the local `main@origin` can predate a revision or an answer to
-   this plan that landed in between; the claim itself goes through GitHub and does not update it.
+   this plan that landed in between; the claim itself goes through GitHub and does not update it. Then run
+   `cargo xtask records path plan/<slug>`: its `log.md` is the plan's working log, wherever the goal file says the log
+   lives (`plans/.agents/outside-files.md`, "Files outside the repository"), and its `notes/` holds what earlier holders
+   left for you. Open your claim in the log with an entry naming your slot and claim id.
 6. Set up the base from the clean `main@origin` working copy. If the plan has open `plan/<slug>/*` PRs (a resume), track
    those bookmarks, rebase that stack onto `main@origin` as a careful rebase (`.agents/careful-rebase.md`), and build on
    its tip; otherwise start a new change on `main@origin`. Either way, mark the start of the plan's builds for the prune
@@ -111,15 +122,13 @@ its open PRs. Record the pick and its reasoning in the executor log.
    the question rather than rebuilding it or carrying on above it.
 7. Resume check, whenever the plan has a working log or open PRs. Read the whole working log, the open PRs, and the
    Decisions, then write a "where this stands" entry in the working log: what is built and pushed, what is half done,
-   what the latest decision asks for, and what comes next. If the log names another checkout and its last recorded
-   pushes differ from GitHub's, inspect that checkout without changing it (`jj --ignore-working-copy -R <path> log`);
-   unpushed work found there is a block, with that as the question, rather than something to rebuild blind. A sub-agent
-   then checks the entry against the same sources. Reconcile any disagreement before working. If the plan cannot be
-   reconciled, block with that as the question (step 10), so that it reaches the landing monitor rather than stopping
-   the next executor the same way. Always start your own resource watchdog; treat the previous executor's scratch
-   directory as read-only input. After a release, entries the released executor wrote to the working log before it
-   noticed are expected: record that you saw them and continue, rather than stopping as the resume protocol would for
-   entries of unknown origin.
+   what the latest decision asks for, and what comes next. GitHub is authoritative for what was pushed: the log was last
+   pushed before the holder's last GitHub step, so it may lack an entry naming the last code push, or may end with an
+   intent whose GitHub step never ran; go by what GitHub shows. Nobody inspects another holder's checkout or scratch
+   directory: whatever an earlier holder did not push is gone, and what it left for you is in the record's `notes/`. A
+   sub-agent then checks the entry against the same sources. Reconcile any disagreement before working. If the plan
+   cannot be reconciled, block with that as the question (step 10), so that it reaches the landing monitor rather than
+   stopping the next executor the same way. Always start your own resource watchdog.
 8. Run the plan file as the goal. For a single plan, set the harness's goal to it if the harness lets the model set its
    own goal; otherwise, and always within a drain, behave exactly as if it were the harness-provided goal under the
    outer request. A drain does not register each plan as a harness goal, because a plan that blocks could not be cleared
@@ -129,41 +138,46 @@ its open PRs. Record the pick and its reasoning in the executor log.
    limitation the entry does not mention), the fragment's context paragraphs say how, so the release agent can flag the
    entry (`releasing/.agents/changelog.md`, "Plans' release notes"). Never edit the section itself.
 9. Before every push of a plan bookmark, run `queue status` and confirm the line still carries your claim id. If it does
-   not, stop pushing and treat the claim as released (step 1). After each push, record the pushed commits in the working
-   log.
+   not, stop pushing and treat the claim as released (step 1). Then push the records
+   (`cargo xtask records push plan/<slug> executor -m 'push <bookmark>'`), then the bookmark. After each push, record
+   the pushed commits in the working log.
 10. Blocking: when the remaining work waits on a decision only the maintainer can make (the goal file's unattended
     fallback), push everything that is consistent, then write the question for the Blocked section
     (`plans/.agents/maintainer-writing.md`, "Writing for the maintainer"). Have a sub-agent cold-read it, asking whether
     the maintainer could decide from this text alone and whether it breaks public-repo hygiene, and revise until it
-    passes. Write `blocking` to the executor log, run `queue block <slug> --claim <id> --question <file>`, and close
-    (step 12). Do not notify: the landing monitor answers the block or notifies the maintainer about it
-    (`plans/AGENTS.md`, "Notifications").
+    passes. Write `blocking` to the executor log, push `plan/<slug>` and `executor`, run
+    `queue block <slug> --claim <id> --question <file>`, and close (step 12). Do not notify: the landing monitor answers
+    the block or notifies the maintainer about it (`plans/AGENTS.md`, "Notifications").
 11. Finishing: when the done criterion holds, rebase the stack onto `main@origin` as a careful rebase if main has moved
     in a way that touches it, so the report describes what would actually land. Then write the report
     (`plans/.agents/maintainer-writing.md`, "Writing for the maintainer") and have a sub-agent cold-read it, asking
     whether the maintainer could approve or ask for a follow-up from it alone and whether it breaks public-repo hygiene.
-    Revise until it passes, write `delivering` to the executor log, and run
+    Revise until it passes, write `delivering` to the executor log, push `plan/<slug>` and `executor`, and run
     `queue deliver <slug> --claim <id> --report <file>`. The plan is now `[complete]`, and the monitor lands it from
     there.
 12. Close: return to clean `main` with the reset under `plans/.agents/close-reset.md`, "Clean-main boundary", prune
-    build leftovers (`plans/.agents/close-reset.md`, "Pruning build leftovers"), write a closing entry in the plan's
-    working log that names any paths the reset discarded, stop its resource watchdog, and clear the claim from the
-    executor log. Closing ends the plan's resume-log protocol and its review demands, as an express stop; the next plan
-    starts its own.
+    build leftovers (`plans/.agents/close-reset.md`, "Pruning build leftovers"), stop its resource watchdog, write a
+    closing entry for the plan in the executor log that names any paths the reset discarded and roughly what the prune
+    freed, clear the claim from the executor log, and push `executor`. The closing entry goes to the executor log, not
+    the plan's: once the claim has ended, nothing writes the plan's record, because a new holder may already be
+    appending to it. Closing ends the plan's resume-log protocol and its review demands, as an express stop; the next
+    plan starts its own.
 
-`block` or `deliver` exiting 10 means the claim was released while you worked: push nothing more, record it in both
-logs, run the reset for a released claim (`plans/.agents/close-reset.md`, "Clean-main boundary"), and prune build
-leftovers. To give a claim back for any other reason (the maintainer stops the flow mid-plan, a `gh` login that expired,
-a disk alert that cannot be cleared), push what is consistent, write the working log, write `unclaiming` to the executor
-log, run `queue unclaim`, and close (step 12). Notify unless the maintainer asked for the stop: an expired login or a
-full disk stops every plan on the machine until someone fixes it, and the plan goes back to `pending`, where the landing
-monitor does not pick it up. If pushing the consistent work failed (the expired login, say), close with the reset for a
-released claim instead of the full one, so that work stays in the checkout for the next claimer to find (step 7), and
-say so in the working log and the notification.
+`block` or `deliver` exiting 10 means the claim was released while you worked: push nothing more (no bookmark and no
+plan record), record it in the executor log only, run the reset for a released claim (`plans/.agents/close-reset.md`,
+"Clean-main boundary"), and prune build leftovers. To give a claim back for any other reason (the maintainer stops the
+flow mid-plan, a `gh` login that expired, a disk alert that cannot be cleared), push what is consistent, write the
+working log, write `unclaiming` to the executor log, push `plan/<slug>` and `executor`, run `queue unclaim`, and close
+(step 12). Notify unless the maintainer asked for the stop: an expired login or a full disk stops every plan on the
+machine until someone fixes it, and the plan goes back to `pending`, where the landing monitor does not pick it up. If
+pushing the consistent work failed (the expired login, say), close with the reset for a released claim instead of the
+full one, so the unpushed work at least stays in this checkout for the maintainer, and say so in the working log and the
+notification. No later claimer looks for it there: the next holder starts from what GitHub and the plan's record hold.
 
 To notify, follow `plans/AGENTS.md`, "Notifications". An executor notifies only when it stops in a way the landing
 monitor will not pick up, whatever a plan's goal file says. A block and a delivery both reach the monitor through the
 queue, so neither notifies: the monitor answers a block or notifies the maintainer about it, and lands a delivery (its
-report reaches the maintainer through `REPORTS.md`). An executor that dies cannot notify at all; its claim shows up in
-`queue status` as possibly abandoned, and the monitor notifies about that (`plans/.agents/landing.md`, "A landing
-round").
+report reaches the maintainer through `REPORTS.md`). An executor that dies cannot notify at all. Nothing in the planning
+system watches for that: keeping the executors and the landing monitor running is the maintainer's job, done out of
+band, and taking a claim away from an executor (`plans/.agents/release-help.md`, "Releasing: "release plan X"") is a
+manual action the maintainer takes only once that executor is gone.

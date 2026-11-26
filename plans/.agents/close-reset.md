@@ -44,18 +44,18 @@ GitHub since then must not count as unpushed. `$s` is the working copy and its a
 reaches; the `~ ::(($s):: ~ ($s))` part leaves out any of those that something outside the set builds on (another jj
 workspace's working copy, another plan's commit), because abandoning them would rewrite that history under its owner.
 What the guard leaves out stays where it is, outside the working copy. The `jj diff` lists the paths being dropped, and
-the plan's closing log entry records them so a discard is never silent. The bookmark step is needed because
-`--retain-bookmarks` only moves a bookmark to the abandoned commit's parent: that is its pushed commit when the local
-work merely extended the stack, but `main` when the pushed commit was amended or rebased, and a later push of that name
-would then empty the PR. Without `--retain-bookmarks` the abandon deletes the bookmark outright, which is worse.
+the plan's closing entry in the executor log records them so a discard is never silent. The bookmark step is needed
+because `--retain-bookmarks` only moves a bookmark to the abandoned commit's parent: that is its pushed commit when the
+local work merely extended the stack, but `main` when the pushed commit was amended or rebased, and a later push of that
+name would then empty the PR. Without `--retain-bookmarks` the abandon deletes the bookmark outright, which is worse.
 
 When the claim was released rather than given up (`plans/.agents/executing.md`, "Executing one plan", step 1, or
 `block`/`deliver` exiting 10), the executor no longer owns the plan and the reset is narrower: `jj git fetch`, then
 `jj new main@origin` and `jj status`, with nothing abandoned and no bookmark touched. Unpushed work may still be local
-at that point (`plans/.agents/executing.md`, "Executing one plan", step 9 forbids pushing it once the claim is gone),
-and step 7 there has the next claimer inspect exactly that work in this checkout before deciding what to do with it.
-Moving off it keeps the working copy clean without destroying it; record the old working-copy commit id in the executor
-log so the leftover can be found.
+at that point (`plans/.agents/executing.md`, "Executing one plan", step 9 forbids pushing it once the claim is gone). No
+later claimer looks at it, since the next holder starts from GitHub and the plan's record, but it may still matter to
+the maintainer. Moving off it keeps the working copy clean without destroying it; record the old working-copy commit id
+in the executor log so the leftover can be found.
 
 Either reset leaves ignored files alone, since jj never sees them. That keeps the checkout's build caches (`target/`,
 `node_modules/`, and the like) for the next plan, and it also leaves the other ignored files (release drafts, delegation
@@ -96,6 +96,6 @@ checkout, the executor prunes relative to that mark:
   Leave any of these that the plan's working log cites as retained failure evidence (`.agents/test-evidence.md`).
 
 If `target/.plan-start` is missing (a plan claimed before this rule existed), skip the two age-based items and do the
-rest. Record in the plan's closing log entry roughly how much the prune freed. Nothing here touches the other ignored
-files the reset paragraph in `plans/.agents/close-reset.md`, "Clean-main boundary", names, the recorder's run records
-(which live outside the checkout), or anything in another checkout.
+rest. Record in the plan's closing entry (in the executor log) roughly how much the prune freed. Nothing here touches
+the other ignored files the reset paragraph in `plans/.agents/close-reset.md`, "Clean-main boundary", names, the
+recorder's run records (which live outside the checkout), or anything in another checkout.
