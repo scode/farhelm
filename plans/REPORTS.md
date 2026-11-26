@@ -40,3 +40,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`supervisor-outliving-programs`](reports/supervisor-outliving-programs.report.md) landed 2026-11-26 in #5083: Root Stop and Restart cleanup at surviving pinned children and record SIGHUP/SIGKILL policy
 - [`supervisor-tab-close-retry`](reports/supervisor-tab-close-retry.report.md) landed 2026-11-26 in #5087: Fix in-memory shell-tab close retry bugs and record Linux systemd/unscoped cleanup policy
 - [`agent-delete-late-notice`](reports/agent-delete-late-notice.report.md) landed 2026-11-26 in #5088: Always record agent-Delete leftover-checkout warnings in the notices bell
+- [`session-right-click-menu`](reports/session-right-click-menu.report.md) landed 2026-11-26 in #5090: Open session and bulk context menus on right-click
