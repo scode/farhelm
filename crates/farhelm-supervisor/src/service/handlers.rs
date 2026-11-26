@@ -910,6 +910,23 @@ async fn handle_stop_session(
             },
             (None, _) | (_, None) => None,
         };
+        // With no live agent, the host's pinned child may still be running:
+        // a host killed outright leaves a child that ignored the hangup
+        // running on, which only a root reaches on a launch with no
+        // confirmed scope (`HostTerminal::leftover_child_root`). Read before
+        // anything is recorded, so a process table that cannot be read
+        // refuses the stop with nothing changed.
+        let leftover_identity = match (alive_pid, entry.terminal.as_ref()) {
+            (None, Some(terminal)) => match terminal.leftover_child_root() {
+                Ok(identity) => identity,
+                Err(error) => {
+                    let message = format!("nothing was stopped: {error:#}");
+                    reply_error(&tx, req_id, ErrorKind::Internal, message).await;
+                    return;
+                }
+            },
+            (Some(_), _) | (_, None) => None,
+        };
 
         // What this stop records, and why the two branches differ.
         //
@@ -1115,12 +1132,15 @@ async fn handle_stop_session(
             // outlives the agent for exactly as long as something
             // it spawned does, which is the case at hand.
             //
+            // A pinned child that outlived its host is rooted into the same
+            // sweep (`leftover_identity` above).
+            //
             // Agent cleanup stays separate from tab closes below. The live
             // agent helper is shared with Restart, which must keep tabs.
             let reaped = reap_process_tree(
                 &sup.seams.scopes,
                 ScopeUnits::recorded(entry.scope.clone()).with_main_launch(&entry.info.launch),
-                None,
+                leftover_identity,
                 &session_id,
                 &SweepTarget::AgentOnly,
                 // Refuse, as the live-agent path does: survivors of an agent

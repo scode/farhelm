@@ -1965,24 +1965,25 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   becomes unreadable between a verb's liveness check and its taking the kill root (an unconditional Delete ends it
   instead, below). The ticker samples a host's screen and title from the emulator once the runtime has caught up with
   the host's journal, and the shared notifier wakes its reap pass, so a host agent's exit is recorded promptly. Stop and
-  Delete take their kill root from the child as pinned at adoption, re-checked against the process table; the host
-  itself carries no session marker and sits outside the launch's scope, so Stop leaves it running and showing the final
-  screen. A launch that never started is classified, and quoted from the emulator's screen (a host runs one child, so
-  the screen is this launch's) only once the host's exit record has been processed, since the child can be reaped before
-  its last output arrives; a Stop that finds the child gone waits two seconds for the record and otherwise records a
-  plain exit, which the observer can still turn into the launch's error (the launch shim's own failure report quotes no
-  screen and is recorded at once). A hook report is anchored at the host's child; while the session's entry is not yet
-  published the report waits for a later pass rather than being refused. Prompts check bracketed paste in the emulator's
-  modes, once the runtime has caught up with its host's journal (until then, after a restart, a prompt is refused, since
-  the modes are a past screen's), and send the paste as one paste through an input sequence, then the submit through the
-  same sequence once all of the paste was written; input written between the two (an answer to a query the program asked
-  meanwhile, a viewer's keys) lands in the prompt, which was accepted rather than have the runtime hold its answers
-  across two sends. The orderly stop's hold wait compares the "held" mark with the child's pid. An attach is refused for
-  a client that cannot show grids, permanently, with `InvalidRequest`; one that can gets a grid stream (below). Every
-  create, tab open and Restart makes a host terminal, which a restarted supervisor finds again ("Across supervisor
-  restarts" below); a Restart replaces the agent's host with a new one ("Restarting a host agent" below), starts a
-  session that has no terminal (an old one ended at startup included) in a new, empty one, and leaves the session's tab
-  hosts as they are.
+  Delete take their kill root from the child as pinned at adoption, re-checked against the process table, and so do Stop
+  and Restart when they find no live agent but that pinned child still runs (a host killed outright whose child ignored
+  the hangup; `HostTerminal::leftover_child_root`); the host itself carries no session marker and sits outside the
+  launch's scope, so Stop leaves it running and showing the final screen. A launch that never started is classified, and
+  quoted from the emulator's screen (a host runs one child, so the screen is this launch's) only once the host's exit
+  record has been processed, since the child can be reaped before its last output arrives; a Stop that finds the child
+  gone waits two seconds for the record and otherwise records a plain exit, which the observer can still turn into the
+  launch's error (the launch shim's own failure report quotes no screen and is recorded at once). A hook report is
+  anchored at the host's child; while the session's entry is not yet published the report waits for a later pass rather
+  than being refused. Prompts check bracketed paste in the emulator's modes, once the runtime has caught up with its
+  host's journal (until then, after a restart, a prompt is refused, since the modes are a past screen's), and send the
+  paste as one paste through an input sequence, then the submit through the same sequence once all of the paste was
+  written; input written between the two (an answer to a query the program asked meanwhile, a viewer's keys) lands in
+  the prompt, which was accepted rather than have the runtime hold its answers across two sends. The orderly stop's hold
+  wait compares the "held" mark with the child's pid. An attach is refused for a client that cannot show grids,
+  permanently, with `InvalidRequest`; one that can gets a grid stream (below). Every create, tab open and Restart makes
+  a host terminal, which a restarted supervisor finds again ("Across supervisor restarts" below); a Restart replaces the
+  agent's host with a new one ("Restarting a host agent" below), starts a session that has no terminal (an old one ended
+  at startup included) in a new, empty one, and leaves the session's tab hosts as they are.
 - **Every terminal in a host.** A supervisor creates every terminal in a terminal host and never starts a tmux server
   (one an earlier supervisor left is ended at startup, "Ending the old private tmux server"). A supervisor inside a test
   binary cannot start a host from its own executable; in builds with test seams, one whose launch shim program is not

@@ -12572,6 +12572,18 @@ impl Supervisor {
             })?,
             (None, _) | (_, None) => None,
         };
+        // With no live agent, a host killed outright may have left its
+        // pinned child running (it ignored the hangup), which only a root
+        // reaches on a launch with no confirmed scope
+        // (`HostTerminal::leftover_child_root`). Rooted into the leftover
+        // reap below so the new agent never starts beside it; a process
+        // table that cannot be read refuses before anything is touched.
+        let leftover_identity = match (alive_pid, entry.terminal.as_ref()) {
+            (None, Some(terminal)) => terminal.leftover_child_root().map_err(|error| {
+                RequestError::new(ErrorKind::Internal, format!("not restarting: {error:#}"))
+            })?,
+            (Some(_), _) | (_, None) => None,
+        };
         // Asked first, before anything below touches a process, so that a
         // refusal in the common case changes nothing; asked again after the
         // settle, which can take seconds (see `refuse_unconsented_stop`).
@@ -12643,11 +12655,12 @@ impl Supervisor {
             // hunt for the PRIOR run's survivors must not reap a tab's
             // shell that has been happily running across the restart.
             // The programs of earlier host starts the settle above found
-            // running are rooted into the same sweep.
+            // running are rooted into the same sweep, and so is a pinned
+            // child that outlived its host (`leftover_identity` above).
             let reaped = reap_process_tree(
                 &self.seams.scopes,
                 ScopeUnits::recorded(entry.scope.clone()),
-                outstanding.roots,
+                leftover_identity.into_iter().chain(outstanding.roots),
                 session_id,
                 &SweepTarget::AgentOnly,
                 // Refuse: relaunching while the prior scope may still hold

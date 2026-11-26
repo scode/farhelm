@@ -296,18 +296,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   exceeded the triage size target, and the cache transition needs its own coverage to preserve working recipes. Plan:
   `plans/queue/podman-proxy-free-images.md`.
 
-- **Handle programs that outlive their terminal host.** The desktop can describe a session as ended while its main
-  program still runs. Stop or Delete can then exceed what the user confirmed. On an unscoped launch, Stop or Restart can
-  miss the survivor if it cannot find a session marker. Count a surviving main program as alive for consent and root
-  authorized Stop and Restart at its retained PID and start identity, checked against the process table as Delete
-  already does. Refuse Stop, Delete and Restart on a process-table read error, and refuse ended-only consent while the
-  program is alive. Keep terminal availability separate so recovery stays available and the desktop can ask for the
-  consent it actually needs. Use current evidence for the recovery Restart decision as well as for ordinary Stop and
-  Delete. The ticker must wait for evidence of exit or successful cleanup before it records a completed Stop. The triage
-  experiment fixed only the supervisor's action checks, which left desktop retries repeating the wrong consent and let
-  an old activity sample block recovery Restart. The full fix needs shared evidence for status, confirmations and
-  cleanup, with tests covering those boundaries. Plan: `plans/queue/supervisor-outliving-programs.md`.
-
 - **Settle an unconfirmed agent start before Stop reports success.** A launch can stay pending with no terminal when
   Farhelm cannot confirm its terminal host ended. Authorized Stop can record an exit and return success without checking
   the recorded start. A first stage that still holds the launch spec can start the agent after that reply. Use Restart's
