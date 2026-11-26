@@ -14,3 +14,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `agent-delete-late-notice.md` — Always record agent-Delete leftover-checkout warnings in the notices bell
 - [pending] `drift-updater-teardown.md` — Run drift-test agent updaters in transient systemd user scopes for clean teardown
 - [pending] `settings-wait-while-saving.md` — Make Settings Close/Escape and editors wait for saves, rip out slow-helm concurrency, and finish surviving Settings follow-ups (after `custom-agent-delete-prompt.md`)
+- [pending] `terminal-tab-hover-close.md` — Move shell tab close button to a fixed left icon slot revealed on hover
+- [pending] `agent-blocked-notifications.md` — Fix ntfy waiting alerts and add blocked-agent notifications with instruction injection (after `settings-wait-while-saving.md`)
