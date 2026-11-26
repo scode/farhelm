@@ -83,3 +83,82 @@ final review required positive evidence that a host follows Settings before the 
 test that covers both the missing and session-owned host cases. The source gate cleared after those findings were
 addressed. The later layout correction passed focused approval tests and an independent visual review of the wrapped
 warning in both themes. The updated Settings pages passed independent visual review as well.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round. The Settings triage's rewording of the trust help was already in the plan's base, and
+the plan's Settings changes build on it. Since the base, main gained the provisioning, Podman and runtime triage, the
+spec and comment updates, the queue discards, the drift and brick tooling and the launcher consent rework; none of them
+touches the trust check, the trust hint band, the Settings trust help or the approval card wording this plan changes.
+The rebase met only conflicts in the shared triage records, kept both ways, and the queue's files, index and open
+outcomes agree.
+
+#### Fixes made while landing
+
+- **Codex could still override a user's explicit "untrusted" choice for a project whose path contains a dot (the
+  review's first should-fix).** The new check for trust set in Codex's Custom permission flags missed a project given as
+  an inline table under a quoted path with dots, such as `projects."/src/github.com/o/r"={trust_level="untrusted"}`, and
+  Farhelm's own trust setting, which replaces Codex's whole projects table, then turned the refusal into trust. That
+  applies in a session's own sandbox or container and on hosts with Codex's trust switch on. Fixed inside
+  [#5043](https://github.com/scode/farhelm/pull/5043/changes): any project assigned an inline table now counts as the
+  user's own trust setting, with test cases for such a path.
+- **The changelog drafts did not follow the rule for unreleased work (the review's second should-fix).** Automatic trust
+  in sandbox and container sessions has not shipped yet, so the parts of this plan that refine it (the Codex override,
+  trust hints offering Settings only where its switch applies, and the Settings help for hosts you add) now live in that
+  feature's existing draft, which I edited to hold them and to drop its guarantee wording about Antigravity; the plan's
+  own draft for the Codex override, which also named Pi although new launches cannot use Pi's Custom flags, was folded
+  into it and removed. The plan's other two drafts each keep only their released-behavior change (the Restart approval
+  wording, and the switches' screen reader state).
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the plan's PRs rebased onto main as it stood at the start of the landing (`78ca4135`), with the shared triage
+records' conflicts kept both ways; every other change was exactly what the executor pushed until the landing fixes.
+
+- The GUI and helm crates' tests, `cargo nextest run -p farhelm-gui -p farhelm-helm`, on the test worker (recorder run
+  `0d53888e-837a-48b8-a44c-316d331c8451`), before the fixes: all 5427 passed. Only these crates' code changed.
+- After the Codex fix, the helm's launch and workspace trust tests,
+  `cargo nextest run -p farhelm-helm --lib -E 'test(/launches::/) | test(/workspace_trust::/)'`, on the test worker
+  (recorder run `9b7f9135-6cad-4a48-8ac7-1ed38ca02129`): all 53 passed, including the new dotted-path cases, which the
+  old check fails; and `cargo clippy -p farhelm-helm --all-targets -- -D warnings` there: passed.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings`, on the test worker: passed.
+- The desktop app's end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run
+  `cefef121-835f-42d4-84f8-004b13743368`): of its 49 steps, 48 passed and one (paste) was skipped by design on Linux.
+- The desktop app's screenshot comparison, `python3 scripts/check-gui-goldens.py`, all scenes, locally (recorder run
+  `2c0ad71a-75d2-4bf2-8cec-9f2ee8bf5ea5`): passed, including the pictures the plan updated; and the screenshot batch
+  tool's test with the scene list (recorder run `abc445ce-8b9a-4623-92f3-199f67a792d9`), locally: passed.
+- The docs website build, `bun install --frozen-lockfile && bun run build` in `website/`, locally: passed (two pages
+  changed).
+- `python3 scripts/check-agents-md.py`, `python3 releasing/check-changelog.py format` (again after the fixes),
+  `cargo fmt --all -- --check` (again after the fixes) and `python -B scripts/check-test-sleeps.py`, locally: passed.
+  `dprint check`, locally: this plan's files pass; it fails only on over-long lines in the triage outcomes archive that
+  main already had. No PR fixes them yet; a formatting-only one would, and I recommend it, as earlier rounds' notes did.
+
+Reused across the fixes: the runs above that predate them, since the Codex fix changes only the helm's trust check,
+which the focused run and helm clippy covered again, and the rest are changelog drafts. The executor's runs were on an
+older base, and everything they covered ran again above.
+
+Skipped: the rest of the workspace Rust suite, since only the GUI and helm crates changed; a Mac run; live agents, which
+spend vendor turns; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+- The report's account of the Codex check holds, except that a project path with a dot was missed; the landing fixed
+  that, as above.
+
+#### Things you should know that the report does not say
+
+- **A related gap that predates this plan.** For Codex and Pi, Custom flags containing `--` push Farhelm's trust setting
+  after the `--`, where the agent reads it as plain text, yet the approval card still says the workspace is trusted. I
+  recommend a follow-up; say if you want a TODO entry.
+- **Smaller points the review noticed.** "Trust the workspace by default" in the Settings help and on the website
+  suggests a switch that does not exist; the website's Codex, Pi, Antigravity and Claude pages still say "installed
+  hosts", the wording this plan fixed in the Settings help; the archived triage entries say "Draft PR"; one Settings
+  test depends on the order of two reads; and no test checks a Restart card's screen reader text directly. The report's
+  remaining gap, that no test reads the warning text under the trust and hook switches, stays as triage closed it: the
+  GUI test driver has no way to read those descriptions. None needs a follow-up on its own.
