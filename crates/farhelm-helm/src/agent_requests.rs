@@ -3152,6 +3152,8 @@ async fn dispatch_agent_create(
                 // would let through on a host that asks.
                 confirm_yolo: false,
                 settings_from_source: false,
+                // An agent's create never teaches the user's launch memory.
+                custom_registration: None,
                 parent: dispatch.parent,
                 spawned: dispatch.spawned,
                 request_fingerprint: dispatch.request_fingerprint,
@@ -4207,6 +4209,8 @@ async fn clone_for_agent(
                 // Never an agent's to give; see `dispatch_agent_create`.
                 confirm_yolo: false,
                 settings_from_source: false,
+                // An agent's create never teaches the user's launch memory.
+                custom_registration: None,
                 parent: None,
                 spawned: false,
                 request_fingerprint,
