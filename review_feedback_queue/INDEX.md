@@ -13,11 +13,6 @@ consequences.
 
 ## Highest priority: security or data loss
 
-- [`uninstall-newline-stripping-defeats-state-inside-lib-guard.md`](uninstall-newline-stripping-defeats-state-inside-lib-guard.md)
-  — Uninstall's `readlink -f | tr -d '\n'` strips embedded newlines, corrupting the spellings every containment/identity
-  guard consumes; a constructed dual-newline layout can make uninstall delete the user's data directory (traced, not
-  run; deliberate-setup drop rejected by independent check).
-
 - [`trailing-legacy-claude-settings-v036-hosts-never-cleaned.md`](trailing-legacy-claude-settings-v036-hosts-never-cleaned.md)
   — A Tensorlake host set up by 0.36.0 and not connected under 0.37-0.43 keeps Farhelm's old Claude endpoint URL and
   token in Claude's settings for good; per SPEC_impl.md they can take precedence and receive a new token (Claude Code
@@ -54,14 +49,6 @@ consequences.
 - [`provisioning-orphan-sweep-deletes-concurrent-helm-upload.md`](provisioning-orphan-sweep-deletes-concurrent-helm-upload.md)
   — Two helms provisioning the same host concurrently can delete each other's active staging temporary via the orphan
   sweep (no liveness check); the victim run fails visibly and retryably (cross-helm premise unverified).
-
-- [`update-identity-unverified-misleading-plan-again-remedy.md`](update-identity-unverified-misleading-plan-again-remedy.md)
-  — Update on a host whose supervisor reports no identity (record has one) is accepted then fails with "identity changed
-  / plan again", a futile remedy; the real remedies are not named (rare state, safe refusal).
-
-- [`installer-fallback-lock-world-openable.md`](installer-fallback-lock-world-openable.md) — On a lock-unsupported
-  volume the installer's fallback lock file is created 0644, so another local account can hold it and block the owner's
-  installs (DoS); umask 0 also allows substituting it (premises named).
 
 - [`release-payload-cache-misses-private-dir-hardening.md`](release-payload-cache-misses-private-dir-hardening.md) — The
   release payload cache is created umask-dependent without symlink refusal, unlike the deliberately hardened sibling

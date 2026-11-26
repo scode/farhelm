@@ -26,23 +26,6 @@
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
-## uninstall-newline-stripping-defeats-state-inside-lib-guard.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed by source inspection (dual-newline + bind-mount layout traced, not live-executed).
-  `crates/farhelm-helm/src/provisioning/backend.rs:3367-3368` runs `readlink -f -- "$1" 2>/dev/null | tr -d '\n'`,
-  stripping embedded newlines from resolved paths before the `-ef "$removed"` ancestor walk (`:3392-3401`) and Rust
-  containment checks (`plan.rs:972-1021`), letting `rm -rf` on the unstripped `lib_dir` (`backend.rs:3656-3660`) delete
-  a state directory reached through a newline-bearing symlink target. Tension between `SPEC.md:5658-5661` (deliberate
-  setup) and `SPEC.md:5663-5666,6115-6117` (lasting damage / uninstall refuses layouts it cannot tell apart safely).
-- Decision: Q2 ("Uninstall newline-in-path safety guard"): maintainer picked "Fix code: fail closed on embedded
-  newlines". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Capture `readlink -f` with a trailing sentinel instead of piping through `tr -d '\n'` in
-  `crates/farhelm-helm/src/provisioning/backend.rs`, fail closed when a resolved path contains an embedded newline so
-  Uninstall refuses the layout, and add a focused regression test (estimate S, ~20-40 lines). Remove the feedback file
-  and its index entry.
-- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
-
 ## trailing-legacy-claude-settings-v036-hosts-never-cleaned.md
 
 - Outcome: `fix spec`.
@@ -437,33 +420,6 @@
 - Completion criteria: Return `ErrorKind::Internal` for `DiskStage::Cancelled` in `commit_upload`
   (`crates/farhelm-supervisor/src/service/uploads.rs:1254-1258`, matching `DiskStage::Failed` and `SPEC_impl.md:5050`),
   and add a focused unit test (estimate S, ~15-30 lines). Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
-
-## update-identity-unverified-misleading-plan-again-remedy.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed by source (`crates/farhelm-helm/src/provisioning/service.rs:1788-1799,3021-3028,3220-3240`):
-  Update planning accepts a host with a recorded identity when the supervisor reports none (`IdentityUnverified`), then
-  execution fails with `"the supervisor identity changed after UPDATE planning ... plan again"` in a futile loop
-  omitting the real remedies already written in `attach_refusal` (`:392-397`).
-- Decision: Q12 ("Straightforward small product fixes"): maintainer picked "Fix all 14". (2026-11-25 fewest-questions
-  triage page, main `5af40d23e`.)
-- Completion criteria: Refuse `recorded = Some` / `reported = None` during Update planning with the `IdentityUnverified`
-  remedies from `attach_refusal`, distinguish missing vs changed identity in `revalidate` (`service.rs:3021-3028`), and
-  add regression tests (estimate S, ~25-45 lines). Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
-
-## installer-fallback-lock-world-openable.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed by source (`crates/farhelm-supervisor/src/installation/mod.rs:208-215`): `FALLBACK_LOCK_FILE`
-  omits `.mode(0o600)`, creating a `0644` file that another local user who can traverse `~/Applications` can open and
-  flock-lock to block installs. (The umask-0 substitution variant is out of scope per `SPEC.md:5994-6004`.)
-- Decision: Q12 ("Straightforward small product fixes"): maintainer picked "Fix all 14". (2026-11-25 fewest-questions
-  triage page, main `5af40d23e`.)
-- Completion criteria: Create `FALLBACK_LOCK_FILE` with `.mode(0o600)` at
-  `crates/farhelm-supervisor/src/installation/ mod.rs:208-215` (leaving `~/Applications` folder creation standard) and
-  add a unit test (estimate S, ~15-30 lines). Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## trailing-launcher-new-clone-enter-after-vanished-pick.md

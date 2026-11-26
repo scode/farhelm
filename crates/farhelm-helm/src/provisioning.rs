@@ -4224,6 +4224,96 @@ mod tests {
         );
     }
 
+    /// A completed hello must confirm the recorded host at both Update
+    /// boundaries. Missing and changed identities have different remedies.
+    #[farhelm_testtrace::test]
+    async fn update_refuses_missing_identity_at_planning_and_confirmation() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "update-identity.example",
+                HostScript {
+                    identity: Some("recorded-identity".into()),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness
+            .await_refreshed_as(host, "recorded-identity", 0)
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let report_identity = |identity: Option<&str>| {
+            *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::Supervisor {
+                build_version: "test-build".into(),
+                database_schema: None,
+                host_identity: identity.map(str::to_owned),
+                dial_farhelm: root.path().join("farhelm"),
+                dial_state_dir: Some(root.path().join("state")),
+            }));
+        };
+
+        report_identity(None);
+        let refusal = refusal_text(
+            service
+                .plan_update(host)
+                .await
+                .expect_err("unverified Update"),
+        );
+        assert!(refusal.contains("without an identity"), "{refusal}");
+        assert!(
+            refusal.contains("wait") || refusal.contains("Wait"),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains("change this entry's destination"),
+            "{refusal}"
+        );
+
+        for reported in [None, Some("different-identity")] {
+            report_identity(Some("recorded-identity"));
+            let preview = service
+                .plan_update(host)
+                .await
+                .expect("verified Update plans");
+            report_identity(reported);
+            service
+                .start_update(
+                    host,
+                    ProvisionRequest {
+                        probe_id: preview.probe_id,
+                    },
+                )
+                .await
+                .unwrap();
+            let run = wait_finished(&service, host).await;
+            assert_eq!(run.status, RunStatus::Failed, "{run:?}");
+            let text = run.message.expect("Update gives a remedy");
+            match reported {
+                None => {
+                    assert!(text.contains("without an identity"), "{text}");
+                    assert!(text.contains("reports its identity again"), "{text}");
+                }
+                Some(identity) => {
+                    assert!(
+                        text.contains("identity changed after UPDATE planning"),
+                        "{text}"
+                    );
+                    assert!(
+                        text.contains(identity) && text.contains("Plan again"),
+                        "{text}"
+                    );
+                }
+            }
+            assert!(
+                backend.operations.lock().unwrap().is_empty(),
+                "no host actions ran"
+            );
+        }
+    }
+
     /// UPDATE against a skewed supervisor — the host left behind by a
     /// protocol bump — must plan and execute, with the recorded identity
     /// carried forward unverified rather than treated as a mismatch: the
