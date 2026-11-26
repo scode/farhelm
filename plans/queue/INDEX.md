@@ -9,7 +9,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 7b9930] `wayland-async-text-paste.md` — Make Wayland desktop text-field paste nonblocking and text-first
 - [pending] `custom-agent-delete-prompt.md` — Port Settings custom-agent Delete to the shared inline confirmation prompt
 - [pending] `settings-hook-save-notice.md` — Wait for in-flight toggle saves before closing Settings and record low-latency helm rule
-- [pending] `settings-close-save-hardening.md` — Harden Settings Close, Save, Credentials Back/Cancel, and footer actions (6 merged follow-ups)
+- [held] `settings-close-save-hardening.md` — Harden Settings Close, Save, Credentials Back/Cancel, and footer actions (6 merged follow-ups)
 - [pending] `tensorlake-sandbox-key-consent.md` — Bind Settings leftover-sandbox Delete confirmation and list to the active Tensorlake key
 - [pending] `launcher-visible-consent.md` — Lock host and destination in Replace with and record launcher list Enter visibility rule
 - [pending] `launcher-late-wake-failures.md` — Report request-tagged late wake failures for suspended sandboxes and stopped containers
