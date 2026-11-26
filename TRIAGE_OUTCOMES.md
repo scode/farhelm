@@ -140,23 +140,6 @@
   file and its index entry.
 - Execution: ``planned in `plans/queue/triage-launcher-safety.md` ``.
 
-## trailing-sandbox-agent-plants-repository-suggestions.md
-
-- Outcome: `fix spec+code`.
-- Assessment: Confirmed by source (`crates/farhelm-helm/src/sessions.rs:2140-2211,2610-2656`;
-  `store/repository_history.rs:84-153`): `record_created_history` gates only
-  `environment_target.is_some() && origin != CreateOrigin::User`, so agent-origin checkouts (`CreateOrigin::Agent`)
-  inside a sandbox/container (or on an ordinary host) promote arbitrary `owner/repo` values to the top of the helm-wide
-  repository suggestion list across all hosts, surviving sandbox deletion.
-- Decision: Q5 ("Agent-origin checkouts in repository suggestions"): maintainer picked "Fix spec+code: user launches
-  only (exclude all agent checkouts)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Update `SPEC.md` ("Managed checkouts", around lines 2146-2148) to state that helm-wide repository
-  suggestions come only from user-initiated Managed checkout launches and exclude agent-origin checkouts on every host;
-  gate repository-history recording on `origin == CreateOrigin::User` in `crates/farhelm-helm/src/sessions.rs`, and add
-  regression tests for both sandbox/container and ordinary-host agent checkouts (estimate S, ~20-40 lines). Remove the
-  feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-security-and-agent-boundaries.md` ``.
-
 ## trailing-auto-trust-overrides-custom-flag-refusal.md
 
 - Outcome: `fix spec+code`.
