@@ -1759,6 +1759,12 @@ static SCENES: &[Scene] = &[
         setup: settings_custom_agent_long_name_setup,
     },
     Scene {
+        name: "settings-custom-agent-save-blocked-by-delete",
+        size: (800., 900.),
+        draw: settings_scroll_end,
+        setup: settings_custom_agent_close_delete_refusal_setup,
+    },
+    Scene {
         name: "settings-codex",
         size: (800., 830.),
         draw: empty,

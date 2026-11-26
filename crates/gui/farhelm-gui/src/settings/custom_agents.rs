@@ -190,7 +190,10 @@ impl SettingsDialog {
                     editor.saw_saved(saved, window, cx);
                 } else {
                     editor.removed = true;
-                    editor.confirm_delete = false;
+                    // The retained draft can be registered again once this Delete question is gone.
+                    if std::mem::take(&mut editor.confirm_delete) {
+                        editor.error = None;
+                    }
                     cx.notify();
                 }
             });
@@ -363,7 +366,12 @@ impl Editor {
     }
 
     pub(super) fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if self.busy() || self.confirm_delete {
+        if self.busy() {
+            return false;
+        }
+        if self.confirm_delete {
+            // Close can request Save even while the inline question owns this editor's actions.
+            self.fail("Save was blocked. Choose Cancel to keep editing.", cx);
             return false;
         }
         let draft = self.draft(cx);
@@ -680,12 +688,19 @@ impl Editor {
                     }),
                 );
         }
-        let notice = this.error.as_ref().map(|reason| {
+        let error = this.error.as_ref().map(|reason| {
             choices::failure_outcome("custom-agent-error", reason, cx).into_any_element()
-        }).or_else(|| confirming.then(|| {
-            div().child("Delete this custom agent? Existing sessions keep their saved resume command.")
+        });
+        // A refused Save leaves Delete armed, so its consequences still belong beside the buttons.
+        let notice = if confirming {
+            Some(div().flex().flex_col().gap(px(4.))
+                .children(error)
+                .child("Delete this custom agent? Existing sessions keep their saved resume command.")
                 .into_any_element()
-        }));
+            )
+        } else {
+            error
+        };
         (row.into_any_element(), notice, confirming)
     }
 }
@@ -723,6 +738,27 @@ pub(crate) fn stage_custom_agent_draft(window: &mut Window, cx: &mut App) {
         editor.resumption = true;
         editor.reporting = true;
         editor.edited(cx);
+    });
+}
+
+/// Show the existing editor's refusal when Close attempts to save while its Delete question is on screen.
+#[cfg(test)]
+pub(crate) fn show_close_delete_refusal_for_golden(window: &mut Window, cx: &mut App) {
+    let editor = crate::layers::last_opened::<SettingsDialog>(cx)
+        .and_then(|dialog| dialog.read(cx).custom_editor().cloned())
+        .expect("the registered custom agent is open");
+    editor
+        .read(cx)
+        .command
+        .clone()
+        .edit_for_golden("~/bin/acme-code-updated", window, cx);
+    // The edit's queued change event clears earlier errors before the next action can set one.
+    window.defer(cx, move |window, cx| {
+        editor.update(cx, |editor, cx| {
+            assert!(editor.dirty(cx));
+            editor.confirm_delete = true;
+            assert!(!editor.save(window, cx));
+        });
     });
 }
 

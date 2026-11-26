@@ -270,7 +270,8 @@ pub(super) fn heading(cx: &mut VisualTestContext) -> Option<String> {
 // ---- Opening, the sections, and focus ------------------------------------------------------------------------------
 
 /// The catalog owns navigation even when it is empty. An external delete before a PUT settles takes the user
-/// back to Add while retaining the draft and its receipt. A delete confirmed on the page removes it entirely.
+/// back to Add while retaining the draft and its receipt. A confirmed Delete retires the draft.
+/// Close Save explains why the open Delete confirmation blocks the write. Cancel clears that explanation.
 /// The previews and sidebar hover help isolate registered text so it cannot reorder the surrounding app words.
 /// The retained draft also exposes the deletion and recovery instructions as a screen-reader status.
 /// A busy key refuses either write with the shared reason and leaves the draft available for retry.
@@ -469,13 +470,34 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     assert!(drawn(cx, "custom-agent-command") && sent(&mut helm).is_empty());
 
     // Changes and Reply arrive together. A deliberate Delete abandons this edit instead of retaining it for recovery.
-    fill(cx, "custom-agent-command", "~/bin/unsaved");
+    fill(cx, "custom-agent-command", "~/bin/example-v3");
     assert!(cx.update(|_, cx| super::draft_changed_for_opened(
         Section::CustomAgent("example-code".into()),
         cx
     )));
     click(cx, "custom-agent-delete");
     assert!(sent(&mut helm).is_empty(), "Delete asks first");
+    assert!(drawn(cx, "custom-agent-confirm-delete"));
+    keys(cx, "escape");
+    assert_eq!(
+        label(cx, "prompt").as_deref(),
+        Some("Save changes before closing?")
+    );
+    click(cx, "prompt-confirm");
+    assert_eq!(
+        label(cx, "custom-agent-error").as_deref(),
+        Some("Save was blocked. Choose Cancel to keep editing.")
+    );
+    assert!(painted(cx).contains("Delete this custom agent?"));
+    assert!(drawn(cx, "custom-agent-confirm-delete"));
+    assert!(sent(&mut helm).is_empty(), "neither action sent a write");
+    click(cx, "custom-agent-keep");
+    assert!(!drawn(cx, "custom-agent-error"));
+    assert!(
+        painted(cx).contains("~/bin/example-v3"),
+        "the draft remains"
+    );
+    click(cx, "custom-agent-delete");
     click(cx, "custom-agent-confirm-delete");
     let (delete, _) = one_command(&mut helm, Method::Delete, "/api/custom-agents/example-code");
     helm.push(CollectionChanges {
