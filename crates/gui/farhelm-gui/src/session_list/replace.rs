@@ -18,8 +18,8 @@
 //!   it, and that refusal asks the question. Every other refusal shows on the row as described below.
 //! - **A host change comes first.** Replace waits for one ([`menu::launch_wait`]).
 //! - **A long wait says so.** After two seconds the row shows "Replacing on <host>… <n> s", the host as the helm names
-//!   it and the whole seconds since the request went out, moved on once a second ([`super::outcome`]'s clock); a
-//!   quick reply adds nothing.
+//!   it and the whole seconds since the request went out, moved on once a second ([`super::outcome`]'s clock and its
+//!   [`super::outcome::row_wait_line`], which a Restart shares); a quick reply adds nothing.
 //! - **The replacement opens only where the source was open.** On success the replacement is selected only if the
 //!   source is still the selected session when the reply lands, and its terminal takes focus only if the user has not
 //!   moved on since the click (SPEC.md, "Who may move focus"); otherwise it just appears in the list. That the source is
@@ -40,7 +40,7 @@ use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::session_requests::{CreateSessionBody, ReplaceSessionBody};
 use farhelm_proto::ui_channel::SessionRow;
 use farhelm_proto::{DeleteGuard, SessionReplaceReply, SessionStatus};
-use gpui::{AnyWindowHandle, App, Context, IntoElement, SharedString, Styled, Window, px};
+use gpui::{AnyWindowHandle, App, Context, SharedString, Window};
 use serde_json::json;
 
 use super::replace_yolo::{self, Surface};
@@ -50,7 +50,6 @@ use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, HelmMarker, NotStarted, OpKey, Outcome, Settled, Work};
 use crate::prompt::{Answer, Question};
-use crate::theme;
 use crate::{local_state, session};
 
 /// The menu's Replace item's hover help: the old header Replace button's tooltip, which says what the item's short
@@ -436,27 +435,6 @@ pub(crate) fn settle(source: &str, settled: &Settled, cx: &mut App) {
 /// Whether `key` has a Replace in flight.
 pub(crate) fn in_flight(key: &str, cx: &App) -> bool {
     outcome::in_flight(key, cx) == Some(Work::Replace)
-}
-
-/// The line under `row`'s lines while its Replace has waited two seconds or more: [`outcome::wait_line`]'s "Replacing
-/// on <host>… <n> s" with the spinner at `step`, in `--fg-0`, or in the fill's ink on the selected row, inset as the
-/// row's other lines are. `None` while there is nothing to show.
-pub(super) fn progress_line(
-    key: &str,
-    row: &SessionRow,
-    step: u8,
-    selected: bool,
-    cx: &App,
-) -> Option<impl IntoElement> {
-    let palette = theme::palette(cx);
-    let ink = theme::color(if selected {
-        palette.on_fill
-    } else {
-        palette.fg_0
-    });
-    // The open session's header announces the wait; its row's copy stays a plain line (see `outcome::wait_line`).
-    let line = outcome::wait_line("session", Work::Replace, !selected, key, row, step, ink, cx)?;
-    Some(line.pt(px(2.)).pb(px(8.)).px(px(14.)))
 }
 
 #[cfg(test)]
