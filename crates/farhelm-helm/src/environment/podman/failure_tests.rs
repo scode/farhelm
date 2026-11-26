@@ -387,7 +387,13 @@ impl PlaceCommands for Commands {
         input: &[u8],
         bound: Duration,
     ) -> anyhow::Result<CommandResult> {
-        self.execute(argv, Some(input), bound).await
+        use crate::environment::podman_probe::{TEST_PLACE_IDENTITY, simulate_verified_place};
+        // Container setup scripts carry the place proof like every bound
+        // container command, with their private input passed through.
+        simulate_verified_place(argv, TEST_PLACE_IDENTITY, |argv| {
+            self.execute(argv, Some(input), bound)
+        })
+        .await
     }
 }
 
@@ -401,6 +407,13 @@ impl Commands {
         bound: Duration,
     ) -> anyhow::Result<CommandResult> {
         assert!(bound > Duration::ZERO && bound <= IMAGE_WORK);
+        if matches!(argv[0].as_str(), "busctl" | "systemctl") {
+            // A new container's proxy read goes through the place proof, so it
+            // arrives here rather than at the probe's text seam. It reads the
+            // same manager environment, so it gets the probe's answer.
+            let text = PlaceCommands::run(self, &BaseRoute::Local, argv).await?;
+            return Ok(output(0, &text));
+        }
         self.state.lock().unwrap().calls.push(argv.to_vec());
         if let Some(input) = input {
             self.state

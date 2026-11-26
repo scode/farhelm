@@ -107,7 +107,7 @@ impl Podman {
         let id = self
             .helper(name, expected, identity, "build", HelperBase::Bootstrap)
             .await?;
-        self.script(place, &id, root_user(), BOOTSTRAP, IMAGE_WORK)
+        self.script(target, &id, root_user(), BOOTSTRAP, IMAGE_WORK)
             .await?;
         let tag = format!(
             "localhost/farhelm-{}-base:{}",
@@ -124,7 +124,7 @@ impl Podman {
     /// because even the root account's home may be absent from a custom image.
     async fn login(
         &self,
-        place: HostId,
+        place: PlaceTarget<'_>,
         id: &str,
         requested: &str,
     ) -> anyhow::Result<ContainerUser> {
@@ -233,9 +233,9 @@ impl Podman {
         let id = self
             .helper(name, &expected, identity, "build", source)
             .await?;
-        let user = self.login(place, &id, requested).await?;
+        let user = self.login(target, &id, requested).await?;
         self.script(
-            place,
+            target,
             &id,
             user.clone(),
             &crate::tensorlake::build_script::ready(),
@@ -243,11 +243,11 @@ impl Podman {
         )
         .await?;
         self.prepare_user_manager(place, &id, &user).await?;
-        self.proxies(place, &id, &user, &ready.proxy).await?;
+        self.proxies(target, &id, &user, &ready.proxy).await?;
         check(cancel)?;
         enter(progress, events, "Installing recipe packages");
         self.script(
-            place,
+            target,
             &id,
             user.clone(),
             &crate::tensorlake::build_script::packages(&recipe.packages),
@@ -258,7 +258,7 @@ impl Podman {
         enter(progress, events, "Installing Claude Code");
         let claude = self
             .script(
-                place,
+                target,
                 &id,
                 user.clone(),
                 &crate::tensorlake::build_script::claude_code(),
@@ -269,7 +269,7 @@ impl Podman {
         enter(progress, events, "Installing Codex");
         let codex = self
             .script(
-                place,
+                target,
                 &id,
                 user.clone(),
                 &crate::tensorlake::build_script::codex(),
@@ -278,7 +278,7 @@ impl Podman {
             .await?;
         check(cancel)?;
         self.script(
-            place,
+            target,
             &id,
             user,
             &crate::tensorlake::build_script::prepare(),
@@ -444,10 +444,10 @@ impl Podman {
                     anyhow::bail!("the recorded software image has an incompatible base")
                 }
             };
-            let user = self.login(place, &id, requested).await?;
+            let user = self.login(target, &id, requested).await?;
             self.prepare_user_manager(place, &id, &user).await?;
             let (_, _, ready) = self.place(place).await?;
-            self.proxies(place, &id, &user, &ready.proxy).await?;
+            self.proxies(target, &id, &user, &ready.proxy).await?;
             let route = self.route(place, &id, user.clone()).await?;
             let facts = self
                 .0

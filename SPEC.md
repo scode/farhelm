@@ -5731,7 +5731,8 @@ with agents or those terminal hosts, and session credentials do not provide same
 without permission checks in disposable remote environments is an intended use. Farhelm still keeps simple local guards
 against accidental interference where their identity is available, such as telling a session's agent terminal and its
 tabs apart by their hosts' tags in tab discovery and destructive tab cleanup. Container sessions have their own rootless
-Podman containment contract above.
+Podman containment contract above. If the user themselves edits `~/.ssh/config` to re-alias or re-point hosts
+concurrently while Farhelm operates, that leads to undefined behavior.
 
 Farhelm defends against what an attached host or an agent's output can do, and against mistakes a user plausibly makes
 in ordinary use of Farhelm or their machine. The test is whether a reasonable user would hit the trigger by accident.

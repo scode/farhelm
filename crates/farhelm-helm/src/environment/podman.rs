@@ -4,7 +4,7 @@
 //! therefore uses this helm's labels and canonical identities. An unanswered
 //! create retains its row/name; a retry never removes possible session work.
 
-use super::podman_probe::{PodmanPlaces, ReadyPlace};
+use super::podman_probe::{CONTAINER_PLACE_UNVERIFIED, PodmanPlaces, ReadyPlace};
 use super::recipes::{BuiltImage, PreparedImage, Recipe};
 use super::*;
 use crate::access::{BaseRoute, ContainerUser, RemoteCommand, RemoteRoute};
@@ -232,9 +232,15 @@ impl Podman {
     }
 
     /// Runtime reuse accepts a current endpoint's older successful probe.
-    /// Launch admission separately requires recent prerequisites.
-    async fn place(&self, host: HostId) -> anyhow::Result<(HostRow, BaseRoute, ReadyPlace)> {
-        let (route, ready) = self.0.places.runtime(&self.0.store, host).await?;
+    /// Launch admission separately requires recent prerequisites. A target
+    /// with an identity also requires the probe to have seen that identity
+    /// ([`PodmanPlaces::runtime`](super::podman_probe::PodmanPlaces::runtime)).
+    async fn place<'a>(
+        &self,
+        place: impl Into<PlaceTarget<'a>> + Send,
+    ) -> anyhow::Result<(HostRow, BaseRoute, ReadyPlace)> {
+        let PlaceTarget { host, identity } = place.into();
+        let (route, ready) = self.0.places.runtime(&self.0.store, host, identity).await?;
         let row = self
             .0
             .store
@@ -259,7 +265,7 @@ impl Podman {
         bound: Duration,
     ) -> anyhow::Result<CommandResult> {
         let place = place.into();
-        let (_, route, ready) = self.place(place.host).await?;
+        let (_, route, ready) = self.place(place).await?;
         let mut argv = vec![
             ready
                 .podman
@@ -400,7 +406,7 @@ impl Podman {
         name: &str,
         args: Vec<String>,
     ) -> anyhow::Result<CommandResult> {
-        let (_, route, ready) = self.place(place.host).await?;
+        let (_, route, ready) = self.place(place).await?;
         let mut argv = vec![
             "systemd-run".into(),
             "--user".into(),
@@ -424,9 +430,9 @@ impl Podman {
     }
 
     /// Builders without host rows still use the ordinary command lowering.
-    async fn route(
+    async fn route<'a>(
         &self,
-        place: HostId,
+        place: impl Into<PlaceTarget<'a>> + Send,
         container: &str,
         user: ContainerUser,
     ) -> anyhow::Result<RemoteRoute> {
@@ -448,7 +454,7 @@ impl Podman {
     /// because a tool can echo its proxy and a proxy URL can carry a password.
     async fn script(
         &self,
-        place: HostId,
+        place: PlaceTarget<'_>,
         container: &str,
         user: ContainerUser,
         script: &str,
@@ -461,9 +467,11 @@ impl Podman {
 
     /// Initial installation supplies its own fresh values. Use the same map
     /// for private exports and stderr masking so a failed import stays private.
+    /// A target with an identity runs the script only once the place proves
+    /// it is still that machine and account, as every container command does.
     async fn script_with_proxy(
         &self,
-        place: HostId,
+        place: PlaceTarget<'_>,
         container: &str,
         user: ContainerUser,
         script: &str,
@@ -481,12 +489,17 @@ impl Podman {
             .command_with_input(
                 via,
                 &route.container_argv(RemoteCommand::Script(PRIVATE_SCRIPT))?,
+                place.identity,
                 script.as_bytes(),
                 bound,
             )
             .await
             .map_err(|error| {
-                if error.is::<crate::transport::SessionLimitRefusal>() {
+                // A place that no longer proves itself keeps its own reason: it says
+                // what to do (restore the destination) and carries nothing private.
+                if error.is::<crate::transport::SessionLimitRefusal>()
+                    || error.to_string() == CONTAINER_PLACE_UNVERIFIED
+                {
                     error
                 } else {
                     anyhow::anyhow!("container setup command failed or timed out")
@@ -686,7 +699,7 @@ impl Podman {
     /// the running manager imports values from the shell's environment by name.
     async fn proxies(
         &self,
-        place: HostId,
+        place: PlaceTarget<'_>,
         id: &str,
         user: &ContainerUser,
         values: &BTreeMap<String, String>,
@@ -845,9 +858,19 @@ impl Podman {
     /// The Containers section may delete a leftover only when no place records
     /// it. Host rows go through ordinary removal and its actor hold. Recorded
     /// recipe helpers go through guarded recipe cleanup.
+    ///
+    /// The place's stored claim is read before any command can probe it, and
+    /// every command is bound to it: a cold probe of a route that now reaches
+    /// another machine could otherwise replace an unused claim first, and the
+    /// cleanup would then remove whatever that machine has under this ID.
     pub(crate) async fn delete_leftover(&self, place: HostId, id: &str) -> anyhow::Result<()> {
         canonical(id)?;
-        let Some(info) = self.inspect(place.into(), id).await? else {
+        let claim = self.0.store.podman_place_identity(place).await?;
+        let target = PlaceTarget {
+            host: place,
+            identity: claim.as_ref(),
+        };
+        let Some(info) = self.inspect(target, id).await? else {
             return Ok(());
         };
         let role = info
@@ -877,7 +900,7 @@ impl Podman {
             !recorded_host && !recorded_recipe && !live,
             "this container belongs to a host or recipe on this helm; delete it there"
         );
-        self.remove_container(place.into(), id, role).await
+        self.remove_container(target, id, role).await
     }
 
     /// An interrupted launch can leave a container without a session. Offer
@@ -1454,7 +1477,7 @@ impl EnvironmentProvider for Podman {
                     .context("the host is no longer a container")?
                     .login_user()?;
                 self.script(
-                    current.place_host,
+                    place,
                     &info.id,
                     login.clone(),
                     crate::tensorlake::build_script::user_manager_ready(),
@@ -1464,10 +1487,9 @@ impl EnvironmentProvider for Podman {
                 let proxy = self
                     .0
                     .places
-                    .creation_proxy(&self.0.store, current.place_host)
+                    .creation_proxy(&self.0.store, place.host, place.identity)
                     .await?;
-                self.proxies(current.place_host, &info.id, &login, &proxy)
-                    .await?;
+                self.proxies(place, &info.id, &login, &proxy).await?;
                 let backend = self
                     .0
                     .delivery
@@ -1598,13 +1620,21 @@ impl EnvironmentProvider for Podman {
         Ok(Destroyed::Podman(ContainerDeleted::attest(binding.host)))
     }
 
+    /// Bound to the place's stored claim, read first, for the same reason as
+    /// [`Podman::delete_leftover`]: discovery must not let a probe of a moved
+    /// route replace the claim its results will be cleaned up under.
     async fn list_owned(&self, place: Place) -> anyhow::Result<Vec<OwnedEnvironment>> {
         let Place::PodmanHost(host) = place else {
             anyhow::bail!("the place belongs to another provider")
         };
+        let claim = self.0.store.podman_place_identity(host).await?;
+        let target = PlaceTarget {
+            host,
+            identity: claim.as_ref(),
+        };
         let text = self
             .require(
-                host,
+                target,
                 vec![
                     "ps".into(),
                     "--all".into(),
@@ -1622,7 +1652,7 @@ impl EnvironmentProvider for Podman {
         // accepting ownership, and propagate a malformed listing as an error.
         for id in text.lines() {
             canonical(id)?;
-            if let Some(info) = self.inspect(host.into(), id).await? {
+            if let Some(info) = self.inspect(target, id).await? {
                 let role = info
                     .labels
                     .get("farhelm.role")

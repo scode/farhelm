@@ -1521,6 +1521,70 @@ async fn moved_place_refuses_build_and_preserves_recipe_artifacts() {
     assert!(commands.model.lock().unwrap().commands.is_empty());
 }
 
+/// Why this matters: Containers' leftover listing and Delete are often the
+/// first thing to touch a place after the helm restarts. If they looked the
+/// place up before reading its stored claim, a cold probe of an alias that
+/// now reaches another machine or account could take the place for that
+/// account first, and the cleanup would list, and remove, that account's
+/// containers.
+///
+/// Specification: with the place's claim stored by an earlier helm process,
+/// this one's cache cold, and the route now answering as another account,
+/// discovery refuses with the changed-destination reason, and so does Delete
+/// of a leftover, each as the first operation of its process; no Podman
+/// command reaches the engine. (Each operation starts cold on its own: the
+/// refused operation's probe may replace the unused claim, which pinning
+/// within one operation does not prevent, by the plan's narrowed scope.)
+#[farhelm_testtrace::test]
+async fn leftover_cleanup_is_bound_to_the_claim_stored_before_the_route_moved() {
+    for operation in ["discovery", "Delete"] {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&directory.path().join("helm.db"))
+            .await
+            .unwrap();
+        let place = store
+            .add_ssh_host("place.example", None, None)
+            .await
+            .unwrap();
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == place)
+            .unwrap();
+        store
+            .try_claim_podman_place(&row, original_endpoint(), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.podman_place_identity(place).await.unwrap(),
+            Some(original_endpoint()),
+            "the premise: an earlier process stored the place's claim"
+        );
+        let (provider, commands) = fixture_on(store.clone(), place).await;
+        {
+            let mut model = commands.model.lock().unwrap();
+            model.place_identity = Some(MOVED_ENDPOINT);
+            model.exists = true;
+        }
+
+        let refusal = match operation {
+            "discovery" => provider.list_owned(Place::PodmanHost(place)).await.err(),
+            _ => provider.delete_leftover(place, ID).await.err(),
+        };
+        assert_eq!(
+            refusal.map(|error| error.to_string()).as_deref(),
+            Some(CONTAINER_PLACE_UNVERIFIED),
+            "{operation}"
+        );
+        assert!(
+            commands.model.lock().unwrap().commands.is_empty(),
+            "{operation}: no Podman command reached the moved place"
+        );
+    }
+}
+
 /// The cleanup that triggers the first probe after an upgrade must use
 /// the claim that probe establishes, even if the alias then moves.
 #[farhelm_testtrace::test]
@@ -1701,7 +1765,7 @@ async fn the_listing_asks_its_container_hosts_concurrently() {
     provider
         .0
         .places
-        .runtime(&provider.0.store, second)
+        .runtime(&provider.0.store, second, None)
         .await
         .unwrap();
     let slow = Duration::from_secs(15);

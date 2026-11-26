@@ -6590,12 +6590,26 @@ ordinary ownership, so a new reference between the two transactions still protec
 existing containers remain separate from admission.
 
 Before a session container's first create, the binding records the current claim's machine ID and UID in the guarded
-pending-send write. Session create and lifecycle commands that check or remove a recorded container verify the bound
-identity in the same local or SSH shell that runs Podman. The shell compares a command-specific SHA-256 digest so the
-recorded machine ID stays at the helm. Its marker proves the check ran and matched before the exit status is used.
+pending-send write. Session create and lifecycle commands that check or remove a recorded container, the setup scripts
+and proxy reads that run inside it, and recipe helpers verify the bound identity in the same local or SSH shell that
+runs the command. The helm sends a per-command nonce and a `check` digest (SHA-256 over a domain tag, the nonce, the
+machine ID and the UID), so the recorded machine ID stays at the helm. A shell whose machine or account differs exits
+125 before the command runs. One that matches prints a `proof` digest over the same values under another domain tag,
+which the helm recomputes and requires before it uses the exit status or output; echoing the nonce back proves nothing.
 Without that proof, an existence result leaves status and cleanup unanswered and recovery does not resend the create.
+Private input still reaches whatever answers the route, since it is not withheld until the proof arrives. Most runtime
+lookups for an existing container or recipe artifact compare the cached check's identity with the bound one, and a
+mismatch refreshes the check once before the command is refused, so restoring the original destination recovers the
+containers. Three provisioning routes do not yet pass the bound identity and use whatever the cache last checked: a new
+session container's install target, and a recipe helper's user-manager preparation and image preparation. Leftover
+discovery and Delete read the place's stored claim before anything can probe the route, and bind their commands to it.
 Existing bindings with null identity retain their previous behavior. Recipe base pulls, helper starts, captures and
 cleanup use the durable place claim when present, which stays fixed while the recipe has artifacts.
+
+These are sanity checks against an SSH destination that moved, not defenses. Where cheap, Farhelm applies basic sanity
+checking to behave sanely, but it does not add significant complexity to protect against concurrent `~/.ssh/config`
+edits (SPEC.md, "Local authority and trust between hosts") or against a hostile account on the wrong host reading what
+it is sent.
 
 Lifecycle commands run on the place host. Wrap `podman run` and `podman start` in `systemd-run --user --scope --collect`
 with a reserved environment name and a per-attempt nonce. This keeps conmon and the container's network helper outside
