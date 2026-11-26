@@ -352,20 +352,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   well as new ones. A change to the retry predicate alone leaves derived skips permanently recorded. Plan:
   `plans/queue/brick-test-reopen-and-retry-fixes.md`.
 
-- **Publish captured agent screens as recoverable pairs.** `scripts/capture-agent-screens.py` copies each scrubbed
-  screen and title from staging into a version directory. An I/O failure or interruption can leave those two files from
-  different captures and remove the staged replacement. Preserve the previous matched pair, retain the validated
-  replacement on failure, and let a later run recover any interrupted publication. Renaming each file atomically still
-  leaves an interruption window between the two renames. Settle the pair publication and recovery contract with the
-  fixture loader, then exercise both an I/O failure and an interrupted replacement using stand-ins. Plan:
-  `plans/queue/agent-drift-and-screen-capture-tooling.md`.
-
 - **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
   out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
   its version, so a case can report a verdict for the wrong binary. Cover both timeouts and cancellation during
   preparation, including a signal arriving as the process starts. Reuse the same teardown for the updater and the
-  fallback shell, and verify with a local child process that no write can race the version probe or a case. Plan:
-  `plans/queue/agent-drift-and-screen-capture-tooling.md`.
+  fallback shell, and verify with a local child process that no write can race the version probe or a case. The first
+  implementation could kill a worker still finishing a successful update. Waiting instead with a process listing could
+  miss a successor forked during the scan. The next design needs to confirm the group has finished with kernel-backed
+  evidence and keep its identity safe to signal through timeout and cancellation.
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
   started with `cursor-agent -- "$prompt"`, where the prompt starts with `--` and includes a newline. Run

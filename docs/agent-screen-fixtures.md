@@ -42,6 +42,11 @@ scratch directory), the tool reports it as not captured and keeps going. Hand-ma
 such as a rate-limit footer that only appears with a different login, are named `*-derived-*` and survive re-capture,
 and so does an earlier capture of any scenario a run missed.
 
+Publication keeps the screen and title together. If a write fails before the replacement is complete, the tool restores
+the previous pair and reports where it kept the scrubbed replacement. If the process stops during publication, rerun
+capture for the same installed version. It restores any unfinished publication before taking new screens. The fixture
+tests refuse a version with an unfinished publication or a title without its screen.
+
 ## What a run touches
 
 - A few short turns per agent. Claude runs with `--model sonnet` in its default permission mode; Codex runs with its

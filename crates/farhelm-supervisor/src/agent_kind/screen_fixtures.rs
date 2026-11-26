@@ -27,6 +27,7 @@ use super::screen_reader::{
 };
 use farhelm_proto::AgentKind;
 use farhelm_terminal_emulator::{Collected, Emulator, FeedMode, Size, trim_screen_tail};
+use std::fs::File;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -103,20 +104,52 @@ fn load_fixtures() -> Vec<ScreenFixture> {
                 "version directory {} does not look like a version",
                 version_dir.display()
             );
-            let mut screens: Vec<PathBuf> = std::fs::read_dir(&version_dir)
-                .unwrap_or_else(|e| panic!("reading {}: {e}", version_dir.display()))
-                .map(|entry| entry.expect("directory entry").path())
-                .filter(|path| path.extension().is_some_and(|ext| ext == "txt"))
-                .collect();
-            screens.sort();
-            for path in screens {
-                fixtures.push(load_one(&harness, &version, &path));
-            }
+            fixtures.extend(load_version_fixtures(&harness, &version, &version_dir));
         }
     }
     fixtures
 }
 
+/// Take one complete view of a version's fixture pairs. The capture tool locks the version directory while it
+/// swaps files, and a left-behind journal means a later capture must finish recovery before these pairs are read.
+fn load_version_fixtures(harness: &str, version: &str, version_dir: &Path) -> Vec<ScreenFixture> {
+    let directory = File::open(version_dir)
+        .unwrap_or_else(|e| panic!("opening {}: {e}", version_dir.display()));
+    directory.try_lock_shared().unwrap_or_else(|e| {
+        panic!(
+            "could not read fixtures while holding the version lock for {}: {e}",
+            version_dir.display()
+        )
+    });
+    let mut screens = Vec::new();
+    for entry in std::fs::read_dir(version_dir)
+        .unwrap_or_else(|e| panic!("reading {}: {e}", version_dir.display()))
+    {
+        let path = entry.expect("directory entry").path();
+        assert!(
+            path.file_name()
+                .is_none_or(|name| name != ".capture-publish"),
+            "fixture publication is unfinished in {}. Run the capture tool again to recover it",
+            version_dir.display()
+        );
+        match path.extension().and_then(|ext| ext.to_str()) {
+            Some("txt") => screens.push(path),
+            Some("title") => assert!(
+                path.with_extension("txt").is_file(),
+                "fixture title {} has no matching .txt screen",
+                path.display()
+            ),
+            _ => {}
+        }
+    }
+    screens.sort();
+    screens
+        .iter()
+        .map(|path| load_one(harness, version, path))
+        .collect()
+}
+
+/// The text and title must describe the same captured terminal state, since the screen reader consumes both.
 fn load_one(harness: &str, version: &str, path: &Path) -> ScreenFixture {
     let stem = path
         .file_stem()
@@ -147,6 +180,27 @@ fn load_one(harness: &str, version: &str, path: &Path) -> ScreenFixture {
         title: title.trim_end_matches('\n').to_string(),
         path: path.to_path_buf(),
     }
+}
+
+/// A crash can leave two individually valid files from different captures. Refuse a version with a journal even
+/// when both sides of the pair have plausible contents.
+#[test]
+#[should_panic(expected = "fixture publication is unfinished")]
+fn screen_fixtures_reject_an_unfinished_publication() {
+    let version = tempfile::tempdir().expect("temporary fixture version");
+    std::fs::write(version.path().join("idle-fresh.txt"), "new screen").unwrap();
+    std::fs::write(version.path().join("idle-fresh.title"), "previous title").unwrap();
+    std::fs::create_dir(version.path().join(".capture-publish")).unwrap();
+    load_version_fixtures("codex", "1.2.3", version.path());
+}
+
+/// A stray title used to disappear from the fixture set. Call it out so an incomplete capture cannot look valid.
+#[test]
+#[should_panic(expected = "has no matching .txt screen")]
+fn screen_fixtures_reject_an_orphan_title() {
+    let version = tempfile::tempdir().expect("temporary fixture version");
+    std::fs::write(version.path().join("idle-fresh.title"), "orphan title").unwrap();
+    load_version_fixtures("codex", "1.2.3", version.path());
 }
 
 fn sorted_dirs(dir: &Path) -> Vec<PathBuf> {

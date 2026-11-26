@@ -1168,8 +1168,9 @@ systemd or SSH substrate ran.
   and IPv6 proxy URLs, including authorities with multiple `@` signs, punctuation and adjacent prose. Public links still
   pass. Stand-ins also exercise the resolved executable, cleanup after startup metadata fails, shutdown after control
   socket creation fails and retaining the run directory until stop is confirmed. Run it when the scrubber or its host
-  backend changes. Seconds, no network or vendor turns. The recorded agent screen fixtures selection independently
-  checks the Rust guard. A drive-failure stand-in also verifies that both harnesses' captured frames are kept.
+  backend changes. Seconds, no network or vendor turns. A drive-failure stand-in verifies that both harnesses' frames
+  are kept. Publication stand-ins check rollback after a failed write and recovery after an interrupted pair swap. The
+  recorded agent screen fixtures selection independently checks the Rust guard.
 - `python3 -B scripts/test-run-harness-drift.py` — the drift runner's build and category discovery, default base
   selection, harness filters, child environment, per-case timeout, category verdicts and evidence retention against
   stand-ins, including cancellation without a failing drift verdict. It also checks the once-per-harness upgrade step
