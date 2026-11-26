@@ -1410,9 +1410,12 @@ fn the_arrow_choice_follows_a_template_after_a_catalog_push(cx: &mut TestAppCont
 }
 
 /// A template disabled while a model catalog is pending must never enqueue an edit in case its name is reused.
+/// Specified: Enter on the refused `nowhere` row keeps the query; the template is then replaced under the same name by
+/// one setting only the session name, which Replace with neither holds nor refuses, and the catalog answers; the draft
+/// is unchanged, so nothing was queued for it (a queued edit setting only the name would now apply).
 #[gpui::test]
 fn enter_on_a_held_template_keeps_its_query_and_never_queues_the_edit(cx: &mut TestAppContext) {
-    use farhelm_proto::launcher::{LaunchTemplate, TemplateDestination, TemplateFields};
+    use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
     use farhelm_proto::ui_channel::{Collection, CollectionChanges, KeyedEntry};
     let source = super::draft_tests::session(codex(None, None, None));
     let (mut helm, cx) =
@@ -1432,7 +1435,7 @@ fn enter_on_a_held_template_keeps_its_query_and_never_queues_the_edit(cx: &mut T
     let replacement = LaunchTemplate {
         name: "nowhere".into(),
         fields: TemplateFields {
-            destination: Some(TemplateDestination::Folder("/other".into())),
+            name: Some("queued".into()),
             ..TemplateFields::default()
         },
     };
@@ -1675,8 +1678,8 @@ fn a_past_model_from_search_chooses_its_agent_type(cx: &mut TestAppContext) {
     assert_eq!(chosen.agent.model_owner, Some(LaunchHarness::Claude));
 }
 
-/// Restart with refuses a recent setup and a saved folder from search with the destination's words, and Replace with
-/// takes a recent setup (it holds only the host). A setup with a retired container choice is refused above the box
+/// Restart with refuses a recent setup and a saved folder from search with the destination's words, and so does Replace
+/// with, which holds the source's folder too. A setup with a retired container choice is refused above the box
 /// with the shared reason. Why: SPEC.md, "Restart with": "Search results and recent setups that set a held field are
 /// still refused", and a container setup supports Delete only (old `retired_recent_is_refused_without_changing_the_draft`).
 #[gpui::test]
@@ -1731,14 +1734,29 @@ fn history_rows_are_refused_where_they_cannot_apply(cx: &mut TestAppContext) {
         fixture_hosts(&[0]),
     );
     answer_history(&mut helm, cx, &answer);
+    let before = draft(cx);
     type_in(cx, "recent:project");
     keys(cx, "enter");
-    assert_eq!(name_of(cx, "launcher-search-refusal"), None);
     assert_eq!(
-        draft(cx).folder.value(),
-        "/src/project",
-        "Replace with takes it"
+        name_of(cx, "launcher-search-refusal").as_deref(),
+        Some("Destination cannot change here: this dialog keeps destination fixed for replace")
     );
+    assert_eq!(
+        draft(cx),
+        before,
+        "Replace with keeps its folder and takes nothing"
+    );
+    for _ in 0.."recent:project".len() {
+        keys(cx, "backspace");
+    }
+    type_in(cx, "folder:project");
+    keys(cx, "enter");
+    assert_eq!(
+        name_of(cx, "launcher-search-refusal").as_deref(),
+        Some("Destination cannot change here: this dialog keeps destination fixed for replace"),
+        "a saved folder is refused too"
+    );
+    assert_eq!(draft(cx), before);
 
     let mut retired = chosen(LaunchHarness::Codex, None, None, None);
     retired.container = Some(

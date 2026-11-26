@@ -2,6 +2,7 @@
 kind: fixed
 ---
 
-In the wide session launcher, the Enter hint on recent search results says Fill. In Replace with, screen readers
-describe an available recent setup as “Fill from recent setup”, and the highlighted one also says that a click fills the
-form while Enter starts the replacement and deletes the source session.
+In the wide session launcher, the Enter hint on recent search results says Fill.
+
+Replace with no longer takes recent setups at all (it keeps the source session's directory), so the screen reader
+wording this entry once described for Replace with's recent setups was removed again before release.

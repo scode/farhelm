@@ -2475,9 +2475,9 @@ impl Render for Launcher {
             );
         }
 
-        // A held destination (Restart with's) is shown, not edited: its folder as read-only text, its name not at all
+        // A held destination (Replace with's and Restart with's) is shown, not edited: its folder as read-only text
         // (SPEC.md, "Restart with": held fields' "editing controls are hidden", and "The held agent type, host and
-        // folder stay visible").
+        // folder stay visible"; "Replace with": "Folder is shown read-only").
         // A new environment's folder is its home, shown as a held destination is (SPEC.md: "Folder is fixed to the new
         // sandbox's home, without Browse or recent folders").
         let managed_checkout = self.draft.checkout.is_some();
@@ -2752,7 +2752,6 @@ impl Render for Launcher {
                     )
                     .children(destination_switch),
             )
-            .children(self.replacement_checkout_warning(palette, cx))
             .children(
                 managed_checkout
                     .then(|| self.checkout_setup(palette, window, cx))

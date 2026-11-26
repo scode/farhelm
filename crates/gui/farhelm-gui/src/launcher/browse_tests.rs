@@ -297,9 +297,11 @@ fn browse_is_not_offered_where_the_folder_cannot_change(cx: &mut TestAppContext)
     );
 }
 
-/// Replace with holds its host, while Browse stays available on the editable folder segment of that address.
+/// Replace with holds its host and its folder (SPEC.md, "Replace with": the destination stays the source's), so Browse,
+/// which picks another folder, is not offered there, as in Restart with. Why: a Browse pick that the request then
+/// ignored, or one that moved the replacement out of the source's checkout, would contradict what the form shows.
 #[gpui::test]
-fn browse_is_offered_under_replace_withs_held_host(cx: &mut TestAppContext) {
+fn browse_is_not_offered_under_replace_withs_held_folder(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(super::view_tests::codex(None, None, None));
     let (_helm, cx) = launcher_with_hosts(
         cx,
@@ -307,18 +309,15 @@ fn browse_is_offered_under_replace_withs_held_host(cx: &mut TestAppContext) {
         fixture_hosts(&[0]),
     );
     assert!(
-        draft(cx).holds(super::draft::Field::Host),
-        "the premise: Replace with holds its host"
+        draft(cx).holds(super::draft::Field::Destination),
+        "the premise: Replace with holds its destination"
     );
     test_support::frame(cx);
-    let (button, folder) = (
-        test_support::bounds(cx, "launcher-browse"),
-        test_support::bounds(cx, "launcher-folder-row"),
-    );
     assert!(
-        button.left() >= folder.right(),
-        "Browse follows the editable folder"
+        cx.debug_bounds("launcher-host-row").is_some(),
+        "the premise: Replace with's launcher is drawn"
     );
+    assert!(cx.debug_bounds("launcher-browse").is_none());
 }
 
 /// Choosing another host forgets the listing: it named the folders of the host it was asked of. Why: taking one would

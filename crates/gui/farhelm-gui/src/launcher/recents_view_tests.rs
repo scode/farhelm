@@ -554,75 +554,74 @@ fn up_from_the_first_recent_restores_the_forms_enter(cx: &mut TestAppContext) {
     assert!(create.body.as_ref().unwrap()["launch"]["model"].is_null());
 }
 
-/// Invoking a recent option fills the form. Enter on the empty pane's highlighted recent can replace the source, so
-/// that key cap must name the replacement. Query results only fill. Restart's rows explain why its destination is held.
+/// Replace with and Restart with hold the destination every recent setup sets, so both show their recent setups
+/// disabled with that reason (SPEC.md, "Creation": "Replace with and Restart with show recent setups disabled with the
+/// reason"). Why: taking a setup there would either move the replacement out of the source's folder or checkout, or
+/// silently drop the setup's destination while applying the rest. Specified: in each mode the row is shown, cannot be
+/// clicked, explains that the destination stays fixed for that mode, and neither a click, a keyboard Enter nor a
+/// `recent:` result changes the draft or sends anything.
 #[gpui::test]
-fn replace_rows_name_the_action_and_restart_rows_are_inactive(cx: &mut TestAppContext) {
-    let source = super::draft_tests::session(codex(None, None, None));
-    let (mut helm, cx) = launcher_with_hosts(
-        cx,
-        LaunchDraft::replace_with("a", &source, Some(1)),
-        fixture_hosts(&[0]),
-    );
+fn replace_and_restart_show_recent_setups_disabled(cx: &mut TestAppContext) {
     let answer = history(vec![launched(
         "/src/project",
         &chosen(LaunchHarness::Codex, Some("recent-model"), None, None),
     )]);
-    answer_history(&mut helm, cx, &answer);
-    let name = name_of(cx, "launcher-recent-0").unwrap_or_default();
-    assert!(
-        name.starts_with("Fill from recent setup: /src/project · "),
-        "{name}"
-    );
-    assert!(!recent_highlighted(cx, "launcher-recent-0"));
-    test_support::click(cx, "launcher-search-row");
-    keys(cx, "down");
-    assert!(recent_highlighted(cx, "launcher-recent-0"));
-    let name = name_of(cx, "launcher-recent-0").expect("the highlighted option has a name");
-    assert!(name.contains("recent-model"), "{name}");
-    assert!(
-        name.ends_with("Click to fill the form. Enter replaces and deletes the source session."),
-        "{name}"
-    );
-    assert_eq!(
-        name_of(cx, "launcher-recent-enter").as_deref(),
-        Some("⏎ Replace"),
-        "the highlighted row's cap names the replacement"
-    );
-    super::search_view_tests::type_in(cx, "recent:project");
-    assert_eq!(
-        name_of(cx, "launcher-recent-enter").as_deref(),
-        Some("⏎ Fill")
-    );
-    assert!(draft(cx).agent.model.is_none());
-    keys(cx, "enter");
-    assert_eq!(draft(cx).agent.model.as_deref(), Some("recent-model"));
-    assert!(super::launch_tests::sent_to(&mut helm, cx, "/api/sessions/a/replace").is_empty());
-
+    let replace_source = super::draft_tests::session(codex(None, None, None));
     // A Guarded source, so the strip's permission narrowing keeps the recent Codex setup (which composes as Guarded).
     // A source with no recorded permission now restarts as YOLO, and its strip would hide that setup.
-    let mut source =
+    let mut restart_source =
         super::draft_tests::session(codex(None, None, Some(LaunchPermission::Guarded)));
-    source.restart_offer = RestartOffer::Resume;
-    let (mut helm, cx) = launcher_with_hosts(
-        cx,
-        LaunchDraft::restart_with("missing", &source, Some(1)).unwrap(),
-        fixture_hosts(&[0]),
-    );
-    answer_history(&mut helm, cx, &answer);
-    let before = draft(cx);
-    let row = test_support::frame(cx)
-        .into_iter()
-        .find(|node| node.element_id.as_deref() == Some("launcher-recent-0"))
-        .expect("Restart with shows the recent row");
-    assert!(!row.flags.click, "held rows cannot be taken by clicking");
-    assert!(
-        recent_help(cx, "launcher-recent-0")
-            .is_some_and(|help| help.contains("keeps destination fixed"))
-    );
-    test_support::click(cx, "launcher-search-row");
-    keys(cx, "down enter");
-    assert_eq!(draft(cx), before);
+    restart_source.restart_offer = RestartOffer::Resume;
+    for (opened, verb) in [
+        (
+            LaunchDraft::replace_with("a", &replace_source, Some(1)),
+            "replace",
+        ),
+        (
+            LaunchDraft::restart_with("missing", &restart_source, Some(1)).unwrap(),
+            "restart",
+        ),
+    ] {
+        let (mut helm, cx) = launcher_with_hosts(cx, opened, fixture_hosts(&[0]));
+        answer_history(&mut helm, cx, &answer);
+        let before = draft(cx);
+        let row = test_support::frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("launcher-recent-0"))
+            .unwrap_or_else(|| panic!("{verb}: the recent row is shown"));
+        assert!(
+            !row.flags.click,
+            "{verb}: held rows cannot be taken by clicking"
+        );
+        let help = recent_help(cx, "launcher-recent-0").unwrap_or_default();
+        assert!(
+            help.contains(&format!("keeps destination fixed for {verb}")),
+            "{verb}: {help}"
+        );
+        test_support::click(cx, "launcher-recent-0");
+        test_support::click(cx, "launcher-search-row");
+        keys(cx, "down enter");
+        assert_eq!(draft(cx), before, "{verb}: nothing was taken");
+        assert_eq!(
+            name_of(cx, "launcher-recent-enter"),
+            None,
+            "{verb}: no Enter cap"
+        );
+        super::search_view_tests::type_in(cx, "recent:project");
+        keys(cx, "enter");
+        assert_eq!(
+            draft(cx).agent.model,
+            before.agent.model,
+            "{verb}: the result fills nothing"
+        );
+        assert!(
+            helm.commands()
+                .iter()
+                .all(|command| !command.path.ends_with("/replace")
+                    && !command.path.ends_with("/restart")),
+            "{verb}: nothing was sent"
+        );
+    }
 }
 
 /// Read the real hover help after the layer tracker's delay has elapsed.

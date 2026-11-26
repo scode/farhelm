@@ -1078,7 +1078,7 @@ fn the_snapshot_reads_a_chosen_repository_as_the_destination() {
 
 /// Replace with holds the host. A template naming the same host applies its other fields with the host left alone; one
 /// naming another host is refused (SPEC.md: a template "that changes a field the current launcher mode holds fixed,
-/// such as the host in Replace with").
+/// such as Replace with's host or folder").
 #[test]
 fn replace_with_drops_an_equal_host_and_refuses_another() {
     let fixture = Fixture::new();
@@ -1118,6 +1118,69 @@ fn replace_with_drops_an_equal_host_and_refuses_another() {
     let refusal = fixture.apply(&mut draft, &[other_host]).unwrap_err();
     assert!(refusal.contains("its host cannot change here"), "{refusal}");
     assert_eq!(draft, before);
+}
+
+/// Replace with holds the source's folder too (SPEC.md, "Replace with": the destination stays the source's). A template
+/// repeating that folder, trailing slash and all, applies its other fields with the folder left alone; one naming
+/// another folder, or any repository, is refused whole. Why: applying the rest while dropping the destination would
+/// launch somewhere other than the template says, and taking it would move the replacement out of the source's folder
+/// or checkout.
+#[test]
+fn replace_with_drops_an_equal_folder_and_refuses_another_destination() {
+    let fixture = Fixture::new();
+    let session = session(SessionLaunch::Command(CommandLaunch {
+        custom_agent: None,
+        command: "make dev".into(),
+        yolo: false,
+        agent: None,
+        resume: None,
+    }));
+    let mut draft = LaunchDraft::replace_with("s1", &session, Some(1));
+    assert_eq!(
+        draft.folder.value(),
+        "/src/project",
+        "the premise: the source's folder"
+    );
+    let same_folder = template(
+        "same-folder",
+        TemplateFields {
+            destination: Some(TemplateDestination::Folder("/src/project/".into())),
+            command: Some("make test".into()),
+            ..TemplateFields::default()
+        },
+    );
+    fixture.apply(&mut draft, &[same_folder]).unwrap();
+    assert_eq!(draft.command.command, "make test");
+    assert_eq!(draft.folder.value(), "/src/project");
+
+    for (name, destination) in [
+        (
+            "other-folder",
+            TemplateDestination::Folder("/srv/elsewhere".into()),
+        ),
+        (
+            "repository",
+            TemplateDestination::Github("acme/widget".into()),
+        ),
+    ] {
+        let before = draft.clone();
+        let moving = template(
+            name,
+            TemplateFields {
+                destination: Some(destination),
+                command: Some("make lint".into()),
+                ..TemplateFields::default()
+            },
+        );
+        let refusal = fixture.apply(&mut draft, &[moving]).unwrap_err();
+        assert!(
+            refusal.contains(
+                "its destination cannot change here: this dialog keeps the session's folder"
+            ),
+            "{name}: {refusal}"
+        );
+        assert_eq!(draft, before, "{name}: nothing from it is applied");
+    }
 }
 
 /// Restart with holds the launch kind, the agent type, the host, the folder and the name. A template that repeats them

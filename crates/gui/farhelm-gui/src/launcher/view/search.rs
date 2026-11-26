@@ -55,7 +55,7 @@ use gpui::{
 use super::Launcher;
 use super::field_list::{Drawn, FieldList, step};
 use super::host_name_with_phase;
-use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal, RecentSurface, recent_hover, wrapper_tail};
+use super::recents::{RecentRefusal, RecentSurface, recent_hover, wrapper_tail};
 use crate::assets::{Icon, TERMINAL_FONT};
 use crate::components::{
     HoverHelp, OptionRow, Role, ScrollBox, Vertical, chips_and_words, command_field,
@@ -439,8 +439,8 @@ impl Launcher {
 
     /// Why taking `row` would change nothing, in the old launcher's words where it had some: a field this launcher
     /// holds fixed ([`Self::held_by_row`]), a folder row or Browse while a new environment is chosen
-    /// ([`environment_refusal`]), a recent setup carrying a retired container choice or, in Replace with, a new
-    /// environment ([`KEEPS_ENVIRONMENT`]), or a host, template or history row since withdrawn.
+    /// ([`environment_refusal`]), a recent setup carrying a retired container choice, or a host, template or history
+    /// row since withdrawn.
     fn search_row_refusal(&self, row: &Row, cx: &App) -> Option<String> {
         if let Some(reason) = self.held_row_reason(row) {
             return Some(reason);
@@ -454,9 +454,8 @@ impl Launcher {
             Row::Recent { entry, .. } => {
                 match self.recent_refusal(entry, RecentSurface::Search, cx)? {
                     RecentRefusal::Retired => return Some(RETIRED_CONTAINER_REASON.to_owned()),
-                    RecentRefusal::KeepsEnvironment => return Some(KEEPS_ENVIRONMENT.to_owned()),
                     RecentRefusal::Stale => true,
-                    // Not reached: `held_by_row` refused above what Restart with holds.
+                    // Not reached: `held_by_row` refused above the destination Replace with and Restart with hold.
                     RecentRefusal::Held => {
                         debug_assert!(
                             false,
@@ -502,10 +501,6 @@ impl Launcher {
             );
         }
         self.held_row_reason(row)
-            .or_else(|| {
-                matches!(row, Row::Recent { entry, .. } if entry.target.is_some() && self.draft.holds(Field::Host))
-                    .then(|| KEEPS_ENVIRONMENT.to_owned())
-            })
             .map(|words| HostSentence::new("launcher-held-choice").text(words))
     }
 

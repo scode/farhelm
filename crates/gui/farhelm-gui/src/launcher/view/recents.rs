@@ -13,10 +13,6 @@ use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{DestinationKind, Field};
 use crate::launcher::recents::{DraftDestination, RecentFilter, placement, strip};
 
-/// Why a new environment's setup is not taken in Replace with, the old launcher's words for a placement where the mode
-/// keeps the source's (decided by the launcher area on 2026-11-16: the row is shown and refused, not left out).
-pub(super) const KEEPS_ENVIRONMENT: &str = "Restart and Replace keep the existing environment";
-
 /// Why a recent setup was not taken; the strip and the search each say it in their own place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RecentRefusal {
@@ -25,11 +21,10 @@ pub(super) enum RecentRefusal {
     /// It is no longer in the chosen host's history as read now: the host or its history changed after the row was
     /// drawn.
     Stale,
-    /// This launcher holds the agent type and destination the setup would change (Restart with).
+    /// This launcher holds a field the setup would change: the destination, which every setup sets, in Replace with
+    /// and Restart with, and the agent type too in Restart with. The row is shown and refused rather than left out
+    /// (decided by the launcher area on 2026-11-16 for a new environment's setup in Replace with).
     Held,
-    /// The setup made a new environment, and this launcher keeps the source's host (Replace with):
-    /// [`KEEPS_ENVIRONMENT`].
-    KeepsEnvironment,
 }
 
 /// Only the empty command pane can use a verified checkout setup retained across suspension.
@@ -89,12 +84,10 @@ impl Launcher {
         if !self.recent_offered(entry, surface, cx) {
             return Some(RecentRefusal::Stale);
         }
-        // Both lists show the reason before taking a held row and still check it again at dispatch.
-        if self.draft.holds(Field::AgentType) {
-            return Some(RecentRefusal::Held);
-        }
-        (entry.target.is_some() && self.draft.holds(Field::Host))
-            .then_some(RecentRefusal::KeepsEnvironment)
+        // Both lists show the reason before taking a held row and still check it again at dispatch. Every setup
+        // carries a destination, so a held one refuses it rather than dropping the setup's folder or repository.
+        (self.draft.holds(Field::AgentType) || self.draft.holds(Field::Destination))
+            .then_some(RecentRefusal::Held)
     }
 
     /// Take `entry`: fill the draft with its setup (see the module docs), or change nothing and say why

@@ -66,17 +66,15 @@ variable. Hooks already installed can still report. See [Turning it off](/docs/h
 or Zsh session it starts a fresh shell. It makes a
 new session in this one's place, so the old conversation, shell tabs, and terminal history all go, and it asks you to
 confirm first; press Enter to go ahead. **Replace with** opens the [session launcher](/docs/using/start-a-session/) filled in with this session's
-choices; change anything but the host, and the new session takes this one's place. **Clone** opens the launcher the same
+choices; change the agent, its settings, the first message or the name, and the new session takes this one's place in
+the same host and directory. **Clone** opens the launcher the same
 way but leaves this session alone, so you end up with two. Clone of a session in its own
 [sandbox](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) or
 [container](/docs/agents/containerized-sessions/) opens on a new one from the same recipe, on your Tensorlake account or the same
 container host, starting in its home directory, or in a fresh checkout of the same repository there when the source was
-in a managed checkout, while **Replace with** keeps the existing sandbox or container. For a source in a managed
-checkout, **Replace with** keeps its checkout and changes when you leave **Folder** on the source's directory. Choosing
-**Managed checkout** starts a fresh clone, and the warning in **Destination** says what happens to the old checkout: when
-you replace its last session, it moves to the host's trash. See
-[Start from a managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) for the sandbox and container
-case. None of these sends an
+in a managed checkout, while **Replace with** keeps the existing sandbox or container. **Replace with** always keeps the
+session's directory, and its managed checkout and your changes when it has one; to start somewhere else, use **Clone**.
+See [Start from a managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout). None of these sends an
 [initial prompt](/docs/using/start-a-session/#supply-the-first-message) again.
 
 While the agent is working (its status is running), **Restart** asks you to confirm first, since restarting stops it.

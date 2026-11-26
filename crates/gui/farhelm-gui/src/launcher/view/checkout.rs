@@ -141,7 +141,9 @@ impl PreviewKey {
 /// due when it was armed, or, for a quick launch never shown whose base name was taken, its next candidate's
 /// ([`Launcher::settle_waiting_launch`]).
 struct Armed {
-    /// A later preview can supply the destination while the answer still owns the source permission.
+    /// The source consent the press was answered with, carried to the submit the preview releases. Only New and Clone
+    /// wait for a preview now (Replace with holds its folder and never has a checkout), so it is the empty consent in
+    /// practice; it is kept so that the waiting launch submits exactly what its press would have.
     source: SourceConsent,
     /// A wake can refresh the preview on another connection to this same installation.
     yolo_consent: Option<super::YoloConsent>,
@@ -891,34 +893,6 @@ impl Launcher {
         )
     }
 
-    /// Explain the source checkout's fate beside Where when making a fresh
-    /// clone. The selected repository belongs to the replacement, so it
-    /// cannot say which checkout the source can leave behind.
-    pub(super) fn replacement_checkout_warning(
-        &self,
-        palette: &theme::Palette,
-        cx: &App,
-    ) -> Option<Div> {
-        self.draft.checkout.as_ref()?;
-        let (_, checkout) = self.replacement_checkout_source(self.store.read(cx).collections())?;
-        let ending = if checkout.in_environment {
-            " If this replaces its last session, the old checkout moves to the trash inside the sandbox or container. \
-              Deleting the sandbox or container also deletes its trash."
-        } else {
-            " If this replaces its last session, the old checkout moves to the trash."
-        };
-        let sentence = HostSentence::new("launcher-replacement-checkout-warning")
-            .text("Starts from a fresh clone without the changes in this session's checkout of ")
-            .host(&checkout.repo)
-            .text(".")
-            .text(ending);
-        Some(
-            help_line_container(palette)
-                .text_color(theme::color(palette.warn_bright))
-                .child(sentence),
-        )
-    }
-
     /// Anchor suggestions to the width of the repository input, whether it shares the address border or has
     /// a row of its own. Follow dismissals by the layer manager so Escape leaves it closed until the next input.
     pub(super) fn repository_control(
@@ -1137,7 +1111,8 @@ impl Launcher {
         )
     }
 
-    /// Describe future Delete of the new checkout. Replace with's separate warning describes retiring the old checkout.
+    /// Describe future Delete of the new checkout. Only New and Clone start one: Replace with keeps the source's
+    /// folder.
     pub(super) fn checkout_lifetime_note(&self, palette: &theme::Palette, cx: &App) -> AnyElement {
         use crate::session_list::environment::Environment;
         let words = if self.draft.target.is_some() {

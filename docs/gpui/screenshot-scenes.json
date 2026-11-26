@@ -2027,7 +2027,7 @@
     },
     {
       "id": "app-launcher-replace-with",
-      "title": "Replace with chosen from Fixture 1's row menu: the launcher holding the source's host with Browse under it, prefilled from its launch, with Replace's warning under the actions while the source is alive",
+      "title": "Replace with chosen from Fixture 1's row menu: the launcher holding the source's host and folder, prefilled from its launch, with Replace's warning under the actions while the source is alive",
       "reference": null,
       "mockup": false,
       "start": [
@@ -2977,7 +2977,7 @@
     },
     {
       "golden": "launcher-replace-with",
-      "title": "Replace with, showing the held host and the warning about replacing the source",
+      "title": "Replace with, showing the held host and folder, its disabled recent setups and the warning about replacing the source",
       "reference": null
     },
     {
@@ -2986,8 +2986,8 @@
       "reference": null
     },
     {
-      "golden": "launcher-replace-typed-recent",
-      "title": "Replace with after typing a recent setup's name: the result says what Return does and keeps its permission visible",
+      "golden": "launcher-typed-recent",
+      "title": "New after typing a recent setup's name: the result says what Return does and keeps its permission visible",
       "reference": null
     },
     {
@@ -3651,11 +3651,6 @@
     {
       "golden": "launcher-restart-wake-refusal",
       "title": "Restart with after the sandbox refused to resume, reporting the failure as a restart refusal",
-      "reference": null
-    },
-    {
-      "golden": "launcher-replace-checkout-in-sandbox",
-      "title": "Replace with a Managed checkout inside an owned sandbox, explaining what happens to the source checkout and the new one",
       "reference": null
     },
     {

@@ -1135,9 +1135,10 @@ partly: line 1166's prefill and launch in
 `launcher::replace_with_tests::{replace_with_prefills_the_source_and_holds_its_host, replace_with_warns_about_a_running_source_and_sends_its_guard, replace_with_opens_its_replacement_only_where_the_source_was_open}`
 (its edit through search in `launcher::search_view_tests::a_word_and_enter_choose_it_and_empty_the_box`, the same path
 in every mode); 1281 in `launcher::replace_with_tests::cancelling_replace_with_sends_nothing`; 1384 in
-`replace_with_warns_about_a_running_source_and_sends_its_guard`, and its recent-setup row's "Replace:" name and "⏎
-Replace" hint in `launcher::recents_view_tests::replace_with_says_replace_and_restart_with_has_no_strip`, except Launch
-and that row naming the warning as their accessible description (deviations below); 1446 and 1503 in
+`replace_with_warns_about_a_running_source_and_sends_its_guard`, except Launch naming the warning as its accessible
+description (deviations below); its recent-setup row's "Replace:" name and "⏎ Replace" hint are gone since Replace with
+holds the source's folder and refuses every recent setup
+(`launcher::recents_view_tests::replace_and_restart_show_recent_setups_disabled`); 1446 and 1503 in
 `launcher::replace_with_tests::replace_with_follows_the_source_and_sends_the_guard_it_shows` (the guard a press sends;
 the helm keeps a source more alive than shown); also
 `launcher::replace_with_tests::{a_refused_replace_with_comes_back_and_stays_on_the_source, replace_with_waits_while_its_source_is_busy}`;
@@ -1262,7 +1263,7 @@ Case: its 13 cases of a launch that resumes its suspended host first (lines 216 
 other 8 cases are host and session lifecycle and stay with that file's entry.
 
 Deterministic fake-helm tests cover launcher wakes in `launcher::wake_tests`, `launcher::checkout_tests` and
-`templates::dispatch_tests`. The Replace with case for a fresh managed checkout after wake still needs coverage. A
+`templates::dispatch_tests`. Replace with no longer starts a managed checkout, so it has no wake case of its own. A
 recent checkout setup can be pressed while suspended after the open launcher read it on the same verified installation.
 The history read requires a connection. The old browser fixture simulated suspension in the page while its helm still
 had a connected host.
@@ -1425,8 +1426,8 @@ had a connected host.
   press, which the helm refuses as stale and the launcher answers with a new preview and nothing sent
   (`launcher::checkout_tests::a_lost_race_takes_a_new_preview_and_sends_nothing`). The helm's history of launches into
   new environments, which the old app re-read on the same notices, is read once as the launcher opens.
-- The folder dropdown leaves out Local home in Replace with, which keeps its host; the old dropdown offered it there too
-  (`launcher::folder_list_tests::replace_with_offers_no_local_home`).
+- Replace with has no folder dropdown, since it holds the source's folder; the old dropdown was offered there, Local
+  home included (`launcher::folder_list_tests::replace_with_offers_no_folder_list`).
 - The folder dropdown's headings (Recent, Reset) are labelled lines among the options, not groups named by them, so its
   rows scroll into view one by one; and like the model field, the folder field reports no expanded or active-row state.
 - The recent setups strip's cells are fixed tracks in pixels rather than the old `ch` units (the host and choices tracks

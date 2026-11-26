@@ -257,10 +257,12 @@ pub fn open_clone(session: &str, window: &mut Window, cx: &mut App) -> bool {
 /// instead.
 ///
 /// The host is the source's own row, held: the helm refuses a Replace with on another host, Clone being the way to move
-/// hosts, so there is no fallback and no note. While the source has anything alive the launcher shows Replace's warning
-/// beside its main action, following the source's state while it stays open, and a press carries the precondition
-/// matching what it showed. The replacement opens only while its source is still the open session, as plain Replace's
-/// does, and the source's row and header show the request while it waits, as they show plain Replace's.
+/// hosts, so there is no fallback and no note. The folder is held the same way: Replace with replaces what runs in the
+/// session, not where it runs, and Clone is how a session moves to another folder or repository. While the source has
+/// anything alive the launcher shows Replace's warning beside its main action, following the source's state while it
+/// stays open, and a press carries the precondition matching what it showed. The replacement opens only while its
+/// source is still the open session, as plain Replace's does, and the source's row and header show the request while it
+/// waits, as they show plain Replace's.
 pub fn open_replace_with(session: &str, window: &mut Window, cx: &mut App) -> bool {
     if layers::focus_layer_open(window, cx) || !new_available(cx) {
         return false;

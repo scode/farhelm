@@ -192,8 +192,8 @@ Matching setups can show even when the selected host is disconnected or you alre
 one restores the recipe and where it runs. The next launch creates a fresh sandbox or container. If the recipe or
 container host has been removed, choose another before launching.
 
-In **Replace with…**, these setups are disabled because the replacement stays in the existing environment. Enter on a
-highlighted setup there replaces the session you opened it from, so its key reads **⏎ Replace**.
+In **Replace with…** and **Restart with…**, recent setups are shown but disabled: each one would set its own directory,
+and those keep the session's.
 
 To start another session like one you already have, choose **Clone** from that session's menu instead. It opens the
 launcher with that session's choices already filled in. [Stop, restart, and resume](/docs/using/stop-restart-resume/)
@@ -286,11 +286,9 @@ in a subdirectory. The name starts as the source's name plus `-clone`, then `-cl
 taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **Folder**
 restores the source's directory and name; for a new sandbox or container it stays at the home directory.
 
-**Replace with** starts on **Folder** at the source session's directory. If the session uses a managed checkout, keeping
-that directory keeps your changes, and the launcher names the checkout. Choose **Managed checkout** to start from a fresh
-clone without those changes; the warning in **Destination** then says what happens to the old checkout: when you replace
-the last session using it, it moves to the host's trash. In a sandbox or container, that trash stays inside and is
-deleted with the sandbox or container. **Replace** keeps the existing directory.
+**Replace with** keeps the source session's directory, and you cannot change it there. If the session uses a managed
+checkout, the replacement keeps working in it with your changes, and the launcher names the checkout. To start from a
+fresh clone instead, use **Clone**. **Replace** keeps the existing directory too.
 
 When no [prepared checkout](/docs/using/start-a-session/#prepared-checkouts) is ready, Git brings the host's cache of the repository up to date, then clones the default branch in the
 session's terminal. The agent starts once that finishes. Both commands use the host's own Git credentials, so anything

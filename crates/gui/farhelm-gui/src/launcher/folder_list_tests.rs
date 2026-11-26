@@ -136,18 +136,6 @@ fn focus_folder(cx: &mut VisualTestContext) {
     );
 }
 
-/// Replace with can retire its source, so a history reply that drops the displayed choice cannot turn its Enter
-/// into a submit. The replacement becomes keyboard-accessible after the no-highlight frame is presented.
-#[gpui::test]
-fn a_history_reply_cannot_turn_folder_enter_into_replace_before_presentation(
-    cx: &mut TestAppContext,
-) {
-    let (helm, cx) = super::entry_tests::window_with(cx, Some("a"));
-    assert!(cx.update(|window, cx| super::entry::open_replace_with("a", window, cx)));
-    settle(cx);
-    assert_history_reply_drops_enter(helm, cx, "host=9", "/api/sessions/a/replace");
-}
-
 /// A late history reply can clear New's highlighted folder. Enter still belongs to that pick until redraw.
 #[gpui::test]
 fn a_history_reply_cannot_turn_new_folder_enter_into_a_launch(cx: &mut TestAppContext) {
@@ -213,16 +201,20 @@ fn assert_history_reply_drops_enter(
 }
 
 /// A template batch can change the filter while the folder field still holds focus. Enter cannot pick the row that
-/// inherited the selected index or replace the source before the new choice is visible.
+/// inherited the selected index, or launch a prefilled Clone, before the new choice is visible. (Replace with used to
+/// carry this case; it now holds the source's folder and has no folder list.)
 #[gpui::test]
 fn a_template_batch_cannot_turn_folder_enter_into_a_different_action(cx: &mut TestAppContext) {
-    let (mut helm, cx) = super::entry_tests::window_with(cx, Some("a"));
-    assert!(cx.update(|window, cx| super::entry::open_replace_with("a", window, cx)));
-    settle(cx);
+    let source = super::draft_tests::session(codex(None, None, None));
+    let (mut helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::clone_of(&source, Some(1)),
+        fixture_hosts(&[0]),
+    );
     let [(read, path)] = &history_reads(&mut helm, cx)[..] else {
         panic!("expected one history read");
     };
-    assert!(path.ends_with("host=9"), "{path}");
+    assert!(path.ends_with("host=1"), "{path}");
     helm.reply(*read, 200, Some(history(&["/src/recent"])));
     settle(cx);
     focus_folder(cx);
@@ -240,7 +232,7 @@ fn a_template_batch_cannot_turn_folder_enter_into_a_different_action(cx: &mut Te
     );
 
     cx.update(|window, cx| {
-        let launcher = super::entry::open_launcher(window, cx).expect("Replace with stays open");
+        let launcher = super::entry::open_launcher(window, cx).expect("Clone stays open");
         launcher.update(cx, |launcher, cx| {
             launcher.apply_batch(
                 |draft, _, _| {
@@ -260,7 +252,7 @@ fn a_template_batch_cannot_turn_folder_enter_into_a_different_action(cx: &mut Te
     });
     assert_eq!(draft(cx).folder.value(), "/opt/elsewhere");
     cx.simulate_keystrokes("enter");
-    assert!(super::launch_tests::sent_to(&mut helm, cx, "/api/sessions/a/replace").is_empty());
+    assert!(super::launch_tests::sent_to(&mut helm, cx, "/api/sessions").is_empty());
     assert_eq!(draft(cx).folder.value(), "/opt/elsewhere");
 }
 
@@ -626,10 +618,11 @@ fn a_late_answer_for_another_host_is_dropped(cx: &mut TestAppContext) {
     );
 }
 
-/// Replace with keeps its host, so the list offers no Local home, which would move it. Why: SPEC.md, "Replace with"
-/// keeps the source's host.
+/// Replace with keeps its host and folder (SPEC.md, "Replace with"), so it offers no folder field and no folder list:
+/// neither recent folders, Home, nor Local home, any of which would move the replacement away from the source's
+/// folder. Specified: the folder is drawn read-only and clicking it lists nothing.
 #[gpui::test]
-fn replace_with_offers_no_local_home(cx: &mut TestAppContext) {
+fn replace_with_offers_no_folder_list(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(super::view_tests::codex(None, None, None));
     let (mut helm, cx) = launcher_with_hosts(
         cx,
@@ -637,18 +630,14 @@ fn replace_with_offers_no_local_home(cx: &mut TestAppContext) {
         fixture_hosts(&[0, 1]),
     );
     history_reads(&mut helm, cx);
-    focus_folder(cx);
-    let names: Vec<String> = (0..4)
-        .filter_map(|index| name_of(cx, &format!("launcher-folder-{index}")))
-        .collect();
+    test_support::frame(cx);
     assert!(
-        names.contains(&"Reset folder to home".to_owned()),
-        "{names:?}"
+        cx.debug_bounds("launcher-folder").is_none(),
+        "no editable folder"
     );
-    assert!(
-        !names.contains(&"Reset destination to local home".to_owned()),
-        "{names:?}"
-    );
+    click_in_body(cx, "launcher-folder-held");
+    assert!(!list_shown(cx), "and no list to pick another from");
+    assert_eq!(name_of(cx, "launcher-folder-0"), None);
 }
 
 /// Escape closes the list before the launcher, so a second Escape closes the launcher; Tab closes the list and moves

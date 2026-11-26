@@ -30,8 +30,10 @@ use super::view_tests::{
 };
 use crate::test_support::{self, keys, meta, settle};
 
-/// Replace with's refusal of a new environment's setup, the old launcher's words.
-const KEEPS_ENVIRONMENT: &str = "Restart and Replace keep the existing environment";
+/// Replace with's refusal of any recent setup, a new environment's included: the setup sets the destination the mode
+/// holds.
+const HELD_DESTINATION: &str =
+    "Destination cannot change here: this dialog keeps destination fixed for replace";
 
 /// A new container of `recipe` on host1.
 fn container(recipe: &str) -> LaunchTarget {
@@ -343,10 +345,11 @@ fn environment_setups_stay_apart_from_a_hosts_held_folder_default(cx: &mut TestA
 }
 
 /// SPEC.md, "Sandbox sessions": "Restart, Restart with, Replace and Replace with stay in the existing sandbox"; the
-/// launcher area decided on 2026-11-16 that Replace with shows a new environment's setup and refuses it in the old
-/// launcher's words rather than leaving it out. In Replace with on host1, the `web` container setup has a descriptive
-/// name and explanatory help. The disabled row offers no Fill or Replace action, and Enter on the query result stays
-/// refused with the same reason, so changing presentation cannot change the target.
+/// launcher area decided on 2026-11-16 that Replace with shows a new environment's setup and refuses it rather than
+/// leaving it out. Replace with now holds the destination every setup sets, so the refusal gives that reason. In
+/// Replace with on host1, the `web` container setup has a descriptive name and explanatory help. The disabled row
+/// offers no Fill or Replace action, and Enter on the query result stays refused with the same reason, so changing
+/// presentation cannot change the target.
 #[gpui::test]
 fn replace_with_refuses_an_environment_setup(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(super::view_tests::codex(None, None, None));
@@ -363,7 +366,7 @@ fn replace_with_refuses_an_environment_setup(cx: &mut TestAppContext) {
     assert!(!row.flags.click);
     let help = super::recents_view_tests::recent_help(cx, "launcher-recent-0")
         .expect("a disabled row still explains itself on hover");
-    assert!(help.starts_with(KEEPS_ENVIRONMENT), "{help}");
+    assert!(help.starts_with(HELD_DESTINATION), "{help}");
     assert!(help.contains("~ · web container on host1"), "{help}");
     test_support::click(cx, "launcher-recent-0");
     assert_eq!(draft(cx), before, "nothing changed");
@@ -391,7 +394,7 @@ fn replace_with_refuses_an_environment_setup(cx: &mut TestAppContext) {
     keys(cx, "enter");
     assert_eq!(
         name_of(cx, "launcher-search-refusal").as_deref(),
-        Some(KEEPS_ENVIRONMENT)
+        Some(HELD_DESTINATION)
     );
     assert_eq!(draft(cx), before, "nothing changed");
     test_support::click(cx, "launcher-launch");

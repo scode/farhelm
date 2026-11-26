@@ -12,9 +12,9 @@ use serde_json::json;
 
 use super::draft::Mode;
 use super::entry::open_replace_with;
-use super::entry_tests::{destination, environment_window, window_with};
+use super::entry_tests::{destination, window_with};
 use super::folder_default_tests::edit_draft;
-use super::view_tests::{Field, click_in_body, draft, focused, name_of, shown_refusal};
+use super::view_tests::{draft, name_of, shown_refusal};
 use crate::local_state;
 use crate::session_list::tests::{change, listing_meta, session};
 use crate::test_support::{self, any_open, keys, settle};
@@ -157,9 +157,11 @@ fn answer_folder_check(
     settle(cx);
 }
 
-/// Keeping the source's subdirectory also keeps its checkout changes. The
-/// mark and named help disappear when the Folder field is edited elsewhere
-/// and return for the canonical spelling Browse would use.
+/// Keeping the source's subdirectory also keeps its checkout changes, so the
+/// launcher names the checkout under Folder once the folder check confirms the
+/// source's alias still leads into it. Replace with holds the folder (SPEC.md,
+/// "Replace with": its destination stays the source's), so the Folder is shown
+/// read-only, with no Where switch to start a fresh clone instead.
 #[gpui::test]
 fn replace_with_explains_the_sources_checkout_under_folder(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
@@ -176,24 +178,22 @@ fn replace_with_explains_the_sources_checkout_under_folder(cx: &mut TestAppConte
         name_of(cx, mark).as_deref(),
         Some("Managed checkout of acme/widget")
     );
-
-    click_in_body(cx, "launcher-folder");
-    assert!(focused(cx, Field::Folder), "the edit goes to Folder");
-    keys(cx, "end");
-    cx.simulate_input("/tmp");
-    settle(cx);
-    assert_eq!(draft(cx).folder.value(), "/linked/widget/lib/tmp");
-    assert_eq!(name_of(cx, folder), None);
-    assert_eq!(name_of(cx, mark), None);
-
-    crate::test_support::select_all_text(cx);
-    cx.simulate_input("/work/widget/lib");
-    settle(cx);
-    assert_eq!(draft(cx).folder.value(), "/work/widget/lib");
-    assert_eq!(name_of(cx, folder).as_deref(), Some(help));
-    assert_eq!(
-        name_of(cx, mark).as_deref(),
-        Some("Managed checkout of acme/widget")
+    let shown = |id: &str, cx: &mut VisualTestContext| {
+        test_support::frame(cx)
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some(id))
+    };
+    assert!(
+        shown("launcher-folder-held", cx),
+        "the folder is shown read-only"
+    );
+    assert!(
+        !shown("launcher-folder", cx),
+        "and not as an editable field"
+    );
+    assert!(
+        !shown("launcher-where-row", cx),
+        "no switch to a managed checkout"
     );
 }
 
@@ -208,63 +208,6 @@ fn replace_with_does_not_promise_a_repointed_checkout_folder(cx: &mut TestAppCon
     answer_folder_check(&mut helm, cx, "/linked/widget/lib", "/unrelated/lib");
     assert_eq!(name_of(cx, "launcher-replacement-checkout-folder"), None);
     assert_eq!(name_of(cx, "launcher-replacement-checkout-mark"), None);
-}
-
-/// The new clone can use another repository. The warning still names the
-/// source's checkout and explains why its edits could end up in the trash.
-/// Returning to Folder puts the checkout's own hint back.
-#[gpui::test]
-fn replace_with_warns_where_about_the_sources_checkout(cx: &mut TestAppContext) {
-    let (mut helm, cx) = window_with(cx, Some("a"));
-    source_in_checkout(&mut helm, cx, "a", 9, "/work/widget/lib");
-    assert!(replace_with(cx, "a"));
-    let folder = "launcher-replacement-checkout-folder";
-    let warning = "launcher-replacement-checkout-warning";
-    assert!(name_of(cx, folder).is_some(), "the source has a checkout");
-    assert_eq!(name_of(cx, warning), None);
-    test_support::click(cx, "launcher-destination-Managed checkout");
-    edit_draft(cx, |draft| {
-        draft.choose_repository(farhelm_proto::parse_github_repo("other/repo").unwrap());
-    });
-    assert_eq!(
-        draft(cx).checkout.and_then(|checkout| checkout.repo),
-        Some(farhelm_proto::parse_github_repo("other/repo").unwrap()),
-        "the replacement's repository differs from the source's"
-    );
-    assert_eq!(name_of(cx, folder), None);
-    assert_eq!(
-        name_of(cx, warning).as_deref(),
-        Some(
-            "Starts from a fresh clone without the changes in this session's checkout of acme/widget. If this replaces its last session, the old checkout moves to the trash."
-        )
-    );
-    test_support::click(cx, "launcher-destination-Folder");
-    settle(cx);
-    assert!(name_of(cx, folder).is_some());
-    assert_eq!(name_of(cx, warning), None);
-}
-
-/// Replacing into a fresh checkout in the source's own sandbox releases the
-/// old checkout through Replace's usual archive path. The new checkout follows
-/// the sandbox's permanent removal rule when its last session is later deleted.
-#[gpui::test]
-fn replace_with_warns_that_the_checkouts_trash_stays_inside_the_sandbox(cx: &mut TestAppContext) {
-    let (mut helm, cx) = environment_window(cx, "c", "web");
-    source_in_checkout(&mut helm, cx, "c", 11, "/work/widget/lib");
-    assert!(replace_with(cx, "c"));
-    assert_eq!(draft(cx).host, Some(11));
-    assert!(name_of(cx, "launcher-replacement-checkout-folder").is_some());
-    test_support::click(cx, "launcher-destination-Managed checkout");
-    settle(cx);
-    assert!(draft(cx).checkout.is_some());
-    assert_eq!(
-        name_of(cx, "launcher-replacement-checkout-warning").as_deref(),
-        Some(
-            "Starts from a fresh clone without the changes in this session's checkout of acme/widget. If this replaces its last session, the old checkout moves to the trash inside the sandbox or container. Deleting the sandbox or container also deletes its trash."
-        )
-    );
-    let lifetime = "New folder inside this environment, named after the session. Deleting the checkout's last session removes the folder permanently.";
-    assert_eq!(name_of(cx, lifetime).as_deref(), Some(lifetime));
 }
 
 /// Launch provenance alone does not tell us that the source still uses a
@@ -282,10 +225,6 @@ fn replace_with_of_an_unmanaged_source_has_no_checkout_hint(cx: &mut TestAppCont
     assert!(replace_with(cx, "a"));
     assert_eq!(name_of(cx, "launcher-replacement-checkout-folder"), None);
     assert_eq!(name_of(cx, "launcher-replacement-checkout-mark"), None);
-    test_support::click(cx, "launcher-destination-Managed checkout");
-    settle(cx);
-    assert!(draft(cx).checkout.is_some());
-    assert_eq!(name_of(cx, "launcher-replacement-checkout-warning"), None);
 }
 
 /// The launch button is the confirmation of the source's delete, so it must say what that delete stops, and the request

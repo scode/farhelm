@@ -222,12 +222,8 @@ linux/launcher-recent-custom-flags-narrow--dark.png 59ae23db9f0947cae7249e028cd3
 linux/launcher-recent-custom-flags-narrow--light.png 45852c809efa22df878e3c263bbd2a2547e72b9b
 linux/launcher-renamed-custom-search--dark.png 68e597cbd66917743aad096222cb4db333f58032
 linux/launcher-renamed-custom-search--light.png 73cee4c008c142ffca190f33d36c5e5166427f0e
-linux/launcher-replace-checkout-in-sandbox--dark.png df192030b7fe57147939cfe17d29828e72db6735
-linux/launcher-replace-checkout-in-sandbox--light.png eda7f68d7dcd76795b95d4bd3270ad067c5ecf6b
-linux/launcher-replace-typed-recent--dark.png 3d2bea617746751dfc87fc0265406f387ced2bbb
-linux/launcher-replace-typed-recent--light.png bd0041c6fb7087614d158b8ad384b475869450dd
-linux/launcher-replace-with--dark.png 6963005db3c2776b2617eacec108dd5f5bfae107
-linux/launcher-replace-with--light.png b64174e881096575f60fe13b765af72c74b1923e
+linux/launcher-replace-with--dark.png 5faa65bbf2601feaaf6a9ea74ff6e3e1d8714316
+linux/launcher-replace-with--light.png dee2cf146713420dd971128f86389b2122c26706
 linux/launcher-repository-history-failure--dark.png c4736a84e26a610ca84322079f26562159705432
 linux/launcher-repository-history-failure--light.png ea0655cb07fa295bf9da66e1a73d78d154efcad4
 linux/launcher-restart-wake-refusal--dark.png 85dfef428c4f8c8fffcfd9c80f89124a8dfcf1fc
@@ -246,6 +242,8 @@ linux/launcher-stale-choice--dark.png 33dfa4bb450781357966bb33e093a3f0a1a203e9
 linux/launcher-stale-choice--light.png 38bd58ef785906dd22d1c2a23bf213d17be87d30
 linux/launcher-template-save-after-undo--dark.png 82a4bdfdff178bd250a156022801ef4a22c1491c
 linux/launcher-template-save-after-undo--light.png b9265ec578c47d6c94fce4fb74fd70706596325f
+linux/launcher-typed-recent--dark.png 793aa62e4d464db2d154fa22769454afa21e97bb
+linux/launcher-typed-recent--light.png a59e576603c4ba369789d9bf67acadb105df42e6
 linux/launcher-unavailable-custom-agent--dark.png 9cd87727c0a27e275a199763eeabcde574e17867
 linux/launcher-unavailable-custom-agent--light.png 471f9e5dd3563f3e2ba7a4de60dc177c5910abe2
 linux/launcher-yolo-question--dark.png 00f054e900816752ab1c74ad1e0def24f6e40492

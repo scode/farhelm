@@ -320,6 +320,11 @@ fn check(
         }
         state = apply_template(&state, &template, &fold_context)
             .map_err(|refusal| refusal.to_string())?;
+        // After the fold, so a template moving both host and folder is refused for its host first, as Restart with's
+        // refusal names them. The fold's state is discarded with the whole batch on any refusal.
+        if let Some(refusal) = destination_refusal(draft, &template) {
+            return Err(refusal.to_string());
+        }
         // A repository the shared fold accepts as text must still be one the launcher can choose; checked here, before
         // the next template, so the first refusal in the batch is the one reported, in the old app's words.
         let repository = match &template.fields.destination {
@@ -376,6 +381,16 @@ fn remove_held(fields: &mut TemplateFields, held: &LauncherState, draft: &Launch
     if (restart || draft.holds(Field::Host)) && fields.host.is_some() && fields.host == held.host {
         fields.host = None;
     }
+    if (restart || draft.holds(Field::Destination))
+        && let (
+            Some(TemplateDestination::Folder(folder)),
+            Some(TemplateDestination::Folder(current)),
+        ) = (&fields.destination, &held.destination)
+        && !folder.is_empty()
+        && folder.trim_end_matches('/') == current.trim_end_matches('/')
+    {
+        fields.destination = None;
+    }
     if !restart {
         return;
     }
@@ -403,13 +418,6 @@ fn remove_held(fields: &mut TemplateFields, held: &LauncherState, draft: &Launch
     {
         fields.container = None;
     }
-    if let (Some(TemplateDestination::Folder(folder)), Some(TemplateDestination::Folder(current))) =
-        (&fields.destination, &held.destination)
-        && !folder.is_empty()
-        && folder.trim_end_matches('/') == current.trim_end_matches('/')
-    {
-        fields.destination = None;
-    }
     if fields.name.is_some() && fields.name == held.name {
         fields.name = None;
         // A kind without its name does not apply, and a repeated name must not turn the session's raw title into a
@@ -427,15 +435,32 @@ pub(super) fn held_refusal(
 ) -> Option<TemplateRefusal> {
     let mut template = template.clone();
     remove_held(&mut template.fields, held, draft);
-    restart_refusal(draft, &template).or_else(|| {
-        let fields = &template.fields;
-        (draft.holds(Field::Host)
-            && (fields.host.is_some() || fields.recipe.is_some() || fields.target.is_some()))
-        .then_some(TemplateRefusal {
-            template: template.name,
-            field: "host",
-            reason: "cannot change here: this dialog keeps the session's host".into(),
+    // Host before destination, as Restart with names them and as the apply's fold refuses a held host first.
+    restart_refusal(draft, &template)
+        .or_else(|| {
+            let fields = &template.fields;
+            (draft.holds(Field::Host)
+                && (fields.host.is_some() || fields.recipe.is_some() || fields.target.is_some()))
+            .then(|| TemplateRefusal {
+                template: template.name.clone(),
+                field: "host",
+                reason: "cannot change here: this dialog keeps the session's host".into(),
+            })
         })
+        .or_else(|| destination_refusal(draft, &template))
+}
+
+/// Replace with's refusal of a template that still sets a destination after [`remove_held`]: another folder or any
+/// repository. Replace with keeps the source's folder or checkout (SPEC.md, "Replace with"), and applying the rest of
+/// the template while dropping its destination would launch somewhere other than the template says. Restart with names
+/// the destination in [`restart_refusal`], which runs first.
+fn destination_refusal(draft: &LaunchDraft, template: &LaunchTemplate) -> Option<TemplateRefusal> {
+    (draft.holds(Field::Destination) && template.fields.destination.is_some()).then(|| {
+        TemplateRefusal {
+            template: template.name.clone(),
+            field: "destination",
+            reason: "cannot change here: this dialog keeps the session's folder".into(),
+        }
     })
 }
 
