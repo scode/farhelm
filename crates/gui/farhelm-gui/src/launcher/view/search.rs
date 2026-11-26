@@ -230,7 +230,7 @@ impl Launcher {
         let host = self.chosen_host(cx).map(host_name_with_phase);
         let history = self.recent_history(cx);
         // Empty unless the query is `gh:` (`checkout`).
-        let (repositories, repository_pending) = self.search_repositories(cx);
+        let repositories = self.search_repositories(cx);
         search(&Inputs {
             query: &query,
             tab: self.draft.tab,
@@ -248,7 +248,7 @@ impl Launcher {
             history: history.as_ref(),
             host: host.as_ref(),
             repositories: &repositories,
-            repository_pending,
+            repository_history: self.repository_read(),
         })
     }
 
@@ -687,10 +687,6 @@ impl Launcher {
     ) -> bool {
         if !self.search_box.inline_results && self.search_box.start_highlight.is_none() {
             return false;
-        }
-        if self.search_box.start_highlight.is_some() {
-            // Holding Escape to clear the highlight leaves the draft open until a fresh press.
-            focus::note_closing(true, window, cx);
         }
         self.close_search(window, cx);
         cx.notify();

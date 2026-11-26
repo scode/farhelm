@@ -488,8 +488,21 @@ pub struct Inputs<'a> {
     pub host: Option<&'a HostText>,
     /// A `gh:` query's repository choices, filtered from the launcher's helm-wide history.
     pub repositories: &'a [GithubRepo],
-    /// Whether this `gh:` query is still waiting for the repository history read.
-    pub repository_pending: Option<bool>,
+    /// The history read's state gives a `gh:` query the right explanation when there are no choices.
+    pub repository_history: &'a RepositoryHistory,
+}
+
+/// The launcher's single repository history read. A failure has no suggestions but has its own visible status.
+pub enum RepositoryHistory {
+    /// The UI connection has not yet accepted the read. Drawing can try to send it again.
+    NotAsked,
+    /// The read is out; an empty list means "not yet", not "no matches".
+    Loading,
+    /// The helm's repositories from past launches, possibly none.
+    Loaded(Vec<GithubRepo>),
+    /// The read failed. It is not retried while this launcher is open (one read per opening), and the helm's own
+    /// words are not shown: the user only needs to know that typing owner/repo still works.
+    Failed,
 }
 
 /// A line the results area shows when there are no rows, and whether it is a warning (drawn in the warning color) or a
@@ -564,7 +577,14 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
         return Results {
             rows,
             default: 0,
-            message: empty_message(Scope::Model, value, false, pending, None, false),
+            message: empty_message(
+                Scope::Model,
+                value,
+                false,
+                pending,
+                inputs.repository_history,
+                false,
+            ),
             reason: None,
         };
     }
@@ -780,7 +800,7 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
             value,
             needs_harness,
             inputs.catalog_pending,
-            inputs.repository_pending,
+            inputs.repository_history,
             inputs.query.is_empty(),
         )
     } else {
@@ -851,7 +871,7 @@ fn empty_message(
     value: &str,
     needs_harness: bool,
     catalog_pending: bool,
-    repository_pending: Option<bool>,
+    repository_history: &RepositoryHistory,
     box_empty: bool,
 ) -> Option<Message> {
     if box_empty {
@@ -874,19 +894,21 @@ fn empty_message(
             Scope::Perms => ("No permissions match", true),
             Scope::Folder => ("No folder matches", true),
             Scope::Recent => ("No recent setup matches", true),
-            Scope::Github => return Some(repository_empty_message(value, repository_pending)),
+            Scope::Github => return Some(repository_empty_message(value, repository_history)),
             Scope::Templates => ("No template matches", true),
         }
     };
     Some(Message { text, warning })
 }
 
-/// The repository field and `gh:` search use the same hint, loading status and no-match warning.
-pub(super) fn repository_empty_message(query: &str, pending: Option<bool>) -> Message {
-    let (text, warning) = match (query.trim().is_empty(), pending) {
-        (true, _) | (_, None) => ("Type owner/repo to choose a repository", false),
-        (false, Some(true)) => ("Loading repositories…", false),
-        (false, Some(false)) => ("No repository matches; enter owner/repo", true),
+/// A failed read is visible on either repository surface. The pairs the user can type remain separate from history.
+pub(super) fn repository_empty_message(query: &str, history: &RepositoryHistory) -> Message {
+    use RepositoryHistory::*;
+    let (text, warning) = match (query.trim().is_empty(), history) {
+        (_, Failed) => ("Couldn't load recent repositories; enter owner/repo", true),
+        (true, _) | (_, NotAsked) => ("Type owner/repo to choose a repository", false),
+        (false, Loading) => ("Loading repositories…", false),
+        (false, Loaded(_)) => ("No repository matches; enter owner/repo", true),
     };
     Message { text, warning }
 }

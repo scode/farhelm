@@ -224,10 +224,7 @@ impl Launcher {
     /// A refusal or answer from an earlier installation cannot authorize a wake or a launch here.
     pub(super) fn yolo_installation_changed(&mut self, cx: &mut Context<Self>) {
         self.yolo = None;
-        self.note = Some(super::Note::WakeRefusal(
-            HostSentence::new("launcher-yolo-installation-changed")
-                .text("The original host installation could not be verified. Launch again to confirm the current host."),
-        ));
+        self.note = Some(super::Note::WakeRefusal(yolo_installation_refusal()));
         cx.notify();
     }
 
@@ -276,16 +273,25 @@ impl Launcher {
         cx.notify();
     }
 
-    /// The question while it is up, for drawing where the launcher's notices go.
-    pub(in crate::launcher) fn yolo_inline(&self) -> Option<&Inline<YoloAsk>> {
-        self.yolo.as_ref().and_then(|state| state.inline.as_ref())
+    /// Reserve the notices slot only while the question is open. Closed answers can leave a refusal there.
+    pub(in crate::launcher) fn yolo_inline(&self, cx: &App) -> Option<&Inline<YoloAsk>> {
+        self.yolo
+            .as_ref()
+            .and_then(|state| state.inline.as_ref())
+            .filter(|inline| inline.is_open(cx))
     }
 
     /// Whether the permanent answer's host write is out, during which the launcher refuses to be dismissed.
     pub(in crate::launcher) fn yolo_in_flight(&self, cx: &gpui::App) -> bool {
-        self.yolo_inline()
+        self.yolo_inline(cx)
             .is_some_and(|inline| inline.in_flight(cx))
     }
+}
+
+/// Both answers explain a changed host in the same words. Only a current answer can consent for an installation.
+fn yolo_installation_refusal() -> HostSentence {
+    HostSentence::new("launcher-yolo-installation-changed")
+        .text("The original host installation could not be verified. Launch again to confirm the current host.")
 }
 
 /// The immediate answer refers to the first dispatch. The permanent answer saves a setting and checks its own shown
@@ -340,6 +346,45 @@ pub(in crate::launcher) struct Owner {
     current: CurrentQuestion,
     /// Redraw the owner when the host write starts or fails (the launcher draws its controls busy meanwhile).
     redraw: Rc<dyn Fn(&mut gpui::App)>,
+    /// A stale answer can leave an explanation on this launcher even if an edit has retired the old question.
+    launcher: Option<WeakEntity<Launcher>>,
+}
+
+impl Owner {
+    /// Report what a stale answer accomplished. Once the host write succeeded, its effect matters even if the
+    /// launcher would now refuse for a more specific reason. Leave any newer question or pending launch alone.
+    fn stale_permanent_answer(&self, ask: &YoloAsk, setting_saved: bool, cx: &mut App) {
+        let Some(launcher) = &self.launcher else {
+            return;
+        };
+        let _ = launcher.update(cx, |launcher, cx| {
+            if setting_saved {
+                launcher.yolo_setting_saved = Some(
+                    HostSentence::new("launcher-yolo-setting-saved-words")
+                        .host(&ask.host_name)
+                        .text(
+                            " now starts YOLO sessions without asking. The launch changed while the setting was saved. \
+                             Review the form before launching again.",
+                        ),
+                );
+            } else {
+                let reason = if !ask
+                    .target
+                    .as_ref()
+                    .is_some_and(|target| launcher.matches_yolo_target(target, cx))
+                {
+                    yolo_installation_refusal()
+                } else if let Some(refusal) = launcher.refusal(cx) {
+                    refusal.append_to(HostSentence::new("launcher-yolo-answer-refused"))
+                } else {
+                    HostSentence::new("launcher-yolo-launch-changed")
+                        .text("The launch changed. Review the current setup and launch again.")
+                };
+                launcher.note = Some(super::Note::WakeRefusal(reason));
+            }
+            cx.notify();
+        });
+    }
 }
 
 /// A plain Replace as a question's owner: its launch is the caller's `retry`, which sends the Replace again with
@@ -349,12 +394,13 @@ pub(in crate::launcher) fn replace_owner(retry: Retry) -> Owner {
         launch: Rc::new(move |_, _, mark, window, cx| retry(mark, window, cx)),
         current: Rc::new(|_, _, _| true),
         redraw: Rc::new(|_| {}),
+        launcher: None,
     }
 }
 
 /// The launcher as a question's owner. Retry the draft only while it still represents the confirmed launch.
 fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
-    let (launching, checking, redrawing) = (launcher.clone(), launcher.clone(), launcher);
+    let (launching, checking, redrawing) = (launcher.clone(), launcher.clone(), launcher.clone());
     Owner {
         launch: Rc::new(move |ask, kind, mark, window, cx| {
             let _ = launching.update(cx, |launcher, cx| {
@@ -383,7 +429,9 @@ fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
                 let launcher = launcher.read(cx);
                 // The attempt's own prompt may still be updating, so compare its identity without reading its view.
                 let same_question = launcher
-                    .yolo_inline()
+                    .yolo
+                    .as_ref()
+                    .and_then(|state| state.inline.as_ref())
                     .is_some_and(|inline| attempt.belongs_to(inline));
                 let source = ask.source.unwrap_or_default();
                 same_question
@@ -398,6 +446,7 @@ fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
         redraw: Rc::new(move |cx| {
             let _ = redrawing.update(cx, |_, cx| cx.notify());
         }),
+        launcher: Some(launcher),
     }
 }
 
@@ -489,6 +538,7 @@ fn stop_asking_then_launch(
     if !(owner.current)(&ask, &attempt, cx) {
         // Close a stale answer before it can write the setting or start a launch.
         attempt.succeeded(cx);
+        owner.stale_permanent_answer(&ask, false, cx);
         return;
     }
     let (Some(operations), Ok(command)) = (
@@ -538,6 +588,8 @@ fn stop_asking_then_launch(
                                     cx,
                                 )
                             });
+                        } else {
+                            on_reply.stale_permanent_answer(&answered, true, cx);
                         }
                     }
                 }

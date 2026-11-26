@@ -70,7 +70,7 @@ use crate::launcher::draft::{
     repo_identifier,
 };
 use crate::launcher::request::{Preview, UNVERIFIED_HOST, WAIT_FOR_PREVIEW, has_checkout_identity};
-use crate::launcher::search::{Scope, repository_empty_message, scoped};
+use crate::launcher::search::{RepositoryHistory, Scope, repository_empty_message, scoped};
 use crate::operations;
 use crate::session_pane::details::{Checkout as SessionCheckout, checkout_mark};
 use crate::settings::{CheckoutField, CheckoutUpdated, FolderScope};
@@ -175,8 +175,7 @@ pub(super) struct CheckoutState {
     /// The suggestions list under the repository field, with the row moved to with the arrows.
     list: FieldList,
     /// Repository history belongs to the helm. Load it once, independently of the selected destination.
-    repositories_asked: bool,
-    repositories: Option<Vec<GithubRepo>>,
+    repositories: RepositoryHistory,
     preview: Latest<PreviewKey, PreviewAnswer>,
     /// The highest checkout configuration revision observed, which never goes back down; `None` until one is.
     revision: Option<i64>,
@@ -236,8 +235,7 @@ impl CheckoutState {
         CheckoutState {
             repository,
             list: FieldList::default(),
-            repositories_asked: false,
-            repositories: None,
+            repositories: RepositoryHistory::NotAsked,
             preview: Latest::default(),
             revision: None,
             name_placeholder: String::new(),
@@ -322,24 +320,26 @@ impl Launcher {
     }
 
     fn repository_history(&self) -> &[GithubRepo] {
-        self.checkout.repositories.as_deref().unwrap_or_default()
+        match &self.checkout.repositories {
+            RepositoryHistory::Loaded(repositories) => repositories,
+            RepositoryHistory::NotAsked
+            | RepositoryHistory::Loading
+            | RepositoryHistory::Failed => &[],
+        }
     }
 
-    fn repository_pending(&self) -> Option<bool> {
-        self.checkout
-            .repositories_asked
-            .then_some(self.checkout.repositories.is_none())
+    /// The state of the launcher's one repository history read, which both the Repository field and a `gh:` search
+    /// use to explain an empty list.
+    pub(super) fn repository_read(&self) -> &RepositoryHistory {
+        &self.checkout.repositories
     }
 
     /// A `gh:` query uses the same remembered repositories and typed choices as the Repository field.
-    pub(super) fn search_repositories(&self, cx: &App) -> (Vec<GithubRepo>, Option<bool>) {
+    pub(super) fn search_repositories(&self, cx: &App) -> Vec<GithubRepo> {
         let Some(query) = self.search_repository_query(cx) else {
-            return (Vec::new(), None);
+            return Vec::new();
         };
-        (
-            repository_choices(&query, self.repository_history()),
-            self.repository_pending(),
-        )
+        repository_choices(&query, self.repository_history())
     }
 
     /// Whether the search holds an unselected `gh:` query. It holds Launch until the user chooses the repository
@@ -552,26 +552,30 @@ impl Launcher {
 
     /// The list is small and global. Typing and switching destinations filter locally even if the read fails.
     fn follow_repository_history(&mut self, cx: &mut Context<Self>) {
-        if self.checkout.repositories_asked {
+        if !matches!(self.checkout.repositories, RepositoryHistory::NotAsked) {
             return;
         }
         let Ok(path) = ApiPath::api(&["github-repositories"]) else {
             return;
         };
         let launcher = cx.weak_entity();
-        self.checkout.repositories_asked = operations::read::<Vec<GithubRepo>>(
+        let sent = operations::read::<Vec<GithubRepo>>(
             path,
             "GET /api/github-repositories",
             cx,
             move |answer, cx| {
                 let _ = launcher.update(cx, |launcher, cx| {
-                    launcher.checkout.repositories = Some(answer.unwrap_or_default());
+                    launcher.checkout.repositories =
+                        answer.map_or(RepositoryHistory::Failed, RepositoryHistory::Loaded);
                     // A typed match can fill the list before the reply. Re-evaluate its highlight once the rows change.
                     launcher.checkout.list.highlighted = None;
                     cx.notify();
                 });
             },
         );
+        if sent {
+            self.checkout.repositories = RepositoryHistory::Loading;
+        }
     }
 
     /// Ask for the preview `key` answers for, if it is still current and no preview is out (then the answer sends
@@ -1220,7 +1224,7 @@ fn draw_repository_rows(
     let rows = launcher.repository_rows(cx);
     if rows.is_empty() {
         let query = launcher.checkout.repository.text(cx);
-        let message = repository_empty_message(&query, launcher.repository_pending());
+        let message = repository_empty_message(&query, launcher.repository_read());
         let words = message.text;
         let color = if message.warning {
             palette.warn

@@ -2971,6 +2971,11 @@
       "reference": null
     },
     {
+      "golden": "launcher-repository-history-failure",
+      "title": "A gh: search after the recent repositories failed to load, saying owner/repo can still be typed",
+      "reference": null
+    },
+    {
       "golden": "launcher-replace-with",
       "title": "Replace with, showing the held host and the warning about replacing the source",
       "reference": null
@@ -3009,6 +3014,16 @@
       "golden": "launcher-yolo-question",
       "title": "New session with the YOLO confirmation visible below the launch actions",
       "reference": "launcher-yolo-confirmation"
+    },
+    {
+      "golden": "launcher-yolo-save-panel-refusal",
+      "title": "A permanent YOLO answer refused while Save as template is open, before the host setting changes",
+      "reference": null
+    },
+    {
+      "golden": "launcher-yolo-setting-saved",
+      "title": "The notice that the host saved the permanent YOLO setting after the launch changed",
+      "reference": null
     },
     {
       "golden": "templates-dialog",

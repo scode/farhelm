@@ -1376,6 +1376,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_managed_checkout_setup,
     },
     Scene {
+        name: "launcher-repository-history-failure",
+        size: (1080., 900.),
+        draw: session_lists_then,
+        setup: launcher_repository_history_failure_setup,
+    },
+    Scene {
         name: "launcher-host-menu",
         size: (1080., 1160.),
         draw: session_lists_then,
@@ -1656,6 +1662,18 @@ static SCENES: &[Scene] = &[
         size: (1080., 1160.),
         draw: session_lists_then,
         setup: launcher_yolo_setup,
+    },
+    Scene {
+        name: "launcher-yolo-save-panel-refusal",
+        size: (1080., 1280.),
+        draw: session_lists_then,
+        setup: launcher_yolo_save_panel_refusal_setup,
+    },
+    Scene {
+        name: "launcher-yolo-setting-saved",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_yolo_setting_saved_setup,
     },
     Scene {
         name: "launcher-custom-yolo-question",

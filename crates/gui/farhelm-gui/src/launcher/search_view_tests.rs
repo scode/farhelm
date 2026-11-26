@@ -1208,6 +1208,44 @@ fn a_held_escape_clears_the_template_highlight_without_closing_the_launcher(
     );
 }
 
+/// Inline results have no separate layer, so closing them must fence held Escape just like a popover does.
+#[gpui::test]
+fn a_held_escape_closes_inline_results_without_discarding_the_launcher(cx: &mut TestAppContext) {
+    let (_helm, cx) = new_launcher_with_templates(cx, None);
+    assert!(search_focused(cx));
+    type_in(cx, "tl:partial");
+    assert!(results_shown(cx));
+    let before = draft(cx);
+
+    test_support::press(cx, "escape", false);
+    assert!(!results_shown(cx));
+    test_support::press(cx, "escape", true);
+    assert!(test_support::any_open(cx));
+    assert_eq!(draft(cx), before);
+    assert_eq!(search_text(cx), "tl:partial");
+    test_support::press(cx, "escape", false);
+    assert!(!test_support::any_open(cx));
+}
+
+/// Escape from Save as template returns focus to the original draft. A held repeat still belongs to the panel.
+#[gpui::test]
+fn a_held_escape_closes_save_as_template_without_discarding_the_launcher(cx: &mut TestAppContext) {
+    let (_helm, cx) = new_launcher_with_templates(cx, None);
+    test_support::click(cx, "launcher-save-template");
+    assert!(read(cx, |launcher, _, _| launcher.save_panel_open()));
+    assert!(!search_focused(cx));
+    let before = draft(cx);
+
+    test_support::press(cx, "escape", false);
+    assert!(!read(cx, |launcher, _, _| launcher.save_panel_open()));
+    assert!(search_focused(cx));
+    test_support::press(cx, "escape", true);
+    assert!(test_support::any_open(cx));
+    assert_eq!(draft(cx), before);
+    test_support::press(cx, "escape", false);
+    assert!(!test_support::any_open(cx));
+}
+
 /// The empty field normally launches with Enter. A removed template must consume the Enter meant for that template.
 #[gpui::test]
 fn enter_on_a_withdrawn_empty_pane_template_cannot_launch(cx: &mut TestAppContext) {
