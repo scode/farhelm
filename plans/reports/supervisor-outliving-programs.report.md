@@ -71,3 +71,63 @@ One fresh-context Opus 5.5 reviewer at high effort. Round 1 found no correctness
 overclaiming (it implied a surviving grandchild of a dead agent was covered), a changelog context paragraph that named
 the wrong gap, tests that did not use the desktop's actual consent or the exact host state the fix acts on, and wording
 nits. All were fixed. Round 2: no remaining findings; its one optional wording suggestion was applied.
+
+### Landing
+
+#### What landed with it
+
+This round landed podman-host-verification first (container hosts must prove which machine they are before Farhelm runs
+commands there), then this plan. The two touch separate code and separate parts of the specs. Since this plan's base,
+main had gained the Replace with action and the launcher's Enter key changes (#5081, #5082), maintainer tooling for
+agent records (#5080) and TODO entries (#5085, #5089); none touches the supervisor.
+
+The closest earlier change is the Restart with fix that landed a few rounds ago (#5071, Restart with's edited settings
+saved together with the start of the new run), already in this plan's base. An independent reviewer and I checked the
+two together: Restart now ends a surviving agent before it starts the new run or saves any edited settings, and if the
+process list cannot be read, or the survivor cannot be confirmed gone, Restart refuses before anything else happens. The
+surviving process is recognized by its process number and its start time, so a process number the system has since
+reused for another program is never mistaken for it.
+
+#### Fixes made while landing
+
+None. The independent review found nothing to fix.
+
+#### Worth knowing
+
+- **A plan in flight will touch the same code.** supervisor-stop-pending-launch, which another executor is working on,
+  also changes what Stop does when no agent is running. Its landing will need to keep this plan's step (ending the
+  surviving agent) next to its own, not replace it.
+
+- **Nothing ran on macOS**, the main platform this fix is for. The plan's new tests read Linux's process information, so
+  they run only on Linux, and all landing checks ran on a Linux machine.
+
+No follow-up TODO is needed; the first point above is for whoever lands supervisor-stop-pending-launch.
+
+#### Checks
+
+Run once for the whole round, on podman-host-verification and supervisor-outliving-programs stacked in that order on
+main as it stood when the landing started; what main gained since each plan's base is in each plan's notes. The test
+worker is an aarch64 Linux machine with rootless Podman and a systemd user manager:
+
+- On the test worker, `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`:
+  clean.
+- On the test worker, `cargo nextest run -p farhelm-helm -p farhelm-supervisor`, recorded run
+  43812fa9-6ae7-42ce-8ff5-3cd2a81d4035: 3,606 passed, 12 skipped (tests marked ignored). That is every helm and
+  supervisor test, wider than either executor's selection.
+- On the test worker, the end-to-end tests of host terminals, relaunches, Restart and Restart with, and the end-to-end
+  tests that use a stand-in for Podman (`cargo nextest run -p farhelm --test e2e` filtered to `host_terminals`,
+  `host_relaunches`, `restart_with_resume`, `scoped_podman`, `containerized_sessions` and every test whose name contains
+  `restart`), recorded run 61da3f76-4294-4420-a2d7-6012a29975ec: 106 passed, and none skipped for lack of systemd or
+  SSH.
+- On the test worker, the real Podman environment scenario
+  (`cargo nextest run -p farhelm --test e2e -E 'test(/^podman_environments::/)'`), recorded run
+  ee60cfb9-8dbf-46ae-a67c-bcc4a22c245c: passed, and it did not skip. It runs the production Podman provider against a
+  real rootless Podman on the worker, so every container setup script and recipe build command went through
+  podman-host-verification's new host proof on a real host. It tests that plan, not supervisor-outliving-programs;
+  neither executor ran it.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown: passed, and `dprint check` on the implementation spec again after
+  podman-host-verification's landing corrected it.
+
+Reused: nothing. Skipped: the desktop app's tests, the screenshot comparison and the desktop app's end-to-end smoke
+test, since nothing in the app changed; the real SSH variant of the Podman scenario, which needs a host set up for it.
