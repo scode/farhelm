@@ -4,7 +4,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `podman-recipe-admission.md` — Report pre-admission container recipe Rebuild failures without creating empty build records (after `podman-host-verification.md`)
 - [complete] `podman-proxy-free-images.md` — Keep build-time host proxy config out of captured Podman recipe images (after `podman-host-verification.md`)
-- [landing 60efbb] `drift-updater-teardown.md` — Run drift-test agent updaters in transient systemd user scopes for clean teardown
 - [in-flight 184b35] `settings-wait-while-saving.md` — Make Settings Close/Escape and editors wait for saves, rip out slow-helm concurrency, and finish surviving Settings follow-ups (after `custom-agent-delete-prompt.md`)
 - [in-flight 2a94e0] `terminal-tab-hover-close.md` — Move shell tab close button to a fixed left icon slot revealed on hover
 - [pending] `agent-blocked-notifications.md` — Fix ntfy waiting alerts and add blocked-agent notifications with instruction injection (after `settings-wait-while-saving.md`)

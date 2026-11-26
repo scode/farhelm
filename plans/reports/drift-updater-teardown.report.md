@@ -75,3 +75,81 @@ still run beside a survivor. That is now the run-ending case above. It also foun
 validation docs understating which tests need a user manager, a missing entry in the full-test list, and tests that did
 not first check the stand-in worker was really running detached; all fixed. Round 2: no remaining correctness findings;
 its two wording and edge-case suggestions were applied.
+
+### Landing
+
+#### What landed with it
+
+This round landed three plans before this one (a session's menu on right-click, the launcher's late wake failures, and
+Stop refusing an unconfirmed start); see the first plan's notes. They change app, helm and supervisor code; this plan
+changes only the drift test tooling and its documentation, so nothing interacted. Since it was built, main had gained
+only two supervisor and helm changes, neither in the drift tooling. The landing's cross-plan review checked that the new
+scope's name (`farhelm-drift-upgrade-<id>.scope`) matches none of the names the supervisor or any cleanup script looks
+for, so nothing in Farhelm will mistake it for a session's.
+
+This plan also edits the validation inventory and the run-all-tests list, as the repository's rules require when a test
+script changes; no other plan this round touched those files. The drift runner's own tests passed on the landing
+machine, whose systemd user manager they need.
+
+#### Fixes made while landing
+
+None for this plan. The reviewers found nothing to fix.
+
+#### Worth knowing
+
+- **A drift runner that dies abruptly leaves its updater running.** If the runner is killed with SIGKILL, or its
+  terminal closes, nothing stops the updater it was upgrading with. Because that updater runs outside the runner,
+  stopping the Farhelm session the runner ran in does not end it either. A hung updater would keep running until stopped
+  by hand, and a late worker could still replace the agent's binary afterwards. A follow-up could give the scope a
+  run-time limit.
+- **One Ctrl-C can go unheeded.** If the scope for an upgrade fails to start and a Ctrl-C or SIGTERM arrived just
+  before, the run does not stop for that signal. This is a narrower case than the lost signal the executor's review
+  fixed, and that fix stands.
+- **Two tests are weaker than they look.** Each checks for a timeout message but would also pass if the runner printed
+  the other timeout's message, so a mix-up between the two would go unnoticed. Separately, a scope test that fails can
+  leave its stand-in processes running on the machine until someone stops them.
+
+None of these affects a normal drift run. The first is the one worth a follow-up entry if you want one; the others are
+small cleanups.
+
+#### Checks
+
+Run once for the whole round, on its four plans stacked in queue order (session-right-click-menu,
+launcher-late-wake-failures, supervisor-stop-pending-launch, drift-updater-teardown) on main as it stood when the
+landing started; what reached main after each plan was built is in each plan's notes. The test worker is an aarch64
+Linux machine with a systemd user manager:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean.
+- On the test worker,
+  `cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm-gui -p farhelm-desktop`: the
+  first attempt, recorded run b6571c52-9267-4c9b-9635-f7c159c2a3f1, never ran a test, because the compiler was killed
+  while building the helm's tests (the worker ran out of memory with four build jobs). The rerun with two build jobs,
+  recorded run 264e5b64-065f-46f0-8dcb-ab15f3ef799d: 7,624 passed, 17 skipped (tests marked ignored). That is every test
+  of the shared message types, the helm, the supervisor, the desktop app and its GUI.
+- On the test worker, the end-to-end tests of host creates, host terminals, relaunches, supervisor restarts and every
+  test whose name contains `restart` or `stop` (`cargo nextest run -p farhelm --test e2e` filtered to them), recorded
+  run 08bd628d-e968-4273-8466-14c3e4f84735: 160 passed, and none skipped for lack of systemd.
+- On the test worker, the desktop app's end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), recorded run
+  2a146ce3-50ae-460e-a84b-d597d7d7b659: 48 of the 49 steps passed; the paste step runs only on a Mac and was skipped, as
+  it always is on Linux.
+- Locally, every screenshot scene compared with its approved picture (`python3 scripts/check-gui-goldens.py`), recorded
+  run 33bc1d03-4b78-4cc2-a05e-d822d0dce764: every picture matched, the new late wake failure picture included. This
+  covers the screenshot re-render that the launcher-late-wake-failures report said it skipped after its rebase.
+- Locally, `python3 -B scripts/test-gui-screenshot-batch.py`, which checks the screenshot scene list against the golden
+  manifest: recorded run b81cb326-fd3c-4921-9f49-69ff01bb3f0d failed because the new late wake failure picture was
+  missing from the scene list; after the landing fix in launcher-late-wake-failures, recorded run
+  ffecfaab-79e4-4bfd-942e-a25925a47bd5 passed.
+- Locally, the drift runner's own tests (`python3 -B scripts/test-run-harness-drift.py`), recorded run
+  029c1d18-8368-4a93-b71c-ea765289da54: 31 passed, none skipped, on the landing machine (Linux, with a systemd user
+  manager).
+- Locally, `python3 scripts/check-agents-md.py` (0 errors; its one warning is an old one about the frozen triage
+  archive), `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown: passed.
+
+Reused: nothing. Skipped: the Podman suites, since no plan changes how a container is actually started or stopped
+(launcher-late-wake-failures changes only how the launcher's own start reports a failure, which the helm's tests cover
+with stand-ins); the rest of the end-to-end suite, since the filter above covers every end-to-end test that stops,
+restarts or relaunches a session or creates a host, which is where this round's changes act; the real-agent drift cases
+themselves, which spend vendor turns and run only on request.
