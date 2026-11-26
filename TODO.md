@@ -60,6 +60,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
+- **Point the landing tooling README at the agent records doc.** `scripts/plans-landing/README.md` describes the landing
+  monitor's records but never says where agent records are documented; add one line pointing to
+  `.agents/agent-records.md`. This is also the first plan to run on agent records, so keep it to that one line.
+
 - **Start several selected sessions at once.** When multiple sessions are selected we need to be able to start sessions
   if all the marked ones are stopped.
 
@@ -431,11 +435,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Move agent records off the host.** Implement the design in
-  https://snippets.scode.org/s/farhelm-records-on-artifacts-sketch/ (goals, decisions and the reasons for them are on
-  the page), so plan executors and the landing monitor can run on other hosts: their logs and notes go to one Cloudflare
-  Artifacts repo behind a small records tool, and plan state stays on GitHub main. Start once the plans in flight have
-  settled.
+- **Run plan executors and the landing monitor on other hosts.** Phase 1 of the design in
+  https://snippets.scode.org/s/farhelm-records-on-artifacts-sketch/ is done: the agents' records live in the
+  `agent-records` Artifacts repo behind `cargo xtask records` (`.agents/agent-records.md`). What remains is phase 2:
+  provision one VM per executor slot (its config with one slot, a repo token, the ntfy topic file, a GitHub login and a
+  checkout), bring up one remote executor and let it claim a plan, then move the landing monitor.
 
 - **A slow host still delays ordered desktop actions.** The desktop app keeps live updates flowing during host waits.
   Session Stop and Delete, environment Suspend, Resume, Stop and suspend, Delete and Retry-delete, and Checkout Trash
