@@ -232,18 +232,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   exceeded the triage size limit. See `SPEC.md` under “One GUI at a time” and `SPEC_impl.md` under “Questions: the
   prompt”. Plan: `plans/queue/settings-wait-while-saving.md`.
 
-- **Keep checkout notices after an agent Delete times out.** If an approved agent Delete outlasts the supervisor's reply
-  budget and then leaves a checkout on disk, keep the checkout path and reason in the notices bell. The target host's
-  result reaches `agent_delete` in `crates/farhelm-helm/src/agent_requests.rs`, while the asking connection's actual
-  deadline and retained reply are in `crates/farhelm-supervisor/src/service/agent_relay.rs`. Under
-  [Managed checkouts](SPEC.md#managed-checkouts), the helm must record the notice for the original target when the
-  asking relay's answer budget has expired. Reuse the late Delete notice store. Correlate the deadline and result to
-  that request on its own connection, including when the target is on a different host or in the asker's environment.
-  Preserve the ordinary agent reply, retained Delete fence and existing timeout semantics. Exercise a real relay timeout
-  followed by the matching checkout warning, and show that a timely reply still carries its notice. Reliable correlation
-  spans both sides of the relay and exceeds this triage item's size gate. Plan:
-  `plans/queue/agent-delete-late-notice.md`.
-
 - **Report late wake failures when launching on a suspended sandbox or stopped container.** When Resume takes longer
   than the reply deadline, a later failure can leave the session launcher waiting for a minute before it gives the wrong
   reason. A slow Podman check can fail before Starting appears. The next host row can still say Stopped and carry the

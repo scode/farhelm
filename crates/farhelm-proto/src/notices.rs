@@ -24,7 +24,8 @@ pub enum NoticeContent {
     DesktopLoginPathUnavailable,
     /// A signed feed added announcements that are waiting to be shown.
     NewAnnouncement,
-    /// A Delete finished after the reply deadline and reported cleanup details.
+    /// A Delete reported cleanup details the user must see: one that finished after
+    /// the reply deadline, or any Delete an agent asked for.
     LateDelete {
         /// The supervisor names any checkout left behind and explains other cleanup outcomes.
         detail: String,

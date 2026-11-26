@@ -539,7 +539,8 @@ pub(crate) async fn observe_trash(
 }
 
 impl HelmStore {
-    /// Persist a late Delete's cleanup details independently of the session it removed.
+    /// Persist a Delete's cleanup details independently of the session it removed: a
+    /// client Delete's once its reply deadline passed, and an agent Delete's always.
     /// A second observation of the same outcome keeps the original notice's
     /// read state. Wake the feed after the write so its first read sees it.
     pub(crate) async fn record_late_delete(

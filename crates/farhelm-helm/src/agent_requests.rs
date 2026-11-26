@@ -2959,7 +2959,7 @@ async fn agent_delete(
     };
     approved(state, origin, asking, target.host == origin.host, action).await?;
     let connection = Some(client.connection_id());
-    match scope {
+    let outcome = match scope {
         AgentScope::Fleet => {
             crate::sessions::do_delete_session(state, target, guard, connection).await
         }
@@ -2967,8 +2967,21 @@ async fn agent_delete(
             crate::sessions::delete_session_within_environment(state, target, guard, connection)
                 .await
         }
+    }?;
+    // A checkout the Delete left on disk is the user's to deal with, not only
+    // the asking agent's: the agent's reply can arrive after its supervisor
+    // stopped waiting, and the agent may say nothing. So the warning always
+    // reaches the notices bell as well, the way a client Delete's does once its
+    // reply deadline passes. A failure to record it does not undo the Delete.
+    if let Some(detail) = outcome.notice.clone()
+        && let Err(error) = state
+            .store
+            .record_late_delete(target.clone(), detail, Arc::clone(state.manager.events()))
+            .await
+    {
+        tracing::warn!(%error, "could not record the agent Delete's checkout notice");
     }
-    .map(|outcome| AgentReply::Deleted { outcome })
+    Ok(AgentReply::Deleted { outcome })
 }
 
 /// The delete card and dispatch share this guard. Unknown status carries
@@ -7934,7 +7947,8 @@ mod tests {
 
     /// Delete describes the live program it bound to the liveness guard even
     /// while the cache holds a different description. The splice verifies the
-    /// exact target and guard dispatched, and that checkout advice survives it.
+    /// exact target and guard dispatched, and that checkout advice survives it,
+    /// both in the agent's reply and in the notices bell.
     #[farhelm_testtrace::test]
     async fn agent_delete_preserves_the_card_guard_and_checkout_notice() {
         use farhelm_proto::ControlMsg;
@@ -8058,11 +8072,32 @@ mod tests {
             ),
             "{outcome:?}"
         );
+        assert_late_delete_notice(
+            &h,
+            local,
+            "checkout preserved; inspect it before removing it",
+        )
+        .await;
         assert!(
             !h.store
                 .has_cached_session(&SessionKey::new(local, "target"))
                 .await
                 .unwrap()
+        );
+    }
+
+    /// The notices bell holds `detail` as a Delete's leftover-checkout notice
+    /// for `host`: the agent's reply is not the only place it lands, since the
+    /// asking agent may never pass it on to the user.
+    async fn assert_late_delete_notice(h: &Harness, host: HostId, detail: &str) {
+        let notices = h.store.notices().await.unwrap().notices;
+        assert!(
+            notices.iter().any(|notice| notice.host == Some(host)
+                && notice.content
+                    == crate::notices::NoticeContent::LateDelete {
+                        detail: detail.into()
+                    }),
+            "{notices:?}"
         );
     }
 
@@ -14888,7 +14923,8 @@ mod tests {
 
     /// Script the supervisor inside a stand-in environment: it creates every
     /// session it is asked for (echoing the folder), deletes every session it
-    /// is asked to and accepts every prompt, recording each request. Listing
+    /// is asked to, reporting its checkout as left at `/work/<id>`, and accepts
+    /// every prompt, recording each request. Listing
     /// and other housekeeping is the splice's, from the host script's
     /// sessions.
     ///
@@ -14939,9 +14975,14 @@ mod tests {
                             .lock()
                             .unwrap()
                             .push(format!("delete:{session_id}"));
+                        // A managed checkout left behind, as a supervisor
+                        // reports it, so an agent Delete's notice can be
+                        // followed to the bell.
                         ControlMsg::SessionDeleted {
                             req_id,
-                            notice: None,
+                            notice: Some(format!(
+                                "checkout left at /work/{session_id}; inspect it before removing it"
+                            )),
                             archived: false,
                         }
                     }
@@ -15316,7 +15357,7 @@ mod tests {
                 );
             }
             let AgentOutcome::Ok {
-                reply: AgentReply::Deleted { .. },
+                reply: AgentReply::Deleted { outcome },
             } = handler
                 .handle(
                     origin,
@@ -15330,6 +15371,11 @@ mod tests {
             else {
                 panic!("{provider:?}: a sibling in the same environment can be deleted")
             };
+            // The leftover checkout reaches the asking agent and, whatever the
+            // agent does with it, the user's notices bell.
+            let left = "checkout left at /work/sibling; inspect it before removing it";
+            assert_eq!(outcome.notice.as_deref(), Some(left), "{provider:?}");
+            assert_late_delete_notice(&h, owned, left).await;
             assert_eq!(
                 *seen.lock().unwrap(),
                 [
