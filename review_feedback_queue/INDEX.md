@@ -91,9 +91,6 @@ consequences.
   program deletes characters from the middle of a wide character, one cell can show the wrong background color
   (pre-existing; cosmetic).
 
-- [`trailing-tab-shell-hangup-delete-wiring-untested.md`](trailing-tab-shell-hangup-delete-wiring-untested.md) — No test
-  would notice if Delete stopped giving macOS tab shells their hangup, which would again lose their shell history.
-
 - [`trailing-drift-claude-trust-real-config-byte-check.md`](trailing-drift-claude-trust-real-config-byte-check.md) — The
   Claude trust drift case fails whenever another Claude session rewrites the real ~/.claude.json during the case,
   reading as if Farhelm wrote it (frequency unmeasured).
@@ -153,12 +150,6 @@ consequences.
 
 - [`trailing-stale-references-to-removed-repository-search.md`](trailing-stale-references-to-removed-repository-search.md)
   — SPEC.md, code comments and a test docstring still describe the removed repository search.
-
-- [`trailing-replace-in-environment-history-check-vacuous.md`](trailing-replace-in-environment-history-check-vacuous.md)
-  — The replace-in-environment test's check that host history is unchanged can no longer fail.
-
-- [`trailing-session-owned-setup-flag-untested.md`](trailing-session-owned-setup-flag-untested.md) — No helm test still
-  checks that sandboxes and containers are never offered checkout-folder setup.
 
 - [`trailing-repository-history-failure-shown-as-no-matches.md`](trailing-repository-history-failure-shown-as-no-matches.md)
   — A failed repository-history read shows "No repository matches" and is not retried while the launcher is open.

@@ -2252,6 +2252,7 @@ async fn readoption_backs_off_without_spinning() {
 /// A failed reconnect must preserve the agent's or tab's root through Delete.
 /// The unmarked child must be swept even though the unreadable stand-in's
 /// peer is this test runner, whose identity deliberately refuses host teardown.
+/// The tab's root must keep its role so Delete knows to hang up the shell.
 #[farhelm_testtrace::test]
 async fn delete_roots_children_after_failed_agent_and_tab_reconnects() {
     for agent in [true, false] {
@@ -2264,10 +2265,24 @@ async fn delete_roots_children_after_failed_agent_and_tab_reconnects() {
             (sup, host, test_host)
         } else {
             let (sup, test_host) = readoption_tab_fixture(&state).await;
-            let host = readoption_tab(&sup).await.host;
+            let tab = readoption_tab(&sup).await;
+            let host = tab.host.clone();
             // The fixture's starter is its live child; Delete needs a finished starter.
             let record = crate::launch::tab_host_record_path(state.path(), "s1", "t1");
             std::fs::remove_file(record).unwrap();
+            {
+                let _admission = sup.working_copy_operations.lock().await;
+                let _claim = sup.lifecycle_locks.claim("s1").await;
+                let mut hosts = sup
+                    .session_hosts("s1", None, vec![tab], WAIT)
+                    .await
+                    .unwrap();
+                let root = host.status().pinned_child_root().unwrap().unwrap();
+                assert_eq!(root.pid, test_host.child_pid());
+                let roots = hosts.sweep_roots().await.unwrap();
+                assert_eq!(roots.tabs, [root], "Delete's shell hangup needs this root");
+                assert!(roots.agents.is_empty());
+            }
             (sup, host, test_host)
         };
         record_s1(&state, old.socket());
