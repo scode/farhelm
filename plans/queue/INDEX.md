@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `session-right-click-menu.md` — Open session and bulk context menus on right-click (after `bulk-start-sessions.md`)
 - [in-flight 2dbcca] `restart-with-generation-sync.md` — Bind Restart-with launch settings with the replacement generation before startup reports
 - [in-flight 7ce017] `custom-agent-per-reg-wrappers.md` — Remember command wrapper defaults per custom agent registration
-- [pending] `wayland-async-text-paste.md` — Make Wayland desktop text-field paste nonblocking and text-first
+- [in-flight 7b9930] `wayland-async-text-paste.md` — Make Wayland desktop text-field paste nonblocking and text-first
 - [pending] `custom-agent-delete-prompt.md` — Port Settings custom-agent Delete to the shared inline confirmation prompt
 - [pending] `settings-hook-save-notice.md` — Wait for in-flight toggle saves before closing Settings and record low-latency helm rule
 - [pending] `settings-close-save-hardening.md` — Harden Settings Close, Save, Credentials Back/Cancel, and footer actions (6 merged follow-ups)
