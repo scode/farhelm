@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 2b7c41] `bulk-start-sessions.md` — Add bulk Restart/Replace action for marked stopped sessions
 - [pending] `session-right-click-menu.md` — Open session and bulk context menus on right-click (after `bulk-start-sessions.md`)
-- [complete] `restart-with-generation-sync.md` — Bind Restart-with launch settings with the replacement generation before startup reports
+- [landing ba1104] `restart-with-generation-sync.md` — Bind Restart-with launch settings with the replacement generation before startup reports
 - [in-flight 7ce017] `custom-agent-per-reg-wrappers.md` — Remember command wrapper defaults per custom agent registration
 - [in-flight c93efa] `custom-agent-delete-prompt.md` — Port Settings custom-agent Delete to the shared inline confirmation prompt
 - [in-flight e425a3] `tensorlake-sandbox-key-consent.md` — Bind Settings leftover-sandbox Delete confirmation and list to the active Tensorlake key
