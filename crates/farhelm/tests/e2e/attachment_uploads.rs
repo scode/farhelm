@@ -1693,10 +1693,8 @@ async fn a_publication_that_outlives_its_bound_frees_the_session() {
     );
 }
 
-/// Cancellation while `link` is gated must not claim rollback. Complete
-/// bytes may land after the error, and a retry must keep both copies
-/// without clobbering the first. This contrasts with the definite fsync
-/// refusal below, which cannot leave any published attachment.
+/// Cancellation while `link` is gated reports an unknown outcome. Complete
+/// bytes may land after the error, and a retry keeps both copies.
 #[farhelm_testtrace::test]
 async fn a_cancelled_publication_can_leave_an_attachment_and_a_retry_copy() {
     let (seam, release) = GatedPublicationFs::new();
@@ -1727,7 +1725,7 @@ async fn a_cancelled_publication_can_leave_an_attachment_and_a_retry_copy() {
         panic!("cancelled publication must not acknowledge a path: {outcome:?}");
     };
     assert_eq!(req_id, 2);
-    assert_eq!(kind, ErrorKind::InvalidRequest);
+    assert_eq!(kind, ErrorKind::Internal);
     assert_publication_unknown(&message);
 
     release.send(()).expect("publication is still gated");

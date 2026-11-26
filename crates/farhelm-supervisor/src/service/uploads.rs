@@ -1251,11 +1251,9 @@ async fn commit_upload(
                             signal.reason
                         )
                     },
-                    kind: if signal.session_gone {
-                        ErrorKind::NotFound
-                    } else {
-                        ErrorKind::InvalidRequest
-                    },
+                    // The disk task can still publish even if the session
+                    // is gone. Internal keeps the outcome unknown to clients.
+                    kind: ErrorKind::Internal,
                 },
                 None,
             )
@@ -1694,9 +1692,16 @@ mod tests {
 
     /// A supervisor with one session, for the transfer tests below.
     async fn upload_fixture() -> (super::super::core::tests::StateDir, Arc<Supervisor>) {
+        upload_fixture_with_seams(super::super::core::SupervisorSeams::default()).await
+    }
+
+    /// Keep the same session setup when a test needs to hold the disk work.
+    async fn upload_fixture_with_seams(
+        seams: super::super::core::SupervisorSeams,
+    ) -> (super::super::core::tests::StateDir, Arc<Supervisor>) {
         use super::super::core::tests::{StateDir, dummy_exe, entry_with};
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = Supervisor::new_with_seams(state.path(), dummy_exe(), Default::default(), seams)
             .await
             .expect("supervisor");
         let mut entry = entry_with(None, crate::store::LastOutcome::Running);
@@ -1706,6 +1711,85 @@ mod tests {
             .await
             .insert("session-1".to_string(), Arc::new(entry));
         (state, sup)
+    }
+
+    /// The complete attachment can already exist while its publication task
+    /// is still running. Cancellation at that boundary must tell the caller
+    /// the result is unknown, so it can account for the risk of a duplicate.
+    #[farhelm_testtrace::test]
+    async fn cancellation_during_publication_reports_an_unknown_outcome() {
+        use super::super::core::SupervisorSeams;
+        use std::path::Path;
+        use std::sync::{Mutex, mpsc as blocking};
+
+        /// Hold staging cleanup after the link has made the file visible.
+        struct HoldCleanup {
+            reached: mpsc::Sender<()>,
+            release: Mutex<blocking::Receiver<()>>,
+            cleaned: mpsc::Sender<()>,
+        }
+        impl crate::files::FaultSeam for HoldCleanup {
+            fn remove_temp(&self, path: &Path) -> std::io::Result<()> {
+                self.reached.try_send(()).unwrap();
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(30))
+                    .map_err(std::io::Error::other)?;
+                std::fs::remove_file(path)?;
+                self.cleaned.try_send(()).unwrap();
+                Ok(())
+            }
+        }
+
+        let (reached, mut held) = mpsc::channel(1);
+        let (release, resume) = blocking::channel();
+        let (cleaned, mut cleanup_done) = mpsc::channel(1);
+        let (_state, sup) = upload_fixture_with_seams(SupervisorSeams {
+            upload_fs: Arc::new(HoldCleanup {
+                reached,
+                release: Mutex::new(resume),
+                cleaned,
+            }),
+            ..Default::default()
+        })
+        .await;
+        let request = UploadRequest {
+            req_id: 1,
+            session_id: "session-1".to_string(),
+            channel: 5,
+            name: "empty.txt".to_string(),
+            size: 0,
+            transfer: 1,
+        };
+        let (priority, mut replies) = mpsc::channel(1);
+        let (cancel, mut signals) = mpsc::channel(UPLOAD_SIGNAL_QUEUE);
+        let staged = stage_upload(&sup, &request, &mut signals)
+            .await
+            .unwrap_or_else(|_| panic!("fixture must stage the upload"));
+        let commit = commit_upload(&sup, &priority, &request, staged, 0, 2, &mut signals);
+        tokio::pin!(commit);
+        let published =
+            crate::attachments::session_dir(&sup.state_dir, "session-1").join("empty.txt");
+        tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::select! {
+                reached = held.recv() => assert_eq!(reached, Some(())),
+                _ = &mut commit => panic!("commit finished before the publication hold"),
+            }
+            assert!(published.is_file(), "premise: the hard link already exists");
+            cancel.send(UploadSignal {
+                reason: "the client cancelled".to_string(),
+                tell_client: false,
+                session_gone: false,
+            }).await.unwrap();
+            assert!(!commit.await, "a client cancellation leaves the session live");
+            let reply: ControlMsg = serde_json::from_slice(&replies.try_recv().unwrap().body).unwrap();
+            assert!(matches!(reply, ControlMsg::Error { req_id: 2, kind: ErrorKind::Internal, message, .. }
+                if message.contains("publication completion is unknown")));
+            release.send(()).unwrap();
+            assert_eq!(cleanup_done.recv().await, Some(()));
+            assert!(published.is_file(), "staging cleanup leaves the attachment");
+        }).await.expect("the upload replies while publication is still held and then cleans up");
     }
 
     /// The deletion signal every test below sends.
