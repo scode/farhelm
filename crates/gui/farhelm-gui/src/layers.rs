@@ -16,13 +16,10 @@
 //! - **Things the user did not start never open a layer.** Every open takes the [`Mark`] the feature took when the user
 //!   acted, and is refused once the user has moved on since (the focus coordinator's counter). Work that finishes later
 //!   shows its result where it belongs instead. At window start, a pending SSH question may open before the first key
-//!   or click. The same exception covers the Welcome card
-//!   and the first batch of announcements when nothing is open ahead of it. Those dialogs take a mark when their
-//!   owner first sees a new UI session. SSH takes the mark when the window is built ([`Mark::at_ui_session_start`]). The user
-//!   has done nothing yet; if they type or click before the open, the open is refused, and the dialog stays unseen
-//!   until a later window start or reset (the maintainer's decision, 2026-11-14). A batch that SPEC.md has wait behind
-//!   the Welcome card (and, after Send feedback now, behind the feedback dialog) is not an exception: it opens with a
-//!   mark taken when the last of them closes, which always follows a press of the user's.
+//!   or click. SSH takes its mark when the window is built. The owner of automatic announcements takes its mark when
+//!   it first sees the UI session ([`Mark::at_ui_session_start`]). If the user types or clicks before the open, the
+//!   dialog stays unseen until a later window start or reset (the maintainer's decision, 2026-11-14). Upgrade
+//!   highlights use the session-start mark when no batch opens, or a new mark when the user dismisses that batch.
 //! - **An overlay closes when its subject is gone, not when it moves.** A popover is anchored to an element through an
 //!   [`Anchor`], state the anchor element keeps in its element state: it follows the element wherever it is drawn,
 //!   and closes when the element is no longer drawn (a deleted row's menu). A layer may also name a [`Subject`]: an

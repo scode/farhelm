@@ -18,8 +18,8 @@
 //! - **On demand from the bell.** The notice and the pending queue arrive in separate pushes. [`read_pending`] takes a
 //!   fresh snapshot for Open Announcements. Closing records the displayed batch and returns focus to the bell.
 //! - **The automatic batch, at window start and reset.** [`open_pending`] opens the pending entries, newest first, when
-//!   the window-start owner ([`crate::welcome::StartDialogs`]) says the check is due: at once, or after the Welcome
-//!   card and its feedback handoff close. An empty queue opens nothing, and a queue the store does not hold (a failed
+//!   the window-start owner ([`crate::welcome::StartDialogs`]) checks the initial snapshot. An empty queue opens
+//!   nothing, and a queue the store does not hold (a failed
 //!   read) is logged and opens nothing; the next window start or reset checks again. Its dismissal (Got it, the ×,
 //!   Escape, Enter on the dialog itself) records exactly the entries it showed with one keyless
 //!   `POST /api/announcements/shown`; a failed write still closes it and leaves them pending. A reset closes it without
@@ -114,8 +114,7 @@ pub fn open_history(
 
 /// Open the automatic batch: this helm's pending announcements, newest first (the helm sends them oldest first), whose
 /// dismissal records exactly those as shown. Called by the window-start owner ([`crate::welcome::StartDialogs`]) once
-/// per UI session, when nothing from the window's start is open ahead of it. `mark` is the window-start mark, or the
-/// one taken when the Welcome card or its feedback handoff closed; nothing opens when the user has moved on since.
+/// per UI session. Nothing opens when the user has moved on since the window-start `mark`.
 ///
 /// Opens nothing when nothing is pending, and nothing when the store holds no queue, which means the helm could not
 /// read it: SPEC.md has that failure "logged silently and retried only at a later window start or reset". Closing the

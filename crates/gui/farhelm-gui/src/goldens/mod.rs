@@ -1117,8 +1117,8 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "welcome-dialog",
-        size: (600., 440.),
-        draw: empty,
+        size: (900., 620.),
+        draw: welcome_pane,
         setup: welcome_dialog_setup,
     },
     Scene {

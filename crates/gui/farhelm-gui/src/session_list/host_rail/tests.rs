@@ -1400,7 +1400,7 @@ fn add_host_opens_the_dialog_and_escape_returns_focus_to_it(cx: &mut TestAppCont
 /// window height). The old page scrolled a focused entry into view; here the rail is a focus coordinator scroll region.
 /// Specified (Linux's rule, where Tab reaches every control): in a 1200 by 500 window over an empty fleet and 30 hosts,
 /// where the last avatar and Add host start below the rail's visible part, a click focuses All (over an empty fleet
-/// focus otherwise rests on New), 30 Tabs then focus the last avatar, which then lies wholly inside the rail's visible
+/// focus otherwise rests on Welcome's Start a session), 30 Tabs then focus the last avatar, which then lies wholly inside the rail's visible
 /// part, and one more focuses Add host, which then does too; the rail's visible box itself stays where it was.
 #[gpui::test]
 fn tab_scrolls_the_last_avatar_and_add_host_into_view_below_the_fold(cx: &mut TestAppContext) {

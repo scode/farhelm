@@ -180,9 +180,10 @@ second clippy run on floating stable is needed.
   without differences, and the page's native review requests. The GUI unit tests cover the native highlight and resize
   calculations.)
 - `python3 -B scripts/gui-goldens.py --self-test` (fetching and publishing the golden references)
-- `python3 -B scripts/test-gui-agent.py` (including the bounded automatic parking report and retained rejection frames),
-  and one end-to-end run of the GPUI app harness from `.agents/validation.md` (`scripts/gui-agent.py <run dir> start`, a
-  `snapshot` and a `screenshot`, then `stop`), which needs `mutter` and lavapipe
+- `python3 -B scripts/test-gui-agent.py` (including the startup dialog override, bounded automatic parking report and
+  retained rejection frames), and one end-to-end run of the GPUI app harness from `.agents/validation.md`
+  (`scripts/gui-agent.py <run dir> start`, a `snapshot` and a `screenshot`, then `stop`), which needs `mutter` and
+  lavapipe
 - `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot batch page)
 - `python3 -B scripts/test-docs-shots.py` (repeatable page and shot selection, draft output boundaries, frozen release
   shots and launcher recapture controls, crop geometry, and cleanup after a release shot's steps fail against a stand-in
@@ -193,8 +194,8 @@ second clippy run on floating stable is needed.
 - `python3 -B scripts/test-gui-e2e-smoke.py` (the end-to-end smoke's check that every step is in its `Smoke` class,
   under a number and a name no other step uses)
 - The GPUI app's end-to-end smoke test from `.agents/validation.md` (`scripts/gui-e2e-smoke.py`, through the recorder),
-  which checks Help's open and Escape focus return alongside reordering pins and moving an unpinned session into a group
-  by its grip. It needs what the harness's end-to-end run needs.
+  which checks opening Welcome from Help and Escape focus return alongside reordering pins and moving an unpinned
+  session into a group by its grip. It needs what the harness's end-to-end run needs.
 - The Linux app's lifecycle check from `.agents/validation.md` (`scripts/gui-lifecycle.py`, through the recorder), which
   needs the same
 - The terminal emulator's ignored tests from `.agents/validation.md`, in release: the snapshot spike's full round-trip

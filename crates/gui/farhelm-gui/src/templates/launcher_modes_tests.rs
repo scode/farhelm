@@ -88,7 +88,7 @@ fn window_over<'a>(
                 .iter()
                 .map(|(key, name)| ((*key).to_owned(), (*name).to_owned()))
                 .collect(),
-            // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
+            // `welcome_seen` has been inert since the startup Welcome card was removed; fixtures keep it to avoid churn.
             welcome_seen: Some(true),
             ..Preferences::default()
         }),

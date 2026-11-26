@@ -263,7 +263,7 @@ pub(super) fn marked(marked: Option<&str>) -> CollectionState {
 }
 
 /// The preferences collection with ⚡ on `marked`, if anything, and number keys `keys` (each a digit and the template
-/// name it holds), from a helm that has shown the Welcome card.
+/// name it holds).
 fn bound(marked: Option<&str>, keys: &[(&str, &str)]) -> CollectionState {
     preferences_state(Preferences {
         quick_launch_template: marked.map(str::to_owned),
@@ -271,7 +271,7 @@ fn bound(marked: Option<&str>, keys: &[(&str, &str)]) -> CollectionState {
             .iter()
             .map(|(key, name)| ((*key).to_owned(), (*name).to_owned()))
             .collect(),
-        // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
+        // `welcome_seen` has been inert since the startup Welcome card was removed; fixtures keep it to avoid churn.
         welcome_seen: Some(true),
         ..Preferences::default()
     })
@@ -2453,7 +2453,7 @@ pub(super) fn unreadable(error: &str) -> CollectionState {
 type Press = fn(&mut VisualTestContext);
 
 /// The real main view over a fake helm that has pushed no preferences at all: the sessions, hosts and templates of
-/// [`window`], but no ⚡ mark or number keys, known or unknown. No preferences entry also keeps the Welcome card shut.
+/// [`window`], but no ⚡ mark or number keys, known or unknown.
 pub(super) fn window_without_preferences(
     cx: &mut TestAppContext,
 ) -> (FakeHelm, &mut VisualTestContext) {

@@ -103,7 +103,7 @@ fn preferences_entry(order: &[&str], skip: bool) -> KeyedEntry {
     let preferences = Preferences {
         visit_history: order.iter().take(1).map(|key| key.to_string()).collect(),
         skip_session_confirmations: Some(skip),
-        // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
+        // `welcome_seen` has been inert since the startup Welcome card was removed; fixtures keep it to avoid churn.
         welcome_seen: Some(true),
         ..Preferences::default()
     };

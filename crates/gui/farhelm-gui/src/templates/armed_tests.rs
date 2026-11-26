@@ -222,7 +222,7 @@ fn bindings(one: &str) -> CollectionState {
         visit_history: vec!["a".into()],
         quick_launch_template: Some("webbuilder".into()),
         template_shortcuts: BTreeMap::from([("1".to_owned(), one.to_owned())]),
-        // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
+        // `welcome_seen` has been inert since the startup Welcome card was removed; fixtures keep it to avoid churn.
         welcome_seen: Some(true),
         ..Preferences::default()
     })

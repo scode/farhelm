@@ -219,7 +219,7 @@ fn setup_run(id: i64, done: usize) -> ProvisioningView {
     view
 }
 
-/// The main view over the fake helm with no Welcome card to open over it, `listed` as the registry, `runs` retained,
+/// The main view over the fake helm with `listed` as the registry, `runs` retained,
 /// the sessions `rows` (the first one open) and "Update remote hosts automatically" `auto`, in a window of the
 /// reference screens' narrow size. Every command sent at startup is answered, so each test sees only its own steps'.
 fn open<'a>(

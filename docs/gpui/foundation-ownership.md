@@ -500,10 +500,9 @@ Extension points: reported: a view drawn inside the main view's ground, and the 
 is not drawn here: `root::wrap` draws it after the ground).
 
 The main view also holds an owner it never draws, made in `MainView::new` and kept for the window's life: the
-`_start_dialogs` field, the window-start dialogs' owner (`welcome::StartDialogs`), which decides when the Welcome card
-and the first batch of announcements open. Such a field is reported wiring too, the same way: an area's owner that must
-live as long as the window, made where the main view makes its other parts, in the order its docs need (this one after
-the session pane, so the selected session's terminal is home before a card opens over it).
+`_start_dialogs` field, the window-start dialogs' owner (`welcome::StartDialogs`), checks pending announcements and then
+upgrade highlights. The field is reported wiring for an owner that lives as long as the window. It is created after the
+session pane so the window's ordinary home is set before a startup dialog opens.
 
 Lint exceptions: none.
 
@@ -536,9 +535,8 @@ Extension points: reported:
   numbered with two digits after the last, because the steps run in name order against one app run and unittest sorts
   names as strings (`test_10_` before `test_1_`); each area's steps seed and use sessions of their own, set up the open
   session and focus they depend on, and never touch a session another area's steps seed or use (the script's module docs
-  say how). One step needs a window start of its own and so starts and stops a second app run beside the shared one:
-  step 53, the other-dialogs area's Welcome card opened by a window start that asks for it. The script's module docs
-  give the pattern such a step follows (its run directory, `--no-build`, and a `stop` in a `finally`).
+  say how). Step 52 opens Welcome from Help and checks that Escape returns focus there. Unit tests cover the startup
+  dialog override with an already-pending announcement.
 
 The Rust side (`agent.rs`, and `agent_startup.rs`, which also holds the guard that refuses the `agent` feature in
 optimized builds) has none. The `agent` feature itself is the bridge's too but is declared in Bootstrap's manifest: a

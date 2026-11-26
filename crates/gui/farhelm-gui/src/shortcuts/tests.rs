@@ -57,8 +57,8 @@ const HELP_BUTTON: &str = "app-help-toggle";
 type Main<'a> = MainWindow<'a>;
 
 /// Sessions a and b, with a the last visited, so a is open at startup, and preferences holding `preferences`'s
-/// bindings. The Welcome card is marked seen, as `session_list::tests::preferences` marks it, so it does not open at
-/// the window's start and take focus from the terminal.
+/// bindings. The inert `welcome_seen` value is set as `session_list::tests::preferences` sets it; nothing reads it
+/// since the startup Welcome card was removed.
 fn fleet(preferences: Preferences) -> Vec<CollectionState> {
     vec![
         listing(&["a", "b"], &[session("a"), session("b")]),

@@ -1,8 +1,8 @@
 //! Tests of the Announcements dialog opened as the `?` menu's history ([`super::open_history`]): what each announcement
 //! shows, the order, that nothing is read as markup, the link, that reopening writes nothing, and closing. Then the
 //! automatic batch ([`super::open_pending`]) as the window-start owner opens it: its order, what its dismissal records,
-//! and when it opens nothing. Those run in the Welcome card's test window (`welcome::tests::open_start`), since the
-//! batch is that owner's to open; the card's tests cover the batch waiting behind the card.
+//! and when it opens nothing. Those run in the startup test window (`welcome::tests::open_start`) so the real
+//! owner sees the first snapshot and decides whether to open the batch.
 //!
 //! The dialog is opened from a stand-in for the `?` button in the root view of the
 //! test's own, whose click takes a mark and calls [`super::open_history`] with its own focus handle, which is where
@@ -329,8 +329,8 @@ fn a_linked_history_has_no_body_stop(cx: &mut TestAppContext) {
 
 // ---- The automatic batch -------------------------------------------------------------------------------------------
 
-/// The pending queue of `ids`, each titled after its id, in the helm's order (oldest first), from a helm that has
-/// already shown the Welcome card, so the batch is the window start's first dialog.
+/// The pending queue of `ids`, each titled after its id in the helm's oldest-first order. The old Welcome field in
+/// the fixture has no bearing on the startup decision.
 fn pending(ids: &[&str]) -> Vec<CollectionState> {
     vec![
         crate::welcome::tests::seen(Some(true)),

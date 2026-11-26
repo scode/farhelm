@@ -35,9 +35,9 @@
 //! question whose text outgrows the region while one of its answers holds focus (the old Trash dialog's global
 //! confirmation).
 //!
-//! Two of the old app's small information dialogs, Announcements and the Welcome card, drew their parts tighter than the
-//! ordinary dialog (`.announcements-dialog > .dialog-header` and `.welcome-dialog > .welcome-header` in the old
-//! stylesheet): [`DialogFrame::compact`].
+//! The old app's Announcements dialog drew its parts tighter than the ordinary dialog
+//! (`.announcements-dialog > .dialog-header` in the old stylesheet): [`DialogFrame::compact`]. The old Welcome card
+//! did too; the Welcome dialog that replaced it uses the ordinary spacing.
 //!
 //! NOTE: The old Close changed only its color on hover; here it is a ghost icon button, which gets the ghost tier's
 //! hover fill. The old one was a 20-pixel "×" character; here it is the close icon at the icon buttons' size.

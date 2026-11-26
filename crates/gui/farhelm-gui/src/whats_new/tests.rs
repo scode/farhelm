@@ -153,10 +153,10 @@ pub(crate) fn test_host(check: UpgradeNotesCheck) -> updates::UpdaterHost {
     host
 }
 
-/// Welcome and Announcements get their own dismissals before highlights are even looked up. The fake updater has
-/// automatic updates off. Closing highlights only advances the release baseline.
+/// The pending announcement gets its dismissal before highlights are looked up. The fake updater has automatic
+/// updates off. Closing highlights only advances the release baseline.
 #[gpui::test]
-fn welcome_and_announcements_precede_upgrade_highlights(cx: &mut TestAppContext) {
+fn announcements_precede_upgrade_highlights(cx: &mut TestAppContext) {
     let checks = Rc::new(Cell::new(0));
     let counted = checks.clone();
     keep_host(
@@ -177,14 +177,6 @@ fn welcome_and_announcements_precede_upgrade_highlights(cx: &mut TestAppContext)
         vec![],
     );
     let (mut helm, cx, _, _) = open_start(cx, Some(vec![seen(None), batch]));
-    assert!(shows(cx, "welcome"));
-    assert_eq!(checks.get(), 0, "Welcome owns the first interaction");
-    click(cx, "welcome-got-it");
-    let (id, body) = one_command(&mut helm, Method::Put, "/api/preferences");
-    assert_eq!(body, json!({"welcome_seen": true}));
-    helm.reply(id, 200, None);
-    settle(cx);
-
     assert!(shows(cx, "announcements"));
     assert_eq!(
         checks.get(),
@@ -299,7 +291,7 @@ fn late_answer_after_prompt(cx: &mut TestAppContext, close_before_answer: bool) 
         .update(|window, cx| crate::welcome::open(&opener, &mark, window, cx))
         .expect("the intervening prompt opened");
     settle(cx);
-    assert_eq!(focused_id(cx).as_deref(), Some("welcome-got-it"));
+    assert_eq!(focused_id(cx).as_deref(), Some("welcome-dialog-start"));
     if close_before_answer {
         cx.update(|window, cx| crate::layers::close(prompt, window, cx));
         settle(cx);

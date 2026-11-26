@@ -35,8 +35,8 @@
 //!   queue's history is not empty, read when the menu draws) and opens that history
 //!   ([`crate::announcements::open_history`]) with the `?` button as its opener.
 //!
-//! - **Welcome** reopens the Welcome card ([`crate::welcome::open`]) with the `?` button as its opener; a reopened card
-//!   writes nothing.
+//! - **Welcome** opens the same introduction and actions as the empty pane ([`crate::welcome::open`]), with the `?`
+//!   button as its opener.
 //!
 //! NOTE: Deviations from the old flyout, both from the layer manager's one beside placement (its `Placement::Beside`
 //! docs record the shared clamp): the old Help menu hung from its toggle's bottom edge and kept at least 8 pixels from
@@ -98,7 +98,7 @@ enum Item {
     ReleaseNotes,
     /// The history of announcements this helm has shown; offered only once it has shown one.
     Announcements,
-    /// The Welcome card again, writing nothing.
+    /// The introduction and first actions in a dialog.
     Welcome,
     /// Offered only while an updater runs (SPEC.md, "Installation and updates").
     CheckForUpdates,
@@ -131,7 +131,7 @@ impl Item {
             Item::KeyboardShortcuts => "Shows keys and your template bindings",
             Item::ReleaseNotes => "Opens the release notes in your browser",
             Item::Announcements => "Shows previously shown announcements again",
-            Item::Welcome => "Shows the welcome card again",
+            Item::Welcome => "Shows the introduction and first steps",
             Item::CheckForUpdates => "Installs a newer Farhelm if there is one",
             Item::OpenSourceNotices => "Licenses of the code and fonts in this app",
         }
@@ -160,7 +160,7 @@ impl Item {
                 "Announcements: show the announcements Farhelm has shown you before, newest first, such as serious changes you needed to act on"
             }
             Item::Welcome => {
-                "Welcome: show the welcome card with Get started and how to send feedback"
+                "Welcome: open the introduction with links to the first-session guide and feedback"
             }
             Item::CheckForUpdates => {
                 "Check for updates: look for a newer Farhelm release now and install it in the background; the version readout shows how it went"

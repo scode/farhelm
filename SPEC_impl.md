@@ -781,13 +781,10 @@ surface the old app's hand-kept list of covering surfaces missed; the launch pil
 refuse the click. The terminal's own raised refusal line is kept off the reopened panel instead: it is raised only while
 the panel is held back. The drag-copy notice stays off the disclosure by never opening while it is shown. Things the
 user did not start never open a layer over what they are doing (SPEC.md, "Keyboard focus"): every open carries the mark
-its feature took when the user acted. The one exception is SPEC.md's window-start dialogs (the Welcome card, and the
-first batch of announcements when nothing is open ahead of it). Each takes its mark through its own constructor,
-`focus::Mark::at_ui_session_start`, when its owner first sees a new UI session, before that session's first snapshot is
-drawn. If the user types or clicks before the open, the layer manager refuses it and the dialog stays unseen until a
-later window start or reset, as the maintainer decided on 2026-11-14. A batch that SPEC.md has wait behind the Welcome
-card (and, after Send feedback now, behind the feedback dialog) is not an exception: it opens with a mark taken when the
-last of them closes, which always follows a press of the user's.
+its feature took when the user acted. The initial announcement batch uses `focus::Mark::at_ui_session_start` when its
+owner first sees a new UI session, before its first snapshot is drawn. If the user types or clicks before the open, the
+layer manager refuses it and the batch stays pending for a later window start or reset. The upgrade highlights check
+uses that same mark if there is no batch, or a fresh mark when the user dismisses the batch.
 
 A submenu opened on hover starts without focus and records its parent at open, like a submenu opened by a key. The layer
 manager gives it keyboard ownership when the pointer or a key enters it, so Tab and focus recovery then see the child.
@@ -5203,10 +5200,9 @@ accepted. Each template may hold at most one key. Names need not exist at write 
 be stale. Both template-deletion paths clear matching bindings and the quick-launch mark inside the deletion
 transaction; restoring the template does not restore either shortcut. Older helms refuse this schema.
 
-Helm schema 51 adds `welcome_seen` to the shared preference row. Unset and false mean unseen; both fresh and upgraded
-helms start unseen. The dismissal belongs to the helm so closing the welcome card on one client hides it on every
-client's next load. A failed or timed-out read is never evidence of unseen. This migration prevents older helms from
-opening the database.
+Helm schema 51 added `welcome_seen` to the shared preferences for the old startup card. The app no longer reads or
+writes that preference. The column and wire field stay in place so moving Welcome to the empty pane needs no database
+migration or protocol change.
 
 The upgrade highlights choice and the last build whose highlights were shown or skipped live beside `welcome_seen`. Only
 `show_whats_new: false` opts out. `last_whats_new_release` stores a SemVer string. A later dismissal advances it under

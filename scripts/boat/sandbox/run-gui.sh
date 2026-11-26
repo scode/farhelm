@@ -33,7 +33,7 @@ for suite in "$@"; do
   case "$suite" in
   smoke)
     script=scripts/gui-e2e-smoke.py selection='GPUI app end-to-end smoke'
-    concurrency='one app run, steps in order; one step starts and stops a second run'
+    concurrency='one app run, steps in order'
     ;;
   lifecycle)
     script=scripts/gui-lifecycle.py selection='Linux app lifecycle'

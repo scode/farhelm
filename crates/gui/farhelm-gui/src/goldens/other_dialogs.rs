@@ -334,14 +334,6 @@ fn announcement_history() -> CollectionState {
     }
 }
 
-/// The Welcome card (reference `welcome-dialog`): the title and its ×, the introduction, the two bordered pointers with
-/// Read Get started and Send feedback now, the footer's note and Got it with focus. Opened as the `?` menu's Welcome item
-/// opens it, which draws the same card as the window start does; the scene's ring handle stands in for the `?` button.
-pub(super) fn welcome_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    let mark = Mark::take(cx);
-    crate::welcome::open(&state.ring, &mark, window, cx);
-}
-
 /// Draw two finalized releases in the real upgrade dialog, including a curated headline and an older entry.
 /// The saved release predates both so the header shows the range alongside the actions and their key hints.
 pub(super) fn whats_new_dialog_setup(_: &SceneState, window: &mut Window, cx: &mut App) {

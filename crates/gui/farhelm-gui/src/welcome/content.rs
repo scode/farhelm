@@ -1,9 +1,8 @@
-//! The first actions available from an empty fleet. The pane owns their focus handles so an opened dialog can return
-//! to the same link after the pane redraws.
+//! The same first actions appear in the empty pane and in the Welcome dialog. Each instance owns its focus handles.
 
 use gpui::{
     App, Div, FocusHandle, FontWeight, InteractiveElement as _, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, div, px, svg,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, svg,
 };
 
 use super::{GET_STARTED_URL, INTRODUCTION, TITLE};
@@ -11,6 +10,7 @@ use crate::actions::NEW_SESSION_SHORTCUT_NAME;
 use crate::components::{Button, HoverHelp, Role, StatusMark, Tier, key_chip};
 use crate::focus::Mark;
 use crate::launcher::{HARNESS_PICKER_ORDER, entry};
+use crate::layers::{self, LayerId};
 use crate::{feedback, harness, hosts, session_list, theme};
 
 pub(crate) const PANE_PREFIX: &str = "welcome-pane";
@@ -42,6 +42,34 @@ impl WelcomeContent {
     /// Offer the same New entry point as the sidebar. Only an accepted open switches the sidebar back to Sessions.
     /// The host and feedback dialogs each return to the link that opened them.
     pub(crate) fn render(&self, cx: &mut App) -> Div {
+        self.render_at(None, cx)
+    }
+
+    /// The dialog starts on its primary action when available and on the first link while a launch or host change
+    /// disables that action. Both are already tab stops inside the body.
+    pub(super) fn dialog_start(&self, can_start: bool) -> FocusHandle {
+        if can_start {
+            self.start.clone()
+        } else {
+            self.host.clone()
+        }
+    }
+
+    /// The frame supplies the title. Host and feedback actions close this layer and use Help as their opener.
+    pub(super) fn render_dialog(&self, layer: LayerId, opener: &FocusHandle, cx: &mut App) -> Div {
+        self.render_at(Some((layer, opener)), cx)
+    }
+
+    /// A click that starts a new layer leaves the Welcome dialog first. In the pane, each link stays drawn and can
+    /// receive focus after the layer closes. The guide simply opens a URL in either surface.
+    fn render_at(&self, dialog: Option<(LayerId, &FocusHandle)>, cx: &mut App) -> Div {
+        let layer = dialog.map(|(layer, _)| layer);
+        let opener = dialog.map(|(_, opener)| opener);
+        let close_dialog = move |window: &mut Window, cx: &mut App| {
+            if let Some(layer) = layer {
+                layers::close(layer, window, cx);
+            }
+        };
         let available = entry::new_available(cx);
         let palette = theme::palette(cx);
         let start = Button::new(
@@ -65,7 +93,12 @@ impl WelcomeContent {
                     NEW_SESSION_SHORTCUT_NAME.map(|name| key_chip(name, palette.on_fill, palette)),
                 ),
         )
-        .on_click(|_, window, cx| {
+        .on_click(move |_, window, cx| {
+            // New can become unavailable after this button was drawn. Leave Welcome open if the launcher can't take over.
+            if layer.is_some() && !entry::new_available(cx) {
+                return;
+            }
+            close_dialog(window, cx);
             if entry::open_new(window, cx) {
                 session_list::show_sessions(window, cx);
             }
@@ -73,8 +106,9 @@ impl WelcomeContent {
         let host = self
             .link("add-host", "Add a remote host", &self.host)
             .on_click({
-                let opener = self.host.clone();
+                let opener = opener.unwrap_or(&self.host).clone();
                 move |_, window, cx| {
+                    close_dialog(window, cx);
                     hosts::add::open(&opener, &Mark::take(cx), window, cx);
                 }
             });
@@ -84,8 +118,9 @@ impl WelcomeContent {
         let feedback = self
             .link("feedback", "Send feedback", &self.feedback)
             .on_click({
-                let opener = self.feedback.clone();
+                let opener = opener.unwrap_or(&self.feedback).clone();
                 move |_, window, cx| {
+                    close_dialog(window, cx);
                     feedback::open(&opener, &Mark::take(cx), window, cx);
                 }
             });
@@ -100,7 +135,7 @@ impl WelcomeContent {
             .text_center()
             .child(marks(self.prefix, palette))
             // A future introduction video belongs above the title, inside the same width as the copy.
-            .child(
+            .children(dialog.is_none().then(|| {
                 div()
                     .id(format!("{}-title", self.prefix))
                     .role(Role::Heading)
@@ -110,8 +145,8 @@ impl WelcomeContent {
                     .line_height(px(24.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::color(palette.fg_0))
-                    .child(TITLE),
-            )
+                    .child(TITLE)
+            }))
             .child(
                 div()
                     .mt(px(8.))

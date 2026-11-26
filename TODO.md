@@ -51,11 +51,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Make Welcome the empty main area.** Replace the startup Welcome card with direction W7, "Empty state", in
-  [the same mockup](https://snippets.scode.org/s/farhelm-whats-new-directions/): the empty main area introduces Farhelm
-  and offers starting a session, adding a remote host, the guide and feedback. A video thumbnail and light coaching
-  indicators come later and should fit the layout. Plan: `plans/queue/welcome-empty-state.md`.
-
 - **Start several selected sessions at once.** When multiple sessions are selected we need to be able to start sessions
   if all the marked ones are stopped.
 

@@ -89,7 +89,7 @@ fn templates() -> Vec<LaunchTemplate> {
 }
 
 /// The module docs' fleet: sessions a, b and c with a the last visited, the helm's own host, the templates, ⚡ and
-/// number key 1 on `deploy`, number key 8 on `partial`, from a helm that has shown the Welcome card.
+/// number key 1 on `deploy`, number key 8 on `partial`.
 fn fleet() -> Vec<CollectionState> {
     vec![
         listing(

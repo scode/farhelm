@@ -109,14 +109,13 @@ class StraySteps(unittest.TestCase):
     def test_the_committed_script_passes_the_check(self) -> None:
         """The real smoke must pass its own check, and passing it must mean every step the file spells out runs.
         Specified: no refusals (no stray step, no shared name or number); unittest collects from `Smoke` exactly as
-        many steps as the file has `def test_` lines (counted as text, not through the AST the check uses); and steps 52
-        and 53, the two the merge hid, are among them."""
+        many steps as the file has `def test_` lines (counted separately from the AST check), including the Welcome
+        step, which an earlier merge hid."""
         text = SCRIPT.read_text(encoding="utf-8")
         self.assertEqual(smoke.step_refusals(text), [])
         written = len(re.findall(r"^\s*(?:async\s+)?def test_", text, re.MULTILINE))
         self.assertEqual(len(unittest.defaultTestLoader.getTestCaseNames(smoke.Smoke)), written)
-        self.assertIn("test_52_welcome_reopens_from_the_help_menu_and_escape_returns_to_the_button", vars(smoke.Smoke))
-        self.assertIn("test_53_a_window_start_opens_the_card_only_when_the_run_asks_for_it", vars(smoke.Smoke))
+        self.assertIn("test_52_welcome_opens_from_help_and_escape_returns_to_the_button", vars(smoke.Smoke))
 
 
 class StepClashes(unittest.TestCase):
