@@ -85,17 +85,34 @@ impl Left {
     /// the width the actions leave and gives it up first (`min_w_0`), so the actions never shrink at the 650-pixel floor.
     ///
     /// With floors, the strip and the pill each sit in a box that shrinks as its child would on its own (GPUI's default
-    /// `flex_shrink: 1` and automatic basis) but never below its floor, though it is wider than its content when the
-    /// floor is (the strip at 1400 pixels with a pill, say). The box is a block, so its child takes the box's whole width
-    /// whatever its own content asks for: the strip keeps scrolling sideways when the box is narrower than its tabs.
+    /// `flex_shrink: 1` and automatic basis) but never below its floor. The strip's box also grows into the region's
+    /// free width, as the strip does without one, so its New terminal stays at the region's right end beside the pill;
+    /// the strip fills it and keeps scrolling its tabs sideways when the box is narrower than they are. Growing does not
+    /// change how a short region is shared: the basis stays the content's width, so the strip and the pill still give
+    /// up width in proportion to their content. The pill's box is a block, so the pill takes its whole width whatever
+    /// its own content asks for.
     /// Without floors there is no box at all, which is not the same as a zero floor: a box with no floor shrank
     /// alongside the strip and let the pill spill out of it over a Delete's progress.
     pub(super) fn build(self, floors: Option<(Pixels, Pixels)>) -> AnyElement {
         let floored =
             |child: AnyElement, floor: Pixels| div().min_w(floor).child(child).into_any_element();
+        // The strip's box takes the region's free width, as the strip does without a box: its New terminal stays at the
+        // region's right end, before the pill (`TerminalSet::strip`). `flex_auto` rather than `flex_1`, which would
+        // zero the basis and so let the pill take its whole width before the strip gave up any. The box is a flex row
+        // so the strip inside can fill it.
+        let strip_box = |child: AnyElement, floor: Pixels| {
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .flex_auto()
+                .min_w(floor)
+                .child(child)
+                .into_any_element()
+        };
         let (strip, pill) = match floors {
             Some((strip, pill)) => (
-                self.strip.map(|child| floored(child, strip)),
+                self.strip.map(|child| strip_box(child, strip)),
                 self.pill.map(|child| floored(child, pill)),
             ),
             None => (self.strip, self.pill),

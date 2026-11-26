@@ -42,6 +42,16 @@
 //!   switch skips "terminal-tab Close"). A refused close shows under the strip on that tab alone ("Close tab: " and the
 //!   helm's words) until its next close.
 //!
+//! - **A tab's × sits at its left, and shows only when asked for.** It used to sit at the right of its tab, always
+//!   shown, so the last tab's × sat right beside New terminal and a press meant for New terminal kept closing a shell
+//!   (the maintainer's TODO entry, "Stop accidental terminal tab closes when creating a new terminal"). Now each shell
+//!   tab starts with a fixed leading slot showing a terminal mark, and the × takes that same place, instead of the
+//!   mark, while the pointer is over the tab, keyboard focus is on the tab or its ×, the tab's close question is open,
+//!   or its close is in flight ([`TerminalSet::strip`]). Nothing moves when it shows: the × is always drawn, over the
+//!   slot and transparent while it is not shown, so it keeps its place in Tab's order (the tab, then its ×) and its
+//!   anchor for the question, and the strip's layout never depends on the pointer. The Agent tab has neither mark
+//!   nor ×.
+//!
 //! - **The choice survives a new view.** Reopening a session or reconnecting to the helm shows the remembered shell
 //!   tab if it has a terminal in the set. A deliberate selection or a close fallback updates the choice, and either
 //!   can clear it by choosing Agent. A missing tab or a refused initial attach during restore leaves the choice
@@ -62,9 +72,10 @@ use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, EntityId,
-    FocusHandle, Global, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render,
-    Role, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    WeakEntity, Window, div, prelude::FluentBuilder as _, px,
+    FocusHandle, Global, HoverListenerMode, Hsla, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement as _, Pixels, Render, Role, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder as _, px, svg,
 };
 
 #[cfg(test)]
@@ -75,10 +86,13 @@ use super::attached::{AttachedTerminal, Hold, InitialTabAttach, NoticeHold, Term
 use super::attachments::Carried;
 use super::tunnels::Tunnels;
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, IconButton, Tier};
+use crate::components::{
+    Button, HoverHelp, IconButton, TERMINAL_TAB_CLOSE_SIDE, TERMINAL_TAB_INSET, TOOLBAR_ICON_GAP,
+    Tier,
+};
 use crate::focus::{self, Mark};
 use crate::host_text;
-use crate::layers::{Anchor, Subject};
+use crate::layers::{self, Anchor, LayerId, Subject};
 use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::prompt::{self, Answer, Question};
 use crate::session::{self, UiSession};
@@ -87,8 +101,12 @@ use crate::theme;
 /// How many tabs are attached at most (the old app's `MAX_MOUNTED_TAB_ISLANDS`). See the module docs.
 pub(crate) const MAX_ATTACHED_TABS: usize = 32;
 
-/// The strip's element id.
+/// The strip's element id: the whole tab area, its scrolling tabs and New terminal pinned after them.
 pub(crate) const STRIP_ID: &str = "session-terminal-tabs";
+
+/// The element id of the strip's part that scrolls: the Agent tab and the shell tabs, without the divider and New
+/// terminal, which stay put at the strip's right end ([`TerminalSet::strip`]).
+pub(crate) const STRIP_TABS_ID: &str = "session-terminal-tabs-scroll";
 
 /// The agent terminal's tab's element id.
 pub(crate) const AGENT_TAB_ID: &str = "session-terminal-tab-agent";
@@ -138,9 +156,91 @@ pub(crate) fn tab_label(index: usize) -> String {
     format!("Terminal {}", index + 1)
 }
 
-/// The element id of shell tab `id`'s × button.
+/// The element id of shell tab `id`'s × button. The wrapper drawn around it names whether the × shows in its debug
+/// selector, this id followed by `:shown` or `:hidden` ([`TerminalSet::strip`]), since the frame's record carries no
+/// opacity.
 pub(crate) fn close_element_id(id: &str) -> String {
     format!("session-terminal-close-{id}")
+}
+
+/// The element id of the box around shell tab `id`'s button and its ×, which listens for the pointer over either and
+/// draws the tab's hover fill under both. Not under the tabs' own `session-terminal-tab-` prefix, which names buttons.
+fn pill_element_id(id: &str) -> String {
+    format!("session-terminal-pill-{id}")
+}
+
+/// The terminal mark in a shell tab's leading slot: one of the standard 14-unit action icons, as the × that takes its
+/// place is, so the two swap without either moving.
+const LEADING_ICON: f32 = 14.;
+
+/// How far a focused button's ring reaches outside its edge (`components::button`'s ring: 2 pixels wide, 1 pixel
+/// clear), which [`TerminalSet::reveal_close`] keeps in view beside a focused ×.
+const RING_ROOM: f32 = 3.;
+
+/// Where a shell tab's × sits from the tab's left edge: centered on the leading slot, which starts
+/// [`TERMINAL_TAB_INSET`] in. The × is wider than the mark, so it starts left of the slot.
+const CLOSE_LEFT: f32 = TERMINAL_TAB_INSET + LEADING_ICON / 2. - TERMINAL_TAB_CLOSE_SIDE / 2.;
+
+/// A shell tab's face, drawn in place of its name's text ([`Button::content`]): the leading slot with the terminal
+/// mark, then the name, as far apart as a button's icon and label ([`TOOLBAR_ICON_GAP`]). The slot is always laid
+/// out, so the tab is as wide with the mark showing as with the × over it; `revealed` only makes the mark transparent
+/// while the × shows in its place. `ink` is the tab's own ink
+/// ([`Button::ink`]), since an SVG takes none from the button around it.
+fn shell_tab_face(label: String, ink: Hsla, revealed: bool) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(TOOLBAR_ICON_GAP)
+        .child(
+            div()
+                .flex_none()
+                .size(px(LEADING_ICON))
+                .opacity(if revealed { 0. } else { 1. })
+                .child(
+                    svg()
+                        .path(Icon::Terminal.path())
+                        .size(px(LEADING_ICON))
+                        .text_color(ink),
+                ),
+        )
+        .child(label)
+}
+
+/// Whether the pointer is over a shell tab's box (its button or its ×), as the box last reported it: one of the ×'s
+/// reveal reasons. Element state under the tab's id, so a tab drawn again starts unhovered and a tab that scrolls or
+/// closes away under a resting pointer cannot leave a × shown. Recorded from a hover listener that GPUI runs whatever
+/// the last input was, unlike its hover styles, which stand down after a key press: a key typed while the pointer
+/// rests on a tab must not hide the × the user is about to press. Local to the strip rather than shared with the
+/// session list's `RowHover`, which does the same for a row's menu button, because only these two use it and they are
+/// keyed by different things. A change redraws the strip.
+#[derive(Clone)]
+struct TabHover(Entity<bool>);
+
+impl TabHover {
+    /// Shell tab `id`'s hover state, made while the strip is drawn.
+    fn of(id: &str, window: &mut Window, cx: &mut App) -> TabHover {
+        TabHover(window.use_keyed_state(
+            SharedString::from(format!("{}-hovered", pill_element_id(id))),
+            cx,
+            |_, _| false,
+        ))
+    }
+
+    /// Record that the pointer is over the tab's box (`hovered`) or not; only a change redraws.
+    fn set(&self, hovered: bool, cx: &mut App) {
+        self.0.update(cx, |state, cx| {
+            if *state != hovered {
+                *state = hovered;
+                cx.notify();
+            }
+        });
+    }
+
+    /// Whether the pointer is over the tab's box.
+    fn hovered(&self, cx: &App) -> bool {
+        *self.0.read(cx)
+    }
 }
 
 /// The element id of the line under the strip saying why closing shell tab `id` was refused.
@@ -156,6 +256,30 @@ pub(crate) const ADD_SIDE: f32 = 24.;
 
 /// `.tab-add-divider`: 16 pixels high.
 const ADD_DIVIDER_HEIGHT: f32 = 16.;
+
+/// `.tab-add-divider`'s width: a 1-pixel rule.
+const ADD_DIVIDER_WIDTH: f32 = 1.;
+
+/// `.tab-add-divider`'s margin on each side, beyond the strip's gaps.
+const ADD_DIVIDER_MARGIN: f32 = 2.;
+
+/// The width New terminal takes when pinned at the strip's end: the gap before the divider, the divider and its
+/// 2-pixel margins, the gap after it, and the button.
+const PINNED_ADD_WIDTH: f32 =
+    STRIP_GAP + ADD_DIVIDER_MARGIN + ADD_DIVIDER_WIDTH + ADD_DIVIDER_MARGIN + STRIP_GAP + ADD_SIDE;
+
+/// The least width the scrolling tabs keep beside a pinned New terminal: a control's worth, so a focused tab or × is
+/// still recognizable when scrolled into view (SPEC.md keeps the top row reachable down to a 650-pixel pane). A strip
+/// narrower than New terminal and this together draws New terminal at the end of the scrolling tabs instead
+/// ([`TerminalSet::pins_add`]).
+const PINNED_TABS_FLOOR: f32 = ADD_SIDE;
+
+/// Whether a strip `width` wide pins New terminal at its end ([`TerminalSet::pins_add`]). A zero width is taken for a
+/// strip not laid out yet and pins; a strip really laid out at zero width (only in a pane narrower than the 650 pixels
+/// SPEC.md keeps the row whole for, where clipping is allowed) shows no tab either way.
+fn pins_add_at(width: Pixels) -> bool {
+    width == px(0.) || width >= px(PINNED_ADD_WIDTH + PINNED_TABS_FLOOR)
+}
 
 /// The close question's first line (the old app's `CLOSE_TAB_CONSEQUENCE`): closing asks whatever the shell runs,
 /// since the window cannot see what that is, and the close kills it either way.
@@ -177,7 +301,9 @@ fn closing(key: &str, id: &str, cx: &App) -> bool {
 
 /// The × of shell tab `id` (named `label` now) was pressed: close it at once when **Skip session confirmations** is on
 /// (SPEC.md: the switch skips "terminal-tab Close"), else ask first, hung under the ×. The question names the tab as it
-/// was named when it opened and acts on its id, so a tab before it closing in the meantime closes the right one.
+/// was named when it opened and acts on its id, so a tab before it closing in the meantime closes the right one. The
+/// set records the question's layer ([`TerminalSet::asking`]), so the × stays shown while its question is open, even
+/// once the pointer has left the tab for the question.
 fn ask_to_close(
     set: &Entity<TerminalSet>,
     id: &str,
@@ -213,7 +339,7 @@ fn ask_to_close(
         Tier::Neutral,
     ));
     let confirmed = set.downgrade();
-    prompt::ask_anchored(
+    let asked = prompt::ask_anchored(
         question,
         anchor.clone(),
         Some(Subject::of(set)),
@@ -224,6 +350,12 @@ fn ask_to_close(
         window,
         cx,
     );
+    if let Some(layer) = asked {
+        set.update(cx, |set, cx| {
+            set.asking = Some((id.to_owned(), layer));
+            cx.notify();
+        });
+    }
 }
 
 /// Show the new shell and focus it only if the user waited for the reply and row update. Choosing it hides the
@@ -265,16 +397,17 @@ struct Tab {
 
 /// A control in the strip that keyboard focus can rest on, as [`TerminalSet::reveal_focused`] tells them apart: each
 /// is revealed once when focus reaches it, and a tab and its × share one item of the strip but are revealed
-/// differently.
+/// differently (the item's start, or the × a few pixels into it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StripControl {
     /// The Agent tab, the strip's first item.
     Agent,
-    /// Shell tab `n`'s button, at the start of the item that holds it and its × (item `n + 1`).
+    /// Shell tab `n`'s button, the item that holds it and its × (item `n + 1`).
     Tab(usize),
-    /// Shell tab `n`'s ×, at the end of that same item.
+    /// Shell tab `n`'s ×, over the start of that same item.
     Close(usize),
-    /// New terminal, the strip's last item (after the shell tabs' items and the divider).
+    /// New terminal: pinned after the scrolling tabs, where focus reaching it scrolls nothing, or, in a strip too
+    /// narrow to pin it ([`TerminalSet::pins_add`]), the scrolling part's last item, after the divider.
     Add,
 }
 
@@ -330,9 +463,21 @@ pub struct TerminalSet {
     /// the strip is built while the header draws, from a shared reference, and asking the scroll handle to reveal a
     /// control then is how GPUI expects it (the handle acts on it when it lays the strip out).
     scroll: ScrollHandle,
-    revealed: Cell<Option<StripControl>>,
+    /// The control last scrolled into view (see `scroll`), and for New terminal whether it was pinned then
+    /// ([`TerminalSet::pins_add`]), since it needs revealing again when it moves into the scrolling part.
+    revealed: Cell<Option<(StripControl, bool)>>,
+    /// The whole strip's bounds as last laid out, tabs and New terminal together: the width the top row gave the strip,
+    /// which does not depend on where New terminal sits in it, so deciding from it cannot flip the choice back
+    /// ([`TerminalSet::pins_add`]). Its scroll position is never used.
+    strip_bounds: ScrollHandle,
     /// Whether the terminals are inert ([`TerminalSet::set_inert`]), which new tabs take on too.
     inert: bool,
+    /// The tab whose close question was asked last, by id, and the question's layer: while that layer is open, the
+    /// tab's × stays shown ([`TerminalSet::strip`]). Never cleared, only replaced: the layer manager says whether the
+    /// layer is still open whenever the strip draws, so a question answered, cancelled or dismissed some other way
+    /// needs no bookkeeping here. Only the last one matters, since a press on another tab's × closes the open question
+    /// before it asks its own. The session header keeps its questions the same way (`session_pane::header`'s `asked`).
+    asking: Option<(String, LayerId)>,
     /// A tab New terminal opened that the pushed row does not list yet, with the press that asked and its window: it is
     /// chosen once it is listed if the user waited.
     opened: Option<(String, Mark, AnyWindowHandle)>,
@@ -375,7 +520,9 @@ impl TerminalSet {
             add_focus: cx.focus_handle().tab_stop(true),
             scroll: ScrollHandle::new(),
             revealed: Cell::new(None),
+            strip_bounds: ScrollHandle::new(),
             inert: false,
+            asking: None,
             opened: None,
             _tabs_follow: tabs_follow,
             _carried: carried,
@@ -771,17 +918,46 @@ impl TerminalSet {
     }
 
     /// The strip for the top row's left region: the agent terminal's tab, then one per shell tab, each choosing its
-    /// terminal and with its × beside it, then a divider and New terminal, in a row that scrolls sideways when it runs
-    /// out of room (SPEC.md: "only the tab strip takes the remaining width and scrolls horizontally when needed").
+    /// terminal and with its × over the leading slot at its left, in a part that scrolls sideways when it runs out of
+    /// room, then a divider and New terminal pinned at the strip's right end (SPEC.md: "only the tab strip takes the
+    /// remaining width, and its tabs scroll horizontally when needed"). A strip too narrow to pin New terminal puts the
+    /// divider and New terminal at the end of the scrolling part instead ([`TerminalSet::pins_add`]).
+    ///
+    /// The strip and its scrolling part grow into free width but keep an automatic basis, their content's width, so
+    /// that beside a tunnel pill a short row takes width from the strip and the pill in proportion to their content, as
+    /// the old app's `.tab-strip { flex: 0 1 auto }` did, down to the strip's floor (`session_pane::header`'s fit). That
+    /// content width is the same whether New terminal is pinned or not (the same items and gaps either way), so the
+    /// strip's width, which decides the pin, does not depend on the pin.
     ///
     /// Each tab is a button reporting whether its terminal is the one shown (pressed), as the old strip's were, not a
     /// tab list, which could not hold the close buttons beside them. A tab, ×, or New terminal that keyboard focus
     /// reaches while scrolled out of view is scrolled into it ([`TerminalSet::reveal_focused`]).
+    ///
+    /// A shell tab's × shows, in place of its terminal mark, while the pointer is over the tab's box (not while the set
+    /// is inert), keyboard focus is on the tab or its ×, its close question is open ([`TerminalSet::asking`]), or its
+    /// close is in flight (see the module docs for why it moved there). How it is drawn holds three invariants:
+    ///
+    /// - **It is always drawn.** Only its opacity follows the reveal. Mounting it only on hover would change the strip's
+    ///   elements with the pointer, which GPUI's frame cannot take (a hover read while laying out and again while
+    ///   painting can disagree; `components::copy_field` has the rule against `group_hover` layout changes), and would
+    ///   take the × out of Tab's order and its question's anchor out of the frame until the pointer came back.
+    /// - **It is drawn over the tab, as the tab's sibling, not inside it.** Inside the button it would be a control in a
+    ///   control. Drawn after the tab, it comes after it in Tab's order. Its box stops a primary press there, after the
+    ///   × has armed its own click, so the tab under it neither arms its click nor takes focus from the same press (the
+    ///   pattern `components::mark_toggle` documents). The gaps between tabs stay empty background for the macOS title
+    ///   band's drag.
+    /// - **Nothing moves when it shows.** The tab lays out its leading slot whether the mark or the × shows, and the ×
+    ///   is placed absolutely over that slot, so tabs, the divider and New terminal keep their places.
+    ///
+    /// The box around a tab and its × listens for the pointer over either and draws an ordinary tab's hover fill
+    /// itself, so the fill stays whole while the pointer is on the ×, and after a key press, when GPUI's own hover
+    /// styles stand down.
     pub fn strip(set: &Entity<TerminalSet>, window: &mut Window, cx: &mut App) -> AnyElement {
         let this = set.read(cx);
         let key = this.key.clone();
         let chosen = this.chosen.clone();
         let inert = this.inert;
+        let asking = this.asking.clone();
         this.reveal_focused(window);
         let listed: Vec<(String, FocusHandle, FocusHandle)> = this
             .tabs
@@ -791,25 +967,44 @@ impl TerminalSet {
         let agent_focus = this.agent_focus.clone();
         let add_focus = this.add_focus.clone();
         let scroll = this.scroll.clone();
+        let strip_bounds = this.strip_bounds.clone();
+        let pins_add = this.pins_add();
+        let strip_bounds_now = strip_bounds.clone();
         let palette = theme::palette(cx);
+        // `revealed` is `None` for the Agent tab, which has no leading slot, and otherwise whether a shell tab's ×
+        // shows over its slot now.
         let tab = |id: String,
                    label: String,
                    help: String,
                    value: Option<String>,
-                   focus: &FocusHandle| {
+                   focus: &FocusHandle,
+                   revealed: Option<bool>| {
             let set = set.clone();
             let pressed = chosen == value;
-            Button::new(id, label, HoverHelp::tooltip(help).below(), Role::Button)
-                .tier(Tier::TerminalTab)
-                .pressed(pressed)
-                .disabled(inert)
-                .focus(focus)
-                .on_click(move |_, window, cx| {
-                    let mark = Mark::take(cx);
-                    let value = value.clone();
-                    set.update(cx, |set, cx| set.choose(value, &mark, window, cx));
-                })
-                .into_any_element()
+            let button = Button::new(
+                id,
+                label.clone(),
+                HoverHelp::tooltip(help).below(),
+                Role::Button,
+            )
+            .tier(Tier::TerminalTab)
+            .pressed(pressed)
+            .disabled(inert)
+            .focus(focus)
+            .on_click(move |_, window, cx| {
+                let mark = Mark::take(cx);
+                let value = value.clone();
+                set.update(cx, |set, cx| set.choose(value, &mark, window, cx));
+            });
+            match revealed {
+                None => button.into_any_element(),
+                Some(revealed) => {
+                    let ink = theme::color(button.ink(palette));
+                    button
+                        .content(shell_tab_face(label, ink, revealed))
+                        .into_any_element()
+                }
+            }
         };
         // A shell session's main terminal runs the shell itself, and its row already says "No agent", so its tab names
         // the shell rather than an agent that is not there. A row not listed yet keeps the agent wording.
@@ -831,68 +1026,106 @@ impl TerminalSet {
             main_help.to_owned(),
             None,
             &agent_focus,
+            None,
         )];
         for (index, (id, focus, close_focus)) in listed.into_iter().enumerate() {
             let label = tab_label(index);
             let closing = closing(&key, &id, cx);
+            let selected = chosen.as_deref() == Some(id.as_str());
             let anchor = Anchor::for_element(
                 SharedString::from(format!("{}-close-anchor", tab_element_id(&id))),
                 window,
                 cx,
             );
+            let hover = TabHover::of(&id, window, cx);
+            // An inert strip takes no presses, so the pointer over it reveals nothing; a question or a close already
+            // under way still shows whose it is.
+            let hovered = hover.hovered(cx) && !inert;
+            let asked = asking
+                .as_ref()
+                .is_some_and(|(asked, layer)| *asked == id && layers::is_open(*layer, window, cx));
+            let revealed = hovered
+                || focus.is_focused(window)
+                || close_focus.is_focused(window)
+                || asked
+                || closing;
             let close = {
                 let set = set.clone();
                 let (id, label, anchor) = (id.clone(), label.clone(), anchor.clone());
-                Button::new(
+                IconButton::new(
                     close_element_id(&id),
-                    "×",
+                    Icon::Close,
+                    format!("Close {label}"),
                     HoverHelp::tooltip(format!(
                         "Close {label}, ending its shell and everything it started"
                     ))
                     .below(),
                     Role::Button,
                 )
-                .tier(Tier::TerminalTabClose)
-                .accessible_name(format!("Close {label}"))
+                .tier(Tier::TerminalTabClose { on_fill: selected })
                 .focus(&close_focus)
                 .disabled(inert)
                 .busy(closing)
                 .on_click(move |_, window, cx| ask_to_close(&set, &id, &label, &anchor, window, cx))
             };
-            // The tab and its ×: siblings, as the old `.tab-slot` held them, the × its own anchor for the question.
+            let close_selector = close_element_id(&id);
+            // The × over the tab's leading slot: placed by a box that takes no input, around a box as large as the ×
+            // that stops the press and is the question's anchor.
+            let close = div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(px(CLOSE_LEFT))
+                .flex()
+                .items_center()
+                .child(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .opacity(if revealed { 1. } else { 0. })
+                        // Tests read the reveal here, since the frame's record carries no opacity. The closure runs
+                        // only in builds that record selectors, so other builds never format the string.
+                        .debug_selector(move || {
+                            format!(
+                                "{close_selector}:{}",
+                                if revealed { "shown" } else { "hidden" }
+                            )
+                        })
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(close)
+                        .child(anchor.track()),
+                );
             items.push(
                 div()
-                    .flex()
-                    .flex_row()
+                    .id(SharedString::from(pill_element_id(&id)))
+                    .relative()
                     .flex_none()
-                    .items_center()
+                    .rounded(theme::metrics::RADIUS_SM)
+                    .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+                    .on_hover(move |hovered, _, cx| hover.set(*hovered, cx))
+                    // The shown tab's accent fill is its own, and the tab draws its hover accent under the pointer.
+                    .when(hovered && !selected, |pill| {
+                        pill.bg(theme::color(palette.control_hover))
+                    })
                     .child(tab(
                         tab_element_id(&id),
                         label.clone(),
                         format!("{label}: show this shell tab"),
                         Some(id.clone()),
                         &focus,
+                        Some(revealed),
                     ))
-                    .child(
-                        div()
-                            .relative()
-                            .flex_none()
-                            .child(close)
-                            .child(anchor.track()),
-                    )
+                    .child(close)
                     .into_any_element(),
             );
         }
         // `.tab-add-divider`: a 1-pixel rule that keeps creating a tab apart from choosing one.
-        items.push(
-            div()
-                .flex_none()
-                .w(px(1.))
-                .h(px(ADD_DIVIDER_HEIGHT))
-                .mx(px(2.))
-                .bg(theme::color(palette.border_dim))
-                .into_any_element(),
-        );
+        let divider = div()
+            .flex_none()
+            .w(px(ADD_DIVIDER_WIDTH))
+            .h(px(ADD_DIVIDER_HEIGHT))
+            .mx(px(ADD_DIVIDER_MARGIN))
+            .bg(theme::color(palette.border_dim));
         // SPEC.md, "Lifecycle operations": "an open lifecycle confirmation or a pending request refuses another
         // lifecycle action, New terminal or Clone on that session". A request on the session's key is the second; any
         // question, dialog or menu holding the keyboard covers the first (the session's questions hang from its row and
@@ -919,8 +1152,44 @@ impl TerminalSet {
                 TerminalSet::open_tab(&set, mark, handle, cx);
             })
         };
-        items.push(add.into_any_element());
-        div()
+        // The tabs scroll in a part of their own that takes the strip's free width, and the divider and New terminal
+        // come after it, outside it: New terminal stays at the tab area's right end however many tabs are open, and in
+        // view while the tabs scroll. A new tab therefore never takes New terminal's place under the pointer, where a
+        // second press would land on the new tab's × (the plan's 2026-11-27 decision; SPEC.md, "Session view").
+        // A strip too narrow to pin it keeps New terminal at the end of the scrolling tabs ([`Self::pins_add`]).
+        let mut pinned_add = Vec::new();
+        let end = if pins_add {
+            &mut pinned_add
+        } else {
+            &mut items
+        };
+        end.push(divider.into_any_element());
+        end.push(add.into_any_element());
+        let tabs = div()
+            .id(STRIP_TABS_ID)
+            .debug_selector(|| STRIP_TABS_ID.into())
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(STRIP_GAP))
+            .flex_auto()
+            .min_w_0()
+            .overflow_x_scroll()
+            .track_scroll(&scroll)
+            .children(items);
+        let strip = div()
+            .on_children_prepainted(move |_, window, cx| {
+                // The choice was made from the last frame's width, and this frame's is known only now (`track_scroll`
+                // records it before the children are prepainted). When the strip changed size across the threshold
+                // (a tunnel pill appearing beside it in a narrow pane, say), draw again with the new choice rather
+                // than wait for something else to redraw the row: a pinned New terminal in a strip too narrow for it
+                // leaves the tabs no room at all. The strip's own width does not depend on the choice, so the second
+                // frame settles it. The redraw is deferred to after this frame, since one asked for while the frame
+                // is prepared is dropped (as `hosts::progress::card`'s tracker notes).
+                if pins_add_at(strip_bounds_now.bounds().size.width) != pins_add {
+                    window.defer(cx, |window, _| window.refresh());
+                }
+            })
             .id(STRIP_ID)
             .debug_selector(|| STRIP_ID.into())
             .role(Role::Group)
@@ -929,12 +1198,14 @@ impl TerminalSet {
             .flex_row()
             .items_center()
             .gap(px(STRIP_GAP))
+            .flex_auto()
             .min_w_0()
-            .overflow_x_scroll()
-            .track_scroll(&scroll)
+            .overflow_x_hidden()
+            .track_scroll(&strip_bounds)
             .when(inert, |strip| strip.opacity(INERT_OPACITY))
-            .children(items)
-            .into_any_element()
+            .child(tabs)
+            .children(pinned_add);
+        strip.into_any_element()
     }
 
     /// Scroll the strip to the control keyboard focus is on, once per control it reaches (see `revealed`): a tab, a
@@ -942,10 +1213,11 @@ impl TerminalSet {
     /// strip's visible part, which happens readily beside a tunnel pill, where the top row may leave the strip only a
     /// few pixels (`session_pane::header`'s fit).
     ///
-    /// The strip's items are the Agent tab, then one item per shell tab holding its button and its ×, then the divider
-    /// and New terminal, which [`StripControl`] maps focus onto. A tab and New terminal are scrolled to as items; a ×
-    /// sits at the end of its tab's item, so it is revealed by that item's end ([`Self::reveal_end`]). Focus moving
-    /// from a tab to its own × still counts as reaching a new control.
+    /// The scrolling part's items are the Agent tab, then one item per shell tab holding its button and its ×, which
+    /// [`StripControl`] maps focus onto; New terminal sits after that part, always in view, unless the strip is too
+    /// narrow to pin it ([`Self::pins_add`]), when it is the part's last item, after the divider. A tab and an unpinned
+    /// New terminal are scrolled to as items, which shows an item wider than the strip from its start; a × is revealed
+    /// by [`Self::reveal_close`]. Focus moving from a tab to its own × still counts as reaching a new control.
     fn reveal_focused(&self, window: &Window) {
         let focused = if self.agent_focus.is_focused(window) {
             Some(StripControl::Agent)
@@ -962,12 +1234,18 @@ impl TerminalSet {
                 }
             })
         };
+        // New terminal moves between the pinned end and the scrolling part when the strip's width crosses
+        // `pins_add`'s threshold, so it counts as a new control to reveal when that happens under focus, as when a
+        // tunnel pill narrows the strip while New terminal holds focus.
+        let focused =
+            focused.map(|control| (control, control == StripControl::Add && self.pins_add()));
         if focused != self.revealed.get() {
-            match focused {
+            match focused.map(|(control, _)| control) {
                 Some(StripControl::Agent) => self.scroll.scroll_to_item(0),
                 Some(StripControl::Tab(n)) => self.scroll.scroll_to_item(n + 1),
-                Some(StripControl::Close(n)) => self.reveal_end(n + 1),
-                // After the shell tabs' items and the divider.
+                Some(StripControl::Close(n)) => self.reveal_close(n + 1),
+                // Pinned outside the scrolling part, so always in view; otherwise after the shell tabs and the divider.
+                Some(StripControl::Add) if self.pins_add() => {}
                 Some(StripControl::Add) => self.scroll.scroll_to_item(self.tabs.len() + 2),
                 None => {}
             }
@@ -975,21 +1253,48 @@ impl TerminalSet {
         }
     }
 
-    /// Scroll the strip so the end of its item `index` shows, where a tab's × sits. `scroll_to_item` shows an item
-    /// wider than the strip from its start, which for a tab's item is the tab and leaves the × out of view, so such an
-    /// item is lined up with the strip's right edge instead; an item that fits is scrolled to as usual, which shows it
-    /// whole. The item's width comes from the frame the strip was last drawn in (the scroll handle keeps it), so an
-    /// item not drawn yet is scrolled to as usual too.
-    fn reveal_end(&self, index: usize) {
+    /// Whether New terminal is pinned at the strip's end, outside the scrolling tabs: unless the strip, as last laid
+    /// out, is narrower than New terminal and a control's worth of tabs ([`PINNED_TABS_FLOOR`]). Pinned, adding a tab
+    /// never moves New terminal, so a second press where it was lands on it again rather than on the new tab's × (the
+    /// plan's 2026-11-27 decision). A strip that narrow appears only beside a tunnel pill in the narrowest pane the top
+    /// row supports, where a pinned New terminal would leave the tabs less than a control's width; there it goes back to
+    /// the end of the scrolling tabs, so every control can still be scrolled into view when focused. Before the strip's
+    /// first layout its width is unknown, and it is pinned. The strip corrects a choice its new width overturns in the
+    /// next frame ([`TerminalSet::strip`]).
+    fn pins_add(&self) -> bool {
+        pins_add_at(self.strip_bounds.bounds().size.width)
+    }
+
+    /// Scroll the strip so the × of the shell tab in its item `index` shows, with room for its focus ring, moving it
+    /// only as far as that takes. A × already in view with its ring stays where it is, so Tab from a tab to its own ×
+    /// does not shift the strip. Otherwise the strip moves the least that brings the × and its ring in from whichever
+    /// side it was cut off; a strip too narrow for both lines the × itself up with its left edge, since beside a tunnel
+    /// pill the top row may leave the strip only a few pixels (`session_pane::header`'s fit). Scrolling to the item
+    /// would not do: an item wider than the strip shows from its start, and the × sits [`CLOSE_LEFT`] pixels into it.
+    /// The item's place comes from the frame the strip was last drawn in (the scroll handle keeps it, placed as if
+    /// unscrolled), so an item not drawn yet is scrolled to as usual.
+    fn reveal_close(&self, index: usize) {
+        let Some(item) = self.scroll.bounds_for_item(index) else {
+            self.scroll.scroll_to_item(index);
+            return;
+        };
         let viewport = self.scroll.bounds();
-        match self.scroll.bounds_for_item(index) {
-            Some(item) if item.size.width > viewport.size.width => {
-                let mut offset = self.scroll.offset();
-                offset.x = viewport.right() - item.right();
-                self.scroll.set_offset(offset);
-            }
-            _ => self.scroll.scroll_to_item(index),
+        let mut offset = self.scroll.offset();
+        let close = item.left() + px(CLOSE_LEFT);
+        let (from, to) = (
+            close - px(RING_ROOM),
+            close + px(TERMINAL_TAB_CLOSE_SIDE + RING_ROOM),
+        );
+        if to - from > viewport.size.width {
+            offset.x = viewport.left() - close;
+        } else if from + offset.x < viewport.left() {
+            offset.x = viewport.left() - from;
+        } else if to + offset.x > viewport.right() {
+            offset.x = viewport.right() - to;
+        } else {
+            return;
         }
+        self.scroll.set_offset(offset);
     }
 
     /// Open a shell tab in the session (New terminal), under the session's own key, so a pending lifecycle request

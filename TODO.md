@@ -68,10 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Stop accidental terminal tab closes when creating a new terminal.** Find some way of making it much less likely that
-  a human will accidentally click the close button for a terminal tab when they intended to create a new terminal. I
-  keep doing this all the time. Plan: `plans/queue/terminal-tab-hover-close.md`.
-
 - **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
   user when blocked through farhelm. Plan: `plans/queue/agent-blocked-notifications.md`.
 
@@ -96,10 +92,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   its own change because it widens which conversations Farhelm captures. The upstream research and the incident's
   evidence are in `lore/2026-11-26-codex-fork-and-vscode-session-sources.md`. Plan:
   `plans/queue/codex-fork-and-vscode-resume.md`.
-
-- **Keep the new-terminal button reachable when terminal tabs overflow.** Opening more terminals next to an agent than
-  will "fit" just seems to overflow "under" the buttons to the right and you can't access the + button anymore to add
-  more. This was observed on 0.46.0-rc.2; it's possible it got fixed in one of the plans in flight since then.
 
 - **Reject flag-like values for CLI `--effort`.** PR #4954 (`agent-catalog-cli-and-drift-cleanups`) added
   `allow_hyphen_values = true` to `--effort` on `LaunchFlags` (`crates/farhelm/src/main.rs`) so hyphen-prefixed custom

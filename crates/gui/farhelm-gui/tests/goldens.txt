@@ -360,8 +360,8 @@ linux/session-status-segments--dark.png 0aeb8c7ab680f49604fde27b933d90227cc17594
 linux/session-status-segments--light.png 89c7374a57a5010ff3c886455dbad9ea114d73a8
 linux/session-summary-card--dark.png 1bcf3315eb88476c4e437da8206608cccdee16ea
 linux/session-summary-card--light.png 0af125cd4857c81edca0d1b682c17f774be7ae65
-linux/session-toolbar--dark.png 6c237995638e03323621c06d71e8f6f31d7b7910
-linux/session-toolbar--light.png 78f390e57487a89c653e628de187b6feb1bc70fe
+linux/session-toolbar--dark.png 7c072e4329d7ebacf63c1e157714ca61e0884bfc
+linux/session-toolbar--light.png bacf21d323159f7478b10a1a075ec7661a754c7d
 linux/session-unavailable--dark.png ba64050bbb898c59c774674689fc7580ccaff939
 linux/session-unavailable--light.png 3ebce7b976276b40383b0f646202cc14e70b18d2
 linux/settings-antigravity--dark.png 429672ff29396cfdafe153523744c7fa04c9c31b
@@ -482,8 +482,8 @@ linux/ssh-sign-in-needed--dark.png fd425ef8bd9ab3fbd400aaea33d944832fce5f43
 linux/ssh-sign-in-needed--light.png 653958ea0915a5b9f3ea1d39c8a1beed0035daea
 linux/ssh-sign-in-notice--dark.png d557d94efedec9a22a493e79c6b160ad436d9daf
 linux/ssh-sign-in-notice--light.png 449e06d65b857ee6db536630a33057cf87a480bd
-linux/stop-and-suspend-outcomes--dark.png 4aa9f2df43be02e451a52bd80414751b8c107d0e
-linux/stop-and-suspend-outcomes--light.png a608bd107c01795e94676b1b7665eba7e57089ac
+linux/stop-and-suspend-outcomes--dark.png 1fe90901f0cd7a46306522d722c0c48fe1284aaf
+linux/stop-and-suspend-outcomes--light.png f3479ce5c15f2ae4f48eeaab29aef14863838a8e
 linux/stop-while-launching-confirmation--dark.png 1567c5cb31dd09c568c666d49f579bb3acab3318
 linux/stop-while-launching-confirmation--light.png 46fbf0459709457fa7b795b320e016be5b7761c7
 linux/switch--dark.png 7b2651bfe584447fd4daea73e59508a1dac0cd54
@@ -524,8 +524,8 @@ linux/terminal-covered-link--dark.png fcf05b0ca81076e7e2085ea46cf8b61ce4353cde
 linux/terminal-covered-link--light.png c98c2be37c8195c97f3cb50693e9b08fb1b50fbe
 linux/terminal-cursors--dark.png 3459e566da4c53c46bf870d97660f696ab9a150d
 linux/terminal-cursors--light.png 132a4374cd6c6d9f0caf116436286f67a99df8e9
-linux/terminal-cut-session-row--dark.png 421f09c9447e6c67f24fbd2ab6fe05ba544d5dd2
-linux/terminal-cut-session-row--light.png cfad520bdab6275b063f2f5c5d6afc6bfc9f3bac
+linux/terminal-cut-session-row--dark.png fed4db489569c17cf9361920fba894dd2e32a855
+linux/terminal-cut-session-row--light.png 9f0601f8f786f81e85615c9e6c8099dc51bb4879
 linux/terminal-delete-scrim--dark.png 003f83508000483997e7455343e31346be48de97
 linux/terminal-delete-scrim--light.png ce2e00db3c93831342dec1b7910dad3ff4aa65eb
 linux/terminal-file-disclosures--dark.png 6ad8011a5e217a328b0862b07c6bdf1190c0f2c7
