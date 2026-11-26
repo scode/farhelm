@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight ecd2fd] `launcher-late-wake-failures.md` — Report request-tagged late wake failures for suspended sandboxes and stopped containers
 - [pending] `podman-recipe-admission.md` — Report pre-admission container recipe Rebuild failures without creating empty build records (after `podman-host-verification.md`)
 - [pending] `podman-proxy-free-images.md` — Keep build-time host proxy config out of captured Podman recipe images (after `podman-host-verification.md`)
-- [complete] `supervisor-outliving-programs.md` — Root Stop and Restart cleanup at surviving pinned children and record SIGHUP/SIGKILL policy
+- [landing 037a94] `supervisor-outliving-programs.md` — Root Stop and Restart cleanup at surviving pinned children and record SIGHUP/SIGKILL policy
 - [in-flight a2468d] `supervisor-stop-pending-launch.md` — Refuse Stop on unconfirmed terminal-less launches in favor of Delete or Restart
 - [complete] `supervisor-tab-close-retry.md` — Fix in-memory shell-tab close retry bugs and record Linux systemd/unscoped cleanup policy
 - [complete] `agent-delete-late-notice.md` — Always record agent-Delete leftover-checkout warnings in the notices bell
