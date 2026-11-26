@@ -286,9 +286,25 @@ fn names_report(line: &str, identity: &str, expected: &str) -> bool {
             && entry.about.is_some_and(|(reported, source)| {
                 hook_log_names_identity(reported, identity)
                     && (entry.suffix == Some(expected)
-                        || source == expected && !expected.starts_with("event="))
+                        || entry.suffix.is_none()
+                            && source == expected
+                            && !expected.starts_with("event="))
             })
     })
+}
+
+/// A prompt-timed capture must precede the first Stop for that same conversation.
+/// A late duplicate of the start report cannot repair a Stop that arrived first.
+fn prompt_report_precedes_stop(fresh: &str, identity: &str, prompt_event: &str) -> bool {
+    let mut lines = fresh.lines();
+    if let Some(first) = lines.find(|line| {
+        names_report(line, identity, prompt_event) || names_report(line, identity, "event=Stop")
+    }) {
+        names_report(first, identity, prompt_event)
+            && lines.any(|line| names_report(line, identity, "event=Stop"))
+    } else {
+        false
+    }
 }
 
 /// The two Grok callbacks can replace the same durable slot. The hook's written event records each actual payload
@@ -326,6 +342,19 @@ async fn check_turn_reports(
             })
             .collect();
         if missing.is_empty() {
+            if matches!(
+                harness.agent_kind().restart_readiness(),
+                Some(RestartReadiness::FirstPrompt | RestartReadiness::FirstPromptWithHooks(_))
+            ) && !prompt_report_precedes_stop(fresh, &identity, expected[0])
+            {
+                return Err(anyhow::anyhow!(
+                    "the first matching {} report must precede Stop\n{}\nrecent hook log: {:?}",
+                    expected[0],
+                    term.diagnostics(),
+                    fresh.lines().rev().take(8).collect::<Vec<_>>()
+                )
+                .into());
+            }
             println!(
                 "observed matching post-submit reports: {}",
                 expected.join(", ")
@@ -675,4 +704,41 @@ fn turn_evidence_distinguishes_a_written_event_from_the_payload_source() {
         "conv-1",
         "startup"
     ));
+    assert!(!prompt_report_precedes_stop(
+        "17 written conv-1 startup\tevent=Stop\n18 written conv-1 -\tevent=Stop",
+        "conv-1",
+        "startup",
+    ));
+}
+
+/// A report from a different conversation or from after the first matching Stop cannot witness prompt capture.
+#[farhelm_testtrace::test]
+fn prompt_timing_uses_the_first_matching_stop() {
+    for (harness, prompt) in [
+        (LaunchHarness::Codex, "17 written conv-1 startup"),
+        (LaunchHarness::Muse, "17 written conv-1 startup"),
+        (
+            LaunchHarness::Grok,
+            "17 written conv-1 -\tevent=UserPromptSubmit",
+        ),
+        (
+            LaunchHarness::Antigravity,
+            "17 written conv-1 -\tevent=SessionStart",
+        ),
+    ] {
+        let event = turn_reports(harness)[0];
+        let stop = "18 written conv-1 -\tevent=Stop";
+        let unrelated = "16 written conv-2 -\tevent=Stop";
+        assert!(prompt_report_precedes_stop(
+            &format!("{unrelated}\n{prompt}\n{stop}"),
+            "conv-1",
+            event
+        ));
+        assert!(!prompt_report_precedes_stop(
+            &format!("{stop}\n{prompt}\n{stop}"),
+            "conv-1",
+            event
+        ));
+        assert!(!prompt_report_precedes_stop(prompt, "conv-1", event));
+    }
 }

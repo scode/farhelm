@@ -25,25 +25,9 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`trailing-drift-cursor-initial-prompt-never-passes.md`](trailing-drift-cursor-initial-prompt-never-passes.md) —
-  Cursor's launch-prompt drift case always ends "could not run" even when Cursor accepts the prompt, so the check can
-  never pass.
-
-- [`trailing-drift-capture-timing-check-too-coarse.md`](trailing-drift-capture-timing-check-too-coarse.md) — The
-  capture-timing drift check treats prompt-timed and reply-timed agents alike, so a vendor drift between "at the first
-  prompt" and "after the first reply" would go unnoticed.
-
 - [`trailing-brick-cleanup-refuses-untested-remote-mac-pair.md`](trailing-brick-cleanup-refuses-untested-remote-mac-pair.md)
   — After a stop-after-P0 request, brick-test cleanup refuses a prepared but untested remote Mac pair and demands a
   retention decision for machines with no evidence.
-
-- [`trailing-drift-claude-trust-real-config-byte-check.md`](trailing-drift-claude-trust-real-config-byte-check.md) — The
-  Claude trust drift case fails whenever another Claude session rewrites the real ~/.claude.json during the case,
-  reading as if Farhelm wrote it (frequency unmeasured).
-
-- [`trailing-drift-claude-trust-ancestor-vacuous-pass.md`](trailing-drift-claude-trust-ancestor-vacuous-pass.md) — The
-  Claude trust drift case can pass without proving Claude honours Farhelm's entry if the maintainer's config already
-  trusts /tmp or /.
 
 - [`trailing-launcher-new-clone-enter-after-vanished-pick.md`](trailing-launcher-new-clone-enter-after-vanished-pick.md)
   — In New and Clone, Return on a highlighted template or folder row can launch instead of picking when the highlight

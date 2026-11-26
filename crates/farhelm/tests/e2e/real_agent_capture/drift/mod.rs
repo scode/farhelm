@@ -338,6 +338,15 @@ async fn opencode_workspace_session(work: &Path, binary: &str) -> Result<String,
     opencode_session(&output, work).map_err(Into::into)
 }
 
+/// Cursor's interactive resume picker cannot identify a seed for tests. Allocate a chat before its first turn.
+async fn cursor_chat_id(work: &Path, binary: &str, turned: bool) -> Result<String, DriftError> {
+    let output = vendor_lookup(work, binary, &["create-chat"], turned).await?;
+    let id = output.trim();
+    uuid::Uuid::parse_str(id)
+        .map_err(|_| anyhow::anyhow!("Cursor create-chat did not return a chat UUID"))?;
+    Ok(id.to_owned())
+}
+
 /// Accept either spelling of a symlinked workspace. Keep the raw path when resolution fails, and require
 /// a single match so an unrelated session or a second launch can never supply the selector.
 fn opencode_session(output: &str, work: &Path) -> anyhow::Result<String> {
@@ -932,13 +941,16 @@ fn update_override_prefix(profile: &Harness, state: &Path) -> anyhow::Result<Opt
     }
 }
 
+/// A category-specific mirror may depend on the canonical workspace the launch will use.
+type ExtraPrivateConfig = fn(&Path, &Path) -> anyhow::Result<private_config::PrivateConfig>;
+
 /// Give the category an owned supervisor and its compiled launch. Agents with global hooks always use the mirror
 /// planned by Farhelm. A category may supply a mirror for another kind, such as Claude's config for a trust check.
 /// Confirm the terminal hosts are gone before reconciling any vendor writes to that mirror.
 async fn with_drift_supervisor(
     profile: &Harness,
     selection: LaunchSelection,
-    extra_config: Option<fn(&Path) -> anyhow::Result<private_config::PrivateConfig>>,
+    extra_config: Option<ExtraPrivateConfig>,
     run: impl AsyncFnOnce(DriftEnv<'_>, farhelm_proto::SessionLaunch) -> DriftResult,
 ) -> DriftResult {
     with_drift_supervisor_using(
@@ -955,7 +967,7 @@ async fn with_drift_supervisor(
 async fn with_drift_supervisor_hooks(
     profile: &Harness,
     selection: LaunchSelection,
-    extra_config: Option<fn(&Path) -> anyhow::Result<private_config::PrivateConfig>>,
+    extra_config: Option<ExtraPrivateConfig>,
     agent_hooks: AgentHooks,
     run: impl AsyncFnOnce(DriftEnv<'_>, farhelm_proto::SessionLaunch) -> DriftResult,
 ) -> DriftResult {
@@ -971,7 +983,7 @@ async fn with_drift_supervisor_hooks(
 async fn with_drift_supervisor_using(
     profile: &Harness,
     mut selection: LaunchSelection,
-    extra_config: Option<fn(&Path) -> anyhow::Result<private_config::PrivateConfig>>,
+    extra_config: Option<ExtraPrivateConfig>,
     mut seams: SupervisorSeams,
     run: impl AsyncFnOnce(DriftEnv<'_>, farhelm_proto::SessionLaunch) -> DriftResult,
 ) -> DriftResult {
@@ -984,13 +996,14 @@ async fn with_drift_supervisor_using(
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     // The private vendor configuration must outlive the agent reading it.
     let config = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
+    let work = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
     let harness = selection.harness;
     let kind = harness.agent_kind();
     let private = if kind.offers_persistent_hooks() {
         private_config::PrivateConfig::prepare(kind, config.path()).await?
     } else {
         extra_config
-            .map(|prepare| prepare(config.path()))
+            .map(|prepare| prepare(config.path(), work.path()))
             .transpose()?
     };
     let installs_hooks = seams.agent_hooks.allows(kind);
@@ -998,7 +1011,6 @@ async fn with_drift_supervisor_using(
         private.apply(&mut seams);
     }
     // State reaps the terminal host if startup fails, and drops before the workspace and configuration.
-    let work = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
     let state = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
     let mut prefix = update_override_prefix(profile, state.path())?.unwrap_or_default();
     if let Some(home) = &seams.grok_home {
@@ -1150,6 +1162,33 @@ mod workspace_trust;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Both Cursor checks need a known chat ID before the seed turn. Only a UUID from the allocator is usable.
+    #[farhelm_testtrace::test]
+    async fn cursor_chat_allocation_requires_a_uuid_from_create_chat() {
+        let scratch = farhelm_teststate::tempdir().unwrap();
+        let binary = scratch.path().join("fixture-cursor");
+        let id = "6fdde3de-eb85-4c20-a119-cf4cd1ba9400";
+        crate::host_creates::script(
+            &binary,
+            &format!(
+                "[ \"$#\" = 1 ] && [ \"$1\" = create-chat ] || exit 64\nprintf '%s\\n' '{id}'"
+            ),
+        );
+        assert_eq!(
+            cursor_chat_id(scratch.path(), binary.to_str().unwrap(), false)
+                .await
+                .unwrap(),
+            id
+        );
+        crate::host_creates::script(&binary, "printf '%s\\n' fixture-no-chat-id");
+        let error = cursor_chat_id(scratch.path(), binary.to_str().unwrap(), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, DriftError::Failed(error) if error.to_string().contains("chat UUID"))
+        );
+    }
 
     /// Reaping the terminal hosts cannot make up for a failed Create or an unconfirmed Delete.
     /// A later successful Delete accounts for only its own create.

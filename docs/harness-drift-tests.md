@@ -64,12 +64,15 @@ The `initial_prompt` category starts each agent that accepts a launch prompt wit
 begins with `--`, checks that the process received it as one argument, and checks the reply, which needs both lines. For
 the agents whose conversations Farhelm tracks, Restart must then reopen the conversation without the prompt in its
 arguments, so the prompt is not sent again. Where the agent also accepts a launch prompt when it opens a named
-conversation, a second launch prompt on the first conversation must recall the first turn's word.
+conversation, another launch prompt must recall the seed turn's word. Cursor's fresh launch still runs without a
+selector. The case allocates a separate chat ID with `cursor-agent create-chat` and starts a seed turn before testing
+named recall on that chat.
 
 The `capture_timing_hooks` category checks whether Restart becomes available before or after the first text turn. It
-looks for the installed vendor's turn callbacks in the hook log and checks that they stay off the screen. Each harness
-also gets a fresh supervisor with hooks disabled. Codex still needs its daemon-ownership option, and Goose's Restart
-must keep its reporter disabled even when the session already has a saved conversation.
+looks for the installed vendor's turn callbacks in the hook log and checks that they stay off the screen. A harness that
+reports at first prompt must show its matching prompt or start report before its first matching Stop. Each harness also
+gets a fresh supervisor with hooks disabled. Codex still needs its daemon-ownership option, and Goose's Restart must
+keep its reporter disabled even when the session already has a saved conversation.
 
 The `workspace_trust` category launches each agent that offers a trust choice in a fresh directory with that choice and
 never answers a trust question: a trusted launch has to reach the composer on its own. Codex and Pi also get an explicit
@@ -122,9 +125,10 @@ checked the real hook files. Files the vendor creates inside the copy's private 
 
 Claude's workspace trust case uses a private copy too, for a different reason: Farhelm records the trust in Claude's
 configuration file, `~/.claude.json` or the one under `CLAUDE_CONFIG_DIR`, so the case starts Claude with a private home
-holding its own copies of Claude's possible configuration files, with an empty place for their `backups` directory.
-Those copies and any backups Claude writes are discarded with the case, and nothing is copied back. The case fails if
-your real files changed while it ran, which a Claude session of your own running at the same time can cause.
+holding its own copies of Claude's possible configuration files, with an empty place for their `backups` directory. The
+fixture clears workspace and ancestor trust from the private copies so the launch must add its own workspace entry.
+Those copies and any backups Claude writes are discarded with the case. A new trust decision in your real config for the
+test workspace fails the case. Other concurrent changes to your real config are reported in a `drift:` note.
 
 Which files to keep private comes from Farhelm's setup itself, so an agent that gains persistent hooks is covered
 without listing its paths again, as long as they lie under the home directory or Grok's. A guard test
