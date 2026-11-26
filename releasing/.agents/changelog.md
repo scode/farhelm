@@ -332,12 +332,13 @@ least:
 
 A callout is a marked note on the review page, never an edit to the maintainer's text except where a rule above wins:
 say what looks wrong and the evidence (a PR, a Decision, a line of the report), and offer replacement wording when it is
-obvious, for the maintainer to accept as a suggestion. The scratch Markdown file keeps the maintainer's entry as it was
-until they change it. A plan with no highlight in the draft (one whose note said no release note was needed, a deferred
-one with nothing to draft from, a malformed one) still gets a row on the page with its PR links and its full-list
-entries, if any, so a callout on it has a place to sit and the maintainer can still add a highlight there. Name every
-plan with a callout in the message that hands over the page, too. "Obvious" sets the bar on purpose: this is a check for
-mistakes a careful reader of the PRs would catch, not a license to second-guess the maintainer's choice of words.
+obvious, for the maintainer to accept as a suggestion. The release's section file (`releasing/.agents/stable.md`,
+"Cutting a stable release", step 2) keeps the maintainer's entry as it was until they change it. A plan with no
+highlight in the draft (one whose note said no release note was needed, a deferred one with nothing to draft from, a
+malformed one) still gets a row on the page with its PR links and its full-list entries, if any, so a callout on it has
+a place to sit and the maintainer can still add a highlight there. Name every plan with a callout in the message that
+hands over the page, too. "Obvious" sets the bar on purpose: this is a check for mistakes a careful reader of the PRs
+would catch, not a license to second-guess the maintainer's choice of words.
 
 ## The checker
 

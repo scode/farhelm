@@ -85,20 +85,22 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
    notes". Draft a headline for every highlight that needs one, including each proposed addition to the highlights.
    Follow the headline format in "Format". Keep the maintainer's wording in the draft while its headline is awaiting
    approval, whether the wording came from a plan or during curation. Keep the whole proposed `## vX.Y.Z - YYYY-MM-DD`
-   section in a Markdown file in your scratch directory, written exactly as it will go into `CHANGELOG.md`, the full
-   list's `<details>` frame included, and show it using the `interactive-artifact` skill. Load and follow that skill by
-   name. Do not publish the page as a snippet or anywhere else unless the maintainer asks.
+   section in a Markdown file, the section file, at `farhelm/flows/release/<checkout>/vX.Y.Z-changelog.md` in the
+   checkout's attended clone, next to the release log and pushed with it (`.agents/agent-records.md`, "Attended flows'
+   logs"), written exactly as it will go into `CHANGELOG.md`, the full list's `<details>` frame included, and show it
+   using the `interactive-artifact` skill. Load and follow that skill by name. Do not publish the page as a snippet or
+   anywhere else unless the maintainer asks.
 
    Write a body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent
-   scratch space"), rendering the scratch section faithfully with its categories, entries and PR diff links. Show the
-   full list as its own part of the page below the highlights, open, so the maintainer can comment on it without
-   unfolding anything. Mark every proposed highlight with the reason for proposing it and a picker to promote it, and
-   every deferred plan's draft (which sits in the full list alone until the maintainer answers) with a picker to approve
-   it as a highlight and a field for their own text. Show each proposed headline as a suggestion on its entry, so the
-   maintainer can approve or edit the headline with the rest of the wording. Apply approved suggestions to the scratch
+   scratch space"), rendering the section file faithfully with its categories, entries and PR diff links. Show the full
+   list as its own part of the page below the highlights, open, so the maintainer can comment on it without unfolding
+   anything. Mark every proposed highlight with the reason for proposing it and a picker to promote it, and every
+   deferred plan's draft (which sits in the full list alone until the maintainer answers) with a picker to approve it as
+   a highlight and a field for their own text. Show each proposed headline as a suggestion on its entry, so the
+   maintainer can approve or edit the headline with the rest of the wording. Apply approved suggestions to the section
    file. Offer final approval of the section once every retained highlight has its approved headline or is exempt from
    the headline rule. Do not use the legacy notes-review page generator: it emits a full document with its own scripts,
-   which the skill does not accept. The Markdown scratch file stays authoritative; page markup is only its presentation.
+   which the skill does not accept. The Markdown section file stays authoritative; page markup is only its presentation.
    Follow the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions, status,
    replies and shutdown. Use its chosen port and tokenized URL. If the skill is unavailable or its server fails, stop
    and report why. Give the maintainer the URL as soon as the page is served, and list the proposed highlights in that
@@ -106,13 +108,13 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
 
    The maintainer comments on entries, suggests replacements, or submits general notes through the skill. Match feedback
    to the quoted text and section, rather than positional entry ids that shift between rounds. Apply the feedback to the
-   scratch file, update the same page in place, and reply to and resolve handled threads as the skill describes.
+   section file, update the same page in place, and reply to and resolve handled threads as the skill describes.
    Removing, rewording or merging highlights leaves the full list as it is, and a merged highlight cites every PR the
    highlights it replaces cited (`releasing/.agents/changelog.md`, "Highlights and the full list"). Ask for explicit
    approval of the current text, using a picker whose id changes with each draft revision so approval of an earlier
    draft cannot carry over. An edit request is not approval, and an approval submitted with edits approves only the
    wording those edits unambiguously settle; ask if that is unclear. Iterate until the maintainer approves the text,
-   then finish the page using the skill's completion procedure. The scratch file and the page hold the section as it
+   then finish the page using the skill's completion procedure. The section file and the page hold the section as it
    will read once approved, without the draft notice; `CHANGELOG.md` gets the notice added in step 4.
 
    Do not wait for approval: go on to step 4 as soon as the page is served, and keep the review going alongside the rest
@@ -123,9 +125,9 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
    precisely those edits, without interpreting them as permission for other changes. An explicit request to write or
    rewrite text grants that latitude only for the requested text. Ask when an instruction is ambiguous. Format or
    checker problems must be brought back to the maintainer rather than silently changing reviewed wording. When
-   transferring the approved section into `CHANGELOG.md`, copy the scratch file verbatim, including headings, blank
+   transferring the approved section into `CHANGELOG.md`, copy the section file verbatim, including headings, blank
    lines, and every word; add only the separation needed between the section and the surrounding changelog sections.
-   Verify the copy by comparing it against the scratch file. Do not run a formatter over the approved section.
+   Verify the copy by comparing it against the section file. Do not run a formatter over the approved section.
 3. While iterating, watch for feedback that generalizes beyond the entry it was given on: a word the maintainer calls
    internal jargon, a shape of sentence they keep rewriting, a kind of detail they keep cutting or adding. Two ways a
    rule gets into `releasing/EDITORIAL_GUIDANCE.md`, and only two: the maintainer states it as a rule in so many words
@@ -139,16 +141,18 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
    When the maintainer approves the text, start or continue the release screenshot subagent immediately, using step 4's
    fixed prompt. Assume the release is going out: prepare the full notes with their app shots, complete the capture and
    image review, publish the screenshot assets and open the draft PR while the build, signing and brick test proceed. Do
-   not wait for any of those outcomes before beginning this work. Give the subagent the approved scratch section if it
-   has not landed on main yet, then send the changelog merge commit when it does. Its final website check must show the
-   shots under the actual release entries, not merely pass a build that has no matching release section yet.
+   not wait for any of those outcomes before beginning this work. Give the subagent a copy of the approved section file
+   in its own scratch subdirectory if the section has not landed on main yet (never the path of the file in your
+   attended clone, which only you write), then send the changelog merge commit when it does. Its final website check
+   must show the shots under the actual release entries, not merely pass a build that has no matching release section
+   yet.
 
    Finalize the approved text too. This usually happens somewhere between step 4 and step 8, and the steps in between do
    not wait for it.
    - Make a finalization PR on the latest main, titled as `docs:` (it is not a `fix`, and needs no fragment), that
-     replaces the `## vX.Y.Z` section of `CHANGELOG.md` with the scratch file, copied verbatim as step 2 describes, so
+     replaces the `## vX.Y.Z` section of `CHANGELOG.md` with the section file, copied verbatim as step 2 describes, so
      the draft notice goes away. The heading must stay exactly as step 4 landed it, date included, because dist named
-     the GitHub release after it; step 4 keeps the scratch file's heading in step with it. Add any guidance recorded
+     the GitHub release after it; step 4 keeps the section file's heading in step with it. Add any guidance recorded
      earlier in this step and run `python3 releasing/check-changelog.py format`. When the tag's GitHub release already
      exists, also run `python3 releasing/finalize-release-notes.py --tag vX.Y.Z --ref <the PR's head commit> --dry-run`
      before merging, so a heading or notice slip shows up while it is still one PR to fix rather than two. Then merge it
@@ -170,10 +174,10 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
    `releasing/AGENTS.md`, "In-app announcements". Attach new entries to `X.Y.Z`; keep entries from earlier candidates on
    their exact original versions and ids. Run that section's recorded table validation before merging a table edit. The
    PR also carries the drafted `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, with the draft notice on the
-   first line under the heading followed by the scratch file's categories, every fragment under `releasing/changelog.d/`
+   first line under the heading followed by the section file's categories, every fragment under `releasing/changelog.d/`
    deleted (including `kind: none` ones; they were for this sweep), `dprint fmt`, and
-   `python3 releasing/check-changelog.py format` passing. If `<today>` differs from the date in the scratch file's
-   heading, update the scratch file's heading to match what this PR lands, and regenerate the page with it, so that the
+   `python3 releasing/check-changelog.py format` passing. If `<today>` differs from the date in the section file's
+   heading, update the section file's heading to match what this PR lands, and regenerate the page with it, so that the
    finalization copy keeps the heading the release is named after. Merge it before going on.
 
    Send this merge commit to the screenshot subagent if it is already preparing the approved notes. Otherwise step 3
@@ -185,8 +189,8 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
      subdirectory of your scratch directory, never in the release checkout, which is busy with the release branch. Run
      `jjstack init` there; a linked workspace whose Git directory differs from jj's store fails its colocation guard. Do
      not run `cargo clean` or touch tags, the release branch, or anything on get.farhelm.io.
-   - Read the approved scratch section supplied by the release agent, or the `## vX.Y.Z` section of `CHANGELOG.md` once
-     it has landed, and decide which of its highlights (the entries above the folded "All changes" list, which gets no
+   - Read the approved section file supplied by the release agent, or the `## vX.Y.Z` section of `CHANGELOG.md` once it
+     has landed, and decide which of its highlights (the entries above the folded "All changes" list, which gets no
      screenshots) change something a reader would see: a new dialog or control, or a redesign. Most entries do not, and
      a release with none gets no PR; say so and stop.
    - For each that does, add a shot to `scripts/docs-shots/release-notes.py` and an item to
@@ -313,10 +317,11 @@ with only the fix cherry-picked.
 The re-cut's section is therefore a draft again, whether or not the previous attempt's notes were finalized: it opens
 with the draft notice in `CHANGELOG.md`, and its review and finalization follow steps 2 and 3. If the new version
 requires headlines and a carried-over highlight still needs one, propose a headline for approval on the review page. The
-scratch file and the review page still hold the section without the notice, as step 2 says: update both with the
-re-cut's entries rather than starting new ones (serve the page again as step 2 does if its server was stopped), and in
-the message that hands the maintainer the updated page, list every entry added without their review, every proposed
-highlight, every fragment left out, and every callout on a plan's entry.
+section file and the review page still hold the section without the notice, as step 2 says: when the re-cut takes a new
+version, rename the section file to it in the attended clone (`git mv`), then update both with the re-cut's entries
+rather than starting new ones (serve the page again as step 2 does if its server was stopped), and in the message that
+hands the maintainer the updated page, list every entry added without their review, every proposed highlight, every
+fragment left out, and every callout on a plan's entry.
 
 Then continue from step 5 at the new changelog PR's merge commit. A `release-X.Y.Z` branch from an attempt that never
 pushed a tag is replaced, since nothing points at it; one whose tag was pushed is left as it is. A GitHub release from

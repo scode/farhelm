@@ -209,11 +209,12 @@ Before presenting the first item, read these in full:
 Phase files: on deciding that an item needs a focused reproduction or check, read `.agents/validation.md`,
 `.agents/test-evidence.md` and `.agents/narrow-tests.md` before running it.
 
-Triage is a persistent mode and can run across many turns, so keep a working log at `farhelm-triage-log-<checkout>.md`
-in the parent directory of the checkout, next to it and out of the repository, where `<checkout>` is the checkout
-directory's name. It records the active mode (triage, or execution once a command that names it has started it), this
-reading list, the item in progress, and the session's scratch directory. After any compaction or resume, read it first.
-It is never committed.
+Triage is a persistent mode and can run across many turns, so keep a working log in the records, at
+`farhelm/flows/triage/<checkout>/log.md` in the checkout's attended clone, where `<checkout>` is the checkout
+directory's name. Before creating or writing it, read `.agents/agent-records.md`, "Attended flows' logs", which says how
+to set up the clone, when to push, and what to do when either fails. It records the active mode (triage, or execution
+once a command that names it has started it), this reading list, the item in progress, and the session's scratch
+directory. After any compaction or resume, read it first. It is never committed to this repository.
 
 Fence: during triage, “fix this”, “fix code”, “update the spec”, “let’s do that”, “agreed” and “yes” are decisions to
 record in `TRIAGE_OUTCOMES.md`, never permission to edit code, specifications, TODO entries or queue files; execution

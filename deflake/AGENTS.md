@@ -27,11 +27,13 @@ Phase files: on deciding to make a fix PR for a `deterministic` failure, read `A
 "Changelog fragments", and `.agents/validation.md`, before the fix; if the fix changes tests, also
 `.agents/test-authoring.md`.
 
-Keep a working log at `farhelm-deflake-log-<checkout>.md` in the parent directory of the checkout, next to it and out of
-the repository, where `<checkout>` is the checkout directory's name. It records that a deflake run is the active flow
-(and whether in repeat mode), this reading list, the session's scratch directory, the events acknowledged and the PRs
-made so far. After any compaction or resume, read it first. Update it in the same turn that handles each event, before
-calling `wait` again; never take an extra turn just to write it. It is never committed.
+Keep a working log in the records, at `farhelm/flows/deflake/<checkout>/log.md` in the checkout's attended clone, where
+`<checkout>` is the checkout directory's name. Before creating or writing it, read `.agents/agent-records.md`, "Attended
+flows' logs", which says how to set up the clone, when to push, and what to do when either fails. It records that a
+deflake run is the active flow (and whether in repeat mode), this reading list, the session's scratch directory, the
+events acknowledged and the PRs made so far. After any compaction or resume, read it first. Update it in the same turn
+that handles each event, before calling `wait` again; never take an extra turn just to write it. It is never committed
+to this repository.
 
 Fence: act only when `deflake/bin/deflake wait` returns; never poll; no narrow reproduction for a classified flake;
 never open a PR for review or merge one.

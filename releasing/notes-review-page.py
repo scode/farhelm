@@ -5,7 +5,7 @@ Stable releases now use the `interactive-artifact` skill (`releasing/.agents/sta
 step 2). Do not use this generator for that flow: its full document and scripts are incompatible with the skill's body
 fragments. The remaining description covers the standalone page retained here.
 
-The proposed `## vX.Y.Z` section lives in a scratch Markdown file, exactly as it will land in `CHANGELOG.md`. This
+The proposed `## vX.Y.Z` section lives in a Markdown file, exactly as it will land in `CHANGELOG.md`. This
 script turns that file into the page. Every entry gets a short id (the category's initial and its position: `B2`,
 `A14`, `M3`) and a note box under it, plus one box for general notes. **Copy feedback** gathers the non-empty notes into
 one plain-text block that the maintainer pastes back into the agent session:
