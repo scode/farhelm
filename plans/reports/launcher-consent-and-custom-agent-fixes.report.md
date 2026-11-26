@@ -87,3 +87,78 @@ None.
 Independent GPT-6.2 Sol high source rechecks cleared the three revised PRs. The rechecks led to pinning every edited
 Restart dispatch, keeping the successful hook-save status separate from other notices, and distinguishing panel and
 viewport bounds in the tests. The registration layer has its original source review and an adjacent merge recheck.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round. An earlier landing blocked it because its YOLO fix stopped the launcher from asking
+the YOLO question at all on a host whose supervisor reports no installation identity; the landing monitor answered the
+block on your behalf (the decision is in the plan's Decisions and a "Plan decisions to revisit" TODO entry), and an
+executor reworked the four PRs. Since the rework's base, main gained only the drift and brick test tooling triage, which
+touches nothing here, and the rebase applied without conflicts.
+
+The landing's independent review found each decision implemented as answered. A host without an identity gets the YOLO
+question again, and its one-time answer works when it goes straight back to the same connection: the launcher records
+the connection the launch was first sent on, the request carries it, and the helm checks it before its YOLO check for
+New, Clone, Replace with and, newly, Restart with. After a host wake, or a reconnect the launcher has seen, the answer
+is dropped with a "Launch again" note, and the helm refuses a reconnect the launcher has not seen yet. Hosts that report
+an identity keep the anchoring as first built. The launcher test that was one pixel off now passes. My block question
+said the suggestions list was one pixel wider than its field; the executor found it was not: since #5037 moved the
+list's border onto an outer panel, the test had been measuring the inner rows. The rework moves the marker the test
+measures onto the painted panel (and trims the list's height limit by the border's two pixels), with the test itself
+unchanged, so nothing users saw was misaligned. And a hook setup answer whose shown launch changed now says "Restart
+setup was saved. The launch changed. Review it, then press Launch again."
+
+#### Fixes made while landing
+
+- None. The review found no blocker or should-fix item.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the reworked PRs rebased onto main as it stood at the start of the landing (`d7ae4daa`), which applied without
+conflicts; every file's change is exactly what the executor pushed.
+
+- The GUI crate's tests, `cargo nextest run -p farhelm-gui`, on the test worker (recorder run
+  `0ac87c29-380d-4a12-9661-b5d13c6945bb`): all 3479 passed, including the launcher test that failed in the earlier
+  landing.
+- The helm and protocol crates' tests, `cargo nextest run -p farhelm-helm -p farhelm-proto`, on the test worker
+  (recorder run `bfc3c991-7450-4d75-8269-0e8834cebc05`): all 2243 passed. The rework added the connection check to the
+  helm and an optional request field to the protocol crate; it is part of the app's own request to its embedded helm,
+  not the supervisor protocol, so no protocol version changes.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings`, on the test worker: passed.
+- The desktop app's end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run
+  `edd5d7ef-ca92-4fbf-a21d-7b082eb73bad`): of its 49 steps, 48 passed, including the launcher and its YOLO question, and
+  one (paste) was skipped by design on Linux.
+- The desktop app's screenshot comparison, `python3 scripts/check-gui-goldens.py`, all scenes, locally (recorder run
+  `baad4f8d-7380-4091-99cf-e356d0b83876`): passed, including the plan's eight new scenes (16 pictures, light and dark);
+  and the screenshot batch tool's test with the scene list (recorder run `9fec7cbc-c56d-49e3-b3e2-1e6be50b5747`),
+  locally: passed.
+- `python3 scripts/check-agents-md.py`, `python3 releasing/check-changelog.py format`, `cargo fmt --all -- --check` and
+  `python -B scripts/check-test-sleeps.py`, locally: passed. `dprint check`, locally: this plan's files pass; it fails
+  only on over-long lines in the triage outcomes archive that main already had. No PR fixes them yet; a formatting-only
+  one would, and I recommend it, as earlier rounds' notes did.
+
+Reused: none. The executor's runs were on an older base, and everything they covered ran again above.
+
+Skipped: the rest of the workspace Rust suite, since only the GUI, helm and protocol crates changed and their tests ran
+in full; the desktop app's outer shell tests, since nothing in it changed; a Mac run; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+- Nothing in the report. My own block question misdescribed the one-pixel test failure, as the first section says.
+
+#### Things you should know that the report does not say
+
+- **Smaller points the review noticed.** **Launch without** on a hook setup question whose draft can no longer launch
+  now clears the question and shows nothing (no setting is written, so it is harmless); a YOLO refusal of a new
+  disposable environment would show the "Launch again" note in a loop, which is probably unreachable since new
+  environment hosts start with YOLO allowed; SPEC_impl.md still says no new precondition checks are added although
+  Restart with now carries one, which the same section states a few lines later (a one-line docs fix the next
+  SPEC_impl.md edit there can make); a few branches have no test of their own (the guard that stops a wake for an
+  identity-less answer, the same-connection answer for anything but New, and the hook note's "Press Launch when the
+  draft is ready" wording); and the YOLO and hook changelog drafts could use a context paragraph for the curator. None
+  needs a follow-up on its own.
