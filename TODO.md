@@ -428,6 +428,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Move agent records off the host.** Implement the design in
+  https://snippets.scode.org/s/farhelm-records-on-artifacts-sketch/ (goals, decisions and the reasons for them are on
+  the page), so plan executors and the landing monitor can run on other hosts: their logs and notes go to one Cloudflare
+  Artifacts repo behind a small records tool, and plan state stays on GitHub main. Start once the plans in flight have
+  settled.
+
 - **A slow host still delays ordered desktop actions.** The desktop app keeps live updates flowing during host waits.
   Session Stop and Delete, environment Suspend, Resume, Stop and suspend, Delete and Retry-delete, and Checkout Trash
   listing and deletion now run independently of ordered commands. Credential replacement is the next candidate. It waits
