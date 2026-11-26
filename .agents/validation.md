@@ -1174,6 +1174,27 @@ systemd or SSH substrate ran.
   in its mid-round `--blocks-only` mode, blocks alone) and of the origin remote. The jj and gh sequences themselves are
   exercised only by real landings. Run them when those files change; seconds, no network beyond Deno's first fetch of
   its `jsr:` imports.
+- `python3 scripts/record-test-run.py --kind development --selection 'xtask records tool' --concurrency 'cargo test default threads' -- cargo test --manifest-path xtask/Cargo.toml --target-dir target/xtask`
+  — the agent records tool behind `cargo xtask records` (`xtask/`, its own workspace; `.agents/agent-records.md`): unit
+  tests of the config, record names, push permissions, command line, git environment, push-retry classification and
+  backoff, and mint-response parsing, and integration tests that run the built tool against local bare repos with fake
+  checkouts and a config passed with `--config` (first clone, slot detection from a subdirectory, absent checkouts,
+  config and name errors, permission refusals, pushes carrying only the named records, nothing to push, the slot stamp,
+  two slots interleaving and three pushing at once without force, same-slot serialization held by the clone's lock,
+  remote changes merged around local edits, stale edits from an ended claim set aside, an accepted push the client saw
+  fail healing on the next call, overlaps in a pushed record refused, late edits staying local, errors naming no remote
+  URL, the token only in the child environment and on the wire as a Bearer header, and `backup` against a fake HTTP
+  server refusing a rewritten history). Run it from the checkout root when anything under `xtask/` or
+  `.cargo/config.toml` changes, with `cargo fmt --manifest-path xtask/Cargo.toml -- --check` and
+  `cargo clippy --manifest-path xtask/Cargo.toml --target-dir target/xtask --all-targets -- -D warnings` (the root
+  workspace's fmt and clippy runs do not reach `xtask/`); about a second after a 30-second first build, no credentials,
+  no network beyond 127.0.0.1. Artifacts itself (its `stale ref` and busy answers to concurrent pushes, and that a write
+  token can force-push) was checked by hand against throwaway repositories, not by these tests. CI does not run it.
+- `python3 -B scripts/test-records-git-credential.py` — the attended clones' credential helper
+  (`scripts/records-git-credential.py`), run as a child process: the Basic-auth answer strips `?expires=`, nothing is
+  offered over plain HTTP or to any host but an Artifacts one, `store` and `erase` leave the token file alone, failures
+  print no password, and a clone made with the exact command `.agents/agent-records.md` documents gets the token from it
+  through real `git credential fill`. Seconds, no network. Run it when the helper changes.
 - `python3 scripts/test-todo-picker.py` — TODO extraction and the legacy standalone checklist
   (`scripts/todo-picker.py`): how TODO.md buckets and entries are read, that entries with a plan are left out, that a
   summaries file written against an older TODO.md is refused, and that summaries are escaped into the page. Run it when
