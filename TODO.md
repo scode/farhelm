@@ -264,24 +264,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   exceeded the triage size target, and the cache transition needs its own coverage to preserve working recipes. Plan:
   `plans/queue/podman-proxy-free-images.md`.
 
-- **Settle an unconfirmed agent start before Stop reports success.** A launch can stay pending with no terminal when
-  Farhelm cannot confirm its terminal host ended. Authorized Stop can record an exit and return success without checking
-  the recorded start. A first stage that still holds the launch spec can start the agent after that reply. Use Restart's
-  recorded-start settlement under the lifecycle claim and after both consent guards. Include pinned agent children in
-  cleanup and keep the launch evidence if the recorded scope or process sweep is unconfirmed. Preserve the distinction
-  between a launch that left no live agent and a Stop that found one. The latter needs the user-stop annotation even if
-  a sweep retry no longer sees the child, and an outcome write failure must report that cleanup already ran. A direct
-  early sweep missed both cases. The final fix needs a durable stop-intent and retry path beyond the triage budget.
-  Extend the retained-create fixture in `host_creates.rs` to drive authorized Stop against an unanswering and a gone
-  host, and add an answering host with a live child. Assert refusal preserves the launch, a completed retry preserves
-  its stop annotation, and a failed write reports the work already done. The existing durable Stop intent treats a
-  missing terminal as exit evidence. Same-boot recovery can also clear the intent when it rediscovers a live host, or
-  complete it from a dead child even though the scope has not been checked. Carry the pending sweep through observation,
-  status and consent, and retries after adoption. An empty terminal address also occurs when create confirmation fails
-  after the terminal became usable, so changing that case's recovery needs an explicit decision. A keyed create retry
-  already preserves an existing Stop intent without starting another agent. Plan:
-  `plans/queue/supervisor-stop-pending-launch.md`.
-
 - **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
   out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
   its version, so a case can report a verdict for the wrong binary. Cover both timeouts and cancellation during

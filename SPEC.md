@@ -2234,7 +2234,11 @@ submission and focus-return behavior.
   tabs?" (using "shell" for Bash or Zsh), or names the remaining tabs when the main program has already exited, unless
   session confirmations are skipped (below). A tab that cannot be closed does not prevent the other tabs from closing;
   the reply names the failed tabs and the client shows that notice. Restart and an agent exiting on its own leave tabs
-  running. Tabs can be opened after Stop; another Stop closes them too.
+  running. Tabs can be opened after Stop; another Stop closes them too. A session whose start was never confirmed and
+  that has no main terminal (a create that was interrupted, or whose host reported an error while its agent may still
+  start, or a Restart that failed without knowing whether its agent started) cannot be stopped: there is nothing for
+  Stop to stop, so it is refused, whoever asks, with nothing changed. The refusal names Delete, which settles such a
+  start, and Restart, which settles it too where it is offered.
 - **Shell exit history.** Stop, Stop and suspend, and the session teardown in Delete and Replace give Bash or Zsh a
   hangup so the shell can save history on exit.
 - **Restart** relaunches the agent in the same working directory and resumes the session's own conversation (see

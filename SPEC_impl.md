@@ -4948,13 +4948,14 @@ no path values are stored in the notice.
   guard requires authoritative evidence that the agent has ended, including for an entry without a terminal. Failed
   discovery or uncertain agent liveness refuses too. UI row, header and bulk Stop derive both guards from the same
   displayed snapshot: no tabs guards tabs, an ended agent guards the agent, independently, whether a question was
-  answered or skipped. Agent-approved Stop is unrestricted. At the HTTP edge, an omitted tab guard defaults true, so an
-  old browser's bodyless or empty-object Stop can still stop the agent but cannot newly close tabs it never warned
-  about. An omitted agent guard retains legacy agent-stop authority; the new UI always sends both explicitly. The HTTP
-  result is `SessionStopOutcome`, an optional notice with an empty object for complete cleanup. Protocol 70 gates the
-  helm-to-supervisor behavior: although the fields have decode defaults and preserve the empty success shape, an older
-  helm would send unrestricted Stop without asking about tabs. Treating the change as additive would let that old client
-  close tabs it never received permission to close.
+  answered or skipped. Agent-approved Stop is otherwise unrestricted: every Stop, guarded or not, refuses an unconfirmed
+  launch with no main terminal (`terminal_less_launch_may_be_live`). At the HTTP edge, an omitted tab guard defaults
+  true, so an old browser's bodyless or empty-object Stop can still stop the agent but cannot newly close tabs it never
+  warned about. An omitted agent guard retains legacy agent-stop authority; the new UI always sends both explicitly. The
+  HTTP result is `SessionStopOutcome`, an optional notice with an empty object for complete cleanup. Protocol 70 gates
+  the helm-to-supervisor behavior: although the fields have decode defaults and preserve the empty success shape, an
+  older helm would send unrestricted Stop without asking about tabs. Treating the change as additive would let that old
+  client close tabs it never received permission to close.
 
   The supervisor checks automatic tab cleanup under the lifecycle claim before signalling. A close that could not
   confirm the host ended is retried when due. For other tabs, the runtime must report that the shell exited or that its
