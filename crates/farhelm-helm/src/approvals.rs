@@ -78,8 +78,8 @@ pub(crate) const NO_GUI_REFUSAL: &str = "no Farhelm window is open to ask the us
 /// The refusal when the asking session is being deleted. Worded as the
 /// request rather than the outcome: a guarded delete can still be refused by
 /// the supervisor after this, and the session would then still exist.
-pub(crate) const DELETING_REFUSAL: &str = "a delete of the asking session was requested while \
-     this request waited for approval, so nothing was done";
+pub(crate) const DELETING_REFUSAL: &str =
+    "a delete of the asking session was requested, so nothing was done";
 
 /// The refusal when the requesting host's connection went away during the
 /// wait.
@@ -194,8 +194,8 @@ impl Approvals {
     }
 
     /// Stop at the installed [`HostWriteGate`], if it is for `host`, until
-    /// the test releases it. Called by the agent's checked host writes
-    /// before they take the host's locks; a no-op when no gate is set.
+    /// the test releases it. Host edits and removes stop before taking
+    /// their locks. Creates stop before dispatch resolves the connection.
     #[cfg(test)]
     pub(crate) async fn hold_at_host_write_gate(&self, host: crate::store::HostId) {
         let gate = self
@@ -297,9 +297,10 @@ impl Approvals {
 }
 
 /// Test-only gate at a host change's last approval boundary. Edits/removals
-/// stop before taking the host's write locks; additions stop before their
-/// final origin check and receipt. Tests can land a competing GUI write or
-/// retire the origin in exactly that window, without a scheduling sleep.
+/// stop before taking the host's write locks. Additions stop before their
+/// final origin check and receipt. A Create stops after approval, before
+/// dispatch resolves its target. Tests can settle a competing operation
+/// or replace a connection in that window without a scheduling sleep.
 ///
 /// The window is where an unprotected comparison of the host against its
 /// card used to sit: a check made there passed, and a GUI retarget or
@@ -427,7 +428,8 @@ pub(crate) enum Allowed {
 }
 
 /// Keep link choices and host-add acceptance in the ordinary approval lifecycle.
-/// Native preapproved links still return Raw immediately, without a card.
+/// Native preapproved links can return Raw without a card once the asking
+/// session passes the same delete check as other callers.
 pub(crate) async fn ask_with_answer(
     state: &AppState,
     origin: AgentOrigin,
@@ -443,6 +445,12 @@ pub(crate) async fn ask_with_answer(
     // the asking suffix. Equal suffixes on other entries are unrelated cards.
     let asking_key = SessionKey::new(origin.host, asking_session);
     let asking_full_id = SessionRef::new(&row.entry_uuid, asking_session)?.to_string();
+    if state.approvals.session_is_being_deleted(&asking_key) {
+        return Err(refusal(
+            ErrorKind::Unauthorized,
+            DELETING_REFUSAL.to_string(),
+        ));
+    }
     let direct_allow = action.requires_direct_allow();
     // Direct-Allow actions cannot offer a persistent shortcut. Browser
     // actions keep their separate URL-category permissions, even if an
@@ -497,6 +505,8 @@ pub(crate) async fn ask_with_answer(
     let mut changes = state.manager.events().subscribe();
     let seq = {
         let mut inner = state.approvals.lock();
+        // Resolving the card's title can yield. Check deletion again while
+        // holding the same lock as the pending entry insertion.
         if inner.deleting.contains_key(&asking_key) {
             return Err(refusal(
                 ErrorKind::Unauthorized,
@@ -2456,6 +2466,55 @@ pub(crate) mod tests {
         let (again, _) = waiting(&harness, origin, "doomed").await;
         again.abort();
         other.abort();
+    }
+
+    /// Standing command, own-session and native link grants can bypass a
+    /// card. They still need the requesting session to have no pending delete.
+    #[farhelm_testtrace::test]
+    async fn a_delete_in_flight_refuses_requests_with_standing_permissions() {
+        let harness = rest_harness::idle_helm_with_link_opener(Arc::new(|_| Ok(()))).await;
+        let origin = local_origin(&harness).await;
+        harness
+            .store
+            .set_own_sessions_without_asking(origin.host, true)
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_browser_permission(origin.host, crate::store::BrowserPermission::Public, true)
+            .await
+            .unwrap();
+        let approvals = &harness.state.approvals;
+        let _mark = approvals.deny_session(&SessionKey::new(origin.host, "doomed"));
+        let open = ApprovalAction::OpenUrl {
+            url: "https://example.test/".into(),
+            local_network: false,
+            preapproved: false,
+            tunnel_available: false,
+        };
+        for (commands, own_action, action) in [
+            (true, false, stop_action()),
+            (false, true, stop_action()),
+            (false, false, open),
+        ] {
+            harness
+                .store
+                .set_commands_without_asking(origin.host, commands)
+                .await
+                .unwrap();
+            let other =
+                ask_with_answer(&harness.state, origin, "other", own_action, action.clone()).await;
+            assert!(
+                matches!(other, Ok(Allowed::Raw)),
+                "premise: this request has a standing grant"
+            );
+            let result =
+                ask_with_answer(&harness.state, origin, "doomed", own_action, action).await;
+            let refused = refusal_of(result.map(|_| ()));
+            assert_eq!(refused.kind, ErrorKind::Unauthorized);
+            assert_eq!(refused.message, DELETING_REFUSAL);
+        }
+        assert!(approvals.list().is_empty());
     }
 
     /// Deletion counters and pending-card ownership distinguish entries even

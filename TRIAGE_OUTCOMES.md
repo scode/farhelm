@@ -26,27 +26,6 @@
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
-## helm-agent-create-dispatch-logs-asking-session-unescaped.md
-
-- Outcome: `fix code`.
-- Assessment: Clearly settled. SPEC_impl.md "Session IDs in logs" (`152-160`): "Session IDs must not inject log lines or
-  use invisible or direction-changing characters to disguise the ID shown in logs. ... Safe escaping by the configured
-  logging formatter also satisfies the requirement without a separate escaping helper at each call site." Code:
-  `crates/farhelm-helm/src/agent_requests.rs:3116-3121` (`dispatch_agent_create`) logs `asking = asking_session`
-  verbatim, where `asking_session` comes from the untrusted supervisor (`client.rs:2442-2448`) and the configured
-  `tracing_subscriber::fmt` formatter (`farhelm-desktop/src/lib.rs:484-486`, `farhelm/src/main.rs:2788-2791`) writes raw
-  `&str` unescaped. All 8 sibling tracing sites in `agent_requests.rs` (`:1476,2014,2455,3425,3497,3648,3734,4708`) use
-  `escape_for_log(asking_session).as_str()`. No comment defends omitting escaping on `asking_session`. Verified:
-  confirmed by source inspection. Fix follows directly: wrap `asking_session` in
-  `escape_for_log(asking_session).as_str()`. Size estimate ~15-25 lines including a unit test.
-- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
-  "Preparing each item", maintainer 2026-10-19). (2026-11-25 triage, main `5af40d23e`.) The maintainer can revise it.
-- Completion criteria: Escape `asking_session` with `escape_for_log` in `dispatch_agent_create`
-  (`agent_requests.rs:3116- 3121`) matching its sibling sites, and add a focused regression test. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-security-and-agent-boundaries.md` ``.
-
 ## trailing-templates-stale-save-duplicate-footer.md
 
 - Outcome: `fix code`.
@@ -377,20 +356,6 @@
   record in Execution which way it went.
 - Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
-## trailing-agent-create-connection-binding-untested.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed as a test coverage gap guarding a security-relevant host-binding path (`agent_requests.rs:2217`
-  forwards `approval.target_incarnation` into `dispatch_agent_create`, but the reconnect test at `:11451-11466` calls
-  `dispatch_agent_create` directly and never exercises `create_for_agent`'s forwarding). Shipped code obeys
-  `SPEC_impl.md:9825-9826`.
-- Decision: Q10 ("Pure product-test coverage gaps"): maintainer picked "Re-apply Nov 21 rule + fix security-binding test
-  (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Add a focused helm test pinning `approval.target_incarnation` forwarding through
-  `create_for_agent` into `dispatch_agent_create` (estimate S-M, ~35-60 lines). Remove the feedback file and its index
-  entry.
-- Execution: ``planned in `plans/queue/triage-security-and-agent-boundaries.md` ``.
-
 ## trailing-trust-hint-late-refusal-untested.md
 
 - Outcome: `other`.
@@ -597,20 +562,6 @@
   (`crates/farhelm-supervisor/src/service/uploads.rs:1254-1258`, matching `DiskStage::Failed` and `SPEC_impl.md:5050`),
   and add a focused unit test (estimate S, ~15-30 lines). Remove the feedback file and its index entry.
 - Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
-
-## preapproved-agent-requests-skip-deleting-session-refusal.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed by source (`crates/farhelm-helm/src/approvals.rs:453-505`): preapproved native-link and
-  standing-permission returns (`:468-480`) run before the `inner.deleting.contains_key(&asking_key)` refusal
-  (`:499-505`), so cardless preapproved requests from a deleting session are carried out instead of refused
-  (`SPEC_impl.md:9797-9799`, `approvals.rs:248`).
-- Decision: Q12 ("Straightforward small product fixes"): maintainer picked "Fix all 14". (2026-11-25 fewest-questions
-  triage page, main `5af40d23e`.)
-- Completion criteria: Check `state.approvals.session_is_being_deleted(&asking_key)` before preapproval fast paths in
-  `ask_with_answer` (`crates/farhelm-helm/src/approvals.rs`), and add a regression test (estimate S, ~25-35 lines).
-  Remove the feedback file and its index entry.
-- Execution: ``planned in `plans/queue/triage-security-and-agent-boundaries.md` ``.
 
 ## update-identity-unverified-misleading-plan-again-remedy.md
 

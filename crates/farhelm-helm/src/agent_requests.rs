@@ -2203,6 +2203,8 @@ async fn create_for_agent(
         named_start.as_ref(),
     )
     .await?;
+    #[cfg(test)]
+    state.approvals.hold_at_host_write_gate(resolved.host).await;
     dispatch_agent_create(
         state,
         origin,
@@ -3109,12 +3111,10 @@ async fn dispatch_agent_create(
     {
         return Err(refusal);
     }
-    // The same paper trail [`resolve_target`] leaves for the lifecycle
-    // verbs. `host_name` is the REGISTRY's own rendering of the matched row
-    // rather than the string the request carried, so nothing
-    // attacker-chosen reaches this line.
+    // Use the resolved host name and keep the supervisor's asking-session
+    // ID legible without allowing it to change the log's presentation.
     info!(
-        asking = asking_session,
+        asking = escape_for_log(asking_session).as_str(),
         host = host_name,
         verb = "create",
         "an agent is creating a session"
@@ -11480,6 +11480,86 @@ mod tests {
             seen.lock().unwrap().is_empty(),
             "neither destination may receive a create"
         );
+    }
+
+    /// A plain command launch has no earlier folder pin. Its final dispatch
+    /// must carry the connection from approval until it has a routing claim.
+    #[farhelm_testtrace::test]
+    async fn agent_create_keeps_the_approved_connection_through_dispatch() {
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, target) = creating_fleet(client, vec![session("asker", 1)]).await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.manager.ui_seat().hold();
+        let origin = origin_of(&h, local);
+        let incarnation = h.manager.status(target).unwrap().incarnation;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    command_create("user@builder", "~", "true", None, None),
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert!(matches!(card.action, ApprovalAction::Launch { .. }));
+        let gate = h.state.approvals.install_host_write_gate(target);
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let reached = tokio::time::timeout(RESPONDER_JOIN_BUDGET, gate.reached.notified()).await;
+        assert!(
+            reached.is_ok(),
+            "the approved create missed its dispatch boundary (request finished: {})",
+            task.is_finished()
+        );
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let replacement = spawn_create_responder(peer, None);
+        h.fleet.edit(target, |script| script.peer = Some(client));
+        h.fleet.kill_connection(target);
+        h.await_refreshed_after(target, incarnation).await;
+        assert_ne!(h.manager.status(target).unwrap().incarnation, incarnation);
+        assert_eq!(origin_of(&h, local).connection, origin.connection);
+        gate.release.notify_one();
+        let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+            .await
+            .unwrap()
+            .unwrap();
+        let (_, message) = refused(outcome);
+        assert!(
+            message.contains("not the connection this request was prepared against"),
+            "{message}"
+        );
+        assert!(seen.lock().unwrap().is_empty());
+        assert!(replacement.lock().unwrap().is_empty());
+    }
+
+    /// The create event's asking-session field uses visible escapes for
+    /// nonprinting characters that the session-reference grammar still accepts.
+    #[farhelm_testtrace::test]
+    async fn ordinary_agent_create_escapes_the_asking_id_in_its_log() {
+        let asking = "asker\u{202e}one";
+        let events = crate::test_capture::current();
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let _seen = spawn_create_responder(peer, None);
+        let (h, local, _) = creating_fleet(client, vec![session(asking, 1)]).await;
+        let outcome = HelmAgentRequests::for_state(&h.state)
+            .handle(
+                origin_of(&h, local),
+                asking,
+                command_create("user@builder", "~", "true", None, None),
+            )
+            .await;
+        assert!(matches!(outcome, AgentOutcome::Ok { .. }), "{outcome:?}");
+        let logged = crate::test_capture::matching(&events, "an agent is creating a session");
+        assert_eq!(logged.len(), 1);
+        assert_eq!(logged[0].field("asking"), Some(r"asker\u{202e}one"));
     }
 
     /// Plain folders also need to keep the trusted destination shown for
