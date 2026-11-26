@@ -801,33 +801,73 @@ pub(crate) fn workspace_trust_pins_approval_cwd(harness: LaunchHarness) -> bool 
     }
 }
 
-/// The user's Antigravity settings take precedence over Farhelm's override.
-/// Words after a bare `--` are positional values.
+/// Recognized Custom trust options suppress Farhelm's own trust argument.
+/// This best-effort check looks only at option words before a bare `--`.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) fn workspace_trust_blocked_by_selection(selection: &LaunchSelection) -> bool {
+    let mut options = custom_permission_words(selection)
+        .iter()
+        .take_while(|word| word.as_str() != "--");
     match selection.harness {
-        LaunchHarness::Antigravity => antigravity_custom_words(selection)
-            .iter()
-            .take_while(|word| word.as_str() != "--")
-            .any(|word| word == "--settings" || word.starts_with("--settings=")),
+        LaunchHarness::Antigravity => {
+            options.any(|word| word == "--settings" || word.starts_with("--settings="))
+        }
+        LaunchHarness::Pi => {
+            options.any(|word| matches!(word.as_str(), "--approve" | "--no-approve"))
+        }
+        LaunchHarness::Codex => {
+            while let Some(word) = options.next() {
+                let assignment = match word.as_str() {
+                    "-c" | "--config" => options.next().map(String::as_str),
+                    word => word
+                        .strip_prefix("--config=")
+                        .or_else(|| word.strip_prefix("-c="))
+                        .or_else(|| word.strip_prefix("-c")),
+                };
+                if assignment.is_some_and(codex_project_trust_assignment) {
+                    return true;
+                }
+            }
+            false
+        }
         LaunchHarness::Claude
-        | LaunchHarness::Codex
         | LaunchHarness::Cursor
         | LaunchHarness::Goose
         | LaunchHarness::Grok
         | LaunchHarness::Muse
         | LaunchHarness::Omp
         | LaunchHarness::OpenCode
-        | LaunchHarness::Pi
         | LaunchHarness::Bash
         | LaunchHarness::Zsh
         | LaunchHarness::Custom => false,
     }
 }
 
+/// Codex can set trust through a dotted key or a table assignment containing
+/// that key. Farhelm's own override replaces the whole projects table.
+///
+/// Any `projects.<key>` assigned an inline table counts as an override, whatever
+/// the key looks like: a project key is usually a quoted path, and a path such as
+/// `"/src/github.com/o/r"` holds dots of its own, so splitting the key at its last
+/// dot would miss the user's table and let Farhelm's trust replace it.
+fn codex_project_trust_assignment(assignment: &str) -> bool {
+    let Some((key, value)) = assignment.split_once('=') else {
+        return false;
+    };
+    let key = key.trim();
+    key == "projects"
+        || key.strip_prefix("projects.").is_some_and(|project_key| {
+            !project_key.is_empty()
+                && (value.trim_start().starts_with('{')
+                    || project_key
+                        .rsplit_once('.')
+                        .is_some_and(|(_, field)| field.trim() == "trust_level"))
+        })
+}
+
 /// Only Custom flags count as user-authored CLI options. Other permission
 /// modes use the compiler's own argument list.
-fn antigravity_custom_words(selection: &LaunchSelection) -> &[String] {
+fn custom_permission_words(selection: &LaunchSelection) -> &[String] {
     if selection.permissions == Some(LaunchPermission::Custom) {
         selection.permission_flags.as_deref().unwrap_or_default()
     } else {
@@ -842,7 +882,7 @@ fn antigravity_custom_words(selection: &LaunchSelection) -> &[String] {
 fn custom_positional_tail_len(selection: &LaunchSelection) -> usize {
     match selection.harness {
         LaunchHarness::Antigravity => {
-            let words = antigravity_custom_words(selection);
+            let words = custom_permission_words(selection);
             words
                 .iter()
                 .position(|word| word == "--")
@@ -1875,6 +1915,94 @@ mod tests {
             wrapper_prefix: None,
             container: None,
             workspace_trust: None,
+        }
+    }
+
+    /// A trust-looking operand, unrelated config assignment or inactive Custom
+    /// field must still leave the destination's automatic trust policy in effect.
+    #[test]
+    fn custom_trust_detection_respects_option_boundaries() {
+        let cases: &[(LaunchHarness, &[&str], bool)] = &[
+            (LaunchHarness::Pi, &["--approve"], true),
+            (LaunchHarness::Pi, &["--no-approve"], true),
+            (LaunchHarness::Pi, &["--", "--no-approve"], false),
+            (LaunchHarness::Pi, &["--no-approve-extra"], false),
+            (
+                LaunchHarness::Codex,
+                &["-c", "projects./work.trust_level='untrusted'"],
+                true,
+            ),
+            (
+                LaunchHarness::Codex,
+                &["--config", "projects={\"/work\"={trust_level='untrusted'}}"],
+                true,
+            ),
+            (
+                LaunchHarness::Codex,
+                &["--config", "projects./work={trust_level='untrusted'}"],
+                true,
+            ),
+            (
+                LaunchHarness::Codex,
+                &[
+                    "-c",
+                    "projects.\"/src/github.com/o/r\"={trust_level='untrusted'}",
+                ],
+                true,
+            ),
+            (
+                LaunchHarness::Codex,
+                &[
+                    "-c",
+                    "projects.\"/src/github.com/o/r\".trust_level='untrusted'",
+                ],
+                true,
+            ),
+            (
+                LaunchHarness::Codex,
+                &["-c", "projects.\"/src/github.com/o/r\".other='x'"],
+                false,
+            ),
+            (
+                LaunchHarness::Codex,
+                &["--config=projects.\"/work\".trust_level='trusted'"],
+                true,
+            ),
+            (
+                LaunchHarness::Codex,
+                &["-cprojects.\"/work\".trust_level='trusted'"],
+                true,
+            ),
+            (
+                LaunchHarness::Codex,
+                &["-c", "model='projects.foo.trust_level'"],
+                false,
+            ),
+            (
+                LaunchHarness::Codex,
+                &["-c", "projects.foo.other='trust_level'"],
+                false,
+            ),
+            (
+                LaunchHarness::Codex,
+                &["-c", "--", "projects.foo.trust_level='untrusted'"],
+                false,
+            ),
+        ];
+        for &(harness, words, expected) in cases {
+            let mut input = selection(harness);
+            input.permission_flags = Some(words.iter().map(ToString::to_string).collect());
+            input.permissions = Some(LaunchPermission::Custom);
+            assert_eq!(
+                super::workspace_trust_blocked_by_selection(&input),
+                expected,
+                "{words:?}"
+            );
+            input.permissions = Some(LaunchPermission::Yolo);
+            assert!(
+                !super::workspace_trust_blocked_by_selection(&input),
+                "{words:?}"
+            );
         }
     }
 

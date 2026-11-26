@@ -380,9 +380,10 @@ like FAT: Farhelm does not detect such changes.
 
 ## Workspace trust
 
-Farhelm grants workspace trust when you start a sandbox session or container session with Claude Code, Codex, Muse
-Code, Pi or Antigravity. Your custom Antigravity settings still take precedence. On installed hosts and hosts you
-create with **Add host**, trust follows **Settings → Agents**.
+Sandbox and container sessions with Claude Code, Codex, Muse Code, Pi or Antigravity trust the workspace by default.
+On installed hosts and hosts you create with **Add host**, trust follows **Settings → Agents**. Farhelm makes a
+best-effort check of **Custom** permission flags for Codex and Antigravity and skips its own trust option when it
+recognizes one you supplied.
 
 Codex, Muse Code and Pi have their own trust switches, all off by default. Each applies to directories you choose
 and to managed checkouts. Enabling one lets the repository's hooks, settings and
