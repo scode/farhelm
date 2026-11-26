@@ -8,5 +8,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `hooks-restart-and-antigravity-fixes.md` — Place Antigravity Restart options before Custom `--`, isolate hook setup errors in Restart and recovery UI, and delay the missing-hook warning clock until agent handoff (after `drop-post-clone-claude-trust.md`)
 - [landing 90720f] `supervisor-stop-and-restart-cleanup-fixes.md` — Settle unconfirmed agent starts before Stop reports success and keep failed Restart cleanup retryable after session deletion
 - [complete] `golden-harness-and-new-container-scene.md` — Report missing renders on the portable golden changes page and show the settled build status in the New container golden
-- [pending] `agent-drift-and-screen-capture-tooling.md` — Stop agent updater process groups before drift cases, publish captured agent screens as recoverable pairs, and require a committed hook report after Restart in drift checks
+- [in-flight 8bdd38] `agent-drift-and-screen-capture-tooling.md` — Stop agent updater process groups before drift cases, publish captured agent screens as recoverable pairs, and require a committed hook report after Restart in drift checks
 - [pending] `brick-test-reopen-and-retry-fixes.md` — Keep the brick test's installer pair retryable after an unavailable P0 check and bind reopen samples to a witnessed app relaunch
