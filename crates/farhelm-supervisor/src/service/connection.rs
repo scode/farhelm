@@ -1202,7 +1202,7 @@ pub(crate) async fn admit_or_refuse(
 /// future's whole lifetime. `work` is handed its own sender for the reply, and
 /// is only called once the request is admitted: the shared admission-then-spawn
 /// shape of the management requests whose work all happens on the connection's
-/// tracked task (directory browse, repository search, tab open and close).
+/// tracked task (directory browse, tab open and close).
 /// Stop, Restart and Rename take their slot through `admit_or_refuse`
 /// directly, because part or all of their work is owned by the supervisor
 /// rather than the connection, and Delete waits for its slot inside its own

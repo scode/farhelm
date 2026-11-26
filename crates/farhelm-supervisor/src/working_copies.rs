@@ -83,13 +83,13 @@ pub const ARCHIVE_DIR_NAME: &str = ".farhelm-trash";
 pub(crate) const LEGACY_ARCHIVE_DIR_NAME: &str = "farhelm-archived-working-copies";
 
 /// Ready checkouts and their private recovery names share this reserved root.
-/// Ordinary checkout names and discovery must never treat it as a repository.
+/// Reserving the root keeps checkout allocation out of the spare pool's namespace.
 pub(crate) const SPARE_DIR_NAME: &str = ".farhelm-spares";
 const RESERVED_CHECKOUT_NAMES: [&str; 3] =
     [ARCHIVE_DIR_NAME, LEGACY_ARCHIVE_DIR_NAME, SPARE_DIR_NAME];
 
 /// Recognize infrastructure even on a case-insensitive checkout filesystem.
-/// Keep discovery and allocation on the same set when another container is added.
+/// Occupancy checks and allocation share this set so users cannot claim infrastructure names.
 pub(crate) fn reserved_checkout_name(name: &std::ffi::OsStr) -> bool {
     name.to_str().is_some_and(|name| {
         RESERVED_CHECKOUT_NAMES

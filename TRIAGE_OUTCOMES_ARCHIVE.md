@@ -50123,3 +50123,147 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   and its index entry, and record in Execution which way it went.
 - Execution: Test fixed within the Nov 21 limit. The live launch-history response for the identified session-owned host now has an assertion that checkout needs no setup, including with no saved root.
   Change `vyrrosrlzwprqzzqzwpknuolstnkwwrx`, bookmark `plan/triage-provisioning-podman-and-runtime/04-runtime-test-gap-checks`, https://github.com/scode/farhelm/pull/5038/changes.
+
+## trailing-legacy-claude-settings-v036-hosts-never-cleaned.md
+
+- Outcome: `fix spec`.
+- Assessment: Confirmed for the leftover file and direct-to-Cleared path (`v0.36.0` wrote `ANTHROPIC_BASE_URL` and
+  `ANTHROPIC_AUTH_TOKEN` into `~/.claude/settings.json`; schema 76->77 added nullable `tensorlake_credential_delivery`
+  with no backfill at `store.rs:4957-4967`; `retire_legacy_settings` at `credential_delivery.rs:1229,1260-1261` marks
+  `None` as `Cleared` directly). Live Claude Code precedence between `settings.json` and process env is unverified.
+- Decision: Q3 ("Legacy v0.36.0 Tensorlake Claude & Codex cleanup"): maintainer picked "Fix spec: accept v0.36.0
+  unstamped Tensorlake hosts" with note: "tensorlake is STILL experimental to be clear. Yes. accept this, fix spec."
+  (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Update `SPEC_impl.md` ("Named credential catalog", around lines 6255-6259) to state that
+  Tensorlake is still experimental and that legacy v0.36.0 Tensorlake hosts that never reconnected under v0.37-v0.43
+  (carrying no delivery record) are accepted as not automatically migrated for Claude settings (alongside the existing
+  crash acceptance). Combine with `trailing-legacy-codex-config-v036-hosts-never-cleaned.md` if convenient. Remove the
+  feedback file and its index entry.
+- Execution: complete. Change `ruqlmlvnzolysnvuwvyskvtkquyuvkyv`, bookmark
+  `plan/triage-spec-and-comment-updates/01-spec-and-comment-updates`.
+  [Draft PR #5040](https://github.com/scode/farhelm/pull/5040/changes).
+
+## trailing-legacy-codex-config-v036-hosts-never-cleaned.md
+
+- Outcome: `fix spec`.
+- Assessment: Confirmed for the leftover file and direct-to-Cleared path (`v0.36.0` wrote `model_provider = "farhelm"`
+  and `[model_providers.farhelm]` with bearer token into `~/.codex/config.toml`; `retire_legacy_settings` at
+  `credential_delivery.rs:1230,1260-1261` marks `None` as `Cleared` directly). Live Codex `-c` merge vs replace behavior
+  is unverified.
+- Decision: Q3 ("Legacy v0.36.0 Tensorlake Claude & Codex cleanup"): maintainer picked "Fix spec: accept v0.36.0
+  unstamped Tensorlake hosts" with note: "tensorlake is STILL experimental to be clear. Yes. accept this, fix spec."
+  (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Update `SPEC_impl.md` ("Named credential catalog", around lines 6254-6259) to state that
+  Tensorlake is still experimental and that legacy v0.36.0 Tensorlake hosts that never reconnected under v0.37-v0.43
+  (carrying no delivery record) are accepted as not automatically migrated for Codex config as well as Claude settings.
+  Remove the feedback file and its index entry.
+- Execution: complete. Change `ruqlmlvnzolysnvuwvyskvtkquyuvkyv`, bookmark
+  `plan/triage-spec-and-comment-updates/01-spec-and-comment-updates`.
+  [Draft PR #5040](https://github.com/scode/farhelm/pull/5040/changes).
+
+## trailing-spec-file-click-release-wording.md
+
+- Outcome: `fix spec`.
+- Assessment: Confirmed by source (`SPEC.md:3753-3754` vs `SPEC_impl.md:3484-3485,3498-3499`,
+  `attached.rs:2805-2816, 2887-2890,4092-4100`, `files.rs:209-238`): pressing closes the hover disclosure popover, so
+  release cannot happen over a still-painted popover; `SPEC_impl.md` already states the real contract accurately.
+- Decision: Q9 ("Stale or inaccurate spec prose & comments"): maintainer picked "Update spec & comments on all 4 to
+  match code". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Reword `SPEC.md:3753-3754` to match shipped behavior and `SPEC_impl.md:3484-3499` (pressed while
+  that hover's disclosure is painted and fully visible, and released before the disclosure is replaced, with link text
+  unchanged). Remove the feedback file and its index entry.
+- Execution: complete. Change `ruqlmlvnzolysnvuwvyskvtkquyuvkyv`, bookmark
+  `plan/triage-spec-and-comment-updates/01-spec-and-comment-updates`.
+  [Draft PR #5040](https://github.com/scode/farhelm/pull/5040/changes).
+
+## trailing-spec-impl-hook-answer-preview-wait.md
+
+- Outcome: `fix spec`.
+- Assessment: Confirmed by source (`SPEC_impl.md:1005-1006` vs `launcher/view/hook_question.rs:228-230,245-266,308-310`,
+  `view.rs:1405-1436,1511-1536`, `checkout.rs:402-428`): only the YOLO answer routes through
+  `submit_or_wait_for_preview`; a hook-setup answer saves any setting and stops safely with `WAIT_FOR_PREVIEW`.
+- Decision: Q9 ("Stale or inaccurate spec prose & comments"): maintainer picked "Update spec & comments on all 4 to
+  match code". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Narrow `SPEC_impl.md:1005-1006` so it accurately distinguishes the YOLO answer (carries
+  permission through a host-setting write or checkout preview) from the hook-setup answer (carries permission through
+  its setting write and refuses safely if a checkout preview is still loading). Remove the feedback file and its index
+  entry.
+- Execution: complete. Change `ruqlmlvnzolysnvuwvyskvtkquyuvkyv`, bookmark
+  `plan/triage-spec-and-comment-updates/01-spec-and-comment-updates`.
+  [Draft PR #5040](https://github.com/scode/farhelm/pull/5040/changes).
+
+## trailing-spec-impl-custom-agent-id-letter.md
+
+- Outcome: `fix spec`.
+- Assessment: Confirmed by source (`SPEC_impl.md:7613` says registered IDs "start with a letter", contradicting
+  `SPEC.md:493`, `custom_agents.rs:37-54,95-98`, and `main.rs:910-922`, which allow leading digits).
+- Decision: Q9 ("Stale or inaccurate spec prose & comments"): maintainer picked "Update spec & comments on all 4 to
+  match code". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Change `SPEC_impl.md:7613` from "start with a letter" to "start with a lowercase letter or
+  digit". Remove the feedback file and its index entry.
+- Execution: complete. Change `ruqlmlvnzolysnvuwvyskvtkquyuvkyv`, bookmark
+  `plan/triage-spec-and-comment-updates/01-spec-and-comment-updates`.
+  [Draft PR #5040](https://github.com/scode/farhelm/pull/5040/changes).
+
+## trailing-stale-references-to-removed-repository-search.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Confirmed across all 6 sites on `5af40d23e`: `SPEC.md:1854`, `service/connection.rs:1190`,
+  `working_copies.rs:86,92`, `farhelm-proto/src/lib.rs:445,2597-2599`, and `ui_channel_tests.rs:1299-1305` still refer
+  to the removed host-side repository discovery/search.
+- Decision: Q9 ("Stale or inaccurate spec prose & comments"): maintainer picked "Update spec & comments on all 4 to
+  match code". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Clean up all 6 stale references to removed repository discovery/search in `SPEC.md`, code
+  comments, and the `ui_channel_tests.rs` test docstring (docs/comments only, ~15 lines). Remove the feedback file and
+  its index entry.
+- Execution: complete. Change `ruqlmlvnzolysnvuwvyskvtkquyuvkyv`, bookmark
+  `plan/triage-spec-and-comment-updates/01-spec-and-comment-updates`.
+  [Draft PR #5040](https://github.com/scode/farhelm/pull/5040/changes).
+
+## shortcuts-chord-during-composition.md
+
+- Outcome: `fix spec`.
+- Assessment: Partly correct. Confirmed in source for Linux XKB compose cancellation
+  (`vendor/gpui-pre-linux/src/linux/ wayland/client.rs:2218-2263`, `x11/client.rs:1165-1214`, `attached.rs:4401-4409`,
+  `main_view.rs:309-313`), which clears `composition.marked` before dispatching `KeyDown` (live Wayland/X11 unverified);
+  fixing requires patching vendored GPUI. Part 2 (focused text fields outside focus layers) has no shipped route
+  (`shortcuts.rs:268-270`).
+- Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
+  6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Document the Linux XKB compose-cancellation limitation for `Ctrl+Shift+/` in `SPEC_impl.md` (no
+  vendored GPUI patch; Part 2 has no shipped non-layer text field). Remove the feedback file and its index entry.
+- Execution: complete. Change `ruqlmlvnzolysnvuwvyskvtkquyuvkyv`, bookmark
+  `plan/triage-spec-and-comment-updates/01-spec-and-comment-updates`.
+  [Draft PR #5040](https://github.com/scode/farhelm/pull/5040/changes).
+
+## trailing-grid-wide-glyph-absorbs-foreign-spacer.md
+
+- Outcome: `fix spec`.
+- Assessment: Confirmed in source (`vendor/alacritty_terminal/src/term/mod.rs:2021-2047`,
+  `crates/farhelm-supervisor/src/grid_output.rs:231-238,272-289`): a non-wide-aware program deleting starting on the
+  second column of a wide character can leave one cell with the wrong background color; `grid_output.rs:272-273`
+  deliberately avoids style comparison so variation-selector widening keeps working.
+- Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
+  6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Add mid-wide-character DCH/ICH edits (deleting/inserting starting on a wide character's spacer
+  column) to `SPEC.md:3396-3399`'s 2026-11-21 terminal fidelity exclusions. Remove the feedback file and its index
+  entry.
+- Execution: complete. Change `ruqlmlvnzolysnvuwvyskvtkquyuvkyv`, bookmark
+  `plan/triage-spec-and-comment-updates/01-spec-and-comment-updates`.
+  [Draft PR #5040](https://github.com/scode/farhelm/pull/5040/changes).
+
+## trailing-symlinked-claude-json-permanent-warning.md
+
+- Outcome: `fix spec`.
+- Assessment: Confirmed in source
+  (`crates/farhelm-helm/src/provisioning/credential_delivery.rs:835-858,935-938,1293- 1342`,
+  `tensorlake_backend.rs:147-159`, `backend.rs:348-354,380-386,1302-1305,1345-1357`): a recipe image shipping a
+  symlinked `~/.claude.json` lacking `hasCompletedOnboarding: true` is deliberately left untouched, retries once, and
+  emits a generic `"could not install the agent settings"` warning on every reconnect.
+- Decision: Q13 ("Rare / low-value edge cases & tradeoffs"): maintainer picked "Accept / discard as listed (3 fix spec,
+  6 discard)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Update `SPEC_impl.md:6836-6840` to explicitly accept the generic persistent warning and retry on
+  symlinked/non-regular `~/.claude.json` alongside the 1 MiB trade-off. Remove the feedback file and its index entry.
+- Execution: complete. Change `ruqlmlvnzolysnvuwvyskvtkquyuvkyv`, bookmark
+  `plan/triage-spec-and-comment-updates/01-spec-and-comment-updates`.
+  [Draft PR #5040](https://github.com/scode/farhelm/pull/5040/changes).

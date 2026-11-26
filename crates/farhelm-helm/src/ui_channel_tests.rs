@@ -1361,13 +1361,11 @@ async fn lifecycle_routes_answer_504_when_the_host_never_answers() {
 /// folder check against a host that never answers cannot hold the GUI's
 /// ordered channel: a create, a Browse, an automatic folder check
 /// (`membership_only`) and a checkout preview reply 504 once
-/// `HOST_REPLY_BOUND` passes, and a repository search still answers, its
-/// suggestions marked incomplete and its scan error naming the timeout rather
-/// than telling the user to check Git (SPEC.md "Managed checkouts": an
-/// incomplete scan never blocks a typed repository). The fixture host
-/// answers none of these, and the checkout folder is configured so the
-/// preview and the search reach the host instead of refusing first. Removing
-/// a bound makes this hang until nextest's timeout.
+/// `HOST_REPLY_BOUND` passes. The checkout folder is configured so the
+/// preview reaches the silent host instead of refusing first. Repository
+/// suggestions still answer from the helm's launch history, without waiting
+/// on that host. Removing a bound from a host request makes this hang until
+/// nextest's timeout.
 #[farhelm_testtrace::test(start_paused = true)]
 async fn launcher_routes_answer_within_the_bound_when_the_host_never_answers() {
     let harness = rest_harness::helm_listing(vec![rest_harness::session("s1", 100)]).await;

@@ -13,16 +13,6 @@ consequences.
 
 ## Highest priority: security or data loss
 
-- [`trailing-legacy-claude-settings-v036-hosts-never-cleaned.md`](trailing-legacy-claude-settings-v036-hosts-never-cleaned.md)
-  — A Tensorlake host set up by 0.36.0 and not connected under 0.37-0.43 keeps Farhelm's old Claude endpoint URL and
-  token in Claude's settings for good; per SPEC_impl.md they can take precedence and receive a new token (Claude Code
-  precedence unverified).
-
-- [`trailing-legacy-codex-config-v036-hosts-never-cleaned.md`](trailing-legacy-codex-config-v036-hosts-never-cleaned.md)
-  — The same 0.36.0-era Tensorlake hosts keep Farhelm's old Codex endpoint and token in Codex's config, so a newly
-  selected login or endpoint may not take effect, and per SPEC_impl.md the old token can reach a new tokenless endpoint
-  (Codex merge behavior unverified).
-
 ## High priority: material UX degradation
 
 - [`trailing-replace-with-recent-named-fill-enter-replaces.md`](trailing-replace-with-recent-named-fill-enter-replaces.md)
@@ -34,9 +24,6 @@ consequences.
   override and may win (vendor flag precedence unverified; highest if it does).
 
 ## Other: correctness, diagnostics, cleanup, or convenience
-
-- [`shortcuts-chord-during-composition.md`](shortcuts-chord-during-composition.md) — The Keyboard shortcuts chord can
-  interrupt an input method if native handling clears its mark first or the action cannot query the focused field.
 
 - [`provisioning-orphan-sweep-deletes-concurrent-helm-upload.md`](provisioning-orphan-sweep-deletes-concurrent-helm-upload.md)
   — Two helms provisioning the same host concurrently can delete each other's active staging temporary via the orphan
@@ -83,14 +70,6 @@ consequences.
   — After a stop-after-P0 request, brick-test cleanup refuses a prepared but untested remote Mac pair and demands a
   retention decision for machines with no evidence.
 
-- [`trailing-spec-file-click-release-wording.md`](trailing-spec-file-click-release-wording.md) — SPEC.md says a file
-  click must be pressed and released over the painted card, but the press closes the card and the release is accepted
-  without it; SPEC_impl.md has it right.
-
-- [`trailing-grid-wide-glyph-absorbs-foreign-spacer.md`](trailing-grid-wide-glyph-absorbs-foreign-spacer.md) — After a
-  program deletes characters from the middle of a wide character, one cell can show the wrong background color
-  (pre-existing; cosmetic).
-
 - [`trailing-drift-claude-trust-real-config-byte-check.md`](trailing-drift-claude-trust-real-config-byte-check.md) — The
   Claude trust drift case fails whenever another Claude session rewrites the real ~/.claude.json during the case,
   reading as if Farhelm wrote it (frequency unmeasured).
@@ -103,10 +82,6 @@ consequences.
   — In New and Clone, Return on a highlighted template or folder row can launch instead of picking when the highlight
   vanished before the redraw; only Replace with is guarded.
 
-- [`trailing-spec-impl-hook-answer-preview-wait.md`](trailing-spec-impl-hook-answer-preview-wait.md) — SPEC_impl.md says
-  a hook-setup answer waits for a checkout preview, but the launch is refused instead and the user has to press Launch
-  again.
-
 - [`trailing-launcher-held-escape-discards-draft.md`](trailing-launcher-held-escape-discards-draft.md) — Holding Escape
   with typed results or the Save as template panel open can close the whole launcher and discard its draft; the fix
   covered only the highlight case.
@@ -114,9 +89,6 @@ consequences.
 - [`trailing-launcher-stale-permanent-yolo-answer-silent.md`](trailing-launcher-stale-permanent-yolo-answer-silent.md) —
   A stale "Start, and don't ask again on this host" answer closes the YOLO question with nothing started and no reason,
   sometimes after the host setting was already saved.
-
-- [`trailing-spec-impl-custom-agent-id-letter.md`](trailing-spec-impl-custom-agent-id-letter.md) — SPEC_impl.md says
-  registered custom agent IDs start with a letter, but they may start with a digit.
 
 - [`trailing-hook-hint-keeps-stale-save-error.md`](trailing-hook-hint-keeps-stale-save-error.md) — The hook setup hint
   brings back an old Don't show again error after a later dismissal and re-enable (previously triaged as no change under
@@ -148,11 +120,5 @@ consequences.
 - [`trailing-disposable-trust-hint-says-off-by-default.md`](trailing-disposable-trust-hint-says-off-by-default.md) — In
   a session's own sandbox, the trust hint says trust is off by default and points to a switch that does not apply there.
 
-- [`trailing-stale-references-to-removed-repository-search.md`](trailing-stale-references-to-removed-repository-search.md)
-  — SPEC.md, code comments and a test docstring still describe the removed repository search.
-
 - [`trailing-repository-history-failure-shown-as-no-matches.md`](trailing-repository-history-failure-shown-as-no-matches.md)
   — A failed repository-history read shows "No repository matches" and is not retried while the launcher is open.
-
-- [`trailing-symlinked-claude-json-permanent-warning.md`](trailing-symlinked-claude-json-permanent-warning.md) — A
-  symlinked `~/.claude.json` leaves a permanent amber warning that misnames the cause.

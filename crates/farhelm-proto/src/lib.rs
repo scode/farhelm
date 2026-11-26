@@ -442,7 +442,7 @@ pub enum ErrorKind {
     /// carries it.
     ///
     /// A supervisor also answers a management request (a stop, restart,
-    /// rename, tab open or close, directory browse or repository search)
+    /// rename, tab open or close, or directory browse)
     /// with this kind, and [`HOST_BUSY_REFUSAL`], when every one of its
     /// management slots is taken. That is the same promise: nothing
     /// happened, and the same request works once the host is less busy.
@@ -2620,11 +2620,8 @@ pub enum AgentReply {
 /// What a supervisor tells a management request it refuses because every
 /// one of its management slots is taken (see [`ErrorKind::Unavailable`]).
 ///
-/// One constant across the supervisor, which sends it, and the helm, which
-/// shows the same sentence where it deliberately replaces a supervisor's
-/// own error text with words of its own (repository search). It names the
-/// problem in the user's terms and the whole remedy: the refusal comes
-/// before the request changes anything, so trying again is safe.
+/// Admission refuses the request before it changes anything, so trying
+/// again when a management slot is free is safe.
 pub const HOST_BUSY_REFUSAL: &str =
     "this host is busy with other session operations; try again in a moment";
 

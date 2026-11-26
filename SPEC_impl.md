@@ -1001,8 +1001,10 @@ target. The question and request use the snapshot that admitted the press.
 SPEC.md's "One GUI at a time" (2026-10-10) lets input delivered before a redraw run as delivered, so a Confirm queued
 behind a Cancel may still submit. An answer acts on the value presented with the confirmation it answers.
 
-An answer to either launch question is accepted after its source warning is shown. It carries that permission through a
-wait for a setting write or checkout preview.
+Each launch answer can act once its source warning has been shown. The YOLO answer carries that permission through a
+setting write or a wait for the checkout preview. The hook-setup answer carries permission through its setting write. If
+the checkout preview is still loading when it continues, the launcher refuses the attempt and requires a fresh press
+after the preview is ready.
 
 **Create and launch** carries the sandbox's displayed CPU, memory and disk from the answered question. A confirmed
 request to `POST /api/environment-sessions` requires that size. The helm compares it against the recipe definition used
@@ -1308,7 +1310,10 @@ stopped without dispatching. Only an event with no native identity at all (a key
 its unshifted US key instead; on real hardware such events are input-method text and replayed keystrokes, never these
 chords. Because the interceptor takes these keys before the element that owns the input handler, refusing one typed
 mid-composition (SPEC.md asks it of Keyboard shortcuts and terminal tab switching) falls to the action's handler, which
-can ask the focused input whether it is composing.
+can ask the focused input whether it is composing. On Linux, Wayland and X11 can commit the pre-edit text when XKB
+cancels composition, before delivering the same Ctrl+Shift+/ key to Farhelm. The terminal's mark is then clear when the
+handler checks it, so the shortcuts overview can open even though the press began during composition. Closing that gap
+would require GPUI to preserve composition state from before native dispatch.
 
 A mode that takes every key without taking focus (SPEC.md's quick-launch sequence) arms the one app-wide key capture
 slot in the same module. Focus cannot move to a capturing element, so the same keystroke interceptor hands every
@@ -6295,12 +6300,14 @@ arguments, and launch records, logs, host argv and host environment carry no bea
 Before publishing the snapshot, a legacy stamp authorizes clearing the old Farhelm keys for that agent. For Codex, only
 an Endpoint stamp records a settings write. An old Absent stamp leaves settings alone. An old Claude settings URL can
 otherwise take precedence and receive the new token. An old Codex settings bearer can survive a provider override that
-omits a bearer. A host with no legacy stamp records Cleared directly, preserving its image settings. An old Claude
-settings write whose stamp was never recorded, for instance after a crash between the remote write and the local commit,
-can therefore remain. This migration accepts that case. A failed cleanup keeps that stamp for retry and withholds that
-agent's entry. The other agent and GitHub can still finish. The host warning names the affected agent, and credential
-replacement reports the warning when that agent's selection uses the replaced name. A successful cleanup commits Cleared
-before the snapshot upload, so an upload retry preserves subsequent settings edits.
+omits a bearer. A host with no legacy stamp records Cleared directly, preserving its image settings. The migration
+accepts leaving a Claude settings write whose stamp was never recorded, for instance after a crash between the remote
+write and the local commit. Tensorlake is still experimental. The migration also accepts leaving both Claude settings
+and Codex config in place on a Tensorlake host set up by v0.36.0 that never reconnected under v0.37 through v0.43 and
+has no delivery record. A failed cleanup keeps that stamp for retry and withholds that agent's entry. The other agent
+and GitHub can still finish. The host warning names the affected agent, and credential replacement reports the warning
+when that agent's selection uses the replaced name. A successful cleanup commits Cleared before the snapshot upload, so
+an upload retry preserves subsequent settings edits.
 
 Recipes persist optional `github_token_credential` names. The GitHub slot atomically installs 0600 bytes through stdin
 at `github_token::host_file(remote_state_dir)`, the shared `github-token` basename, or unlinks only that file for None.
@@ -6892,11 +6899,13 @@ On a recipe host, an independent delivery slot uses that installer to add `hasCo
 the project for the physical login home. Claude inherits that trust in descendants. Existing keys and the home
 directory's permissions are preserved. An install or an already satisfied document settles the host's slot. A failure
 warns and retries on reconnection. The seed uses the first third of the existing delivery deadline, so a slow settings
-update leaves time for credentials. This seed leaves symlinked and non-regular destinations in place. Because it reuses
-the same 1 MiB reader and non-locking compare-and-replace installer, a long-lived persistent recipe host whose
-`~/.claude.json` exceeds 1 MiB (or outlasts the seed's transfer budget) warns on reconnect without settling the slot,
-and a concurrent Claude write between comparison and replacement can be lost. Both trade-offs are accepted: the seed
-exists for fresh and disposable recipe hosts, and hosts with large files have already completed onboarding.
+update leaves time for credentials. If a symlinked or non-regular `~/.claude.json` prevents a required update, the seed
+leaves it in place and shows the generic agent-settings read or install warning. An install refusal from the destination
+check uses the same one retry as a concurrent edit. The slot stays pending and the warning and retry recur on
+reconnection while the destination still prevents seeding. The same pending state is possible for files over 1 MiB or
+transfers that outlast the seed's budget. A concurrent Claude write between comparison and replacement can also be lost.
+These are accepted trade-offs. The seed exists for fresh and disposable recipe hosts, and hosts with large files have
+already completed onboarding.
 
 The credential ownership rule in SPEC.md applies to image and user settings. A bearer in an unstamped Codex config stays
 under the image or user's ownership. Custom headers and helpers also remain in place. A gateway needing extra headers
@@ -7669,7 +7678,8 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   be refused naming the launch flags and `--template`, and the retired `--invocation` is parsed, hidden, only to be
   refused naming `--command` and the YOLO flags. Free-text value options such as `--model`, `--effort`, and `--cwd`
   accept a value beginning with `-` as a separate argument and leave its validation to the target. `--permissions` has a
-  closed set of values. `--agent` accepts built-in names and registered IDs, which start with a letter.
+  closed set of values. `--agent` accepts built-in names and registered IDs, which start with a lowercase letter or
+  digit.
 - `farhelm agent template create <name> [--cwd <dir>] [--title ...] [--title-kind base|fixed] [--host <name>] <launch flags>`,
   `farhelm agent template edit <name> ...` with the same flags, and `farhelm agent template delete <name>` — an agent's
   template writes (SPEC.md, Agent-spawned sessions). The launch flags are `farhelm agent create`'s; `--template` is
