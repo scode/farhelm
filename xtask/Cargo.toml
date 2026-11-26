@@ -1,0 +1,26 @@
+# Farhelm's repository tooling, run as `cargo xtask <command>` through the alias in `.cargo/config.toml`.
+#
+# This crate is its own workspace (the empty `[workspace]` table below, its own `Cargo.lock`, and the root workspace's
+# `exclude`). The records tool (`cargo xtask records`) is what the unattended plan executors and the landing monitor use
+# to save their logs, so it has to keep working while the root workspace is half-edited, mid-rebase or conflicted, and it
+# must not wait on the main build's lock: the alias builds it into `target/xtask/`, away from the main target directory.
+#
+# Keep dependencies few and quick to compile: every caller builds the tool from its own checkout on first use (there is
+# no install step), so build time is paid by each executor slot.
+[package]
+name = "xtask"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
+# Only `records backup` speaks HTTP: one POST to Cloudflare's REST API to mint a short-lived read token. rustls with
+# ring and the compiled-in Mozilla roots keeps the build free of OpenSSL and of the platform verifier; no gzip, since the
+# response is a few hundred bytes of JSON.
+ureq = { version = "3", default-features = false, features = ["rustls"] }

@@ -95,7 +95,8 @@ Leave these where they already go:
   scripts: plain `tempfile::tempdir()` tests honor it, and some of them bind sockets.
 - Anything of your own that binds a unix socket, such as a hand-started supervisor or terminal host. Put that directly
   under `/tmp` with a random name, because `/tmp/farhelm-tmp/<uuid>/` already spends over 50 of the 108 bytes.
-- Anything another rule tells you to keep somewhere specific, such as goal files and working logs.
+- Anything another rule tells you to keep somewhere specific, such as goal files and working logs, and the records host
+  files and clones in `~/.fh-records/` (`.agents/agent-records.md`), which are small.
 
 This rule governs agents, not harness code: a harness still must not use a fixed path, per "Sharing the machine with
 other agents".

@@ -31,6 +31,9 @@ exclude = [
   "vendor/gpui-pre-wgpu",
   "vendor/gpui-pre-macos",
   "vendor/gpui-agent",
+  # The repository tooling behind `cargo xtask` is its own workspace with its own Cargo.lock, so a half-edited root
+  # workspace or a rebase conflict here cannot break the records pushes the plan executors depend on (xtask/Cargo.toml).
+  "xtask",
 ]
 # Application and ordinary library members, excluding `farhelm-desktop`: on Linux it links GIO, which needs the GLib
 # development packages, and it compiles the GPUI app (`farhelm-gui`, below) and the helm together. The

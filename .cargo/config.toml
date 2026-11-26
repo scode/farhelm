@@ -1,0 +1,10 @@
+# Cargo aliases for this checkout.
+#
+# `cargo xtask` runs the repository tooling in xtask/ (its own workspace, see xtask/Cargo.toml) with its own target
+# directory, so it never waits on the main build's lock; --locked, so it builds exactly the reviewed xtask/Cargo.lock
+# and never re-resolves dependencies on its own; and --quiet, so it prints only the tool's own output.
+#
+# Run it from the checkout root: cargo resolves the relative paths in an alias against the working directory, not
+# against this file, so from a subdirectory it fails with "manifest path `xtask/Cargo.toml` does not exist".
+[alias]
+xtask = "run --locked --quiet --manifest-path xtask/Cargo.toml --target-dir target/xtask --"

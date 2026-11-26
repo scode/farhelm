@@ -135,6 +135,11 @@ second clippy run on floating stable is needed.
 - `python3 -B scripts/plans-landing/test-landing.py`, `deno check` and `deno test -A` on
   `scripts/plans-landing/idle-watch.ts`, and `shellcheck scripts/plans-landing/notify.sh` (the landing monitor's round
   tooling, including the Python module import before checking the round safeguards)
+- `python3 scripts/record-test-run.py --kind development --selection 'xtask records tool' --concurrency 'cargo test default threads' -- cargo test --manifest-path xtask/Cargo.toml --target-dir target/xtask`,
+  with `cargo fmt --manifest-path xtask/Cargo.toml -- --check` and
+  `cargo clippy --manifest-path xtask/Cargo.toml --target-dir target/xtask --all-targets -- -D warnings` (the agent
+  records tool, its own workspace that the root fmt and clippy runs do not reach), and
+  `python3 -B scripts/test-records-git-credential.py` (the attended clones' credential helper)
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
 - `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy, terminal host ownership and cleanup when the
   control socket cannot be created, frame retention on drive failure, and rollback and recovery after a partial pair
