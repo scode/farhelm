@@ -153,7 +153,9 @@ impl InterruptedUploads {
 /// What is showing, in the order it was posted. A notice shows at most once.
 #[derive(Default)]
 pub struct Notices {
-    posted: Vec<Notice>,
+    posted: Vec<(u64, Notice)>,
+    /// The sequence counts repeated posts too, including a repost of the last banner.
+    post_sequence: u64,
 }
 
 /// The notice center's entity, which surfaces observe so a post or a withdrawal redraws them.
@@ -173,14 +175,14 @@ pub fn entity(cx: &App) -> Option<Entity<Notices>> {
     crate::bootstrap::installed::<NoticesGlobal>(cx).map(|global| global.0.clone())
 }
 
-/// Post `notice`. Posting one that is already showing changes nothing.
+/// Post `notice` at the end of the stack. A repeated report stays a single entry and becomes the latest post.
 pub fn post(notice: Notice, cx: &mut App) {
     if let Some(notices) = entity(cx) {
         notices.update(cx, |notices, cx| {
-            if !notices.posted.contains(&notice) {
-                notices.posted.push(notice);
-                cx.notify();
-            }
+            notices.posted.retain(|(_, posted)| posted != &notice);
+            notices.post_sequence += 1;
+            notices.posted.push((notices.post_sequence, notice));
+            cx.notify();
         });
     }
 }
@@ -190,7 +192,7 @@ pub fn withdraw(notice: Notice, cx: &mut App) {
     if let Some(notices) = entity(cx) {
         notices.update(cx, |notices, cx| {
             let before = notices.posted.len();
-            notices.posted.retain(|posted| posted != &notice);
+            notices.posted.retain(|(_, posted)| posted != &notice);
             if notices.posted.len() != before {
                 cx.notify();
             }
@@ -200,5 +202,13 @@ pub fn withdraw(notice: Notice, cx: &mut App) {
 
 /// What is showing now, oldest first.
 pub fn posted(cx: &App) -> Vec<Notice> {
+    posted_with_sequence(cx)
+        .into_iter()
+        .map(|(_, notice)| notice)
+        .collect()
+}
+
+/// Sequences let the scrolling banner region distinguish a new report from a redraw or dismissal.
+pub(crate) fn posted_with_sequence(cx: &App) -> Vec<(u64, Notice)> {
     entity(cx).map_or_else(Vec::new, |notices| notices.read(cx).posted.clone())
 }

@@ -104,14 +104,6 @@ consequences.
   — After a stop-after-P0 request, brick-test cleanup refuses a prepared but untested remote Mac pair and demands a
   retention decision for machines with no evidence.
 
-- [`trailing-file-disclosure-holdback-silent-click.md`](trailing-file-disclosure-holdback-silent-click.md) — When a
-  terminal file's details card would cover the pointer, it flashes and vanishes and a click on the path does nothing,
-  with no "not visible" explanation (pre-existing).
-
-- [`trailing-file-prepaint-click-test-gap.md`](trailing-file-prepaint-click-test-gap.md) — The test for clicking a
-  terminal file before its card paints misses the placed-but-unpainted window, so dropping that guard would go unnoticed
-  (likely; premise on GPUI event timing).
-
 - [`trailing-spec-file-click-release-wording.md`](trailing-spec-file-click-release-wording.md) — SPEC.md says a file
   click must be pressed and released over the painted card, but the press closes the card and the release is accepted
   without it; SPEC_impl.md has it right.
@@ -122,10 +114,6 @@ consequences.
 
 - [`trailing-tab-shell-hangup-delete-wiring-untested.md`](trailing-tab-shell-hangup-delete-wiring-untested.md) — No test
   would notice if Delete stopped giving macOS tab shells their hangup, which would again lose their shell history.
-
-- [`trailing-reposted-notice-not-revealed.md`](trailing-reposted-notice-not-revealed.md) — In an overflowing notice
-  stack, a repeated connection-lost or opt-out-refused notice stays scrolled out of view instead of being revealed
-  (pre-existing).
 
 - [`trailing-drift-claude-trust-real-config-byte-check.md`](trailing-drift-claude-trust-real-config-byte-check.md) — The
   Claude trust drift case fails whenever another Claude session rewrites the real ~/.claude.json during the case,

@@ -94,9 +94,9 @@ pub struct MainView {
     root: root::Attachment,
     /// Follows the connection and notice center, and refreshes the motion preference on macOS activation.
     _observed: Vec<Subscription>,
-    /// The previous connected frame's banners. A fresh notice should scroll into view. Dismissing the last banner
-    /// or receiving a notice for the approval region should leave the banner scroll position alone.
-    drawn_banners: Vec<Notice>,
+    /// The latest banner in the previous connected frame. Only a new banner post, including a repost, scrolls the
+    /// region. Dismissals and approval-region notices leave its scroll position alone.
+    drawn_banner_sequence: Option<u64>,
     /// The sidebar's session list, which the sidebar keeps for the window's life (it holds only per-UI-session state,
     /// which it starts over by itself after a reset). A handle is kept here for the quick switcher, which this view
     /// opens and which tells the list what a pick opened, and for tests, which ask the list for a row's action the way
@@ -151,7 +151,7 @@ impl MainView {
             }),
             root,
             _observed: observed,
-            drawn_banners: Vec::new(),
+            drawn_banner_sequence: None,
             sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),
             session_list,
             session_pane: cx.new(|cx| SessionPane::new(window, cx)),
@@ -221,11 +221,13 @@ impl Render for MainView {
             self.pane_anchor = Some(pane_anchor.clone());
             // The approval region centers its cards in this pane and reaches at most its height.
             crate::approvals::region::set_pane(pane_anchor.clone(), cx);
-            let posted: Vec<Notice> = notices::posted(cx).into_iter().filter(is_banner).collect();
-            let reveal_latest = posted
-                .last()
-                .is_some_and(|last| !self.drawn_banners.contains(last));
-            self.drawn_banners.clone_from(&posted);
+            let posted: Vec<_> = notices::posted_with_sequence(cx)
+                .into_iter()
+                .filter(|(_, notice)| is_banner(notice))
+                .collect();
+            let latest = posted.last().map(|(sequence, _)| *sequence);
+            let reveal_latest = latest > self.drawn_banner_sequence;
+            self.drawn_banner_sequence = latest;
             // In the macOS window a posted notice's banner would sit under the traffic lights, so a strip of the title
             // band goes above the banners while any is shown.
             let above_banners = (!posted.is_empty())
@@ -236,9 +238,10 @@ impl Render for MainView {
                 .flex_col()
                 .size_full()
                 .children(above_banners)
-                .children(
-                    (!posted.is_empty()).then(|| notice_banners(posted, reveal_latest, window, cx)),
-                )
+                .children((!posted.is_empty()).then(|| {
+                    let banners = posted.into_iter().map(|(_, notice)| notice).collect();
+                    notice_banners(banners, reveal_latest, window, cx)
+                }))
                 // In a narrow macOS window the app header leaves the sidebar's column and runs across the window's top
                 // here, above the row that scrolls sideways (`Sidebar::floating_header`).
                 .children(
@@ -278,7 +281,7 @@ impl Render for MainView {
                 .into_any_element()
         } else {
             // The scroll handle is tied to the drawn region. Reveal the latest notice when that region returns.
-            self.drawn_banners.clear();
+            self.drawn_banner_sequence = None;
             self.sidebar
                 .update(cx, |sidebar, cx| sidebar.suspend_update_reminder(cx));
             inert(&state, cx)

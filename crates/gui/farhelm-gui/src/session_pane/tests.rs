@@ -1506,7 +1506,8 @@ fn deleting_the_only_filtered_session_shows_interrupted_uploads_without_a_termin
 
 /// Undismissed uploads can outnumber the window's available lines. A second interruption of the same file must
 /// scroll into view on its own without moving focus. The pane keeps its working area and older notices stay reachable.
-/// Rebuilding the scroll region after reconnect still shows the newest notice, even if it was already present.
+/// Reposting the same connection warning moves its single banner to the bottom and reveals it again, including at
+/// reconnect when the region is rebuilt.
 #[gpui::test]
 fn a_full_notice_stack_reveals_the_latest_upload_without_hiding_the_pane(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -1533,6 +1534,7 @@ fn a_full_notice_stack_reveals_the_latest_upload_without_hiding_the_pane(cx: &mu
         "the two occurrences have identical text"
     );
     fleet.cx.update(|_, cx| {
+        notices::post(Notice::ConnectionLost, cx);
         for upload in earlier {
             notices::post(Notice::InterruptedUpload(upload.clone()), cx);
         }
@@ -1612,13 +1614,26 @@ fn a_full_notice_stack_reveals_the_latest_upload_without_hiding_the_pane(cx: &mu
                 && node.bounds.bottom() <= viewport.bottom()
         })
     };
+    assert!(
+        !latest_visible(fleet.cx),
+        "the earlier connection warning is out of view"
+    );
     fleet
         .cx
         .update(|_, cx| notices::post(Notice::ConnectionLost, cx));
     settle(fleet.cx);
     assert!(
         latest_visible(fleet.cx),
-        "the latest notice is already on screen"
+        "the repeated warning scrolled into view"
+    );
+    let posted = fleet.cx.update(|_, cx| notices::posted(cx));
+    assert_eq!(posted.last(), Some(&Notice::ConnectionLost));
+    assert_eq!(
+        posted
+            .iter()
+            .filter(|notice| **notice == Notice::ConnectionLost)
+            .count(),
+        1
     );
     fleet.helm.break_channel();
     settle(fleet.cx);
