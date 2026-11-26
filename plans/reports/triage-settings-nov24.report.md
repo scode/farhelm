@@ -116,3 +116,85 @@ change in both appearances and approved the final rebased trust pictures. Indepe
 recorded deferrals where a smaller complete change could not be justified. Opus noted that Antigravity's longer trust
 card leaves the last hook description line below the initial viewport. It is still available by scrolling, and the
 entire trust card fits in both appearances.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round, through its 20 PRs and the landing fix
+[#5026](https://github.com/scode/farhelm/pull/5026/changes). Since the PRs were based, main gained the Welcome
+empty-pane change, the hook log acknowledgment and screen capture tooling changes, a planning PR and a TODO entry. The
+rebase applied without conflicts, and the landing's independent review found no interaction: nothing in this plan
+assumes the removed startup Welcome card, its new screenshots sit beside the Welcome ones in the picture list, and the
+Settings tests run on a view of their own, so the Welcome change's new focus home does not reach them. The review found
+no path where Save and Close loses an edit, saves a draft you did not approve, or hides a refusal, and every executed
+outcome left the queue and the triage ledger as the rules require.
+
+#### Fixes made while landing
+
+- **Six new Settings screenshots were missing from the screenshot scene list,** so the batch tool's own test failed on
+  the stack (it requires every picture to be listed). [#5026](https://github.com/scode/farhelm/pull/5026/changes) lists
+  them.
+- **Removing triaged items left a doubled blank line in the review feedback queue's index,** which `dprint check`
+  refuses. [#5026](https://github.com/scode/farhelm/pull/5026/changes) removes it.
+- **Three deferred TODO entries describe more than triage decided (the review's should-fix).** The entries for a failed
+  hook opt-out after Settings closes, naming each custom-agent draft when closing, and keeping credential delivery
+  reports visible each spell out a larger fix than the triage decision and read as settled; for the custom-agent and
+  credential delivery ones, which triage sized as small, that larger scope is itself the stated reason for deferring.
+  [#5026](https://github.com/scode/farhelm/pull/5026/changes) adds to each what triage actually decided and marks the
+  rest as the executor's proposal, so a later executor does not take it as your design.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the plan's 20 PRs rebased onto main as it stood at the start of the landing (`a1090987`), which applied without
+conflicts; every file's change is exactly what the executor pushed. The landing fix
+[#5026](https://github.com/scode/farhelm/pull/5026/changes) changes only the scene list, the queue index's whitespace
+and three TODO entries, so these runs still apply to it.
+
+- The GUI and helm crates' tests, `cargo nextest run -p farhelm-gui -p farhelm-helm`, on the test worker (recorder run
+  `5731c272-82be-4e46-8c51-3c607520afe0`): all 5365 passed. Only these crates' code changed.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings`, on the test worker: passed.
+- The desktop app's end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run
+  `0e0176c5-28d3-4b35-aca6-17cac6f3d140`): of its 49 steps, 48 passed and one was skipped by design on Linux (paste),
+  including opening and closing Settings.
+- The desktop app's screenshot comparison, `python3 scripts/check-gui-goldens.py`, all scenes, locally (recorder run
+  `6d0c1c64-5c20-41e0-8e74-3edd23c985c3`): passed on the rebased stack, including the plan's new and changed Settings
+  pictures and the Welcome pictures that landed since its base.
+- The screenshot batch tool's test, `python3 -B scripts/test-gui-screenshot-batch.py`, locally: failed on the stack
+  (recorder run `64a31d1a-c5e4-4a65-8bdf-5f0e62e5d042`) because six new pictures were not in the scene list, and passed
+  after [#5026](https://github.com/scode/farhelm/pull/5026/changes) (recorder run
+  `828907ec-9623-4cf9-8c22-86cee2e2e61f`).
+- `python3 scripts/check-agents-md.py`, `python3 releasing/check-changelog.py format`, `cargo fmt --all -- --check` and
+  `python -B scripts/check-test-sleeps.py`, locally: passed. `dprint check`, locally: on the stack it also failed on the
+  review feedback queue's index, which [#5026](https://github.com/scode/farhelm/pull/5026/changes) fixes; after that it
+  fails only on over-long lines in the triage outcomes archive, which main has had since an earlier triage record
+  (#4978) landed. No PR fixes them yet; a formatting-only one would, and I recommend it, as earlier rounds' notes did.
+
+Reused across [#5026](https://github.com/scode/farhelm/pull/5026/changes): every run above except the scene list test
+and `dprint check`, which ran again. The executor's runs were on an older base, and everything they covered ran again
+above.
+
+Skipped: the rest of the workspace Rust suite and the desktop app's own tests, since no other crate's code changed; a
+Mac run, since nothing changed is Mac-specific; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+- Nothing.
+
+#### Things you should know that the report does not say
+
+- **Nine of the 33 outcomes were deferred, and two that triage sized as small were deferred on scope the executor added
+  itself** (the custom-agent draft names and the credential delivery reports, the two described above; the review did
+  not single out the others). The TODO entries now say which parts were decided; you may want a smaller fix for those
+  two than the entries propose.
+- **The new trust help partly does an outcome of a queued plan.** Its wording for launches an agent requests already
+  covers some of what `triage-trust-settings-and-ui-wording`, which runs after this one, is to change in the same help
+  text; its executor should check before repeating it.
+- **Smaller points the review noticed.** When Save and Close skips a draft that changed after the question opened,
+  Settings stays open without saying why (no edit is lost, and the spec allows it); the changelog draft for keeping
+  newer questions open does not say Settings has to be closed again afterwards; the new gate on the hook switch's
+  displayed state covers only that switch, not the workspace trust switches, which are also consent; and a few wording
+  and quoting details in the new TODO entries and one refusal message. None needs a follow-up on its own.

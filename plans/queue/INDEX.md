@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 5803ed] `triage-settings-nov24.md` — execute the 2026-11-24 triage outcomes for the Settings dialog, in grouped PRs
 - [in-flight 8dab48] `launcher-consent-and-custom-agent-fixes.md` — Carry one-time YOLO consent through host wake, guard hook-setup continuation against late-arriving folders, distinguish unread custom agents from deleted ones, and show Custom approval flags on keyboard-highlighted recent setups
 - [complete] `hooks-restart-and-antigravity-fixes.md` — Place Antigravity Restart options before Custom `--`, isolate hook setup errors in Restart and recovery UI, and delay the missing-hook warning clock until agent handoff (after `drop-post-clone-claude-trust.md`)
 - [complete] `brick-test-reopen-and-retry-fixes.md` — Keep the brick test's installer pair retryable after an unavailable P0 check and bind reopen samples to a witnessed app relaunch
