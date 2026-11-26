@@ -66,10 +66,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Stop accidental terminal tab closes when creating a new terminal.** Find some way of making it much less likely that
   a human will accidentally click the close button for a terminal tab when they intended to create a new terminal. I
-  keep doing this all the time.
+  keep doing this all the time. Plan: `plans/queue/terminal-tab-hover-close.md`.
 
 - **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
-  user when blocked through farhelm.
+  user when blocked through farhelm. Plan: `plans/queue/agent-blocked-notifications.md`.
 
 ### Must run attended
 
