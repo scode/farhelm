@@ -24,10 +24,11 @@ monitor.
 
 ### Starting and resuming
 
-Read the monitor log first (`plans/.agents/outside-files.md`, "Files outside the repository"). Check for the ntfy topic
-file (`plans/AGENTS.md`, "Notifications"), unless the log already records the maintainer's choice to run without
-notifications. If the log records a landing claim, `jj git fetch` and run `queue status` and `queue history <slug>`,
-then go by the verb the log says you were running:
+Read the monitor log first: `log.md` in the directory `cargo xtask records path landing` prints
+(`plans/.agents/outside-files.md`, "Files outside the repository"). Check for the ntfy topic file (`plans/AGENTS.md`,
+"Notifications"), unless the log already records the maintainer's choice to run without notifications. If the log
+records a landing claim, `jj git fetch` and run `queue status` and `queue history <slug>`, then go by the verb the log
+says you were running:
 
 - Nothing pending (you were landing it): if the line carries your claim id, carry on with that plan from step 2 of the
   round in `plans/.agents/landing.md`, "A landing round", after the cross-plan review that opens the round (main may
@@ -46,16 +47,37 @@ the landing carries on, and reset it the way an executor's close does (`plans/.a
 boundary") when the claim was cleared. Only a dirty working copy with no recorded claim aborts the start, as the
 clean-main boundary says.
 
-Then write `running` to the Status section and start a round.
+Then write `running` to the Status section. If the log's newest round entry is an `r<n> started` entry (no `r<n> ended`
+follows it), round `<n>` was under way: resume it from its record, `round/<n>` (`cargo xtask records path round/<n>`),
+whose text files are all a resumed round needs; nothing needs restoring. Otherwise start a round.
+`landing.py round-start` refusing a number because its record already holds a round means the same thing: that round was
+started, so resume it rather than starting another.
+
+### Pushing the monitor's records
+
+The monitor's log and the current round's text files are records, pushed per `plans/.agents/outside-files.md`, "When
+records are pushed": `cargo xtask records push landing round/<n> -m '<what comes next>'`, or `push landing` outside a
+round. Push right before anything that changes GitHub (a landing claim verb, `answer`, `block`, a push of a rebased
+stack, marking a PR ready, a merge, a TODO or docs PR), and also at moments that change nothing on GitHub but that a
+replacement monitor would otherwise repeat: before each notification you send (except the one reporting that a records
+push failed), right after recording a block as left for the maintainer, when stopping, and at the end of every round.
+`scripts/plans-landing/landing.py` does the pushes its own commands need (`claim`, each PR's turn inside `land`,
+`record`, `land-docs-prs`, `round-end`); push by hand before the GitHub steps you take yourself. A failed push (the tool
+exiting non-zero, inside a `landing.py` command or run by hand) means: do not take that step, notify, leave any landing
+claim where it is (this is not a block and not a `stop-landing`), write `stopped` with the reason to the Status section,
+and stop. Writing the log needs the records remote too, since `path landing` fetches first; when it cannot be reached,
+write the Status line by hand in `log.md` in the directory `path landing` printed earlier (the landing slot's clone:
+`log.md` in `farhelm/landing/` under `~/.fh-records/clones/landing/`).
 
 ### A landing round
 
 Apply the clean-main boundary, then run `queue status` and record the main commit id it prints
-(`scripts/plans-landing/landing.py round-start` runs it and records that commit and the round's `[complete]` plans in a
-new round directory). Look at its flags:
+(`scripts/plans-landing/landing.py round-start --round <n>` runs it and records that commit and the round's `[complete]`
+plans in the round's record, `round/<n>`). `<n>` is one more than the newest round number in the monitor log's
+`r<n> started` entries, which `round-start` writes itself (and `round-end` writes `r<n> ended`); `round-start` refuses a
+number whose record already holds a round. Bulky outputs (the diffs) go in a scratch directory of the round's own, never
+in the record. Look at its flags:
 
-- `possibly abandoned` on an executor's claim: the plan stays stuck until the maintainer releases it, and a dead
-  executor cannot notify for itself, so notify.
 - `complete, no open PRs, merged ...`: a landing merged the whole stack and stopped before `landed`, and its claim was
   released. Finish it in this round: claim it with `start-landing`, confirm from GitHub that the merged PRs are the
   plan's whole stack (the report's PR list), and run `landed` with those numbers and notes that say the landing was
@@ -66,14 +88,16 @@ new round directory). Look at its flags:
 - `landing, no open PRs` on a landing claim that is not yours: another monitor or an interrupted one, which only the
   maintainer can sort out; notify and leave it.
 
-These flags stay up across rounds, so notify for each once (per claim id, or per plan for the second), and keep what has
-been notified in the monitor log.
+Any other flag is for information and needs nothing. These flags stay up across rounds, so notify for each once (per
+claim id, or per plan for the second), and keep what has been notified in the monitor log.
 
 Answer every `[blocked]` plan the monitor log does not record as left for the maintainer, per
 `plans/.agents/landing.md`, "Answering blocks". Answering takes nothing from the round: a blocked plan is not landed,
 and an answered one goes back to an executor.
 
-If no plan is `[complete]`, the round is over.
+If no plan is `[complete]`, the round is over: end it with `landing.py round-end` like any other round. Every round, an
+empty one included, ends with `round-end`, whose `r<n> ended` entry is what marks it finished for a resume and for
+anyone reading the log.
 
 NOTE: A round's plans are fixed when it starts: the plans this `queue status` shows as `[complete]`, and no others. Land
 every one of them (merged, or blocked, or given back) before claiming anything else. A plan that completes while the
@@ -117,14 +141,15 @@ across the whole set, not one stack at a time. Have a fresh-context sub-agent do
 reconcile any disagreement. Fix what is obvious as part of the landing; a conflict that needs a design decision blocks
 the plan it concerns (the paragraph after the numbered list in this section), and the round goes on with the others.
 `landing.py bases`, `stack` and `diffs` (in `scripts/plans-landing/`) prepare the review's inputs: each plan's base and
-what main gained since, the round's plans stacked in queue order with their conflicts listed, and the diffs.
+what main gained since, the round's plans stacked in queue order with their conflicts listed, and the diffs (written to
+the round's scratch directory, `--scratch`).
 
 Then, for each `[complete]` plan in queue order:
 
 1. Claim it. Generate a claim id (`python3 -c 'import secrets; print(secrets.token_hex(3))'`), write slug, id and
-   `starting` to the monitor log, then `queue start-landing <slug> --claim <id>`. Exit 10 means it is no longer complete
-   (the maintainer abandoned or released it): skip it. Exit 3 follows the rule under `plans/.agents/queue.md`, "States,
-   and the script that moves them". `landing.py claim` does this step.
+   `starting` to the monitor log, push the records, then `queue start-landing <slug> --claim <id>`. Exit 10 means it is
+   no longer complete (the maintainer abandoned or released it): skip it. Exit 3 follows the rule under
+   `plans/.agents/queue.md`, "States, and the script that moves them". `landing.py claim` does this step.
 2. Fetch, and rebase its stack onto `main@origin` as a careful rebase. Conflicts in the shared bookkeeping files listed
    under `plans/.agents/executing.md`, "Picking: "pick a plan to execute", "execute the next plan"" are mechanical: keep
    both sides. When this plan and something already on main each added a database schema version, renumber this plan's
@@ -150,7 +175,7 @@ Then, for each `[complete]` plan in queue order:
    and skipped (as redacted commands and recorder run ids, per `.agents/test-evidence.md`), and anything in the
    executor's report that the landing made untrue. `landing.py assemble-notes` fills the round's shared checks into a
    plan's notes and rewraps them.
-7. Write `recording` to the monitor log, then
+7. Write `recording` to the monitor log, push the records, then
    `queue landed <slug> --claim <id> --merged <every PR number that landed> --notes <file>`, which refuses while any of
    the plan's PRs is still open and checks that each named PR merged. Clear the claim from the monitor log, and return
    to a clean `main` (`jj new main@origin`). `landing.py record` does the log and `queue landed` parts.
@@ -159,14 +184,15 @@ When a landing needs a decision only the maintainer can make (a conflict that ne
 without an obvious fix, a PR closed without merging), push nothing that is not consistent, then write the question per
 `plans/.agents/maintainer-writing.md`, "Writing for the maintainer", naming which of the plan's PRs already merged and
 what main now holds of the plan. Have a sub-agent cold-read it as in `plans/.agents/executing.md`, "Executing one plan",
-step 10, write `blocking` to the monitor log, run `queue block <slug> --claim <id> --question <file>`, return to a clean
-`main`, answer the block per `plans/.agents/landing.md`, "Answering blocks" (which notifies only for a block left for
-the maintainer), and go on with the next plan.
+step 10, write `blocking` to the monitor log, push the records, run `queue block <slug> --claim <id> --question <file>`,
+return to a clean `main`, answer the block per `plans/.agents/landing.md`, "Answering blocks" (which notifies only for a
+block left for the maintainer), and go on with the next plan.
 
 A failure that is not a decision (an expired GitHub login, a disk that is full) is the monitor's own problem: write
-`stopping`, run `queue stop-landing <slug> --claim <id>` if it can still reach GitHub, notify with the reason, write
-`stopped` with the reason to the Status section, and stop. A plan left in `[landing]` because even that failed shows up
-in `queue status` for whoever looks next, and `release plan X` returns it to `[complete]`.
+`stopping`, push the records, run `queue stop-landing <slug> --claim <id>` if it can still reach GitHub, write `stopped`
+with the reason to the Status section, push the records again, notify with the reason, and stop. A plan left in
+`[landing]` because even that failed shows up in `queue status` for whoever looks next, and `release plan X` returns it
+to `[complete]`.
 
 Validation during a landing never ends on a clock. Do not pass the recorder's `--timeout`, wrap a command in `timeout`,
 or give any other hard-coded deadline the power to kill a test run or a build. A deadline picked before the run starts
@@ -192,7 +218,9 @@ required authorization (`AGENTS.md`, "Unattended runs"), which never becomes the
 budget the maintainer granted in the current session (a number of Tensorlake sandboxes, say) is an answer already given
 under that section, not a required authorization. Leave a huge block for the maintainer: notify (`plans/AGENTS.md`,
 "Notifications") and record the slug in the monitor log as left for the maintainer. Only such a block is put to the
-maintainer, in conversation too, and the monitor then says which part of this test it meets.
+maintainer, in conversation too, and the monitor then says which part of this test it meets. Push the records right
+after recording the block as left for the maintainer, before notifying, so that a replacement monitor neither notifies
+nor triages it twice.
 
 The maintainer being present in the monitor's conversation changes none of this. A non-huge block is answered as below,
 and then the monitor tells the maintainer what it decided; a later change of mind is a follow-up. A request like "what's
@@ -206,7 +234,8 @@ Answer every other block:
 2. Write the decision per `plans/.agents/maintainer-writing.md`, "Writing for the maintainer", and `plans/AGENTS.md`,
    "Public-repo hygiene": say that the landing monitor answered it on the maintainer's behalf under this section, state
    each decision in product terms, and say that a later change of mind is a follow-up, not a reason to stop the plan.
-3. Run `queue answer <slug> --decision <file>`, never with `--hold`, which is the maintainer's to ask for. A plan that
+3. Record the answer you are about to give in the monitor log, push the records, and run
+   `queue answer <slug> --decision <file>`, never with `--hold`, which is the maintainer's to ask for. A plan that
    blocked while on hold goes back on hold by itself; it still needs the answer. Exit 10 means someone else answered or
    changed the plan first: leave it.
 4. For every judgment call the answer makes (not for a plain instruction to fix failing tests), add a TODO entry: one
@@ -223,10 +252,12 @@ Answer every other block:
 
 "Monitor for complete plans" waits the way a monitoring executor does (`plans/.agents/watching.md`, "Drain and keep
 monitoring"), with the same watcher run the same way, except for its role, what its exits mean, and a `--max-wait 6600`
-that makes it wake about every 110 minutes even when nothing changed. The executors have no use for that wake-up, but
-the monitor does: it is how a claim that went quiet gets noticed, and how the review flow can tell the monitor is still
-alive. The monitor also wakes for a plan that blocks, which it answers (`plans/.agents/landing.md`, "Answering blocks");
-during a round, the blocks-only watcher that `plans/.agents/landing.md`, "A landing round", starts does that instead.
+that makes it wake about every 110 minutes even when nothing changed. That wake exists only to catch a complete or
+blocked plan the watcher should have woken for and did not, and `idle-watch.ts` handles it without waking the agent
+unless a round is due. Nothing in it judges whether other agents are alive: keeping the executors running is the
+maintainer's job, done out of band. The monitor also wakes for a plan that blocks, which it answers
+(`plans/.agents/landing.md`, "Answering blocks"); during a round, the blocks-only watcher that
+`plans/.agents/landing.md`, "A landing round", starts does that instead.
 
 Before starting the watcher at the end of a round, stop the round's blocks-only watcher (its exit is then ignored, like
 that of any watcher the agent stopped itself), and measure the checkout with `du -sh` on its directory. If it reports
@@ -234,13 +265,14 @@ more than 50 GB, run `cargo clean` in the checkout and delete the one-off output
 `plans/.agents/close-reset.md`, "Pruning build leftovers", once nothing the round started is still building or testing,
 even though the next round's first build is then slower. The monitor builds and tests every plan it lands in this one
 checkout and, unlike an executor, prunes nothing between plans; its checkout reached 350 GB that way on 2026-10-18.
-`landing.py round-end` returns to a clean `main`, abandons the local copies of the round's merged PR heads, and prints
-the checkout's size and a `queue status` whose head is the watcher's baseline.
+`landing.py round-end` returns to a clean `main`, abandons the local copies of the round's merged PR heads, writes the
+round's `r<n> ended` entry, pushes the records, and prints the checkout's size and a `queue status` whose head is the
+watcher's baseline.
 
 `scripts/plans-landing/idle-watch.ts` runs the watcher below and handles its `idle` exit itself as the list says
-(`queue status`, the Status line, a restart with the same commit), waking the session only for a change, an actionable
-flag, a block it was not told to ignore, or an error that retrying cannot fix (HTTP 401, 403 or 404). Run it the way the
-watcher is run.
+(`queue status`, then a restart with the same commit), waking the session only for a change, an actionable flag, a block
+it was not told to ignore, or an error that retrying cannot fix (HTTP 401, 403 or 404). Run it the way the watcher is
+run.
 
 - Start
   `scripts/plans-watch.sh --repo <OWNER/NAME> --baseline-from <commit> --wake-check <checkout>/scripts/plans-queue.py --wake-for lander --max-wait 6600`,
@@ -254,18 +286,18 @@ watcher is run.
 - `changed` (status 0): run a round.
 - `idle` (status 10): run `queue status`. If it shows a `[complete]` plan with open PRs, or a `[blocked]` plan not left
   for the maintainer, run a round: the watcher should have woken for it, and this catches any way it did not. Otherwise
-  act on its flags only (as at the start of a round), then start the watcher again with the same commit. This idle wake,
-  about every 110 minutes, is also how a claim that went quiet gets noticed.
+  act on its flags only (as at the start of a round), then start the watcher again with the same commit.
 - `error:` (status 3): if the line mentions HTTP 401 or 403, the GitHub login needs the maintainer; notify, write
-  `stopped` with the reason, and stop. Otherwise keep restarting the watcher with `--interval 1800`, still with
-  `--max-wait 6600`, until one exits `changed` or `idle`, which also restores the default interval; an outage still
-  being retried is not notified.
+  `stopped` with the reason, and stop. Otherwise keep restarting the watcher with `--interval 1800 --max-wait 3600`, as
+  executors do (`plans/.agents/watching.md`), until one exits `changed` or `idle`, which also restores the default
+  interval and cap; an outage still being retried is not notified.
 - `usage:` (status 2) or anything else: notify, write `stopped` with the reason, and stop.
 
 Rewrite the Status section on every wake, at the end of every round, when stopping, and whenever you check on a long
-validation run, so a landing that takes hours does not look like a dead monitor; when the maintainer says stop, write
-`stopped <time>: stopped by the maintainer`. "Land the complete plans" writes `stopped <time>: one round finished` when
-its round ends, since no watcher follows it. The monitor notifies only for the conditions this section names (a block it
-left for the maintainer, a landing it could not finish, the three `queue status` flags, and monitoring that stopped for
-any reason other than the maintainer), each of which can stop progress until the maintainer acts. A landing that went
-through is not worth a notification; it shows up in `REPORTS.md` for the next review.
+validation run, so whoever reads it sees what the monitor last did; when the maintainer says stop, write
+`stopped <time>: stopped by the maintainer` and push the records. "Land the complete plans" writes
+`stopped <time>: one round finished` when its round ends, since no watcher follows it. The monitor notifies only for the
+conditions this section names (a block it left for the maintainer, a landing it could not finish, the `queue status`
+flags listed under "A landing round", and monitoring that stopped for any reason other than the maintainer), each of
+which can stop progress until the maintainer acts. A landing that went through is not worth a notification; it shows up
+in `REPORTS.md` for the next review.

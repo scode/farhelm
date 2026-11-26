@@ -47,8 +47,8 @@ maintainer's agreement. A merged plan references every entry it covers, and each
 Apply the clean-main boundary first, then work from the latest `main@origin`. An entry that already references a plan is
 skipped and reported, not planned again; a request to revise an existing plan updates that plan's file in place, which
 is allowed only while the plan is `pending`, `held` or `blocked`. Never reuse a slug that has ever existed under
-`plans/`: `queue check-slug <slug>` refuses one, because an old plan's working log may still sit beside the checkouts
-and a new plan with that name would resume from it.
+`plans/`: `queue check-slug <slug>` refuses one, because an old plan's working log still exists as its record
+(`plans/.agents/outside-files.md`, "Files outside the repository") and a new plan with that name would resume from it.
 
 For each plan, run `scode-build-goal` with the entry's text (and whatever the maintainer said about it) as the goal,
 with these overrides on top of the skill's own rules:
@@ -71,8 +71,12 @@ with these overrides on top of the skill's own rules:
   in" and to everything in it by repo-relative path. Paths outside the repository are stated as rules
   (`plans/.agents/outside-files.md`, "Files outside the repository"), and the executing session resolves them before it
   starts.
-- The log is `farhelm-plan-<slug>-log.md` in the parent directory of the executing checkout, stated in the goal file as
-  that rule. Its existence keeps the goal self-resumeable the way the skill intends.
+- The log is the plan's record, `plan/<slug>`, whose `log.md` the executing session finds with
+  `cargo xtask records path plan/<slug>` after it claims the plan (`plans/.agents/outside-files.md`, "Files outside the
+  repository"), stated in the goal file as that rule. Its existence keeps the goal self-resumeable the way the skill
+  intends. The resource watchdog's status file is not part of the record: the goal file puts it at
+  `farhelm-plan-<slug>-watchdog.json` in the parent directory of the executing checkout, never in the record's
+  directory, whatever the skill's default of "next to the working log" would give.
 - The delegation paragraph names the sub-agents `plans/AGENTS.md`, "Sub-agents this file requires", lists as exempt from
   the no-delegation demand.
 - Stack and PRs: the stack's base is `main@origin`, or the plan's own open PRs when it resumes, never another plan's

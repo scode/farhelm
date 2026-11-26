@@ -3,34 +3,40 @@
  * Wait for the landing monitor's next real event, handling idle timeouts without waking the model.
  *
  * The landing monitor waits between rounds on `scripts/plans-watch.sh --wake-for lander --max-wait 6600`
- * (plans/.agents/landing.md, "Waiting between rounds"). Its `idle` exit, about every 110 minutes, used to wake the
- * model only to run `queue status`, refresh the monitor log's Status line, and restart the watcher. This wrapper does
- * that idle check itself and exits (waking the model) only when something needs it:
+ * (plans/.agents/landing.md, "Waiting between rounds"). The watcher should wake it for every plan that becomes complete
+ * or blocked; the idle exit, about every 110 minutes, exists only to catch one it missed. Waking the model for that
+ * would cost a full re-read of its conversation each time to find nothing, so this wrapper does the idle check itself:
+ * it runs `queue status` and exits (waking the model) only when a round is due or something else needs it:
  *
  * - the watcher exits `changed` (a plan became complete or blocked), or with a usage error, an unexpected status, or
  *   an `error:` line naming HTTP 401 or 403 (the GitHub login needs the maintainer) or 404 (a baseline commit GitHub
  *   does not know, which retrying cannot fix);
  * - an idle check's `queue status` shows a `[complete]` plan, one of the flags the landing instructions say to act on
- *   (possibly abandoned, complete with no open PRs, landing with no open PRs), or a `[blocked]` line for a plan named
- *   with `--wake-on-blocked`, or, with `--wake-on-any-blocked`, any `[blocked]` line not named with
- *   `--ignore-blocked` (the monitor answers blocks itself unless they are huge, landing.md, "Answering blocks", so a
- *   fresh block is work for it; `--ignore-blocked` names the blocks it left for the maintainer);
+ *   (complete with no open PRs, landing with no open PRs), or a `[blocked]` line for a plan named with
+ *   `--wake-on-blocked`, or, with `--wake-on-any-blocked`, any `[blocked]` line not named with `--ignore-blocked` (the
+ *   monitor answers blocks itself unless they are huge, landing.md, "Answering blocks", so a fresh block is work for
+ *   it; `--ignore-blocked` names the blocks it left for the maintainer);
  * - `queue status` itself fails.
  *
- * `--blocks-only` is the mode for while a landing round runs (landing.md, "A landing round"). A round's plans are fixed
- * when it starts, so the only thing worth waking the monitor for mid-round is a block it can answer beside the round.
- * In this mode the watcher runs with `--wake-for lander-blocks`, which wakes only for a plan newly blocked since the
- * baseline, and an idle check wakes only for a `[blocked]` line (as with `--wake-on-any-blocked`, still minus
- * `--ignore-blocked`). It never wakes for a `[complete]` plan, which includes the round's own, or for the status
- * flags: both belong to the round boundary, which looks at them anyway.
+ * Otherwise it restarts the watcher with the same baseline. `--blocks-only` is the mode for while a landing round runs
+ * (landing.md, "A landing round"). A round's plans are fixed when it starts, so the only thing worth waking the monitor
+ * for mid-round is a block it can answer beside the round. In this mode the watcher runs with `--wake-for
+ * lander-blocks`, which wakes only for a plan newly blocked since the baseline, and an idle check wakes only for a
+ * `[blocked]` line (as with `--wake-on-any-blocked`, still minus `--ignore-blocked`). It never wakes for a `[complete]`
+ * plan, which includes the round's own, or for the status flags: both belong to the round boundary, which looks at
+ * them anyway.
  *
- * Other `error:` exits are retried with `--interval 1800`, as the instructions say, until a poll succeeds. Each idle
- * check appends a History entry naming its mode to the monitor log, so the review flow still sees a live monitor;
- * between rounds it also rewrites the log's `running, last checked` line. It prints exactly one line before exiting:
- * `wake <reason>`.
+ * Other `error:` exits (a GitHub outage, say) are retried with `--interval 1800 --max-wait 3600`, as the executors'
+ * watcher is (plans/.agents/watching.md), until a watcher exits `changed` or `idle`, which restores the default
+ * interval and `--max-wait`. The shorter cap makes the slow interval end on its own once GitHub answers again. An
+ * outage being retried does not need the maintainer, so each retry is reported on this script's own stderr only.
  *
- * The checkout defaults to the one holding this script, the repository to its `origin` remote, and the monitor log to
- * `farhelm-plans-monitor-log.md` beside the checkout (plans/.agents/outside-files.md).
+ * NOTE: This script never writes the monitor log. The log lives in the agent records (`cargo xtask records path
+ * landing`), where the monitor and `landing.py` edit it and push it before GitHub changes; a background writer racing
+ * those edits could drop one, and nothing reads the idle checks as a sign of life any more, since nothing unattended
+ * judges whether the monitor is alive. It prints exactly one line on stdout before exiting: `wake <reason>`.
+ *
+ * The checkout defaults to the one holding this script and the repository to its `origin` remote.
  *
  * Usage: idle-watch.ts --baseline-from <commit> [--checkout <dir>] [--repo OWNER/NAME] [--wake-on-blocked <slug>]...
  *        [--wake-on-any-blocked] [--blocks-only] [--ignore-blocked <slug>]... [--max-wait <seconds>]
@@ -39,9 +45,9 @@ import $, { KillController } from "jsr:@david/dax@0.50.1";
 import { parseArgs } from "jsr:@std/cli@1.0.32/parse-args";
 import { dirname, fromFileUrl, join, resolve } from "jsr:@std/path@1.1.6";
 
-// Flags from plans/.agents/landing.md, "A landing round", that the monitor acts on. Other flags (such as a pending
-// plan's unlanded work from an earlier round) are informational and do not wake it.
-const ACTIONABLE_FLAGS = ["possibly abandoned", "no open PRs"];
+// Flags from plans/.agents/landing.md, "A landing round", that the monitor acts on. Other flags (a pending plan's
+// unlanded work from an earlier round, a claim too old for its age to be known) are informational and do not wake it.
+const ACTIONABLE_FLAGS = ["no open PRs"];
 
 /** Which `queue status` lines wake the monitor; the command-line flags of the same names. */
 export interface WakeOn {
@@ -91,24 +97,30 @@ export function githubRepo(url: string): string | undefined {
     ?.[1];
 }
 
+/** The idle cap the landing instructions give the watcher between rounds: about 110 minutes. */
+export const DEFAULT_MAX_WAIT = "6600";
+
 /**
- * Append one History entry stamped with the current UTC minute, and with `refreshStatus` also rewrite the Status line.
- *
- * Between rounds the model is asleep and nothing else writes the log, so rewriting the whole file is safe. During a
- * round the monitor and `landing.py` edit the log all the time (claim lines among them, which a resume depends on),
- * and a whole-file rewrite racing one of those edits would drop it. So the mid-round mode only appends: at worst a
- * concurrent rewrite loses this entry, never the monitor's. The Status line is the monitor's to keep during a round.
+ * The watcher's polling arguments. Normal runs pass only the idle cap (`maxWait`, default `DEFAULT_MAX_WAIT`). Slow
+ * mode, after a transient error, polls every 30 minutes with the executors' shorter cap of 3600 seconds
+ * (plans/.agents/watching.md), so that it ends by itself with an `idle` exit once GitHub answers again.
  */
-async function logIdleCheck(log: string, entry: string, refreshStatus: boolean) {
-  const now = new Date().toISOString().slice(0, 16) + "Z";
-  const text = await Deno.readTextFile(log);
-  if (refreshStatus) {
-    const updated = text.replace(/^running, last checked .*$/m, `running, last checked ${now}`);
-    await Deno.writeTextFile(log, updated.replace(/\n*$/, "\n") + `- ${now}: ${entry}\n`);
-    return;
-  }
-  const sep = text === "" || text.endsWith("\n") ? "" : "\n";
-  await Deno.writeTextFile(log, `${sep}- ${now}: ${entry}\n`, { append: true });
+export function watcherTiming(slow: boolean, maxWait: string = DEFAULT_MAX_WAIT): string[] {
+  return slow ? ["--interval", "1800", "--max-wait", "3600"] : ["--max-wait", maxWait];
+}
+
+/**
+ * What one watcher exit means for the loop, and whether the next watcher runs in slow mode.
+ *
+ * - `retry`: an `error:` exit (status 3) that retrying can fix; the next watcher runs slow. HTTP 401 and 403 (the
+ *   GitHub login) and 404 (a baseline GitHub does not know) are not retried.
+ * - `check`: `idle` (status 10); run the idle check, and the next watcher (if any) is back to normal.
+ * - `wake`: anything else (`changed`, a usage error, an unexpected status, an unretryable error).
+ */
+export function afterWatcherExit(code: number, line: string): { action: "retry" | "check" | "wake"; slow: boolean } {
+  if (code === 3 && !/HTTP 40[134]/.test(line)) return { action: "retry", slow: true };
+  if (code === 10) return { action: "check", slow: false };
+  return { action: "wake", slow: false };
 }
 
 function wake(reason: string): never {
@@ -125,7 +137,6 @@ if (import.meta.main) {
   const baseline = args["baseline-from"];
   if (!baseline) throw new Error("--baseline-from is required");
   const checkout = resolve(args.checkout ?? join(dirname(fromFileUrl(import.meta.url)), "..", ".."));
-  const log = join(dirname(checkout), "farhelm-plans-monitor-log.md");
   const repo = args.repo ?? githubRepo(await $`git -C ${checkout} remote get-url origin`.noThrow().text());
   if (!repo) throw new Error("cannot tell the repository from the origin remote; pass --repo OWNER/NAME");
   const on: WakeOn = {
@@ -135,66 +146,58 @@ if (import.meta.main) {
     blocksOnly: args["blocks-only"] as boolean,
   };
   const role = on.blocksOnly ? "lander-blocks" : "lander";
-  const mode = on.blocksOnly ? "mid-round, blocks only" : "between rounds";
-  const record = (entry: string) => logIdleCheck(log, `idle watcher (idle-watch, ${mode}): ${entry}`, !on.blocksOnly);
-  // 6600 s is the landing instructions' idle cap; a smaller value is only for exercising the idle path.
-  const maxWait = args["max-wait"] ?? "6600";
+  // A value other than the default is only for exercising the idle path.
+  const maxWait = args["max-wait"] ?? DEFAULT_MAX_WAIT;
   const kill = new KillController();
   for (const sig of ["SIGINT", "SIGTERM"] as const) Deno.addSignalListener(sig, () => kill.kill());
   let slow = false;
   while (true) {
-    const interval = slow ? ["--interval", "1800"] : [];
     const watch = await $`${checkout}/scripts/plans-watch.sh --repo ${repo} --baseline-from ${baseline} \
-      --wake-check ${checkout}/scripts/plans-queue.py --wake-for ${role} --max-wait ${maxWait} ${interval}`
+      --wake-check ${checkout}/scripts/plans-queue.py --wake-for ${role} ${watcherTiming(slow, maxWait)}`
       .cwd(checkout).noThrow().stdout("piped").signal(kill.signal);
     const line = watch.stdout.trim();
-    if (watch.code === 3 && !/HTTP 40[134]/.test(line)) {
-      slow = true;
-      await record(`watcher error, retrying at the slow interval: ${line}`);
+    const exit = afterWatcherExit(watch.code, line);
+    slow = exit.slow;
+    if (exit.action === "retry") {
+      console.error(`idle-watch: watcher error, retrying at the slow interval: ${line}`);
       continue;
     }
-    if (watch.code !== 10) wake(`watcher exit ${watch.code}: ${line}`);
-    slow = false;
+    if (exit.action === "wake") wake(`watcher exit ${watch.code}: ${line}`);
     const status = await $`python3 scripts/plans-queue.py --repo ${repo} status`.cwd(checkout).noThrow()
       .stdout("piped").stderr("piped");
     if (status.code !== 0) {
       wake(`queue status failed (exit ${status.code}): ${status.stderr.trim().split("\n").at(-1)}`);
     }
-    const head = status.stdout.match(/^head: (\w+)/m)?.[1] ?? "unknown";
     const reasons = actionable(status.stdout, on);
-    if (reasons.length > 0) {
-      await record(`status head ${head.slice(0, 8)} needs the monitor: ${reasons.join("; ")}`);
-      wake(reasons.join("; "));
-    }
-    const inFlight = status.stdout.split("\n").filter((l) => l.startsWith("[in-flight")).length;
-    const nothing = on.blocksOnly ? "no block to answer" : "no flags, no [complete]";
-    await record(
-      `status head ${head.slice(0, 8)}: ${nothing}, ${inFlight} in flight; ` +
-        `restarting the watcher with baseline ${baseline.slice(0, 8)} without waking the model.`,
-    );
+    if (reasons.length > 0) wake(reasons.join("; "));
   }
 }
 
 // The status every `actionable` test reads: one line per state, with flags under the plans they belong to.
 const SAMPLE_STATUS = [
   "head: 0123456789abcdef",
-  "[complete] alpha | PRs #1 | log quiet 0.1 h",
-  "[in-flight abc123] beta | claimed 2026-10-23T00:00:00Z | log quiet 9.0 h",
-  "    ! possibly abandoned",
+  "[complete] alpha | PRs #1",
+  "[in-flight abc123] beta | claimed 2026-10-23T00:00:00Z",
+  "[in-flight def456] theta",
+  "    ! claim commit not in recent history: its age is unknown",
   "[pending] gamma",
   "    ! unlanded work from an earlier round",
   "[blocked] delta | PRs #2",
   "[blocked] epsilon",
-  "[landing ff00ff] zeta | log quiet 1.0 h",
+  "[landing ff00ff] zeta",
   "    ! landing, no open PRs",
   "[landed 2026-10-20] eta | PRs #3 | report awaiting review",
 ].join("\n");
 
+/**
+ * Between rounds the idle check wakes the monitor only for a round that is due or a flag it acts on. An old claim is
+ * not one: nothing unattended judges whether a holder is alive, so neither an old claim nor the informational
+ * unknown-age flag may wake it.
+ */
 Deno.test("actionable finds complete plans, acted-on flags and pre-answered blocks only", async () => {
   const { assertEquals } = await import("jsr:@std/assert@1.0.19");
   assertEquals(actionable(SAMPLE_STATUS, { wakeOnBlocked: ["delta"] }), [
     "complete alpha",
-    "flag beta: possibly abandoned",
     "blocked delta",
     "flag zeta: landing, no open PRs",
   ]);
@@ -217,6 +220,37 @@ Deno.test("actionable in blocks-only mode wakes for blocks alone", async () => {
   assertEquals(actionable(SAMPLE_STATUS, { blocksOnly: true, ignoreBlocked: ["epsilon"] }), ["blocked delta"]);
   assertEquals(actionable(SAMPLE_STATUS, { blocksOnly: true }), ["blocked delta", "blocked epsilon"]);
   assertEquals(actionable(SAMPLE_STATUS, { blocksOnly: true, ignoreBlocked: ["delta", "epsilon"] }), []);
+});
+
+/**
+ * After a GitHub outage the watcher must poll slowly but still end the slow mode by itself, and an `idle` exit must
+ * put it back on the normal cap; otherwise the monitor would either hammer GitHub during an outage or keep the
+ * 30-minute interval forever. Specified: slow mode passes `--interval 1800 --max-wait 3600` whatever cap was asked
+ * for, normal mode only the cap (6600 by default); a retryable error turns slow mode on, an `idle` exit turns it off,
+ * and login or unknown-baseline errors and every other exit wake the monitor instead of retrying.
+ */
+Deno.test("the watcher's timing goes slow after a transient error and back to normal after idle", async () => {
+  const { assertEquals } = await import("jsr:@std/assert@1.0.19");
+  assertEquals(watcherTiming(false), ["--max-wait", "6600"]);
+  assertEquals(watcherTiming(false, "60"), ["--max-wait", "60"]);
+  assertEquals(watcherTiming(true, "60"), ["--interval", "1800", "--max-wait", "3600"]);
+  let slow = false;
+  const timings: string[][] = [];
+  for (const [code, line] of [[3, "error: HTTP 502"], [3, "error: timeout"], [10, "idle"]] as const) {
+    timings.push(watcherTiming(slow));
+    slow = afterWatcherExit(code, line).slow;
+  }
+  timings.push(watcherTiming(slow));
+  assertEquals(timings, [
+    ["--max-wait", "6600"],
+    ["--interval", "1800", "--max-wait", "3600"],
+    ["--interval", "1800", "--max-wait", "3600"],
+    ["--max-wait", "6600"],
+  ]);
+  assertEquals(afterWatcherExit(3, "error: HTTP 401 from GitHub").action, "wake");
+  assertEquals(afterWatcherExit(3, "error: HTTP 404 baseline").action, "wake");
+  assertEquals(afterWatcherExit(0, "changed abc").action, "wake");
+  assertEquals(afterWatcherExit(2, "usage: bad").action, "wake");
 });
 
 Deno.test("githubRepo reads https and ssh remotes and nothing else", async () => {

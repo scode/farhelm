@@ -18,10 +18,15 @@ works through every landed plan in `REPORTS.md`, oldest first, then every `[bloc
 plans" and "check for blocked plans" are the same flow limited to blocked plans, still starting with the monitor's
 status.
 
-The monitor's status is one line, taken from the `## Status` section of `farhelm-plans-monitor-log.md` beside the
-checkouts: when it last checked, or when and why it stopped. An idle monitor checks in at least every 110 minutes, so a
-`running` line whose last check is more than about two and a half hours old means it has probably died; say so. A
-missing log means no monitor has run on this machine, and nothing is landing. Add any flags `queue status` raises.
+The monitor's status is one line, taken from the `## Status` section of the monitor's log, the `landing` record
+(`plans/.agents/outside-files.md`, "Files outside the repository"): when it last checked, or when and why it stopped.
+Never read it with the records tool, which is the unattended flows' own. On the host the monitor runs on, read `log.md`
+in `farhelm/landing/` in the landing slot's clone as a plain file (no git there: `.agents/agent-records.md`, "Reading
+records"); that is the live copy. Anywhere else, read the same file in a clone of `agent-records` of your own after a
+fetch, which is the copy as of the monitor's last push, and there you may ask git when it was pushed. Report the line
+(and, for a pushed copy, when it was pushed) without judging from its age whether the monitor is alive: keeping it
+running is the maintainer's job, done out of band. A missing log means no monitor has run, and nothing is landing. Add
+any flags `queue status` raises.
 
 By default, review the landed plans on one page using the `interactive-artifact` skill; load and follow it by name. Do
 not publish the page as a snippet or anywhere else unless the maintainer asks.

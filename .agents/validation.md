@@ -1161,19 +1161,24 @@ systemd or SSH substrate ran.
   keeps concurrent plan executors off each other's plans: its line grammar, every state transition and refusal, the
   invariants between a state and its files, the rules a planning PR must keep, the wake check for each role (the landing
   monitor's mid-round role waking for new blocks only), the pass count that bounds how long picking can skip a plan for
-  conflicts, and the compare-and-swap loop against an in-memory GitHub that injects racing writers and lost responses.
-  One case runs the real `dprint` when it is on PATH, which downloads dprint's plugins if its cache is cold. Run it when
-  the script changes; seconds, no other network.
+  conflicts, `status`'s flags and that it reads no logs and judges no claim by its age, and the compare-and-swap loop
+  against an in-memory GitHub that injects racing writers and lost responses. One case runs the real `dprint` when it is
+  on PATH, which downloads dprint's plugins if its cache is cold. Run it when the script changes; seconds, no other
+  network.
 - `python3 -B scripts/plans-landing/test-landing.py`, `deno check scripts/plans-landing/idle-watch.ts`,
   `deno test -A scripts/plans-landing/idle-watch.ts` and `shellcheck scripts/plans-landing/notify.sh` — the landing
   monitor's round tooling (`scripts/plans-landing/README.md`): importing the landing tool with postponed dataclass
   annotations (check the Python command on 3.14 when changing its loader), the log edits a resume relies on (Status and
-  entry sharing one stamp, a stopped monitor's Status refused, the claim line replaced once or refused), the round
-  files, the claim check before every push and merge (exact slug and claim id), the landing notes' placeholder and
-  line-length rules, the review page's escaping, and the idle watcher's reading of `queue status` (between rounds, and
-  in its mid-round `--blocks-only` mode, blocks alone) and of the origin remote. The jj and gh sequences themselves are
-  exercised only by real landings. Run them when those files change; seconds, no network beyond Deno's first fetch of
-  its `jsr:` imports.
+  entry sharing one stamp, a stopped monitor's Status refused, the claim line replaced once or refused), the monitor log
+  and round files living in the agent records' `landing` and `round/<n>` records, the records pushes before each
+  GitHub-changing step and a failed push stopping the command before it (against an injected stand-in for
+  `cargo xtask records` and the queue script, never the real tool), the round files and their `r<n> started` and
+  `r<n> ended` log entries in the shape the plan-status skill parses, the claim check before every push and merge (exact
+  slug and claim id), the landing notes' placeholder and line-length rules, the review page's escaping, the idle
+  watcher's slow-mode timing after an error (`--interval 1800 --max-wait 3600`, then back to the default cap), and its
+  reading of `queue status` (between rounds, and in its mid-round `--blocks-only` mode, blocks alone) and of the origin
+  remote. The jj and gh sequences themselves are exercised only by real landings. Run them when those files change;
+  seconds, no network beyond Deno's first fetch of its `jsr:` imports.
 - `python3 scripts/record-test-run.py --kind development --selection 'xtask records tool' --concurrency 'cargo test default threads' -- cargo test --manifest-path xtask/Cargo.toml --target-dir target/xtask`
   — the agent records tool behind `cargo xtask records` (`xtask/`, its own workspace; `.agents/agent-records.md`): unit
   tests of the config, record names, push permissions, command line, git environment, push-retry classification and

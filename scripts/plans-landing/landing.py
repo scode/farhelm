@@ -12,19 +12,33 @@ repository and the round number written into each file and rewritten by text sub
 reboot wiped them once already, and the substitution silently stopped updating the round base of the post-landing
 comparison, which went on naming an earlier round's. Everything that varies is an argument now:
 
-- `--checkout`: the monitor's checkout (default: the checkout this script lives in). Every jj and queue command runs
-  there, one at a time; jj is never run concurrently.
+- `--checkout`: the monitor's checkout (default: the checkout this script lives in). Every jj, queue and records
+  command runs there, one at a time; jj is never run concurrently.
 - `--repo OWNER/NAME`: default from the checkout's `origin` remote.
-- `--round-dir`: the round's own scratch directory, which `round-start` creates. It holds the round's inputs and
-  outputs as plain text files so that a compacted or resumed session can read them back: `plans.txt` (one line per
-  plan: slug, then its bookmarks bottom to top), `base.txt` (the main commit `queue status` printed at the round's
-  start), `prs.txt` (slug, then `pr:bookmark` pairs bottom to top), `tested_commits.txt` (`commit bookmark` per
-  bookmark, as the round's checks tested it), `diffs/` and `notes/`.
+- `--round N`: the round's number. Its text files live directly in the agent records' `round/N` record, in the
+  directory `cargo xtask records path round/N` prints, so that they are pushed with the monitor log and a resumed or
+  replacement monitor finds them there without any restore step: `plans.txt` (one line per plan: slug, then its
+  bookmarks bottom to top), `base.txt` (the main commit `queue status` printed at the round's start), `prs.txt` (slug,
+  then `pr:bookmark` pairs bottom to top), `tested_commits.txt` (`commit bookmark` per bookmark, as the round's checks
+  tested it) and `notes/`. `plans.txt` marks a round as started, so `round-start` refuses a number whose record
+  already holds one.
+- `--scratch DIR` (on `diffs` only): the round's scratch directory, for the bulky outputs (`diffs/`) that never go
+  into a record. It must not be inside the record's directory.
 
-The monitor log is `farhelm-plans-monitor-log.md` in the checkout's parent directory, derived the way
-`plans/.agents/outside-files.md` and `scripts/plans-queue.py` derive it. The commands that write it rely on two lines
-the monitor keeps there: `running, last checked <time>` in `## Status`, and `- Landing claim in progress: <text>`.
-History entries are appended at the end of the file.
+The monitor log is `log.md` in the directory `cargo xtask records path landing` prints (the `landing` record). The
+commands that write it rely on two lines the monitor keeps there: `running, last checked <time>` in `## Status`, and
+`- Landing claim in progress: <text>`. History entries are appended at the end of the file; `round-start` and
+`round-end` append the round's own (`r<n> started, head <short sha>`, `r<n> ended`), which are the source of the next
+round's number. Writing the log is local; it reaches the records repository only when a command pushes.
+
+Pushes follow the records rule (`plans/.agents/landing.md`): the records are pushed right before every step here that
+changes GitHub, so the remote copy of the monitor's reasoning never lags what GitHub shows. `claim` and `claim-land`
+push before `queue start-landing`, `land` at the start of each PR's turn (before its retarget, push, ready and merge),
+`record` before `queue landed`, `land-docs-prs` before each PR it pushes, opens and lands (the `landing` record alone,
+since no round applies), and `round-end` once at the round's end. Every other command pushes nothing. A failed push
+stops the command with exit 1 before the GitHub step it guards: Cloudflare is assumed available, so there is no
+fallback, and the flow stops and notifies instead. The records command is `cargo xtask records` unless a caller injects
+another (tests do; see `main`).
 
 Exit status: 0 done; 1 a step failed or refused (the message says which, and nothing after it ran); 2 usage error; 10
 `claim` or `claim-land` found the plan no longer complete (`queue start-landing` exit 10), so the plan is skipped.
@@ -47,7 +61,12 @@ import sys
 import time
 
 SCRIPT_CHECKOUT = pathlib.Path(__file__).resolve().parents[2]
-MONITOR_LOG_NAME = "farhelm-plans-monitor-log.md"
+
+# The agent records tool, run from the checkout so that it finds this checkout's slot and builds this checkout's own
+# version of the tool (`.agents/agent-records.md`). Tests inject a stand-in instead of running cargo.
+DEFAULT_RECORDS = ("cargo", "xtask", "records")
+LANDING_RECORD = "landing"
+MONITOR_LOG_NAME = "log.md"
 
 EXIT_FAIL = 1
 EXIT_USAGE = 2
@@ -72,9 +91,11 @@ class Refusal(Exception):
 # --- Paths, repository and monitor log ------------------------------------------------------------------------------
 
 
-def monitor_log_path(checkout: pathlib.Path) -> pathlib.Path:
-    """The monitor log beside the checkout, the same file `queue status` reads the landing claim's quiet time from."""
-    return checkout.resolve().parent / MONITOR_LOG_NAME
+def round_record(number: int) -> str:
+    """The records name of a round's text files: `round/<n>`, a positive decimal without leading zeros."""
+    if number < 1:
+        raise Refusal(f"round numbers start at 1, got {number}")
+    return f"round/{number}"
 
 
 def parse_github_repo(url: str) -> str | None:
@@ -131,11 +152,36 @@ def with_claim_line(text: str, claim: str) -> str:
     return text
 
 
+def round_entry(number: int, event: str, head: str | None = None) -> str:
+    """The History entry that marks a round's start or end: `r<n> started, head <short sha>` or `r<n> ended`.
+
+    These entries are the defined source of the round number (the next round is one more than the newest `r<n> started` entry), and the
+    plan-status skill parses them to tell which round is under way, so their shape must not drift. `round-start` and
+    `round-end` write them, so the monitor never has to type one.
+    """
+    if event == "started":
+        if not head:
+            raise Refusal("a round's start entry needs the status head")
+        return f"r{number} started, head {head[:8]}"
+    if event == "ended":
+        return f"r{number} ended"
+    raise ValueError(f"unknown round event {event!r}")
+
+
+def read_log(log: pathlib.Path) -> str:
+    """The monitor log's text. A missing log is refused rather than created: the commands only edit lines the monitor
+    already keeps, and a fresh empty file would have neither of them."""
+    try:
+        return log.read_text(encoding="utf-8")
+    except FileNotFoundError as err:
+        raise Refusal(f"the monitor log {log} does not exist") from err
+
+
 def append_history(log: pathlib.Path, entry: str, refresh_status: bool = True) -> str:
     """Append a History entry stamped with the real current time, and by default refresh the Status line in the same
     write, so the two never disagree and no time is ever typed by hand. Returns the stamp."""
     now = utc_minute()
-    text = log.read_text(encoding="utf-8")
+    text = read_log(log)
     if refresh_status:
         text = with_status_refreshed(text, now)
     log.write_text(with_history_entry(text, entry, now), encoding="utf-8")
@@ -145,7 +191,7 @@ def append_history(log: pathlib.Path, entry: str, refresh_status: bool = True) -
 def set_claim_line(log: pathlib.Path, claim: str) -> None:
     """Rewrite the log's landing claim line, which a resume reads to settle a claim (landing.md, "Starting and
     resuming")."""
-    log.write_text(with_claim_line(log.read_text(encoding="utf-8"), claim), encoding="utf-8")
+    log.write_text(with_claim_line(read_log(log), claim), encoding="utf-8")
 
 
 # --- Round files ----------------------------------------------------------------------------------------------------
@@ -196,15 +242,60 @@ def claim_held(status: dict, slug: str, claim: str) -> bool:
 
 @dataclasses.dataclass
 class Ctx:
-    """The checkout and repository every command works against. Every subprocess runs to completion before the next
-    starts, which is what keeps jj commands from ever running concurrently in one repository."""
+    """The checkout, repository and records command every command works against. Every subprocess runs to completion
+    before the next starts, which is what keeps jj commands from ever running concurrently in one repository.
+
+    `records` is the argv prefix of the agent records tool. Record directories are asked for once per command and
+    cached: `path` fetches, and a directory never moves within one slot's clone, so asking again would only cost a
+    round trip and give the tool another chance to fail mid-command.
+    """
 
     checkout: pathlib.Path
     repo: str
+    records: list[str] = dataclasses.field(default_factory=lambda: list(DEFAULT_RECORDS))
+    _record_dirs: dict[str, pathlib.Path] = dataclasses.field(default_factory=dict, repr=False)
+
+    def record_dir(self, name: str) -> pathlib.Path:
+        """The local directory of record `name`, from the records tool's `path`, which also brings it up to date."""
+        if name not in self._record_dirs:
+            r = self._records("path", name)
+            lines = r.stdout.strip().splitlines()
+            path = pathlib.Path(lines[0]) if len(lines) == 1 else None
+            if path is None or not path.is_absolute() or not path.is_dir():
+                raise Refusal(f"records path {name} printed no usable directory: {r.stdout.strip()[-300:]!r}")
+            self._record_dirs[name] = path
+        return self._record_dirs[name]
 
     @property
     def log(self) -> pathlib.Path:
-        return monitor_log_path(self.checkout)
+        """The monitor log, `log.md` in the `landing` record."""
+        return self.record_dir(LANDING_RECORD) / MONITOR_LOG_NAME
+
+    def round_dir(self, number: int) -> pathlib.Path:
+        """The directory of round `number`'s text files, the `round/<n>` record."""
+        return self.record_dir(round_record(number))
+
+    def push_records(self, message: str, number: int | None = None) -> None:
+        """Push the monitor log, and round `number`'s files when a round applies, as one records commit.
+
+        Called right before a GitHub-changing step. A failure raises Refusal, which stops the command before that
+        step: the records tool leaves its clone as it was, so the same command can simply be run again once the cause
+        is fixed.
+        """
+        names = [LANDING_RECORD] + ([round_record(number)] if number is not None else [])
+        r = self._records("push", *names, "-m", message)
+        print(r.stdout.strip(), flush=True)
+
+    def _records(self, *args: str) -> subprocess.CompletedProcess:
+        cmd = [*self.records, *args]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, cwd=self.checkout)
+        except FileNotFoundError as err:
+            raise Refusal(f"records {args[0]} failed: {cmd[0]} not found") from err
+        if r.returncode != 0:
+            raise Refusal(f"records {' '.join(args[:-2] if args[0] == 'push' else args)} failed ({r.returncode}); "
+                          f"stopping before the next step\n{r.stdout[-800:]}{r.stderr[-800:]}")
+        return r
 
     def run(self, cmd: list[str], check: bool = True, stdin: str | None = None) -> subprocess.CompletedProcess:
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=self.checkout, input=stdin)
@@ -238,13 +329,21 @@ class Ctx:
 
 def cmd_round_start(ctx: Ctx, args) -> None:
     """Fix the round's plans: every `[complete]` plan the round's `queue status` shows, in queue order, with its
-    bookmarks tracked locally so the stack can be rebased. Refuses a dirty working copy: the clean-main boundary comes
-    first, and its judgment about whose changes those are is not this tool's."""
+    bookmarks tracked locally so the stack can be rebased, written to the `round/<n>` record. Prints that record's
+    directory first, since the monitor writes the round's notes there.
+
+    Appends `r<n> started, head <short sha>` to the monitor log (`round_entry`), which is what makes the log's `rN`
+    entries the source of the next round's number.
+
+    Refuses a round whose record already holds `plans.txt` (each round gets a new number, and a resumed round carries on
+    from its files rather than starting again), and a dirty working copy: the clean-main boundary comes first, and its
+    judgment about whose changes those are is not this tool's. Pushes nothing; nothing here changes GitHub."""
+    rd = ctx.round_dir(args.round)
+    if (rd / "plans.txt").exists():
+        raise Refusal(f"round {args.round} was already started: its record {rd} holds plans.txt. Resume that round "
+                      "from its record rather than starting it again; a new round takes the next number.")
     if ctx.jj("diff", "--summary", "-r", "@").strip():
         raise Refusal("the working copy has changes; apply the clean-main boundary first")
-    rd = args.round_dir
-    if rd.exists():
-        raise Refusal(f"{rd} already exists; each round gets a new directory")
     ctx.fetch()
     status = ctx.status()
     lines = []
@@ -259,20 +358,31 @@ def cmd_round_start(ctx: Ctx, args) -> None:
             print(f"{slug}: complete with no plan bookmarks; act on its status flag instead", file=sys.stderr)
             continue
         lines.append(f"{slug} {' '.join(names)}")
-    # Created only now, so a failed fetch or status leaves nothing behind and the same command can simply be rerun.
-    rd.mkdir(parents=True)
-    (rd / "notes").mkdir()
-    (rd / "diffs").mkdir()
-    (rd / "base.txt").write_text(status["head"] + "\n", encoding="utf-8")
-    (rd / "plans.txt").write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+    write_round_start(ctx, args.round, status["head"], lines)
+    print(f"round {args.round} record {rd}")
     print(f"head {status['head']}")
     print("\n".join(lines) if lines else "no [complete] plans: the round is over")
+
+
+def write_round_start(ctx: Ctx, number: int, head: str, lines: list[str]) -> None:
+    """Record a round's start: the `r<n> started` History entry, then `notes/`, `base.txt`, and `plans.txt` last.
+
+    Called only once the fetch and status succeeded, so a failure before it leaves nothing behind. The log entry comes
+    before `plans.txt` on purpose: a crash in between leaves an entry without a started round, and rerunning the same
+    number then just adds a second entry, while the other order could leave a started round without its entry, and the
+    next round's number (one more than the newest `r<n> started` entry) would collide with it.
+    """
+    rd = ctx.round_dir(number)
+    append_history(ctx.log, round_entry(number, "started", head), refresh_status=False)
+    (rd / "notes").mkdir(exist_ok=True)
+    (rd / "base.txt").write_text(head + "\n", encoding="utf-8")
+    (rd / "plans.txt").write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
 
 
 def cmd_bases(ctx: Ctx, args) -> None:
     """Per plan: its pushed base, the non-bookkeeping main commits since then (landed work it has not seen), and any
     path under `plans/` its stack touches (landing.md step 3: no plan PR may touch `plans/`)."""
-    for slug, bms in read_plans(args.round_dir / "plans.txt"):
+    for slug, bms in read_plans(ctx.round_dir(args.round) / "plans.txt"):
         base = ctx.jj("log", "--no-graph", "-r", f"{bms[0]}@origin-", "-T", "commit_id.short(8)").strip()
         since = ctx.jj("log", "--no-graph", "-r", f"{base}..main@origin {NOT_BOOKKEEPING}",
                        "-T", 'description.first_line() ++ "\\n"').splitlines()
@@ -287,7 +397,7 @@ def cmd_stack(ctx: Ctx, args) -> None:
     """Stack the round's plans in queue order on main@origin (each plan's bottom onto the previous plan's top) and
     list every conflicted commit with its files, so bookkeeping-only conflicts can be told from real ones before
     anything is resolved."""
-    plans = read_plans(args.round_dir / "plans.txt")
+    plans = read_plans(ctx.round_dir(args.round) / "plans.txt")
     if not plans:
         raise Refusal("plans.txt is empty")
     onto = "main@origin"
@@ -304,24 +414,33 @@ def cmd_stack(ctx: Ctx, args) -> None:
 
 
 def cmd_diffs(ctx: Ctx, args) -> None:
-    """Write the cross-plan review's inputs to `diffs/`: each plan's diff as stacked locally (so it includes the
-    landing's resolutions and fixes), and main's landed work since the oldest base, without `plans/`."""
-    rd = args.round_dir
-    (rd / "diffs").mkdir(exist_ok=True)
+    """Write the cross-plan review's inputs to `<scratch>/diffs/`: each plan's diff as stacked locally (so it includes
+    the landing's resolutions and fixes), and main's landed work since the oldest base, without `plans/`.
+
+    The diffs are bulk, and only this host's review reads them, so they go to the
+    round's scratch directory and never into the round's record, which every push would otherwise carry. A scratch
+    directory inside the record's directory is refused for that reason."""
+    rd = ctx.round_dir(args.round)
+    scratch = args.scratch.resolve()
+    if scratch == rd.resolve() or rd.resolve() in scratch.parents:
+        raise Refusal(f"--scratch {scratch} is inside the round's record {rd}; diffs never go into a record")
+    out = scratch / "diffs"
+    out.mkdir(parents=True, exist_ok=True)
     for slug, bms in read_plans(rd / "plans.txt"):
         text = ctx.jj("diff", "--git", "--from", f"{bms[0]}-", "--to", bms[-1])
-        (rd / "diffs" / f"{slug}.diff").write_text(text, encoding="utf-8")
+        (out / f"{slug}.diff").write_text(text, encoding="utf-8")
         print(slug, len(text.splitlines()))
     landed = ctx.jj("diff", "--git", "--from", args.oldest_base, "--to", "main@origin", "~plans/")
-    (rd / "diffs" / "landed-since-bases.diff").write_text(landed, encoding="utf-8")
+    (out / "landed-since-bases.diff").write_text(landed, encoding="utf-8")
     print("landed-since-bases", len(landed.splitlines()))
 
 
 def cmd_pr_map(ctx: Ctx, args) -> None:
     """Write `prs.txt`: each bookmark's open PR. Refuses a bookmark with no open PR or more than one, because a
     landing must name exactly the plan's own PRs."""
+    rd = ctx.round_dir(args.round)
     lines = []
-    for slug, bms in read_plans(args.round_dir / "plans.txt"):
+    for slug, bms in read_plans(rd / "plans.txt"):
         pairs = []
         for bm in bms:
             found = ctx.gh_json("pr", "list", "-R", ctx.repo, "--head", bm, "--state", "open", "--json", "number")
@@ -330,18 +449,19 @@ def cmd_pr_map(ctx: Ctx, args) -> None:
                 raise Refusal(f"{bm}: expected one open PR, found {numbers}")
             pairs.append(f"{numbers[0]}:{bm}")
         lines.append(f"{slug} {' '.join(pairs)}")
-    (args.round_dir / "prs.txt").write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+    (rd / "prs.txt").write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
     print("\n".join(lines))
 
 
 def cmd_tested(ctx: Ctx, args) -> None:
     """Write `tested_commits.txt`: every bookmark's current commit. Run it when the round's combined checks start, so
     `verify` can later compare main with the tree the checks actually saw."""
+    rd = ctx.round_dir(args.round)
     lines = []
-    for _slug, bms in read_plans(args.round_dir / "plans.txt"):
+    for _slug, bms in read_plans(rd / "plans.txt"):
         for bm in bms:
             lines.append(f"{ctx.jj('log', '--no-graph', '-r', bm, '-T', 'commit_id').strip()} {bm}")
-    (args.round_dir / "tested_commits.txt").write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+    (rd / "tested_commits.txt").write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
     print("\n".join(lines))
 
 
@@ -388,12 +508,16 @@ def merge_one(ctx: Ctx, slug: str, claim: str, pr: str, bm: str, want: str) -> s
     raise Refusal(f"giving up on #{pr}")
 
 
-def land_plan(ctx: Ctx, slug: str, claim: str, pairs: list[tuple[str, str]]) -> None:
-    """Land one claimed plan's PRs bottom-up: rebase each onto main@origin, refuse on conflicts, retarget the PR to
-    main, confirm the claim, push, wait until GitHub shows the pushed head, mark it ready and merge it through
-    `merge_one`. Each merge is appended to the monitor log. Leaves the plan in `landing`; notes and `queue landed`
-    are the caller's."""
+def land_plan(ctx: Ctx, number: int, slug: str, claim: str, pairs: list[tuple[str, str]]) -> None:
+    """Land one claimed plan's PRs bottom-up: push the records, rebase each onto main@origin, refuse on conflicts,
+    retarget the PR to main, confirm the claim, push, wait until GitHub shows the pushed head, mark it ready and merge
+    it through `merge_one`. Each merge is appended to the monitor log. Leaves the plan in `landing`; notes and `queue
+    landed` are the caller's.
+
+    The records push opens each PR's turn because everything after it in the turn changes GitHub, and the log entry
+    for the previous PR's merge then reaches the records before the next PR is touched."""
     for pr, bm in pairs:
+        ctx.push_records(f"round {number}: land {slug} #{pr}", number)
         ctx.fetch()
         print(ctx.run(["jj", "-R", str(ctx.checkout), "rebase", "-s", bm, "-d", "main@origin"]).stderr.strip()[-300:])
         marks = ctx.jj("log", "-r", f"main@origin::{bm}", "--no-graph", "-T", 'if(conflict, "CONFLICT\\n", "")')
@@ -457,13 +581,16 @@ def round_pairs(rd: pathlib.Path, slug: str) -> list[tuple[str, str]]:
     return pairs
 
 
-def claim_plan(ctx: Ctx, slug: str) -> str | None:
-    """Step 1: generate a claim id, write it to the log as `starting`, run `queue start-landing`, and rewrite the log
-    line to `landing`. Returns the claim id, or None when the plan is no longer complete (exit 10: skip it)."""
+def claim_plan(ctx: Ctx, number: int, slug: str) -> str | None:
+    """Step 1: generate a claim id, write it to the log as `starting`, push the records, run `queue start-landing`,
+    and rewrite the log line to `landing`. Returns the claim id, or None when the plan is no longer complete (exit 10:
+    skip it)."""
     claim = secrets.token_hex(3)
-    # The log names the claim before the queue does, so a crash in between leaves a `starting` claim a resume can
-    # settle from `queue status` (landing.md, "Starting and resuming").
+    # The log names the claim before the queue does, and is pushed before the queue verb, so a crash or a failed push
+    # in between leaves a `starting` claim a resume can settle from `queue status` (landing.md, "Starting and
+    # resuming"): with no such claim on main, it never landed, and the line is cleared.
     set_claim_line(ctx.log, f"{slug} {claim} starting.")
+    ctx.push_records(f"round {number}: claim {slug} ({claim})", number)
     r = ctx.queue("start-landing", slug, "--claim", claim)
     if r.returncode == 10:
         set_claim_line(ctx.log, "none.")
@@ -477,10 +604,11 @@ def claim_plan(ctx: Ctx, slug: str) -> str | None:
     return claim
 
 
-def land_and_verify(ctx: Ctx, rd: pathlib.Path, slug: str, claim: str, pairs: list[tuple[str, str]]) -> None:
+def land_and_verify(ctx: Ctx, number: int, slug: str, claim: str, pairs: list[tuple[str, str]]) -> None:
     """Step 5 for a claimed plan, then a fetch and the comparison of main with the tested tree."""
+    rd = ctx.round_dir(number)
     try:
-        land_plan(ctx, slug, claim, pairs)
+        land_plan(ctx, number, slug, claim, pairs)
     except Refusal as err:
         raise Refusal(f"{err}\nlanding stopped for {slug}; claim {claim} still held") from err
     ctx.run(["jj", "-R", str(ctx.checkout), *FETCH], check=False)
@@ -495,37 +623,39 @@ def land_and_verify(ctx: Ctx, rd: pathlib.Path, slug: str, claim: str, pairs: li
 
 def cmd_claim(ctx: Ctx, args) -> int:
     """Step 1 alone, for a round that claims a plan before rebasing and checking it, as landing.md's numbering does."""
-    round_pairs(args.round_dir, args.slug)
-    return 0 if claim_plan(ctx, args.slug) else EXIT_SKIP
+    round_pairs(ctx.round_dir(args.round), args.slug)
+    return 0 if claim_plan(ctx, args.round, args.slug) else EXIT_SKIP
 
 
 def cmd_land(ctx: Ctx, args) -> None:
     """Step 5 for a plan `claim` claimed, with the claim id it printed."""
-    land_and_verify(ctx, args.round_dir, args.slug, args.claim, round_pairs(args.round_dir, args.slug))
+    pairs = round_pairs(ctx.round_dir(args.round), args.slug)
+    land_and_verify(ctx, args.round, args.slug, args.claim, pairs)
 
 
 def cmd_claim_land(ctx: Ctx, args) -> int:
     """`claim` and `land` back to back, for a round whose rebase and checks already ran on the stacked plans."""
-    pairs = round_pairs(args.round_dir, args.slug)
-    claim = claim_plan(ctx, args.slug)
+    pairs = round_pairs(ctx.round_dir(args.round), args.slug)
+    claim = claim_plan(ctx, args.round, args.slug)
     if claim is None:
         return EXIT_SKIP
-    land_and_verify(ctx, args.round_dir, args.slug, claim, pairs)
+    land_and_verify(ctx, args.round, args.slug, claim, pairs)
     return 0
 
 
 def cmd_verify(ctx: Ctx, args) -> None:
     """`verify_landed` on its own, for a plan landed by hand or a comparison repeated after a later fetch."""
-    verify_landed(ctx, args.round_dir, args.top)
+    verify_landed(ctx, ctx.round_dir(args.round), args.top)
 
 
 def cmd_record(ctx: Ctx, args) -> None:
-    """Step 7: write `recording` to the log, run `queue landed` with `notes/<slug>.final.md`, then clear the claim.
-    On failure the claim line keeps `recording`, so a resume can settle it from `queue history`."""
-    notes = args.round_dir / "notes" / f"{args.slug}.final.md"
+    """Step 7: write `recording` to the log, push the records, run `queue landed` with `notes/<slug>.final.md`, then
+    clear the claim. On failure the claim line keeps `recording`, so a resume can settle it from `queue history`."""
+    notes = ctx.round_dir(args.round) / "notes" / f"{args.slug}.final.md"
     if not notes.is_file():
         raise Refusal(f"{notes} does not exist; run assemble-notes first")
     set_claim_line(ctx.log, f"{args.slug} {args.claim} recording. PRs merged: {args.merged}.")
+    ctx.push_records(f"round {args.round}: record {args.slug} ({args.claim})", args.round)
     r = ctx.queue("landed", args.slug, "--claim", args.claim, "--merged", args.merged, "--notes", str(notes))
     if r.returncode != 0:
         raise Refusal(f"landed exit {r.returncode}: {r.stdout.strip()} {r.stderr.strip()}")
@@ -558,7 +688,7 @@ def cmd_assemble_notes(ctx: Ctx, args) -> None:
     """Write `notes/<slug>.final.md` from `notes/<slug>.md` and the shared `notes/_checks.md`, rewrapped with the
     repository's dprint settings. The queue script inserts the notes as written, so a line the wrap cannot fix is
     refused here rather than landing on main."""
-    notes = args.round_dir / "notes"
+    notes = ctx.round_dir(args.round) / "notes"
     out = fill_checks((notes / f"{args.slug}.md").read_text(encoding="utf-8"),
                       (notes / "_checks.md").read_text(encoding="utf-8"))
     out = ctx.run(["dprint", "fmt", "--stdin", "landing-notes.md"], stdin=out).stdout
@@ -573,17 +703,24 @@ def cmd_assemble_notes(ctx: Ctx, args) -> None:
 
 
 def cmd_round_end(ctx: Ctx, args) -> None:
-    """Back to a clean main, abandon the local copies of the round's landed PR heads, and show what the next step
-    needs: `jj status`, the checkout's size (landing.md, "Waiting between rounds", prunes over 50 GB) and the queue
-    status whose head is the next watcher's baseline.
+    """Back to a clean main, abandon the local copies of the round's landed PR heads, append `r<n> ended` to the
+    monitor log, push the records once more, and show what the next step needs: `jj status`, the checkout's size
+    (landing.md, "Waiting between rounds", prunes over 50 GB) and the queue status whose head is the next watcher's
+    baseline.
 
     The landed heads stay visible after a fetch (see FETCH). Only heads GitHub shows as the head of a MERGED round PR
     are abandoned, and never an ancestor of the working copy. A round PR that is not merged refuses the whole step
     unless `--skip-unmerged` says the round left it open on purpose (a blocked plan); its head is then kept.
+
+    The push comes after the cleanup, so a refusal there leaves it for the rerun, and before the closing status, so a
+    status that fails cannot skip it. It carries what the round recorded after its last GitHub change (the last
+    landing's log entries, blocks left for the maintainer, notifications sent), which a replacement monitor would
+    otherwise repeat.
     """
+    rd = ctx.round_dir(args.round)
     ctx.fetch()
     ctx.jj("new", "main@origin")
-    prs = args.round_dir / "prs.txt"
+    prs = rd / "prs.txt"
     heads = []
     for _slug, pairs in (read_pairs(prs).items() if prs.exists() else []):
         for pr, _bm in pairs:
@@ -601,6 +738,10 @@ def cmd_round_end(ctx: Ctx, args) -> None:
         if listed:
             ctx.jj("abandon", revset)
         print("abandoned", len(listed))
+    # The entry goes in before the push so the push carries it. A rerun after a failed push appends it again, which
+    # is harmless: readers take the newest `rN` entry.
+    append_history(ctx.log, round_entry(args.round, "ended"), refresh_status=False)
+    ctx.push_records(f"round {args.round}: end", args.round)
     print(ctx.jj("status"), end="")
     print(ctx.run(["du", "-sh", str(ctx.checkout)]).stdout, end="")
     r = ctx.queue("status")
@@ -613,7 +754,8 @@ def cmd_round_end(ctx: Ctx, args) -> None:
 
 
 def cmd_log(ctx: Ctx, _args) -> None:
-    """Append stdin as one History entry and refresh the Status line with the same stamp."""
+    """Append stdin as one History entry and refresh the Status line with the same stamp. Local only: the entry
+    reaches the records with the next push, which comes before the next GitHub change."""
     print(append_history(ctx.log, sys.stdin.read()))
 
 
@@ -625,12 +767,17 @@ def cmd_land_docs_prs(ctx: Ctx, args) -> None:
     For the PRs the instructions say to land without waiting for checks: the TODO-only PR of answered blocks
     (landing.md, "Answering blocks", step 4) and others the maintainer has said to merge without asking. Whether a PR
     qualifies is the caller's call, not this command's.
+
+    Each PR's turn opens with a push of the `landing` record (no round applies: these PRs land between or after rounds),
+    since everything after it pushes to or merges on GitHub.
     """
     jjstack = str(args.jjstack)
-    for pair in args.pairs:
-        bookmark, sep, msgfile = pair.partition("=")
+    pairs = [pair.partition("=") for pair in args.pairs]
+    for pair, (_bookmark, sep, _msgfile) in zip(args.pairs, pairs):
         if not sep:
             raise Refusal(f"expected bookmark=message-file, got {pair!r}")
+    for bookmark, _sep, msgfile in pairs:
+        ctx.push_records(f"landing: open and land {bookmark}")
         ctx.fetch()
         ctx.run(["jj", "-R", str(ctx.checkout), "describe", "-r", bookmark, "--stdin"],
                 stdin=pathlib.Path(msgfile).read_text(encoding="utf-8"))
@@ -734,19 +881,22 @@ def build_parser() -> argparse.ArgumentParser:
                         help="the checkout to work in (default: the one holding this script)")
     parser.add_argument("--repo", help="OWNER/NAME (default: from the checkout's origin remote)")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
-    round_dir = argparse.ArgumentParser(add_help=False)
-    round_dir.add_argument("--round-dir", type=pathlib.Path, required=True, help="this round's scratch directory")
+    round_arg = argparse.ArgumentParser(add_help=False)
+    round_arg.add_argument("--round", type=round_number, required=True, metavar="N",
+                           help="this round's number; its text files are the round/N record")
 
-    def add(name: str, func, help: str, parents=(round_dir,)) -> argparse.ArgumentParser:
+    def add(name: str, func, help: str, parents=(round_arg,)) -> argparse.ArgumentParser:
         p = sub.add_parser(name, help=help, parents=list(parents))
         p.set_defaults(func=func)
         return p
 
-    add("round-start", cmd_round_start, "create the round directory and fix the round's [complete] plans")
+    add("round-start", cmd_round_start, "fix the round's [complete] plans in its record")
     add("bases", cmd_bases, "each plan's base, main's landed work since it, and any plans/ touch")
     add("stack", cmd_stack, "stack the plans in queue order on main@origin and list conflicts")
-    add("diffs", cmd_diffs, "write the cross-plan review's diffs").add_argument(
-        "--oldest-base", required=True, help="the oldest plan base, as `bases` prints it")
+    p = add("diffs", cmd_diffs, "write the cross-plan review's diffs to the round's scratch directory")
+    p.add_argument("--oldest-base", required=True, help="the oldest plan base, as `bases` prints it")
+    p.add_argument("--scratch", type=pathlib.Path, required=True,
+                   help="the round's scratch directory (diffs go to its diffs/; never inside the record)")
     add("pr-map", cmd_pr_map, "write prs.txt: each bookmark's one open PR")
     add("tested", cmd_tested, "write tested_commits.txt as the combined checks start")
     add("claim", cmd_claim, "step 1: claim one plan for landing").add_argument("slug")
@@ -761,8 +911,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("merged", help="comma-separated PR numbers that merged")
     add("assemble-notes", cmd_assemble_notes, "fill the shared checks into a plan's notes and rewrap").add_argument(
         "slug")
-    add("round-end", cmd_round_end, "back to main, abandon landed heads, show size and status").add_argument(
-        "--skip-unmerged", action="store_true", help="keep the heads of round PRs that did not merge")
+    p = add("round-end", cmd_round_end, "back to main, abandon landed heads, push the records, show size and status")
+    p.add_argument("--skip-unmerged", action="store_true", help="keep the heads of round PRs that did not merge")
     add("log", cmd_log, "append stdin to the monitor log's History and refresh its Status", parents=())
     p = add("land-docs-prs", cmd_land_docs_prs, "open and land single-commit PRs that need no checks", parents=())
     p.add_argument("--jjstack", type=pathlib.Path, required=True, help="the jjstack skill's scripts/jjstack")
@@ -778,11 +928,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str]) -> int:
+def round_number(text: str) -> int:
+    """argparse type for `--round`: a positive decimal without leading zeros, the form the records tool accepts."""
+    if not re.fullmatch(r"[1-9][0-9]*", text):
+        raise argparse.ArgumentTypeError(f"expected a positive round number without leading zeros, got {text!r}")
+    return int(text)
+
+
+def main(argv: list[str], records: list[str] | None = None) -> int:
+    """Run one command. `records` replaces the records tool's argv prefix (`cargo xtask records`); tests pass a
+    stand-in so that no test builds or runs the real tool."""
     args = build_parser().parse_args(argv)
     try:
         checkout = args.checkout.resolve()
-        ctx = Ctx(checkout, args.repo or default_repo(checkout))
+        ctx = Ctx(checkout, args.repo or default_repo(checkout), list(records or DEFAULT_RECORDS))
         return args.func(ctx, args) or 0
     except Refusal as err:
         print(err, file=sys.stderr)

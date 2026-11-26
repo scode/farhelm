@@ -6,14 +6,18 @@ Three short flows: "release plan X", which frees a plan whose executor or monito
 
 ## Releasing: "release plan X"
 
-Only on the maintainer's request, for a plan whose executor or monitor died or is stuck: `queue release <slug>`, or
-`queue release <slug> --hold` for an in-flight plan the maintainer wants parked rather than picked up again
-(`plans/.agents/release-help.md`, "Holding: "hold plan X", "unhold plan X""). A plan that was in flight goes back to
-`[pending]`, and whoever claims it next resumes it from its working log and open PRs (`plans/.agents/executing.md`,
-"Executing one plan", step 7). A plan that was landing goes back to `[complete]`, and the next landing round lands it,
-starting from whichever of its PRs have not merged yet; if all of them had merged, that round only records the landing
-(the `complete, no open PRs, merged ...` flag in `plans/.agents/landing.md`, "A landing round"). If the old executor or
-monitor is in fact still alive, its next claim check or claim-holder verb finds the claim gone and it stops.
+Only on the maintainer's request, for a plan whose executor or monitor the maintainer has stopped or knows to be dead:
+taking a claim away is always the maintainer's manual action, never an automated one, and it comes after the holder is
+gone, so that two agents never write one plan's record. If the request does not say so, ask whether the holder is
+stopped before releasing. Then `queue release <slug>`, or `queue release <slug> --hold` for an in-flight plan the
+maintainer wants parked rather than picked up again (`plans/.agents/release-help.md`, "Holding: "hold plan X", "unhold
+plan X""). A plan that was in flight goes back to `[pending]`, and whoever claims it next resumes it from its working
+log as last pushed and its open PRs (`plans/.agents/executing.md`, "Executing one plan", step 7); whatever the old
+holder had not pushed is lost, as after a crash. A plan that was landing goes back to `[complete]`, and the next landing
+round lands it, starting from whichever of its PRs have not merged yet; if all of them had merged, that round only
+records the landing (the `complete, no open PRs, merged ...` flag in `plans/.agents/landing.md`, "A landing round"). An
+old holder that turns out to be alive after all still stops at its next claim check or claim-holder verb, which finds
+the claim gone, but that is a backstop, not a reason to release a holder that is still running.
 
 ## Holding: "hold plan X", "unhold plan X"
 

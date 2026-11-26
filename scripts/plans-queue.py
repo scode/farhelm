@@ -61,10 +61,6 @@ def queue_owned(path: str) -> bool:
     return path == REPORTS_PATH or path.startswith((f"{QUEUE_DIR}/", f"{REPORTS_DIR}/"))
 
 
-# The executors' and the monitor's own logs live beside the checkouts, never in the repository; `status` reads their
-# modification times to tell a quiet claim from a working one.
-MONITOR_LOG = "farhelm-plans-monitor-log.md"
-
 EXIT_OK = 0
 EXIT_VIOLATIONS = 1
 EXIT_USAGE = 2
@@ -1450,21 +1446,21 @@ class _IndexHistory:
                 self.exhausted = True
 
 
-def _hours_since(path: pathlib.Path, now: datetime.datetime) -> float | None:
-    return (now.timestamp() - path.stat().st_mtime) / 3600 if path.exists() else None
-
-
-def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.datetime) -> dict:
+def status(gh: GitHub, branch: str) -> dict:
     """The queue as executors, the monitor and review sessions start from it: one snapshot instead of each agent
     deriving its own.
 
-    Also flags what a person or the monitor should look at: a claim that is old and whose log has gone quiet (possibly
-    an executor or a monitor that died; a landing claim is judged by the monitor's log, an executor's by the plan's
-    working log), a landing plan with no open PRs (a landing that stopped before `landed`), a complete plan with no
-    open PRs (merged ones mean a landing that was released after its last merge and only needs `landed`; none merged
-    means its PRs were closed and the maintainer must decide), and a pending or held plan that still has open PRs
-    (unlanded work from an earlier round, which conflict judgments must count). Landed plans awaiting review are
-    listed after the queue.
+    Everything here comes from GitHub; no log is read. Executors and the monitor may run on other hosts than the one
+    asking, with their logs in the agent records rather than beside the checkouts, and nothing unattended judges whether
+    another agent is alive: keeping executors and the monitor running is the maintainer's job, done out of band. So a
+    claim carries its age (`claimed_at`, from main's history) for a person to judge, and no flag says it looks dead.
+
+    Flags name what a person or the monitor should look at: a landing plan with no open PRs (a landing that stopped
+    before `landed`), a complete plan with no open PRs (merged ones mean a landing that was released after its last
+    merge and only needs `landed`; none merged means its PRs were closed and the maintainer must decide), a pending or
+    held plan that still has open PRs (unlanded work from an earlier round, which conflict judgments must count), and a
+    claim whose commit is older than the history read here, so that its missing age is explained rather than silently
+    absent. Landed plans awaiting review are listed after the queue.
 
     Each eligible pending plan and each blocked plan also carries its pass count and whether that makes it overdue
     (`count_passes`), which picking uses to bound how long a conflicting plan can be passed over.
@@ -1481,20 +1477,17 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
             ({"number": p["number"], "ref": p["ref"]} for p in plan_pulls(pulls, entry.slug)),
             key=lambda p: p["ref"],
         )
-        # A landing claim is the monitor's; the plan's working log belongs to executors and says nothing about it.
-        log_name = MONITOR_LOG if entry.state == "landing" else f"farhelm-plan-{entry.slug}-log.md"
-        log_age = _hours_since(logs_dir / log_name, now)
         item = {
             "slug": entry.slug,
             "state": entry.state,
             "claim": entry.claim,
             "deps_waiting": [d for d in entry.deps if index.find(d)],
             "open_prs": prs,
-            "log_quiet_hours": None if log_age is None else round(log_age, 1),
             "flags": [],
         }
         # Passes are reported only for plans that are waiting their turn: eligible pending ones and blocked ones.
-        # Overdue is a field, not a flag, because the monitor acts on every flag and this one is for executors.
+        # Overdue is a field, not a flag: flags are for a person or the monitor to look at, and this one is for
+        # executors' picking.
         if entry.state == "blocked" or (entry.state == "pending" and not item["deps_waiting"]):
             passes = count_passes(index_history, entry, _plan_created(gh, branch, entry.slug))
             item["passes"] = passes
@@ -1502,18 +1495,10 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
         if entry.claim:
             since = claim_age(gh, branch, entry)
             item["claimed_at"] = since
-            quiet = log_age
             if since is None:
-                # Too old for the history status reads to date. The log still tells a working holder from a dead one,
-                # and a dead one gets the same flag as any other, since the monitor notifies on exactly that flag.
-                if quiet is None or quiet > 6:
-                    item["flags"].append("possibly abandoned: claim commit not in recent history and its log is quiet")
-                else:
-                    item["flags"].append("claim commit not in recent history: an old claim, but its log is active")
-            else:
-                hours = (now - datetime.datetime.fromisoformat(since.replace("Z", "+00:00"))).total_seconds() / 3600
-                if hours > 24 and (quiet is None or quiet > 6):
-                    item["flags"].append("possibly abandoned: claimed over 24 h ago and its log is quiet")
+                # Informational, never acted on unattended: it only says why this claim shows no age. An old claim is
+                # not a dead one, and whether its holder is alive is the maintainer's to judge.
+                item["flags"].append("claim commit not in recent history: its age is unknown")
         if entry.state == "landing" and not prs:
             merged = plan_pulls(gh.merged_pulls(f"plan/{entry.slug}/"), entry.slug)
             if merged:
@@ -1558,8 +1543,6 @@ def render_status(data: dict) -> str:
             parts.append("PRs " + ", ".join(f"#{p['number']}" for p in plan["open_prs"]))
         if plan.get("claimed_at"):
             parts.append(f"claimed {plan['claimed_at']}")
-        if plan["log_quiet_hours"] is not None:
-            parts.append(f"log quiet {plan['log_quiet_hours']} h")
         lines.append(" | ".join(parts))
         for flag in plan["flags"]:
             lines.append(f"    ! {flag}")
@@ -1702,6 +1685,9 @@ def main(
                 print(problem)
             return EXIT_VIOLATIONS if found else EXIT_OK
         if args.verb == "check-slug":
+            # A slug names more than the plan file: its report, its `plan/<slug>/*` branches and its working log, which
+            # lives in the agent records under the slug and outlives the plan. A reused slug would hand the new plan's
+            # first claimer the old plan's log and notes as if it were resuming that plan.
             if not SLUG_RE.match(args.slug):
                 raise Usage(f"bad slug {args.slug!r}")
             paths = [f"plans/{args.slug}.md", plan_path(args.slug), report_path(args.slug)]
@@ -1721,8 +1707,7 @@ def main(
                 print(line)
             return EXIT_OK
         if args.verb == "status":
-            logs_dir = pathlib.Path(__file__).resolve().parents[2]
-            data = status(gh, args.branch, logs_dir, datetime.datetime.now(datetime.timezone.utc))
+            data = status(gh, args.branch)
             print(json.dumps(data, indent=2) if args.json else render_status(data))
             return EXIT_OK
 
