@@ -409,12 +409,12 @@ impl Supervisor {
         kind: NotificationKind,
         text: &str,
     ) {
-        let admission = if kind == NotificationKind::PodmanStopFailed {
-            NotificationAdmission::RefreshChanged
-        } else {
-            NotificationAdmission::Once {
+        let admission = match kind {
+            NotificationKind::PodmanStopFailed => NotificationAdmission::RefreshChanged,
+            NotificationKind::HookSilent => NotificationAdmission::HookSilent,
+            _ => NotificationAdmission::Once {
                 unless_captured: kind.requires_no_identity(),
-            }
+            },
         };
         self.notify_session_with_admission(id, generation, kind, text, admission)
             .await;

@@ -91,6 +91,7 @@ async fn seed_pin_session(sup: &Arc<Supervisor>, id: &str, case: PinCase) {
         omp_reporter_asset: None,
         omp_launch_program: None,
         launch_hooked: false,
+        handoff_marker_expected: false,
         launch_boot_ended: false,
     };
     sup.store.insert_session(row, None).await.unwrap();

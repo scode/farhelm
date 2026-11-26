@@ -165,7 +165,8 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use farhelm_proto::grid::{
-    ClipboardTarget, ExitState, GRID_MAX_HISTORY_CAP, GridInput, GridOutput, TerminalState,
+    ClipboardTarget, ExitState, GRID_MAX_HISTORY_CAP, GridError, GridInput, GridOutput,
+    TerminalState,
 };
 use farhelm_proto::{ControlMsg, Frame};
 use farhelm_terminal_emulator::Notice;
@@ -1057,7 +1058,7 @@ impl HostAttach {
         )
     }
 
-    /// Take one data frame of viewer input: decode it, encode it from the
+    /// Take the decode result of one data frame, encode its input from the
     /// program's modes as last published, and queue the bytes for the pump,
     /// or, for a paste part, add them to the paste, which is queued whole
     /// with its last part. Returns whether the bytes submit a line, for the
@@ -1069,11 +1070,14 @@ impl HostAttach {
     /// attachment's input is broken (module docs, "Input"), and the caller
     /// tears the attachment down; a paste being collected is then never
     /// written.
-    pub(crate) fn send_input(&mut self, frame: &[u8]) -> anyhow::Result<bool> {
+    pub(crate) fn send_input(
+        &mut self,
+        input: Result<GridInput, GridError>,
+    ) -> anyhow::Result<bool> {
         if let Some(reason) = self.failure.borrow().clone() {
             anyhow::bail!(reason);
         }
-        let input = GridInput::decode(frame).context("a malformed grid input message")?;
+        let input = input.context("a malformed grid input message")?;
         let (modes, size) = {
             let status = self.status.borrow();
             (status.modes, status.size)

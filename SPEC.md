@@ -3311,35 +3311,35 @@ be in the background.
 When Farhelm loses track of a session's agent conversation in a way that will matter later, most often because Restart
 will then be unable to resume it, it says so on that session as a notification rather than only in a log. The
 session-tracking notifications cover a launch whose conversation hook should have reported which conversation the agent
-is in and has not, a minute after the first Enter the user sent it (an Enter inside a paste, or Shift+Enter, inserts a
-newline and does not count, and an Enter while the latest screen reading shows a recognized dialog does not count
-either; an outdated dialog reading can defer the clock to the next Enter; with no reading yet, the ordinary Enter rule
-applies), for an agent that reports by its first prompt (Pi and OMP report only after their first reply, which can take
-as long as the first turn, so their silence proves nothing and is not reported); a launch Farhelm could not add its
-conversation hook to, unless the user turned hooks off for that agent themselves; a Codex or Grok conversation record
-that Restart finds missing, which withdraws the resume offer; and an OMP launch whose conversation reporter does not
-match the running Farhelm, the one refused conversation report that notifies; and a Claude, Codex, Grok, Muse,
-Antigravity or custom agent launch whose selected conversation is corrected by a report from a recorded ancestor of the
-process that reported it. For Codex, Grok and custom agents, the notice says a Restart before now could have resumed the
-earlier conversation and that Farhelm now follows the conversation reported by one of that process's ancestors. The
-Claude, Muse and Antigravity notices describe what Restart would have resumed and name the agent process now followed. A
-higher recorded ancestor can still correct the choice. Every other refused report (from a subagent, from an agent
-process the session's agent started itself, overtaken by a relaunch or delete, or turned away by a passing error) is the
-system working and never notifies. A launch that still carries a conversation Farhelm captured earlier is never told
-Restart cannot resume it, because Restart can. For Grok and Antigravity, the silent-hook timer starts only when Farhelm
-verified its own hook files for that launch. After a supervisor restart, a launch that received the hook starts its
-silent-hook clock at the next qualifying Enter; launches stored before this behavior was introduced stay unchecked. Each
-notification says what happened and what the user can do about it, or, when nothing can be done, what they lose; it
-never points at a log. The silent-conversation-hook warning names the agent and when it normally reports its
-conversation, using the same timing as Restart's explanation. It says Restart cannot resume until that report arrives.
-For agents whose hooks are passed as launch arguments, the warning asks users of custom commands to check that they pass
-on `{farhelm_args}`. Grok and Antigravity's warning invites feedback from the help (?) menu, as it does for ordinary
-launches of the other agents. There is at most one notification of each such problem per launch of the session's agent.
-The warning that the agent never reported its conversation and the warning that Restart stopped offering to resume are
-marked resolved when Restart can resume that launch's conversation again, including after a supervisor restart. The
-other session-tracking kinds and notifications from earlier launches stay as they are. If a resolved problem returns in
-the same launch, its existing notification reopens at the top as new and unread, even if the user had cleared it;
-repeated checks while it remains unresolved do not repeat it.
+is in and has not, a minute after the first Enter the user sent it once the agent started. The terminal still accepts
+input during checkout preparation. Those lines, newlines inside a bracketed paste or from Shift+Enter, and Enter while
+the latest screen reading shows a recognized dialog leave the timer idle. An outdated dialog reading can defer the clock
+to the next Enter. With no reading yet, the ordinary Enter rule applies. This notification is for agents that report by
+their first prompt (Pi and OMP report only after their first reply, which can take as long as the first turn). The
+notifications also cover a launch Farhelm could not add its conversation hook to, unless the user turned hooks off for
+that agent themselves; a Codex or Grok conversation record that Restart finds missing, which withdraws the resume offer;
+and an OMP launch whose conversation reporter does not match the running Farhelm, the one refused conversation report
+that notifies; and a Claude, Codex, Grok, Muse, Antigravity or custom agent launch whose selected conversation is
+corrected by a report from a recorded ancestor of the process that reported it. For Codex, Grok and custom agents, the
+notice says a Restart before now could have resumed the earlier conversation and that Farhelm now follows the
+conversation reported by one of that process's ancestors. The Claude, Muse and Antigravity notices describe what Restart
+would have resumed and name the agent process now followed. A higher recorded ancestor can still correct the choice.
+Every other refused report (from a subagent, from an agent process the session's agent started itself, overtaken by a
+relaunch or delete, or turned away by a passing error) is the system working and never notifies. A launch that still
+carries a conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. For Grok
+and Antigravity, the silent-hook timer starts only when Farhelm verified its own hook files for that launch. After a
+supervisor restart, a launch that received the hook starts its silent-hook clock at the next qualifying Enter; launches
+stored before this behavior was introduced stay unchecked. Each notification says what happened and what the user can do
+about it, or, when nothing can be done, what they lose; it never points at a log. The silent-conversation-hook warning
+names the agent and when it normally reports its conversation, using the same timing as Restart's explanation. It says
+Restart cannot resume until that report arrives. For agents whose hooks are passed as launch arguments, the warning asks
+users of custom commands to check that they pass on `{farhelm_args}`. Grok and Antigravity's warning invites feedback
+from the help (?) menu, as it does for ordinary launches of the other agents. There is at most one notification of each
+such problem per launch of the session's agent. The warning that the agent never reported its conversation and the
+warning that Restart stopped offering to resume are marked resolved when Restart can resume that launch's conversation
+again, including after a supervisor restart. The other session-tracking kinds and notifications from earlier launches
+stay as they are. If a resolved problem returns in the same launch, its existing notification reopens at the top as new
+and unread, even if the user had cleared it; repeated checks while it remains unresolved do not repeat it.
 
 Only a launch with a resume command can receive the silent conversation hook warning. A missing report cannot take away
 Restart for a launch that already has Resume off.

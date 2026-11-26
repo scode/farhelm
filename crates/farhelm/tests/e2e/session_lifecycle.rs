@@ -5266,6 +5266,17 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => panic!("remove the session's host launch record: {error}"),
     }
+    // The launch's handoff marker (`<id>.0.handoff`, written once the shell hands
+    // the terminal to the agent command) is another artifact the same removal
+    // unlinks. basic_session waited for the agent, so the marker is already
+    // written and nothing recreates it; remove it for the same reason as the
+    // host record.
+    let handoff_marker = spec_path.with_extension("handoff");
+    match std::fs::remove_file(&handoff_marker) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("remove the launch's handoff marker: {error}"),
+    }
     let entries: Vec<_> = std::fs::read_dir(&launch_dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())

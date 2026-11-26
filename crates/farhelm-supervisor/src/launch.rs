@@ -784,6 +784,7 @@ pub(crate) struct LaunchArtifacts {
     spec: PathBuf,
     status: PathBuf,
     waypoint: PathBuf,
+    handoff: PathBuf,
     host: PathBuf,
 }
 
@@ -806,6 +807,7 @@ impl LaunchArtifacts {
             spec: spec.to_path_buf(),
             status: spec.with_extension("status"),
             waypoint: spec.with_extension("waypoint"),
+            handoff: spec.with_extension("handoff"),
             host: spec.with_extension("host"),
         }
     }
@@ -825,6 +827,12 @@ impl LaunchArtifacts {
         &self.waypoint
     }
 
+    /// The shim creates this after every terminal-consuming preparation step.
+    /// Its presence lets a supervisor count later input toward the hook warning.
+    pub(crate) fn handoff(&self) -> &Path {
+        &self.handoff
+    }
+
     /// For a launch in a terminal host: which socket the host was to bind and
     /// which first-stage process could still start it, recorded before that
     /// process is given the spec (`service::core::host_launch`, "The launch
@@ -841,6 +849,20 @@ impl LaunchArtifacts {
     fn consume_spec(&self) -> std::io::Result<()> {
         std::fs::remove_file(self.spec())
     }
+}
+
+/// Publish an empty marker in the private launch directory. An existing path
+/// can be evidence from a different attempt and must never stand in for this one.
+fn create_launch_marker(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map(drop)
 }
 
 /// Where one LAUNCH's spec file lives:
@@ -875,7 +897,7 @@ pub fn spec_path_for_launch(state_dir: &Path, id: &str, generation: i64) -> Path
 pub enum LaunchFileOf<'a> {
     /// One launch of the session's agent, by its launch generation
     /// (`store::StoredSession::generation`): every artifact the launch path
-    /// writes (spec, sentinel, waypoint, the session hold's marks and a host
+    /// writes (spec, sentinel, waypoint, handoff, the session hold's marks and a host
     /// launch's record).
     Launch(i64),
     /// One of the session's terminal tabs that runs in a terminal host, by
@@ -910,7 +932,7 @@ pub(crate) fn tab_host_record_path(state_dir: &Path, id: &str, tab_id: &str) -> 
 /// Split a launch artifact NAME back into the session id and the terminal
 /// it belongs to ([`LaunchFileOf`]), or `None` when it is not one of ours.
 ///
-/// Recognizes the `.json` spec, `.status` sentinel and `.waypoint` derived
+/// Recognizes the `.json` spec, `.status` sentinel, `.waypoint` and `.handoff` derived
 /// from [`spec_path_for_launch`], and the session hold's marks below. Sweeps
 /// and Delete use that ownership before removing anything. A session id is a UUID and
 /// contains no `.`, so splitting on the LAST two dot-separated components
@@ -918,7 +940,7 @@ pub(crate) fn tab_host_record_path(state_dir: &Path, id: &str, tab_id: &str) -> 
 /// guessed at, since an unrecognized file in this directory is not this
 /// code's to delete.
 ///
-/// Besides the spec (`.json`), its sentinel (`.status`) and its waypoint, a
+/// Besides these shim artifacts, a
 /// launch in the Mac app's version layout leaves two marks with the same stem
 /// (`crate::session_hold`'s `.held` and `.launched`), and a launch in a
 /// terminal host its host record (`.host`, [`LaunchArtifacts::host`]), so
@@ -931,7 +953,7 @@ pub fn parse_launch_file_name(name: &str) -> Option<(&str, LaunchFileOf<'_>)> {
     let (rest, extension) = name.rsplit_once('.')?;
     if !matches!(
         extension,
-        "json" | "status" | "waypoint" | "held" | "launched" | "host"
+        "json" | "status" | "waypoint" | "handoff" | "held" | "launched" | "host"
     ) {
         return None;
     }
@@ -1045,7 +1067,6 @@ pub fn exec_wrapped_launch(
     farhelm_exe: &Path,
     wrapper: &[std::ffi::OsString],
 ) -> anyhow::Error {
-    use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::process::CommandExt;
 
     let artifacts = LaunchArtifacts::from_spec_path(spec_path);
@@ -1058,24 +1079,13 @@ pub fn exec_wrapped_launch(
         ));
     };
     let waypoint = artifacts.waypoint();
-    // The directory is already private. Refuse any existing entry rather than
-    // following a symlink or accepting evidence another invocation left behind.
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(waypoint)
-    {
-        Ok(file) => drop(file),
-        Err(error) => {
-            let report = record_launch_failure(
-                status_path,
-                format!("creating scope waypoint {}: {error}", waypoint.display()),
-                &crate::files::RealFs,
-            );
-            return anyhow::Error::from(error).context(report);
-        }
+    if let Err(error) = create_launch_marker(waypoint) {
+        let report = record_launch_failure(
+            status_path,
+            format!("creating scope waypoint {}: {error}", waypoint.display()),
+            &crate::files::RealFs,
+        );
+        return anyhow::Error::from(error).context(report);
     }
     let error = std::process::Command::new(program)
         .args(arguments)
@@ -1191,11 +1201,11 @@ pub fn exec_launch_spec_with_seam(
     {
         return e;
     }
-    // This disposable shim enters the directory itself, so an entry error cannot
-    // be confused with exec failing for a missing or non-executable agent. Keep
-    // the sentinel anchored across that chdir, even for a relative internal spec.
-    let status_path = match std::path::absolute(status_path) {
-        Ok(path) => path,
+    // This disposable shim enters the directory itself and reports a failed
+    // chdir separately from failed exec. Keep both evidence paths anchored
+    // across that chdir, even for a relative internal spec.
+    let artifacts = match std::path::absolute(artifacts.spec()) {
+        Ok(path) => LaunchArtifacts::from_spec_path(&path),
         Err(error) => {
             let report = record_launch_failure(
                 status_path,
@@ -1205,10 +1215,11 @@ pub fn exec_launch_spec_with_seam(
             return anyhow::Error::from(error).context(report);
         }
     };
+    let status_path = artifacts.status();
     if let Some(directory) = &spec.working_directory
         && let Err(error) = enter_session_directory(directory)
     {
-        let report = record_launch_failure(&status_path, format!("{error:#}"), seam);
+        let report = record_launch_failure(status_path, format!("{error:#}"), seam);
         return error.context(report);
     }
     if spec.claude_workspace_trust {
@@ -1239,13 +1250,41 @@ pub fn exec_launch_spec_with_seam(
     // Farhelm tab can carry its outer `FARHELM_TAB_ID` in the child launch
     // environment. The exec scrubs it so the agent's descendants carry
     // only this launch's ownership markers.
-    let err = agent_command(&spec).exec();
+    let mut command = agent_command(&spec);
+    // Interactive preparation is over, so every later line in this terminal
+    // is for the agent. Publish only after the directory and trust work.
+    let handoff = artifacts.handoff();
+    let marked_handoff = match create_launch_marker(handoff) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Starting on top of an occupied path could let an earlier
+            // attempt qualify input for this launch.
+            let report = record_launch_failure(
+                status_path,
+                format!("creating launch handoff: {error}"),
+                seam,
+            );
+            return anyhow::Error::from(error).context(report);
+        }
+        Err(error) => {
+            // The marker is diagnostic evidence. An unwritable marker
+            // leaves the warning unarmed while the agent can still start.
+            tracing::warn!(%error, "could not record the launch handoff");
+            false
+        }
+    };
+    let err = command.exec();
+    // Failed exec leaves no agent to accept a line. Settled-launch cleanup
+    // will retry the unlink if the shim cannot remove it.
+    if marked_handoff && let Err(error) = std::fs::remove_file(handoff) {
+        tracing::warn!(%error, "could not clear the failed launch's handoff marker");
+    }
     let report = format!(
         "exec_failed argv0={} errno={}: {err}",
         spec.argv[0],
         err.raw_os_error().unwrap_or(-1)
     );
-    let report = record_launch_failure(&status_path, report, seam);
+    let report = record_launch_failure(status_path, report, seam);
     anyhow::Error::from(err).context(report)
 }
 
@@ -3141,6 +3180,11 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(mode, 0o600, "sentinel must be 0600, got {mode:o}");
+        assert!(
+            !LaunchArtifacts::from_spec_path(&spec_path)
+                .handoff()
+                .exists()
+        );
 
         // The spec itself must always be gone by this point, success or
         // failure — it carries the agent's full command line.
@@ -4376,14 +4420,18 @@ exec sleep 60
             "witness-trust-write" => {
                 // Observe the real durable write from a second open of the
                 // checkout flock. Checking after exec would miss its lifetime.
-                struct WitnessTrustWrite(PathBuf);
+                struct WitnessTrustWrite {
+                    lock: PathBuf,
+                    handoff: PathBuf,
+                }
                 impl crate::files::FaultSeam for WitnessTrustWrite {
                     fn write(&self, file: &mut std::fs::File, bytes: &[u8]) -> std::io::Result<()> {
                         if let Ok(record) = serde_json::from_slice::<PreparationRecord>(bytes)
                             && let Some(trust) = record.claude_trust
                         {
                             assert_eq!(record.state, PreparationState::Ready);
-                            assert!(!PreparationLock::open(&self.0)?.try_acquire()?);
+                            assert!(!PreparationLock::open(&self.lock)?.try_acquire()?);
+                            assert!(!self.handoff.exists(), "trust work still precedes handoff");
                             assert_eq!(std::fs::read_to_string(trust.config_path)?, "{}");
                             eprintln!("TRUST-RECORD-WRITTEN-UNDER-LOCK");
                         }
@@ -4393,7 +4441,8 @@ exec sleep 60
                 let spec: LaunchSpec =
                     serde_json::from_slice(&std::fs::read(&spec_path).unwrap()).unwrap();
                 let lock = preparation_lock_path(&spec.preparation.unwrap().state_path);
-                exec_launch_spec_with_seam(&spec_path, &WitnessTrustWrite(lock))
+                let handoff = LaunchArtifacts::from_spec_path(&spec_path).handoff;
+                exec_launch_spec_with_seam(&spec_path, &WitnessTrustWrite { lock, handoff })
             }
             "fail-at-write" => {
                 struct FailEveryWrite;
@@ -4607,6 +4656,7 @@ printf 'AGENT-RAN\n'
     /// Only the Claude launch opt-in can edit the child's selected vendor config.
     /// Retained specs can still contain the old checkout-wide switch. A fresh
     /// Claude launch records its edit under the flock so archive can undo it.
+    /// Handoff follows that edit and is already visible to the agent at exec.
     #[farhelm_testtrace::test]
     fn claude_trust_launch_is_opt_in_and_best_effort_after_ready() {
         for (enabled, content, child) in [
@@ -4615,6 +4665,11 @@ printf 'AGENT-RAN\n'
             (true, "[]", "real"),
         ] {
             let fixture = build_d1_fixture(Some("true".into()));
+            let artifacts = LaunchArtifacts::from_spec_path(&fixture.spec_path);
+            fixture.install_script(
+                "fake-agent",
+                "#!/bin/sh\n[ -f \"$TEST_HANDOFF_PATH\" ] || exit 19\nprintf 'AGENT-RAN\\n'\n",
+            );
             let config_dir = fixture.tmp.path().join("vendor-config");
             std::fs::create_dir(&config_dir).unwrap();
             let config = config_dir.join(".claude.json");
@@ -4635,6 +4690,7 @@ printf 'AGENT-RAN\n'
                     ("CLAUDE_CONFIG_DIR", config_dir.as_os_str()),
                     ("HOME", fixture.tmp.path().as_os_str()),
                     (PREP_CHILD_KIND, std::ffi::OsStr::new(child)),
+                    ("TEST_HANDOFF_PATH", artifacts.handoff().as_os_str()),
                 ],
                 &["CLAUDE_CODE_CUSTOM_OAUTH_URL"],
             );
@@ -4709,6 +4765,7 @@ printf 'AGENT-RAN\n'
         let mut spec: LaunchSpec =
             serde_json::from_slice(&std::fs::read(&fixture.spec_path).unwrap()).unwrap();
         spec.claude_workspace_trust = true;
+        let artifacts = LaunchArtifacts::from_spec_path(&fixture.spec_path);
         let launch = |config_dir: &Path| {
             std::fs::write(&fixture.spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
             let (report, terminal, status) = fixture.run_written_shim_in_child(
@@ -4724,6 +4781,9 @@ printf 'AGENT-RAN\n'
                 "{terminal}\n{report}"
             );
             assert!(terminal.contains("AGENT-RAN"), "{terminal}");
+            // The child has exited. The service clears this marker before
+            // retaking the create, which this shim-only fixture models here.
+            std::fs::remove_file(artifacts.handoff()).expect("clear the completed attempt");
             terminal
         };
         assert_eq!(fixture.state().unwrap(), PreparationState::NotStarted);
@@ -4846,6 +4906,7 @@ printf 'AGENT-RAN\n'
         spec.preparation = None;
         spec.working_directory = Some(project.clone());
         spec.claude_workspace_trust = true;
+        let artifacts = LaunchArtifacts::from_spec_path(&fixture.spec_path);
 
         for (home, notice) in [
             (None, "HOME is unset"),
@@ -4867,7 +4928,7 @@ printf 'AGENT-RAN\n'
             } else {
                 removed.push("HOME");
             }
-            // Each launch consumes its spec, so each shell configuration needs a fresh copy.
+            // Each configuration models a new attempt with a fresh spec.
             std::fs::write(&fixture.spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
             let (report, terminal, status) =
                 fixture.run_written_shim_in_child(None, &env, &removed);
@@ -4880,6 +4941,8 @@ printf 'AGENT-RAN\n'
                 "{terminal}"
             );
             assert_eq!(std::fs::read_to_string(&config).unwrap(), "{}");
+            // The service clears attempt artifacts before reusing the path.
+            std::fs::remove_file(artifacts.handoff()).unwrap();
         }
 
         let canonical = std::fs::canonicalize(&project).unwrap();
@@ -5408,11 +5471,13 @@ printf 'AGENT-RAN\n'
     /// and the hook's echo proves it did not run again either.
     #[farhelm_testtrace::test]
     fn d3_ready_restart_skips_clone_and_hook() {
-        let (fixture, report1, terminal1, _status) =
+        let (mut fixture, report1, terminal1, _status) =
             run_d1_style_fixture(Some("echo hook-body-ran".to_string()));
         let marker = fixture.marker();
         assert!(report1.is_empty(), "first run must succeed: {report1}");
         assert_eq!(fixture.state().unwrap(), PreparationState::Ready);
+        // A Restart shares the checkout record and names a new launch generation.
+        fixture.spec_path = fixture.spec_path.with_file_name("prep-session.1.json");
         let (report2, terminal2, _status) = fixture.run_shim_in_child();
         assert!(report2.is_empty(), "restart must succeed: {report2}");
         assert_eq!(fixture.state().unwrap(), PreparationState::Ready);
