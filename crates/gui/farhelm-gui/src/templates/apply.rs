@@ -39,13 +39,11 @@
 //! snapshot reports the draft's target and no host while one is set, as the old `launcher_snapshot` did, so the host
 //! the Host row keeps underneath a new environment is never captured.
 
-use std::collections::BTreeMap;
-
 use farhelm_proto::launcher::{
     LaunchTemplate, LauncherKind, LauncherState, TemplateContext, TemplateDestination,
     TemplateFields, TemplateRefusal, apply_template,
 };
-use farhelm_proto::ui_channel::{HostStateView, HostView};
+use farhelm_proto::ui_channel::{HostStateView, HostView, Preferences};
 use farhelm_proto::{
     GithubRepo, LaunchHarness, LaunchPermission, Place, RepoError, parse_github_repo,
     split_permission_flags, split_wrapper_prefix,
@@ -65,9 +63,10 @@ pub struct Context<'a> {
     /// The model catalog as the launcher read it; `None` while it has not answered, which checks only what each agent
     /// type itself declares (as an unread catalog does for a hand edit).
     pub catalog: Catalog<'a>,
-    /// The wrapper prefix the helm remembers per agent type (`Preferences::remembered_wrapper_prefixes`), which a
-    /// template's agent type loads exactly as picking that agent by hand does.
-    pub remembered_wrappers: &'a BTreeMap<LaunchHarness, Vec<String>>,
+    /// The helm's pushed preferences, read here only for the wrapper prefixes it remembers per built-in agent type and
+    /// per custom agent registration (`Preferences::remembered_wrapper`), which a template's agent loads exactly as
+    /// picking that agent by hand does.
+    pub remembered: &'a Preferences,
     /// The folder New would seed for a host, which a template's host change re-seeds into a folder the user has not
     /// typed or picked ([`LaunchDraft::choose_host`]). The launcher owns that precedence (the open session's folder,
     /// the newest recent setup, `~`), so it is passed in rather than recomputed here.
@@ -489,8 +488,7 @@ fn replay(
     context: &Context<'_>,
     notice: &mut Option<Option<String>>,
 ) {
-    let remembered =
-        |harness: LaunchHarness| context.remembered_wrappers.get(&harness).map(Vec::as_slice);
+    let remembered = |harness: LaunchHarness| context.remembered.remembered_wrapper(harness, None);
 
     // 1. The launch kind, before anything else: the same agent field means an agent launch's choice or a command's
     // declared agent depending on it.
@@ -540,6 +538,15 @@ fn replay(
                     draft.agent.model.clone_from(&applied.model);
                     draft.agent.model_owner = applied.model_owner;
                     draft.agent.custom_effort.clear();
+                    // Another registration is another agent: its own remembered prefix replaces the old one's, as
+                    // `LaunchDraft::choose_custom_agent` does for a hand pick. A wrapper the template names is applied
+                    // after this and still wins.
+                    let wrapper = draft.agent.harness.and_then(|harness| {
+                        context
+                            .remembered
+                            .remembered_wrapper(harness, applied.custom_agent.as_deref())
+                    });
+                    draft.load_remembered_wrapper(wrapper);
                 }
                 draft.agent.custom_agent.clone_from(&applied.custom_agent);
             }

@@ -252,7 +252,8 @@ pub struct AgentChoices {
     pub permissions_explicit: bool,
     /// The Custom flags editor's raw text.
     pub permission_flags: String,
-    /// The wrapper prefix editor's raw text, loaded from the agent type's remembered prefix on an agent switch.
+    /// The wrapper prefix editor's raw text, loaded from the new agent's remembered prefix on a switch of agent type or
+    /// of custom agent registration.
     pub wrapper: String,
     /// Whether `wrapper` is the user's own choice: typed or cleared by hand, set by a launch template, or restored with
     /// a Clone's launch. A remembered prefix an agent switch loaded is not, so Save as template offers it unchecked
@@ -755,9 +756,11 @@ impl LaunchDraft {
 
     /// Choose `harness` as the agent type: the choices made for another type are reconciled (incompatible ones
     /// cleared, with a notice for any the user had chosen deliberately), the new type's remembered wrapper prefix
-    /// loads, the old conversation selector and Custom flags are cleared, and the tab becomes Agent. `remembered_wrapper` is the prefix the helm
-    /// remembers for `harness` (`Preferences::remembered_wrapper_prefixes`), as shell words. In Restart with, which
-    /// holds the agent type and the launch kind, anything but the same agent on the Agent tab is refused.
+    /// loads, the old conversation selector and Custom flags are cleared, and the tab becomes Agent.
+    /// `remembered_wrapper` is the prefix the helm remembers for `harness` (`Preferences::remembered_wrapper`), as
+    /// shell words; for the custom catalog it is none, since a custom agent's prefix belongs to its registration and
+    /// [`Self::choose_custom_agent`] loads it. In Restart with, which holds the agent type and the launch kind,
+    /// anything but the same agent on the Agent tab is refused.
     pub fn choose_harness(
         &mut self,
         harness: LaunchHarness,
@@ -770,7 +773,10 @@ impl LaunchDraft {
     }
 
     /// The custom catalog groups many registrations under the same harness. Switching within that group
-    /// clears values typed for the old integration, including its one-time conversation ID.
+    /// clears values typed for the old integration, including its one-time conversation ID, and loads the new
+    /// registration's remembered wrapper prefix in place of whatever the old one had, chosen by hand or not, exactly as
+    /// a switch between agent types does. `remembered_wrapper` is the prefix the helm remembers for `agent`'s
+    /// registration (`Preferences::remembered_wrapper`), never one shared by every custom agent.
     pub fn choose_custom_agent(
         &mut self,
         agent: &farhelm_proto::custom_agents::CustomAgent,
@@ -783,13 +789,16 @@ impl LaunchDraft {
                 ..Edit::default()
             };
         }
-        let mut edit = self.choose_harness(LaunchHarness::Custom, catalog, remembered_wrapper);
+        // The registration branch below loads this agent's prefix: a switch from another agent type always reaches
+        // it, because that switch clears the chosen registration.
+        let mut edit = self.choose_harness(LaunchHarness::Custom, catalog, None);
         if self.agent.custom_agent.as_deref() != Some(agent.id.as_str()) {
             self.agent.custom_agent = Some(agent.id.clone());
             self.agent.model = None;
             self.agent.model_owner = None;
             self.agent.custom_effort.clear();
             self.conversation.clear();
+            self.load_remembered_wrapper(remembered_wrapper);
             edit.switched_agent = true;
         }
         self.agent.custom_registration = CustomRegistration::of(agent);
@@ -850,8 +859,7 @@ impl LaunchDraft {
         let switched_agent = before.agent.harness != Some(harness);
         if switched_agent {
             self.conversation.clear();
-            self.agent.wrapper = joined(remembered_wrapper);
-            self.agent.wrapper_explicit = false;
+            self.load_remembered_wrapper(remembered_wrapper);
             self.agent.permission_flags = String::new();
             self.agent.custom_agent = None;
             self.agent.custom_registration = CustomRegistration::Loading;
@@ -862,6 +870,13 @@ impl LaunchDraft {
             switched_agent,
             escalation: self.escalation_since(&before),
         }
+    }
+
+    /// Put the newly chosen agent's remembered wrapper prefix in the wrapper field, replacing the previous agent's,
+    /// and mark it as not chosen by hand: a prefix typed for one agent says nothing about another.
+    pub fn load_remembered_wrapper(&mut self, remembered_wrapper: Option<&[String]>) {
+        self.agent.wrapper = joined(remembered_wrapper);
+        self.agent.wrapper_explicit = false;
     }
 
     /// A custom model id typed into the model field for the chosen agent type, which never changes the type (SPEC.md:

@@ -509,6 +509,55 @@ fn an_agent_switch_loads_its_remembered_wrapper() {
     assert_eq!(draft.agent.wrapper, "");
 }
 
+/// Each registered custom agent loads its own remembered wrapper prefix when picked, replacing whatever the previous
+/// agent had, typed by hand or remembered; picking the same agent again keeps what the user typed, and leaving for a
+/// built-in type loads that type's prefix.
+///
+/// Why: every custom agent once shared one remembered prefix, and a switch between two custom agents did not touch
+/// the wrapper at all, so one agent's wrapper (a credential-injecting `env`, say) silently ran in front of another.
+#[test]
+fn each_custom_agent_loads_its_own_remembered_wrapper() {
+    let agent = |id: &str| farhelm_proto::custom_agents::CustomAgent {
+        id: id.into(),
+        display_name: id.into(),
+        command: id.into(),
+        supports_resumption: false,
+        supports_reporting: false,
+    };
+    let acme_wrap = vec!["acme-env".to_owned(), "--".to_owned()];
+    let codex_wrap = vec!["nice".to_owned()];
+    let mut draft = new_draft();
+    draft.choose_custom_agent(&agent("acme"), None, Some(&acme_wrap));
+    assert_eq!(draft.agent.wrapper, "acme-env --");
+    assert!(!draft.agent.wrapper_explicit);
+
+    draft.edit_wrapper("typed-for-acme".into());
+    draft.choose_custom_agent(&agent("acme"), None, Some(&acme_wrap));
+    assert_eq!(
+        draft.agent.wrapper, "typed-for-acme",
+        "the same agent again keeps the typed prefix"
+    );
+
+    let edit = draft.choose_custom_agent(&agent("beta"), None, None);
+    assert!(edit.switched_agent);
+    assert_eq!(
+        draft.agent.wrapper, "",
+        "beta remembers no prefix, so acme's typed one is gone"
+    );
+    assert!(
+        !draft.agent.wrapper_explicit,
+        "the previous explicit choice is cleared"
+    );
+
+    draft.choose_custom_agent(&agent("acme"), None, Some(&acme_wrap));
+    assert_eq!(draft.agent.wrapper, "acme-env --");
+    draft.choose_harness(LaunchHarness::Codex, None, Some(&codex_wrap));
+    assert_eq!(
+        draft.agent.wrapper, "nice",
+        "a built-in type loads its own prefix"
+    );
+}
+
 /// Custom flags belong to the agent they were written for: switching agents drops them, and so does choosing another
 /// permission, while their text is kept as typed even when it does not parse (SPEC.md: "Changing agent type clears
 /// custom and its words").

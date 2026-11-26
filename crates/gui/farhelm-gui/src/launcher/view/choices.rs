@@ -97,22 +97,21 @@ impl Launcher {
         self.changed(cx);
     }
 
-    /// The prefix the helm remembers for `harness`, from the pushed preferences.
+    /// The prefix the helm remembers for `harness`, from the pushed preferences. For the custom catalog it is the
+    /// prefix of the registration `custom_agent` names, and none when no registration is chosen
+    /// (`Preferences::remembered_wrapper`).
     pub(super) fn remembered_wrapper(
         &self,
         harness: LaunchHarness,
+        custom_agent: Option<&str>,
         cx: &App,
     ) -> Option<Vec<String>> {
         self.store
             .read(cx)
             .collections()
             .get::<Preferences>(PREFERENCES_KEY)
-            .and_then(|preferences| {
-                preferences
-                    .remembered_wrapper_prefixes
-                    .get(&harness)
-                    .cloned()
-            })
+            .and_then(|preferences| preferences.remembered_wrapper(harness, custom_agent))
+            .map(<[String]>::to_vec)
     }
 
     pub(super) fn choose_harness(
@@ -121,7 +120,7 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let wrapper = self.remembered_wrapper(harness, cx);
+        let wrapper = self.remembered_wrapper(harness, None, cx);
         let edit = self
             .draft
             .choose_harness(harness, self.catalog.as_deref(), wrapper.as_deref());
@@ -158,7 +157,7 @@ impl Launcher {
             cx.notify();
             return;
         };
-        let wrapper = self.remembered_wrapper(LaunchHarness::Custom, cx);
+        let wrapper = self.remembered_wrapper(LaunchHarness::Custom, Some(id), cx);
         let edit =
             self.draft
                 .choose_custom_agent(&agent, self.catalog.as_deref(), wrapper.as_deref());

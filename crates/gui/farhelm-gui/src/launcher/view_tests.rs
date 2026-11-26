@@ -2504,6 +2504,73 @@ fn an_agent_switch_shows_an_unsafe_remembered_prefix_escaped(cx: &mut TestAppCon
     assert_eq!(wrapper(cx), "with-endpoint --profile 'codex profile' --");
 }
 
+/// Clicking a custom agent's chip loads the prefix the helm remembers for that registration, from the pushed
+/// preferences, and clicking another custom agent's chip replaces it with that agent's own (here none). Specified: with
+/// a prefix remembered only for `acme-code`, its chip shows that prefix in the wrapper field; `beta-code`'s chip empties
+/// the field; `acme-code`'s chip loads its prefix again.
+///
+/// Why: the bug this guards lived in this wiring. Every custom agent once read one shared remembered prefix, and a
+/// switch between two custom agents left the field alone, so one agent's wrapper ran in front of another.
+#[gpui::test]
+fn each_custom_agents_chip_loads_its_own_remembered_wrapper(cx: &mut TestAppContext) {
+    let acme = acme_agent();
+    let beta = farhelm_proto::custom_agents::CustomAgent {
+        id: "beta-code".into(),
+        display_name: "Beta Code".into(),
+        command: "beta-code".into(),
+        ..acme_agent()
+    };
+    let remembered =
+        crate::session_list::tests::preferences_state(farhelm_proto::ui_channel::Preferences {
+            welcome_seen: Some(true),
+            remembered_custom_wrapper_prefixes: [(
+                acme.id.clone(),
+                vec!["env".into(), "ACME_TOKEN_FILE=~/acme".into(), "--".into()],
+            )]
+            .into(),
+            ..Default::default()
+        });
+    let (_helm, cx) = launcher_over(
+        cx,
+        LaunchDraft::new(Some(1), "~".into(), None),
+        vec![
+            hosts(),
+            remembered,
+            CollectionState {
+                collection: Collection::CustomAgents,
+                meta: meta(&[&acme.id, &beta.id]),
+                entries: [&acme, &beta]
+                    .into_iter()
+                    .map(|agent| KeyedEntry {
+                        key: agent.id.clone(),
+                        value: serde_json::to_value(agent).unwrap(),
+                    })
+                    .collect(),
+            },
+        ],
+    );
+    let wrapper = |cx: &mut VisualTestContext| {
+        read(cx, |launcher, _, cx| launcher.wrapper.text(cx).to_string())
+    };
+    assert_eq!(
+        wrapper(cx),
+        "",
+        "premise: nothing is loaded before an agent is picked"
+    );
+    click_in_body(cx, "launcher-custom-acme-code");
+    assert_eq!(draft(cx).agent.custom_agent.as_deref(), Some("acme-code"));
+    assert_eq!(wrapper(cx), "env ACME_TOKEN_FILE=~/acme --");
+    click_in_body(cx, "launcher-custom-beta-code");
+    assert_eq!(draft(cx).agent.custom_agent.as_deref(), Some("beta-code"));
+    assert_eq!(
+        wrapper(cx),
+        "",
+        "beta-code remembers no prefix, so acme-code's is gone"
+    );
+    click_in_body(cx, "launcher-custom-acme-code");
+    assert_eq!(wrapper(cx), "env ACME_TOKEN_FILE=~/acme --");
+}
+
 /// The Agent tab's other launch text is spelled out as the old launcher showed it (`view::shown_text`): a model a draft
 /// carries in the closed model field, Custom flags in an editable escaped spelling, and the initial prompt read-only
 /// behind Clear initial prompt. Why: such text comes from a source session or a template, and shown raw it could hide

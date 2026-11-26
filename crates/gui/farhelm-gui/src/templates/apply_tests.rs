@@ -13,7 +13,7 @@ use farhelm_proto::launcher::{
     TemplateNameKind,
 };
 use farhelm_proto::session_requests::RestartSessionBody;
-use farhelm_proto::ui_channel::{HostStateView, HostView, SessionRow};
+use farhelm_proto::ui_channel::{HostStateView, HostView, Preferences, SessionRow};
 use farhelm_proto::{
     CommandLaunch, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, LaunchTarget,
     Place, RestartOffer, SessionInfo, SessionLaunch,
@@ -80,7 +80,7 @@ fn default_folder(host: i64) -> String {
 struct Fixture {
     hosts: Vec<HostView>,
     catalog: Vec<LaunchCatalogModel>,
-    wrappers: BTreeMap<LaunchHarness, Vec<String>>,
+    preferences: Preferences,
     recipes: Vec<String>,
 }
 
@@ -89,10 +89,13 @@ impl Fixture {
         Fixture {
             hosts: hosts(),
             catalog: catalog(),
-            wrappers: BTreeMap::from([(
-                LaunchHarness::Codex,
-                vec!["env".into(), "FOO='a b'".into()],
-            )]),
+            preferences: Preferences {
+                remembered_wrapper_prefixes: BTreeMap::from([(
+                    LaunchHarness::Codex,
+                    vec!["env".into(), "FOO='a b'".into()],
+                )]),
+                ..Preferences::default()
+            },
             recipes: vec!["web".into(), "api".into()],
         }
     }
@@ -101,7 +104,7 @@ impl Fixture {
         Context {
             hosts: &self.hosts,
             catalog: Some(&self.catalog),
-            remembered_wrappers: &self.wrappers,
+            remembered: &self.preferences,
             default_folder: &default_folder,
             known_recipes: &self.recipes,
         }
@@ -170,6 +173,60 @@ fn custom_agent_template_replays_the_saved_registration_and_effort() {
     let changed = draft.agent_selection().unwrap();
     assert_eq!(changed.custom_agent.as_deref(), Some("other-code"));
     assert_eq!((changed.model, changed.effort), (None, None));
+}
+
+/// A template that names a registered custom agent loads that registration's remembered wrapper prefix, replacing the
+/// previous agent's the way picking the agent by hand does (`each_custom_agent_loads_its_own_remembered_wrapper` covers
+/// the hand pick); a wrapper the template names itself, or its explicit clear, overrides the remembered one.
+///
+/// Why: templates replay hand edits, and the wrapper memory is now per registration. Loading the shared slot, or
+/// nothing, would let one custom agent's wrapper ride along into another's launch.
+#[test]
+fn a_templates_custom_agent_loads_that_registrations_wrapper() {
+    let mut fixture = Fixture::new();
+    fixture.preferences.remembered_custom_wrapper_prefixes = BTreeMap::from([
+        ("acme".to_owned(), vec!["acme-env".to_owned()]),
+        ("beta".to_owned(), vec!["beta-env".to_owned()]),
+    ]);
+    let pick = |id: &str, wrapper_prefix: Option<Option<Vec<String>>>| {
+        template(
+            id,
+            TemplateFields {
+                agent: Some(LaunchHarness::Custom),
+                custom_agent: Some(Some(id.into())),
+                wrapper_prefix,
+                ..TemplateFields::default()
+            },
+        )
+    };
+    let mut draft = new_draft();
+    fixture.apply(&mut draft, &[pick("acme", None)]).unwrap();
+    assert_eq!(draft.agent.wrapper, "acme-env");
+    draft.edit_wrapper("typed".into());
+    fixture.apply(&mut draft, &[pick("beta", None)]).unwrap();
+    assert_eq!(
+        draft.agent.wrapper, "beta-env",
+        "another registration replaces the typed prefix"
+    );
+    assert!(!draft.agent.wrapper_explicit);
+
+    fixture
+        .apply(
+            &mut draft,
+            &[pick("acme", Some(Some(vec!["template-wrap".into()])))],
+        )
+        .unwrap();
+    assert_eq!(
+        draft.agent.wrapper, "template-wrap",
+        "the template's own prefix wins"
+    );
+    fixture
+        .apply(&mut draft, &[pick("beta", Some(None))])
+        .unwrap();
+    assert_eq!(
+        draft.agent.wrapper, "",
+        "the template's explicit clear wins"
+    );
 }
 
 /// A template switch uses the effort the custom field shows. A word Claude can use stays, while a custom-only
@@ -421,9 +478,8 @@ fn a_templates_agent_loads_its_remembered_wrapper_prefix() {
         LaunchHarness::Codex,
         Some(&fixture.catalog),
         fixture
-            .wrappers
-            .get(&LaunchHarness::Codex)
-            .map(Vec::as_slice),
+            .preferences
+            .remembered_wrapper(LaunchHarness::Codex, None),
     );
     let mut by_template = new_draft();
     let codex = template(
@@ -539,9 +595,8 @@ fn a_model_picks_its_only_agent_and_a_custom_id_keeps_its_owner() {
         "gpt-6-luna",
         Some(&fixture.catalog),
         fixture
-            .wrappers
-            .get(&LaunchHarness::Codex)
-            .map(Vec::as_slice),
+            .preferences
+            .remembered_wrapper(LaunchHarness::Codex, None),
     );
     assert_eq!(
         draft, by_hand,

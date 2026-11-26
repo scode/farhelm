@@ -9524,7 +9524,9 @@ Switching agent types loads that type's remembered words; Clone, Replace with an
 selection. A template with no prefix edit leaves the current draft alone, while explicit null empties it. Save as
 template offers the current prefix but checks it only when the user explicitly changed or cleared it, so a passive
 remembered value does not become a template edit. Quick launch uses the same snapshot and submit path as New. Restart
-with keeps its own raw input and updates its selection only after parsing succeeds; an invalid edit cannot be sent.
+with keeps its own raw input and updates its selection only after parsing succeeds; an invalid edit cannot be sent. A
+custom agent's remembered words are its registration's, so a switch between two custom agents, by hand or by template,
+loads them the same way.
 
 More options is view state. Folding it leaves its text inputs and draft values intact. Its summary renders escaped
 values separately and uses the terminal face for the wrapper. The request prerequisites also drive its inline warnings,
