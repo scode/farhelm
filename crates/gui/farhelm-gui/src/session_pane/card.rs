@@ -68,6 +68,7 @@ use gpui::{
 use super::SessionPane;
 use crate::components::{self, Button, HoverHelp, Ring, Tier};
 use crate::focus::Mark;
+use crate::host_text::HostSentence;
 use crate::operations::Work;
 use crate::prompt::{self, Inline, ShownAction};
 use crate::session::{self, ObservingCurrent, PerSession};
@@ -271,7 +272,8 @@ fn offers_replace_with(row: &SessionRow) -> bool {
 
 /// Name the reason the pane has no terminal and what each recovery action does. An interrupted session keeps the
 /// explanation about a reboot or update. The missing-terminal report does not identify a cause.
-pub(crate) fn text(row: &SessionRow) -> String {
+/// A hook setup error stays separate from the card's recovery instructions when it is drawn.
+fn text(row: &SessionRow) -> HostSentence {
     let offer = row.info.restart_offer;
     let lead = match row.info.status {
         SessionStatus::Interrupted if row.info.launch.is_shell() => {
@@ -288,35 +290,30 @@ pub(crate) fn text(row: &SessionRow) -> String {
              never started, or could not be found on its host"
         }
     };
-    let clause = restart::offer_clause(row, true);
-    let note = restart::feedback_note(&row.info, true);
-    // A legacy session's card offers Replace with, never plain Replace, so its text must not promise that "Replace
-    // starts it over".
-    if offers_replace_with(row) {
-        return if offer.can_restart() {
-            format!(
-                "{lead}. Farhelm will wait for you to choose Restart or Replace with \
-                 — {clause}."
-            )
-        } else if offer == RestartOffer::NotCaptured {
-            let start_over = "Replace with opens the launcher with its command to start it over";
-            let clause = restart::not_captured_clause(&row.info, true, start_over);
-            format!("{lead}. Farhelm will wait for you to choose Replace with — {clause}.{note}")
-        } else {
-            format!(
-                "{lead}. Farhelm will wait for you to choose Replace with — this session was created before launch \
-                 kinds, so it cannot resume, and Replace with opens the launcher with its command to start it over."
-            )
-        };
-    }
-    if offer.can_restart() {
-        format!(
-            "{lead}. Farhelm will wait for you to choose Restart or Replace — \
-             {clause}."
-        )
+    // The source's launch kind determines which Replace action the card can actually offer.
+    let legacy = offers_replace_with(row);
+    let replace = if legacy { "Replace with" } else { "Replace" };
+    let restart = if offer.can_restart() {
+        "Restart or "
     } else {
-        format!("{lead}. Farhelm will wait for you to choose Replace — {clause}.{note}")
-    }
+        ""
+    };
+    let sentence = HostSentence::new("session-recovery-reason").text(format!(
+        "{lead}. Farhelm will wait for you to choose {restart}{replace} — "
+    ));
+    let sentence = if !legacy || offer.can_restart() {
+        restart::offer_clause(sentence, row, true, false)
+    } else if offer == RestartOffer::NotCaptured {
+        let start_over = "Replace with opens the launcher with its command to start it over";
+        restart::not_captured_clause(sentence, &row.info, true, start_over, false)
+    } else {
+        sentence.text(
+            "this session was created before launch kinds, so it cannot resume, and Replace with opens the launcher with its command to start it over",
+        )
+    };
+    sentence
+        .text(".")
+        .text(restart::feedback_note(&row.info, true))
 }
 
 // ---- Following the store ---------------------------------------------------------------------------------------------
@@ -428,6 +425,7 @@ pub(crate) fn draw(
     // Replace stays drawn pressed rather than unavailable, so focus can rest on it and come back to it on Escape.
     let busy = menu::refused(key, cx) && !asking;
     let text = text(row);
+    let name = text.accessible_name();
     let ink = theme::color(palette.fg_0);
     let mut lines: Vec<AnyElement> = Vec::new();
     for work in [Work::Restart, Work::Replace] {
@@ -458,7 +456,10 @@ pub(crate) fn draw(
             Button::new(
                 "session-card-restart",
                 "Restart",
-                HoverHelp::tooltip(wait.map_or_else(|| restart::hover_help(row), str::to_owned)),
+                wait.map_or_else(
+                    || HoverHelp::sentence(restart::hover_help(row, "recovery-restart-help")),
+                    HoverHelp::tooltip,
+                ),
                 Role::Button,
             )
             .help_below()
@@ -547,7 +548,7 @@ pub(crate) fn draw(
                 .w_full()
                 .text_size(metrics::TEXT_MD)
                 .line_height(relative(1.5))
-                .child(text.clone()),
+                .child(text.named_by_parent()),
         )
         .children(lines)
         .children(buttons)
@@ -566,7 +567,7 @@ pub(crate) fn draw(
         "session-interrupted-card",
         focus,
         Role::Group,
-        text.into(),
+        name,
         ring,
         window,
         cx,
@@ -640,6 +641,11 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+
+    /// Compare the card's accessible words. The runtime tests separately exercise direction isolation when drawn.
+    fn text(row: &SessionRow) -> String {
+        super::text(row).accessible_name().to_string()
+    }
 
     /// A row interrupted with `offer` for an agent of `kind`, launched as `launch` when one is given.
     fn row(offer: &str, kind: &str, launch: Option<Value>) -> SessionRow {

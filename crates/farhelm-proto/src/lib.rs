@@ -935,15 +935,38 @@ pub enum PersistentHookSetup {
     },
 }
 
+/// The explanation of a missing hook setup, still split at the boundary between app and host text.
+pub struct RestartHookBlocker<'a> {
+    /// Authored explanation, ending with the opening parenthesis when there is a host error.
+    pub message: String,
+    /// Unescaped host error. The caller supplies its own display escaping and direction isolation.
+    pub host_error: Option<&'a str>,
+}
+
 impl PersistentHookSetup {
     /// Session snapshots omit the default so older stored rows and launches without setup use the same shape.
     pub fn is_not_requested(&self) -> bool {
         matches!(self, Self::NotRequested)
     }
 
-    /// Explain a missing or failed setup for an uncaptured session. An installed hook uses ordinary report timing.
-    /// The reason is escaped for the terminal and desktop because it can include a path supplied by the host.
+    /// Format a missing or failed hook setup for a terminal, escaping any host-supplied error.
     pub fn restart_blocker(&self, kind: AgentKind, wording: ReadinessWording) -> Option<String> {
+        self.restart_blocker_parts(kind, wording).map(|parts| {
+            if let Some(reason) = parts.host_error {
+                format!("{}{})", parts.message, crate::text::escaped(reason))
+            } else {
+                parts.message
+            }
+        })
+    }
+
+    /// Explain a missing or failed setup for an uncaptured session. Installed hooks use ordinary report timing.
+    /// Keep the raw error apart so the desktop can isolate it without treating it as part of the app's prose.
+    pub fn restart_blocker_parts(
+        &self,
+        kind: AgentKind,
+        wording: ReadinessWording,
+    ) -> Option<RestartHookBlocker<'_>> {
         if !kind.offers_persistent_hooks() {
             return None;
         }
@@ -955,14 +978,17 @@ impl PersistentHookSetup {
                     ReadinessWording::ToTheUser => "Turn on hook setup",
                     ReadinessWording::Neutral => "The user can turn on hook setup",
                 };
-                Some(format!(
-                    "Farhelm did not set up its {name} conversation hooks for this session. {instruction} in Settings → Agents → {name} and start a new session"
-                ))
+                Some(RestartHookBlocker {
+                    message: format!(
+                        "Farhelm did not set up its {name} conversation hooks for this session. {instruction} in Settings → Agents → {name} and start a new session"
+                    ),
+                    host_error: None,
+                })
             }
-            Self::Failed { reason } => Some(format!(
-                "Farhelm could not set up its {name} conversation hooks ({})",
-                crate::text::escaped(reason),
-            )),
+            Self::Failed { reason } => Some(RestartHookBlocker {
+                message: format!("Farhelm could not set up its {name} conversation hooks ("),
+                host_error: Some(reason),
+            }),
         }
     }
 }
@@ -5851,7 +5877,8 @@ mod tests {
     }
 
     /// A not-yet-captured launch distinguishes missing consent, a failed installation, and ordinary first-prompt
-    /// readiness. Both persistent hook agents use the same Settings route in the supervisor's refusal.
+    /// readiness. Both persistent hook agents use the same Settings route in the supervisor's refusal, and the
+    /// terminal keeps the escaped host error as part of the same plain-text explanation.
     #[farhelm_testtrace::test]
     fn persistent_hooks_explain_restart_readiness_from_the_launch_result() {
         for kind in [AgentKind::Grok, AgentKind::Antigravity] {
@@ -5867,10 +5894,14 @@ mod tests {
             let installed = reason(&PersistentHookSetup::Installed);
             assert!(installed.contains("after the first prompt"), "{installed}");
             let failed = reason(&PersistentHookSetup::Failed {
-                reason: "read-only path".into(),
+                reason: "تعذّر\u{202e}".into(),
             });
-            assert!(failed.contains("read-only path"), "{failed}");
-            assert!(!failed.contains("after the first prompt"));
+            assert_eq!(
+                failed,
+                format!(
+                    "Farhelm could not set up its {agent} conversation hooks (تعذّر<U+202E>). Replace starts the session over"
+                )
+            );
         }
     }
 

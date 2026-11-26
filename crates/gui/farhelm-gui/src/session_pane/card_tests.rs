@@ -187,6 +187,49 @@ fn an_interrupted_session_opens_on_its_card_with_no_terminal(cx: &mut TestAppCon
     assert_eq!(focused_id(main.cx).as_deref(), Some(CARD));
 }
 
+/// The recovery card is read on focus. A failed hook reason must leave its Replace instruction readable beside
+/// right-to-left host text, and assistive technology must name the same escaped error without drawing controls.
+#[gpui::test]
+fn the_recovery_card_isolates_and_names_a_failed_hook_reason(cx: &mut TestAppContext) {
+    use farhelm_proto::ui_channel::Collection;
+
+    let mut state = snapshot(&[(interrupted("a"), 0)], false);
+    let row = &mut state
+        .iter_mut()
+        .find(|collection| collection.collection == Collection::Sessions)
+        .expect("the premise: one session collection")
+        .entries[0]
+        .value;
+    row["agent_kind"] = json!("antigravity");
+    row["restart_offer"] = json!("not_captured");
+    row["persistent_hook_setup"] = json!({"status": "failed", "reason": "تعذّر\u{202e}"});
+    let main = open_main(cx, state);
+    assert_eq!(focused_id(main.cx).as_deref(), Some(CARD));
+    assert!(
+        !drawn(main.cx, "session-card-restart"),
+        "there is no captured conversation"
+    );
+    let name = label_of(main.cx, CARD).expect("the card is named by its explanation");
+    assert!(
+        name.contains(
+            "Farhelm could not set up its Antigravity conversation hooks (تعذّر<U+202E>). Replace starts the session over."
+        )
+    );
+    assert!(!name.contains(['\u{2066}', '\u{2069}', '\u{202e}']));
+    let nodes = frame(main.cx);
+    assert!(
+        crate::session_list::host_rail::tests::texts_within(&nodes, "session-recovery-reason")
+            .iter()
+            .any(|line| line.text.contains("\u{2066}تعذّر<U+202E>\u{2069})"))
+    );
+    assert!(
+        nodes.iter().all(|node| {
+            node.element_id.as_deref() != Some("session-recovery-reason") || node.role.is_none()
+        }),
+        "the parent card already provides the accessible name"
+    );
+}
+
 /// SPEC.md, "Durability and resume": "Nothing respawns unattended", so looking at an interrupted session is never a
 /// request to bring it back, and leaving it is no request to clean it up. The old `terminal-multihost.spec.ts` case
 /// "reboot-already-interrupted" (reference commit `24bc0580`) pinned that opening such a session mounts no terminal and
