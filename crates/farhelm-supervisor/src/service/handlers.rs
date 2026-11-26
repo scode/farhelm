@@ -778,6 +778,15 @@ async fn wait_for_mutation_reply(
     }
 }
 
+/// Stop's refusal of a session whose launch was never confirmed and that has no main terminal
+/// ([`terminal_less_launch_may_be_live`]). It names what settles such a launch, so the user is not left retrying a
+/// Stop that can never succeed. Delete always can. Restart settles it too, but is offered only when a conversation
+/// was captured (never for a create interrupted before its agent ran, or for Bash or Zsh), so the message names it
+/// conditionally rather than promise an action the session may not have.
+const UNCONFIRMED_LAUNCH_STOP_REFUSAL: &str = "this session's start was never confirmed, so there is no terminal for \
+    Stop to stop and nothing was stopped; its agent may still be starting. Delete the session to end whatever its \
+    start left, or Restart it if Restart is offered";
+
 /// Start a stop without making its process sweep connection-cancellable.
 /// The supervisor-owned mutation keeps the lifecycle claim and admission
 /// permit until intent, sweep, and outcome are complete; the connection's
@@ -835,14 +844,26 @@ async fn handle_stop_session(
             reply_error(&tx, req_id, error.kind, error.message).await;
             return;
         }
-        // A display with an ended agent authorizes no new agent's death.
-        // An interrupted, unconfirmed launch may have started a program
-        // even though there is no terminal to probe. Treat that uncertainty
-        // as alive, without Delete's unrelated recorded-host settlement.
-        if refuse_if_agent_running && terminal_less_launch_may_be_live(&entry) {
-            let message = "this session's launch was never confirmed and its agent may \
-                    still be running; nothing was stopped. Check the session and try again";
-            reply_error(&tx, req_id, ErrorKind::Conflict, message.to_string()).await;
+        // An interrupted, unconfirmed launch with no main terminal may have
+        // started a program, but there is no terminal to probe or stop, so
+        // Stop cannot tell what it would be stopping. It refuses for every
+        // caller, guarded or not, rather than record an exit it never
+        // observed and report success: Delete settles the launch record and
+        // fences or ends whatever the start left, and Restart, where it is
+        // offered, settles it before relaunching (SPEC.md, "Lifecycle
+        // operations"). This also covers a Restart that failed without
+        // knowing whether its agent started, which leaves the same launching,
+        // terminal-less state. Nothing is
+        // recorded here, so the launching state and its record stay for
+        // those to settle.
+        if terminal_less_launch_may_be_live(&entry) {
+            reply_error(
+                &tx,
+                req_id,
+                ErrorKind::Conflict,
+                UNCONFIRMED_LAUNCH_STOP_REFUSAL.to_string(),
+            )
+            .await;
             return;
         }
         // A no-tabs click authorizes stopping the agent only. Check before
@@ -4109,50 +4130,58 @@ mod tests {
         );
     }
 
-    /// An ended-agent Stop display cannot authorize cleanup of an
-    /// unconfirmed terminal-less launch. The guard must refuse before
-    /// classification: no durable row is seeded, so falling through would
-    /// return a recording failure rather than this consent refusal.
+    /// Stop refuses an unconfirmed terminal-less launch whoever asks, the
+    /// ended-agent display's guarded Stop and an unguarded Stop alike: there
+    /// is no terminal for Stop to stop, and reporting success would claim a
+    /// stop while the agent may still be starting. The refusal must come
+    /// before classification (no durable row is seeded, so falling through
+    /// would surface a recording failure instead), must leave the launch's
+    /// outcome untouched, and must name what settles it.
     #[farhelm_testtrace::test]
-    async fn ended_agent_stop_consent_refuses_an_unconfirmed_terminal_less_launch() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let entry = fake_entry(&session_id, 1_700_000_000);
-        assert!(
-            entry.terminal.is_none(),
-            "premise: there is no terminal to probe"
-        );
-        *entry.run.outcome.lock().unwrap() = LastOutcome::Launching;
-        sup.sessions
-            .lock()
-            .await
-            .insert(session_id.clone(), Arc::clone(&entry));
-        let (mut tasks, mut rx) = dispatch_for_test(
-            &sup,
-            ControlMsg::StopSession {
-                req_id: 73,
-                session_id,
-                refuse_if_tabs_open: false,
-                refuse_if_agent_running: true,
-            },
-        )
-        .await;
-        while tasks.join_next().await.is_some() {}
-        let frame = rx.recv().await.expect("guard refusal");
-        let ControlMsg::Error { kind, message, .. } =
-            parse_control(&frame).expect("decode refusal")
-        else {
-            panic!("an unconfirmed launch must not be classified or stopped");
-        };
-        assert_eq!(kind, ErrorKind::Conflict);
-        assert!(message.contains("agent may still be running"), "{message}");
-        assert!(matches!(
-            *entry.run.outcome.lock().unwrap(),
-            LastOutcome::Launching
-        ));
+    async fn stop_refuses_an_unconfirmed_terminal_less_launch_whoever_asks() {
+        for (req_id, refuse_if_agent_running) in [(73, true), (74, false)] {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .expect("supervisor");
+            let session_id = uuid::Uuid::new_v4().to_string();
+            let entry = fake_entry(&session_id, 1_700_000_000);
+            assert!(
+                entry.terminal.is_none(),
+                "premise: there is no terminal to probe"
+            );
+            *entry.run.outcome.lock().unwrap() = LastOutcome::Launching;
+            sup.sessions
+                .lock()
+                .await
+                .insert(session_id.clone(), Arc::clone(&entry));
+            let (mut tasks, mut rx) = dispatch_for_test(
+                &sup,
+                ControlMsg::StopSession {
+                    req_id,
+                    session_id,
+                    refuse_if_tabs_open: false,
+                    refuse_if_agent_running,
+                },
+            )
+            .await;
+            while tasks.join_next().await.is_some() {}
+            let frame = rx.recv().await.expect("refusal");
+            let ControlMsg::Error { kind, message, .. } =
+                parse_control(&frame).expect("decode refusal")
+            else {
+                panic!(
+                    "an unconfirmed launch must not be classified or stopped \
+                     (refuse_if_agent_running={refuse_if_agent_running})"
+                );
+            };
+            assert_eq!(kind, ErrorKind::Conflict);
+            assert_eq!(message, UNCONFIRMED_LAUNCH_STOP_REFUSAL);
+            assert!(matches!(
+                *entry.run.outcome.lock().unwrap(),
+                LastOutcome::Launching
+            ));
+        }
     }
 
     /// A panicking Stop mutation must settle the real dispatched request with

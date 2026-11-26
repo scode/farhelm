@@ -1868,6 +1868,133 @@ async fn deleting_a_session_fences_its_unbound_recorded_start() {
     assert!(!runs.exists(), "the agent never started");
 }
 
+/// Stop refuses a session whose create was interrupted before its launch was
+/// confirmed and that has no main terminal, even when the caller asks without
+/// the ended-agent guard, and leaves the launch for Delete to settle.
+///
+/// Why: such a session may still be starting an agent, but with no terminal
+/// there is nothing for Stop to probe or stop. Stop used to record an exit it
+/// never observed and report success, leaving the recorded first stage free to
+/// start an agent its session shows as stopped. Spec: with a create interrupted after its
+/// first stage took the spec (held, never released) and the supervisor
+/// restarted on the same state (premises: the row is launching with no
+/// terminal, no host socket exists, the recorded first stage runs, the launch
+/// record exists), an unguarded Stop fails with a conflict naming Delete; afterwards
+/// the row is still launching, its launch record is still there and the first
+/// stage still runs; an unconditional Delete then succeeds and ends the first
+/// stage, and the agent never started.
+#[farhelm_testtrace::test]
+async fn stop_refuses_an_unconfirmed_start_and_leaves_it_for_delete() {
+    let state = farhelm_teststate::tempdir().expect("state");
+    let fixture = farhelm_teststate::tempdir().expect("fixture directory");
+    let gate = fixture.path().join("gate");
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let runs = work.path().join("runs");
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        SupervisorTimeouts::default(),
+        interrupted_seams(fixture.path(), &gate, None),
+    )
+    .await
+    .expect("supervisor");
+    let client = connect_client(&sup).await;
+    client
+        .create_session_with_key(
+            work.path().to_str().unwrap(),
+            &counted_agent(&runs),
+            None,
+            80,
+            24,
+            Some("stopped-start".to_string()),
+        )
+        .await
+        .expect_err("the interrupted attempt fails");
+    let db = state.path().join("supervisor.db");
+    let id = SessionStore::open(&db, false)
+        .await
+        .unwrap()
+        .load_all()
+        .await
+        .unwrap()
+        .pop()
+        .expect("the launching row")
+        .id;
+    let record_path = state.path().join("launch").join(format!("{id}.0.host"));
+    let record = std::fs::read_to_string(&record_path).expect("the launch's host record");
+    let starter: u32 = record
+        .lines()
+        .find_map(|line| line.strip_prefix("starter "))
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|pid| pid.parse().ok())
+        .expect("the record names its first stage");
+    let sup = crate::create_idempotency::handoff_to_new_supervisor_with_seams(
+        state.path(),
+        sup,
+        client,
+        host_seams(),
+    )
+    .await;
+    let client = connect_client(&sup).await;
+    // The row's outcome, and whether it names no confirmed terminal.
+    let launching = |rows: Vec<farhelm_supervisor::store::StoredSession>| {
+        rows.into_iter()
+            .find(|row| row.id == id)
+            .map(|row| (row.outcome, row.terminal_address.is_empty()))
+    };
+    assert_eq!(
+        launching(
+            SessionStore::open(&db, false)
+                .await
+                .unwrap()
+                .load_all()
+                .await
+                .unwrap()
+        ),
+        Some((LastOutcome::Launching, true)),
+        "premise: an unconfirmed launch with no terminal"
+    );
+    assert!(
+        !process_is_gone(starter),
+        "premise: the first stage is held"
+    );
+    let host_sockets = std::fs::read_dir(state.path().join("hosts"))
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(host_sockets, 0, "premise: no host, so no terminal to stop");
+
+    let error = client
+        .stop_session_guarded(&id, false, false)
+        .await
+        .expect_err("Stop refuses the unconfirmed start");
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("start was never confirmed") && message.contains("Delete the session"),
+        "{message}"
+    );
+    assert_eq!(
+        launching(
+            SessionStore::open(&db, false)
+                .await
+                .unwrap()
+                .load_all()
+                .await
+                .unwrap()
+        ),
+        Some((LastOutcome::Launching, true)),
+        "Stop recorded nothing"
+    );
+    assert!(record_path.exists(), "the launch record is kept");
+    assert!(!process_is_gone(starter), "nothing was stopped");
+
+    client.delete_session(&id).await.expect("delete");
+    assert!(
+        process_is_gone(starter),
+        "Delete ended the held first stage"
+    );
+    assert!(!runs.exists(), "the agent never started");
+}
+
 /// A keyed create that an earlier supervisor started in tmux and that was
 /// interrupted after its launching row is refused when retried: nothing is
 /// started, its row is rolled back, and the refusal is what every later

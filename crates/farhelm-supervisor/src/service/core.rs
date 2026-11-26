@@ -5343,8 +5343,11 @@ pub struct Supervisor {
 /// is chiefly an ambiguous create: the host's start reported an error, but
 /// the agent may run anyway, and nothing recorded a terminal to probe.
 /// Deleting that row unasked could kill the agent and its unsaved work, so
-/// delete treats it as alive, as does a Stop whose display said the agent
-/// had ended. Restart used to demand consent for it too; it
+/// delete treats it as alive. Stop refuses it outright, whoever asks: with no
+/// terminal there is nothing for Stop to stop, and Delete (or Restart, where
+/// it is offered) settles the launch instead. A Restart that failed without
+/// knowing whether its agent started leaves the same state and is refused the
+/// same way. Restart used to demand consent for it too; it
 /// no longer does, because the row reads unknown and an unknown-status agent
 /// restarts without asking (SPEC.md, Lifecycle operations).
 ///
