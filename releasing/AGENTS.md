@@ -34,6 +34,10 @@ build waits for the maintainer: the build gate takes the longest and finds the f
 soon as the pre-tag checks pass. At an RC or dev release, local version-parity tests run alongside GitHub's builds and
 do not hold up the tag (`releasing/.agents/rc.md`, "Cutting an RC release").
 
+For stable, RC and dev releases, fetch and use current `origin/main` as the product-source base unless the maintainer
+specifies another source. State the chosen revision when settling the request. An omitted source uses this default
+without a confirmation.
+
 At request time, compare `UPGRADE_FLOOR` in `crates/farhelm-proto/src/version.rs` between the previous promoted stable
 and the proposed product-source base. A previous release without the constant has the earlier documented v0.23.0
 boundary. Tell the maintainer whether the floor differs. For a raise, show the old and new floors and the new floor
@@ -121,10 +125,10 @@ about it.
 A stop is a point where the procedure has the agent wait for the maintainer before the release can go further. These are
 the kinds the procedures have, each only when its procedure actually makes it:
 
-- A question the procedure says to ask: the base or version when the request and the defaults do not settle them, the
-  in-app announcements when the request does not answer them, an upgrade-floor raise (an unchanged floor is reported,
-  not asked about), an earlier-base release path, a fix forward that is the maintainer's call, an inferred editorial
-  rule, a brick test that could not run.
+- A question the procedure says to ask: an ambiguous explicit source, a version the request and defaults do not settle,
+  the in-app announcements when the request does not answer them, an upgrade-floor raise (an unchanged floor is
+  reported, not asked about), an earlier-base release path, a fix forward that is the maintainer's call, an inferred
+  editorial rule, a brick test that could not run.
 - A line or task only the maintainer can do, once the procedure waits on it: the RC or dev signing-and-install line, the
   stable publish line, the brick test, deploying the website for stable upgrade highlights, the line that moves
   `/latest`.
@@ -286,8 +290,8 @@ Before settling the base and version, read these in full:
 
 Phase files: on reproducing a failed pre-tag check or gate failure, read `.agents/narrow-tests.md`.
 
-Fence: every rule in `releasing/AGENTS.md`, "Rules for every release"; ask about the base unless the request states it;
-the bump PR is closed without merging; agents never run the signing and install line they hand the maintainer.
+Fence: every rule in `releasing/AGENTS.md`, "Rules for every release". The bump PR is closed without merging, and agents
+never run the signing and install line they hand the maintainer.
 
 ### Dev release ("cut a dev release", "cut a dev release with this stack")
 
@@ -307,8 +311,7 @@ read these in full:
 
 Phase files: on reproducing a failed pre-tag check or gate failure, read `.agents/narrow-tests.md`.
 
-Fence: as for an RC, except that the RC version default does not apply: ask for the base and version unless the request
-states them or a fix forward settled them.
+Fence: as for an RC. Ask for the dev version unless the request states it or a fix forward settled it.
 
 ### Fixing forward and stable re-cuts ("fix forward", "re-cut the release")
 

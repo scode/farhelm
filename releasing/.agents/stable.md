@@ -13,15 +13,15 @@ changelog curation reading lists include it. Step numbers in this file refer to 
 > notification first, per `releasing/AGENTS.md`, "Notifying the maintainer". That adds no stops: what runs without
 > asking also runs without a notification.
 
-A stable release is cut from main. The changelog section and any selected announcement additions or changes land on main
-FIRST, in the changelog PR; the release branch is cut after it merges, so the bump commit keeps its three-file shape and
-main is the only place the notes ever live. The section lands as a draft, and the procedure does not wait for the
-maintainer to approve its wording: the tag builds, and the release can be signed and brick tested, while they review it.
-The approved text then replaces the draft on main and on the GitHub release (step 3). The tag keeps its original copy.
-The installed app gets its upgrade highlights from the website's `/whats-new.json`, which includes only finalized notes.
-That lets the build and brick test run during notes review. Promotion in step 8 waits for the website to serve the new
-release's highlights. The human-readable Release notes page can still show a draft if the site is deployed during
-review.
+A stable release uses current `origin/main` by default. The changelog section and any selected announcement changes land
+on main first, in the changelog PR. The release branch is cut after it merges, so the bump commit keeps its three-file
+shape and main is the only place the notes ever live. The section lands as a draft, and the procedure does not wait for
+the maintainer to approve its wording: the tag builds, and the release can be signed and brick tested, while they review
+it. The approved text then replaces the draft on main and on the GitHub release (step 3). The tag keeps its original
+copy. The installed app gets its upgrade highlights from the website's `/whats-new.json`, which includes only finalized
+notes. That lets the build and brick test run during notes review. Promotion in step 8 waits for the website to serve
+the new release's highlights. The human-readable Release notes page can still show a draft if the site is deployed
+during review.
 
 The version, announcements and any upgrade-floor raise are settled when the stable release is requested, and from then
 on nothing waits for the maintainer until the tag's build is running. Apply `releasing/AGENTS.md`, "Rules for every
