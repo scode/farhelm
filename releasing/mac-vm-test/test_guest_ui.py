@@ -67,6 +67,40 @@ class NativeUITests(unittest.TestCase):
                 ui.prepare(ui_call(1, 'farhelm', 'bind', []))
         self.assertEqual(ui.bound, set())
 
+    def test_announcements_allow_one_native_quit_before_each_launch(self):
+        """Both candidate processes need a Quit, with a fresh binding after the staged launch."""
+        self.task['check_id'] = 'p2-announcements'
+        ui = NativeUI(self.operations)
+        bind = ui_call(1, 'farhelm', 'bind', [])
+        quit_call = ui_call(2, 'farhelm', 'quit', [])
+        response = {'result': {'content': []}}
+        with mock.patch.object(self.operations, 'version', return_value=version('0.30.0')):
+            ui.prepare(bind)
+            ui.complete(bind['params']['arguments'], response)
+            with self.assertRaisesRegex(RuntimeError, 'verify publication'):
+                ui.prepare(quit_call)
+            self.operations.observations['announcements_feed'] = {'available': True}
+
+            for launch in ('launch_announcements', 'relaunch_announcements'):
+                with self.subTest(launch=launch):
+                    request = ui.prepare(quit_call)
+                    self.assertEqual(request['params']['arguments']['code'], 'await brickFarhelm.pressKey("super+q");')
+                    ui.complete(quit_call['params']['arguments'], response)
+                    self.assertNotIn('farhelm', ui.bound)
+                    with self.assertRaisesRegex(RuntimeError, 'already attempted'):
+                        ui.prepare(quit_call)
+
+                    self.operations.completed.add(launch)
+                    if launch == 'launch_announcements':
+                        with self.assertRaisesRegex(RuntimeError, 'bind the running candidate'):
+                            ui.prepare(quit_call)
+                    ui.prepare(bind)
+                    ui.complete(bind['params']['arguments'], response)
+
+            with self.assertRaisesRegex(RuntimeError, 'already attempted'):
+                ui.prepare(quit_call)
+        self.assertNotIn('reopen_quit', self.operations.completed)
+
     def test_ax_only_menu_observation_cannot_reuse_an_earlier_image(self):
         """A successful menu observation may omit its image; retain it without borrowing stale calibration."""
         self.task.update(check_id='native-preflight', pass_id='fresh')

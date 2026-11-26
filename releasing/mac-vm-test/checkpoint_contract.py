@@ -91,12 +91,13 @@ ANNOUNCEMENTS_TEST_TITLE = 'Farhelm brick test announcement'
 
 
 def announcements_instructions():
-    """Exercise the installed candidate's verification path through the native bell."""
+    """Exercise the native bell with two quits around the one-off feed override."""
     return f'''Call announcements_feed first. If either file is unavailable, retain the
 receipt and return its outcome with the exact detail. A 404 means the standing
 test feed or signature is not published yet. Leave the running app alone when
 the probe cannot establish publication.
-Otherwise quit the candidate normally through native UI and call launch_announcements.
+Otherwise bind the running candidate with brick_ui. Use method quit with
+args [] on target farhelm, then call launch_announcements.
 That launch alone uses FARHELM_ANNOUNCEMENTS_PATH={ANNOUNCEMENTS_TEST_PATH}.
 The staged launch leaves the pending batch for the bell even if it arrives
 before the first window. If a launch operation returns not-ready after Quit,
@@ -111,10 +112,10 @@ the standing feed's title "{ANNOUNCEMENTS_TEST_TITLE}" and capture it.
 Dismiss the dialog with Got it. Reopen the bell and verify the notice is
 resolved with no Open Announcements action. Open ? > Announcements and capture
 the same title in history. Only the standing feed's exact title counts.
-In either case, finish the staged launch by quitting through native UI and
-calling relaunch_announcements. It verifies that the new process has no
-override. If no notice arrived, report could-not-run with what the bell showed
-and the elapsed wait after the relaunch.
+In either case, finish the staged launch by calling brick_ui quit again on the
+bound candidate, then call relaunch_announcements. It verifies
+that the new process has no override. If no notice arrived,
+report could-not-run with what the bell showed and the elapsed wait after the relaunch.
 Pass needs the three native captures and the fixed command receipts.
 Any P2 failure leaves the recorded P0, P1 and feedback results intact.'''
 

@@ -776,6 +776,12 @@ printf 'installer contract satisfied\\n'
         self.assertIn('Use native paste', text)
         self.assertNotIn('Read RECIPE', text)
 
+    def test_announcement_task_uses_native_quit_for_both_launches(self):
+        """The tester needs the managed Quit before enabling and clearing the feed override."""
+        text = ' '.join(managed_instructions('p2-announcements', 'p0-installer-upgrade').split())
+        self.assertIn('Use method quit with args [] on target farhelm, then call launch_announcements', text)
+        self.assertIn('calling brick_ui quit again on the bound candidate, then call relaunch_announcements', text)
+
     def test_missing_announcement_file_reports_404_without_starting_the_app(self):
         """Either missing publication yields P2 evidence before any launch can mutate the guest."""
         self.value.update(pass_id='p0-installer-upgrade', check_id='p2-announcements')

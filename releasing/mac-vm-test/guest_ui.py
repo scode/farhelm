@@ -61,9 +61,10 @@ reactive field value before submitting. For the actual Restart to update
 button first capture its visible menu, then use method restart with its center
 coordinates as args [[x,y]], never ordinary click or an accessibility index.
 That action clicks once, waits for the candidate process, and rebinds only after
-observing it running. It never launches an absent Farhelm. For the reopen
-checkpoint, bind the running Farhelm, take the before sample, then use method
-quit with args [] to send Command-Q once. Native images are
+observing it running. It never launches an absent Farhelm. Use method quit with
+args [] to send Command-Q to bound Farhelm. For reopen, take the before sample
+first. For signed announcements, verify publication first and bind again after
+the staged launch before the second Quit. Native images are
 returned unchanged. An AX-plus-screenshot request can return only menu AX text:
 that is no captured image. Dismiss the menu normally and request the actual
 acceptance screenshot. Tool/permission failures stop the attempt.''',
@@ -84,6 +85,7 @@ class NativeUI:
         self.clock = clock
         self.pause = pause
         self.before_restart = None
+        self.announcement_quits = set()
         self.image_sequence = 0
 
     def prepare(self, message):
@@ -102,13 +104,7 @@ class NativeUI:
         elif method == 'bind' and target != 'desktop' and not args:
             code = self.bind_code(target)
         elif method == 'quit' and target == 'farhelm' and not args:
-            if self.operations.task['check_id'] != 'reopen' or 'reopen_quit' in self.operations.completed:
-                raise RuntimeError('native Quit is only available once for a reopen attempt')
-            before = self.operations.observations.get('continuity_reopen_before')
-            if target not in self.bound or before is None:
-                raise RuntimeError('bind the candidate and take the before sample before native Quit')
-            if self.operations.version()['desktop_pids'] != before['desktop_pids']:
-                raise RuntimeError('the before-sample app is absent or changed before native Quit')
+            self.require_quit_ready()
             code = f'await {variable}.pressKey("super+q");'
         elif method == 'restart' and target == 'farhelm' and len(args) == 1:
             point = args[0]
@@ -136,6 +132,31 @@ class NativeUI:
             code = f'await {variable}.{method}({", ".join(json.dumps(value) for value in args)});'
         return dict(message, params={'name': 'js', 'arguments': {'code': code, 'title': f'{target}: {method}'}})
 
+    def require_quit_ready(self):
+        """Authorize one Quit per announcement launch or one sampled continuity Quit.
+
+The provider acknowledges input. The managed launch separately checks for the
+process to exit before opening the next app.
+"""
+        check = self.operations.task['check_id']
+        completed = self.operations.completed
+        if check == 'p2-announcements':
+            if not self.operations.observations.get('announcements_feed', {}).get('available'):
+                raise RuntimeError('verify publication before native Quit')
+            staged = 'launch_announcements' in completed
+            if staged in self.announcement_quits or 'relaunch_announcements' in completed:
+                raise RuntimeError('native Quit was already attempted for this announcement launch')
+            if 'farhelm' not in self.bound or not self.operations.version()['desktop_running']:
+                raise RuntimeError('bind the running candidate before native Quit')
+            return
+        if check != 'reopen' or 'reopen_quit' in completed:
+            raise RuntimeError('native Quit requires a reopen or signed announcements attempt')
+        before = self.operations.observations.get('continuity_reopen_before')
+        if 'farhelm' not in self.bound or before is None:
+            raise RuntimeError('bind the candidate and take the before sample before native Quit')
+        if self.operations.version()['desktop_pids'] != before['desktop_pids']:
+            raise RuntimeError('the before-sample app is absent or changed before native Quit')
+
     def bind_code(self, target):
         """Refuse to use getApp as a launch fallback after a missing product restart."""
         if target == 'farhelm':
@@ -157,9 +178,10 @@ so frame evidence cannot silently borrow a previous screenshot's calibration.
         if parameters['method'] == 'bind':
             self.bound.add(parameters['target'])
         if parameters['method'] == 'quit':
-            # A provider acknowledgment proves the request, while the fixed
-            # launch gate independently checks that the old app really exited.
-            self.operations.completed.add('reopen_quit')
+            if self.operations.task['check_id'] == 'p2-announcements':
+                self.announcement_quits.add('launch_announcements' in self.operations.completed)
+            else:
+                self.operations.completed.add('reopen_quit')
             self.bound.discard(parameters['target'])
         task = self.operations.task
         needs_geometry = task['check_id'] == 'window-drag' or (
