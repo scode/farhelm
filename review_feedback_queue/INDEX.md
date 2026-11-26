@@ -103,11 +103,6 @@ consequences.
   — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
   failure above it, and leaves the launch refusal stuck even after an in-flight toggle succeeds.
 
-- [`trailing-custom-agent-settings-dirty-close-prompt-collapses-multiple-agents.md`](trailing-custom-agent-settings-dirty-close-prompt-collapses-multiple-agents.md)
-  — When two or more custom-agent pages have unsaved changes, the 'Save changes before closing?' prompt lists only a
-  single 'Custom agent' and jumps Settings to whichever custom-agent draft sorts first rather than staying on the page
-  the user was viewing.
-
 - [`trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md`](trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md)
   — When you replace your saved Tensorlake API key with a different key in Settings without clicking Clear first, the
   list of sandboxes not on this helm keeps showing leftover sandboxes from the old key while the new check runs — and
