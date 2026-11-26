@@ -60,6 +60,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Bind Settings footer Save and Discard to the page and drafts shown.** Navigation can move Save to another page's
+  draft, including a different replacement for the one stored Tensorlake key. A late save refusal can move Discard to
+  the page with the refused draft. In `settings/editing.rs`, bind `page_answers` to the presented page, form identities,
+  draft revisions and available actions. Require the action to remain visible and eligible at keypress and across a
+  pointer gesture. Search, an open Credentials editor or a busy form can change what the footer offers. GPUI can install
+  a footer's handlers before presenting it and can carry a pending mouse-down across redraws. Capture the valid
+  presented action on primary-down and require the same action at release. Keep keyboard activation at its normal press
+  and preserve Close and the footer's focus and layout. Reuse the shared action frame and existing field revisions.
+  Include the checkout field's loaded comparison base and cover the compound Notifications draft without copying its
+  token. Test a held press across a page change and a down after the new footer is installed but before it is shown,
+  followed by release after presentation. Cover a later same-page edit and an ordinary Save. The complete correction
+  exceeded the triage size limit. See `SPEC.md` under “One GUI at a time” and `SPEC_impl.md` under “Questions: the
+  prompt”.
+
 - **Keep checkout notices after an agent Delete times out.** If an approved agent Delete outlasts the supervisor's reply
   budget and then leaves a checkout on disk, keep the checkout path and reason in the notices bell. The target host's
   result reaches `agent_delete` in `crates/farhelm-helm/src/agent_requests.rs`, while the asking connection's actual
