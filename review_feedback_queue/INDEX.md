@@ -38,14 +38,6 @@ consequences.
 - [`shortcuts-chord-during-composition.md`](shortcuts-chord-during-composition.md) — The Keyboard shortcuts chord can
   interrupt an input method if native handling clears its mark first or the action cannot query the focused field.
 
-- [`ui-channel-displaced-notice-lost-to-reader-race.md`](ui-channel-displaced-notice-lost-to-reader-race.md) — A
-  displaced UI channel's Displaced notice can be dropped by a reader/writer drain race, so the displaced window
-  reconnects and steals the seat back (latent: a second UI cannot arise in the shipped embedded app).
-
-- [`upload-cancel-mid-publication-reported-not-published.md`](upload-cancel-mid-publication-reported-not-published.md) —
-  An upload cancelled while the host is publishing it can be reported to the user as "definitely not published" although
-  the host's answer says the outcome is unknown (reachability premise unverified; recorded higher).
-
 - [`provisioning-orphan-sweep-deletes-concurrent-helm-upload.md`](provisioning-orphan-sweep-deletes-concurrent-helm-upload.md)
   — Two helms provisioning the same host concurrently can delete each other's active staging temporary via the orphan
   sweep (no liveness check); the victim run fails visibly and retryably (cross-helm premise unverified).

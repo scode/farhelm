@@ -927,6 +927,71 @@ async fn a_displaced_channel_says_so_and_ends() {
         .unwrap();
 }
 
+/// A GUI can still heartbeat while the takeover notice is in flight.
+/// Hold that write until the socket has had a chance to read the heartbeat.
+/// The displaced GUI must receive the notice before the socket closes,
+/// and only the successor holds the seat.
+#[farhelm_testtrace::test]
+async fn an_incoming_frame_does_not_interrupt_the_displacement_notice() {
+    let seat = UiSeat::default();
+    let displaced = seat.take();
+    let channel = Channel::new(
+        test_router(Arc::new(TestRoutes::default())),
+        HeaderValue::from_static("Bearer test"),
+        vec![test_collection()],
+    );
+    let (_feed, feed_rx) = watch::channel(0);
+    let (to_helm, mut incoming) = mpsc::unbounded_channel();
+    let rx = futures_util::stream::poll_fn(|cx| incoming.poll_recv(cx));
+    let (written, mut from_helm) = mpsc::unbounded_channel();
+    let (started, mut writing_displaced) = oneshot::channel();
+    let (release, drain) = oneshot::channel();
+    let tx = futures_util::sink::unfold(
+        (written, Some((started, drain))),
+        |(written, mut hold), frame: ws::Message| async move {
+            if let ws::Message::Text(text) = &frame
+                && serde_json::from_str::<ServerMessage>(text.as_str()).unwrap()
+                    == ServerMessage::Displaced
+            {
+                let (started, drain) = hold.take().unwrap();
+                started.send(()).unwrap();
+                drain.await.unwrap();
+            }
+            written.send(frame).unwrap();
+            Ok::<_, axum::Error>((written, hold))
+        },
+    );
+    let socket = serve_socket(Box::pin(tx), rx, channel, displaced, feed_rx);
+    tokio::pin!(socket);
+    tokio::time::timeout(NOTICE, async {
+        let first = tokio::select! {
+            frame = from_helm.recv() => frame.unwrap(),
+            () = &mut socket => panic!("socket closed before the snapshot"),
+        };
+        assert!(matches!(first, ws::Message::Text(text)
+            if matches!(serde_json::from_str(text.as_str()).unwrap(), ServerMessage::Snapshot { .. })));
+        let mut successor = seat.take();
+        tokio::select! {
+            result = &mut writing_displaced => result.unwrap(),
+            () = &mut socket => panic!("socket closed before writing Displaced"),
+        }
+        to_helm
+            .send(Ok(ws::Message::Text(r#"{"type":"ping","n":1}"#.into())))
+            .unwrap();
+        // The old reader could end the entire socket on this poll because
+        // the channel had already dropped the incoming queue's receiver.
+        assert!(futures_util::poll!(socket.as_mut()).is_pending());
+        release.send(()).unwrap();
+        socket.await;
+        assert!(matches!(from_helm.try_recv().unwrap(), ws::Message::Text(text)
+            if serde_json::from_str::<ServerMessage>(text.as_str()).unwrap() == ServerMessage::Displaced));
+        assert!(matches!(from_helm.try_recv().unwrap(), ws::Message::Close(_)));
+        assert!(seat.is_held() && successor.try_recv().is_err());
+    })
+    .await
+    .expect("the displaced socket drains and closes");
+}
+
 // ---------------------------------------------------------------------------
 // The socket bridge, against test routes
 // ---------------------------------------------------------------------------

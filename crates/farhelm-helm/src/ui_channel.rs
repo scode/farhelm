@@ -1194,17 +1194,6 @@ pub(crate) async fn serve_socket<Tx, Rx>(
         }
         let _ = tokio::time::timeout(WRITE_DEADLINE, tx.send(ws::Message::Close(None))).await;
     };
-    let channel_and_writer = async move {
-        tokio::pin!(writer);
-        tokio::select! {
-            // The channel ended on its own: let the writer drain and close.
-            () = core => writer.await,
-            // The writer ended first, which only a failed write does while
-            // the channel still runs: end the channel with it.
-            () = &mut writer => {}
-        }
-    };
-
     let reader = async move {
         loop {
             let frame = match tokio::time::timeout(SILENCE_CLOSE, rx.next()).await {
@@ -1235,8 +1224,12 @@ pub(crate) async fn serve_socket<Tx, Rx>(
         }
     };
 
+    tokio::pin!(writer);
     tokio::select! {
-        () = channel_and_writer => {}
+        // Once the core has ended, the reader's queue is closed. A frame
+        // arriving now must leave the writer free to drain the last notice.
+        () = core => writer.await,
+        () = &mut writer => {}
         () = reader => {}
     }
 }

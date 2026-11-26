@@ -50038,3 +50038,46 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   (estimate S, ~25-45 lines). Remove the feedback file and its index entry.
 - Execution: Fixed. Recipe launches validate home-folder session titles before provisioning or asking for approval.
   Change `nmpwwsrpvpvlmuzumukomkxprlkkwoul`, bookmark `plan/triage-provisioning-podman-and-runtime/02-podman-projection-and-recipe-title`, https://github.com/scode/farhelm/pull/5031/changes.
+
+## ui-channel-displaced-notice-lost-to-reader-race.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC.md "One GUI at a time" (`5834-5839`): "A UI that connects takes the seat, and the
+  one holding it is displaced: the displaced window says that another window took over and goes wholly inert, its
+  terminals included. ... Only the helm's own word that another UI took the seat counts as a takeover; a connection that
+  merely drops is a reset". SPEC_impl.md "The seat: one UI per helm" (`531-532`): "A new one displaces the old; the
+  displaced window shows 'another window took over' and does not reconnect on its own. Only the live channel's
+  'displaced' message counts as a takeover." `crates/farhelm-helm/src/ui_channel.rs:1149-1151` itself promises "Its
+  writer then drains what it queued, so a displaced channel's last message still reaches the GUI before the socket
+  closes." Code: `run`'s displaced arm (`ui_channel.rs:1025-1028`) queues `ServerMessage::Displaced` and returns,
+  dropping `incoming_rx`. In `serve_socket` (`:1197-1241`), the outer `tokio::select!` polls `reader` against
+  `channel_and_writer`; any frame arriving from the old client makes `incoming_tx.send(message).await` fail (`:1233`),
+  `reader` returns, and `select!` drops `channel_and_writer` mid-drain before `Displaced` is written. Verified:
+  confirmed by source inspection (race timing not executed). Fix follows directly: stop polling `reader` once `core`
+  completes so `writer` always drains `Displaced`, keeping reader-first and write-failure teardowns unchanged. Size
+  estimate ~40-60 lines with a regression test.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-25 triage, main `5af40d23e`.) The maintainer can revise it.
+- Completion criteria: Make `serve_socket` drain queued outgoing messages (including `ServerMessage::Displaced`) after
+  `core` returns without an incoming client frame aborting the drain, preserving `SILENCE_CLOSE`, reader-first, and
+  write-failure teardowns, and add a regression test with a concurrent incoming frame during displacement. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. After the UI channel ends, its writer drains the takeover notice before closing the socket. An in-memory regression holds that write while the old window sends a heartbeat.
+  Change `kwouwwlwrrkyszzxzwxzllkqpwklnrrl`, bookmark `plan/triage-provisioning-podman-and-runtime/03-ui-channel-drain-and-upload-cancel`, https://github.com/scode/farhelm/pull/5034/changes.
+
+## upload-cancel-mid-publication-reported-not-published.md
+
+- Outcome: `fix code`.
+- Assessment: Partly correct. Confirmed in source (`crates/farhelm-supervisor/src/service/uploads.rs:1224-1264` vs
+  `:1265-1289`, `helm-client/src/transfers.rs:134-144`, `gui/.../attachments.rs:876-885`): `DiskStage::Cancelled` says
+  `"publication completion is unknown"` but sends `ErrorKind::NotFound`/`InvalidRequest` (4xx -> `NotPublished`) instead
+  of `ErrorKind::Internal` (5xx -> `Unknown`). Live reachability to a waiting GUI requires an unverified half-closed
+  helm->supervisor pipe (`service/connection.rs:774`).
+- Decision: Q12 ("Straightforward small product fixes"): maintainer picked "Fix all 14". (2026-11-25 fewest-questions
+  triage page, main `5af40d23e`.)
+- Completion criteria: Return `ErrorKind::Internal` for `DiskStage::Cancelled` in `commit_upload`
+  (`crates/farhelm-supervisor/src/service/uploads.rs:1254-1258`, matching `DiskStage::Failed` and `SPEC_impl.md:5050`),
+  and add a focused unit test (estimate S, ~15-30 lines). Remove the feedback file and its index entry.
+- Execution: Fixed. Cancellation while a complete upload is being published returns an unknown outcome. A unit test holds staging cleanup after the attachment has appeared, and the wire test confirms that a late publication and its retry can leave two complete copies.
+  Change `kwouwwlwrrkyszzxzwxzllkqpwklnrrl`, bookmark `plan/triage-provisioning-podman-and-runtime/03-ui-channel-drain-and-upload-cancel`, https://github.com/scode/farhelm/pull/5034/changes.
