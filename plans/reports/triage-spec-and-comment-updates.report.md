@@ -54,3 +54,66 @@ reproduction.
 
 One fresh GPT-6.2 Sol high source review. Corrected the timing of cover checks for terminal file clicks and linked the
 product spec to the Linux compose exception. The reviewer confirmed both corrections and found no remaining issue.
+
+### Landing
+
+#### What landed with it
+
+This plan landed second of three in its round, after the provisioning, Podman and runtime triage
+(`triage-provisioning-podman-and-runtime`) and before the queue discards (`triage-queue-discards`). It changes SPEC.md,
+SPEC_impl.md and code and test comments, and no code. The rebase met only conflicts in the shared triage records. The
+landing's independent review confirmed all nine of its items are present and the stale references to the removed
+repository search are gone.
+
+#### Fixes made while landing
+
+- **One SPEC.md sentence dropped a requirement the previous round had just implemented (the review's should-fix).** The
+  rewrite of the terminal file-click paragraph turned "is refused with a visible explanation" into "a refusal ...
+  explains", so a silent refusal read as allowed, while the host menu and terminal triage, which landed one round
+  earlier, exists to show that refusal. Fixed inside [#5040](https://github.com/scode/farhelm/pull/5040/changes): a
+  click on a file whose disclosure painted but is clipped or covered is again refused with a visible explanation.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on the round's three plans stacked in queue order on main as it stood at the start of the landing (`491df5c5`), with the
+shared triage records' conflicts kept both ways (by hand for one review queue index block in the spec plan's PR and the
+open outcomes file in the discards plan's PR, then checked: the queue's 21 feedback files, its 21 index entries and the
+21 open outcomes agree). Every other change is exactly what the executors pushed until the landing fixes, which change
+only a SPEC.md sentence and two changelog drafts.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `0368f541-87a9-4191-8302-5b438567d5bf`): all 8765 passed, with no runtime `SKIPPED` lines. That includes the
+  provisioning, Podman, upload, UI channel and runtime tests the plans added or changed, on the rebased tree.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings`, on the test worker: passed.
+- The desktop app's end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run
+  `19013678-79f1-4d2e-9e1b-0271274e62f8`): of its 49 steps, 48 passed and one (paste) was skipped by design on Linux.
+- `python3 scripts/check-agents-md.py`, `python3 releasing/check-changelog.py format` (again after the fixes),
+  `cargo fmt --all -- --check` and `python -B scripts/check-test-sleeps.py`, locally: passed. `dprint check`, locally:
+  it fails only on over-long lines in the triage outcomes archive: main's earlier ones and the new entries of the
+  provisioning, Podman and runtime plan (the other two plans' entries pass); no PR fixes them yet; a formatting-only one
+  would, and I recommend it, as earlier rounds' notes did.
+
+Reused across the fixes: every run above, since they change no code. The executors' runs were on older bases, and
+everything they covered ran again above.
+
+Skipped: the screenshot comparison and the desktop app's outer shell tests, since no drawing code or desktop shell code
+changed; real Podman and Tensorlake hosts and a Mac run, which no automated check here reaches; and CI, which runs only
+on demand.
+
+#### What the report says that is no longer true
+
+- Nothing.
+
+#### Things you should know that the report does not say
+
+- **The launcher consent plan, now back with an executor, must reconcile with this plan's rewritten SPEC_impl.md
+  paragraph** on how the YOLO and hook setup answers continue through a pending checkout preview, since that plan
+  changes the behavior the paragraph describes. Its executor does that when it rebases, and its next landing review
+  checks it; nothing needs your action.
+- **Smaller points the review noticed.** The file disclosure is called a "card" next to the approval card; SPEC.md now
+  links into SPEC_impl.md for the first time; and the Linux input-method gap is documented for the Keyboard shortcuts
+  chord only, though it probably also applies to the tab switching and Rename and Delete chords (unverified). None needs
+  a follow-up on its own.
