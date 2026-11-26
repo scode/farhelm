@@ -96,3 +96,61 @@ checklist, reviewed the PR in two rounds.
   - A registration removed elsewhere could clear an unrelated error. Now only an open question's removal clears it.
   - A test step could not tell the close question's Save from the Delete question's Delete. It now checks the label.
 - Round 2 found nothing.
+
+### Landing
+
+#### What landed with it
+
+This round landed bulk-start-sessions first (Restart/Replace for marked ended sessions in the session list), then this
+plan. The two change different parts of the desktop app and met only in TODO.md, where the landing kept both removals.
+Since this plan's base, main had also gained the Wayland text-field paste fix (#5069), the fix that judges a custom
+agent's conversation report by the settings a "Restart with" just chose (#5071), and the fix that remembers each custom
+agent's wrapper separately for each registration (#5073, #5074); while it landed, main gained a fix to the release brick
+test's own harness (#5076). The wrapper fix is the one that touches custom agents. An independent reviewer and I read it
+against this plan: it does not change how Delete asks the helm to remove an agent, or what the helm tells the app about
+each agent, so the new question works the same on top of it. Nothing interacted.
+
+#### Fixes made while landing
+
+None. The independent review found nothing to fix.
+
+#### Worth knowing
+
+- The question says the same thing twice: "Delete this custom agent?" as its heading, then "Delete Example Code
+  (example-code)? Existing sessions keep their saved resume command." beneath. It reads clearly in the new screenshot,
+  but the heading and the first sentence could be merged if you prefer.
+- The question remembers which agent it is about by its ID. If another Farhelm window or client on the same helm deleted
+  that agent and registered a new one under the same ID while the question was open, confirming would delete the new
+  one. The old two-button question had the same exposure, and it needs two windows editing the same agent at once.
+- What landed goes against a rule in SPEC.md. The spec says nothing closes a confirmation it did not open, but accepting
+  "Save changes before closing?" now drops an unanswered Delete question, as the plan's decision asked. The spec names
+  no exception for it. Either SPEC.md gets an exception for the close save, or the behavior goes back to keeping the
+  Delete question open; the first matches the plan's decision.
+
+#### Checks
+
+Run once for the whole round, on bulk-start-sessions and custom-agent-delete-prompt stacked in that order on main as it
+stood when the landing started (`bf468652`); what main gained since each plan's base is in each plan's notes. The brick
+test harness fix (#5076), which reached main while this round was landing, is not exercised by any check here. The test
+worker is an aarch64 Linux machine:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean.
+- On the test worker, `cargo nextest run -p farhelm-gui -p farhelm-desktop`, recorded run
+  bd36cea5-d4a2-4942-86ca-981f0eee85fb: 3,692 passed, 4 skipped. That is every desktop app test, wider than either
+  executor's selection.
+- On the test worker, the desktop app's end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), recorded run
+  25abe428-bee0-437b-9486-34e05898acf1: all 49 steps passed, except the paste step, which runs only on a Mac and was
+  skipped as always on Linux. It marks no sessions, but it exercises the row menus' Stop, Restart and Replace and
+  Settings opening and closing.
+- Locally, every screenshot scene compared with its approved picture, with both plans' new and changed screenshot scenes
+  included (`python3 scripts/check-gui-goldens.py`), recorded run 9bb96428-674a-4cb0-98e1-6be02b626c7e: every picture
+  matched, the new custom agent Delete scene included.
+- Locally, `python3 -B scripts/test-gui-screenshot-batch.py`, which checks the screenshot scene list against the golden
+  manifest, recorded run 26eeb3f3-b1a9-43bc-a31e-63b8e02b4697: passed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown and the scene list: passed.
+
+Reused: nothing. Skipped: the helm's, the supervisor's and the end-to-end Rust tests, since both plans change only the
+desktop app and nothing it sends.
