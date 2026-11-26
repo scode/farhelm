@@ -1863,11 +1863,11 @@ reason, and clears it when an all-whitespace field is saved. The command field p
 An explicitly disabled command displays as an empty field, but opening Settings never rewrites any stored value.
 Configuration replies the GUI reads may contain the default folder, a host's own folder and the all-hosts command, never
 per-host command overrides. A missing root and its parents are created on the target host at the first checkout, using
-the ordinary umask; configuration, discovery and preview create nothing. Existing symlink ancestors resolve to their
-canonical directory, while unresolved `..` in a missing suffix and dangling symlinks are refused. A root whose
-resolution changed since preview is still refused. `~` expands there, using the supervisor's captured home. Clearing an
-override restores inheritance; an empty hook override disables the inherited hook. Configuration changes affect new
-attempts, not an already accepted attempt or its retries.
+the ordinary umask. Configuration and preview create nothing. Existing symlink ancestors resolve to their canonical
+directory, while unresolved `..` in a missing suffix and dangling symlinks are refused. A root whose resolution changed
+since preview is still refused. `~` expands there, using the supervisor's captured home. Clearing an override restores
+inheritance; an empty hook override disables the inherited hook. Configuration changes affect new attempts, not an
+already accepted attempt or its retries.
 
 New, Clone, Restart with, Replace with and agent-requested launches use the destination's workspace trust policy.
 Structured launches in a session's own sandbox or container automatically trust where supported by Claude Code, Codex,
@@ -3431,8 +3431,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   default palette, foreground, and background are Ghostty's defaults, and launched agents see `COLORTERM=truecolor`.
 - Decided 2026-11-21: that fidelity targets what common agent CLIs and shells use. The terminal need not match xterm in
   rare modes, decorations, chords and wide-character edge cases (only the oldest X10 mouse mode, overline via SGR 53,
-  AltGr held with Shift+Enter, copying across a wide character cut by a selection edge, lines wrapped over a thousand
-  rows). A program-set cursor color is not supported: the cursor keeps the theme's color.
+  AltGr held with Shift+Enter, copying across a wide character cut by a selection edge, deleting or inserting characters
+  starting at a wide character's spacer column (DCH or ICH), and lines wrapped over a thousand rows). The cursor keeps
+  the theme's color even when a program sets its own.
 - Settings can color the thin frame around every session's terminal with that session's host identity color. This is off
   by default and shared by every device. When on, a host with the default color uses the ordinary foreground color;
   every other host uses its chosen icon color at full strength. A host color change updates open session frames through
@@ -3786,37 +3787,37 @@ whatever the agent renders is what you see. There is no composer, no message abs
   paths use the session's directory, not a shell's later directory. Hover checks the path silently. Only a downloadable
   file gets an underline, a pointing hand, and a disclosure showing the host, full resolved path and size. Each hover
   checks afresh; a redraw beneath a pointer resting on the same path text and target at the same position is not a new
-  hover. Leaving cancels it. A click before the disclosure paints does nothing. Only a click pressed and released over
-  the same painted disclosure, with the link text unchanged since that hover, transfers or opens the file. A partial
-  redraw that changes the link text withdraws transfer and opening permission even if the terminal library retains its
-  old target. A click cannot transfer or open a file while the full hover disclosure does not fit in the window or is
-  covered by another Farhelm surface such as an approval card or tunnel-error notice. A click on a file whose disclosure
-  painted but is clipped or covered is refused with a visible explanation to move the pointer or enlarge the window and
-  hover again. While the pointer stays on a refused link, its explanation may cover the top of an approval card,
-  including its heading and the requesting session and host. The card stays answerable from the keyboard meanwhile; the
-  cover ends when the pointer leaves the link. File disclosures and transfer messages make presentation-unsafe
-  characters visible, distinguish literal escape notation from escaped characters, and preserve repeated spaces. They do
-  not guarantee that names differing only by leading or trailing spaces, other Unicode spaces, or lookalike letters
-  render differently (confirmed 2026-10-17): a trailing space only makes a file less openable, and in the usual case the
-  program that could plant such a name can already write the file it imitates. Files must be readable regular files no
-  larger than 100 MB, including while transferring; directories are refused. The desktop app saves into Downloads under
-  a unique name and shows where it went, with no partial file after failure or interruption, except that a crash or
-  force-quit mid-transfer can leave its partial file behind. Status appears at the top of that terminal: success fades
-  after a few seconds, while a failure stays until the next click or download there. Plain click only downloads. In the
-  desktop app, Cmd-click on macOS (Ctrl-click elsewhere) also opens the completed save with the default app when the
-  saved file's final extension is in the helm's shared list, case-insensitively. The list defaults to .md, .txt, .json
-  and the common image types .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif, and the saved file must still have the same
-  final extension as the path disclosed at hover. Other types are saved without opening; an opening failure leaves the
-  save successful and says why it was not opened. The hover uses a file icon and bright name, the host and full
-  directory on a second line, and decimal size with the action hints on a third. A left stripe and size color show under
-  1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber. A file with an unknown size uses a neutral
-  stripe. Only an eligible desktop file has the opening hint. Any file the session's account can read is in reach,
-  within the existing shell authority; hover discloses the agent-provided target before an explicit click. Only the helm
-  can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to http and https. A hyperlink
-  with any other scheme, `file://` included, is inert: it gets no pointer, underline, hover, file check or click, and
-  with mouse reporting on a press on it reaches the program as a press on plain text does. Its cells stay the
-  hyperlink's, so its text is not taken for a printed URL or path either. To offer a file for download, a program prints
-  its path.
+  hover. Leaving cancels it. A click before the disclosure paints does nothing. To transfer or open the file, press
+  while that hover's disclosure is painted and fully visible, then release on the same link before the disclosure is
+  replaced. The link text must stay unchanged from hover. The press closes the card. A partial redraw that changes the
+  link text withdraws transfer and opening permission even if the terminal library retains its old target. A cover over
+  the disclosure from another Farhelm surface, such as an approval card or tunnel-error notice, blocks the click if
+  observed at press or release. A click on a file whose disclosure painted but is clipped or covered is refused with a
+  visible explanation of how to move the pointer or enlarge the window and hover again. While the pointer stays on a
+  refused link, its explanation may cover the top of an approval card, including its heading and the requesting session
+  and host. The card stays answerable from the keyboard meanwhile; the cover ends when the pointer leaves the link. File
+  disclosures and transfer messages make presentation-unsafe characters visible, distinguish literal escape notation
+  from escaped characters, and preserve repeated spaces. They do not guarantee that names differing only by leading or
+  trailing spaces, other Unicode spaces, or lookalike letters render differently (confirmed 2026-10-17): a trailing
+  space only makes a file less openable, and in the usual case the program that could plant such a name can already
+  write the file it imitates. Files must be readable regular files no larger than 100 MB, including while transferring;
+  directories are refused. The desktop app saves into Downloads under a unique name and shows where it went, with no
+  partial file after failure or interruption, except that a crash or force-quit mid-transfer can leave its partial file
+  behind. Status appears at the top of that terminal: success fades after a few seconds, while a failure stays until the
+  next click or download there. Plain click only downloads. In the desktop app, Cmd-click on macOS (Ctrl-click
+  elsewhere) also opens the completed save with the default app when the saved file's final extension is in the helm's
+  shared list, case-insensitively. The list defaults to .md, .txt, .json and the common image types .png, .jpg, .jpeg,
+  .gif, .webp, .bmp and .avif, and the saved file must still have the same final extension as the path disclosed at
+  hover. Other types are saved without opening; an opening failure leaves the save successful and says why it was not
+  opened. The hover uses a file icon and bright name, the host and full directory on a second line, and decimal size
+  with the action hints on a third. A left stripe and size color show under 1 MB green, 1–10 MB blue stripe with neutral
+  size, and 10–100 MB amber. A file with an unknown size uses a neutral stripe. Only an eligible desktop file has the
+  opening hint. Any file the session's account can read is in reach, within the existing shell authority; hover
+  discloses the agent-provided target before an explicit click. Only the helm can ask the supervisor for file reads. OSC
+  hyperlink schemes are explicitly limited to http and https. A hyperlink with any other scheme, `file://` included, is
+  inert: it gets no pointer, underline, hover, file check or click, and with mouse reporting on a press on it reaches
+  the program as a press on plain text does. Its cells stay the hyperlink's, so its text is not taken for a printed URL
+  or path either. To offer a file for download, a program prints its path.
 
 ## Attachments
 
@@ -4115,17 +4116,18 @@ the terminal's program and does nothing while any modal is open, including New, 
 quick-launch preparation, or before preferences finish loading.
 
 Cmd+/ on macOS, Ctrl+Shift+/ on Linux, opens **Keyboard shortcuts**, including from a focused terminal. Matching uses
-the physical Slash key, with no extra modifiers; repeat and composition do not open it. The chord never reaches the
-terminal's program, and does nothing while another modal is open or before preferences finish loading. The same dialog
-is also available from the **?** menu, where the item shows its shortcut. Its Sessions, Launching and Terminal groups
-show every app-wide shortcut and the keys inside a quick-launch sequence, with action names beside key chips. New
-appears only in the Mac desktop app. Each shortcut shows only the form this client handles: quick switcher, template
-list, ⚡, terminal text size, terminal tab switching and this dialog follow the operating system, while New, Delete,
-Rename, number keys and the sequence prefix use Command only in the Mac desktop app. The dialog names the current ⚡
-template, or says none is marked, and lists assigned number keys with their template names. It refreshes those shared
-bindings once each time it opens; a failed read keeps cached names. Keys used only inside other dialogs are omitted.
-Escape, Close or a click outside closes the ordinary modal and restores the opener's focus, including the terminal or
-the **?** button. The documentation's Keyboard shortcuts page lists both platform forms.
+the physical Slash key, with no extra modifiers. Held repeats do nothing. Composition blocks the chord except in the
+[Linux XKB compose cancellation case](SPEC_impl.md#actions-and-keymap). The chord never reaches the terminal's program,
+and does nothing while another modal is open or before preferences finish loading. The same dialog is also available
+from the **?** menu, where the item shows its shortcut. Its Sessions, Launching and Terminal groups show every app-wide
+shortcut and the keys inside a quick-launch sequence, with action names beside key chips. New appears only in the Mac
+desktop app. Each shortcut shows only the form this client handles: quick switcher, template list, ⚡, terminal text
+size, terminal tab switching and this dialog follow the operating system, while New, Delete, Rename, number keys and the
+sequence prefix use Command only in the Mac desktop app. The dialog names the current ⚡ template, or says none is
+marked, and lists assigned number keys with their template names. It refreshes those shared bindings once each time it
+opens; a failed read keeps cached names. Keys used only inside other dialogs are omitted. Escape, Close or a click
+outside closes the ordinary modal and restores the opener's focus, including the terminal or the **?** button. The
+documentation's Keyboard shortcuts page lists both platform forms.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
