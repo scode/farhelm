@@ -1210,8 +1210,11 @@ agent choice is independent of that destination:
   An invalid combination cannot launch. New normally preselects no harness or model. The permissions mode remembers the
   last successful agent launch, helm-wide across every client, except that a harness's default or forced YOLO clears
   that memory instead of preselecting YOLO for another harness. Explicit YOLO on a harness with a non-YOLO default is
-  remembered. The last wrapper prefix from a successful user agent launch is remembered per agent type, helm-wide; a
-  launch without one clears that agent's remembered prefix. Switching agent types loads the new type's remembered
+  remembered. The last wrapper prefix from a successful user agent launch is remembered per agent type, helm-wide, and
+  separately for each registered custom agent; a launch without one clears that agent's remembered prefix and no other.
+  Deleting a custom agent forgets its prefix, so one registered again under the same ID starts with none, and a launch
+  that finishes after its agent was deleted remembers nothing. Switching agent types, or between custom agents, loads
+  the new agent's remembered prefix in place of the old one's, typed or not. Choosing the same agent again keeps the
   prefix. Agent-origin launches and command launches do not change this memory. Workspace trust for Codex, Muse and Pi
   comes from the destination policy and separate off-by-default Settings switches (below). There is no per-launch trust
   choice, and the old remembered trust value is neither read nor written. Those switches add per-launch trust arguments.

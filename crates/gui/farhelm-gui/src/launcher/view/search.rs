@@ -584,7 +584,7 @@ impl Launcher {
                 // edit's escalation is judged as if from the Agent tab and dropped.
                 let from_command = self.draft.tab == Tab::Command;
                 self.draft.choose_tab(Tab::Agent);
-                let wrapper = self.remembered_wrapper(harness, cx);
+                let wrapper = self.remembered_wrapper(harness, None, cx);
                 let mut edit = self.draft.choose_catalog_model(
                     harness,
                     &id,
@@ -608,7 +608,7 @@ impl Launcher {
                 // edit's escalation is judged as if from the Agent tab and dropped.
                 let from_command = self.draft.tab == Tab::Command;
                 self.draft.choose_tab(Tab::Agent);
-                let wrapper = self.remembered_wrapper(harness, cx);
+                let wrapper = self.remembered_wrapper(harness, None, cx);
                 let mut edit = self.draft.choose_history_model(
                     harness,
                     &id,

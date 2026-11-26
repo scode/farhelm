@@ -557,9 +557,9 @@ fn apply_from_store(
         .into_iter()
         .cloned()
         .collect();
-    let remembered_wrappers = collections
+    let remembered = collections
         .get::<Preferences>(PREFERENCES_KEY)
-        .map(|preferences| preferences.remembered_wrapper_prefixes.clone())
+        .cloned()
         .unwrap_or_default();
     let selected = local_state::selected(cx);
     let default_folder = |host| entry::default_folder(collections, selected.as_deref(), host);
@@ -572,7 +572,7 @@ fn apply_from_store(
     let context = apply::Context {
         hosts: &hosts,
         catalog,
-        remembered_wrappers: &remembered_wrappers,
+        remembered: &remembered,
         default_folder: &default_folder,
         known_recipes: &known_recipes,
     };

@@ -223,7 +223,7 @@ impl Launcher {
                 self.changed(cx);
             }
             ModelOption::Model { id, harness, .. } => {
-                let wrapper = self.remembered_wrapper(harness, cx);
+                let wrapper = self.remembered_wrapper(harness, None, cx);
                 let edit = self.draft.choose_catalog_model(
                     harness,
                     &id,

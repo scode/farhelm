@@ -274,19 +274,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   replaced by a clipped frame before presentation, and a successful continuation after a wait. Update the documented
   Enter behavior and key hint if the fill now needs another press. Plan: `plans/queue/launcher-visible-consent.md`.
 
-- **Keep wrapper defaults per custom agent registration.** Farhelm remembers one wrapper for all custom agents. A
-  launcher switch or template can carry an explicit prefix from one agent into another, and launching a second agent
-  without a prefix can erase the first agent's default. When a user agent launch succeeds, update only that
-  registration's wrapper memory, clearing it for an unwrapped launch. Ignore the old shared Custom default because its
-  owner cannot be recovered. Reload the destination agent's default and clear the previous explicit choice on a chip,
-  search or template switch. A template's explicit prefix or clear overrides the remembered default. Use the existing
-  switch notice when a deliberately chosen model or effort is cleared. Preserve saved launch commands and built-in
-  defaults. Prune only that registration's memory in the Delete transaction and prevent an in-flight launch from putting
-  it back after deletion or re-registration of the same ID. Update the creation rules in SPEC.md and the preferences
-  contract in SPEC_impl.md. Cover two registrations, blank and explicit prefixes, template replay, upgrades and
-  re-registration. The triage plan deferred the combined change because it spans stored and pushed preferences, launch
-  history, deletion and both launcher paths. Plan: `plans/queue/custom-agent-per-reg-wrappers.md`.
-
 - **Use the shared Delete confirmation for custom agents in Settings.** The footer asks with two ordinary buttons.
   Escape can close Settings instead of cancelling Delete, focus stays away from Cancel, and the question never names the
   registration. Port `settings/custom_agents.rs` to the recipe editor's inline prompt as described in
