@@ -5970,6 +5970,12 @@ suspended may still be answered and get the helm's refusal, and a pin drag may l
 Throughout the app, a key or click may act before a frame shows an arriving background update, with destructive
 confirmations and launches that retire a session (Replace with) limited to the action and consent already shown.
 
+Decided 2026-11-26, an exception to the 2026-10-10 rule that ignores an action whose target is no longer in view: an
+item the user highlighted with the arrow keys in a scrollable list is their explicit choice, and Enter acts on it even
+when the list has since scrolled it partly or wholly out of view. The GUI does not prove after layout that the
+highlighted row is still visible before acting on it. Scrolling changes nothing else: a highlighted choice that is no
+longer offered is still refused as stale, and a disabled or held one is refused as it would be in view.
+
 A click on a printed terminal link uses the last drawn grid at the press position. Grid or scrollback updates can make a
 click before the next draw do nothing.
 
