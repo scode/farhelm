@@ -734,7 +734,8 @@ fn app_version_checks_once_and_follows_the_updaters_busy_state(cx: &mut TestAppC
 }
 
 /// The App switch reads the helm choice and writes the running version with it. This lets re-enabling defer
-/// highlights until a later upgrade, even if this build's highlights have never been downloaded.
+/// highlights until a later upgrade, even if this build's highlights have never been downloaded. The App heading
+/// includes the helm because this switch is shared alongside the installation settings.
 #[gpui::test]
 fn enabling_upgrade_highlights_starts_from_the_running_release(cx: &mut TestAppContext) {
     let preferences = Preferences {
@@ -750,6 +751,10 @@ fn enabling_upgrade_highlights_starts_from_the_running_release(cx: &mut TestAppC
     open_settings(cx);
     click(cx, section_button(Section::App));
     let id = Choice::ShowWhatsNew.id();
+    assert_eq!(
+        label_of(cx, "settings-page-scope").as_deref(),
+        Some("This Mac and this helm")
+    );
     assert_eq!(
         switch_on(cx, id),
         Some(false),
@@ -781,7 +786,10 @@ fn the_app_switch_writes_the_apps_own_setting_and_shows_only_what_was_saved(
     open_settings(cx);
     click(cx, section_button(Section::App));
     let _ = sent(&mut helm);
-    assert!(painted(cx).contains("This Mac"));
+    assert_eq!(
+        label_of(cx, "settings-page-scope").as_deref(),
+        Some("This Mac")
+    );
     assert_eq!(switch_on(cx, super::app::ID), Some(true));
     assert!(
         painted(cx)
@@ -1430,7 +1438,8 @@ const SOUNDS: [Choice; 4] = [
     Choice::SoundSshSignIn,
 ];
 
-/// Each play button calls the existing player once with the row's sound and leaves its preference untouched.
+/// Each Play button calls the player with its own sound and leaves the preference untouched. Clicks within the
+/// same column but outside Play still reach the switch, which owns the rest of the row.
 #[gpui::test]
 fn previewing_a_setting_plays_only_the_chosen_sound(cx: &mut TestAppContext) {
     use crate::sounds::{self, Sound};
@@ -1461,6 +1470,18 @@ fn previewing_a_setting_plays_only_the_chosen_sound(cx: &mut TestAppContext) {
         assert_eq!(switch_on(cx, choice.id()), before);
         assert!(sent(&mut helm).is_empty());
     }
+
+    let toggle = Choice::SoundTurnFinished.id();
+    let preview = "settings-sound-turn-finished-preview";
+    into_view(cx, toggle);
+    test_support::show_next_frame(cx);
+    let (row, play) = (bounds(cx, toggle), bounds(cx, preview));
+    let above_play = gpui::point(play.center().x, play.top() - gpui::px(2.));
+    assert!(row.contains(&above_play) && !play.contains(&above_play));
+    cx.simulate_click(above_play, gpui::Modifiers::none());
+    settle(cx);
+    assert_eq!(one_save(&mut helm).1, json!({"sound_turn_finished": true}));
+    assert!(played.take().is_empty());
 }
 
 /// The Sounds sub-heading is how the user turns each status sound on or off, and each switch must write only its own

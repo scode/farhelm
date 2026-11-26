@@ -14,35 +14,6 @@
   record which way it went. Recommendation for reference: discard (or fix code) — coverage only; size S.
 - Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
 
-## sound-preview-overlay-blocks-settings-switch.md
-
-- Outcome: `other`.
-- Assessment: Each sound switch in Notifications has a small Play button. The invisible strip above and below that
-  button, as tall as the row, swallows clicks, so clicking there neither plays nor toggles the switch. Verified:
-  confirmed. The wrapper is `absolute().top_0().bottom_0()` with `block_mouse_except_scroll()` (`choices.rs:723-735`),
-  wider in height than the 24 px button. The dead area is about 24 px wide.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: fix code — move the blocking hitbox to the button; size S.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
-## app-settings-shared-upgrade-option-has-local-heading.md
-
-- Outcome: `other`.
-- Assessment: Settings → App's heading says its settings apply to "This Mac", but the page also holds "Show what's new
-  after updates", which the helm shares. Verified: confirmed per reviewer (frame scope mapping not re-traced). SPEC.md
-  2563: the heading "shows its icon, name, description and scope"; SPEC.md 2687-2690 places both an installation setting
-  and the helm-shared choice in App. The spec does not say what scope label a mixed page shows, so this is a reading.
-- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
-  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
-- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
-  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
-  for reference: discard or fix spec (say App's scope is the installation's, with the shared switch saying so itself);
-  size S.
-- Execution: ``planned in `plans/queue/triage-settings-nov24.md` ``.
-
 ## trailing-settings-containers-reload-omits-loading-keeps-error.md
 
 - Outcome: `other`.

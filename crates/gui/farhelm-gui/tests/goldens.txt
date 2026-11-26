@@ -344,8 +344,8 @@ linux/session-unavailable--dark.png ba64050bbb898c59c774674689fc7580ccaff939
 linux/session-unavailable--light.png 3ebce7b976276b40383b0f646202cc14e70b18d2
 linux/settings-antigravity--dark.png 297fe018249c03196bf5ac2dec449d41935c2b3d
 linux/settings-antigravity--light.png 42452144997903d825f8ae8a45af9841ddc3cbf3
-linux/settings-app--dark.png 6dafcc5497e78c7f1ef90cd3b16384e69645a2e0
-linux/settings-app--light.png c1cc018e6ba1f559740068de2c6ddf5ef5678996
+linux/settings-app--dark.png a4f50825debd4ff45376944836de4c2bf32ba600
+linux/settings-app--light.png a1774d43be96fc50177354c78a593899128810d5
 linux/settings-appearance--dark.png c744c892e378e21200a30345ff6c85085a3e1da2
 linux/settings-appearance--light.png 90bc74646fd45354d5457f65133b31f06498fccf
 linux/settings-checkouts--dark.png b29ed7e00c358a3f7c08c718851ffdb0e6cf3456
