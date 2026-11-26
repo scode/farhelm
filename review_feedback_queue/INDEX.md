@@ -50,29 +50,11 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`tensorlake-key-discard-lacks-preservation-test.md`](tensorlake-key-discard-lacks-preservation-test.md) — The new
-  Tensorlake Discard coverage does not prove that abandoning a replacement keeps the saved key.
-
-- [`ntfy-test-no-longer-witnesses-pending-save-lock.md`](ntfy-test-no-longer-witnesses-pending-save-lock.md) — The
-  changed Notifications test can pass if Save wrongly becomes available on an edited form while Send test is pending.
-
 - [`sound-preview-overlay-blocks-settings-switch.md`](sound-preview-overlay-blocks-settings-switch.md) — The Play
   overlay leaves parts of its sound switch row unclickable.
 
-- [`sound-preview-regression-misses-separate-mappings.md`](sound-preview-regression-misses-separate-mappings.md) — The
-  preview test exercises one sound and can miss a wrong mapping on the three other Play controls.
-
 - [`app-settings-shared-upgrade-option-has-local-heading.md`](app-settings-shared-upgrade-option-has-local-heading.md) —
   The App heading says This Mac even though it contains a helm-shared highlights setting.
-
-- [`pi-settings-tests-miss-trust-route.md`](pi-settings-tests-miss-trust-route.md) — Pi's Settings tests no longer check
-  a successful trust read or the absence of a hook hint control.
-
-- [`agent-settings-tests-miss-late-trust-replies.md`](agent-settings-tests-miss-late-trust-replies.md) — The per-agent
-  Settings tests can miss a trust reply being applied to the page opened after the request.
-
-- [`agent-settings-search-test-omits-focus-target.md`](agent-settings-search-test-omits-focus-target.md) — The Settings
-  search test can pass with a trust result that names the right agent and focuses the wrong control.
 
 - [`shortcuts-chord-during-composition.md`](shortcuts-chord-during-composition.md) — The Keyboard shortcuts chord can
   interrupt an input method if native handling clears its mark first or the action cannot query the focused field.
