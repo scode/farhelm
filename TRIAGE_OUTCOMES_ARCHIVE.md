@@ -50081,3 +50081,45 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   and add a focused unit test (estimate S, ~15-30 lines). Remove the feedback file and its index entry.
 - Execution: Fixed. Cancellation while a complete upload is being published returns an unknown outcome. A unit test holds staging cleanup after the attachment has appeared, and the wire test confirms that a late publication and its retry can leave two complete copies.
   Change `kwouwwlwrrkyszzxzwxzllkqpwklnrrl`, bookmark `plan/triage-provisioning-podman-and-runtime/03-ui-channel-drain-and-upload-cancel`, https://github.com/scode/farhelm/pull/5034/changes.
+
+## trailing-tab-shell-hangup-delete-wiring-untested.md
+
+- Outcome: `other`.
+- Assessment: Confirmed as a test-only coverage gap (`service/session_hosts.rs:518-562` `sweep_roots` and
+  `teardown.rs:529-534` tab-shell wiring into `SweepTarget::WholeSession` are not exercised by any test; only
+  `sweep.rs:3576` constructs `WholeSession` directly). Shipped code is correct.
+- Decision: Q10 ("Pure product-test coverage gaps"): maintainer picked "Re-apply Nov 21 rule + fix security-binding test
+  (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
+  guards a user-facing behavior; otherwise make no change. Either way remove the feedback file and its index entry, and
+  record in Execution which way it went.
+- Execution: Test strengthened within the Nov 21 limit. The existing stand-in tab fixture now checks that its pinned child reaches Delete's tab-root collection for shell hangup. Direct signal delivery during Delete remains separate coverage.
+  Change `vyrrosrlzwprqzzqzwpknuolstnkwwrx`, bookmark `plan/triage-provisioning-podman-and-runtime/04-runtime-test-gap-checks`, https://github.com/scode/farhelm/pull/5038/changes.
+
+## trailing-replace-in-environment-history-check-vacuous.md
+
+- Outcome: `other`.
+- Assessment: Confirmed as a vacuous test check (`sessions_tests.rs:862-884` checks `launch_history` is empty after a
+  command launch, which never writes `launch_history` at `store.rs:210-217`, so `HistoryScope::RepositoryOnly` at
+  `sessions.rs:2202-2208` is unguarded at the route level). Shipped code obeys `SPEC_impl.md:5326-5328`.
+- Decision: Q10 ("Pure product-test coverage gaps"): maintainer picked "Re-apply Nov 21 rule + fix security-binding test
+  (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
+  guards a user-facing behavior; otherwise make no change (estimate ~10-20 lines). Either way remove the feedback file
+  and its index entry, and record in Execution which way it went.
+- Execution: Test fixed within the Nov 21 limit. The Replace route adds the repository to global suggestions while the replacement consumes no slot in the host's ordinary create window.
+  Change `vyrrosrlzwprqzzqzwpknuolstnkwwrx`, bookmark `plan/triage-provisioning-podman-and-runtime/04-runtime-test-gap-checks`, https://github.com/scode/farhelm/pull/5038/changes.
+
+## trailing-session-owned-setup-flag-untested.md
+
+- Outcome: `other`.
+- Assessment: Confirmed as a test-only coverage gap (`sessions_tests.rs:12339-12368` tests `needs_checkout_root` only on
+  the local installed host; `assert_new_environment_checkout` at `:575-690` never queries `/api/launch-history` for
+  `owned`). Shipped code obeys `SPEC.md:1844-1846`.
+- Decision: Q10 ("Pure product-test coverage gaps"): maintainer picked "Re-apply Nov 21 rule + fix security-binding test
+  (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
+  guards a user-facing behavior; otherwise make no change (estimate ~8-12 lines). Either way remove the feedback file
+  and its index entry, and record in Execution which way it went.
+- Execution: Test fixed within the Nov 21 limit. The live launch-history response for the identified session-owned host now has an assertion that checkout needs no setup, including with no saved root.
+  Change `vyrrosrlzwprqzzqzwpknuolstnkwwrx`, bookmark `plan/triage-provisioning-podman-and-runtime/04-runtime-test-gap-checks`, https://github.com/scode/farhelm/pull/5038/changes.

@@ -635,7 +635,8 @@ async fn next_control_frame<R: tokio::io::AsyncRead + Unpin>(
 
 /// Exercise the real preview/name retry and one accepted create with both
 /// an inherited default and the home fallback, on a registered environment.
-/// The actual Create must carry trust for the new host with Codex Settings off.
+/// Launch history must allow checkout without setup, and the actual Create
+/// must carry trust for the new host with Codex Settings off.
 async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_root: &'static str) {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -741,8 +742,14 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
         (previews, creates)
     });
     h.manager.sync_registry().await.unwrap();
-    h.await_refreshed(owned).await;
+    h.await_refreshed_as(owned, "fresh-recipe-install", 0).await;
     assert!(h.manager.status(owned).unwrap().is_session_owned);
+    let (status, history) = get_json(&h, &format!("/api/launch-history?host={owned}")).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{history}");
+    assert_eq!(
+        history["needs_checkout_root"], false,
+        "the launcher can use the environment's own home"
+    );
     assert!(
         !h.store
             .resolve_checkout_config(None)
@@ -940,13 +947,19 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
         h.store.global_github_repository_history().await.unwrap(),
         [farhelm_proto::parse_github_repo("acme/bar").unwrap()],
     );
-    assert!(
-        h.store
-            .launch_history(host, "fresh-recipe-install")
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    // A command launch still consumes a slot under ordinary admission.
+    let db = h.store.connection_for_test();
+    let admitted = db
+        .call("read replacement admission", move |conn| {
+            Ok(conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM create_history_sessions WHERE host_id = ?1 AND session_id = 'replacement')",
+                [host],
+                |row| row.get::<_, bool>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert!(!admitted, "Replace must preserve the host's create window");
     assert_eq!(h.state.trash_requests.epoch(host), 1);
     done.send(()).unwrap();
     responder.await.unwrap();

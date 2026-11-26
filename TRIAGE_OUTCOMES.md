@@ -176,19 +176,6 @@
   its index entry.
 - Execution: ``planned in `plans/queue/triage-spec-and-comment-updates.md` ``.
 
-## trailing-tab-shell-hangup-delete-wiring-untested.md
-
-- Outcome: `other`.
-- Assessment: Confirmed as a test-only coverage gap (`service/session_hosts.rs:518-562` `sweep_roots` and
-  `teardown.rs:529-534` tab-shell wiring into `SweepTarget::WholeSession` are not exercised by any test; only
-  `sweep.rs:3576` constructs `WholeSession` directly). Shipped code is correct.
-- Decision: Q10 ("Pure product-test coverage gaps"): maintainer picked "Re-apply Nov 21 rule + fix security-binding test
-  (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
-  guards a user-facing behavior; otherwise make no change. Either way remove the feedback file and its index entry, and
-  record in Execution which way it went.
-- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
-
 ## trailing-trust-hint-late-refusal-untested.md
 
 - Outcome: `other`.
@@ -213,32 +200,6 @@
   guards a user-facing behavior; otherwise make no change (estimate ~15-20 lines). Either way remove the feedback file
   and its index entry, and record in Execution which way it went.
 - Execution: ``planned in `plans/queue/triage-trust-settings-and-ui-wording.md` ``.
-
-## trailing-replace-in-environment-history-check-vacuous.md
-
-- Outcome: `other`.
-- Assessment: Confirmed as a vacuous test check (`sessions_tests.rs:862-884` checks `launch_history` is empty after a
-  command launch, which never writes `launch_history` at `store.rs:210-217`, so `HistoryScope::RepositoryOnly` at
-  `sessions.rs:2202-2208` is unguarded at the route level). Shipped code obeys `SPEC_impl.md:5326-5328`.
-- Decision: Q10 ("Pure product-test coverage gaps"): maintainer picked "Re-apply Nov 21 rule + fix security-binding test
-  (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
-  guards a user-facing behavior; otherwise make no change (estimate ~10-20 lines). Either way remove the feedback file
-  and its index entry, and record in Execution which way it went.
-- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
-
-## trailing-session-owned-setup-flag-untested.md
-
-- Outcome: `other`.
-- Assessment: Confirmed as a test-only coverage gap (`sessions_tests.rs:12339-12368` tests `needs_checkout_root` only on
-  the local installed host; `assert_new_environment_checkout` at `:575-690` never queries `/api/launch-history` for
-  `owned`). Shipped code obeys `SPEC.md:1844-1846`.
-- Decision: Q10 ("Pure product-test coverage gaps"): maintainer picked "Re-apply Nov 21 rule + fix security-binding test
-  (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
-- Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
-  guards a user-facing behavior; otherwise make no change (estimate ~8-12 lines). Either way remove the feedback file
-  and its index entry, and record in Execution which way it went.
-- Execution: ``planned in `plans/queue/triage-provisioning-podman-and-runtime.md` ``.
 
 ## trailing-drift-copyback-runs-while-agent-may-live.md
 
