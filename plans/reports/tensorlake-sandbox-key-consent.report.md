@@ -63,3 +63,52 @@ did not finish, a small fix so a stale "couldn't load" message is dropped with t
 The second found that one new test could not tell the old behavior from the new for its first claims, and that two test
 descriptions gave the wrong reason; it got a companion test that does fail on the old code, and the descriptions were
 corrected. The gate passed after the second round.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round. Since its base, main had gained the Restart/Replace action for marked sessions (#5065,
+#5072) and the change that makes Delete for a custom agent in Settings ask its confirmation in place, the same way this
+Delete does (#5075). The second is also in Settings, so an independent reviewer and I read it against this plan: its
+rule that accepting "Save changes before closing?" drops an unanswered Delete question lives in the custom agent editor
+alone, not in anything the Tensorlake page shares, so nothing interacted. We also confirmed the plan kept to your
+decision not to handle a slow helm specially. The Delete question closes when the helm accepts the key change, not when
+you press Save. While the save is still going, or if the helm refuses it, the question stays open. That is safe because
+the helm checks the key it has stored again when it deletes.
+
+#### Fixes made while landing
+
+Two code comments were rewrapped to the repository's line length. No behavior changed.
+
+#### Worth knowing
+
+- One check in the test where you confirm a Delete while a Clear of the key is still going proves nothing: it looks for
+  the Delete question to be gone, but confirming the Delete had already closed it. This is not the weak test the review
+  gate found and fixed. The test's other checks still fail on the old code, as the report says of all six tests, and a
+  separate test covers a Clear closing a question that is still open, so the behavior is covered.
+- Nothing tests a key change while keyboard focus is on the Delete question's buttons. On a Mac, clicking a button does
+  not move keyboard focus, so focus can still be on the question when you click Clear. Settings already moves focus
+  somewhere sensible when the control holding it disappears, and that is expected to cover this case, but nothing checks
+  it here. Not worth a follow-up unless focus is seen getting lost.
+
+Nothing from the landing needs a follow-up.
+
+#### Checks
+
+Run on the plan's change as the executor pushed it, rebased onto main as it stood when the landing started. The landing
+fix above only rewraps two code comments, so these runs still cover what merged. The test worker is an aarch64 Linux
+machine:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean.
+- On the test worker, `cargo nextest run -p farhelm-gui -p farhelm-desktop`, recorded run
+  e6730559-2947-4ddb-8b9a-5dab100fdfaf: 3,698 passed, 4 skipped (tests marked ignored). That is every desktop app test,
+  wider than the executor's Settings selection, and on the base that includes the Settings change that landed meanwhile
+  (#5075).
+- Locally, `cargo fmt --all -- --check` (again after the landing fix), the test-sleep check,
+  `python3 releasing/check-changelog.py format` and `dprint check` on the changed Markdown: passed.
+
+Reused: nothing. Skipped: the screenshot comparison and the end-to-end smoke, since nothing drawn changed and the smoke
+has no Tensorlake step; the rest of the workspace, since only the desktop app's Settings changed.

@@ -34,3 +34,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`custom-agent-per-reg-wrappers`](reports/custom-agent-per-reg-wrappers.report.md) landed 2026-11-26 in #5073, #5074: Remember command wrapper defaults per custom agent registration
 - [`bulk-start-sessions`](reports/bulk-start-sessions.report.md) landed 2026-11-26 in #5065, #5072: Add bulk Restart/Replace action for marked stopped sessions
 - [`custom-agent-delete-prompt`](reports/custom-agent-delete-prompt.report.md) landed 2026-11-26 in #5075: Port Settings custom-agent Delete to the shared inline confirmation prompt
+- [`tensorlake-sandbox-key-consent`](reports/tensorlake-sandbox-key-consent.report.md) landed 2026-11-26 in #5077: Bind Settings leftover-sandbox Delete confirmation and list to the active Tensorlake key
