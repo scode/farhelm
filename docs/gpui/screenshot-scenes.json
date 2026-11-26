@@ -3769,6 +3769,36 @@
       "reference": null
     },
     {
+      "golden": "settings-close-save-held",
+      "title": "Settings' shared close refusal in the pinned footer at the minimum window height",
+      "reference": null
+    },
+    {
+      "golden": "settings-credentials-key-conflict",
+      "title": "Credentials after Save and Close refused two different Tensorlake keys",
+      "reference": null
+    },
+    {
+      "golden": "settings-custom-agent-busy-save",
+      "title": "A custom agent's Save in progress keeping keyboard focus beside its catalog row",
+      "reference": null
+    },
+    {
+      "golden": "settings-custom-agent-save-blocked-by-delete",
+      "title": "A custom agent close blocked by its pending Delete, with Cancel and Delete still open",
+      "reference": null
+    },
+    {
+      "golden": "settings-notifications-close-refused",
+      "title": "Notifications showing a refused close save above the actions at the minimum window size",
+      "reference": null
+    },
+    {
+      "golden": "settings-tunnel-question-over-terminal",
+      "title": "The Mac tunnel warning shown over the saved Terminal settings",
+      "reference": null
+    },
+    {
       "golden": "template-custom-yolo-refusal",
       "title": "A custom command template's stored safety answer offered for removal",
       "reference": null

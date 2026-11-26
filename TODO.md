@@ -71,7 +71,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and a registered agent, the accessible labels, and the page retained behind the question. Capture and review the new
   prompt in light and dark, publish the accepted references, and include their manifest entries in the fix. See the
   Settings close contract in `SPEC.md`. The separate form names, keyboard access and their required evidence exceed this
-  item’s size allowance.
+  item’s size allowance. The triage decision asked only to reveal a page when one section is affected and to name each
+  custom-agent draft in one sentence (size S); the separate rows, labels, scroll stop and new screenshots above are the
+  plan executor's proposal, not a decision, and a smaller fix that meets the decision is fine.
 
 - **Keep credential delivery reports visible when Settings closes.** A replacement saved through Save and Close can
   reach storage while some hosts miss delivery. `crates/gui/farhelm-gui/src/settings/credentials/editor.rs` sends the
@@ -85,7 +87,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   must not be resent. See the Settings and Credentials paragraphs under “Session list” in `SPEC.md`. Test the exact
   committed PUT and host report, including a tunnel question opened before the receipt, then Cancel and Close. Review
   the Credentials overview in both appearances. The ordinary path, the deferred reveal after a newer action, and their
-  required evidence together exceed this item's size allowance.
+  required evidence together exceed this item's size allowance. The triage decision asked only to keep Settings open on
+  Credentials when a close-save returns delivery warnings (size S); the rules above for a deferred reveal, retiring the
+  old close and a later Save are the plan executor's proposal, not a decision.
 
 - **Wait for credential saves after Back or Cancel.** A credential editor can start Save, then close while the helm
   still owns the write. Settings can close without waiting or offer Discard for another draft, and a refused write has
@@ -114,8 +118,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Test the exact opt-out with plain Close before the reply, its success counterpart, and the refusal before and after
   accepting the close question with another draft staged. Review the notice and revealed refusal in light and dark. See
   `SPEC.md` under “Settings” and “Errors and diagnostics”. The receipt must outlive the dialog for plain Close and join
-  the close decision for staged drafts. Those paths and their test and visual evidence exceed this triage item's size
-  allowance.
+  the close decision for staged drafts. The triage assessment left the fix's shape open (hold the close, or a notice
+  that survives it); choosing both, and an agent-specific notice with a retry route, is the plan executor's proposal,
+  not a decision. Those paths and their test and visual evidence exceed this triage item's size allowance.
 
 - **Reveal the credential editor when Save and Close fails.** Resolving a Tensorlake key conflict from the Credentials
   overview footer can leave that overview in front of a retained credential draft. Save and Close still submits the
