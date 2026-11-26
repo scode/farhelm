@@ -81,3 +81,62 @@ hook shaped like the existing ones and absent from the shipped build. It found S
 (true only when the host ended), a timing race in one test, comments citing the wrong SPEC section, out-of-date notes on
 the retry fields, and the pre-existing first-close case above. All but that last one were fixed. Round 2: no remaining
 findings.
+
+### Landing
+
+#### What landed with it
+
+This round landed this plan, then agent-delete-late-notice (an agent's Delete also puts its leftover-checkout notice in
+the notices bell). The two touch separate code. Since this plan's base, main had gained supervisor-outliving-programs
+(#5083, Stop and Restart ending an agent that outlived its killed terminal host), an unrelated container-host change
+(#5084) and a TODO entry (#5089). An independent reviewer and I read #5083 against this plan: it changes only how a
+session's agent is ended, and the tab close, its sweeps and its retries are untouched. Stop and Delete also behave
+sensibly with a tab whose close failed and is waiting to retry: Stop retries the close and reports an error if that
+fails too; Delete ends the tab.
+
+The two plans' policy paragraphs in SPEC.md (this one in "Session view", #5083's in "Lifecycle operations") both state
+the same cleanup policy. They agree; as this plan's report suggests, one could later be shortened to a pointer to the
+other.
+
+#### Fixes made while landing
+
+Two spec corrections, both found by the independent review; no code changed:
+
+- The implementation spec's paragraph on closing a tab still described the old close: the tab's record went as soon as
+  its terminal host was confirmed ended. It now says the record goes only once the sweep after the end also succeeded,
+  that a failed sweep keeps the tab and retries it, and that a retry whose own sweep fails pushes the next try back.
+- A new SPEC.md sentence said a failed close never reports that the tab's processes were reaped. One error message does
+  say that, truthfully: when the sweep before ending the host and the sweep after it both succeeded, but the host itself
+  could not be confirmed ended. The sentence now says a close never claims a sweep succeeded when it did not.
+
+#### Worth knowing
+
+- **The report's follow-up still stands.** When a tab's shell exits on its own and Farhelm's first automatic close of it
+  fails at its first sweep, that close is retried on every cleanup pass (every two seconds) with no backoff. Nothing in
+  TODO.md tracks it (the entry this plan removed never covered it), so the report is its only record; ask for a Plan
+  follow-ups entry if you want it kept. The fix is a few lines.
+- **No test covers Stop or Delete while a failed close is waiting to retry.** The reviewer traced both by reading the
+  code (above). Not worth a follow-up on its own.
+
+#### Checks
+
+Run once for the whole round, on supervisor-tab-close-retry and agent-delete-late-notice stacked in that order on main
+as it stood when the landing started; what main gained since each plan's base is in each plan's notes. The landing fixes
+change only SPEC.md and SPEC_impl.md, so these runs still cover what merged. The test worker is an aarch64 Linux machine
+with a systemd user manager:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean.
+- On the test worker, `cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm-gui`,
+  recorded run d8896d2e-d92c-4d1e-8121-ea0329db3284: 7,416 passed, 17 skipped (tests marked ignored). That is every test
+  of the shared message types, the helm, the supervisor and the desktop app, wider than either executor's selection.
+- On the test worker, the end-to-end tests of host tabs (including this plan's three new ones), terminal tabs, tab edge
+  cases, host terminals and every test whose name contains `delete` (`cargo nextest run -p farhelm --test e2e` filtered
+  to `host_tabs`, `terminal_tabs`, `tab_lifecycle_edges`, `host_terminals` and `delete`), recorded run
+  0ffb2472-3094-47e8-9b62-3e09fc4aa544: 85 passed, and none skipped for lack of systemd.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown: passed, and `dprint check` on both specs again after the landing fixes.
+
+Reused: nothing. Skipped: the screenshot comparison and the desktop app's end-to-end smoke test, since nothing drawn
+changed; the Podman suites, since neither plan touches containers.
