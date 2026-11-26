@@ -70,3 +70,59 @@ end-to-end report checks could not reliably tell the old behavior from the new. 
 adding the unit test above. It also suggested a small simplification, which was taken. The second round found no
 problems of substance and two low-severity items (a test assertion that could pass for the wrong reason, and two
 overstated comments), both fixed. The gate passed after the second round.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round. Since its base, main gained the Wayland text-field paste fix (#5069), which changes
+only the desktop app's clipboard handling, and TODO and plan bookkeeping. Neither touches restarts, conversation
+reporting or the supervisor's database, and neither side changed the database schema or the protocol version, so nothing
+interacted. The report's note that main had moved only in TODO and plan files was true when it was written; the paste
+fix landed after it. An independent reviewer and I both read the change against the code around it:
+
+- the edited settings are saved in the same database write that begins the restart, before the new agent starts, so a
+  crash cannot leave one without the other;
+- a conversation report arriving during the restart is judged by the new setting;
+- Delete, Stop and another Restart still wait for the restart to finish;
+- each way the restart can fail leaves the stored settings and what Farhelm shows in agreement.
+
+#### Fixes made while landing
+
+One comment in the restart code said a session list never shows the old settings beside the new agent. During the
+restart, a list deliberately still shows the session as it was just before, as the report's first point says. The
+comment now says so. No behavior changed.
+
+#### Worth knowing
+
+- Besides the case the executor raised (a conversation reported by an agent whose restart then fails), saving the
+  settings before the agent starts has one more small effect. If, during the restart, you start another agent from one
+  of the session's terminal tabs with `farhelm spawn` and it copies the session's agent settings, it gets the new
+  settings, and keeps them even if the restart then fails before its agent starts and the session goes back to the old
+  settings. The window is the few moments a restart is in progress, and I would leave it.
+- The changelog draft's phrase "the restart's reply" names an internal message, not something a user sees. What the user
+  sees is whether the session offers to resume its conversation right after the restart; the release curation can reword
+  it that way.
+
+#### Checks
+
+Run on the plan's change as the executor pushed it, rebased onto main as it stood when the landing started (`986c48ce`).
+The one landing fix above changes only a code comment, so these runs still cover what merged. The test worker is an
+aarch64 Linux machine:
+
+- On the test worker, `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`:
+  clean.
+- On the test worker, the supervisor's whole unit suite, `cargo nextest run -p farhelm-supervisor --lib`, recorded run
+  23458ef3-fa99-4727-8c98-986c3d530ce3: 1,652 passed, 10 skipped (tests marked ignored). That is wider than the
+  executor's selection of tests by name, because the change touches a step every kind of restart goes through, and the
+  supervisor's database code next to it.
+- On the test worker, every end-to-end test about restarts, relaunches, the command shell's restarts, hook identity,
+  conversation reports and named conversations (`cargo nextest run -p farhelm --test e2e` filtered to the
+  `restart_with_resume`, `host_relaunches`, `command_shell` and `hook_identity` modules and to every test whose name
+  contains `restart`, `conversation_report` or `named_conversation`), recorded run ea1a358c-69f6-404a-8a5f-ad3ce2118a01:
+  123 passed, and none reported a missing substrate.
+- Locally, `cargo fmt --all -- --check` (again after the landing fix), the test-sleep check,
+  `python3 releasing/check-changelog.py format` and `dprint check` on the changed Markdown: passed.
+
+Reused: nothing. Skipped: the GUI, desktop, installer and browser suites and the rest of the workspace battery, since
+nothing outside the supervisor's restart path and its store changed.
