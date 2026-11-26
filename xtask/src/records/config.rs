@@ -23,10 +23,11 @@
 //! `~` (alone or as `~/...`) in a path value means the process's `HOME`; every path must be absolute after that.
 //! Unknown keys are errors, so a typo cannot silently fall back to a default.
 //!
-//! Slot names match `[a-z0-9][a-z0-9-]*`, except the reserved `attended`: attended flows keep their working clones in
-//! `<clones_dir>/attended/`, so a slot by that name would share the directory. Duplicate slot names or checkout paths
-//! are errors, since either would make "which slot am I" ambiguous. A slot whose checkout does not exist is fine;
-//! nothing here requires any listed checkout to exist.
+//! Slot names match `[a-z0-9][a-z0-9-]*`, except the reserved `attended` and `status`: attended flows keep their
+//! working clones in `<clones_dir>/attended/` and the plan status tooling its read-only clone in `<clones_dir>/status/`,
+//! so a slot by either name would share a directory with them. Duplicate slot names or checkout paths are errors,
+//! since either would make "which slot am I" ambiguous. A slot whose checkout does not exist is fine; nothing here
+//! requires any listed checkout to exist.
 
 use std::collections::HashSet;
 use std::fs;
@@ -41,7 +42,7 @@ use super::names::is_identifier;
 const DEFAULT_API_BASE: &str = "https://api.cloudflare.com/client/v4";
 
 /// Slot names that would collide with other users of `clones_dir`.
-const RESERVED_SLOT_NAMES: &[&str] = &["attended"];
+const RESERVED_SLOT_NAMES: &[&str] = &["attended", "status"];
 
 /// A loaded, validated config with every path expanded.
 #[derive(Debug)]
@@ -136,7 +137,8 @@ pub fn parse(text: &str, home: Option<&Path>) -> Result<Config, Failure> {
         let name = raw_slot.name;
         if !is_identifier(&name) || RESERVED_SLOT_NAMES.contains(&name.as_str()) {
             return Err(Failure::failed(format!(
-                "slot name `{name}` is not allowed (names match [a-z0-9][a-z0-9-]* and `attended` is reserved)"
+                "slot name `{name}` is not allowed (names match [a-z0-9][a-z0-9-]* and `attended` and `status` are \
+                 reserved)"
             )));
         }
         if !names.insert(name.clone()) {
@@ -384,8 +386,9 @@ mod tests {
     }
 
     /// Each config mistake is refused with a message naming it: duplicates make the slot ambiguous, bad names could
-    /// escape the clones directory, relative paths depend on the caller's working directory, and unknown keys are
-    /// usually typos that would otherwise silently fall back to a default.
+    /// escape the clones directory, reserved names would share a clone directory another user of it owns, relative
+    /// paths depend on the caller's working directory, and unknown keys are usually typos that would otherwise
+    /// silently fall back to a default.
     #[test]
     fn config_mistakes_are_refused() {
         let slot = |name: &str, checkout: &str| {
@@ -412,6 +415,7 @@ mod tests {
             (format!("{base}{}", slot("Exec-1", "/a")), "not allowed"),
             (format!("{base}{}", slot("../x", "/a")), "not allowed"),
             (format!("{base}{}", slot("attended", "/a")), "not allowed"),
+            (format!("{base}{}", slot("status", "/a")), "not allowed"),
             (
                 format!("{base}{}", slot("exec-1", "relative/path")),
                 "absolute",

@@ -56,6 +56,8 @@ logged or committed.
 - `clones/<slot>/`: the records tool's clone for each slot. On the host running a slot, its files are the live copy of
   that slot's records, newer than anything pushed.
 - `clones/attended/<checkout>/`: a plain git clone for one checkout's attended flows ("Attended flows' logs" below).
+- `clones/status/`: the plan status tooling's own read-only clone. It only fetches; nothing pushes from it. The tool
+  refuses `attended` and `status` as slot names, so no slot's clone can land on either.
 
 `~/.fh-records/` is a location a rule names, like goal files and working logs (`.agents/machine.md`, "Agent scratch
 space"); its clones are small.
@@ -86,6 +88,14 @@ landing monitor's checkout while that stack is being landed.
   time: six slots pushing at the same moment all got through in about twelve seconds when measured. Edits that arrive
   while it runs stay local for the next push.
 - `backup --dest <dir>` is described under "Backup".
+
+Every commit the tool writes ends with a `Slot: <slot>` trailer, and with a `Host: <login>@<tailnet DNS name>` trailer
+right after it (say, `Host: agent@host-a.example.ts.net`). `Host:` is how you find where a slot runs: the newest commit
+by a slot names the machine it runs on now, which is where status tooling goes over ssh to read that agent's session.
+The name is the machine's own from `tailscale status` rather than its OS hostname, since that is what ssh over the
+tailnet reaches. When tailscale is missing, fails, takes more than three seconds to answer or gives no usable name, the
+commit has no `Host:` trailer and the push goes ahead as usual. The trailers are for readers: the tool tells its own
+commits from other slots' by the author alone, so slots on versions of the tool with and without `Host:` mix fine.
 
 The tool sends the repo token to git as an `Authorization: Bearer` header through the child process's environment, so it
 never appears on a command line or in a clone's config. Its module docs (`xtask/src/`) have the full contract.
