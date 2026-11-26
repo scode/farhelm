@@ -2748,6 +2748,11 @@ The close answers apply to the drafts listed when the question opened. A page Sa
 started with. New or changed drafts stay in Settings for a fresh action. If a dialog or menu opened from Settings still
 awaits input when the saves finish, both stay open. Close Settings again after finishing with the newer action.
 
+For Settings edits and saves, treat the helm as a presumed low-latency, ordinarily reliable remote. Do not add
+asynchronous flows to Settings editing to account for a helm far away, or notices that outlive the dialog, just so
+someone can move on before a helm round trip settles. Making someone wait for that round trip after Save or a similar
+action, before Settings closes or an editor is left, is accepted, not a defect.
+
 Related controls and list rows share cards, with separators between rows and actions such as Refresh, New recipe and Add
 in their group headings. The Containers delete question opens inside the leftovers card. The recipe editor keeps Name,
 Size, Software, Tunnels, GitHub and Agents in separate cards. Size belongs to Tensorlake sandboxes. The software choices
