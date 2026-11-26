@@ -29,6 +29,17 @@ use crate::local_time::{self, Zone};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProviderUi(pub(crate) ProviderKind);
 
+/// What Stop and suspend closes before freezing the environment, as shown by the session row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StopTarget {
+    /// The main program has ended and there are no open tabs. Stop can still clean up its remaining processes.
+    EndedWithoutTabs,
+    /// The session's main program has already ended. Open terminal tabs would close.
+    Tabs,
+    /// The main program is running. Stop ends it and closes its terminal tabs.
+    Program(&'static str),
+}
+
 /// The place row of an agent's environment-launch card, as [`ProviderUi::agent_launch_place`] words it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AgentLaunchPlace {
@@ -792,20 +803,27 @@ impl ProviderUi {
         }
     }
 
-    /// The Suspend question's first sentence, before [`ProviderUi::suspend_help`]. Stop and suspend names the
-    /// session's program, which ends before the remaining processes are frozen.
-    pub(crate) fn suspend_question(self, stopped_program: Option<&str>) -> String {
+    /// The Suspend question's consequence before [`ProviderUi::suspend_help`]. Stop and suspend distinguishes the
+    /// session's closed tabs and program (if still running) from the processes that Resume can continue.
+    pub(crate) fn suspend_question(self, stops: Option<StopTarget>) -> String {
         let noun = self.noun();
-        if let Some(program) = stopped_program {
-            format!(
+        match stops {
+            Some(StopTarget::Program(program)) => format!(
                 "Stop this session's {program} and close its terminal tabs, then suspend the whole {noun}? Every other \
                  process freezes and continues on Resume. The stopped {program} and closed tabs do not continue. "
-            )
-        } else {
-            format!(
+            ),
+            Some(StopTarget::Tabs) => format!(
+                "Close this session's terminal tabs, then suspend the whole {noun}? The remaining processes freeze and \
+                 continue on Resume. The closed tabs stay closed. "
+            ),
+            Some(StopTarget::EndedWithoutTabs) => format!(
+                "Finish stopping this session, then suspend the whole {noun}? The remaining processes freeze and \
+                 continue on Resume. "
+            ),
+            None => format!(
                 "Suspend the whole {noun}? Every process in it freezes, including any other sessions, and continues \
                  on Resume. "
-            )
+            ),
         }
     }
 
@@ -819,30 +837,42 @@ impl ProviderUi {
     }
 
     /// The Suspend question's Cancel help: what Cancel keeps running.
-    pub(crate) fn suspend_cancel(self, stopped_program: Option<&str>) -> String {
-        if let Some(program) = stopped_program {
-            format!(
+    pub(crate) fn suspend_cancel(self, stops: Option<StopTarget>) -> String {
+        match stops {
+            Some(StopTarget::Program(program)) => format!(
                 "Cancel: keep the {program}, its terminal tabs and the {} running",
                 self.noun()
-            )
-        } else {
-            format!("Cancel: keep the {} running", self.noun())
+            ),
+            Some(StopTarget::Tabs) => format!(
+                "Cancel: leave the terminal tabs open and keep the {} running",
+                self.noun()
+            ),
+            Some(StopTarget::EndedWithoutTabs) | None => {
+                format!("Cancel: keep the {} running", self.noun())
+            }
         }
     }
 
     /// The Suspend question's answer help, and Stop and suspend's: the scope includes every other session in the
     /// environment, listed or not.
-    pub(crate) fn suspend_action(self, stopped_program: Option<&str>) -> String {
-        if let Some(program) = stopped_program {
-            format!(
+    pub(crate) fn suspend_action(self, stops: Option<StopTarget>) -> String {
+        match stops {
+            Some(StopTarget::Program(program)) => format!(
                 "Stop this session's {program} and close its terminal tabs, then suspend the whole {}",
                 self.noun()
-            )
-        } else {
-            format!(
+            ),
+            Some(StopTarget::Tabs) => format!(
+                "Close this session's terminal tabs, then suspend the whole {}",
+                self.noun()
+            ),
+            Some(StopTarget::EndedWithoutTabs) => format!(
+                "Finish stopping this session, then suspend the whole {}",
+                self.noun()
+            ),
+            None => format!(
                 "Suspend the whole {}, freezing every process in it until Resume",
                 self.noun()
-            )
+            ),
         }
     }
 }

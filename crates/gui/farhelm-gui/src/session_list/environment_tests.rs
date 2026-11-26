@@ -705,6 +705,48 @@ fn a_suspend_in_flight_leaves_new_available(cx: &mut TestAppContext) {
 
 // ---- Stop and suspend ----------------------------------------------------------------------------------------------
 
+/// When the shell has exited, the row's Stop and suspend describes closing its tabs and freezing the environment.
+/// The confirmation keeps the ended-program guard even though it never asks to stop the shell.
+#[gpui::test]
+fn stop_and_suspend_from_the_menu_describes_only_the_remaining_tabs(cx: &mut TestAppContext) {
+    let ended = bash_session("a").status(json!({"state": "exited", "exit_code": 0}));
+    let host = environment_host(Provider::Container, connected());
+    let (mut fake, cx) = open(cx, &[(ended.clone(), 1)], false, &host);
+    pending(&mut fake);
+    test_support::click(cx, "session-menu-a");
+    let action = "session-menu-stop-and-suspend";
+    assert!(texts(cx).iter().any(
+        |text| text == "Close this session's terminal tabs, then suspend the whole environment"
+    ));
+    let help = "Close this session's terminal tabs, then suspend the whole container";
+    assert_eq!(hover_help(cx, action).as_deref(), Some(help));
+    test_support::click(cx, action);
+    let (read, _) = one(&mut fake, Method::Get, "/api/sessions?host=2");
+    fake.reply(read, 200, Some(listing(&[ended], false)));
+    test_support::settle(cx);
+    assert_eq!(
+        label_of(cx, "prompt").as_deref(),
+        Some("Stop and suspend container?")
+    );
+    assert!(
+        texts(cx)
+            .iter()
+            .any(|text| text.starts_with(help) && text.contains("The closed tabs stay closed."))
+    );
+    assert_eq!(hover_help(cx, "prompt-confirm").as_deref(), Some(help));
+    assert_eq!(
+        hover_help(cx, "prompt-cancel").as_deref(),
+        Some("Cancel: leave the terminal tabs open and keep the container running")
+    );
+    assert!(pending(&mut fake).is_empty(), "nothing before an answer");
+    test_support::click(cx, "prompt-confirm");
+    let (_, body) = one(&mut fake, Method::Post, "/api/sessions/a/stop-and-suspend");
+    assert_eq!(
+        body,
+        json!({"refuse_if_tabs_open": false, "refuse_if_agent_running": true})
+    );
+}
+
 /// Stop and suspend uses the shown ended agent and tab count if a listing arrives before its click. The activity
 /// read can ask a broader question, but a quiet environment sends exactly the guarded Stop and suspend.
 #[gpui::test]
@@ -713,6 +755,11 @@ fn stop_and_suspend_keeps_its_verb_and_guards_across_a_push(cx: &mut TestAppCont
     let (mut fake, cx) = open(cx, &[(super::menu_tests::ended("a"), 0)], true, &host);
     pending(&mut fake);
     test_support::click(cx, "session-menu-a");
+    assert_eq!(
+        hover_help(cx, "session-menu-stop-and-suspend").as_deref(),
+        Some("Finish stopping this session, then suspend the whole container"),
+        "the ended row lists no tabs"
+    );
     test_support::show_next_frame(cx);
     let at = test_support::center(cx, "session-menu-stop-and-suspend");
     let idle = session("a").status(json!({"state": "idle"}));

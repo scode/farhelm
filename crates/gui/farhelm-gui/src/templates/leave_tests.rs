@@ -584,6 +584,43 @@ fn an_old_delete_footer_cannot_delete_the_new_editor(cx: &mut TestAppContext) {
     one(&mut helm, Method::Delete, "/api/templates/codex-deep");
 }
 
+/// Legacy fill-ins make Save available on both templates without blocking a switch between them. The unpresented
+/// editor must neither be saved nor copied when a press reaches the old footer after the switch.
+#[gpui::test]
+fn old_save_and_duplicate_cannot_act_on_the_new_editor(cx: &mut TestAppContext) {
+    let mut list = templates();
+    list[0].fields.kind = None;
+    let (mut helm, cx) = open_header(cx, &list, None);
+    open_editor(&mut helm, "template-open-kindless", cx);
+    for button in ["templates-save", "templates-duplicate"] {
+        assert!(
+            painted(cx).contains("Unsaved changes"),
+            "Save has legacy fill-ins"
+        );
+        let next = test_support::center(cx, "template-open-codex-deep");
+        let action = test_support::center(cx, button);
+        cx.update(|window, cx| {
+            test_support::click_before_redraw(next, window, cx);
+            let dialog = layers::last_opened::<super::dialog::TemplatesDialog>(cx).unwrap();
+            let editor = dialog.read(cx).editor.as_ref().unwrap();
+            assert_eq!(editor.previous(), Some("codex-deep"));
+            assert!(editor.dirty(), "the new draft could also be saved");
+            test_support::click_before_redraw(action, window, cx);
+        });
+        test_support::show_next_frame(cx);
+        assert!(
+            helm.commands().is_empty(),
+            "the stale {button} sent nothing"
+        );
+        assert_eq!(
+            draft(cx).name,
+            "codex-deep",
+            "the stale {button} left the new editor open"
+        );
+        click(cx, "template-open-kindless");
+    }
+}
+
 /// A delete the helm refuses must say so and keep the template open, or the user believes it gone. Specified: the
 /// helm's words show in the status line, the editor still holds the template, and no Undo is offered.
 #[gpui::test]
