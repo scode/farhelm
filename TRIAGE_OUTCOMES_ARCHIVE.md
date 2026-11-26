@@ -49262,3 +49262,26 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   feedback file and its index entry.
 - Execution: Fixed as decided. Change `opqulrrvypmwoxvqtqkqkrmtvzokusyp`, bookmark
   `plan/triage-settings-nov24/02e-explain-held-close-save`, [#4982](https://github.com/scode/farhelm/pull/4982/changes).
+
+## settings-close-can-dismiss-a-newer-question.md
+
+- Outcome: `fix code`.
+- Assessment: After you answer Save in the close question, Settings stays interactive until the saves finish. On a Mac,
+  if you meanwhile flip the tunnels switch, its warning opens; when the saves finish, Settings closes and takes that
+  newer, unanswered warning with it. Nothing is written; you just have to open Settings and flip the switch again.
+  Verified: confirmed by source for the Mac path (per reviewer's trace; layers cleanup not re-traced). `finish_close`
+  closes the layer unconditionally (`editing.rs:564-568`). SPEC_impl.md "Work that finishes later" (1091-1092): "A
+  completion that would focus, open, select or close something asks the focus coordinator whether the user has moved
+  on." What "moved on" should mean after an explicit Save-and-Close answer is a design choice. The window lasts the
+  credential save (up to the 20 s delivery bound), so the rare-glitch filter's "narrow window" is unclear and does not
+  apply.
+- Decision: q-settings, "Settings: what Save and Close saves, waits for and shows": the maintainer picked "Fix them all
+  to the spec's contract". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Save and Close binds to the forms and draft versions it listed, waits for every pending save,
+  stops on a refusal and shows it; every Settings page, the custom-agent page included, follows the shared Settings and
+  prompt contracts. Recommendation for reference: discard — the user asked to close and then started a new action;
+  nothing is lost; size S if fixed. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
+  the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
+  Remove the feedback file and its index entry.
+- Execution: Fixed as decided. Change `wnuuqyxlswrrnqtuyvvwrolvnwlmnpyy`, bookmark
+  `plan/triage-settings-nov24/02f-keep-newer-questions`, [#4986](https://github.com/scode/farhelm/pull/4986/changes).

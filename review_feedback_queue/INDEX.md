@@ -68,9 +68,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`settings-close-can-dismiss-a-newer-question.md`](settings-close-can-dismiss-a-newer-question.md) — A successful Save
-  and Close can dismiss a newer unanswered tunnel-permission question.
-
 - [`tensorlake-key-discard-lacks-preservation-test.md`](tensorlake-key-discard-lacks-preservation-test.md) — The new
   Tensorlake Discard coverage does not prove that abandoning a replacement keeps the saved key.
 

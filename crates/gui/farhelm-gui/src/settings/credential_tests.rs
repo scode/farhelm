@@ -14,8 +14,8 @@ use serde_json::{Value, json};
 use super::Section;
 use super::credentials::Editor;
 use super::tests::{
-    available, drawn, fill, label_of, open_rail, open_settings, painted, reach, section_button,
-    sent,
+    available, click_section, drawn, fill, label_of, open_rail, open_settings, painted, reach,
+    section_button, sent,
 };
 use crate::layers;
 use crate::local_time;
@@ -145,6 +145,67 @@ fn credential_work(cx: &mut VisualTestContext, name: &str) -> Option<Work> {
         session::current_operations(cx)
             .and_then(|operations| operations.read(cx).in_flight(&OpKey::credential(name)))
     })
+}
+
+/// A credential reply can arrive while a separately admitted tunnel question is open over Settings. Keep the same
+/// unanswered question and its focus, and let a fresh Close finish after the person dismisses it.
+#[gpui::test]
+fn a_completed_close_save_keeps_the_newer_tunnel_question(cx: &mut TestAppContext) {
+    let (mut helm, cx, _) = open_rail(cx, &Preferences::default());
+    let catalog = json!([entry("test-endpoint", "endpoint_token", 1, &[])]);
+    show_credentials(&mut helm, cx, catalog);
+    cx.update(|_, cx| super::decide_tunnels_for_opened(farhelm_input_mapping::Platform::Mac, cx));
+    press(cx, "credential-edit-test-endpoint");
+    fill(cx, "credential-secret", "fictional-replacement");
+    click(cx, "settings-close");
+    assert_eq!(
+        label_of(cx, "prompt").as_deref(),
+        Some("Save changes before closing?")
+    );
+    click(cx, "prompt-confirm");
+    let (write, method, path, body) = one_command(&mut helm);
+    assert_eq!(
+        (method, path.as_str()),
+        (Method::Put, "/api/credentials/test-endpoint")
+    );
+    assert_eq!(body, json!({"secret": "fictional-replacement"}));
+    assert_eq!(credential_work(cx, "test-endpoint"), Some(Work::Save));
+
+    click_section(cx, Section::Terminal);
+    assert!(
+        drawn(cx, super::terminal::TUNNEL_ID),
+        "the Mac tunnel switch must be visible"
+    );
+    click(cx, super::terminal::TUNNEL_ID);
+    assert_eq!(
+        label_of(cx, "prompt").as_deref(),
+        Some("Allow tunnels from remote sessions?")
+    );
+    let warning = cx.update(|window, cx| layers::top_layer(window, cx));
+    assert!(warning.is_some());
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert!(sent(&mut helm).is_empty());
+    helm.reply(write, 200, Some(json!({})));
+    settle(cx);
+    assert_eq!(credential_work(cx, "test-endpoint"), None);
+    let (refresh, method, path, _) = one_command(&mut helm);
+    assert_eq!((method, path.as_str()), (Method::Get, "/api/credentials"));
+    helm.reply(
+        refresh,
+        200,
+        Some(json!([entry("test-endpoint", "endpoint_token", 2, &[])])),
+    );
+    settle(cx);
+    assert_eq!(
+        cx.update(|window, cx| layers::top_layer(window, cx)),
+        warning
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    click(cx, "prompt-cancel");
+    assert!(drawn(cx, super::terminal::TUNNEL_ID));
+    click(cx, "settings-close");
+    assert!(!crate::test_support::any_open(cx));
+    assert!(sent(&mut helm).is_empty());
 }
 
 // ---- The overview --------------------------------------------------------------------------------------------------

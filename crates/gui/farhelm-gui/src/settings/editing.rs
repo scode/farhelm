@@ -739,8 +739,11 @@ impl SettingsDialog {
         }
     }
 
+    /// A pending close owns its completed saves. A newer interactive child needs its own answer before Settings closes.
     fn finish_close(&self, window: &mut Window, cx: &mut App) {
-        if let Some(layer) = self.layer {
+        if let Some(layer) = self.layer
+            && !layers::has_interactive_child(layer, window, cx)
+        {
             layers::close(layer, window, cx);
         }
     }

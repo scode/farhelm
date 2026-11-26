@@ -1714,6 +1714,18 @@ pub(crate) fn top_layer(window: &Window, cx: &App) -> Option<LayerId> {
         .map(|layer| layer.id)
 }
 
+/// An automatic close would take an interactive child with its parent, including any newer question it holds.
+/// A deeper descendant has an interactive child above it in the tree because only focus-taking layers own children.
+pub(crate) fn has_interactive_child(id: LayerId, window: &Window, cx: &App) -> bool {
+    stack(window, cx).is_some_and(|stack| {
+        stack
+            .read(cx)
+            .layers
+            .iter()
+            .any(|layer| layer.parent == Some(id) && !layer.passes_pointer())
+    })
+}
+
 /// Whether the layer `id` is still open.
 pub fn is_open(id: LayerId, window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| stack.read(cx).layers.iter().any(|layer| layer.id == id))

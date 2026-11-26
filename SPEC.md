@@ -2665,7 +2665,8 @@ leave Settings open on Credentials with a message to save the desired key first.
 the control that opened it if it is still available, such as the gear or the Settings button in a hook hint.
 
 The close answers apply to the drafts listed when the question opened. A page Save also applies only to the drafts it
-started with. New or changed drafts stay in Settings for a fresh action.
+started with. New or changed drafts stay in Settings for a fresh action. If a dialog or menu opened from Settings still
+awaits input when the saves finish, both stay open. Close Settings again after finishing with the newer action.
 
 Related controls and list rows share cards, with separators between rows and actions such as Refresh, New recipe and Add
 in their group headings. The Containers delete question opens inside the leftovers card. The recipe editor keeps Name,

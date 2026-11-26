@@ -1668,6 +1668,12 @@ static SCENES: &[Scene] = &[
         setup: settings_terminal_setup,
     },
     Scene {
+        name: "settings-tunnel-question-over-terminal",
+        size: (800., 830.),
+        draw: settings_edited,
+        setup: settings_tunnel_question_setup,
+    },
+    Scene {
         name: "settings-terminal-edited",
         size: (800., 830.),
         draw: settings_edited,
