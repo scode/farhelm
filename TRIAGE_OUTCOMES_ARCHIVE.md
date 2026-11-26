@@ -49483,3 +49483,27 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed as decided. Change `myznqsnrnnszklumslyporxuqxlzozmn`, bookmark
   `plan/triage-settings-nov24/06a-clarify-trust-and-search`.
   [Draft PR #5010](https://github.com/scode/farhelm/pull/5010/changes).
+
+## trailing-tensorlake-key-replacement-keeps-old-discovered-sandboxes.md
+
+- Outcome: `fix code`.
+- Assessment: In Settings → Tensorlake, saving a different API key over the saved one keeps showing the old key's
+  "Sandboxes not on this helm" while the new list loads, and keeps them (with Delete buttons) under "Could not refresh"
+  if the new key cannot list sandboxes. Verified: confirmed. `follow_account` re-reads without clearing cached rows when
+  a key stays saved (`tensorlake_sandboxes.rs:159-166`); a failed discovery keeps `last_discovered` (`:241-246`). The
+  module docs say "A key change invalidates that evidence too" (`:21-22`). SPEC.md 613-614 ("above previously discovered
+  sandboxes") does not distinguish keys, so a reading. Delete still confirms by name and targets the vendor ID
+  (reviewer), so no wrong deletion is established.
+- Decision: q-staleconf, "Confirmations and kept state whose subject is gone": the maintainer picked "Close or
+  invalidate them". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: A confirmation or kept state whose subject is gone (host removed, listing emptied, account key
+  changed) closes or is invalidated. Recommendation for reference: fix code — clear cached discovery on a key
+  replacement; size S. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Deferred to the existing `TODO.md` entry **Bind leftover sandbox consent to the saved Tensorlake key**
+  ([#4947](https://github.com/scode/farhelm/pull/4947/changes)). Resetting discovery after acknowledgment leaves a
+  pending-write interval in which an old Delete can be queued. The shared account fence, ambiguous replies, regression
+  tests and visual evidence exceed this item's size gate. Change `lozxqkwmwlolnnqvpkxnnnmmsrxowvzw`, bookmark
+  `plan/triage-settings-nov24/06b-defer-tensorlake-discovery`.
+  [Draft PR #5013](https://github.com/scode/farhelm/pull/5013/changes).
