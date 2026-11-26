@@ -256,15 +256,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   but exceeded the triage budget before it covered focus restoration and the silent Save refusal. Test both from a dirty
   registration and check light and dark captures.
 
-- **Show Custom approval flags in keyboard-highlighted Recent setups.** Two Recent setups in the launcher can show the
-  same agent and Custom approval mode while saving different flags. Pointer hover and the screen-reader label give the
-  full choice. When the command field keeps keyboard focus, show the saved flag words on the highlighted row in both the
-  command pane and narrow search results, before Enter. Keep the compact wrapper summary and avoid adding a Tab stop. A
-  prototype that wrapped the flags in place still clipped the last words when a highlighted row was taller than the
-  results area. Give keyboard users a way to read those words without changing the highlight, and test two setups with a
-  long shared flag prefix and different final arguments. The complete fix exceeds the triage size gate. Plan:
-  `plans/queue/launcher-consent-and-custom-agent-fixes.md`.
-
 - **Make Wayland text-field paste nonblocking.** Pasting into a text field such as an SSH sign-in answer can freeze the
   window while another app supplies clipboard data. [Terminal experience](SPEC.md#terminal-experience) requires Farhelm
   to stay responsive during clipboard operations on Wayland. Kit's Paste checks the synchronous read before its async

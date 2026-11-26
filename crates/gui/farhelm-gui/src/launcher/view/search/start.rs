@@ -202,7 +202,7 @@ impl Launcher {
             .gap(px(3.))
             .p(px(10.))
             .text_size(metrics::TEXT_MD)
-            .size_full()
+            .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&scroll);
@@ -215,6 +215,7 @@ impl Launcher {
                 list,
                 children: Vec::new(),
                 highlighted: None,
+                footer: None,
             }
         };
         if drawn.highlighted != self.search_box.pane_revealed {
@@ -227,6 +228,8 @@ impl Launcher {
             .id("launcher-command-pane")
             .debug_selector(|| "launcher-command-pane".into())
             .relative()
+            .flex()
+            .flex_col()
             .flex_none()
             .w(px(PANE_WIDTH))
             .min_h_0()
@@ -251,6 +254,7 @@ impl Launcher {
                 cx,
             ))
             .child(drawn.list.children(drawn.children))
+            .children(drawn.footer)
             .into_any_element()
     }
 
@@ -260,6 +264,7 @@ impl Launcher {
         let weak = cx.weak_entity();
         let mut children = Vec::new();
         let mut highlighted = None;
+        let mut active_recent = None;
         if !rows.is_empty() {
             children.push(navigation_hint(palette));
         }
@@ -283,6 +288,9 @@ impl Launcher {
             let selected = active || self.search_box.source.as_ref() == Some(&key);
             if active {
                 highlighted = Some(children.len());
+                if let StartRow::Recent(entry, _) = row {
+                    active_recent = Some(entry);
+                }
             }
             let (id, label, help, contents) = match row {
                 StartRow::Recent(entry, placement) => {
@@ -369,6 +377,7 @@ impl Launcher {
                 .aria_label("Recent setups and templates"),
             children,
             highlighted,
+            footer: self.recent_permission_footer(active_recent, palette, cx),
         }
     }
 

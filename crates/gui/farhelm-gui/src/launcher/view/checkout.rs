@@ -1241,6 +1241,7 @@ fn draw_repository_rows(
             list: list.role(Role::Status),
             children: vec![empty],
             highlighted: None,
+            footer: None,
         };
     }
     let active = launcher.checkout.list.highlighted;
@@ -1295,5 +1296,6 @@ fn draw_repository_rows(
         list: list.role(Role::ListBox),
         children,
         highlighted: active,
+        footer: None,
     }
 }

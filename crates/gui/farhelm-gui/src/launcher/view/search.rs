@@ -40,14 +40,16 @@
 //! What the box holds besides the draft (the open results, the highlight, the last refusal) is the launcher's alone;
 //! what is typed is the field's own text, read when the rows are needed, never copied.
 
-use farhelm_proto::RETIRED_CONTAINER_REASON;
 use farhelm_proto::session_requests::LaunchHistoryEntry;
 use farhelm_proto::ui_channel::HostView;
+use std::cell::RefCell;
+
+use farhelm_proto::{LaunchPermission, RETIRED_CONTAINER_REASON, join_permission_flags};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
-    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
-    px,
+    ScrollHandle, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity,
+    Window, div, px,
 };
 
 use super::Launcher;
@@ -57,7 +59,7 @@ use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal, RecentSurface, recent_hov
 use crate::assets::{Icon, TERMINAL_FONT};
 use crate::components::{
     HoverHelp, OptionRow, Role, ScrollBox, Vertical, chips_and_words, command_field,
-    command_heading, command_icon_tile, key_chip,
+    command_heading, command_icon_tile, key_chip, scroll_detail_page,
 };
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
@@ -99,6 +101,9 @@ const STALE_ROW: &str = "That choice is no longer available; choose a current re
 
 /// The right side still needs room for the address and several agent controls to share rows.
 const MIN_WIDE_FORM_WIDTH: f32 = 650.;
+
+/// Leave room for choices at the shortest supported window height. Longer flags page inside the footer.
+const MAX_RECENT_FLAGS_HEIGHT: f32 = 140.;
 
 /// The 250-pixel pane leaves at least 650 pixels for the address and agent controls on its right. Use the same
 /// horizontal inset as DialogFrame so the two-column threshold is based on the card, not the whole window.
@@ -196,6 +201,16 @@ pub(super) struct SearchBox {
     refusal: Option<HostSentence>,
     /// A deliberate arrow pick survives live updates until Enter can take it or explain its disappearance.
     typed_choice: Option<SearchChoice>,
+    /// The matching viewport can be drawn in a separate popover after the command field itself. Share its scroll
+    /// handle with the field's key listener, indexed by the same setup identity as the keyboard highlight.
+    recent_detail: RefCell<Option<RecentDetail>>,
+}
+
+/// Keep wheel and key offsets through redraws of the same choice. Another setup starts with its first flag, even
+/// if it shares most of its words with this one.
+struct RecentDetail {
+    source: SetupSource,
+    scroll: ScrollHandle,
 }
 
 impl Launcher {
@@ -241,6 +256,7 @@ impl Launcher {
     pub(super) fn reset_search_highlight(&mut self) {
         self.search_box.typed_choice = None;
         self.search_box.pane_revealed = None;
+        self.search_box.recent_detail.get_mut().take();
     }
 
     /// A sole result can look selected without an arrow pick. Rename fixtures require the explicit choice.
@@ -720,6 +736,7 @@ impl Launcher {
         if self.search_box.list.follow(window, cx) {
             self.reset_search_highlight();
         }
+        let flags_editor = cx.weak_entity();
         let tracker = self
             .search_box
             .list
@@ -747,7 +764,8 @@ impl Launcher {
                 HoverHelp::tooltip(
                     concat!(
                         "Type a name, host, folder, harness, model, effort or permission, then press Enter to choose it. ",
-                        "Press Enter in an empty field to start this setup."
+                        "Press Enter in an empty field to start this setup. ",
+                        "Page Up and Page Down scroll long approval flags in a highlighted Recent setup."
                     ),
                 ),
             ),
@@ -765,6 +783,28 @@ impl Launcher {
             .capture_action(|enter: &gpui_component::input::Enter, _, cx| {
                 if enter.secondary || enter.shift {
                     cx.stop_propagation();
+                }
+            })
+            .on_key_down(move |event, window, cx| {
+                let scroll = flags_editor.upgrade().and_then(|launcher| {
+                    let launcher = launcher.read(cx);
+                    // A popover can close between frames. Do not give its last viewport the command field's keys.
+                    let active = launcher.search_open(window, cx)
+                        || (command_pane_fits(window)
+                            && launcher.search.text(cx).is_empty()
+                            && launcher.search_box.start_highlight.is_some());
+                    if !active {
+                        return None;
+                    }
+                    launcher
+                        .search_box
+                        .recent_detail
+                        .borrow()
+                        .as_ref()
+                        .map(|detail| detail.scroll.clone())
+                });
+                if let Some(scroll) = scroll {
+                    scroll_detail_page(event, &scroll, window, cx);
                 }
             })
             .child(
@@ -1091,10 +1131,75 @@ fn draw_search_rows(
             );
         }
     }
+    let recent = active.and_then(|index| match &results.rows[index] {
+        Row::Recent { entry, .. } => Some(entry.as_ref()),
+        _ => None,
+    });
     Drawn {
         list,
         children,
         highlighted: active_child,
+        footer: launcher.recent_permission_footer(recent, palette, cx),
+    }
+}
+
+impl Launcher {
+    /// Keep the exact saved arguments readable when two choices share a row summary. The footer sits outside
+    /// the list, and paging inside it leaves the highlighted row and its Enter action alone.
+    fn recent_permission_footer(
+        &self,
+        recent: Option<&LaunchHistoryEntry>,
+        palette: &theme::Palette,
+        cx: &App,
+    ) -> Option<AnyElement> {
+        let recent = recent.and_then(|entry| {
+            let selection = &entry.selection;
+            let flags = selection.permission_flags.as_deref()?;
+            (selection.permissions == Some(LaunchPermission::Custom) && !flags.is_empty())
+                .then_some((entry, flags))
+        });
+        let mut viewport = self.search_box.recent_detail.borrow_mut();
+        let Some((entry, flags)) = recent else {
+            viewport.take();
+            return None;
+        };
+        let source = SetupSource::recent(entry, self.chosen_host(cx));
+        if viewport
+            .as_ref()
+            .is_some_and(|detail| detail.source != source)
+        {
+            viewport.take();
+        }
+        let scroll = &viewport
+            .get_or_insert_with(|| RecentDetail {
+                source,
+                scroll: ScrollHandle::new(),
+            })
+            .scroll;
+        let flags = HostText::from_host(join_permission_flags(flags));
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .flex_none()
+                .min_w_0()
+                .gap(px(3.))
+                .p(px(10.))
+                .border_t_1()
+                .border_color(theme::color(palette.border_dim))
+                .text_size(metrics::TEXT_SM)
+                .text_color(theme::color(palette.fg_1))
+                .child("Custom approval flags")
+                .child(
+                    div()
+                        .id("launcher-recent-flags-scroll")
+                        .max_h(px(MAX_RECENT_FLAGS_HEIGHT))
+                        .overflow_y_scroll()
+                        .track_scroll(scroll)
+                        .child(HostSentence::new("launcher-recent-permission-flags").mono(&flags)),
+                )
+                .into_any_element(),
+        )
     }
 }
 

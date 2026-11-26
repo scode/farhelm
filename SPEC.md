@@ -1544,22 +1544,24 @@ highlighted template applies it. In Replace with, a highlighted recent setup's k
 there replaces, and so deletes, the source. The list adds no Tab stops. A mouse pick returns focus to the command field.
 With text in the field, grouped results take over the column and the form dims while staying editable. Escape or
 clicking outside the results hides them and keeps the query. When the window is too narrow to fit both sides, the column
-is hidden and typed results appear below the field. Use `recent:` and `tl:` to reach setups and templates there. The
-Destination card heads the form, followed by the Agent and Command tabs and their fields. The selected tab is
-underlined. Labels sit above the fields with short notes where needed. The Agent tab shows the session list's harness
-marks on its chips, with a rule before Bash and Zsh. Model, Effort and Permissions share a row when they fit. **More
-options** folds the conversation selector, when offered, and Wrapper prefix together at the bottom of the Agent form.
-The folded row names the fields and shows a pill for each set value, with the wrapper prefix in the terminal font. With
-both empty it says "none set". It opens and stays open while a field inside is required, refused or invalid. After a
-correction, the user can close it once no field needs attention. The footer's actions sit on the right. Cancel comes
-first, then quiet Reset choices and Save as template where offered. The main action comes last with a Return key cap.
-Its accessible name keeps the operation and target. Tab visits the command field, Close, Command field messages when
-present, the visible body controls, then the footer actions. More options is a Tab stop, with its editors following it
-when expanded. New, Clone and Replace with open with focus in the command field. Restart with opens on Cancel. Refusals,
-destructive warnings and the inline YOLO question remain adjacent to the actions in a bounded scroll region, so long
-content cannot displace those actions. The save-as-template panel remains inline in the scrolling body. Escape closes
-open search results before closing that panel. Hover help shows the held host's name. Project registration (associating
-metadata with a directory) is optional convenience and never a prerequisite.
+is hidden and typed results appear below the field. Use `recent:` and `tl:` to reach setups and templates there. When a
+Recent setup with saved Custom approval flags is highlighted, the flag words wrap below the scrolling results in either
+layout. The details add no Tab stop. When the flags exceed that space, Page Up and Page Down in the command field scroll
+the flags without moving the highlight. The Destination card heads the form, followed by the Agent and Command tabs and
+their fields. The selected tab is underlined. Labels sit above the fields with short notes where needed. The Agent tab
+shows the session list's harness marks on its chips, with a rule before Bash and Zsh. Model, Effort and Permissions
+share a row when they fit. **More options** folds the conversation selector, when offered, and Wrapper prefix together
+at the bottom of the Agent form. The folded row names the fields and shows a pill for each set value, with the wrapper
+prefix in the terminal font. With both empty it says "none set". It opens and stays open while a field inside is
+required, refused or invalid. After a correction, the user can close it once no field needs attention. The footer's
+actions sit on the right. Cancel comes first, then quiet Reset choices and Save as template where offered. The main
+action comes last with a Return key cap. Its accessible name keeps the operation and target. Tab visits the command
+field, Close, Command field messages when present, the visible body controls, then the footer actions. More options is a
+Tab stop, with its editors following it when expanded. New, Clone and Replace with open with focus in the command field.
+Restart with opens on Cancel. Refusals, destructive warnings and the inline YOLO question remain adjacent to the actions
+in a bounded scroll region, so long content cannot displace those actions. The save-as-template panel remains inline in
+the scrolling body. Escape closes open search results before closing that panel. Hover help shows the held host's name.
+Project registration (associating metadata with a directory) is optional convenience and never a prerequisite.
 
 Both launcher tabs keep a saved custom agent choice visible while its registration list loads or a read fails. The
 launcher can still use a retained entry. When the entry is absent, Launch waits and says whether the list is loading or

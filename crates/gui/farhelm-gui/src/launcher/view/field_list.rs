@@ -13,7 +13,7 @@
 use gpui::{
     AnyElement, App, AppContext as _, Context, Div, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, ScrollHandle, Stateful, StatefulInteractiveElement as _,
-    Styled as _, Subscription, WeakEntity, Window, px,
+    Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 
 use super::Launcher;
@@ -28,7 +28,7 @@ const LIST_MAX_HEIGHT: f32 = 260.;
 const LIST_PAD: f32 = 6.;
 const LIST_GAP: f32 = 2.;
 
-/// One list's own drawing: from the launcher's state, given the list's surface (already sized, padded and scrolling,
+/// One list's own drawing: from the launcher's state, given the list's viewport (already sized, padded and scrolling,
 /// under its id), the list's role and name and its rows, with which child is the highlighted row. The weak launcher is
 /// for the rows' click handlers.
 pub(super) type DrawRows =
@@ -36,7 +36,7 @@ pub(super) type DrawRows =
 
 /// What a [`DrawRows`] function drew.
 pub(super) struct Drawn {
-    /// The list's surface, with whatever role and name the list gives it now.
+    /// The scrolling list, with whatever role and name the list gives it now.
     pub(super) list: Stateful<Div>,
     /// Its children, headings and status lines included: every row must be a direct child, so the scroll handle can
     /// bring any of them into view.
@@ -44,6 +44,9 @@ pub(super) struct Drawn {
     /// The index in `children` of the highlighted row, if one is highlighted and drawn. A heading before it shifts it,
     /// so it is not always the row's own index.
     pub(super) highlighted: Option<usize>,
+    /// Details of the highlighted choice that stay readable when its row scrolls out of view. The footer shares
+    /// the list's surface but sits outside its scroll viewport and takes no focus.
+    pub(super) footer: Option<AnyElement>,
 }
 
 /// Up or Down over `count` rows from the row `from` (none highlighted yet): Down from none is the first row, Up from
@@ -215,20 +218,27 @@ impl ListRows {
 impl Render for ListRows {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let id = self.id;
-        let list = layers::surface(cx)
-            .id(id)
-            // Tests find the list by where it is drawn; this records nothing outside test builds.
+        // The field anchors to the painted surface, including its border. The rows scroll inside it.
+        let surface = layers::surface(cx)
             .debug_selector(move || id.into())
+            .flex()
+            .flex_col();
+        let list = div()
+            .id(id)
+            // The scroll viewport ends before the pinned Recent details. Tests can measure both boxes independently.
+            .debug_selector(move || format!("{id}-viewport"))
             .flex()
             .flex_col()
             .gap(px(LIST_GAP))
             .p(px(LIST_PAD))
-            .max_h(px(LIST_MAX_HEIGHT))
+            // The original limit includes the one-pixel border on each side of the surface.
+            .max_h(px(LIST_MAX_HEIGHT - 2.))
+            .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .text_size(metrics::TEXT_MD);
         let Some(launcher) = self.launcher.upgrade() else {
-            return list;
+            return surface.child(list);
         };
         let drawn = (self.draw)(launcher.read(cx), list, &self.launcher, window, cx);
         if drawn.highlighted != self.scrolled_to {
@@ -237,6 +247,8 @@ impl Render for ListRows {
             }
             self.scrolled_to = drawn.highlighted;
         }
-        drawn.list.children(drawn.children)
+        surface
+            .child(drawn.list.children(drawn.children))
+            .children(drawn.footer)
     }
 }

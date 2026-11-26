@@ -387,6 +387,7 @@ fn draw_folder_rows(
         list,
         children,
         highlighted: active_child,
+        footer: None,
     }
 }
 

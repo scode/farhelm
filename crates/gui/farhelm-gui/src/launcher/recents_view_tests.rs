@@ -108,6 +108,265 @@ pub(super) fn two_setups() -> Value {
     ])
 }
 
+/// Two otherwise identical setups whose flags share several lines. The last argument is the only way to tell
+/// the saved approvals apart, and the short wrapper must still have room in the row.
+pub(crate) fn custom_flag_setups() -> Value {
+    repeated_flag_setups(1)
+}
+
+/// A longer common prefix makes the footer itself scroll. Use exactly the same choices as the short fixture.
+fn repeated_flag_setups(repeats: usize) -> Value {
+    let setup = |policy: &str| {
+        let mut selection = chosen(
+            LaunchHarness::Codex,
+            None,
+            None,
+            Some(LaunchPermission::Custom),
+        );
+        selection.wrapper_prefix = Some(vec!["env".into(), "CI=1".into()]);
+        let mut flags: Vec<_> = [
+            "--allow-workspace-reads",
+            "--allow-project-edits",
+            "--deny-outside-workspace",
+            "--deny-network-by-default",
+            "--confirm-before-running-tools",
+        ]
+        .repeat(repeats)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        if repeats > 1 {
+            flags.push(format!("--allowed-path={}", "fixture-scope/".repeat(18)));
+        }
+        flags.push(policy.to_owned());
+        selection.permission_flags = Some(flags);
+        launched("/tmp", &selection)
+    };
+    history(vec![
+        setup("--policy=review-only"),
+        setup("--policy=ask-every-time"),
+    ])
+}
+
+/// Down moves between indistinguishable summaries in the empty command pane. The footer identifies the setup
+/// before Enter launches it, even when the last argument would not fit in the row.
+#[gpui::test]
+fn wide_recents_show_custom_flags_before_enter(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_in_tmp(cx, &custom_flag_setups());
+    assert!(test_support::drawn(cx, "launcher-command-pane"));
+    assert_recent_flag_choices(cx, ["launcher-recent-0", "launcher-recent-1"]);
+    assert!(name_of(cx, "launcher-recent-permission-flags").is_none());
+    keys(cx, "down");
+    assert_recent_flag_detail(
+        cx,
+        "launcher-recents",
+        "launcher-recent-0",
+        "--policy=review-only",
+    );
+    keys(cx, "down");
+    assert_recent_flag_detail(
+        cx,
+        "launcher-recents",
+        "launcher-recent-1",
+        "--policy=ask-every-time",
+    );
+    assert!(creates(&mut helm, cx).is_empty());
+    keys(cx, "enter");
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("expected one launch from the highlighted setup, got {sent:?}");
+    };
+    assert_eq!(
+        create.body.as_ref().unwrap()["launch"]["permission_flags"]
+            .as_array()
+            .unwrap()
+            .last(),
+        Some(&json!("--policy=ask-every-time"))
+    );
+}
+
+/// Typed results in the narrow window keep their own pinned footer. Enter fills the selection without launching.
+#[gpui::test]
+fn narrow_recent_search_shows_custom_flags_before_enter(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_in_tmp(cx, &custom_flag_setups());
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
+    assert!(!test_support::drawn(cx, "launcher-command-pane"));
+    assert!(search_focused(cx));
+    super::search_view_tests::type_in(cx, "recent:codex");
+    assert_recent_flag_choices(cx, ["launcher-search-option-0", "launcher-search-option-1"]);
+    assert_recent_flag_detail(
+        cx,
+        "launcher-search-results-viewport",
+        "launcher-search-option-0",
+        "--policy=review-only",
+    );
+    keys(cx, "down");
+    assert_recent_flag_detail(
+        cx,
+        "launcher-search-results-viewport",
+        "launcher-search-option-1",
+        "--policy=ask-every-time",
+    );
+    assert!(creates(&mut helm, cx).is_empty());
+    keys(cx, "enter");
+    let flags = farhelm_proto::split_permission_flags(&draft(cx).agent.permission_flags).unwrap();
+    assert_eq!(
+        flags.last().map(String::as_str),
+        Some("--policy=ask-every-time")
+    );
+    assert!(name_of(cx, "launcher-recent-permission-flags").is_none());
+    assert!(creates(&mut helm, cx).is_empty());
+}
+
+/// Long flags must leave both the selected row and the command field usable at the shortest wide window height.
+#[gpui::test]
+fn wide_recent_flag_overflow_pages_without_moving_the_choice(cx: &mut TestAppContext) {
+    assert_can_page_recent_flags(cx, false);
+}
+
+/// The narrow popover measures itself differently from the wide pane. It still owns the same independent scroll.
+#[gpui::test]
+fn narrow_recent_flag_overflow_pages_without_moving_the_choice(cx: &mut TestAppContext) {
+    assert_can_page_recent_flags(cx, true);
+}
+
+/// Prove the last word is clipped initially, then reveal it using only the command field's page keys.
+fn assert_can_page_recent_flags(cx: &mut TestAppContext, narrow: bool) {
+    let (mut helm, cx) = new_in_tmp(cx, &repeated_flag_setups(6));
+    let minimum = crate::bootstrap::MIN_WINDOW_SIZE;
+    let (first, second) = if narrow {
+        cx.simulate_resize(minimum);
+        settle(cx);
+        assert!(!test_support::drawn(cx, "launcher-command-pane"));
+        assert!(search_focused(cx));
+        super::search_view_tests::type_in(cx, "recent:codex");
+        ("launcher-search-option-0", "launcher-search-option-1")
+    } else {
+        cx.simulate_resize(gpui::size(gpui::px(1080.), minimum.height));
+        settle(cx);
+        assert!(test_support::drawn(cx, "launcher-command-pane"));
+        assert!(search_focused(cx));
+        ("launcher-recent-0", "launcher-recent-1")
+    };
+    assert_recent_flag_choices(cx, [first, second]);
+    if !narrow {
+        keys(cx, "down");
+    }
+    assert!(
+        test_support::frame(cx).iter().any(|node| {
+            node.element_id.as_deref() == Some(first)
+                && node.selected == Some(true)
+                && node.visible_bounds == node.bounds
+                && !node.visible_bounds.is_empty()
+        }),
+        "the viewport still shows the entire selected row"
+    );
+    let first_block = recent_flags_block(cx, "--policy=review-only");
+    assert_eq!(first_block.visible_bounds.top(), first_block.bounds.top());
+    assert!(
+        first_block.visible_bounds.bottom() < first_block.bounds.bottom(),
+        "the fixture must require scrolling to the last word"
+    );
+    // This fixture's prefix and its long path fit in fewer than sixteen pages in either viewport.
+    let mut block = first_block;
+    for _ in 0..16 {
+        if block.visible_bounds.bottom() == block.bounds.bottom() {
+            break;
+        }
+        let previous = block.bounds.top();
+        keys(cx, "pagedown");
+        block = recent_flags_block(cx, "--policy=review-only");
+        assert!(
+            block.bounds.top() < previous,
+            "Page Down scrolled the detail"
+        );
+    }
+    assert_eq!(
+        block.visible_bounds.bottom(),
+        block.bounds.bottom(),
+        "the last flag is visible"
+    );
+    assert!(!block.visible_bounds.is_empty());
+    assert!(recent_highlighted(cx, first));
+    assert!(search_focused(cx));
+    let previous = block.bounds.top();
+    keys(cx, "pageup");
+    assert!(recent_flags_block(cx, "--policy=review-only").bounds.top() > previous);
+    assert!(recent_highlighted(cx, first));
+    assert!(search_focused(cx));
+    keys(cx, "pagedown");
+    let scrolled = recent_flags_block(cx, "--policy=review-only");
+    assert!(
+        scrolled.visible_bounds.top() > scrolled.bounds.top(),
+        "the previous choice still has an offset when the highlight moves"
+    );
+    keys(cx, "down");
+    assert!(recent_highlighted(cx, second));
+    let second_block = recent_flags_block(cx, "--policy=ask-every-time");
+    assert_eq!(
+        second_block.visible_bounds.top(),
+        second_block.bounds.top(),
+        "a new choice starts at its first flag"
+    );
+    assert!(creates(&mut helm, cx).is_empty());
+}
+
+/// Witness both saved choices before moving the highlight. Their accessibility labels already include all
+/// the flags and the wrapper. The keyboard footer gives the same distinction in painted text.
+fn assert_recent_flag_choices(cx: &mut VisualTestContext, rows: [&'static str; 2]) {
+    assert!(search_focused(cx));
+    for (row, policy) in rows
+        .into_iter()
+        .zip(["--policy=review-only", "--policy=ask-every-time"])
+    {
+        let name = name_of(cx, row).expect("both setups are offered");
+        assert!(
+            name.contains("Codex") && name.contains("Permissions: Custom"),
+            "{name}"
+        );
+        assert!(
+            name.contains("Wrapper: env CI=1") && name.contains(policy),
+            "{name}"
+        );
+    }
+}
+
+/// Check the painted text block. The renderer records all wrapped lines as one block, even if the last is clipped.
+fn assert_recent_flag_detail(
+    cx: &mut VisualTestContext,
+    list: &'static str,
+    row: &'static str,
+    last: &str,
+) {
+    assert!(recent_highlighted(cx, row));
+    assert!(search_focused(cx));
+    let flags = recent_flags_block(cx, last);
+    assert!(
+        flags.bounds.size.height > crate::theme::metrics::TEXT_SM * 2.,
+        "the long flag list wraps: {flags:?}"
+    );
+    assert_eq!(
+        flags.visible_bounds, flags.bounds,
+        "the flag tail remains in view"
+    );
+    assert!(
+        flags.bounds.top() >= test_support::bounds(cx, list).bottom(),
+        "the flags are below the scroll viewport"
+    );
+}
+
+/// Read painted text at the last rendered offset. The record keeps the full text even when its bounds are clipped.
+fn recent_flags_block(cx: &mut VisualTestContext, last: &str) -> gpui::DriverText {
+    crate::session_list::host_rail::tests::texts_within(
+        &test_support::frame(cx),
+        "launcher-recent-permission-flags",
+    )
+    .into_iter()
+    .find(|block| block.text.contains(last))
+    .expect("the highlighted setup supplies its last argument")
+}
+
 /// New on host1 in `/tmp` with `answer` as its history.
 pub(super) fn new_in_tmp<'a>(
     cx: &'a mut TestAppContext,

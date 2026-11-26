@@ -454,6 +454,7 @@ enum LauncherScene {
     IncompleteCustomQuickLaunch,
     CustomRecents,
     NarrowCustomRecents,
+    RecentFlags { narrow: bool },
     ShellWrapper,
     ShellWrapperNote,
     StaleChoice,
@@ -633,6 +634,16 @@ pub(super) fn launcher_narrow_custom_recents_setup(
     cx: &mut App,
 ) {
     setup(state, LauncherScene::NarrowCustomRecents, window, cx);
+}
+
+/// The same two stored sets of flags need a readable tail in the pane and in the narrow results popover.
+pub(super) fn launcher_recent_flags_setup(
+    state: &SceneState,
+    narrow: bool,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::RecentFlags { narrow }, window, cx);
 }
 
 /// Open a Bash launch with the wrapper row expanded and its help visible.
@@ -1085,6 +1096,8 @@ fn open_new_with_claude(
     if let LauncherScene::CustomRegistration(tab, _) = scene {
         draft = crate::launcher::view_tests::saved_custom_draft();
         draft.choose_tab(tab);
+    } else if matches!(scene, LauncherScene::RecentFlags { .. }) {
+        draft.edit_folder("/tmp".into());
     } else if matches!(
         scene,
         LauncherScene::CustomAgent
@@ -1308,7 +1321,9 @@ fn answer_new_reads(
         } else if command.path == "/api/tensorlake" && environment {
             Some(json!(account(true, SshKeyStatus::NotCreated)))
         } else if command.path.starts_with("/api/launch-history") {
-            Some(if scene.custom_recents() {
+            Some(if matches!(scene, LauncherScene::RecentFlags { .. }) {
+                crate::launcher::custom_flag_setups()
+            } else if scene.custom_recents() {
                 custom_recents_history()
             } else {
                 launcher_history(scene)
@@ -1449,6 +1464,14 @@ fn answer_new_reads(
     }
     if scene.custom_recents() {
         show_custom_recents(state, scene, window, cx);
+        return;
+    }
+    if let LauncherScene::RecentFlags { narrow } = scene {
+        state.after.set(Some(if narrow {
+            type_launcher_query
+        } else {
+            highlight_recent_flags
+        }));
         return;
     }
     let catalog_drawn = window.driver_nodes().iter().any(|node| {
@@ -1885,12 +1908,111 @@ fn type_launcher_query(
         LauncherScene::RenamedCustomSearch => ("acme-code", rename_highlighted_custom_agent),
         LauncherScene::StaleChoice => ("tl:Bench", click_withdrawn_template),
         LauncherScene::RecentFill => ("recent:permission-check", wait_for_recent_fill),
+        LauncherScene::RecentFlags { narrow: true } => ("recent:codex", highlight_recent_flags),
         _ => ("build", wait_for_launcher_results),
     };
     if field.text(cx).as_ref() != query {
         field.edit_for_golden(query, window, cx);
     }
     state.after.set(Some(stage));
+}
+
+/// Wait for both candidate rows, then move the highlight once. Keep the key outside the readiness retry so it
+/// cannot keep the headless queue drawing while a fixture is missing its intended selection.
+fn highlight_recent_flags(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let LauncherScene::RecentFlags { narrow } = launcher_scene(state) else {
+        unreachable!("only the saved flags scenes highlight these rows");
+    };
+    let rows = if narrow {
+        ["launcher-search-option-0", "launcher-search-option-1"]
+    } else {
+        ["launcher-recent-0", "launcher-recent-1"]
+    };
+    for (id, policy) in rows.into_iter().zip(["review-only", "ask-every-time"]) {
+        let Some(row) = window
+            .driver_nodes()
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id) && !node.visible_bounds.is_empty())
+        else {
+            state.after.set(Some(highlight_recent_flags));
+            return;
+        };
+        assert!(
+            row.label
+                .as_deref()
+                .is_some_and(|label| label.contains(policy))
+        );
+    }
+    let launcher = entry::open_launcher(window, cx).expect("Recent belongs to the launcher");
+    assert!(
+        launcher
+            .read(cx)
+            .search_for_golden()
+            .focus_handle(cx)
+            .is_focused(window)
+    );
+    press_down(window, cx);
+    state.after.set(Some(expect_recent_flags));
+}
+
+/// Inspect the painted bounds of the wrapped flag text. A clipped last line still has the full accessible label.
+fn expect_recent_flags(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let narrow = launcher_scene(state) == (LauncherScene::RecentFlags { narrow: true });
+    let (row, last) = if narrow {
+        ("launcher-search-option-1", "--policy=ask-every-time")
+    } else {
+        ("launcher-recent-0", "--policy=review-only")
+    };
+    let nodes = window.driver_nodes();
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some(row) && node.selected == Some(true))
+    );
+    let blocks = texts_within(nodes, "launcher-recent-permission-flags");
+    let flags = blocks
+        .iter()
+        .find(|block| block.text.contains(last))
+        .expect("the highlighted setup supplies its last argument");
+    assert!(
+        flags.bounds.size.height > crate::theme::metrics::TEXT_SM * 2.,
+        "the long flag list wraps: {flags:?}"
+    );
+    assert_eq!(
+        flags.visible_bounds, flags.bounds,
+        "the flag tail remains in view"
+    );
+    let launcher = entry::open_launcher(window, cx).expect("Recent belongs to the launcher");
+    assert!(
+        launcher
+            .read(cx)
+            .search_for_golden()
+            .focus_handle(cx)
+            .is_focused(window)
+    );
+}
+
+/// Drive the command editor's real Down binding without moving focus or simulating a pick.
+fn press_down(window: &mut Window, cx: &mut App) {
+    window.dispatch_event(
+        gpui::PlatformInput::KeyDown(gpui::KeyDownEvent {
+            native_key: None,
+            keystroke: gpui::Keystroke::parse("down").expect("valid key"),
+            is_held: false,
+            prefer_character_input: false,
+        }),
+        cx,
+    );
 }
 
 /// Set an explicit choice before the rename, since the query's default would highlight a sole result anyway.
@@ -1916,15 +2038,7 @@ fn rename_highlighted_custom_agent(
     );
     let launcher = entry::open_launcher(window, cx).expect("the search result belongs to New");
     assert!(!launcher.read(cx).has_explicit_search_choice());
-    window.dispatch_event(
-        gpui::PlatformInput::KeyDown(gpui::KeyDownEvent {
-            native_key: None,
-            keystroke: gpui::Keystroke::parse("down").expect("valid key"),
-            is_held: false,
-            prefer_character_input: false,
-        }),
-        cx,
-    );
+    press_down(window, cx);
     assert!(launcher.read(cx).has_explicit_search_choice());
     let mut agent = super::custom_agent();
     agent.display_name = "New Acme".into();

@@ -98,6 +98,8 @@ mod recents_tests;
 #[cfg(test)]
 mod recents_view_tests;
 #[cfg(test)]
+pub(crate) use recents_view_tests::custom_flag_setups;
+#[cfg(test)]
 mod replace_with_tests;
 #[cfg(test)]
 mod request_tests;
