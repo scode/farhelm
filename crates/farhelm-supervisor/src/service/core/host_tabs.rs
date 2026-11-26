@@ -58,10 +58,14 @@
 //! still runs (`HostTerminal::sweep_root`), and then the host is ended and its
 //! record removed. A runtime that judged its host gone (from the socket
 //! alone) has the process it adopted confirmed gone before the tab is
-//! forgotten. A close that cannot confirm the end keeps the tab and its
+//! forgotten. A close that cannot confirm the end, or whose sweep after the
+//! end cannot confirm what outlived the hangup reaped, keeps the tab and its
 //! record and marks it ([`HostTab::end_failed`]), and the reap closes it
 //! again, since its stopped runtime will announce nothing: a second after
-//! the failure, then doubling to at most a minute between tries. The
+//! the failure, then doubling to at most a minute between tries, a retry
+//! whose own sweep fails moving the next try on as well. The mark lives in
+//! memory only: a supervisor restarted before a retry succeeds leaves the
+//! rest to the session's Delete (SPEC.md, "Session view"). The
 //! automatic reap is driven by the host's exit event:
 //! the runtime announces it on the supervisor's liveness notifier, which
 //! wakes the ticker's reap pass, so an exited tab disappears without a poll
@@ -111,8 +115,8 @@ use super::host_launch::{
     settle_launch_record_with,
 };
 use super::{
-    KeyedGuard, RequestError, SessionEntry, Supervisor, TabOpenStage, TabReapAnchor, error_kind,
-    truncate_for_error,
+    KeyedGuard, RequestError, SessionEntry, Supervisor, TabCloseSweep, TabOpenStage, TabReapAnchor,
+    error_kind, truncate_for_error,
 };
 use crate::hosts::{
     AdoptError, Adoption, ChildSpec, DEFAULT_JOURNAL_CAP, HostEvidence, HostRegistry, HostRole,
@@ -144,8 +148,10 @@ pub(crate) struct HostTab {
     /// restarted supervisor could not use (`HostTerminal::unavailable`),
     /// or a gone-reading handle waiting for the reap to close the tab.
     pub(crate) host: HostTerminal,
-    /// Whether a close of this tab could not confirm its host ended. Such a
-    /// close has stopped the runtime (`Supervisor::end_launch_host` aborts
+    /// Whether a close of this tab could not confirm its host ended, or
+    /// ended it but could not confirm the sweep after the end reaped what
+    /// outlived the hangup. Either way the tab and its record are kept. A
+    /// close whose end failed has stopped the runtime (`Supervisor::end_launch_host` aborts
     /// it so that it cannot take the host back), whose status then stays
     /// what it last was, possibly "running" for good: nothing would ever
     /// announce the host's end. So the reap closes such a tab again
@@ -154,11 +160,12 @@ pub(crate) struct HostTab {
     /// [`Self::retry_at`], since an end that keeps failing (a host that
     /// survives SIGKILL, a process table that cannot be read) would
     /// otherwise hold the session's lifecycle claim and a reap permit on
-    /// every pass.
+    /// every pass. A retry whose own sweep fails moves that time on too.
     pub(crate) end_failed: bool,
-    /// How many closes of this tab could not confirm its host ended.
+    /// How many closes of this tab could not confirm its host ended or a
+    /// sweep reaped, counting retries.
     pub(crate) failed_ends: u32,
-    /// When the reap may close this tab again after a failed end: one
+    /// When the reap may close this tab again after a failed close: one
     /// second after the first failure, doubling with each further one, at
     /// most a minute apart ([`retry_delay`]), as re-adoption backs off.
     /// `None` until a close fails.
@@ -189,7 +196,7 @@ impl HostTab {
 
     /// Whether the reap is to close this tab now: it is
     /// [finished](Self::finished) and no close of it has failed, or an
-    /// earlier close could not confirm its host ended
+    /// earlier close could not confirm its host ended or its sweeps
     /// ([`Self::end_failed`]) and its retry time has come.
     pub(crate) fn reap_due(&self) -> bool {
         if self.end_failed {
@@ -308,8 +315,9 @@ fn retry_delay(failures: u32) -> std::time::Duration {
 }
 
 /// Mark the tab whose runtime is `host` as one whose close could not
-/// confirm its host ended ([`HostTab::end_failed`]), and set when the reap
-/// may try again ([`HostTab::retry_at`]).
+/// confirm its host ended or its sweeps ([`HostTab::end_failed`]), and set
+/// when the reap may try again ([`HostTab::retry_at`]), one backoff step
+/// later than the previous failure's.
 fn mark_end_failed(cell: &HostTabs, host: &HostTerminal) {
     let now = tokio::time::Instant::now();
     for tab in cell
@@ -913,10 +921,11 @@ impl Supervisor {
     ///   `Shutdown`, else the verified signal to the process its runtime
     ///   adopted), then a marker-only sweep catches what outlived the
     ///   hangup.
-    /// - **The record** goes once the host is confirmed ended, and so does
-    ///   the tab from the session's cell; a host judged gone from its socket
-    ///   alone is confirmed by its adopted process first. A host not
-    ///   confirmed ended keeps both, and the tab is marked
+    /// - **The record** goes once the host is confirmed ended and the sweep
+    ///   after it succeeded, and so does the tab from the session's cell; a
+    ///   host judged gone from its socket alone is confirmed by its adopted
+    ///   process first. A host not confirmed ended, or a sweep after the end
+    ///   that failed, keeps both, and the tab is marked
     ///   ([`HostTab::end_failed`]) so that the reap closes it again.
     /// - **The attachment** is detached unconditionally, before the host is
     ///   ended (see the body).
@@ -1001,16 +1010,31 @@ impl Supervisor {
             TabReapAnchor::PaneIfLive
         };
         let reaped = self
-            .reap_tab_tree(session_id, &terminal, tab_id, tab.scoped, anchor)
+            .sweep_for_close(
+                TabCloseSweep::BeforeEnd,
+                session_id,
+                &terminal,
+                tab_id,
+                tab.scoped,
+                anchor,
+            )
             .await;
         self.notify_podman_cleanup(entry, Reaped::from_result(&reaped))
             .await;
-        reaped.map_err(|e| {
-            RequestError::new(
+        if let Err(e) = reaped {
+            // A close finishing an earlier failed one is the reap's retry:
+            // its next attempt waits for the backoff to advance, or the reap
+            // would try it again on every tick for as long as the sweep keeps
+            // failing. A first close keeps its tab unmarked, so a retry still
+            // roots at the live child.
+            if tab.end_failed {
+                mark_end_failed(&entry.session.host_tabs, &tab.host);
+            }
+            return Err(RequestError::new(
                 ErrorKind::Internal,
                 format!("closing terminal tab {}: {e:#}", truncate_for_error(tab_id)),
-            )
-        })?;
+            ));
+        }
         // The attachment goes before the host: a grid stream watches its host, and would end on its own
         // with "terminal ended" the moment the host does, racing the
         // truthful "tab closed". The tab is being closed whatever the end
@@ -1021,7 +1045,8 @@ impl Supervisor {
         // the hangup by the tab's marker and scope alone, never by a root:
         // the child is gone, or its pid may be anyone's by now.
         let survivors = self
-            .reap_tab_tree(
+            .sweep_for_close(
+                TabCloseSweep::AfterEnd,
                 session_id,
                 &terminal,
                 tab_id,
@@ -1031,8 +1056,8 @@ impl Supervisor {
             .await;
         self.notify_podman_cleanup(entry, Reaped::from_result(&survivors))
             .await;
-        match ended {
-            Ok(()) => {
+        match (ended, survivors) {
+            (Ok(()), Ok(_)) => {
                 remove_tab_record(&crate::launch::tab_host_record_path(
                     &self.state_dir,
                     session_id,
@@ -1040,24 +1065,59 @@ impl Supervisor {
                 ))
                 .await;
                 forget_host_tab(&entry.session.host_tabs, &tab.host);
-                super::tab_close_cleanup_result(tab_id, survivors.map(|_| ()))?;
                 info!(session = %session_id, tab = %tab_id, "terminal tab closed");
                 Ok(())
             }
-            Err(why) => {
+            // The host ended but what outlived its hangup could not be
+            // confirmed reaped. The tab stays, hidden and marked, with its
+            // record, so that a manual Close or the reap sweeps again; only
+            // a confirmed sweep forgets it. Kept in memory only: a supervisor
+            // restart before then leaves the remainder to the session's
+            // Delete (SPEC.md, "Session view").
+            (Ok(()), Err(survivors)) => {
+                mark_end_failed(&entry.session.host_tabs, &tab.host);
+                Err(super::tab_close_cleanup_error(tab_id, survivors))
+            }
+            (Err(why), survivors) => {
                 // Its runtime is stopped by now and will announce nothing,
                 // so the tab is marked for the reap to close again.
                 mark_end_failed(&entry.session.host_tabs, &tab.host);
-                Err(RequestError::new(
-                    ErrorKind::Internal,
-                    format!(
+                // The tree was reaped from the live child before the end;
+                // only the sweep after it can fail on its own, and then the
+                // reply says so rather than claim everything was reaped.
+                let message = match survivors {
+                    Ok(_) => format!(
                         "terminal tab {}'s processes were reaped but its terminal host could not \
                          be confirmed ended: {why}",
                         truncate_for_error(tab_id)
                     ),
-                ))
+                    Err(survivors) => format!(
+                        "terminal tab {}'s terminal host could not be confirmed ended ({why}), and \
+                         survivors of its shell could not be confirmed reaped: {survivors:#}",
+                        truncate_for_error(tab_id)
+                    ),
+                };
+                Err(RequestError::new(ErrorKind::Internal, message))
             }
         }
+    }
+
+    /// One of a tab close's sweeps (`Supervisor::reap_tab_tree`), failed
+    /// instead when a test's [`super::TabCloseSweepFault`] says so.
+    async fn sweep_for_close(
+        &self,
+        sweep: TabCloseSweep,
+        session_id: &str,
+        terminal: &HostTerminal,
+        tab_id: &str,
+        scoped: bool,
+        anchor: TabReapAnchor,
+    ) -> anyhow::Result<Reaped> {
+        if let Some(fault) = self.seams.faults.tab_close_sweep_fault() {
+            fault(sweep).map_err(anyhow::Error::msg)?;
+        }
+        self.reap_tab_tree(session_id, terminal, tab_id, scoped, anchor)
+            .await
     }
 
     /// End a tab's host through the shared shutdown and adopted-process checks.

@@ -2095,15 +2095,16 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   viewer is told the tab closed (before the host ends, since a grid stream would otherwise report its terminal ended
   first), the host is ended as above (for a runtime that judged its host gone from its socket alone, the process it
   adopted is confirmed gone first, by the verified signal), a marker-only sweep catches what outlived the hangup, and
-  the record goes once the end is confirmed. A close that cannot confirm the end keeps the tab and its record and marks
-  it, and since its stopped runtime announces nothing, the reap closes it again until one does: a second after the
-  failure, then doubling to at most a minute between tries, so an end that keeps failing holds the session's lifecycle
-  claim and a reap slot only that often. A host tab that cannot be read refuses to close unless an earlier close could
-  not confirm its host ended. Deleting the session ends the tab. The automatic reap is driven by the host's exit event:
-  the runtime announces its processed exit record on the supervisor's liveness notifier, which wakes the ticker's reap
-  pass at once, with no poll; the tick runs it too, for a close a busy session put off. A takeover displaces the
-  previous client's attachments to every terminal of the session, and a grid attach to a tab goes through the grid
-  stream as an agent's does.
+  the record goes once the end is confirmed and that sweep succeeded. A close that cannot confirm the end, or whose
+  sweep after the end fails, keeps the tab and its record and marks it, and since its stopped runtime announces nothing,
+  the reap closes it again until one succeeds: a second after the failure, then doubling to at most a minute between
+  tries, so a close that keeps failing holds the session's lifecycle claim and a reap slot only that often; a retry
+  whose own sweep fails moves the next try on too. The mark is in memory only. A host tab that cannot be read refuses to
+  close unless an earlier close of it failed. Deleting the session ends the tab. The automatic reap is driven by the
+  host's exit event: the runtime announces its processed exit record on the supervisor's liveness notifier, which wakes
+  the ticker's reap pass at once, with no poll; the tick runs it too, for a close a busy session put off. A takeover
+  displaces the previous client's attachments to every terminal of the session, and a grid attach to a tab goes through
+  the grid stream as an agent's does.
 - **Restarting a host agent** (`service/core/host_restart.rs`): a host runs one child for its whole life, so a Restart
   of an agent in a host (or of a host row whose session holds no terminal) never reuses the host. Under the session's
   lifecycle claim, once the consent a working agent needs has been checked (so a refusal touches nothing) and before

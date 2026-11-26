@@ -132,8 +132,8 @@ pub use core::{
     BootIdSource, CreateCrashSeam, CreateIntentWaiting, CreateStage, FaultHooks, HostRestartFault,
     HostRestartStage, ReclaimDiscoveryGate, ReclaimListingFault, STALL_DETACH_TIMEOUT,
     SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams, SupervisorTimeouts,
-    TabOpenFault, TabOpenStage, TabSettleGate, UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT,
-    WRITER_STALL_TIMEOUT, hook_log_path,
+    TabCloseSweep, TabCloseSweepFault, TabOpenFault, TabOpenStage, TabSettleGate,
+    UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, hook_log_path,
 };
 pub use core::{
     DEFAULT_SESSION_PATH, HOST_CHECKPOINT_BUDGET, ORPHAN_RECLAIM_BUDGET, SESSION_START_PATH_ENV,
