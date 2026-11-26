@@ -342,8 +342,7 @@ Each entry: trigger phrases, the file to read in full before the first action, a
   `docs/agent-screen-fixtures.md`. Fence: it spends real vendor turns; only when asked or after an agent upgrade.
 - **Real agent tests** ("run real harness tests", "run the drift tests"): `docs/harness-drift-tests.md`. Fence: opt-in
   only, spends vendor turns, upgrades the agents.
-- **Agent records** (agent logs, Artifacts and records tokens): `.agents/agent-records.md`. Fence: never print or commit
-  a token.
+- **Agent fleet** ("fleet flow", agent records, tokens, backups): `.agents/fleet.md`. Fence: loading it changes nothing.
 - **Agent TUI behavior**: before relying on a claim about how an installed agent behaves in a terminal, read
   `.agents/real-agent-tui.md`.
 
