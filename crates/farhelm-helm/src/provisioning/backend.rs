@@ -3366,17 +3366,20 @@ impl ProvisioningBackend for SystemBackend {
         // identity only refuses (SPEC.md: uninstall "still refuses layouts it
         // cannot tell apart safely"); it never accepts.
         let mut script = format!("removed={}\n", shell_path(removed)?);
+        script.push_str(UNINSTALL_CANONICAL_PATH_SH);
         script.push_str(
             r#"home=''
 if [ -n "${HOME-}" ]; then
-    home=$(readlink -f -- "$HOME" 2>/dev/null) || home=''
+    canonical_path "$HOME"
+    home=$canonical
 fi
 resolve() {
     if [ -e "$1" ] || [ -L "$1" ]; then printf 1; else printf 0; fi
     printf '\0'
     if [ -L "$1" ]; then printf 1; else printf 0; fi
     printf '\0'
-    resolved=$(readlink -f -- "$1" 2>/dev/null | tr -d '\n')
+    canonical_path "$1"
+    resolved=$canonical
     raw=$resolved
     case "$home" in
         ''|/) ;;
@@ -3713,6 +3716,27 @@ resolve() {
         })
     }
 }
+
+/// Preserve the name for Uninstall's containment and file-identity checks.
+///
+/// The sentinel keeps shell substitution from stripping newlines in the
+/// path itself. Remove just the terminator printed by `readlink`. Refuse
+/// the inspection if a newline remains, including one at the end of a name.
+/// An unresolved path still has the empty spelling expected by the caller.
+const UNINSTALL_CANONICAL_PATH_SH: &str = r#"newline='
+'
+canonical_path() {
+    canonical=$(readlink -f -- "$1" 2>/dev/null && printf '%s' x) || { canonical=''; return; }
+    canonical=${canonical%x}
+    canonical=${canonical%"$newline"}
+    case "$canonical" in
+        *"$newline"*)
+            printf '%s\n' 'Uninstall cannot safely inspect a path containing a newline. Use Remove in Hosts to stop using this host.' >&2
+            exit 1
+            ;;
+    esac
+}
+"#;
 
 /// Shell function `mount_points DIR SEP`: print each mount point at or below
 /// DIR, a non-empty resolved path, each followed by SEP (`'\0'` or `'\n'`).
@@ -4289,6 +4313,38 @@ readlink() {{ return 0; }}
 mod tests {
     use super::*;
     use crate::provisioning::ssh_stand_in::{LyingSsh, control_root};
+
+    /// Canonical path parsing must refuse ambiguous bytes before containment
+    /// checks use them. A terminating newline in the path survives capture too.
+    #[test]
+    fn uninstall_rejects_newlines_in_canonical_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let resolve = |name: &str| {
+            let path = root.path().join(name);
+            std::fs::create_dir(&path).unwrap();
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(format!(
+                    "{UNINSTALL_CANONICAL_PATH_SH}canonical_path \"$1\"; printf '%s' \"$canonical\""
+                ))
+                .arg("fixture")
+                .arg(path)
+                .output()
+                .unwrap()
+        };
+        let ordinary = resolve("ordinary directory");
+        assert!(ordinary.status.success());
+        assert!(ordinary.stdout.ends_with(b"/ordinary directory"));
+        for name in ["part\nbreak", "ends\n"] {
+            let rejected = resolve(name);
+            assert!(!rejected.status.success(), "{name:?} was accepted");
+            assert!(rejected.stdout.is_empty());
+            let refusal = String::from_utf8_lossy(&rejected.stderr);
+            assert!(
+                refusal.contains("cannot safely inspect") && refusal.contains("Remove in Hosts")
+            );
+        }
+    }
 
     /// A long state directory prevents SSH config sharing. Tailscale uses a different socket path,
     /// so its connection failure must keep the diagnostic about the actual peer.

@@ -52,6 +52,7 @@ use std::fs::File;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -160,6 +161,20 @@ fn lock_unsupported(error: &rustix::io::Errno) -> bool {
     *error == Errno::NOTSUP || *error == Errno::OPNOTSUPP || *error == Errno::NOLCK
 }
 
+/// Restrict newly created fallback files to the installer owner.
+///
+/// A read-only descriptor can take the same exclusive lock as the installer.
+/// Reopening the existing inode keeps all holders on the same lock.
+fn open_fallback_lock(applications: &Path) -> io::Result<File> {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(applications.join(FALLBACK_LOCK_FILE))
+}
+
 /// Take the installation lock on `applications` (`~/Applications`),
 /// creating the folder first if it is missing, waiting up to `wait` for a
 /// running install or uninstall (`Duration::ZERO` tries once).
@@ -205,14 +220,7 @@ pub fn lock_installation(
             None
         }
         Err(error) if lock_unsupported(&error) => {
-            let path = applications.join(FALLBACK_LOCK_FILE);
-            let file = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(&path)
-                .map_err(io_error)?;
+            let file = open_fallback_lock(applications).map_err(io_error)?;
             match try_lock(file.as_fd()) {
                 Ok(true) => {}
                 Ok(false) => waited(wait_for(&deadline, || try_lock(file.as_fd())))?,
@@ -755,6 +763,17 @@ pub fn new_installation_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A directory that cannot be locked uses a file other local accounts
+    /// cannot open just to hold the owner's install lock.
+    #[farhelm_testtrace::test]
+    fn a_new_fallback_lock_file_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let applications = tempfile::tempdir().unwrap();
+        let lock = open_fallback_lock(applications.path()).unwrap();
+        assert_eq!(lock.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+    }
 
     /// The two-field record every older installer writes reads as
     /// "complete, no id", and so does any absolute link to a `farhelm` (the

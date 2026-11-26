@@ -413,12 +413,9 @@ fn attach_refusal(state: &HostState) -> Option<BackendFailure> {
             peer_text(recorded),
         ),
         HostState::OwnedElsewhere { owner, .. } => format!("{REFUSED}. {}", owner_refusal(owner)),
-        HostState::IdentityUnverified { recorded } => format!(
-            "{REFUSED}: it answered without an identity, but this host has identity {} on \
-             record; wait until it reports its identity again, or change this entry's destination \
-             or remove the entry",
-            peer_text(recorded),
-        ),
+        HostState::IdentityUnverified { recorded } => {
+            format!("{REFUSED}: it {}", unverified_identity_remedy(recorded))
+        }
         HostState::Duplicate { twin, identity } => format!(
             "{REFUSED}: identity {} belongs to host {twin}; remove that entry or change this \
              one's destination, then press Retry",
@@ -439,6 +436,23 @@ fn attach_refusal(state: &HostState) -> Option<BackendFailure> {
         _ => return None,
     };
     Some(BackendFailure::new(sentence, ""))
+}
+
+/// An answered hello with no identity calls for a fresh report or a registry change.
+fn unverified_identity_remedy(recorded: &str) -> String {
+    format!(
+        "answered without an identity, but this host has identity {} on record. Wait until it \
+         reports its identity again, or change this entry's destination or remove the entry.",
+        peer_text(recorded),
+    )
+}
+
+/// UPDATE cannot use a completed hello without reestablishing the recorded identity.
+fn update_identity_unverified(recorded: &str) -> String {
+    format!(
+        "UPDATE requires a verified identity. The supervisor {}",
+        unverified_identity_remedy(recorded)
+    )
 }
 
 /// A listed host offers Take over in Hosts, whether the connection actor
@@ -1841,6 +1855,11 @@ impl ProvisioningService {
                         refusal,
                     )));
                 }
+                if let (Some(recorded), None) = (&row.host_identity, &host_identity) {
+                    return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                        update_identity_unverified(recorded),
+                    )));
+                }
                 if let (Some(recorded), Some(reported)) = (&row.host_identity, &host_identity)
                     && recorded != reported
                 {
@@ -3172,13 +3191,27 @@ impl ProvisioningService {
                                 "",
                             ));
                         }
-                        if expected_identity.is_some() && &host_identity != expected_identity {
-                            return Err(BackendFailure::new(
-                                "the supervisor identity changed after UPDATE planning",
-                                format!(
-                                    "expected {expected_identity:?}, reported {host_identity:?}; plan again"
-                                ),
-                            ));
+                        if let Some(expected) = expected_identity.as_deref() {
+                            match host_identity.as_deref() {
+                                None => {
+                                    return Err(BackendFailure::new(
+                                        update_identity_unverified(expected),
+                                        "",
+                                    ));
+                                }
+                                Some(reported) if reported != expected => {
+                                    return Err(BackendFailure::new(
+                                        format!(
+                                            "the supervisor identity changed after UPDATE planning. \
+                                             Expected {}, reported {}. Plan again.",
+                                            peer_text(expected),
+                                            peer_text(reported),
+                                        ),
+                                        "",
+                                    ));
+                                }
+                                Some(_) => {}
+                            }
                         }
                         (
                             None,
