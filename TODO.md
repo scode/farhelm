@@ -60,6 +60,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Stop Settings Save and Close when an independent save fails.** An editor can save on its own while a page Save waits
+  for another write. If the editor fails before the page finishes, Save and Close must show its reason and stop before
+  sending the remaining drafts. The frozen draft list prevents replaying the failed write, but does not show the refusal
+  or stop other writes that the close answer queued. In `crates/gui/farhelm-gui/src/settings/editing.rs`, `ask_to_close`
+  skips `watch_close_question` when a page batch exists. Keep the receipts joined for closing distinct from those the
+  page Save already owns. Watch independent saves while the question is open and transfer them to the accepted close
+  decision only if the user chooses Save. Opening another Close question gives up the previous close decision. A refusal
+  dismisses the new question and shows the error if it is still open. Let the older page Save finish either way. Cover a
+  refused editor save followed by an acknowledged checkout folder write. Confirmed close must show the refusal and send
+  neither a retry nor the queued post-clone command. A newer unanswered or dismissed question must preserve the original
+  page Save's post-clone write with its original draft. See `SPEC.md` under “Settings” and “One GUI at a time”. Deferred
+  because separating receipt ownership and testing and capturing the revealed refusal exceeded this Settings triage
+  item's size allowance.
+
 - **Bind Settings footer Save and Discard to the page and drafts shown.** Navigation can move Save to another page's
   draft, including a different replacement for the one stored Tensorlake key. A late save refusal can move Discard to
   the page with the refused draft. In `settings/editing.rs`, bind `page_answers` to the presented page, form identities,

@@ -49144,3 +49144,29 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed as decided. Change `lxqnqquqtuyuvzpmvnyzysqksyqvynxm`, bookmark
   `plan/triage-settings-nov24/01c-bind-approved-settings-drafts`.
   [Draft PR](https://github.com/scode/farhelm/pull/4966/changes).
+
+## settings-close-can-retry-refused-save.md
+
+- Outcome: `fix code`.
+- Assessment: Clearly settled. SPEC.md "One GUI at a time" (5785): "The GUI never retries or replays a failed save on
+  its own." SPEC.md Settings paragraph (2574-2575): "A close that saves waits for pending operations and sends the
+  remaining saves one at a time. The first failure keeps Settings open and shows the affected page with its error."
+  Code: when a page batch is already running, `ask_to_close` sets only `batch.after` and never watches pending saves
+  outside that batch (`editing.rs:636-639,647-653`); a recipe editor's own Save is outside page batches (`is_form`,
+  `:166-171,367`). A refused recipe save goes back to an editable dirty draft (`recipes/editor.rs:579-590`) with nobody
+  listening; when the page batch finishes, `AfterBatch::SaveAndClose` runs `start_batch(None)` (`:477`), which sends the
+  refused recipe draft again. Fix follows directly: in the batch branch also watch out-of-batch pending saves and cancel
+  the close (keep Settings open, reveal the failure) on refusal, as `watch_close_question` already does for the no-batch
+  branch. Verified: confirmed by inspection. Size estimate ~50-100 lines including a regression test that overlaps a
+  recipe save with a page save; may approach the 100-line gate because the test setup is involved.
+- Decision: Recorded without asking under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`,
+  "Preparing each item", maintainer 2026-10-19). (2026-11-24 triage, main c38b93552.) The maintainer can revise it.
+- Completion criteria: Make the code match the quoted rule as the Assessment describes (recommendation: fix code —
+  direct application of the quoted rules; size S-M (near the gate).). Size gate: about 100 lines of diff (code, tests
+  and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings
+  the item back to the maintainer. Remove the feedback file and its index entry, or narrow it to any part the Assessment
+  says remains.
+- Execution: Deferred to the Plan follow-ups TODO **Stop Settings Save and Close when an independent save fails**. The
+  complete correction exceeded the scope allowance. Change `ylpnxysmnrmlqoxoooxrpvxlttqwlrnw`, bookmark
+  `plan/triage-settings-nov24/02a-pending-refusal-follow-up`.
+  [Draft PR](https://github.com/scode/farhelm/pull/4968/changes).
