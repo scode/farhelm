@@ -407,6 +407,12 @@ impl TensorlakeKey {
         (!typed.is_empty()).then_some(typed)
     }
 
+    /// The settled conflict picture has a stored key and an independent draft, which must remain editable.
+    #[cfg(test)]
+    pub(super) fn replacement_input_for_golden(&self, cx: &App) -> Option<TextInputState> {
+        (self.key_set(cx) == Some(true) && !self.locked(cx)).then(|| self.key.input().clone())
+    }
+
     /// Clear the typed replacement without sending a Clear command for the stored key.
     pub(super) fn discard(&mut self, cx: &mut Context<Self>) {
         self.key.discard(self.window, cx);

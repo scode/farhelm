@@ -49,9 +49,6 @@ consequences.
 - [`settings-close-can-miss-detached-credential-save.md`](settings-close-can-miss-detached-credential-save.md) —
   Settings can close without waiting for a credential save whose editor is already closed.
 
-- [`settings-close-can-miss-conflicting-tensorlake-keys.md`](settings-close-can-miss-conflicting-tensorlake-keys.md) —
-  Save and Close can skip the conflicting-key check and write a second Tensorlake key after the first save completes.
-
 - [`settings-close-can-retry-refused-save.md`](settings-close-can-retry-refused-save.md) — Save and Close can miss one
   pending refusal and retry the rejected draft without a new decision.
 
