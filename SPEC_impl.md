@@ -5439,13 +5439,13 @@ exactly with Custom. Older peers refuse the new protocol and older releases cann
 the missing downgrade path is accepted. Absent flags remain absent on serialization, so existing create fingerprints and
 `agent_create_v1` digests do not change. `split_permission_flags` shares `shell_words::split` between the editors and
 the helm's shape check: quotes/backslashes group words, a `#` starting a word begins a comment, and nothing expands. The
-compiler refuses all five reserved supervisor placeholders as complete words, then inserts custom words where YOLO flags
-would go, before workspace-trust flags and the resume suffix. No custom-flag meaning is interpreted. The shared shape
-check requires a nonempty word vector with Custom and refuses flags with any other choice. Templates store the same
-words, explicitly paired with Custom; another permission edit clears them. A harness switch drops both even when the
-destination also offers Custom, because words belong to the source CLI. The remembered-permission read, write validation
-and successful-create projection exclude Custom while recent setups retain the whole selection. Editable UI text is
-separate from words so malformed quotes remain repairable without submitting a different command.
+compiler refuses all five reserved supervisor placeholders as complete words, then copies custom words where YOLO flags
+would go, before workspace-trust flags and the resume suffix. The helm's best-effort trust check is described below. The
+shared shape check requires a nonempty word vector with Custom and refuses flags with any other choice. Templates store
+the same words, explicitly paired with Custom; another permission edit clears them. A harness switch drops both even
+when the destination also offers Custom, because words belong to the source CLI. The remembered-permission read, write
+validation and successful-create projection exclude Custom while recent setups retain the whole selection. Editable UI
+text is separate from words so malformed quotes remain repairable without submitting a different command.
 
 Schema 30's nullable `remembered_workspace_trust` column stays in the preference row, but no read or write uses it.
 Permission memory and structured launch history still come from the selection the user submitted
@@ -5475,10 +5475,14 @@ Restart and Replace; new composition uses true or omission. Older selection JSON
 
 Antigravity true adds `--settings` with the canonical-directory JSON slot. Its switch applies to structured launches on
 installed hosts in plain folders as well as managed checkouts. The supervisor resolves the directory when it fills the
-slot. Custom `--settings` and `--settings=...` options take precedence over Farhelm's opt-in. The resolved selection
-then omits trust, including on approval cards. A bare `--` ends the Custom options. The compiler puts the trust option
-and the conversation selector before that token. Editing a stored launch's trust choice preserves both its literal
-Custom tail and the selector placement already saved for that session.
+slot. The compiler puts the trust option and the conversation selector before a bare `--`. Editing a stored launch's
+trust choice preserves both its literal Custom tail and the selector placement already saved for that session.
+
+Before enabling automatic trust, the helm makes a best-effort check of Custom option words before a bare `--`. It
+recognizes Antigravity `--settings` and `--settings=...`, Pi `--approve` and `--no-approve`, and Codex `-c` or
+`--config` assignments to the `projects` table, a single project's inline table or a dotted project `trust_level` key.
+When the check finds one, the resolved selection omits Farhelm's trust argument and the approval card omits its trust
+indicator. Pi's classifier covers a selection carrying Custom words, while fresh structured Pi launches only offer YOLO.
 
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order

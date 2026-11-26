@@ -1880,8 +1880,9 @@ already accepted attempt or its retries.
 
 New, Clone, Restart with, Replace with and agent-requested launches use the destination's workspace trust policy.
 Structured launches in a session's own sandbox or container automatically trust where supported by Claude Code, Codex,
-Muse, Pi and Antigravity. Custom settings flags still take precedence. Local, SSH and persistent recipe hosts follow
-Settings. Plain Restart and the Replace answers that reuse the saved command keep the stored choice. **Replace as
+Muse, Pi and Antigravity. Local, SSH and persistent recipe hosts follow Settings. For launches that carry Custom
+permission flags, Farhelm makes a best-effort check for trust overrides and skips its own trust argument when it
+recognizes one. Plain Restart and the Replace answers that reuse the saved command keep the stored choice. **Replace as
 guarded instead** uses the same policy as Replace with.
 
 For agents that require a change to their own settings file, Farhelm applies workspace trust at launch of that agent,
@@ -1928,7 +1929,8 @@ a symlink and stored its canonical path.
 Antigravity has its own off-by-default switch for installed hosts. The per-launch `--settings` argument names the
 canonical working directory on the session's host when it can be resolved and represented as text. Otherwise it uses the
 submitted path. It replaces the saved trust list for that process and leaves the settings file alone. Custom permission
-options supplying `--settings` or `--settings=...` take precedence. Literal Command launches supply their own arguments.
+options supplying `--settings` or `--settings=...` are covered by the best-effort check above. Literal Command launches
+supply their own arguments.
 
 Codex, Muse and Antigravity show the same nonmodal discovery hint while their recognized trust question is current in
 the agent terminal, their switch is off, and their own hint has not been dismissed. The hint names the agent, offers

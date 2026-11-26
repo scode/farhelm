@@ -50498,3 +50498,21 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed as decided. Change `qunmnmqkomqwzzmmlllxnmumqptsvzot`, bookmark
   `plan/triage-drift-and-brick-tooling/03-brick-cleanup-untested-remote-pair`,
   [#5048](https://github.com/scode/farhelm/pull/5048/changes).
+
+## trailing-auto-trust-overrides-custom-flag-refusal.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Confirmed for Farhelm's code (`crates/farhelm-helm/src/workspace_trust.rs:143-152`,
+  `launches.rs:679-699,837-856,899-941`): `workspace_trust_blocked_by_selection` detects only Antigravity `--settings` /
+  `--settings=`, so in a session's own sandbox/container Farhelm appends `--approve` / `-c <trusted>` after Custom Pi
+  `--no-approve` or Codex untrusted `-c` overrides. Live Pi/Codex CLI flag precedence is unverified.
+- Decision: Q6 ("Auto-trust vs Custom flags on Pi & Codex"): maintainer picked "Fix spec+code: honor Pi & Codex Custom
+  trust flags too" with note: "But SPEC this as best effort detection ONLY. We do NOT guarantee it and we never document
+  it as a guarantee." (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Extend `workspace_trust_blocked_by_selection` to also detect Pi `--no-approve`/`--approve` and
+  Codex project-trust `-c` overrides in Custom permission flags (with unit tests, estimate S ~30-50 lines), and update
+  `SPEC.md` (and `SPEC_impl.md` if applicable) to specify this explicitly as best-effort detection ONLY — never
+  documented or promised as a guarantee. Remove the feedback file and its index entry.
+- Execution: Change `omomxqkulppumqtpmrqnpoquxottuqsq`, bookmark
+  `plan/triage-trust-settings-and-ui-wording/01-auto-trust-custom-flags-best-effort`.
+  [Draft PR #5043](https://github.com/scode/farhelm/pull/5043/changes).

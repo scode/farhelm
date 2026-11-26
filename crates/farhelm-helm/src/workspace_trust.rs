@@ -101,7 +101,7 @@ pub(crate) fn try_without_workspace_trust(
 }
 
 /// Apply the destination's policy to a new composition. Disposable sessions
-/// always trust where supported. Commands keep their literal words.
+/// default to trust where supported. Commands keep their literal words.
 pub(crate) async fn normalize_launch_workspace_trust(
     state: &AppState,
     launch: SessionLaunch,
@@ -115,8 +115,8 @@ pub(crate) async fn normalize_launch_workspace_trust(
     configured_launch_workspace_trust(launch, &config, destination)
 }
 
-/// Automatic trust must preserve an explicit settings file in Custom flags,
-/// even on a disposable host.
+/// A recognized Custom trust option takes priority over both sources of
+/// automatic trust. The resolved selection then carries no Farhelm opt-in.
 fn trust_enabled_for_selection(
     selection: &LaunchSelection,
     config: &crate::checkout_config::ResolvedCheckoutConfig,
@@ -219,6 +219,62 @@ mod tests {
                 supported.contains(&harness).then_some(true),
                 "{harness:?}",
             );
+        }
+    }
+
+    /// A recognized Custom trust choice survives the same composition used by
+    /// approval and dispatch, including on a host that would normally opt in.
+    #[test]
+    fn codex_custom_trust_option_suppresses_automatic_trust() {
+        use farhelm_proto::LaunchPermission;
+
+        let config = crate::checkout_config::ResolvedCheckoutConfig {
+            keep_spare: false,
+            claude_trust: false,
+            codex_trust: true,
+            muse_trust: false,
+            pi_trust: false,
+            antigravity_trust: false,
+            root: None,
+            post_clone: None,
+            config_revision: 0,
+        };
+        let words = ["-c", "projects./work.trust_level='untrusted'"];
+        let mut selection = LaunchSelection {
+            custom_agent: None,
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::Custom),
+            permission_flags: Some(words.map(str::to_owned).to_vec()),
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        };
+        let custom = launches::compile(selection.clone()).unwrap();
+        assert!(
+            custom
+                .start_argv()
+                .unwrap()
+                .windows(words.len())
+                .any(|argv| argv == words.as_slice())
+        );
+        selection.permission_flags = Some(vec!["-c".into(), "model='chosen'".into()]);
+        let ordinary = launches::compile(selection).unwrap();
+        for destination in [TrustDestination::Disposable, TrustDestination::HostSettings] {
+            let normalize = |launch| {
+                configured_launch_workspace_trust(launch, &config, destination)
+                    .unwrap()
+                    .into_launch()
+            };
+            assert_eq!(
+                normalize(ordinary.clone())
+                    .agent_selection()
+                    .unwrap()
+                    .workspace_trust,
+                Some(true)
+            );
+            assert_eq!(normalize(custom.clone()), custom);
         }
     }
 
