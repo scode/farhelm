@@ -11,7 +11,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `supervisor-outliving-programs.md` — Root Stop and Restart cleanup at surviving pinned children and record SIGHUP/SIGKILL policy
 - [in-flight a2468d] `supervisor-stop-pending-launch.md` — Refuse Stop on unconfirmed terminal-less launches in favor of Delete or Restart
 - [in-flight 7e8d44] `supervisor-tab-close-retry.md` — Fix in-memory shell-tab close retry bugs and record Linux systemd/unscoped cleanup policy
-- [pending] `agent-delete-late-notice.md` — Always record agent-Delete leftover-checkout warnings in the notices bell
+- [in-flight 3fa119] `agent-delete-late-notice.md` — Always record agent-Delete leftover-checkout warnings in the notices bell
 - [pending] `drift-updater-teardown.md` — Run drift-test agent updaters in transient systemd user scopes for clean teardown
 - [pending] `settings-wait-while-saving.md` — Make Settings Close/Escape and editors wait for saves, rip out slow-helm concurrency, and finish surviving Settings follow-ups (after `custom-agent-delete-prompt.md`)
 - [pending] `terminal-tab-hover-close.md` — Move shell tab close button to a fixed left icon slot revealed on hover
