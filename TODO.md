@@ -67,6 +67,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (instead of using the ... menu on the right). When right clicking and multiple sessions are selected, it should bring
   up the menu that applies to all selected sessions. Plan: `plans/queue/session-right-click-menu.md`.
 
+- **Stop accidental terminal tab closes when creating a new terminal.** Find some way of making it much less likely that
+  a human will accidentally click the close button for a terminal tab when they intended to create a new terminal. I
+  keep doing this all the time.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
