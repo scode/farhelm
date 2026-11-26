@@ -35,8 +35,8 @@ non-zero when any capture failed or any app run did not start or did not stop cl
 - App scenes: the running app driven by bridge commands, once per app variant (a theme and a window size), each labelled
   with its variant and the real pixel size of the capture. The bridge has no theme or resize command, so each variant is
   its own app run, started with `gui-agent.py start --appearance --window-size` (agent-build test hooks, not the app's
-  appearance setting). Those runs start with the start dialogs off, as every `start` does, so a scene that shows the
-  Welcome card needs `--start-dialogs` in its own `start` options.
+  appearance setting). Those runs skip automatic announcements and upgrade highlights unless a scene asks for
+  `--start-dialogs`. Welcome in the empty pane appears without any startup option.
 - On Linux, only the app's own drawing. Under Mutter GPUI draws the window's decorations itself, and GPUI Kit frames the
   window with a 20-pixel margin for its shadow and a 1-pixel border, all inside the window's surface, which is what the
   bridge's screenshot captures: a 900x700 window showed the app in 858x658 pixels inside a black band. So a Linux run

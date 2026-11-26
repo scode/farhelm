@@ -41,8 +41,8 @@
 //! dispatcher decides what they do.
 //!
 //! The main view also keeps the owner of the dialogs SPEC.md opens by themselves when the window starts or resets, the
-//! Welcome card and the first batch of announcements ([`welcome::StartDialogs`]), for the window's life; it is made
-//! after the session pane, so the selected session's terminal is home by the time a card opens over it. It keeps the
+//! first batch of announcements and upgrade highlights ([`welcome::StartDialogs`]), for the window's life; it is made
+//! after the session pane, so the ordinary home is set before an automatic dialog opens. It keeps the
 //! status sounds' owner ([`sounds::StatusSounds`]) for the window's life the same way, over the sidebar's session list,
 //! whose query tells it when the sidebar's view changes.
 //!
@@ -107,7 +107,7 @@ pub struct MainView {
     /// The pane beside the list, kept for the window's life like the list: it remakes the selected session's terminal
     /// by itself on every change of selection or UI session.
     session_pane: Entity<SessionPane>,
-    /// The owner of the window-start dialogs (the Welcome card and the first batch of announcements), kept for the
+    /// The owner of the window-start dialogs (announcements and upgrade highlights), kept for the
     /// window's life; it starts over by itself with each UI session.
     _start_dialogs: Entity<welcome::StartDialogs>,
     /// Owns the layer and the input marks for SSH questions in this window.

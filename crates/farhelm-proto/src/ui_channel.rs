@@ -755,8 +755,8 @@ pub struct Preferences {
     pub grok_hook_hint_dismissed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub antigravity_hook_hint_dismissed: Option<bool>,
-    /// Dismissal shared by every client of this helm. Unset means unseen,
-    /// including existing helms upgraded from before the welcome card.
+    /// Legacy dismissal value for the former startup Welcome card. Retained for wire compatibility after the
+    /// desktop GUI stopped using it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub welcome_seen: Option<bool>,
     /// The newest build whose upgrade highlights this helm has shown or skipped.

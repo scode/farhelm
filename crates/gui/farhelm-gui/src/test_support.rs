@@ -1087,8 +1087,7 @@ mod shared_helper_tests {
         });
         let preferences = Preferences {
             visit_history: vec!["a".to_owned()],
-            // A helm that has shown the Welcome card, which would otherwise open over the main view and could take
-            // focus from the terminal this test needs focused (`crate::welcome`).
+            // Inert since the startup Welcome card was removed; kept to avoid churning fixtures.
             welcome_seen: Some(true),
             ..Preferences::default()
         };

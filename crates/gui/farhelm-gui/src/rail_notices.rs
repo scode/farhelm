@@ -915,7 +915,7 @@ fn feedback_notice_entry(
     .on_click(move |_, window, cx| {
         let mark = Mark::take(cx);
         let _ = button.update(cx, |button, cx| button.close(window, cx));
-        crate::feedback::open_returning(ReturnTo::Control(bell.clone()), None, &mark, window, cx);
+        crate::feedback::open(&bell, &mark, window, cx);
     });
     let content = div()
         .flex()

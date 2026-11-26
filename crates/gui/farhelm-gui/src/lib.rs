@@ -60,14 +60,14 @@
 //!   dialog it opens.
 //! - [`notices_bell`]: a session row's notification bell and the list of the session's notifications it opens.
 //! - [`rail_notices`]: the notices bell at the top of the host rail's foot and its panel of notices about hosts.
-//! - [`welcome`]: the Welcome card, and the owner of the dialogs a window opens by itself when it starts or resets
-//!   (the card, then the first batch of announcements).
+//! - [`welcome`]: Welcome in the empty pane and from Help, and the owner of the window-start dialogs
+//!   (announcements, then upgrade highlights).
 //!
 //! The `agent` feature adds the test-automation bridge (`gpui-agent`), which `scripts/gui-agent.py` drives; see
 //! `docs/gui-agent.md`. It also makes the app read `agent_startup`'s startup overrides (window size, appearance, start
-//! dialogs off) from its environment, which a screenshot batch uses to capture each theme and size and every bridge run
-//! uses to keep the Welcome card from opening over the app, and a staged run's session values. The rest of that module
-//! is compiled into every build, so ordinary test runs cover it (except the staged values; see the module).
+//! dialogs off) from its environment. Screenshot batches use them to capture each theme and size. Bridge runs use
+//! them to control automatic dialogs and stage session values. The rest of that module is compiled into every build,
+//! so ordinary test runs cover it (except the staged values; see the module).
 
 pub mod actions;
 pub mod announcements;

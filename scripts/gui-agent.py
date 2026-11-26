@@ -24,10 +24,10 @@ screenshot goldens; on a Mac it is Metal.
 `--lock FILE` holds an exclusive `flock` on FILE from before the build until `stop`, for a machine whose one GUI
 session several runs share (the test Mac's convention). `--window-size` and `--appearance` start the app's window at
 that size and in that palette (agent builds only; `crates/gui/farhelm-gui/src/agent_startup.rs`), so a screenshot batch
-can capture each theme and size; they are test hooks, not the app's own appearance setting. A run's helm is always
-fresh, so the Welcome card would open over the app and catch the run's first click; `start` therefore turns the
-window's start dialogs (that card and the announcement batch after it) off through the same agent-build overrides, and
-`--start-dialogs` leaves them on to see the real start. `--templates` seeds a fixed set of launch templates with the
+can capture each theme and size; they are test hooks, not the app's own appearance setting. `start` turns off the
+automatic announcements and upgrade highlights through the same overrides so they cannot consume the run's first
+action. `--start-dialogs` leaves them on. Welcome in the empty pane is always available when there are no sessions.
+`--templates` seeds a fixed set of launch templates with the
 ⚡ mark and number keys over them (SEEDED_TEMPLATES), for screenshot scenes of templates and quick launch.
 `--scripted-hosts` makes the helm fake every command it runs on a host (setup, Update and the rest) with its scripted
 provisioning backend
@@ -868,10 +868,9 @@ def app_env_args(
     otherwise, so the app starts at its own default size in the system's appearance, sets up hosts for real, has no
     payloads to push, registers no hosts and shows every session as the helm pushes it).
     `staged` forces the scripted backend on whatever `scripted_hosts` says: a staged remote host is this machine, so a
-    real setup, Update or uninstall of it would act on its own Farhelm installation. The start dialogs are off unless
-    `start_dialogs` asks for them, because every run's helm is fresh and would otherwise open the Welcome card over the
-    app. `scripts/gui-lifecycle.py` relaunches through `launch_env_args` with the defaults, so its relaunched app keeps
-    them off too, as it must: the first launch marked nothing seen."""
+    real setup, Update or uninstall of it would act on its own Farhelm installation. The automatic announcements and
+    upgrade highlights stay off unless `start_dialogs` asks for them. `scripts/gui-lifecycle.py` relaunches with this
+    default too, so the next action still reaches the app."""
     pairs = {
         # The app's state directory: never the default one, which could be a real installation's.
         "FARHELM_DESKTOP_STATE_DIR": str(run / "state"),
@@ -2497,8 +2496,7 @@ def start(run: Path, args: list[str]) -> int:
     parser.add_argument(
         "--start-dialogs",
         action="store_true",
-        help="let the window's start dialogs (the Welcome card, then announcements) open as in a real launch; off by "
-        "default (agent-build test hook)",
+        help="allow automatic announcements and upgrade highlights (off by default in agent runs)",
     )
     parser.add_argument(
         "--payload-dir",

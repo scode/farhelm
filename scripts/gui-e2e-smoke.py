@@ -14,9 +14,9 @@ Hosts panel; 44, the settings-and-hosts area's Remove host; 45, the other-dialog
 session list's order menu; 47, the settings-and-hosts area's host Update, its progress, failure and rerun; 48, the
 other-dialogs area's Send feedback, up to but never including Send; 49, the session list header's Trash; 50, the session
 view's open session that a status filter hides, named and renamed; 51, the session list heading's New and the quick
-switcher's New row; 52 and 53, the other-dialogs area's Welcome card, reopened from the Help menu and opened by a window
-start that asks for it; 54, the session list's Replace meeting the YOLO question; 60 and 62 to 64, the approvals area's
-cards for agents' requests: Allow, the host-only grant, Deny over the quick switcher, and an agent's host add through
+switcher's New row; 52, the Welcome dialog opened from Help; 54, the session list's Replace meeting the YOLO question;
+60 and 62 to 64, the approvals area's cards for agents' requests: Allow, the host-only grant, Deny over the quick
+switcher, and an agent's host add through
 the Add host dialog; 61, the settings-and-hosts area's host uninstall, its refusal, run and removal notice; 65, the
 other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's rail notices bell and its empty panel;
 67, the session list's Compact; 68, the other-dialogs area's status sound switches in Settings; 69, the session
@@ -39,12 +39,11 @@ whole start (the build check, the app, its helm and supervisor) for each. Every 
 lands: a Delete or a Rename through the helm's own listing as well as in the window, and typing through the open
 terminal's text. The run directory is made under /tmp (the same place `scripts/gui-screenshot-batch.py` makes its runs),
 deleted when every step passed and the run stopped cleanly, and kept for its logs otherwise; `--keep` keeps it either
-way. `--no-build` reuses the binaries already built. Ctrl-C or SIGTERM ends the steps and still stops the app run, and
-a second run a step started (see the last rule below).
+way. `--no-build` reuses the binaries already built. Ctrl-C or SIGTERM ends the steps and still stops the app run.
 
 An area adds the steps for its own feature at the end of `Smoke` (the Test-automation bridge row of
-`docs/gpui/foundation-ownership.md`). These rules keep the steps of several areas from depending on each other, because
-they share the one app run, and say how the one step that needs a start of its own gets it:
+`docs/gpui/foundation-ownership.md`). These rules keep the steps of several areas independent while sharing one app
+run:
 
 - Steps run in name order, and unittest sorts names as strings, so a step is `test_<nn>_...` with a two-digit number
   after the last one taken (`test_10_` would sort before `test_1_`, since `0` sorts before `_`). `main` refuses to run
@@ -58,13 +57,6 @@ they share the one app run, and say how the one step that needs a start of its o
   earlier step left, and never touch a session another area's steps seed or use. The three `Fixture` sessions `start`
   seeds belong to steps 01 to 05, the first slice's, which leave Fixture 3 deleted, Fixture 1 renamed, and Fixture 2
   open with focus in its terminal (each step's `setUp` presses Escape, which reaches that terminal).
-- A step that needs a window start of its own (step 53's start with `--start-dialogs`, which the shared run cannot
-  show again) starts a second app run, in a run directory inside the smoke's own parent directory (beside `RUN`), with
-  `--no-build` (the smoke's start has built the binaries), and stops it in a `finally` that runs `stop` only once the
-  run's `run.json` exists, with the `start` inside the `try`, so an interrupt during it still stops what it started.
-  It never touches the shared run's sessions. On a Mac the second app opens a real window in the same GUI session, so
-  a later step must not assume the smoke's own window is frontmost (the bridge drives each window by its own socket,
-  whichever is in front).
 
 Needs what `gui-agent.py start` needs: on Linux `mutter`, `dbus-run-session` and lavapipe; on a Mac, a logged-in GUI
 session of the same user. Run it through `scripts/record-test-run.py` (`.agents/validation.md` has the command).
@@ -151,10 +143,6 @@ FEEDBACK_NOTE = "Nothing is sent until you press Send"
 
 # The feedback dialog's contact reuse choice, drawn only while the contact field is not blank (step 48).
 FEEDBACK_REUSE = "Re-use for future feedback"
-
-# The Welcome card's footer note: text only the open card draws, so the oracle for the card open and closed (steps 52
-# and 53).
-WELCOME_NOTE = "This card is in the ? menu as Welcome if you want it again."
 
 # The Trash dialog's opening words: drawn whatever the hosts' trash holds, so the oracle for the dialog open and closed
 # (step 49).
@@ -1437,80 +1425,23 @@ class Smoke(unittest.TestCase):
             "the one-off answer left the local host asking",
         )
 
-    # ---- The other-dialogs area's Welcome card (52, 53) --------------------------------------------------------------
+    # ---- Help's Welcome dialog (52) --------------------------------------------------------------------------------
 
-    def test_52_welcome_reopens_from_the_help_menu_and_escape_returns_to_the_button(self) -> None:
-        """SPEC.md's Welcome item in the Help menu shows the Welcome card again; reopening it does not rewrite the
-        shared seen preference, and closing it returns focus to the "?" button. The step seeds and touches no session
-        and follows neither of the card's links (Read Get started would open a browser, Send feedback now the feedback
-        dialog). Specified: with the card not open, choosing Welcome from the menu closes the menu and opens the card
-        with focus on Got it; Escape closes it with focus on the "?" button, and the helm's `welcome_seen` is what it
-        was before the step. The footer's note is the oracle for open and closed, since only the open card draws it."""
-        self.assertNotIn(WELCOME_NOTE, self.ok("snapshot"), "premise: the Welcome card is not open")
+    def test_52_welcome_opens_from_help_and_escape_returns_to_the_button(self) -> None:
+        """Welcome uses the same actions wherever it appears. Check the dialog instance by its control ID and verify
+        that Escape returns focus to Help. The helm's legacy seen preference must stay untouched."""
+        self.assertNotIn('dialog "Welcome to Farhelm"', self.ok("snapshot"))
         seen = gui_agent.helm_request(RUN, "GET", "/api/preferences").get("welcome_seen")
         self.ok("click", "id:app-help-toggle")
         self.ok("wait", "--text", HELP_MENU_SUMMARY)
         self.ok("click", "id:help-menu-welcome")
         self.ok("wait", "--gone", HELP_MENU_SUMMARY)
-        self.ok("wait", "--text", WELCOME_NOTE)
-        self.assertRegex(self.ok("snapshot", "-i"), r'button "Got it" \[focused\]', "focus starts on Got it")
+        self.assertEqual(self.ok("get", "text", "id:welcome-dialog-start").strip(), "Start a session")
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "Start a session" \[focused\]')
         self.ok("press", "escape")
-        self.ok("wait", "--gone", WELCOME_NOTE)
-        self.assertRegex(self.ok("snapshot", "-i"), r'button "Help" \[focused\]', "focus is back on the ? button")
-        self.assertEqual(
-            gui_agent.helm_request(RUN, "GET", "/api/preferences").get("welcome_seen"),
-            seen,
-            "reopening the card wrote nothing",
-        )
-
-    def test_53_a_window_start_opens_the_card_only_when_the_run_asks_for_it(self) -> None:
-        """Every bridge run's helm is fresh, so `gui-agent.py start` turns the window's start dialogs off unless given
-        `--start-dialogs` (`docs/gui-agent.md`); this step is the end-to-end proof of both halves, which is what lets
-        every other step and the screenshot batch rely on a default start showing no card. The default half is this
-        smoke's own app: had its start opened the card, the card would still be open or some close would have marked
-        it seen (each step's `setUp` presses Escape, which dismisses it), so the card's absence together with
-        `welcome_seen` still unset shows it never opened. The other half needs a window start of its own, so this step
-        starts a second app run of its own (no sessions, the binaries the smoke's start built) in a run directory beside
-        the smoke's, and stops it whatever happens. Specified: the smoke's app shows no card and its helm has no
-        `welcome_seen`; a run started with `--start-dialogs` shows the card by itself, without any input, and its
-        helm's `welcome_seen` is unset, since only a close of the card writes it."""
-        assert RUN is not None
-        self.assertNotIn(WELCOME_NOTE, self.ok("snapshot"), "the default start opened no card")
-        self.assertIsNone(
-            gui_agent.helm_request(RUN, "GET", "/api/preferences").get("welcome_seen"),
-            "nothing marked the card seen, so the default start never opened it",
-        )
-        other = RUN.parent / "start-dialogs"
-
-        def other_run(*args: str, timeout: float | None = STEP_TIMEOUT_SECONDS) -> subprocess.CompletedProcess:
-            return subprocess.run(
-                [sys.executable, str(AGENT), str(other), *args], capture_output=True, text=True, timeout=timeout
-            )
-
-        stopped: subprocess.CompletedProcess | None = None
-        try:
-            # Inside the `try`, so an interrupt during `start` (Ctrl-C, or the recorder's SIGTERM, which `main` turns
-            # into KeyboardInterrupt) still stops whatever it had started. No timeout for `start` and `stop`, as for the
-            # smoke's own: `start` may wait on a build lock and `stop` must always finish its cleanup.
-            started = other_run("start", "--sessions", "0", "--start-dialogs", "--no-build", timeout=None)
-            self.assertEqual(started.returncode, 0, f"the second run did not start:\n{started.stdout}{started.stderr}")
-            shown = other_run("wait", "--text", WELCOME_NOTE)
-            self.assertEqual(shown.returncode, 0, f"no card at the asked-for start:\n{shown.stdout}{shown.stderr}")
-            self.assertIsNone(
-                gui_agent.helm_request(other, "GET", "/api/preferences").get("welcome_seen"),
-                "opening the card wrote nothing",
-            )
-        finally:
-            # Only a run that got as far as writing `run.json` has anything to stop, as `main` checks `RUN` exists; a
-            # `start` that failed before then keeps its own error rather than `stop`'s. Nothing is asserted here, so
-            # an interrupt or an earlier failure is never replaced by this one.
-            if (other / "run.json").exists():
-                stopped = other_run("stop", timeout=None)
-                if stopped.returncode != 0:
-                    print(f"gui-e2e-smoke: the second run's `stop` failed; it is kept at {other}", file=sys.stderr)
-        self.assertIsNotNone(stopped, "the second run wrote no run.json, so it never started")
-        assert stopped is not None
-        self.assertEqual(stopped.returncode, 0, f"the second run did not stop:\n{stopped.stdout}{stopped.stderr}")
+        self.assertNotIn('dialog "Welcome to Farhelm"', self.ok("snapshot"))
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "Help" \[focused\]')
+        self.assertEqual(gui_agent.helm_request(RUN, "GET", "/api/preferences").get("welcome_seen"), seen)
 
     # ---- The settings-and-hosts area's host uninstall (61) ----------------------------------------------------------
 
@@ -2700,9 +2631,8 @@ def step_refusals(source: str) -> list[str]:
     together, and three shapes they can leave behind lose or reorder a step without a word:
 
     - A function named `test_...` anywhere but directly in the module-level `Smoke` class is never collected. A jj
-      automatic merge once put a module-level helper function between two areas' steps, so steps 52 and 53, which
-      followed it, became unreachable code inside that function, which every run from then on skipped with nothing
-      saying so. Reported in line order.
+      automatic merge once put a module-level helper function between two areas' steps, leaving a Welcome step as
+      unreachable code inside that function. Every run then skipped it. Reported in line order.
     - Two steps with the same name: Python keeps only the last definition, so the first never runs.
     - Two steps with the same number: two areas took the number independently, and their steps run in whatever order
       the rest of their names sort in. Refusing it makes the merge that brings them together surface the collision.

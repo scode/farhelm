@@ -324,7 +324,7 @@ pub(crate) fn text(row: &SessionRow) -> String {
 /// What tells the pane that the open session's recovery card or its reason changed, or its host came into or out of reach
 /// (and so into or out of the unavailable card, `unavailable.rs`), or that its row turned out to be a retired
 /// containerized session's (`retired.rs`), so it can drop, mount or make inert its terminals then, and that the fleet
-/// became empty or stopped being empty, so it can make New home or stop: the store pushes the change (or a Restart
+/// became empty or stopped being empty, so it can make Welcome's Start a session home or stop: the store pushes the change (or a Restart
 /// marks the session), and nothing else the pane observes (the selection, the user's choices, the connection) moves.
 /// It also drops the restarted marks the store has caught up with ([`forget_settled`]).
 ///

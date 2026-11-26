@@ -467,7 +467,7 @@
     },
     {
       "id": "app-empty-fleet",
-      "title": "The main window over an empty fleet",
+      "title": "Welcome in the empty main pane, with Start a session and its three links",
       "reference": "empty-fleet",
       "mockup": false,
       "start": [
@@ -478,7 +478,7 @@
         [
           "wait",
           "--text",
-          "No sessions"
+          "Welcome to Farhelm"
         ]
       ]
     },
@@ -2813,7 +2813,7 @@
     },
     {
       "golden": "welcome-dialog",
-      "title": "The Welcome card: the introduction, Read Get started and Send feedback now in their bordered pointers, the footer's note and Got it with focus",
+      "title": "Welcome from Help, with the same introduction and actions as the empty pane behind it",
       "reference": "welcome-dialog"
     },
     {
@@ -3829,7 +3829,7 @@
     },
     {
       "id": "empty-fleet",
-      "ported": false
+      "ported": true
     },
     {
       "id": "hosts-panel",

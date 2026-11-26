@@ -16,6 +16,7 @@ use gpui::{DriverNode, Modifiers, Role, TestAppContext, VisualTestContext, px, s
 
 use super::{BUTTON_ID, Item, items};
 use crate::desktop::updates::{self, UpdaterHost};
+use crate::launcher::launch_tests::{HostChange, start_host_change};
 use crate::layers;
 use crate::session_list::tests::{listing, open_main, preferences, session};
 use crate::test_support::{self, any_open, focused_id, frame};
@@ -462,33 +463,106 @@ fn announcements_appear_after_a_showing_and_open_the_history(cx: &mut TestAppCon
     assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
 }
 
-/// SPEC.md: "Welcome shows the welcome card again", and "Reopening does not reset or rewrite seen. Closing a reopened
-/// card returns focus to the help toggle". The real main view's window-start owner sits beside the menu here, so this
-/// also shows that a card reopened over a helm that has already seen it does not start the window-start flow. Specified:
-/// over preferences that say the card was seen, nothing opens by itself; choosing Welcome, the menu's last fixed item,
-/// closes the menu and opens the card with focus on Got it; Escape closes it with focus on the `?` button, and the helm
-/// received no command.
+/// Help opens Welcome on request. Both close routes return to Help even under the Mac click rule, where clicking the
+/// menu button leaves focus elsewhere. Opening and closing Welcome sends the helm nothing.
 #[gpui::test]
-fn welcome_reopens_the_card_without_writing_and_returns_focus_to_the_button(
-    cx: &mut TestAppContext,
-) {
+fn welcome_closes_to_help_without_writing(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
     cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
     test_support::check(cx);
-    assert!(
-        !any_open(cx),
-        "premise: a seen card does not open by itself"
-    );
+    assert!(!any_open(cx), "premise: no dialog at startup");
     let _ = fake.commands();
     open_menu(cx);
     test_support::click(cx, "help-menu-welcome");
     assert!(node(&frame(cx), MENU).is_none(), "the menu closed");
-    assert!(node(&frame(cx), "welcome").is_some(), "the card opened");
-    assert_eq!(focused_id(cx).as_deref(), Some("welcome-got-it"));
+    assert!(node(&frame(cx), "welcome").is_some(), "the dialog opened");
+    assert_eq!(focused_id(cx).as_deref(), Some("welcome-dialog-start"));
     test_support::keys(cx, "escape");
-    assert!(!any_open(cx), "Escape closed the card");
+    assert!(!any_open(cx), "Escape closed the dialog");
     assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
-    assert!(fake.commands().is_empty(), "reopening writes nothing");
+
+    open_menu(cx);
+    test_support::click(cx, "help-menu-welcome");
+    test_support::click(cx, "welcome-close");
+    assert!(!any_open(cx), "Close closed the dialog");
+    assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
+    assert!(fake.commands().is_empty(), "Welcome writes nothing");
+}
+
+/// The dialog and the pane have distinct controls even over an empty fleet. The guide leaves the dialog up, and
+/// opening either form replaces Welcome and returns focus to Help when the form closes.
+#[gpui::test]
+fn welcome_dialog_and_pane_can_coexist_and_the_links_return_to_help(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), preferences(&[], None)]);
+    let _ = fake.commands();
+    open_menu(cx);
+    test_support::click(cx, "help-menu-welcome");
+    let shown = frame(cx);
+    assert!(node(&shown, "welcome-pane-get-started").is_some());
+    assert!(node(&shown, "welcome-dialog-get-started").is_some());
+    test_support::click(cx, "welcome-dialog-get-started");
+    assert_eq!(
+        cx.opened_url().as_deref(),
+        Some(crate::welcome::GET_STARTED_URL)
+    );
+    assert!(node(&frame(cx), "welcome").is_some());
+
+    for (link, form) in [
+        ("welcome-dialog-add-host", "add-host-cancel"),
+        ("welcome-dialog-feedback", "feedback-cancel"),
+    ] {
+        test_support::click(cx, link);
+        let shown = frame(cx);
+        assert!(node(&shown, "welcome").is_none());
+        assert!(node(&shown, form).is_some());
+        test_support::keys(cx, "escape");
+        assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
+        open_menu(cx);
+        test_support::click(cx, "help-menu-welcome");
+    }
+    test_support::keys(cx, "escape");
+    assert!(
+        fake.commands().is_empty(),
+        "opening a form or guide does not write"
+    );
+}
+
+/// Enter in Help's Welcome opens the existing session launcher. This needs its own test because New refuses while a
+/// dialog still holds the keyboard.
+#[gpui::test]
+fn welcome_dialog_start_hands_off_to_the_session_launcher(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(cx, vec![listing(&[], &[]), preferences(&[], None)]);
+    open_menu(cx);
+    test_support::click(cx, "help-menu-welcome");
+    assert_eq!(focused_id(cx).as_deref(), Some("welcome-dialog-start"));
+    test_support::keys(cx, "enter");
+    let shown = frame(cx);
+    assert!(node(&shown, "welcome").is_none());
+    assert!(node(&shown, "launcher-launch").is_some());
+}
+
+/// A pending host probe makes New unavailable. Welcome must start on a usable control so the keyboard can still
+/// reach the help links while the probe has no answer.
+#[gpui::test]
+fn welcome_dialog_focuses_add_host_while_start_is_unavailable(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), preferences(&[], None)]);
+    let path = start_host_change(cx, HostChange::Probe);
+    assert!(
+        fake.commands().iter().any(|command| command.path == path),
+        "premise: the probe is waiting for a reply"
+    );
+    assert!(
+        !cx.update(|_, cx| crate::launcher::entry::new_available(cx)),
+        "premise: New is unavailable"
+    );
+
+    open_menu(cx);
+    test_support::click(cx, "help-menu-welcome");
+    let shown = frame(cx);
+    let start = node(&shown, "welcome-dialog-start").expect("Start a session is drawn");
+    assert!(!start.flags.focusable);
+    assert_eq!(focused_id(cx).as_deref(), Some("welcome-dialog-add-host"));
+    assert!(node(&shown, "welcome").is_some());
 }
 
 // ---- A menu taller than the window --------------------------------------------------------------------------------

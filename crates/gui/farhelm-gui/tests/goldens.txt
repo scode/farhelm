@@ -56,10 +56,10 @@ linux/filter-empty-both-links--dark.png a1165e5fc5fbbeff96e5b339afe92e72c640cd24
 linux/filter-empty-both-links--light.png 2f2427d907c6ff2da69a17abc370511524e2c94e
 linux/focus-ring--dark.png accae7af6218067ad7f111b2b6f2d0a4c4a004a4
 linux/focus-ring--light.png a8855b0cf7f2b3b95ea08e0357f3b914df1af2a8
-linux/help-menu--dark.png ae64c51781dcf48011dbdd2c1745933afd5c46b5
-linux/help-menu--light.png 4017a85badae0ae1630b1805eca26380db303d58
-linux/help-menu-announcements-hover--dark.png 6432c19cb876154f00a938a2e4acb0274456544b
-linux/help-menu-announcements-hover--light.png bd2e1694f33165b91c3ebb77e848f800c2b6e67d
+linux/help-menu--dark.png fd72001a40549bf125ec1616e54838d5de91e234
+linux/help-menu--light.png 747ea57ea192cc69116f4dfacbd20737466b10b8
+linux/help-menu-announcements-hover--dark.png 918f1a29f4e46b81d38f7e7fd55b13068d692aae
+linux/help-menu-announcements-hover--light.png 3a4fbbd7804808ff1c60267cf4d594d961e0fa1a
 linux/host-add-dialog--dark.png 80fbe2307e206831286b950324b89a70b6af3c73
 linux/host-add-dialog--light.png 19b7e63336990bf505484cc9b0cc4d7fc0522d9e
 linux/host-add-dialog-agent--dark.png 6a733496c829a2e7a5b1b31ccc412c9371952165
@@ -538,8 +538,8 @@ linux/version-readout-tooltip--dark.png 4752ad9a9f76602b3ce227ad53fe674ba858b719
 linux/version-readout-tooltip--light.png 59e6f78390780d3d60eb53c62b6e029b16eed12f
 linux/version-readout-update-ready--dark.png 3a3b7add0b092ccaed69600f28e2115644db04ce
 linux/version-readout-update-ready--light.png ccbe9cd2bf58b0bef79a58289222aa3c65ad3821
-linux/welcome-dialog--dark.png 9f535d56dbe5772fd74a3798261cdda55d614cdb
-linux/welcome-dialog--light.png 8b9d43f5aa3a201cd43e8b9d0ab5418b6fd14b76
+linux/welcome-dialog--dark.png 5fcbb13acdc249d978547df71562b9487762db93
+linux/welcome-dialog--light.png af517d9f5a08c7ec3688c201f98c2f17eff71c7a
 linux/welcome-empty-pane--dark.png 34eff4c33f2650b4cd8a08c748c09e8bbed8bcd4
 linux/welcome-empty-pane--light.png d4343f1c8e0e6fe4834fd4923e5c5ff9917c34a1
 linux/welcome-empty-pane-narrow--dark.png 8bdddf1e82bd0ccbeb70ca234cdda98a8248c651

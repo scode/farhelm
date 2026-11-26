@@ -1,7 +1,7 @@
 //! Startup overrides for agent builds: the first window's size and a forced appearance, so a screenshot batch can
 //! capture the app light and dark, narrow and wide, without a resize or theme command in the bridge; the start dialogs
-//! turned off, so a bridge run's first step acts on the app rather than on a Welcome card its fresh helm has never
-//! seen; and a staged run's values (see "Staged session values" and "Staged host values" below), so a docs-media
+//! turned off, so an automatic announcement or upgrade dialog cannot take a bridge run's first action; and a staged
+//! run's values (see "Staged session values" and "Staged host values" below), so a docs-media
 //! capture shows each session's age and folder, and each staged host's launch history, checkout trash and file checks,
 //! as its scenario designs them.
 //!
@@ -13,15 +13,15 @@
 //! choice is the user's preference, which the helm's preferences hold (the maintainer decided on 2026-11-13 that
 //! appearance is a helm preference, not a per-device one), and a forced appearance wins over that stored choice for
 //! as long as the run lasts; the window's real size is its saved frame or the first-launch default. Turning the start
-//! dialogs off decides the window's start for the run without writing anything: the helm still holds the Welcome card
-//! unseen and the announcements pending. Nothing here is persisted, and the app never offers it.
+//! dialogs off leaves announcements pending and the upgrade record untouched. The empty pane still shows Welcome.
+//! Nothing here is persisted, and the app never offers it.
 //!
 //! The harness (`scripts/gui-agent.py start --window-size WxH --appearance light|dark`) passes the values through the
 //! app's environment, the same way it passes the desktop app's other agent-build variables
 //! (`crates/farhelm-desktop/src/agent.rs`). It turns the start dialogs off on every run unless given `--start-dialogs`,
-//! because every run starts a fresh helm. With every variable unset an agent build starts like any other. A value that
-//! does not parse fails startup rather than being ignored, so a batch never captures the default look under a wrong
-//! label, and a run never acts on a card it meant to keep closed.
+//! so runs start with a predictable screen even when the helm has news to show. With every variable unset an agent
+//! build starts like any other. A value that does not parse fails startup, so a batch cannot capture the default
+//! appearance under a different label or proceed with automatic dialogs it meant to suppress.
 
 // The bridge's socket is unauthenticated, and on a Mac the local agent sessions run as the same user, so a build that
 // contains it lets any of them click Allow on its own approval card (SPEC_impl.md, "How the rules are enforced"). Shipped
@@ -65,8 +65,8 @@ pub const WINDOW_SIZE_ENV: &str = "FARHELM_DESKTOP_AGENT_WINDOW_SIZE";
 /// helm's stored choice is.
 pub const APPEARANCE_ENV: &str = "FARHELM_DESKTOP_AGENT_APPEARANCE";
 
-/// `off` keeps the dialogs a window opens on its own at start and reset (the Welcome card, then the announcement
-/// batch) closed for the run; [`start_dialogs_off`] says why. `off` is the only value: unset is the real behavior.
+/// `off` keeps automatic announcements and upgrade highlights closed at window start and reset for the run.
+/// Leaving the variable unset gives ordinary startup behavior.
 pub const START_DIALOGS_ENV: &str = "FARHELM_DESKTOP_AGENT_START_DIALOGS";
 
 /// What an agent run asked the app to start with. Installed as a global by the bootstrap before anything reads it.
@@ -183,18 +183,9 @@ pub fn current(cx: &App) -> Overrides {
     cx.try_global::<Overrides>().copied().unwrap_or_default()
 }
 
-/// Whether an agent run turned the start dialogs off. When true, the window's own start decision (SPEC.md, "Welcome
-/// card" and "Announcements": the Welcome card on a helm that has not seen it, then the pending announcement batch)
-/// counts as already made for every window start and reset of this run: the caller opens nothing, reads no preference
-/// for it and writes nothing, so the card stays unseen, no announcement is recorded shown, and the helm's state is what
-/// the real behavior would find. Only that automatic decision may read this; an open the user asks for (Help's
-/// Welcome, and its Announcements history once this helm has one) must not consult it. On a run's fresh helm the
-/// history stays empty, so Help offers no Announcements item.
-///
-/// Why it exists: the bridge (`scripts/gui-agent.py start`) gives every run a fresh helm, so without this every run
-/// would start under the Welcome card, and its first click or key would act on the card. Nothing can mark the card
-/// seen before the window's first snapshot, since the helm answers requests only once it is up. A run passes
-/// `--start-dialogs` to see the real start.
+/// Whether an agent run suppresses its automatic announcement and upgrade dialogs at window start and reset. A run
+/// can pass `--start-dialogs` to exercise ordinary startup. Welcome in the pane and dialogs requested from Help do
+/// not consult the override.
 ///
 /// False in every build but an agent build, and in a test that did not install overrides turning it off:
 ///
@@ -694,9 +685,8 @@ mod tests {
         );
     }
 
-    /// Every bridge run starts a fresh helm, which would open the Welcome card over the app; `off` must reach the app
-    /// as the start dialogs turned off, or a run's first click lands on the card. Specifies that `off` turns them off
-    /// and changes nothing else, and that unset leaves them on.
+    /// A bridge run can suppress automatic dialogs so its first input reaches the app. The override must leave other
+    /// startup settings alone. An unset value allows ordinary startup.
     #[test]
     fn start_dialogs_off_parses() {
         assert_eq!(
@@ -1070,7 +1060,7 @@ mod tests {
     }
 
     /// A typo must fail the launch: ignoring it would capture the default look under the label the batch asked for, or
-    /// leave the Welcome card over the app a run meant to drive.
+    /// allow a startup dialog in a run that meant to suppress it.
     #[test]
     fn a_malformed_value_is_an_error_naming_its_variable() {
         for bad in ["900", "900x", "x700", "0x700", "900x-1", "900X700", "wide"] {

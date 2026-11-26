@@ -2,7 +2,7 @@
 
 Old Playwright specs (reference commit `24bc0580`; read one with `git show 24bc0580:e2e/<path>`) and what replaces them
 in the GPUI app. Port behavior from SPEC.md and these specs' acceptance cases, not one spec file at a time. SPEC.md
-sections: Feedback, Welcome card, Announcements, Partial deletion, Status (session notifications, the rail's notices
+sections: Feedback, Welcome dialog, Announcements, Partial deletion, Status (session notifications, the rail's notices
 bell and sounds), and Desktop window chrome's Keyboard shortcuts paragraph.
 
 NOTE: The goldens and the `gui-e2e-smoke.py` steps named here are not part of `cargo test`. The goldens' one runner,
@@ -153,41 +153,20 @@ lists it too
 
 ## `tests/welcome.spec.ts` and `tests/announcements.spec.ts`
 
-The Welcome card and the owner of the window-start dialogs are `welcome` (`welcome::open` from the Help menu,
-`welcome::StartDialogs` at a window start or reset, which the main view keeps); the Announcements dialog, its history
-and the automatic batch are `announcements` (`open_history`, `open_pending`). Replacing tests, in
-`crates/gui/farhelm-gui/src/welcome/tests.rs` and `announcements/tests.rs`:
+Welcome lives in the empty pane and opens as a dialog from Help. The window-start owner (`welcome::StartDialogs`) checks
+for announcements and upgrade highlights. Current coverage:
 
-- "welcome dismissal by ${dismissal} is shared and survives reload":
-  `every_close_of_the_first_card_marks_it_seen_once_and_returns_home` (each of Got it, the × and Escape sends one sparse
-  `PUT /api/preferences` of `welcome_seen` and leaves focus home; a reset decides again). The write being shared by
-  every client and surviving a reload is the helm's preference store, tested in the helm
-  (`welcome_seen_sparse_patch_and_type_contract`); the GPUI app keeps no copy of it.
-- "welcome stays closed when preferences are ${refused | timed out}":
-  `a_seen_helm_or_a_failed_preference_read_opens_no_card_and_each_reset_decides_again`. The preferences arrive in the UI
-  channel's first snapshot, which never waits on a host, so a failed or timed-out read is a snapshot without the
-  preferences entry.
-- "welcome waits for initial sign-in before deciding" and "announcements wait for sign-in": superseded (the desktop app
-  never signs in).
-- "a refused seen write still dismisses the welcome": `a_failed_seen_write_still_closes_the_card`.
-- "welcome links, modal isolation and short-window dismissal":
-  `read_get_started_opens_the_guide_and_leaves_the_card_open` and
-  `an_unseen_helm_opens_the_card_at_window_start_with_focus_on_got_it`; the links' look is the `welcome-dialog` golden;
-  isolation and the short window are the shared dialog behavior named under the announcements' content case below.
-- "send feedback now records seen and hands focus to feedback":
-  `send_feedback_now_marks_seen_and_opens_feedback_without_sending`.
-- "help reopens welcome without rewriting seen": `reopening_from_help_writes_nothing_and_returns_focus_to_the_button`,
-  `help_menu::tests::welcome_reopens_the_card_without_writing_and_returns_focus_to_the_button`, and `gui-e2e-smoke.py`'s
-  `test_52`.
+- `welcome::tests::an_unseen_helm_opens_no_automatic_welcome` checks startup with a legacy unset preference. The helm
+  retains its sparse-patch contract (`welcome_seen_sparse_patch_and_type_contract`).
+- The `help_menu::tests` Welcome cases check Escape and Close, Start a session, both form handoffs, and the guide link.
+  They also check that the dialog and the empty pane use distinct IDs. The `welcome-dialog` golden shows the dialog, and
+  `gui-e2e-smoke.py` step 52 drives it through Help.
+
 - "announcement dismissal by ${dismissal} survives reload": `each_dismissal_records_exactly_the_shown_entries_once` and
   `the_pending_batch_opens_at_window_start_newest_first` (in `announcements/tests.rs`).
-- "announcements wait for welcome${feedback ? ' and its feedback handoff' : ''}":
-  `the_batch_waits_for_the_card_and_opens_when_it_closes` and `the_batch_waits_for_the_feedback_handoff_too`.
-- "a late queue result waits behind a reopened welcome": superseded. The queue is pushed state read from the store when
-  the window start's check runs, so no read finishes late; the check runs at the start, or when the first-open card and
-  its handoff close, and a card reopened from Help is no part of it.
-- "announcements wait for the preference decision and survive a failed preference read":
-  `the_pending_batch_opens_at_window_start_newest_first` (its reset without preferences).
+- Announcements use the initial snapshot. The tests cover a failed preference read, input that refuses the automatic
+  open, a later queue push, and a reset that starts the check again.
+
 - "a failed shown write dismisses and leaves history hidden": `a_failed_record_still_closes_the_batch`; the history item
   follows the pushed history, which a failed write does not change
   (`help_menu::tests::announcements_appear_after_a_showing_and_open_the_history`).
@@ -210,14 +189,13 @@ and the automatic batch are `announcements` (`open_history`, `open_pending`). Re
   stop's keys are tested in `components::tests::dialog`).
 
 Also tested, from the decisions on the window-start mark (SPEC_impl.md, "Overlays: the layer manager"):
-`a_press_before_the_open_refuses_the_card_and_the_batch_until_a_reset`. A reset while the card or its feedback handoff
-is open writes nothing and decides again:
-`a_reset_while_the_card_or_its_handoff_is_open_writes_nothing_and_decides_again`. Bridge runs keep the start dialogs
-closed unless `gui-agent.py start --start-dialogs` asks for them:
-`an_agent_run_with_the_start_dialogs_off_opens_and_writes_nothing_at_start` in process, and `gui-e2e-smoke.py`'s
-`test_53` end to end (no card in the smoke's own default start; the card at a second run's `--start-dialogs` start).
+`a_press_before_the_open_refuses_the_batch_until_a_reset`. The batch can open with no preferences collection, as
+`the_pending_batch_opens_at_window_start_newest_first` verifies. Bridge runs keep the start dialogs closed unless
+`gui-agent.py start --start-dialogs` asks for them. The GUI tests cover the suppression in process with
+`an_agent_run_with_the_start_dialogs_off_opens_and_writes_nothing_at_start`, and the Python harness tests cover how the
+flag reaches the app. Smoke step 52 opens Welcome from Help and checks that Escape returns focus to the Help button.
 
-The golden is `welcome-dialog` (the reference scene's card).
+The `welcome-dialog` golden shows the Help dialog over the empty pane in both appearances.
 
 ## `tests/trash-dialog.spec.ts` and the trash cases of other specs, partly
 
@@ -487,16 +465,9 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### Welcome
 
-- **Where the `?` menu is.** The old card said Send feedback is "in the **?** menu at the top of the sidebar", which was
-  already stale at the reference commit: the `?` button sits at the host rail's foot. The card says "at the bottom left
-  of the window" instead (decided by the migration's orchestrator, 2026-11-14).
-- **The links sit on a line of their own.** The old card ran Read Get started and Send feedback now on at the end of
-  their sentences. GPUI has no inline flow for a control inside a paragraph, so each sits on a line of its own under its
-  sentence, at the start, which makes each pointer one line taller than the old one.
-- **Focus after the feedback handoff from the card that opened by itself.** The old feedback dialog always returned
-  focus to the Help toggle, also when the first-open card had handed off to it. Here it returns focus where the card
-  would have, home, since that card has no originating control (SPEC.md); after a card reopened from Help it returns to
-  the `?` button, as before.
+- **No startup card.** The old app's Welcome card, which opened by itself on a helm's first window, is gone
+  (2026-11-25). Welcome now fills the empty main pane while there are no sessions and opens as a dialog from Help →
+  Welcome, a design the old app never had; SPEC.md describes it, so the card's former deviations no longer apply.
 
 ### Keyboard shortcuts
 

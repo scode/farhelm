@@ -22,13 +22,36 @@ use super::{SceneState, session_at_age};
 struct WelcomePaneScene {
     sidebar: Entity<Sidebar>,
     pane: Entity<SessionPane>,
-    _connection: Entity<session::Connection>,
-    _helm: FakeHelm,
 }
 
 /// Mount the actual sidebar and pane over a complete empty listing. The scene records these columns without running
 /// the desktop window's startup sequence or changing the palette selected by the golden harness.
 pub(super) fn welcome_pane_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let fleet = welcome_scene(state, window, cx);
+    state.keep.borrow_mut().push(Box::new(fleet));
+}
+
+/// Show the Help dialog over a proven empty fleet to exercise the two instances in the same frame.
+pub(super) fn welcome_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (helm, connection) = welcome_scene(state, window, cx);
+    let handle = window.window_handle();
+    let opener = state.ring.clone();
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
+        handle
+            .update(cx, |_, window, cx| {
+                let mark = crate::focus::Mark::take(cx);
+                assert!(crate::welcome::open(&opener, &mark, window, cx).is_some());
+            })
+            .expect("the golden window is live");
+    });
+}
+
+/// Set up the same empty fleet for both Welcome surfaces. The caller owns the connection's lifetime.
+fn welcome_scene(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> (FakeHelm, Entity<session::Connection>) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let list = cx.new(SessionList::new);
@@ -39,12 +62,11 @@ pub(super) fn welcome_pane_setup(state: &SceneState, window: &mut Window, cx: &m
         hosts(&[local()]),
         preferences(&[], None),
     ]);
-    state.keep.borrow_mut().push(Box::new(WelcomePaneScene {
-        sidebar,
-        pane,
-        _connection: connection,
-        _helm: helm,
-    }));
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(WelcomePaneScene { sidebar, pane }));
+    (helm, connection)
 }
 
 /// Give each column the same width it receives in the desktop at these window sizes.

@@ -130,7 +130,7 @@ fn push_listing(helm: &mut FakeHelm, rows: &[Fixture], gone: &[&str], cx: &mut V
     settle(cx);
 }
 
-/// A preference row that has shown the Welcome card (so no card covers the window) and stores these sound switches.
+/// A preference row that stores these sound switches.
 fn row(waiting: Option<bool>, approval: Option<bool>, turn_finished: Option<bool>) -> Preferences {
     Preferences {
         welcome_seen: Some(true),

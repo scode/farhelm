@@ -81,7 +81,7 @@ fn refuse(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64) {
 fn reset_then_another_agents_custom_starts_empty(cx: &mut TestAppContext) {
     let remembered_yolo = preferences_state(Preferences {
         remembered_permissions: Some("yolo".into()),
-        // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
+        // `welcome_seen` has been inert since the startup Welcome card was removed; fixtures keep it to avoid churn.
         welcome_seen: Some(true),
         ..Preferences::default()
     });

@@ -39,24 +39,22 @@ screen; on Linux it must fit Mutter's monitor, and it includes the frame GPUI Ki
 under Mutter, which `screenshot` captures too) and `--appearance light|dark` (start in that palette whatever the
 system's appearance). The last two are test hooks of agent builds, passed to the app as environment variables that
 `crates/gui/farhelm-gui/src/agent_startup.rs` reads, so a screenshot batch can capture each theme and size; they are not
-the app's appearance setting, and a value the app cannot parse makes it refuse to start. `--start-dialogs` lets the
-window's start dialogs open: the Welcome card, which a helm that has not seen it opens at window start, and the
-announcement batch after it. Without the option `start` keeps them closed for the run (another agent-build variable the
-same file reads), because every run's helm is fresh and the card would otherwise sit over the app and take the run's
-first click or key; nothing is marked seen. `--templates` seeds a fixed set of launch templates with the ⚡ mark and
-number keys over them (see "Seeded templates"). `--scripted-hosts` gives the app fake SSH hosts (see "Scripted hosts").
-`--payload-dir DIR` is for a run that sets up or updates a real remote host: it hands the app's embedded helm a
-directory of staged `farhelm` payloads (`farhelm-<target>.tar.gz`, as `scripts/devbuild-mac.sh` stages them) to install
-from, as `FARHELM_HELM_PAYLOAD_DIR`, which every build of the app reads. A debug build has no release to download
-payloads from, and `start` keeps the caller's own `FARHELM_*` variables out of the app, so this option is the way to
-pass it in. DIR must be absolute and an existing directory; `start` refuses anything else before it creates the run.
-`--remote-host DEST`, given once per host, makes the run a staged one with remote hosts (see "Staged runs").
-`--scenario FILE`, instead of `--sessions` or `--fleet`, stages the hosts and sessions a docs-media `scenario.json5`
-describes (see "Scenario runs"), and `capture OUT.png` then takes its picture (see "Scenario captures").
-`--user-session` (Linux only) gives the app your own runtime directory and session bus, so that its helm's Podman check
-works and New container shows; such a run shares your systemd user manager and Podman storage (see "User-session runs").
-It builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases
-whatever `start` had already taken, the lock included.
+the app's appearance setting, and a value the app cannot parse makes it refuse to start. `--start-dialogs` lets
+automatic announcements and upgrade highlights open. By default `start` keeps them closed so the run's first input
+reaches the app. An empty session list still shows Welcome in the main pane. `--templates` seeds a fixed set of launch
+templates with the ⚡ mark and number keys over them (see "Seeded templates"). `--scripted-hosts` gives the app fake SSH
+hosts (see "Scripted hosts"). `--payload-dir DIR` is for a run that sets up or updates a real remote host: it hands the
+app's embedded helm a directory of staged `farhelm` payloads (`farhelm-<target>.tar.gz`, as `scripts/devbuild-mac.sh`
+stages them) to install from, as `FARHELM_HELM_PAYLOAD_DIR`, which every build of the app reads. A debug build has no
+release to download payloads from, and `start` keeps the caller's own `FARHELM_*` variables out of the app, so this
+option is the way to pass it in. DIR must be absolute and an existing directory; `start` refuses anything else before it
+creates the run. `--remote-host DEST`, given once per host, makes the run a staged one with remote hosts (see "Staged
+runs"). `--scenario FILE`, instead of `--sessions` or `--fleet`, stages the hosts and sessions a docs-media
+`scenario.json5` describes (see "Scenario runs"), and `capture OUT.png` then takes its picture (see "Scenario
+captures"). `--user-session` (Linux only) gives the app your own runtime directory and session bus, so that its helm's
+Podman check works and New container shows; such a run shares your systemd user manager and Podman storage (see
+"User-session runs"). It builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop`
+anyway: it releases whatever `start` had already taken, the lock included.
 
 On Linux, `--size` is in logical points. `--scale 1|2` selects the private compositor's output scale (default 1). A Mac
 run uses the real screen's scale.

@@ -867,110 +867,104 @@ systemd or SSH substrate ran.
   a number clash), the committed script passes with unittest collecting every `def test_` it spells out, and `main`
   refuses before it makes a run directory or starts anything. Seconds; starts nothing. Run it when
   `scripts/gui-e2e-smoke.py` changes, a new step included.
-- `python3 scripts/record-test-run.py --kind development --selection 'GPUI app end-to-end smoke' --concurrency 'one app run, steps in order; one step starts and stops a second run' --termination-grace 30 -- python3 -B scripts/gui-e2e-smoke.py`
+- `python3 scripts/record-test-run.py --kind development --selection 'GPUI app end-to-end smoke' --concurrency 'one app run, steps in order' --termination-grace 30 -- python3 -B scripts/gui-e2e-smoke.py`
   — the GPUI app end to end (`scripts/gui-e2e-smoke.py`): the real app, its embedded helm and a real supervisor with
-  three basic fake agents, driven through the bridge by `scripts/gui-agent.py`. In one app run (one step starts and
-  stops a second run of its own), in order: the list shows every seeded session; a click on a row opens its terminal,
-  which shows the fake agent's ready line and echoes a stamped line typed into it; a row's actions button opens its menu
-  and Escape closes it; the menu's Delete asks, and Confirm delete removes the session from the helm's listing and its
-  row from the window; the menu's Rename opens the rename dialog, and a saved title reaches the helm's listing and the
-  row; on a session of its own, a paste of over a megabyte that the receiving program put on the clipboard (an OSC 52
-  write) reaches it whole between one pair of bracketed-paste markers, with an end marker embedded in it removed rather
-  than ending the paste early (on a Mac only: the step is skipped on Linux, where headless Mutter never lets the app own
-  the clipboard, so a Linux run is no evidence for paste); on another session of its own, text the bridge commits the
-  way an input method does (non-ASCII) reaches the program and comes back echoed; on two sessions of its own, the quick
-  switcher's chord from one's focused terminal opens the switcher, and part of the other's title and Enter make the helm
-  record the other as last selected and focus its terminal; and on another session of its own, the wheel scrolls a
-  terminal back to lines that scrolled off and a typed key returns it to the live screen; and on sessions of its own,
-  the menu's Stop on a session without tabs reaches the helm's listing as exited, and the menu's Replace, once
-  confirmed, lists the title under a new id and not the old one; and on a session of its own, a click on the local
-  host's avatar in the host rail narrows the list to that host through the helm's channel query (the chip names the host
-  and the count reads "N of N"), and a click on the chip widens it again and focuses the rail's All; and on a session of
-  its own, left unopened and idle, the menu's Mark read, Mark unread and Mark read again make the helm list a seen
-  stamp, none, and one again; and with the sidebar's divider focused, Right makes the helm store a width 10 pixels wider
-  and Left the starting width again, focus staying on the divider; and on a session of its own, a command launch
-  declaring Muse that runs the fake agent's hook-reporting script, a conversation reported through the injected hook
-  makes the helm list it resumable, and the open session's header's Restart relaunches it: its terminal shows the
-  resumed launch's marker and the helm lists it live again; and at the host rail's foot, a click on Hosts shows host
-  management and a second hides it, with focus on Hosts throughout, and a click on the gear opens Settings with focus on
-  its first switch, and Escape closes it with focus back on the gear; and a click on the rail's Add host opens the Add
-  host dialog, and Escape closes it with focus back on Add host; and on two sessions of its own, replayed to hold a
-  running and an idle screen, the status segments' Running and Idle each list only the session in that status, with the
-  helm's count of its sessions in that status against the fleet as "N of M", and All lists both again with the plain
-  count; and on three fake SSH hosts of its own, a host menu's Remove asks and Cancel keeps the host, while Remove, the
-  permanent answer and then Remove without asking make the helm forget each; and on a fake SSH host of its own, a host
-  menu's Update shows its held run's progress inline with the row folded, its failure opens the row on the failed step
-  and the scripted backend's reason, and the menu's Re-run updates the host; and on three sessions of its own, once a
-  line typed into the oldest has set the helm's activity order apart from its creation order, choosing Newest created
-  and then Title A–Z from the list title's order menu makes the helm store each order and the window draw the three in
-  the helm's own order for it, and Recently active is chosen again; and on a session of its own, open and idle, Running
-  takes its row out of the list while the details bar still names it, and the Rename shortcut renames it in the helm's
-  listing; the Help menu opens on Send feedback, has no SSH command item, and Escape returns focus to Help; from the
-  Help menu, Send feedback opens its dialog, a typed contact brings up Re-use for future feedback, and Cancel closes it
-  with focus back on the ? button, never pressing Send; and a click on the session list header's Trash opens its dialog
-  with focus on Close and, once the helm has read the local host's trash, says the trash is empty, and Escape closes it
-  with focus back on Trash; and on a session of its own, the list heading's New opens the launcher, and the quick
-  switcher's `New session named` row for a typed name opens it with that name in its Name field, neither starting a
-  session; from the Help menu, Welcome reopens the Welcome card with focus on Got it, and Escape closes it with focus
-  back on the ? button, the helm's `welcome_seen` unchanged; and the smoke's own run, started as every
-  `gui-agent.py start` is with the start dialogs off, shows no Welcome card and leaves it unseen, while a second app run
-  started with `--start-dialogs` (no sessions, `--no-build`, stopped whatever happens) shows the card by itself and
-  writes nothing; and on a session of its own running the spawning fake agent, a `farhelm spawn` from inside it waits on
-  an approval card in the window, and the card's Allow ends the request and the spawned session's row appears in the
-  window; on another, the card's "Always allow on <host> only" turns on the local host's session grant alone, and the
-  next spawn starts its child without a card; on another, Deny on a spawn's card while the quick switcher is open ends
-  the request, keeps the switcher open, and the agent is told the user declined, with no child started; and from a shell
-  session of its own, an agent's `farhelm agent host add` card opens the Add host dialog with the agent's destination
-  and alias, the dialog's Add ends the request and asks before setup even with setup's asking turned off, and Cancel
-  there adds no host while the agent is told its request was accepted; and on a fake SSH host of its own, a host menu's
-  Uninstall opens the helm's refusal of a host it cannot check, and once the scripted backend reports the unit file
-  gone, the confirmation's Uninstall starts a run the row shows, after which the helm forgets the host and the Hosts
-  panel shows the removal notice until its dismiss control hides it; and on a session of its own, a command launch
-  asserted YOLO, the menu's Replace and Confirm replace bring up the YOLO question in its row, and its one-off answer
-  makes the helm list the title under a new id and not the old one, with the local host still asking before YOLO
-  launches; and on a session of its own, the Keyboard shortcuts chord from its focused terminal opens the overview with
-  focus on its Close, and Escape closes it with focus back on the terminal, which then echoes a typed line; and on a
-  session of its own, the header's Replace caret's Replace with… opens the launcher in its Replace with mode and the
-  header's Clone opens it with the session's title, Escape closing each with nothing started; and on a session of its
-  own in a folder of its own, the order menu's Compact makes the helm store compact on and the row's last line, naming
-  the folder, leave the window, and choosing it again stores it off and brings the line back; and on two sessions of its
-  own, each row menu's Pin to top makes the helm list it pinned, the second below the first, the second's Move up lists
-  it above the first, and each Unpin lists both unpinned again; and on a session of its own, Up on a row's closed
-  actions button opens its menu with focus on Delete, and Escape returns focus to the button; and on two sessions of its
-  own, a line typed into one's terminal, a switch to the other and back, shows that line's echo replayed and a second
-  typed line echoed live; and on a session of its own, the Larger terminal text chord makes the helm store a size one
-  point larger and the program's `stty size` answer fewer columns and no more rows than before, and Smaller stores the
-  starting size again; and on a session of its own, resting the pointer on its row's title shows the row's summary card,
-  and moving it off the rows takes the card away; on a fake SSH host of its own whose scripted setup fails while Hosts
-  is closed, the host's rail avatar is named with the setup or update warning until opening Hosts acknowledges it; and
-  on another such host, the Hosts attention list above the sessions shows the failed setup's row ("Setup or update needs
-  attention"), whose Details opens Hosts with that host's menu toggle focused, and the row is gone once Hosts closes
-  again; and a right press on the local host's rail avatar opens its host menu without choosing the host, Escape
-  returning focus to the avatar, and the rail's Expand control makes the helm store `host_rail_open` true and the window
-  paint the expanded foot's Collapse label, and again stores false with the label gone; and on two sessions of its own,
-  pinned through the helm, a drag of the second's grip onto the first's pin glyph makes the helm list the second above
-  the first. On two other sessions, dragging a loose session by its grip to the other session's group header makes the
-  helm list it in that group, still unpinned. A failed run keeps its run directory under `/tmp` for its logs. An
-  interrupted one (Ctrl-C, or SIGTERM from the recorder) still stops its app run, and the second run if one is up, for
-  which the recorder's `--termination-grace` leaves it time: 30 s covers the two `stop`s in a row, each a few seconds
-  normally. Its 50 steps (one skipped on Linux) took longer than the 42 before the two terminal steps came: 46 of them
-  took 150 s on a build worker on 2026-11-15, and 43 of them took 305 s on a loaded development machine shared with
-  other agents on 2026-11-15, the second run's start and stop included (42 took 137 s on a build worker that day; 114 s
-  for 39, 98 s for 37 and 91 s for 34 steps earlier, 62 s for 24 steps on 2026-11-14; 4, 18 and 23 s with fewer steps),
-  plus the app's start; it builds the app first unless given `--no-build`. Linux needs headless Mutter,
-  `dbus-run-session` and Mesa's software renderer (`mutter`, `dbus-daemon`, `mesa-vulkan-drivers` and `libegl-mesa0`).
-  macOS needs a logged-in GUI session of the same user. The x86_64 Linux release gate runs it after the desktop tests
-  with `--kind release` and the shared release evidence root. The harness builds the debug app with the automation
-  bridge, `farhelm`, `farhelm-fixtures` and `gpui-agent` in the same Cargo target directory. Run it when the app's
-  session list, row menu, session header, Delete, Rename, Stop, Restart, Replace (its YOLO question included), Mark read
-  and Mark unread, quick switcher, host rail (Add host among its entries, an avatar's setup or update warning, an
-  avatar's menu and expansion) and its foot (Hosts, the Settings gear and the Expand control), the Hosts attention list,
-  status segments, host menu, Remove host, host Update and host Uninstall, Help menu or Send feedback dialog, Welcome
-  card or the start dialogs (the Welcome card and announcements at a window start), Trash button and dialog, Keyboard
-  shortcuts overview, approval cards or their region, the helm's approval path, sidebar width or divider, terminal
-  attach, replay, paste, text input, scrollback or text size, the order menu (Compact included), compact rows, pins and
-  the order hold, the heading's New, the row's summary card, the bridge's wiring, the app's startup or
-  `scripts/gui-agent.py` change.
+  three basic fake agents, driven through the bridge by `scripts/gui-agent.py`. In one app run, in order: the list shows
+  every seeded session; a click on a row opens its terminal, which shows the fake agent's ready line and echoes a
+  stamped line typed into it; a row's actions button opens its menu and Escape closes it; the menu's Delete asks, and
+  Confirm delete removes the session from the helm's listing and its row from the window; the menu's Rename opens the
+  rename dialog, and a saved title reaches the helm's listing and the row; on a session of its own, a paste of over a
+  megabyte that the receiving program put on the clipboard (an OSC 52 write) reaches it whole between one pair of
+  bracketed-paste markers, with an end marker embedded in it removed rather than ending the paste early (on a Mac only:
+  the step is skipped on Linux, where headless Mutter never lets the app own the clipboard, so a Linux run is no
+  evidence for paste); on another session of its own, text the bridge commits the way an input method does (non-ASCII)
+  reaches the program and comes back echoed; on two sessions of its own, the quick switcher's chord from one's focused
+  terminal opens the switcher, and part of the other's title and Enter make the helm record the other as last selected
+  and focus its terminal; and on another session of its own, the wheel scrolls a terminal back to lines that scrolled
+  off and a typed key returns it to the live screen; and on sessions of its own, the menu's Stop on a session without
+  tabs reaches the helm's listing as exited, and the menu's Replace, once confirmed, lists the title under a new id and
+  not the old one; and on a session of its own, a click on the local host's avatar in the host rail narrows the list to
+  that host through the helm's channel query (the chip names the host and the count reads "N of N"), and a click on the
+  chip widens it again and focuses the rail's All; and on a session of its own, left unopened and idle, the menu's Mark
+  read, Mark unread and Mark read again make the helm list a seen stamp, none, and one again; and with the sidebar's
+  divider focused, Right makes the helm store a width 10 pixels wider and Left the starting width again, focus staying
+  on the divider; and on a session of its own, a command launch declaring Muse that runs the fake agent's hook-reporting
+  script, a conversation reported through the injected hook makes the helm list it resumable, and the open session's
+  header's Restart relaunches it: its terminal shows the resumed launch's marker and the helm lists it live again; and
+  at the host rail's foot, a click on Hosts shows host management and a second hides it, with focus on Hosts throughout,
+  and a click on the gear opens Settings with focus on its first switch, and Escape closes it with focus back on the
+  gear; and a click on the rail's Add host opens the Add host dialog, and Escape closes it with focus back on Add host;
+  and on two sessions of its own, replayed to hold a running and an idle screen, the status segments' Running and Idle
+  each list only the session in that status, with the helm's count of its sessions in that status against the fleet as
+  "N of M", and All lists both again with the plain count; and on three fake SSH hosts of its own, a host menu's Remove
+  asks and Cancel keeps the host, while Remove, the permanent answer and then Remove without asking make the helm forget
+  each; and on a fake SSH host of its own, a host menu's Update shows its held run's progress inline with the row
+  folded, its failure opens the row on the failed step and the scripted backend's reason, and the menu's Re-run updates
+  the host; and on three sessions of its own, once a line typed into the oldest has set the helm's activity order apart
+  from its creation order, choosing Newest created and then Title A–Z from the list title's order menu makes the helm
+  store each order and the window draw the three in the helm's own order for it, and Recently active is chosen again;
+  and on a session of its own, open and idle, Running takes its row out of the list while the details bar still names
+  it, and the Rename shortcut renames it in the helm's listing; the Help menu opens on Send feedback, has no SSH command
+  item, and Escape returns focus to Help; from the Help menu, Send feedback opens its dialog, a typed contact brings up
+  Re-use for future feedback, and Cancel closes it with focus back on the ? button, never pressing Send; and a click on
+  the session list header's Trash opens its dialog with focus on Close and, once the helm has read the local host's
+  trash, says the trash is empty, and Escape closes it with focus back on Trash; and on a session of its own, the list
+  heading's New opens the launcher, and the quick switcher's `New session named` row for a typed name opens it with that
+  name in its Name field, neither starting a session; from Help, Welcome opens with focus on Start a session and Escape
+  closes it with focus back on the ? button, leaving the helm's legacy `welcome_seen` field alone; and on a session of
+  its own running the spawning fake agent, a `farhelm spawn` from inside it waits on an approval card in the window, and
+  the card's Allow ends the request and the spawned session's row appears in the window; on another, the card's "Always
+  allow on <host> only" turns on the local host's session grant alone, and the next spawn starts its child without a
+  card; on another, Deny on a spawn's card while the quick switcher is open ends the request, keeps the switcher open,
+  and the agent is told the user declined, with no child started; and from a shell session of its own, an agent's
+  `farhelm agent host add` card opens the Add host dialog with the agent's destination and alias, the dialog's Add ends
+  the request and asks before setup even with setup's asking turned off, and Cancel there adds no host while the agent
+  is told its request was accepted; and on a fake SSH host of its own, a host menu's Uninstall opens the helm's refusal
+  of a host it cannot check, and once the scripted backend reports the unit file gone, the confirmation's Uninstall
+  starts a run the row shows, after which the helm forgets the host and the Hosts panel shows the removal notice until
+  its dismiss control hides it; and on a session of its own, a command launch asserted YOLO, the menu's Replace and
+  Confirm replace bring up the YOLO question in its row, and its one-off answer makes the helm list the title under a
+  new id and not the old one, with the local host still asking before YOLO launches; and on a session of its own, the
+  Keyboard shortcuts chord from its focused terminal opens the overview with focus on its Close, and Escape closes it
+  with focus back on the terminal, which then echoes a typed line; and on a session of its own, the header's Replace
+  caret's Replace with… opens the launcher in its Replace with mode and the header's Clone opens it with the session's
+  title, Escape closing each with nothing started; and on a session of its own in a folder of its own, the order menu's
+  Compact makes the helm store compact on and the row's last line, naming the folder, leave the window, and choosing it
+  again stores it off and brings the line back; and on two sessions of its own, each row menu's Pin to top makes the
+  helm list it pinned, the second below the first, the second's Move up lists it above the first, and each Unpin lists
+  both unpinned again; and on a session of its own, Up on a row's closed actions button opens its menu with focus on
+  Delete, and Escape returns focus to the button; and on two sessions of its own, a line typed into one's terminal, a
+  switch to the other and back, shows that line's echo replayed and a second typed line echoed live; and on a session of
+  its own, the Larger terminal text chord makes the helm store a size one point larger and the program's `stty size`
+  answer fewer columns and no more rows than before, and Smaller stores the starting size again; and on a session of its
+  own, resting the pointer on its row's title shows the row's summary card, and moving it off the rows takes the card
+  away; on a fake SSH host of its own whose scripted setup fails while Hosts is closed, the host's rail avatar is named
+  with the setup or update warning until opening Hosts acknowledges it; and on another such host, the Hosts attention
+  list above the sessions shows the failed setup's row ("Setup or update needs attention"), whose Details opens Hosts
+  with that host's menu toggle focused, and the row is gone once Hosts closes again; and a right press on the local
+  host's rail avatar opens its host menu without choosing the host, Escape returning focus to the avatar, and the rail's
+  Expand control makes the helm store `host_rail_open` true and the window paint the expanded foot's Collapse label, and
+  again stores false with the label gone; and on two sessions of its own, pinned through the helm, a drag of the
+  second's grip onto the first's pin glyph makes the helm list the second above the first. On two other sessions,
+  dragging a loose session by its grip to the other session's group header makes the helm list it in that group, still
+  unpinned. A failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from
+  the recorder) still stops its app run. The recorder's `--termination-grace 30` leaves time for app cleanup. It has 49
+  steps (one skipped on Linux). Earlier, 46 steps took 150 s on a build worker on 2026-11-15, and 43 took 305 s on a
+  loaded machine that day, when the smoke still started and stopped a second app for one step (42 took 137 s on a build
+  worker that day; 114 s for 39, 98 s for 37 and 91 s for 34 steps earlier, 62 s for 24 steps on 2026-11-14; 4, 18 and
+  23 s with fewer steps), plus the app's start; it builds the app first unless given `--no-build`. Linux needs headless
+  Mutter, `dbus-run-session` and Mesa's software renderer (`mutter`, `dbus-daemon`, `mesa-vulkan-drivers` and
+  `libegl-mesa0`). macOS needs a logged-in GUI session of the same user. The x86_64 Linux release gate runs it after the
+  desktop tests with `--kind release` and the shared release evidence root. The harness builds the debug app with the
+  automation bridge, `farhelm`, `farhelm-fixtures` and `gpui-agent` in the same Cargo target directory. Run it when the
+  app's session list, row menu, session header, Delete, Rename, Stop, Restart, Replace (its YOLO question included),
+  Mark read and Mark unread, quick switcher, host rail (Add host among its entries, an avatar's setup or update warning,
+  an avatar's menu and expansion) and its foot (Hosts, the Settings gear and the Expand control), the Hosts attention
+  list, status segments, host menu, Remove host, host Update and host Uninstall, Help menu or Send feedback dialog,
+  Welcome from Help, Trash button and dialog, Keyboard shortcuts overview, approval cards or their region, the helm's
+  approval path, sidebar width or divider, terminal attach, replay, paste, text input, scrollback or text size, the
+  order menu (Compact included), compact rows, pins and the order hold, the heading's New, the row's summary card, the
+  bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
 - `python3 scripts/record-test-run.py --kind development --selection 'Linux app lifecycle' --concurrency 'one app run, launched again in order' --termination-grace 30 -- python3 -B scripts/gui-lifecycle.py`
   — the Linux desktop app's lifecycle end to end (`scripts/gui-lifecycle.py`), on headless Mutter through
   `scripts/gui-agent.py`'s run machinery with one seeded fake-agent session, relaunching the app on one state directory,

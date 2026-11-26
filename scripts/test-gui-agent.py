@@ -163,10 +163,8 @@ class EnvironmentTest(unittest.TestCase):
         self.assertNotIn(gui_agent.SCRIPTED_HOSTS_ENV, pairs)
 
     def test_start_dialogs_are_off_unless_the_run_asks_for_them(self):
-        """Every run's helm is fresh, so a run that let the Welcome card open would act on the card with its first
-        click or key instead of on the app. Specified: by default the app gets `off` under the name its agent-build
-        startup overrides read, and `--start-dialogs` (`start_dialogs=True`) leaves the variable unset, which is the
-        app's real start."""
+        """An automatic announcement can take the run's first input. Suppress startup dialogs unless the run opts in.
+        The override passes `off` by default, and `--start-dialogs` leaves the variable unset for ordinary startup."""
         args = gui_agent.app_env_args(pathlib.Path("/tmp/run"), {"farhelm": "/t/f"})
         pairs = dict(arg.split("=", 1) for arg in args[1::2])
         self.assertEqual(pairs["FARHELM_DESKTOP_AGENT_START_DIALOGS"], "off")

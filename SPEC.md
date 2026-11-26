@@ -922,12 +922,12 @@ from main, to the desktop app on Linux, or to remote hosts. Remote hosts have th
 **Update remote hosts automatically** setting described under Topology.
 
 After an upgrade to a stable release, the installed Mac app can show **What's new in Farhelm** when the window starts,
-after Welcome and any pending Announcements. The header shows the last release whose highlights were seen or skipped and
-the running release, or just the running release when no record exists. Its category marks and counts describe the
-highlights in the dialog. Releases appear newest first, each with its date and the total changes in that release. Each
-highlight has a category mark, a headline when the release notes provide one, and the full entry text. **Screenshot**
-opens the entry on the Release notes page in the browser when it has a screenshot. **All release notes** opens the full
-page, leaving the dialog open.
+after any pending Announcements. The header shows the last release whose highlights were seen or skipped and the running
+release, or just the running release when no record exists. Its category marks and counts describe the highlights in the
+dialog. Releases appear newest first, each with its date and the total changes in that release. Each highlight has a
+category mark, a headline when the release notes provide one, and the full entry text. **Screenshot** opens the entry on
+the Release notes page in the browser when it has a screenshot. **All release notes** opens the full page, leaving the
+dialog open.
 
 The helm records the last release whose highlights were shown or skipped. A new helm starts at the release that created
 it. An older helm with no record starts with the running release's highlights. Otherwise the app asks for the finalized
@@ -2780,12 +2780,12 @@ client of this helm; existing controls with a natural place in the main UI stay 
 helm pushes its preferences to the window when it connects and whenever they change, and the window writes one on
 change, so a window opens in the same order and on the same session after a reconnect as before it. Per-client
 persistence — a desktop state file, anything that lets two clients remember different answers — is not wanted for these
-shared preferences, including Welcome, Announcements and upgrade highlights dismissals and the host rail's expansion.
-The sound switches are among these shared preferences: the maintainer decided on 2026-11-13 that they are helm
-preferences rather than per-device ones (see Status). A client that asks the helm for no particular order gets creation
-time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not
-nest the list and implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can
-record it, while `farhelm agent create` and `clone` need not record the asking session.
+shared preferences, including Announcements and upgrade highlights dismissals and the host rail's expansion. The sound
+switches are among these shared preferences: the maintainer decided on 2026-11-13 that they are helm preferences rather
+than per-device ones (see Status). A client that asks the helm for no particular order gets creation time. No mandatory
+hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
+implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
+`farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -5071,8 +5071,7 @@ environment.
   GUI save is reported and discarded); and the automatic "mark seen" a session's own opening or activity advance
   triggers (see Status), because a lost automatic mark costs nothing worse than a dot that is one open-and-close cycle
   behind, corrected by the next successful write; and marking a session's notifications read when their list closes (see
-  Status), for the same reason: a lost mark costs a bell that stays loud until the list is next closed; marking the
-  welcome card seen, because a failed save only lets it appear at a later window start or reset; the automatic
+  Status), for the same reason: a lost mark costs a bell that stays loud until the list is next closed; the automatic
   announcement check and recording a dismissed batch, because a failed read or save only postpones those announcements
   to a later window start or reset; and a trust hint's Don't show again save after its session has left the screen,
   because that session's adjacent error no longer has a place to appear. Sidebar width, terminal text size and
@@ -5093,8 +5092,8 @@ environment.
   choice alive or inherit the closed dialog's alert. A failed corrective read leaves trust settings unavailable rather
   than treating unknown trust as off. An ntfy save refused during the Settings close question leaves the form open with
   its reason. The first visit to Notifications in the reopened dialog reads the saved ntfy settings from the helm.
-- Recording an ordinary dismissal of upgrade highlights (**Got it**, ×, or Escape) is best effort, like marking the
-  welcome card seen. If the save fails, the highlights can appear again at a later window start or reset.
+- Recording an ordinary dismissal of upgrade highlights (**Got it**, ×, or Escape) is best effort. If the save fails,
+  the highlights can appear again at a later window start or reset.
 - Connection state per host is always visible on its rail avatar, with name and phase on hover and to screen readers;
   reconnection uses bounded retries followed by periodic low-frequency re-probing, so a host that comes back overnight
   resurfaces by itself. Hosts swaps session content for the complete management surface. Each row and its rail avatar
@@ -5126,24 +5125,20 @@ dialog described in [Desktop window chrome](#desktop-window-chrome). Release not
 (`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is waiting. After this helm has shown
 an announcement, **Announcements** appears directly after **Release notes**, with the description **Shows previously
 shown announcements again**; it reopens the shown history described below. The installed desktop app's menu adds **Check
-for updates** last (see [Installation and updates](#installation-and-updates)). Welcome shows the welcome card again.
+for updates** last (see [Installation and updates](#installation-and-updates)). **Welcome** opens the Welcome dialog.
 The **What's new in Farhelm** startup dialog has its own release record. Opening **Release notes** from Help does not
 advance it.
 
-### Welcome card
+### Welcome dialog
 
-Once per helm, a welcome card introduces Farhelm and points at the Get started guide's first-session page and private
-feedback. Every helm starts unseen, including existing helms after updating. Each window start or reset decides once,
-after a successful shared-preferences read; a failed or timed-out read does not open the card. It is a modal in the
-app's dialog style, titled **Welcome to Farhelm**, with focus inside and other global chords inactive. Escape, the ×,
-**Got it**, and **Send feedback now** close it and mark it seen in the helm's shared preferences. A failed write still
-closes it and may let it appear again at a later window start or reset.
+**Welcome** in the **?** menu opens **Welcome to Farhelm**, a modal in the session launcher's style with the same
+introduction, marks and actions as the [empty main pane](#empty-main-pane). Focus starts inside the dialog, on **Start a
+session** when available and on **Add a remote host** otherwise. Global chords stay inactive. Escape and × return focus
+to the **?** button.
 
-**Read Get started** opens `https://farhelm.io/docs/get-started/first-session/` in the user's browser through the same
-opener as Documentation and leaves the card open. **Send feedback now** closes it and opens the feedback dialog, without
-sending anything. The footer says it is available again as **Welcome** in the **?** menu. Reopening does not reset or
-rewrite seen. Closing a reopened card returns focus to the help toggle; the first-open card has no originating control
-and restores ordinary initial focus.
+**Start a session** closes it and opens the session launcher. **Add a remote host** and **Send feedback** close it and
+open their dialogs, which return focus to **?** when closed. **Read Get started** opens the first-session guide in the
+browser and leaves Welcome open. Welcome opens as a dialog only when the user asks for it from Help.
 
 ### Announcements
 
@@ -5152,11 +5147,9 @@ never-reused id, title, plain-text body and optional display details or a labell
 does nothing, even after dismissal, and never replaces the text this helm first received. The queue, dialog and history
 do not depend on where an announcement came from.
 
-Once per window start or reset, after the initial preference decision, the client reads pending announcements and shown
-history. Initial Welcome, including its Send feedback now handoff, closes first. A failed preference read does not
-prevent this separate check. An empty queue opens nothing; a failed announcement read is logged silently and retried at
-a later window start or reset. A batch ready behind another modal waits for it to close. A live delivery raises a bell
-notice without opening the dialog by itself.
+Once per window start or reset, the client checks pending announcements and shown history. An empty queue opens nothing.
+A failed announcement read is logged silently and retried at a later window start or reset. A batch ready behind another
+modal waits for it to close. A live delivery raises a bell notice without opening the dialog by itself.
 
 The dialog is titled **Announcements**, with **Updates and information from Farhelm.** underneath. Pending entries
 appear newest first, each with its title, body and supplied extras. Blank lines separate plain-text paragraphs; text is
