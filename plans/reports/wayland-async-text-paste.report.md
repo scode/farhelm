@@ -113,3 +113,77 @@ checklist, reviewed the PR in two rounds.
   - Low: a test step did not check that focus actually moved.
   - Low: a test helper's description had become wrong.
 - Round 2 found nothing.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round. Since its base, main gained only TODO.md edits to other entries and one planning PR
+(#5066, which plans the Settings save follow-ups and points their TODO entries at the new plan), so nothing interacted
+with this change. Before landing, I and an independent reviewer looked for anything else that reads the clipboard
+without waiting, since on Wayland that read now gives nothing while another app holds the clipboard. Nothing in Farhelm
+does outside tests. GPUI Kit's text-field paste reads without waiting first and then waits for the clipboard when that
+gives nothing, which is the path this plan relies on. Kit's separate paste hook reads only without waiting, and Farhelm
+does not use it. On X11 nothing changed. On macOS, the existing files-first clipboard read now serves the terminal's
+payload read instead of the general one, and the two have the same shape, so it should compile. No Mac has built it yet,
+so the report's follow-up still stands: run the macOS build or a devbuild before the next release.
+
+#### Fixes made while landing
+
+Two small documentation fixes, both found by the independent review:
+
+- The README for Farhelm's copy of GPUI lists the Farhelm-specific changes inside the patch layers that came from the
+  earlier GPUI prototype, and it named only one. It now also names this plan's split of the clipboard read into a text
+  read and a payload read, and its notes on rebuilding the copy from the published crates say the three trees were
+  rebuilt with that split.
+- Two comments in the terminal's paste code said no test can hold a clipboard read, because the test clipboard used to
+  answer at once. This plan's test clipboard can hold a read. Both comments now say those cases are not tested yet, and
+  that they now can be.
+
+#### Worth knowing
+
+- Three terminal paste behaviors are checked only by review: a paste goes nowhere if the terminal reconnected while the
+  read was still waiting, a paste is sent to the terminal connection that was live when the user pasted, not to one that
+  replaced it while the read was waiting, and a second paste waits for the first. The new test clipboard can now hold a
+  read, so all three could get tests. That would be a small follow-up.
+- Text-field paste from another app on Wayland now depends entirely on GPUI Kit falling back to the waiting read, which
+  Kit added for its browser build, not for desktop. The new text-field tests run against the real Kit, so a Kit upgrade
+  that narrowed that fallback would fail them.
+- The new test-only clipboard hooks in the vendored GPUI core lack the build condition their neighbors carry, so a build
+  with only the benchmark feature would warn that they are unused. No Farhelm build turns that feature on, so it is
+  harmless today; adding the same condition would be a trivial follow-up.
+
+#### Checks
+
+Run on the plan's change as the executor pushed it, rebased onto main as it stood when the landing started (`655b991e`).
+The two landing fixes above change only a README and two comments, so these runs still cover what merged. The test
+worker runs are on its aarch64 Linux machine:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean. The desktop app and every GUI crate build on the changed GPUI
+  core.
+- On the test worker, `cargo nextest run -p farhelm-gui -p farhelm-desktop`, recorded run
+  92cdd465-75f6-4c96-a46f-acf29d941316: 3,675 passed, 4 skipped. Both crates' tests run against GPUI's stand-in
+  clipboard and windowing, which this plan changed.
+- On the test worker, `cargo test -p gpui-pre-linux --lib attachment_clipboard`, recorded run
+  3215dc63-7d61-450a-aba8-fca4c6581df4: the 7 tests that check the order in which each clipboard read asks for content
+  types passed.
+- On the test worker, the vendored GPUI core's own selection (`cargo test --manifest-path vendor/gpui-pre/Cargo.toml`
+  with its four named tests), recorded run be89c5ac-e16d-4458-8258-0e60fb929b82: passed. The executor had skipped it as
+  covering nothing the plan changed, but the plan adds test-only clipboard hooks to the core, so it was worth running.
+- On the test worker, the desktop app's end-to-end smoke, recorded run 87e89cab-b054-46de-8614-fee56708988b: all 49
+  steps passed, except the paste step, which runs only on a Mac and was skipped as always on Linux.
+- Locally, the full screenshot golden comparison, recorded run 8bb3960e-a52d-48e7-ae6d-a5cdaeaadc53: no picture changed.
+- Locally, the plan's patch files were applied again, in the README's order, to the published core, Linux and macOS GPUI
+  crates. All three trees came out identical to the plan's. The independent reviewer repeated this with the same result.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `python3 scripts/check-agents-md.py` (0 errors; its one warning is an old one about the frozen triage archive):
+  passed. `dprint check` reported only the frozen triage archive, which was already like that on main.
+  `rustfmt --edition 2024 --check` on the vendored files the plan touched flagged one line, in a part of one file this
+  plan does not change, from an earlier patch layer (the reduced-motion observer); main has the same line. After the
+  landing fixes, `dprint check` on the README and `cargo fmt --all -- --check` passed again.
+
+Reused: nothing. Skipped: the workspace Rust battery outside the GUI crates and the desktop app, since nothing else uses
+the clipboard; any test against a real Wayland compositor or a real other app's clipboard, since there is no harness for
+one; and the macOS build, which needs a Mac.
