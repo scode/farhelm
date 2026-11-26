@@ -49891,3 +49891,53 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   `xloltlslnmonzztzzwvmwnqurklutzwl`, bookmark
   `plan/triage-gui-hosts-menus-and-terminal/02-templates-footer-and-menu-stop-suspend`.
   [Draft PR #5036](https://github.com/scode/farhelm/pull/5036/changes).
+
+## trailing-file-disclosure-holdback-silent-click.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source
+  (`crates/gui/farhelm-gui/src/terminal/attached.rs:521-523,2429-2433,2693,2802-2841, 2901-2932,4092-4100`): when a
+  terminal file hover card would cover the pointer and is held back via `refusal_waits_for_hover`, `link_released`
+  returns silently instead of emitting `Hidden::NotVisible.file_words()`, unlike web links (`:2833-2841`) and contrary
+  to `SPEC_impl.md:3555-3562`.
+- Decision: Q12 ("Straightforward small product fixes"): maintainer picked "Fix all 14". (2026-11-25 fewest-questions
+  triage page, main `5af40d23e`.)
+- Completion criteria: Show the `"not visible"` refusal (`Hidden::NotVisible.file_words()`) when clicking a terminal
+  file path whose disclosure was held back over the pointer (matching web links and `SPEC_impl.md:3555-3562`), and add a
+  regression test (estimate S-M, ~35-60 lines). Remove the feedback file and its index entry.
+- Execution: Fixed. A file click explains why the panel held back over its pointer cannot authorize a transfer. Change
+  `zlpmsmxuyovptqkqxxomzvwsrkkspnql`, bookmark
+  `plan/triage-gui-hosts-menus-and-terminal/03-terminal-file-holdback-and-notices`.
+  [Draft PR #5039](https://github.com/scode/farhelm/pull/5039/changes).
+
+## trailing-file-prepaint-click-test-gap.md
+
+- Outcome: `other`.
+- Assessment: Confirmed as a test-only coverage gap (`terminal/files/tests.rs:720-764` never triggers render/placement,
+  so `self.disclosure` is `None` rather than exercising `shown.drawn.get().is_some()` at `attached.rs:4097`; GPUI
+  mid-frame mouse dispatch timing unverified). Shipped code obeys `SPEC.md:3753`.
+- Decision: Q10 ("Pure product-test coverage gaps"): maintainer picked "Re-apply Nov 21 rule + fix security-binding test
+  (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
+  guards a user-facing behavior; otherwise make no change. Either way remove the feedback file and its index entry, and
+  record in Execution which way it went.
+- Execution: Fixed under the Nov 21 rule. The test presses after placement and before the file details paint. Change
+  `zlpmsmxuyovptqkqxxomzvwsrkkspnql`, bookmark
+  `plan/triage-gui-hosts-menus-and-terminal/03-terminal-file-holdback-and-notices`.
+  [Draft PR #5039](https://github.com/scode/farhelm/pull/5039/changes).
+
+## trailing-reposted-notice-not-revealed.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source (`crates/gui/farhelm-gui/src/notices.rs:177-186`, `main_view.rs:203-207,260,463-474`):
+  `notices::post` deduplicates in place, so re-posting an earlier notice in an overflowing banner stack leaves it
+  scrolled out of view instead of moving it into view.
+- Decision: Q12 ("Straightforward small product fixes"): maintainer picked "Fix all 14". (2026-11-25 fewest-questions
+  triage page, main `5af40d23e`.)
+- Completion criteria: Move a re-posted notice to the bottom of the notice stack in `notices::post` and scroll it into
+  view in `main_view.rs` (tracking a monotonic post sequence or position change), with a regression test (estimate S,
+  ~20-35 lines). Remove the feedback file and its index entry.
+- Execution: Fixed. Reposting a notice moves it to the bottom and reveals it without duplicating the entry. Change
+  `zlpmsmxuyovptqkqxxomzvwsrkkspnql`, bookmark
+  `plan/triage-gui-hosts-menus-and-terminal/03-terminal-file-holdback-and-notices`.
+  [Draft PR #5039](https://github.com/scode/farhelm/pull/5039/changes).

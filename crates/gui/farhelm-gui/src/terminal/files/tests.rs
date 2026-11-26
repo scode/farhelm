@@ -504,9 +504,63 @@ fn a_click_whose_file_details_are_not_fully_visible_is_refused(cx: &mut TestAppC
     assert_eq!(h.admitted(), ["/work/report.pdf"]);
 }
 
-/// A successful host check makes a file eligible for download only while its disclosed path can be seen. A
-/// covering popover may disappear on mouse down. The release must preserve that frame's download refusal,
-/// even if the blocker overlaps only the card's stripe.
+/// A file panel held back over its own pointer still explains a refused transfer and replaces any earlier result.
+/// Rewriting its path starts a new check, even if output later puts the original text back under the resting pointer.
+#[gpui::test]
+fn a_file_panel_held_back_over_its_pointer_explains_the_refusal(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.cx.simulate_resize(gpui::size(px(520.), px(300.)));
+    h.show(
+        vec![
+            row(0, "/work/report.pdf", false),
+            row(1, "notes.txt", false),
+        ],
+        None,
+    );
+    let previous = h.at_cell(3, 1);
+    h.checked(previous, "notes.txt", 10);
+    h.click(previous);
+    h.save(Ok(saved(
+        "/home/u/Downloads/notes.txt",
+        OpenOutcome::NotAsked,
+    )));
+    assert!(h.status().is_some(), "an earlier save is still on screen");
+    let on = h.at_cell(3, 0);
+    h.rest_on(on);
+    let answer = h.check("/work/report.pdf");
+    let resolved = format!("/work/{}report.pdf", "deep/".repeat(420));
+    h.answer(answer, ready(&resolved, 2000));
+    let owner = h.owner.clone();
+    assert!(
+        h.cx.update(|_, cx| owner.read(cx).file_disclosure_held_back("/work/report.pdf")),
+        "the panel painted over the pointer and was held back"
+    );
+    assert!(!h.shown(), "the file panel is gone");
+    h.click(on);
+    assert_eq!(
+        h.admitted(),
+        ["/work/notes.txt"],
+        "no new transfer was admitted"
+    );
+    assert_eq!(h.refusal().as_deref(), Some(FILE_REFUSAL));
+
+    h.rewrite(vec![row(0, "/work/plans.pdf", false)], None, 2);
+    let intervening = h.check("/work/plans.pdf");
+    h.rewrite(vec![row(0, "/work/report.pdf", false)], None, 3);
+    assert!(intervening.abandoned(), "the old hover's check was retired");
+    let pending = h.check("/work/report.pdf");
+    h.click(on);
+    assert!(
+        !pending.abandoned(),
+        "the replacement check is still outstanding"
+    );
+    assert_eq!(h.refusal(), None, "the pending check stays silent");
+    assert_eq!(h.status(), None, "the earlier save does not come back");
+    assert_eq!(h.admitted(), ["/work/notes.txt"]);
+}
+
+/// A covering popover may disappear on mouse down. The release preserves the frame's refusal even when the blocker
+/// overlaps only the stripe of an otherwise visible file panel.
 #[gpui::test]
 fn a_covered_file_panel_refuses_the_transfer_even_if_the_press_dismisses_the_cover(
     cx: &mut TestAppContext,
@@ -723,9 +777,7 @@ fn a_click_before_the_answer_has_painted_stays_silent(cx: &mut TestAppContext) {
     let on = h.at_cell(3, 0);
     h.rest_on(on);
     let pending = h.check("/work/report.pdf");
-    // The answer, the press and the release in one update of the window, so no frame can come between them. Through
-    // the test context's simulated events, a first version of this test saw the answered display drawn before the
-    // press, which then was admitted, as it should be once the answer is on screen.
+    // Place the disclosure with one draw, then dispatch the click before the deferred popover paints.
     let owner = h.owner.clone();
     h.cx.update(|window, cx| {
         let files = owner.read(cx).files().clone();
@@ -734,10 +786,12 @@ fn a_click_before_the_answer_has_painted_stays_silent(cx: &mut TestAppContext) {
             let link = files.tracking().expect("the premise: the check is tracked");
             assert!(files.ready_for(link), "the premise: the host answered");
         });
-        assert!(
-            owner.read(cx).disclosure_drawn().is_none(),
-            "the premise: no display was opened yet"
-        );
+        window.draw(cx).clear(cx);
+        let drawn = owner
+            .read(cx)
+            .disclosure_drawn()
+            .expect("the frame placed the disclosure");
+        assert!(drawn.get().is_none(), "the popover has yet to paint");
         let down = MouseDownEvent {
             button: MouseButton::Left,
             position: on,

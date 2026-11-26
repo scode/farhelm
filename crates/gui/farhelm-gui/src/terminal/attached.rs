@@ -522,6 +522,9 @@ pub struct AttachedTerminal {
     /// opened over the resting pointer itself ([`AttachedTerminal::display_covers_pointer`]), so it does not close and
     /// reopen forever; with no panel shown, a click there gets the "not visible" refusal.
     refusal_waits_for_hover: bool,
+    /// The file disclosure held back because it painted over its own pointer. Retain its identity after the layer
+    /// and host check are dropped, so a click on that path can explain why it cannot transfer the file.
+    held_back_file: Option<TerminalLink>,
     /// The line stays above approvals as long as the pointer is still on the refused link, even if moving within
     /// the span has already restarted the disclosure.
     refusal_target: Option<RefusalTarget>,
@@ -726,6 +729,7 @@ impl AttachedTerminal {
             press_visibility: None,
             refusal: None,
             refusal_waits_for_hover: false,
+            held_back_file: None,
             refusal_target: None,
             refusal_pill: None,
             tunnels,
@@ -2188,6 +2192,16 @@ impl AttachedTerminal {
 impl Render for AttachedTerminal {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         render_count::record("attached-terminal", cx);
+        // Output can replace a held-back path without moving the pointer. The new hover starts its own check.
+        if self.held_back_file.as_ref().is_some_and(|held| {
+            self.committed
+                .as_ref()
+                .and_then(|view| view.read(cx).hovered_link())
+                != Some(held)
+        }) {
+            self.held_back_file = None;
+            self.refusal_waits_for_hover = false;
+        }
         if self.activation.is_none() {
             self.activation = Some(cx.observe_window_activation(window, |owner, window, cx| {
                 owner.window_focus = owner.focus_in_active_window(window);
@@ -2427,6 +2441,11 @@ impl Render for AttachedTerminal {
                 // panel, uncover the pointer and open it again on the next frame, without end. Hold the panel back
                 // instead, keeping the hover, until the pointer reaches another cell.
                 if !*hovered && owner.display_covers_pointer(window) {
+                    owner.held_back_file = owner
+                        .disclosure
+                        .as_ref()
+                        .filter(|shown| shown.link.kind == LinkKind::Path)
+                        .map(|shown| shown.link.clone());
                     owner.refusal_waits_for_hover = true;
                     cx.notify();
                     return;
@@ -2630,6 +2649,8 @@ struct LinkPress {
     /// The painted file disclosure that vouched for the press. A new stat cannot borrow that panel's authorization
     /// even if the terminal restores the original path text before release.
     file_disclosure: Option<u64>,
+    /// A painted file panel was held back over this link at press time. It can explain a refusal but cannot transfer.
+    file_held_back: bool,
 }
 
 /// The web address a click on `link` opens: a printed address by the strict rule for text, a program's hyperlink by
@@ -2684,6 +2705,7 @@ impl AttachedTerminal {
         self.hover_point = position;
         let cell = position.and_then(|position| self.link_cell(position, cx));
         if cell != was {
+            self.held_back_file = None;
             // Reaching another cell counts as hovering again, after a refused click or a display put away with no
             // press (Escape). Nothing else redraws for a move within one link, so ask for the frame that shows it.
             let dismissed = self
@@ -2800,20 +2822,25 @@ impl AttachedTerminal {
         // link's activation downloaded without reading the link choice (terminal.js:1050 and :1104), which only
         // `activateWeb` passed on (terminal.js:1012).
         if press.link.file_path().is_some() {
-            // A normal press closes the layer but keeps its disclosure record until release. Replacing the hover
-            // replaces that record, even if the same printed path comes back before mouse-up.
-            let Some(shown) = self
-                .disclosure
-                .as_ref()
-                .filter(|shown| Some(shown.generation) == press.file_disclosure)
-            else {
-                return;
+            let refusal = if press.file_held_back {
+                self.files.update(cx, |files, cx| files.clear_status(cx));
+                Some(Hidden::NotVisible.file_words())
+            } else {
+                // A normal press closes the layer but keeps its disclosure record until release. Replacing the hover
+                // replaces that record, even if the same printed path comes back before mouse-up.
+                let Some(shown) = self
+                    .disclosure
+                    .as_ref()
+                    .filter(|shown| Some(shown.generation) == press.file_disclosure)
+                else {
+                    return;
+                };
+                let released = disclosure::visibility(&shown.drawn, window);
+                let modifiers = event.modifiers;
+                self.files.update(cx, |files, cx| {
+                    files.clicked(&press.link, press.visibility, released, modifiers, cx)
+                })
             };
-            let released = disclosure::visibility(&shown.drawn, window);
-            let modifiers = event.modifiers;
-            let refusal = self.files.update(cx, |files, cx| {
-                files.clicked(&press.link, press.visibility, released, modifiers, cx)
-            });
             if let Some(refusal) = refusal {
                 self.refusal = Some(refusal.into());
                 self.refusal_waits_for_hover = true;
@@ -3080,6 +3107,16 @@ impl AttachedTerminal {
     #[cfg(test)]
     pub(crate) fn disclosure_drawn(&self) -> Option<super::disclosure::Drawn> {
         self.disclosure.as_ref().map(|shown| shown.drawn.clone())
+    }
+
+    /// The file panel painted over its pointer and has been suppressed for this hover.
+    #[cfg(test)]
+    pub(super) fn file_disclosure_held_back(&self, path: &str) -> bool {
+        self.held_back_file
+            .as_ref()
+            .and_then(TerminalLink::file_path)
+            .as_deref()
+            == Some(path)
     }
 
     /// Stage a refused open in the screenshot scene. The pointer dispatch and cover check are exercised by the
@@ -3449,6 +3486,7 @@ impl AttachedTerminal {
     /// the refusal and cleared with it at the next press.
     fn file_status_shown(&mut self, cx: &mut Context<Self>) {
         let refused = self.refusal.take().is_some();
+        self.held_back_file = None;
         let raised = std::mem::take(&mut self.refusal_waits_for_hover)
             | self.refusal_target.take().is_some();
         if refused || raised {
@@ -4089,6 +4127,7 @@ impl AttachedTerminal {
         });
         self.link_press = admitted.map(|link| LinkPress {
             hinted: self.tunnel_hint(&link, cx).is_some(),
+            file_held_back: self.held_back_file.as_ref() == Some(&link),
             file_disclosure: self
                 .disclosure
                 .as_ref()
