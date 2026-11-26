@@ -122,6 +122,16 @@ FOLD_CATEGORIES: tuple[tuple[str, str], ...] = (
 # and may not carry a fold.
 FIRST_FOLD_VERSION = (0, 42, 0)
 
+# Sections already on main can finish in the format they were drafted in. Only later finalized sections require
+# headlines, since the desktop feed excludes drafts and curation can still be waiting for headline approval.
+# v0.45.0 was the newest section on main, and already finalized, when this rule landed; it is not meant to move.
+LAST_PRE_HEADLINE_VERSION = (0, 45, 0)
+# Plain text and simple inline links keep the headline in one bold piece in the upgrade feed. In particular,
+# emphasis and code would split it. Leave sentence wording to curation and check the piece boundary here.
+HIGHLIGHT_HEADLINE_RE = re.compile(
+    r"^\*\*(?=\S)(?:[^*_`\[\]<>\\]|(?<!!)\[[^*_`\[\]<>\\]+\]\([^\s()<>\\]+\))*[.!?]\*\* +(?=\S)"
+)
+
 # GitHub renders raw HTML inside Markdown, so an entry that mentions `</details>` in plain text would close the fold
 # early on the GitHub release (the website escapes it, so the two would silently disagree). In a fold-era section the
 # frame's tags may appear only as the frame itself, or inside a code span. The code-span pattern is the same heuristic
@@ -330,7 +340,8 @@ def _check_release_body(version: str, lines: list[str], may_be_draft: bool = Fal
     """
     problems: list[str] = []
     first = next((index for index, line in enumerate(lines) if line.strip()), None)
-    if first is not None and lines[first] == DRAFT_NOTICE:
+    draft = first is not None and lines[first] == DRAFT_NOTICE
+    if draft:
         if not may_be_draft:
             problems.append("only the newest section may still be a draft; finalize this one before cutting another release")
         lines = lines[first + 1 :]
@@ -353,7 +364,14 @@ def _check_release_body(version: str, lines: list[str], may_be_draft: bool = Fal
     # A release whose every change went into the full list has no highlights, and that is a legitimate release.
     if not categories and fold is None:
         problems.append("a release needs at least one category")
-    problems.extend(_check_categories(version, categories, allowed))
+    problems.extend(
+        _check_categories(
+            version,
+            categories,
+            allowed,
+            require_headlines=not draft and _version_tuple(version) > LAST_PRE_HEADLINE_VERSION,
+        )
+    )
     # The complete fold is what makes the highlights a pure selection: whatever the maintainer removes or merges there,
     # every change is still in the full list. A PR a highlight cites and the fold does not is the one way to lose that,
     # so it is checked here rather than left to curation.
@@ -470,12 +488,18 @@ def _split_categories(
 
 
 def _check_categories(
-    version: str, categories: list[tuple[str, list[str]]], allowed: tuple[tuple[str, str], ...], historical: bool = True
+    version: str,
+    categories: list[tuple[str, list[str]]],
+    allowed: tuple[tuple[str, str], ...],
+    historical: bool = True,
+    *,
+    require_headlines: bool = False,
 ) -> list[str]:
     """Check category order and each category's body; `historical` enables the shapes only old `###` sections use.
 
     The fold's categories pass `historical=False`: a fold exists only in sections newer than every historical exception,
-    and its Fixed must not be read as the pre-split Fixed or its Changed as v0.40.0's.
+    and its Fixed must not be read as the pre-split Fixed or its Changed as v0.40.0's. The headline rule is only for
+    highlights the desktop app will receive, all of which are in the unfolded categories.
     """
     problems: list[str] = []
     order_of = {name: index for index, (name, _emoji) in enumerate(allowed)}
@@ -501,7 +525,7 @@ def _check_categories(
         elif historical and version == RELEASE_NOTES_POLICY_VERSION and name == "Changed":
             category_problems = _check_bullets(body, uncited_leading_entries=1)
         else:
-            category_problems = _check_bullets(body)
+            category_problems = _check_bullets(body, require_headline=require_headlines)
         problems.extend(f"under `{name}`: {item}" for item in category_problems)
     return problems
 
@@ -558,12 +582,15 @@ def _check_highlights(lines: list[str]) -> list[str]:
     return problems
 
 
-def _check_bullets(lines: list[str], *, uncited_leading_entries: int | None = 0) -> list[str]:
+def _check_bullets(
+    lines: list[str], *, uncited_leading_entries: int | None = 0, require_headline: bool = False
+) -> list[str]:
     """Validate paragraph-sized bullets, with PR references for entries about product changes.
 
     The file is stored one paragraph per line (GitHub renders a release body like a comment, newline as line break),
     but an item is still taken to be the `- ` line plus any indented lines after it, and the PR reference is checked
     on the joined text, so a hand-wrapped bullet is flagged for its reference, not misread as several entries.
+    Check headlines on the joined text as well, which is how the feed reads each highlight.
     Historical sections can exempt their opening entries or pass None to exempt a whole category.
     """
     problems: list[str] = []
@@ -587,6 +614,12 @@ def _check_bullets(lines: list[str], *, uncited_leading_entries: int | None = 0)
             problems.append("empty bullet entry")
         elif uncited_leading_entries is not None and index >= uncited_leading_entries and not PR_REFERENCE_RE.search(joined):
             problems.append(f"entry `{joined[:60]}…` must end with its PR reference, `(#N)` or `(#N, #M)`")
+        elif require_headline and not HIGHLIGHT_HEADLINE_RE.match(joined):
+            problems.append(
+                f"highlight `{joined[:60]}…` must start with a bold headline made of plain words and simple"
+                " `[text](url)` links. End it in '.', '?' or '!' inside the bold, then add a space and the rest"
+                " of the entry. Leave out code, emphasis, nested bold, images, angle brackets and backslashes"
+            )
     return problems
 
 
@@ -1260,6 +1293,43 @@ def self_test() -> int:
     }
     for what, text in variants.items():
         expect(check_changelog_format(text) != [], f"the format check rejects {what}")
+
+    # The same prose stays valid in an existing section and while a new section is under review. Only the finalized
+    # highlights go to the desktop. Exercise the cutoff and the draft notice through the full format check.
+    latest_existing = ".".join(map(str, LAST_PRE_HEADLINE_VERSION))
+    major, minor, patch = LAST_PRE_HEADLINE_VERSION
+    new_version = f"{major}.{minor}.{patch + 1}"
+    historical = FOLD_CHANGELOG.replace("v0.44.0", f"v{latest_existing}", 1)
+    new_release = historical.replace(f"v{latest_existing}", f"v{new_version}", 1)
+    heading = f"## v{new_version} - 2027-03-01"
+    draft = new_release.replace(heading, f"{heading}\n\n{DRAFT_NOTICE}", 1)
+    expect(check_changelog_format(historical) == [], "published and in-flight sections can keep their older format")
+    expect(check_changelog_format(draft) == [], "headlines can still be missing while the maintainer reviews a new draft")
+    expect(
+        sum("must start with a bold headline" in problem for problem in check_changelog_format(new_release)) == 2,
+        "a finalized new section requires headlines on its two highlights",
+    )
+    headline = "**You can open [help](https://example.com/guide).**"
+    featured = new_release.replace("A feature the maintainer highlighted.", f"{headline} A feature in full.", 1).replace(
+        "A fix most users would notice.", "**Was a session stuck?** It can open again.", 1
+    )
+    expect(check_changelog_format(featured) == [], "finalized highlights accept bold headlines and the plain fold")
+    expect(
+        check_changelog_format(featured.replace("Was a session stuck?", "Sessions open again!")) == [],
+        "an exclamation point can end a headline",
+    )
+    for malformed in (
+        "**The period is outside**.",
+        "**You can open `help`.**",
+        "**You can open *help*.**",
+        "**You can open _help_.**",
+        "**You can **open** help.**",
+        "**See ![a picture](help.png).**",
+        "**You can open [*help*](https://example.com/guide).**",
+        "**Settings** now opens faster.",
+    ):
+        problems = check_changelog_format(featured.replace(headline, malformed, 1))
+        expect(any("must start with a bold headline" in problem for problem in problems), f"reject {malformed}")
 
     old_highlights = GOOD_CHANGELOG.replace("## v0.2.0", "## v0.13.0").replace("## v0.1.0", "## v0.12.0").replace(
         "### \U0001f4a5 Breaking", "### ✨ Highlights\n\n#### A feature\n\nProse. (#12)\n\n### \U0001f4a5 Breaking"

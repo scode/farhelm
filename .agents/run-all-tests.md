@@ -119,7 +119,8 @@ second clippy run on floating stable is needed.
 - `python3 -B scripts/dependency-notices.py --check` and `python3 -B scripts/test-dependency-notices.py` (the generated
   dependency license notices are current)
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` (release-note
-  format, including the v0.40.0 policy section and folded PR coverage, and fragment and announcement checks)
+  format, including the v0.40.0 policy section, folded PR coverage and headlines in finalized highlights, and fragment
+  and announcement checks)
 - `python3 releasing/finalize-release-notes.py --self-test`
 - `python3 releasing/notes-review-page.py --self-test` (legacy standalone page; includes link attribute escaping and
   HTTP(S)/relative-only targets)
