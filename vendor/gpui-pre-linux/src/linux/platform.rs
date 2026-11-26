@@ -1181,6 +1181,13 @@ impl Platform for LinuxPlatform {
         self.connection.borrow().read_from_clipboard_async()
     }
 
+    /// The same, asking for local files, then an image, then text.
+    fn read_from_clipboard_payload_async(
+        &self,
+    ) -> Task<Result<Option<ClipboardItem>, gpui::ClipboardReadError>> {
+        self.connection.borrow().read_from_clipboard_payload_async()
+    }
+
     fn add_recent_document(&self, _path: &Path) {}
 }
 

@@ -3692,7 +3692,8 @@ whatever the agent renders is what you see. There is no composer, no message abs
   system clipboard works. Copies may be dropped while it is broken, hung or slow. A paste the user starts on macOS may
   stall the window while the system clipboard supplies its contents. Farhelm must stay responsive during other clipboard
   operations. On Wayland, keys typed while Farhelm is still fetching pasted text from the system clipboard may reach the
-  terminal before that text.
+  terminal before that text, and a paste into a text field is dropped if the user types in the field, moves its cursor,
+  leaves it or pastes again before the text arrives.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the

@@ -193,12 +193,26 @@ impl DisplayConnection {
 
     /// Wayland needs its event loop free while the external producer writes the
     /// requested pipe. Other backends retain their existing synchronous facade.
+    /// Text first, for a text field.
     pub(crate) fn read_from_clipboard_async(
         &self,
     ) -> gpui::Task<Result<Option<ClipboardItem>, gpui::ClipboardReadError>> {
         match self {
             #[cfg(feature = "wayland")]
             Self::Wayland(connection) => connection.read_from_clipboard_async(),
+            _ => gpui::Task::ready(Ok(self.read_from_clipboard())),
+        }
+    }
+
+    /// As [`DisplayConnection::read_from_clipboard_async`], for a paste that can
+    /// take files or an image: Wayland asks for local files, then an image, then
+    /// text. Other backends answer with their synchronous read.
+    pub(crate) fn read_from_clipboard_payload_async(
+        &self,
+    ) -> gpui::Task<Result<Option<ClipboardItem>, gpui::ClipboardReadError>> {
+        match self {
+            #[cfg(feature = "wayland")]
+            Self::Wayland(connection) => connection.read_from_clipboard_payload_async(),
             _ => gpui::Task::ready(Ok(self.read_from_clipboard())),
         }
     }

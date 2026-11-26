@@ -308,15 +308,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   but exceeded the triage budget before it covered focus restoration and the silent Save refusal. Test both from a dirty
   registration and check light and dark captures. Plan: `plans/queue/custom-agent-delete-prompt.md`.
 
-- **Make Wayland text-field paste nonblocking.** Pasting into a text field such as an SSH sign-in answer can freeze the
-  window while another app supplies clipboard data. [Terminal experience](SPEC.md#terminal-experience) requires Farhelm
-  to stay responsive during clipboard operations on Wayland. Kit's Paste checks the synchronous read before its async
-  fallback. Give that path an async text-first read on Wayland, reusing Kit's focus, document and selection checks and
-  its atomic undo. Keep the terminal's file-first paste and keep text-field newline handling. The vendored async path
-  currently prefers files and images, so sending both callers through it can lose text from a mixed offer. The split
-  spans the Wayland receive code and the clipboard API used by Kit and the terminal. Cover keyboard and Edit menu paste,
-  mixed offers and a reply that arrives after the target changes. Plan: `plans/queue/wayland-async-text-paste.md`.
-
 - **Show container recipe admission failures before recording build ownership.** An explicit Rebuild can answer Accepted
   before a fresh Podman check fails. The existing recipe place record keeps that failure visible after the job ends.
   Suppressing the record alone loses the reason if the old host check still says Ready, for example after a refresh

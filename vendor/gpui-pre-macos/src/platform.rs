@@ -1210,8 +1210,9 @@ impl Platform for MacPlatform {
     }
 
     /// Preserve AppKit thread ownership while exposing attachment flavor priority.
-    /// Task::ready does not make this native pasteboard access nonblocking.
-    fn read_from_clipboard_async(
+    /// Task::ready does not make this native pasteboard access nonblocking. The
+    /// text read keeps the default, which is the synchronous text-first read.
+    fn read_from_clipboard_payload_async(
         &self,
     ) -> Task<Result<Option<ClipboardItem>, gpui::ClipboardReadError>> {
         let state = self.0.lock();

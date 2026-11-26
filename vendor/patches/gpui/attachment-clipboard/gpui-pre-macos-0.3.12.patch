@@ -5,7 +5,7 @@ index 23ac6a0..df5d4c8 100644
 @@ -108,6 +108,41 @@ impl Pasteboard {
          None
      }
- 
+
 +    /// Payload paste preserves file priority but chooses an offered image before
 +    /// its accompanying text flavor. The synchronous editor API keeps its old
 +    /// text-first behavior. An offered image that cannot be read is an error;
@@ -43,7 +43,7 @@ index 23ac6a0..df5d4c8 100644
 +
      fn read_image(&self, format: ImageFormat) -> Option<ClipboardItem> {
          let ut_type = UTType::from(format);
- 
+
 @@ -507,4 +542,52 @@ mod tests {
                  .setData_forType(Some(&bytes), NSPasteboardTypeString);
          }
@@ -98,16 +98,17 @@ index 23ac6a0..df5d4c8 100644
 +    }
  }
 diff --git a/src/platform.rs b/src/platform.rs
-index f22510f..f838092 100644
+index f22510f..90530bd 100644
 --- a/src/platform.rs
 +++ b/src/platform.rs
-@@ -1208,6 +1208,15 @@ impl Platform for MacPlatform {
+@@ -1208,6 +1208,16 @@ impl Platform for MacPlatform {
          state.general_pasteboard.read()
      }
- 
+
 +    /// Preserve AppKit thread ownership while exposing attachment flavor priority.
-+    /// Task::ready does not make this native pasteboard access nonblocking.
-+    fn read_from_clipboard_async(
++    /// Task::ready does not make this native pasteboard access nonblocking. The
++    /// text read keeps the default, which is the synchronous text-first read.
++    fn read_from_clipboard_payload_async(
 +        &self,
 +    ) -> Task<Result<Option<ClipboardItem>, gpui::ClipboardReadError>> {
 +        let state = self.0.lock();

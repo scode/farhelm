@@ -599,6 +599,17 @@ pub trait Platform: 'static {
         Task::ready(Ok(self.read_from_clipboard()))
     }
 
+    /// Reads the clipboard for a paste that can take files or an image, resolving once its contents are available.
+    ///
+    /// [`Platform::read_from_clipboard_async`] answers a text field: on a mixed clipboard it prefers text, as the
+    /// synchronous read does. This one answers a paste that can attach a payload: platforms that can tell override it
+    /// to prefer local files, then an image, then text. The default is the text read.
+    fn read_from_clipboard_payload_async(
+        &self,
+    ) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>> {
+        self.read_from_clipboard_async()
+    }
+
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     fn read_from_primary(&self) -> Option<ClipboardItem>;
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]

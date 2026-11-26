@@ -178,6 +178,8 @@ second clippy run on floating stable is needed.
   reach
 - The vendored GPUI core's recorded native-key, driver record, hitbox occlusion and motion preference tests from
   `.agents/validation.md` (`vendor/gpui-pre`), which the workspace batteries never reach either
+- The vendored Linux tree's recorded Wayland clipboard tests from `.agents/validation.md` (`gpui-pre-linux`, not a
+  workspace member either)
 - The GPUI app's screenshot goldens from `.agents/validation.md` (`scripts/check-gui-goldens.py`), ignored in the
   workspace batteries because they need the software renderer the script selects, and needing read access to the storage
   repository that holds their references (or a fetched copy in `FARHELM_GOLDENS_DIR`). The development profile optimizes
