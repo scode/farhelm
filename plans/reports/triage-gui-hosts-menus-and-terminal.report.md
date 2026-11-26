@@ -74,3 +74,66 @@ before the panel appeared. Repeated window warnings could stay scrolled out of v
 
 One fresh GPT-6.2 Sol high source review per pull request. Addressed the review findings in the affected code and tests,
 including the refusal footer's redraw dependency, ended-program wording, and stale file-disclosure evidence.
+
+### Landing
+
+#### What landed with it
+
+This plan landed second in its round, right after the agent request and container approval triage
+(`triage-security-and-agent-boundaries`), which changes only the helm and shares only the triage records with it. Since
+this plan's PRs were based, main gained the Restart and hook warning fixes, the release brick test fixes and a TODO
+entry. The rebase met only conflicts in the shared triage records, kept both ways, and the landing's independent review
+found no interaction. It also found the plan's behavior sound: no confirmation choice is ignored or applied to the wrong
+host or row, every failed or out-of-order read falls back to asking, and a reposted notice cannot loop.
+
+While this plan's PRs were merging, another change reached main between its first and second PR: a test-only change to
+the screenshot comparison that fails a render that hangs ([#5045](https://github.com/scode/farhelm/pull/5045/changes)).
+It touches only the screenshot harness and its runner, which this plan does not, so main now holds the tested tree plus
+that change.
+
+#### Fixes made while landing
+
+- None. The review found no blocker or should-fix item.
+
+#### Checks
+
+Worker runs were on a separate arm64 Linux test worker; the rest ran locally on x86_64 Linux. All the checks below ran
+on both plans' PRs stacked in queue order on main as it stood at the start of the landing (`1e344451`), with the shared
+triage records' conflicts kept both ways; every other change is exactly what the executors pushed. The round's one
+landing fix since, inside the agent request and container approval plan's #5030, removes a blank line from the review
+feedback queue's index, so these runs still apply.
+
+- The workspace Rust suite, `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `3ab311fb-56ce-4f7e-a781-048ff52d03ee`): all 8755 passed, with no runtime `SKIPPED` lines. It covers both plans' helm
+  and GUI tests.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings`, on the test worker: passed.
+- The desktop app's end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run
+  `da502306-29fe-48a5-af71-405b24619819`): of its 49 steps, 48 passed, including Rename, the spawn approval steps, the
+  host menus, Stop and the templates, and one (paste) was skipped by design on Linux.
+- The desktop app's screenshot comparison, `python3 scripts/check-gui-goldens.py`, all scenes, locally (recorder run
+  `5ec3eec6-72fa-4964-9cd6-17b84713fc75`): passed; neither plan changes a reference picture.
+- `python3 scripts/check-agents-md.py`, `python3 releasing/check-changelog.py format`, `cargo fmt --all -- --check` and
+  `python -B scripts/check-test-sleeps.py`, locally: passed. `dprint check`, locally: after the fix it fails only on
+  over-long lines in the triage outcomes archive, main's earlier ones (#4978) and the security triage plan's three new
+  entries. No PR fixes them yet; a formatting-only one would, and I recommend it, as earlier rounds' notes did.
+
+Reused across the fix: every run above except `dprint check`, which ran again, since the fix changes only whitespace in
+the queue's index. The executors' runs were on older bases, and everything they covered ran again above.
+
+Skipped: the desktop app's outer shell tests, since nothing in that crate changed; a Mac run; real Podman and Tensorlake
+hosts, which no automated check here reaches; and CI, which runs only on demand.
+
+#### What the report says that is no longer true
+
+- Nothing.
+
+#### Things you should know that the report does not say
+
+- **Smaller points the review noticed.** Tensorlake's Re-run sends its settings read even when it then does not start
+  because other work is running on the host, though its own description says nothing is sent then (harmless); the
+  confirmation changelog draft says "turning it off" where it should name **Create Tensorlake sandboxes without
+  asking**; the Stop and Suspend wording change adds a variant for an ended session without tabs ("Finish stopping this
+  session") beyond what triage asked for; one changelog draft uses a curly apostrophe; and clearing the file details'
+  waiting-for-hover state while drawing could use a comment. None needs a follow-up on its own.
