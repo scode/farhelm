@@ -4,6 +4,7 @@
 
 use super::super::*;
 use crate::agent_kind::report_pin::{PinDecision, ReportPin};
+use crate::hook_report::ReportAdmission;
 
 impl Supervisor {
     /// Check the admitted exact file only when Restart is about to use it.
@@ -68,7 +69,7 @@ impl Supervisor {
         kind: AgentKind,
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
-    ) -> Result<(), RequestError> {
+    ) -> Result<ReportAdmission, RequestError> {
         let ReportedConversation {
             vendor: _,
             mut conversation,
@@ -150,7 +151,7 @@ impl Supervisor {
             .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
         if decision == PinDecision::Refuse {
             if enrichment {
-                return Ok(());
+                return Ok(ReportAdmission::Ignored);
             }
             return Err(RequestError::new(
                 ErrorKind::Conflict,
@@ -173,14 +174,14 @@ impl Supervisor {
                 .as_deref()
                 .and_then(|value| crate::agent_kind::codex::CodexLocator::parse(value).ok())
             else {
-                return Ok(());
+                return Ok(ReportAdmission::Ignored);
             };
             if row.capture_ownership_version != 1
                 || previous.resumable
                 || previous.thread_id.is_some()
                 || previous.runtime_session_id != locator.runtime_session_id
             {
-                return Ok(());
+                return Ok(ReportAdmission::Ignored);
             }
             if let Some(path) = previous.session_file.as_ref() {
                 if locator
@@ -218,7 +219,7 @@ impl Supervisor {
             )
         })?;
         if !locator.resumable && enrichment {
-            return Ok(());
+            return Ok(ReportAdmission::Ignored);
         }
         if !locator.resumable && source != "clear" {
             return Err(RequestError::new(
@@ -278,12 +279,20 @@ impl Supervisor {
                     .await
             }
         };
-        self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)?;
+        let admission = self.finish_reported_admission(
+            id,
+            written,
+            &conversation,
+            &source,
+            generation,
+            entry,
+            1,
+        )?;
         // The warning committed with the correction. A crash before this mirror
         // only delays its visibility: the next supervisor reloads the durable row.
         if correction && self.reload_notification_cell(id).await {
             self.hint_sessions_changed();
         }
-        Ok(())
+        Ok(admission)
     }
 }

@@ -8,12 +8,14 @@
 mod private_config;
 
 use super::{
-    SCREEN_BYTES, StreamText, reported_runtime_identity, serving_supervisor, which_binary,
+    SCREEN_BYTES, StreamText, hook_log_names_identity, reported_runtime_identity,
+    serving_supervisor, which_binary,
 };
 use crate::harness::*;
 use farhelm_proto::session_launch::CONVERSATION_PLACEHOLDER;
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchSelection, RestartOffer};
 use farhelm_supervisor::agent_kind::AgentHooks;
+use farhelm_supervisor::hook_report::{HookLogLine, ReportAdmission, parse_log_line};
 use farhelm_supervisor::hosts::{HostTerminal, Liveness};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -70,12 +72,13 @@ enum UpdateOverride {
     Omp,
 }
 
-/// Some report paths acknowledge subordinate or stale callbacks without changing the captured conversation.
-/// Those profiles need an acknowledgment that names the runtime identity in the snapshot.
+/// Some report paths acknowledge subordinate or stale callbacks. The strict profiles need a write for the runtime
+/// identity after Restart, because an untouched binding can still contain the right identity and resume command.
 #[derive(Clone, Copy)]
 enum HookWitness {
     Fresh,
     MatchingIdentity,
+    CommittedIdentity { resumed_generation: Option<i64> },
 }
 
 /// Per-harness launch inputs and rendered composer cues. An omitted model uses the user's vendor setting.
@@ -112,7 +115,9 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
             Some("gpt-6-luna"),
             Some(LaunchEffort::Low),
             &["openai codex", "›"][..],
-            Some(HookWitness::MatchingIdentity),
+            Some(HookWitness::CommittedIdentity {
+                resumed_generation: None,
+            }),
             true,
             None,
         ),
@@ -124,7 +129,9 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
             // its trust prompt, contains it, and a prompt typed into the splash is lost. 1.5.14's composer has
             // "? for shortcuts" under the input box.
             &["? for shortcuts", "type a message"][..],
-            Some(HookWitness::MatchingIdentity),
+            Some(HookWitness::CommittedIdentity {
+                resumed_generation: None,
+            }),
             false,
             None,
         ),
@@ -142,7 +149,9 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
             None,
             None,
             &["grok", "❯"][..],
-            Some(HookWitness::Fresh),
+            Some(HookWitness::CommittedIdentity {
+                resumed_generation: None,
+            }),
             false,
             None,
         ),
@@ -643,20 +652,36 @@ impl TurnExpectation<'_> {
         reply_on_screen(text, self.reply)
     }
 
-    /// After Restart both turns must resolve to the same resume command. If admission can acknowledge a callback
-    /// without applying it, the new report also has to name the runtime identity in the sampled snapshot.
+    /// An acknowledgment for an earlier launch cannot prove admission on the resumed launch, even if the vendor
+    /// sends the same ID and the snapshot still offers the same resume command.
     fn saw_report(&self, log: &str, resume_argv: Option<&[String]>, conversation: &str) -> bool {
         if !resume_argv
             .is_some_and(|argv| self.original_argv.is_none_or(|original| argv == original))
         {
             return false;
         }
+        if let HookWitness::CommittedIdentity {
+            resumed_generation: Some(generation),
+        } = self.hook_witness
+        {
+            let expected = reported_runtime_identity(conversation);
+            return acknowledged_reports(log).any(|entry| {
+                entry.admission == Some(ReportAdmission::Committed { generation })
+                    && entry
+                        .identity()
+                        .is_some_and(|id| hook_log_names_identity(id, &expected))
+            });
+        }
         let mut fresh = acknowledged_reports(log).skip(self.acked_before);
         match self.hook_witness {
             HookWitness::Fresh => fresh.next().is_some(),
-            HookWitness::MatchingIdentity => {
+            HookWitness::MatchingIdentity | HookWitness::CommittedIdentity { .. } => {
                 let expected = reported_runtime_identity(conversation);
-                fresh.any(|incoming| incoming == expected)
+                fresh.any(|entry| {
+                    entry
+                        .identity()
+                        .is_some_and(|id| hook_log_names_identity(id, &expected))
+                })
             }
         }
     }
@@ -680,12 +705,11 @@ fn reply_on_screen(text: &str, reply: &str) -> bool {
     })
 }
 
-/// The supervisor writes the reported identity as the third field of an acknowledgment.
-fn acknowledged_reports(log: &str) -> impl Iterator<Item = &str> {
-    log.lines().filter_map(|line| {
-        let mut fields = line.split_whitespace().skip(1);
-        (fields.next()? == "acked").then_some(fields.next()?)
-    })
+/// Count acknowledgments for the legacy baseline without mistaking them for committed writes.
+fn acknowledged_reports(log: &str) -> impl Iterator<Item = HookLogLine<'_>> {
+    log.lines()
+        .filter_map(parse_log_line)
+        .filter(|entry| entry.word == "acked" && entry.about.is_some())
 }
 
 /// The hook log belongs to this new session only. A startup hook can fire before the prompt, so both an accepted
@@ -735,6 +759,12 @@ async fn wait_for_turn_matching(
                 .ok_or_else(|| anyhow::anyhow!("launched session vanished"))?;
             if let Some(conversation) = snapshot.captured_conversation.as_deref()
                 && snapshot.restart_offer == RestartOffer::Resume
+                && !matches!(
+                    expected.hook_witness,
+                    HookWitness::CommittedIdentity {
+                        resumed_generation: Some(generation),
+                    } if generation != snapshot.generation
+                )
                 && expected.saw_report(&log, snapshot.resume_argv.as_deref(), conversation)
             {
                 return Ok(snapshot);
@@ -745,7 +775,7 @@ async fn wait_for_turn_matching(
                 "the restarted agent did not recall the original code word"
             } else if answered && acked > expected.acked_before && expected.original_argv.is_some()
             {
-                "recall arrived, but the new acknowledgments did not confirm the original resume command"
+                "recall arrived, but the new hook evidence did not confirm the original conversation on this launch"
             } else if answered {
                 "reply arrived but no accepted resumable conversation report followed"
             } else {
@@ -1119,7 +1149,9 @@ mod tests {
             reply: "RECALL-FH78C1E9AF",
             acked_before: 1,
             original_argv: Some(original_argv),
-            hook_witness: HookWitness::MatchingIdentity,
+            hook_witness: HookWitness::CommittedIdentity {
+                resumed_generation: Some(7),
+            },
         }
     }
 
@@ -1129,8 +1161,32 @@ mod tests {
         let argv = ["resume".into(), "original".into()];
         let expected = after_restart(&argv);
         assert!(expected.saw_reply("Agent\n  • recall-fh78c1e9af\nComposer"));
-        let log = "1 acked original stop\n2 written original start\n3 acked original start\n";
+        let log = "1 acked original stop\tcommitted gen=6\n2 written original start\n3 acked original start\tcommitted gen=7\n";
         assert!(expected.saw_report(log, Some(&argv), "original"));
+    }
+
+    /// The ready binding survives Restart. An ignored callback with that same identity supplies no new write.
+    #[farhelm_testtrace::test]
+    fn same_identity_acknowledgment_needs_a_write_in_the_resumed_generation() {
+        let argv = ["resume".into(), "original".into()];
+        let expected = after_restart(&argv);
+        for suffix in ["\tignored", "\tcommitted gen=6", ""] {
+            let log =
+                format!("1 acked original stop\tcommitted gen=6\n2 acked original start{suffix}\n");
+            assert!(!expected.saw_report(&log, Some(&argv), "original"), "{log}");
+        }
+    }
+
+    /// Grok's log can truncate the file evidence after its ID. The ID and generation still have to match exactly.
+    #[farhelm_testtrace::test]
+    fn grok_restart_matches_the_logged_id_in_a_truncated_locator() {
+        let argv = ["resume".into(), "example".into()];
+        let expected = after_restart(&argv);
+        let stored = r#"grok:{"session_id":"example","session_file":"path"}"#;
+        let log = "1 acked grok:{\"version\":1, -\tcommitted gen=7 id=example";
+        assert!(expected.saw_report(log, Some(&argv), stored));
+        let different = log.replace("id=example", "id=example-other");
+        assert!(!expected.saw_report(&different, Some(&argv), stored));
     }
 
     /// Retained Turn-1 history, typed input and a line merely containing the token are insufficient witnesses.
@@ -1190,7 +1246,8 @@ mod tests {
         let original = ["resume".into(), "original".into()];
         let other = ["resume".into(), "different".into()];
         let expected = after_restart(&original);
-        let log = "1 acked original stop\n2 acked different start\n";
+        let log =
+            "1 acked original stop\tcommitted gen=6\n2 acked different start\tcommitted gen=7\n";
         assert!(expected.saw_reply("RECALL-FH78C1E9AF"));
         assert!(!expected.saw_report(log, Some(&other), "different"));
         assert!(!expected.saw_report(log, None, "original"));

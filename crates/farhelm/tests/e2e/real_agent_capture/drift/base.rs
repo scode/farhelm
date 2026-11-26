@@ -99,7 +99,12 @@ async fn check_base_session(env: &DriftEnv<'_>, profile: &Harness, id: &str) -> 
                 .as_deref()
                 .expect("accepted Turn 1 has resume argv"),
         ),
-        hook_witness,
+        hook_witness: match hook_witness {
+            HookWitness::CommittedIdentity { .. } => HookWitness::CommittedIdentity {
+                resumed_generation: Some(resumed.generation),
+            },
+            HookWitness::Fresh | HookWitness::MatchingIdentity => hook_witness,
+        },
     };
     if expected.saw_reply(&second.host.screen_tail(SCREEN_BYTES)) {
         return Err(anyhow::anyhow!("the recall witness was already present before Turn 2").into());

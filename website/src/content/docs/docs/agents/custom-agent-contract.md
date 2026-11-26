@@ -23,6 +23,10 @@ after a Farhelm upgrade, read the [Contract changelog](#contract-changelog) belo
   `--effort <value>` (`[a-z0-9_-]+`); optional `--resume <id>` (used for both fresh named starts and Restart);
   conversation reporting via `farhelm custom-agent report-conversation --id <id>` on `PATH`; all custom agents treated
   as YOLO; no initial prompt flag; no `--clear` flag.
+- **Hook log acknowledgments (2026-11-26):** the flags and the report command are unchanged. An `acked` line in the hook
+  log now ends with a tab and `committed gen=<number>` when the supervisor saved the report, or `ignored` when it left
+  the saved conversation unchanged. A check that matched the whole line `acked <id> -` should match its start instead
+  and look for `committed`.
 
 ## 1. How Farhelm invokes your executable
 
@@ -217,11 +221,12 @@ command.
 - **Conversation report inside Farhelm** (if _Supports session reporting_ is enabled): Action: Invoke
   `farhelm custom-agent report-conversation --id conv-123` from the agent or its hook with `FARHELM_*` intact.
   Expectation: Exits `0` with no stdout or stderr; the session's hook log records `written conv-123 -` followed within
-  ~2 seconds by `acked conv-123 -`.
+  ~2 seconds by `acked conv-123 -`, then a tab and `committed gen=<number>`.
 - **Conversation change within one session** (if _Supports session reporting_ is enabled): Action: Start a new
   conversation inside the same session (such as `/new` or `/clear`) and invoke
   `farhelm custom-agent report-conversation --id conv-456`. Expectation: Hook log records `written conv-456 -` and
-  `acked conv-456 -`; a later **Restart** invokes `<binary> ... --resume conv-456`.
+  `acked conv-456 -` with `committed gen=<number>` after the tab; a later **Restart** invokes
+  `<binary> ... --resume conv-456`.
 - **Safe outside Farhelm** (if _Supports session reporting_ is enabled): Action: Run `<binary>` and its reporting hook
   with `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, and `FARHELM_SUPERVISOR_SOCK` unset. Expectation:
   `farhelm custom-agent report-conversation --id conv-123` exits `0` silently without writing files or showing errors in
@@ -238,8 +243,9 @@ For the Restart step in the conversation-change test, enable both resumption and
    launcher, and trigger whatever causes your agent to report its conversation ID.
 2. **Inspect the hook log on the host:** read `~/.local/state/farhelm/hook-log/$FARHELM_SESSION_ID.log` (or under
    `$XDG_STATE_HOME/farhelm/hook-log/`):
-   - `<ts> written <id> -` followed by `<ts> acked <id> -`: report accepted; **Restart** should now be enabled (if
-     **Supports session resumption** is ticked).
+   - `<ts> written <id> -` followed by `<ts> acked <id> -` with `committed gen=<number>` after a tab: report accepted;
+     **Restart** should now be enabled (if **Supports session resumption** is ticked). `ignored` after the tab means the
+     supervisor left the saved conversation unchanged.
    - `<ts> refused <kind> <reason> <id> -`: report rejected (for example, invalid ID format or process ancestry did not
      reach the session's terminal).
    - `<ts> bad-payload <reason>`: the reporter rejected its arguments or the ID before sending a report to the

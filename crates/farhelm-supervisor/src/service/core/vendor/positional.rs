@@ -7,6 +7,7 @@
 
 use super::super::*;
 use crate::agent_kind::report_pin::{PinDecision, ReportPin};
+use crate::hook_report::ReportAdmission;
 use crate::procs::PositionalReporter;
 
 /// Evidence a vendor needs beyond the pinned process for a selecting report.
@@ -87,7 +88,7 @@ impl Supervisor {
         policy: PositionalReportPolicy,
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
-    ) -> Result<(), RequestError> {
+    ) -> Result<ReportAdmission, RequestError> {
         let ReportedConversation {
             conversation,
             source,
@@ -171,14 +172,14 @@ impl Supervisor {
                 Ok(decision) => decision,
                 // A nested agent can report at every turn. Unknown liveness
                 // retains the pin, and a quiet Stop need not warn on every turn.
-                Err(_) if stop => return Ok(()),
+                Err(_) if stop => return Ok(ReportAdmission::Ignored),
                 Err(reason) => return Err(RequestError::new(ErrorKind::Conflict, reason)),
             };
         if decision == PinDecision::Refuse {
             // Returning before the writer and finish helper keeps the report
             // acknowledged without changing capture or logging a refusal.
             if stop {
-                return Ok(());
+                return Ok(ReportAdmission::Ignored);
             }
             return Err(RequestError::new(
                 ErrorKind::Conflict,
@@ -196,7 +197,7 @@ impl Supervisor {
                 .await
                 {
                     if stop {
-                        return Ok(());
+                        return Ok(ReportAdmission::Ignored);
                     }
                     return Err(RequestError::new(
                         ErrorKind::Conflict,
@@ -236,10 +237,18 @@ impl Supervisor {
                     .await
             }
         };
-        self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 0)?;
+        let admission = self.finish_reported_admission(
+            id,
+            written,
+            &conversation,
+            &source,
+            generation,
+            entry,
+            0,
+        )?;
         if correction && self.reload_notification_cell(id).await {
             self.hint_sessions_changed();
         }
-        Ok(())
+        Ok(admission)
     }
 }

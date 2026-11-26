@@ -55,7 +55,7 @@
 //! corridors) then reads the same anchored chain.
 
 use super::core::{RequestError, SessionEntry, Supervisor};
-use crate::hook_report::{self, HookReport, Slot};
+use crate::hook_report::{self, HookReport, ReportAdmission, Slot};
 use farhelm_proto::ErrorKind;
 use std::path::Path;
 use std::sync::Arc;
@@ -221,7 +221,7 @@ impl Supervisor {
             }
             Err(hook_report::ReadError::Invalid(reason)) => {
                 warn!(session = %id, %reason, "discarded a conversation report that could not be read");
-                self.log_verdict(id, "refused", &format!("unreadable {reason}"), None);
+                self.log_refusal(id, &format!("unreadable {reason}"), None);
                 return Disposition::Settled;
             }
         };
@@ -241,10 +241,17 @@ impl Supervisor {
             return Disposition::Retry;
         }
         let about = (report.conversation.clone(), report.source.clone());
-        let about = Some((about.0.as_str(), about.1.as_str()));
+        let about = (about.0.as_str(), about.1.as_str());
+        let runtime_id = report.acknowledgment_runtime_id();
         match self.admit_hook_report(id, &row, report).await {
-            Ok(()) => {
-                self.log_verdict(id, "acked", "", about);
+            Ok(admission) => {
+                let line = hook_report::render_acknowledgment(
+                    crate::store::now_unix().max(0) as u64,
+                    about,
+                    admission,
+                    runtime_id.as_deref(),
+                );
+                self.append_verdict(id, &line);
                 Disposition::Settled
             }
             Err(error)
@@ -260,7 +267,7 @@ impl Supervisor {
             Err(error) => {
                 warn!(session = %id, reason = %error.message, "refused a conversation report");
                 let detail = format!("{} {}", error_kind_word(error.kind), error.message);
-                self.log_verdict(id, "refused", &detail, about);
+                self.log_refusal(id, &detail, Some(about));
                 Disposition::Settled
             }
         }
@@ -279,19 +286,20 @@ impl Supervisor {
         )
     }
 
-    /// Append the verdict on one settled report to the session's hook log,
-    /// next to the hook's own line for the run that wrote it: the one place
-    /// a person looking at a session can see whether its report landed and,
-    /// if not, why. `acked` for an accepted report; `refused` with the error
-    /// kind and reason otherwise. Best effort, like every hook-log write.
-    fn log_verdict(&self, id: &str, word: &str, detail: &str, about: Option<(&str, &str)>) {
+    /// Render a refusal with the verification error beside the original report's identity when it is known.
+    fn log_refusal(&self, id: &str, detail: &str, about: Option<(&str, &str)>) {
         let line = hook_report::render_log_line(
             crate::store::now_unix().max(0) as u64,
-            word,
+            "refused",
             detail,
             about,
         );
-        hook_report::append_hook_log(&super::core::hook_log_path(&self.state_dir, id), &line);
+        self.append_verdict(id, &line);
+    }
+
+    /// Leave the supervisor's decision beside the hook's own report, independently of the drop file's retirement.
+    fn append_verdict(&self, id: &str, line: &str) {
+        hook_report::append_hook_log(&super::core::hook_log_path(&self.state_dir, id), line);
     }
 
     /// Validate one dropped report, tie it to the session's current launch,
@@ -303,7 +311,7 @@ impl Supervisor {
         id: &str,
         row: &crate::store::StoredSession,
         report: HookReport,
-    ) -> Result<(), RequestError> {
+    ) -> Result<ReportAdmission, RequestError> {
         let source = check_hook_report(row, &report)?;
         let chain = report
             .chain()

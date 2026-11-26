@@ -31,6 +31,7 @@
 
 use crate::boot_id_durable_outcome::listed;
 use crate::harness::*;
+use farhelm_supervisor::hook_report::{ReportAdmission, parse_log_line};
 
 // ---------------------------------------------------------------------
 // Fixtures
@@ -598,8 +599,7 @@ fn hook_log_lines(h: &Harness, session_id: &str) -> Vec<String> {
     text.lines().map(str::to_string).collect()
 }
 
-/// The single line a hook log must hold after exactly one run, minus its
-/// leading timestamp.
+/// Check the outcome of one hook run after proving the diagnostic has exactly one line for it.
 ///
 /// Used by the silence tests, which have no `Harness` — only the state
 /// directory they pointed the hook's environment at. Asserting the line COUNT
@@ -607,7 +607,13 @@ fn hook_log_lines(h: &Harness, session_id: &str) -> Vec<String> {
 /// runs the binary exactly once, so a second line would mean the log had
 /// stopped being one-line-per-run and every other assertion about it would
 /// quietly start meaning something else.
-fn sole_hook_log_outcome(state: &std::path::Path, session_id: &str) -> String {
+fn assert_sole_hook_log_outcome(
+    state: &std::path::Path,
+    session_id: &str,
+    word: &str,
+    detail: Option<&str>,
+    about: Option<(&str, &str)>,
+) {
     let path = state.join("hook-log").join(format!("{session_id}.log"));
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("no hook log at {}: {e}", path.display()));
@@ -617,10 +623,17 @@ fn sole_hook_log_outcome(state: &std::path::Path, session_id: &str) -> String {
         "exactly one line per run is what makes this file readable at all: {text}"
     );
     let line = text.lines().next().expect("just counted one line");
-    line.split_once(' ')
-        .expect("every log line is `<unix-seconds> <outcome> ...`")
-        .1
-        .to_string()
+    let entry = parse_log_line(line).expect("the hook emitted a structured outcome");
+    assert_eq!(entry.word, word, "{line}");
+    if let Some(detail) = detail {
+        assert_eq!(entry.detail, detail, "{line}");
+    } else {
+        assert!(
+            !entry.detail.is_empty(),
+            "the hook must report its error: {line}"
+        );
+    }
+    assert_eq!(entry.about, about, "{line}");
 }
 
 /// The value of every `--settings` flag in an argv marker line, in order.
@@ -1256,7 +1269,10 @@ async fn antigravity_manual_hook_captures_and_restart_passes_the_conversation() 
     )
     .await;
     assert!(
-        hook_log(&h, &session.id).contains("bad-payload unsupported-hook-event"),
+        hook_log(&h, &session.id)
+            .lines()
+            .filter_map(parse_log_line)
+            .any(|entry| entry.word == "bad-payload" && entry.detail == "unsupported-hook-event"),
         "{}",
         hook_log(&h, &session.id)
     );
@@ -1326,9 +1342,12 @@ async fn antigravity_manual_hook_captures_and_restart_passes_the_conversation() 
         wait_for_hook_log_words(h.state.path(), &session.id, "refused", index + 1).await;
         let log = hook_log(&h, &session.id);
         assert!(
-            log.contains(&format!(
-                "refused conflict the Antigravity transcript does not verify a main conversation {rival} -"
-            )),
+            log.lines().filter_map(parse_log_line).any(|entry| {
+                entry.word == "refused"
+                    && entry.detail
+                        == "conflict the Antigravity transcript does not verify a main conversation"
+                    && entry.about == Some((rival, "-"))
+            }),
             "{log}"
         );
         assert_eq!(
@@ -1355,7 +1374,15 @@ async fn antigravity_manual_hook_captures_and_restart_passes_the_conversation() 
     )
     .await;
     wait_for_hook_log_words(h.state.path(), &session.id, "acked", 2).await;
-    assert!(hook_log(&h, &session.id).contains("acked child-conversation -"));
+    assert!(
+        hook_log(&h, &session.id)
+            .lines()
+            .filter_map(parse_log_line)
+            .any(|entry| {
+                entry.admission == Some(ReportAdmission::Ignored)
+                    && entry.about == Some(("child-conversation", "-"))
+            })
+    );
     assert_eq!(
         snapshot_of(&h, &session.id)
             .await
@@ -1434,19 +1461,25 @@ async fn shelled_out_child_cannot_replace_foreground(vendor: PositionalFixture) 
     let log = hook_log_lines(&h, &session.id);
     let child = log
         .iter()
-        .find(|line| line.contains(" conv-child ") && !line.contains(" written "))
+        .find(|line| {
+            parse_log_line(line).is_some_and(|entry| {
+                matches!(entry.word, "acked" | "refused") && entry.identity() == Some("conv-child")
+            })
+        })
         .unwrap_or_else(|| panic!("the supervisor must have judged the child's report: {log:?}"));
     assert!(
-        child.contains(" refused conflict ")
-            && child.contains(&format!(
-                "the {} report came from a process other than this launch's pinned emitter",
+        parse_log_line(child).is_some_and(|entry| {
+            entry.word == "refused" && entry.detail == format!(
+                "conflict the {} report came from a process other than this launch's pinned emitter",
                 vendor.display_name
-            )),
+            )
+        }),
         "the supervisor must have refused the child for its emitter pin: {child}"
     );
     assert!(
         log.iter()
-            .any(|line| line.contains(" written ") && line.contains(" conv-parent ")),
+            .filter_map(|line| parse_log_line(line))
+            .any(|entry| entry.word == "written" && entry.identity() == Some("conv-parent")),
         "the foreground's own report must have been written: {log:?}"
     );
 
@@ -1632,7 +1665,7 @@ async fn a_repeated_report_of_one_id_is_two_hook_runs() {
     // On a grid stream the second report's transcript markers can be the
     // first one's rows sent again, so its completion is read from the log:
     // two `written` lines, then a drain, then the supervisor's two verdicts.
-    let word = |line: &String| line.split_whitespace().nth(1).map(str::to_string);
+    let word = |line: &String| parse_log_line(line).map(|entry| entry.word.to_string());
     let count = |log: &[String], what: &str| {
         log.iter()
             .filter(|line| word(line).as_deref() == Some(what))
@@ -2106,8 +2139,13 @@ fn a_hook_with_no_supervisor_is_silent_and_leaves_its_report() {
         "a hook must not wait for a supervisor that is not there: {elapsed:?}"
     );
 
-    let outcome = sole_hook_log_outcome(state.path(), "sess-missing");
-    assert_eq!(outcome, "written conv-missing startup");
+    assert_sole_hook_log_outcome(
+        state.path(),
+        "sess-missing",
+        "written",
+        Some(""),
+        Some(("conv-missing", "startup")),
+    );
     let slot = farhelm_supervisor::hook_report::session_dir(state.path(), "sess-missing")
         .expect("a valid session id")
         .join(farhelm_supervisor::hook_report::Slot::Latest.file_name());
@@ -2165,9 +2203,12 @@ fn custom_agent_report_is_silent_and_preserves_the_last_valid_id() {
         report.ancestry.is_some_and(|links| !links.is_empty()),
         "{CONTRACT}"
     );
-    assert_eq!(
-        sole_hook_log_outcome(state.path(), "custom-fixture"),
-        "written conv-custom -"
+    assert_sole_hook_log_outcome(
+        state.path(),
+        "custom-fixture",
+        "written",
+        Some(""),
+        Some(("conv-custom", "-")),
     );
 
     for args in [
@@ -2182,7 +2223,8 @@ fn custom_agent_report_is_silent_and_preserves_the_last_valid_id() {
     let log = hook_log_at(state.path(), "custom-fixture");
     assert_eq!(
         log.lines()
-            .filter(|line| line.contains(" bad-payload "))
+            .filter_map(parse_log_line)
+            .filter(|entry| entry.word == "bad-payload")
             .count(),
         4,
         "{CONTRACT}: {log}"
@@ -2455,11 +2497,7 @@ fn a_hook_whose_stdin_is_never_closed_still_finishes_in_budget() {
     let socket = state.path().join("supervisor.sock");
     assert_silent(hook_command(&socket, "sess-open"), b"partial", true);
 
-    assert_eq!(
-        sole_hook_log_outcome(state.path(), "sess-open"),
-        "timeout stdin",
-        "the budget must have expired in the READ, not anywhere later"
-    );
+    assert_sole_hook_log_outcome(state.path(), "sess-open", "timeout", Some("stdin"), None);
 }
 
 /// Run outside farhelm entirely, the hook does nothing at all — silently.
@@ -2530,9 +2568,12 @@ fn antigravity_hook_writes_json_on_early_exit_and_write_failure() {
     let mut outside = hook_command_for("antigravity", &socket, "sess-outside");
     outside.arg("--announce").env_remove(SESSION_TOKEN_ENV_VAR);
     assert_hook_response(outside, payload, false, b"{}\n");
-    assert_eq!(
-        sole_hook_log_outcome(state.path(), "sess-outside"),
-        "no-credential"
+    assert_sole_hook_log_outcome(
+        state.path(),
+        "sess-outside",
+        "no-credential",
+        Some(""),
+        None,
     );
 
     let report_dir =
@@ -2545,7 +2586,7 @@ fn antigravity_hook_writes_json_on_early_exit_and_write_failure() {
         false,
         b"{}\n",
     );
-    assert!(sole_hook_log_outcome(state.path(), "sess-blocked").starts_with("write-failed "));
+    assert_sole_hook_log_outcome(state.path(), "sess-blocked", "write-failed", None, None);
 }
 
 /// A held stdin exhausts the shared read budget before the Antigravity JSON
@@ -2560,10 +2601,7 @@ fn antigravity_hook_writes_json_after_a_stdin_timeout() {
     let socket = state.path().join("supervisor.sock");
     let command = hook_command_for("antigravity", &socket, "sess-open");
     assert_hook_response(command, b"partial", true, b"{}\n");
-    assert_eq!(
-        sole_hook_log_outcome(state.path(), "sess-open"),
-        "timeout stdin"
-    );
+    assert_sole_hook_log_outcome(state.path(), "sess-open", "timeout", Some("stdin"), None);
 }
 
 /// A hook invocation without `--vendor` never runs: clap refuses the argv
@@ -2678,10 +2716,12 @@ fn an_announcing_hook_prints_exactly_the_pointer_line() {
         "stdout must be the pointer and nothing else"
     );
 
-    let outcome = sole_hook_log_outcome(state.path(), "sess-announce");
-    assert_eq!(
-        outcome, "written conv-a startup",
-        "the identity half must still have run and written its report"
+    assert_sole_hook_log_outcome(
+        state.path(),
+        "sess-announce",
+        "written",
+        Some(""),
+        Some(("conv-a", "startup")),
     );
 }
 
@@ -3151,7 +3191,8 @@ async fn wait_for_hook_log_words(
         let text = std::fs::read_to_string(&path).unwrap_or_default();
         let seen = text
             .lines()
-            .filter(|line| line.split_whitespace().nth(1) == Some(word))
+            .filter_map(parse_log_line)
+            .filter(|entry| entry.word == word)
             .count();
         if seen >= count {
             return;
@@ -3240,7 +3281,10 @@ async fn a_report_made_while_no_supervisor_runs_is_applied_when_one_starts() {
         "the applied report is settled and removed"
     );
     assert!(
-        hook_log_at(state.path(), &session.id).contains(" acked conv-offline "),
+        hook_log_at(state.path(), &session.id)
+            .lines()
+            .filter_map(parse_log_line)
+            .any(|entry| entry.word == "acked" && entry.identity() == Some("conv-offline")),
         "the supervisor's verdict sits beside the hook's line"
     );
 }
@@ -3356,7 +3400,8 @@ async fn grok_selection_survives_enrichments_made_while_no_supervisor_runs() {
     );
     let acked = hook_log_at(state.path(), &session.id)
         .lines()
-        .filter(|line| line.split_whitespace().nth(1) == Some("acked"))
+        .filter_map(parse_log_line)
+        .filter(|entry| entry.word == "acked")
         .count();
     assert_eq!(
         acked, 2,
@@ -3475,7 +3520,8 @@ async fn grok_parent_corrects_a_child_first_selection() {
     assert_eq!(
         hook_log(&h, &session.id)
             .lines()
-            .filter(|line| line.split_whitespace().nth(1) == Some("acked"))
+            .filter_map(parse_log_line)
+            .filter(|entry| entry.word == "acked")
             .count(),
         2,
         "the parent's early Stop is acknowledged without taking over"
@@ -3624,9 +3670,12 @@ async fn a_report_from_an_earlier_launch_is_discarded() {
     );
     let log = hook_log(&h, &session.id);
     assert!(
-        log.lines().any(|line| line.contains(" refused conflict ")
-            && line.contains("cannot be attributed")
-            && line.contains(" conv-old ")),
+        log.lines().filter_map(parse_log_line).any(|entry| {
+            entry.word == "refused"
+                && entry.detail.starts_with("conflict ")
+                && entry.detail.contains("cannot be attributed")
+                && entry.identity() == Some("conv-old")
+        }),
         "the refusal names the launch check: {log}"
     );
 }

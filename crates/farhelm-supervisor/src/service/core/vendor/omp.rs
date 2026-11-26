@@ -81,7 +81,7 @@ impl Supervisor {
         kind: AgentKind,
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
-    ) -> Result<(), RequestError> {
+    ) -> Result<crate::hook_report::ReportAdmission, RequestError> {
         let ReportedConversation {
             vendor: _,
             conversation,
