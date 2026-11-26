@@ -62,6 +62,7 @@ mod foundations;
 mod hosts;
 mod launcher;
 mod other_dialogs;
+mod render_budget_tests;
 mod session_list;
 mod session_pane;
 mod settings;
@@ -110,6 +111,24 @@ const MAX_STAGING_FRAMES: usize = 24;
 /// Once a scene is ready, its icons may still be decoding on the background executor. Allow several captures to
 /// get two consecutive identical ones. Unstable pixels fail here before any comparison with a reference.
 const MAX_SETTLE_FRAMES: usize = 6;
+
+/// The most times one appearance's [`SceneView`] may render before the harness gives up on it as a fixture that never
+/// settles. Past it, [`SceneView::render`] panics with the scene's name, which fails that appearance like any other
+/// render panic, and the batch goes on with the next one.
+///
+/// NOTE: [`MAX_STAGING_FRAMES`] does not cover this case, and raising it would not help. `settle` spends a staging frame
+/// once per pass of its loop, but GPUI's test mode redraws a dirty window inside its own effect flush and keeps going
+/// (`App::flush_effects` in `vendor/gpui-pre/src/app.rs`). A fixture whose draw defers work that dirties the window
+/// again (a notify, a dispatched event, a second button press) therefore loops inside one `run_until_parked` or
+/// `update_window` call, and the staging check is never reached. On 2026-11-25 two such fixtures each held a
+/// renderer at full CPU for hours before someone killed it. Counting renders catches that loop wherever it spins,
+/// because every turn of it draws the scene.
+///
+/// The bound is about nine times the measured need. On 2026-11-25, a full Linux comparison of all 556 appearances
+/// rendered each one between 5 and 22 times (the most: `launcher-template-save-after-undo`). The re-arming fixtures in
+/// `render_budget_tests` reach it in under a second. If a new scene legitimately needs more, raise the bound and
+/// record the new measurement here; do not raise it to quiet a scene that never settles.
+const MAX_SCENE_RENDERS: u32 = 200;
 
 /// Both views show the same registration to pin the identity and controls on either side of a launch.
 fn custom_agent() -> farhelm_proto::custom_agents::CustomAgent {
@@ -169,6 +188,9 @@ struct SceneState {
     advance_clock: Rc<Cell<Option<std::time::Duration>>>,
     /// Ends deliberately pending fixture work after its frame has been captured.
     after_capture: Rc<Cell<Option<AfterCapture>>>,
+    /// How many times [`SceneView::render`] has run for this appearance, checked against [`MAX_SCENE_RENDERS`]. Each
+    /// appearance gets a new `SceneState` and a new headless app in `render_capture`, so the count never needs a reset.
+    renders: Rc<Cell<u32>>,
 }
 
 /// The view a scene is drawn in: the window's ground, then the scene, centered, with the layer manager's overlay.
@@ -179,7 +201,31 @@ struct SceneView {
 }
 
 impl Render for SceneView {
+    /// Draws the scene, and first enforces [`MAX_SCENE_RENDERS`].
+    ///
+    /// The first render past the bound panics, naming the scene. From what the vendored GPUI code shows, that panic
+    /// also ends the appearance's view and window (GPUI drops both while unwinding and never puts them back), so no
+    /// later render of this appearance should happen; any that did would get the same check.
+    ///
+    /// It never panics while the thread is already unwinding: Rust aborts the whole process on a panic during a
+    /// panic, which would end the hang but also lose every scene left in the batch. A render past the bound in that
+    /// state draws nothing rather than the scene, so the scene's draw cannot re-arm itself any further.
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let renders = self.state.renders.get().saturating_add(1);
+        self.state.renders.set(renders);
+        let over_budget = renders > MAX_SCENE_RENDERS;
+        if over_budget && !std::thread::panicking() {
+            panic!(
+                "scene {} redrew {renders} times without settling; a fixture step is probably re-arming itself \
+                 every frame (see Pending)",
+                self.scene.name
+            );
+        }
+        let content = if over_budget {
+            div().into_any_element()
+        } else {
+            (self.scene.draw)(&self.state, window, cx)
+        };
         let palette = theme::palette(cx);
         let ground = div()
             .size_full()
@@ -189,7 +235,7 @@ impl Render for SceneView {
             .p(px(12.))
             .bg(theme::color(palette.bg_0))
             .font_family(crate::assets::UI_FONT)
-            .child((self.scene.draw)(&self.state, window, cx));
+            .child(content);
         root::wrap(ground, &self.root, window, cx)
     }
 }
@@ -473,6 +519,8 @@ fn defer_after(state: &SceneState, window: &mut Window, cx: &mut App) {
 
 /// A scene's one remaining step (opening a menu, scrolling a dialog), kept among the scene's kept values until
 /// a frame makes it possible. It runs once: run on every frame, its own redraw would ask for the next frame forever.
+/// A step that checks its result on the next frame belongs behind this guard too; retrying the action until the result
+/// shows is the same loop. [`MAX_SCENE_RENDERS`] turns such a loop into a failed scene rather than a hung renderer.
 struct Pending(Cell<bool>);
 
 /// Whether the scene's [`Pending`] step is still to run, marking it run.
@@ -2231,6 +2279,7 @@ fn settle(
     cx: &mut gpui::HeadlessAppContext,
     window: gpui::AnyWindowHandle,
     view: &Entity<SceneView>,
+    capture: Capture,
 ) -> anyhow::Result<image::RgbaImage> {
     let mut previous = None;
     let mut remaining_staging = MAX_STAGING_FRAMES;
@@ -2284,7 +2333,7 @@ fn settle(
             remaining_staging -= 1;
             previous = None;
         }
-        let capture = cx.capture_screenshot(window)?;
+        let capture = capture(cx, window)?;
         if previous.as_ref() == Some(&capture) {
             return Ok(capture);
         }
@@ -2381,11 +2430,32 @@ impl GoldenRun {
     }
 }
 
+/// Takes a settled frame's pixels. The goldens read them back from the headless renderer.
+type Capture =
+    fn(&mut gpui::HeadlessAppContext, gpui::AnyWindowHandle) -> anyhow::Result<image::RgbaImage>;
+
+/// Where a batch gets each appearance's headless app and its pixels.
+///
+/// The goldens use [`GOLDEN_RENDERER`]. The harness's own tests use one without a renderer (`render_budget_tests`), so
+/// they can run in an ordinary test run. Everything else (the scene's window, setup, staging, the render budget and the
+/// panic handling) is the same code either way.
+struct Renderer {
+    headless: fn() -> anyhow::Result<gpui::HeadlessAppContext>,
+    capture: Capture,
+}
+
+/// The platform's headless renderer and its real pixels.
+const GOLDEN_RENDERER: Renderer = Renderer {
+    headless: test_support::headless,
+    capture: |cx, window| cx.capture_screenshot(window),
+};
+
 /// Draw one appearance in the headless app that belongs to it.
 fn render_capture(
     cx: &mut gpui::HeadlessAppContext,
     scene: &'static Scene,
     preference: Preference,
+    capture: Capture,
 ) -> anyhow::Result<image::RgbaImage> {
     cx.update(|cx| {
         theme::follow_system(WindowAppearance::Light, cx);
@@ -2414,6 +2484,7 @@ fn render_capture(
             hover: Rc::new(Cell::new(None)),
             advance_clock: Rc::new(Cell::new(None)),
             after_capture: Rc::new(Cell::new(None)),
+            renders: Rc::new(Cell::new(0)),
         };
         let scene_view = cx.new(|cx| SceneView {
             scene,
@@ -2426,20 +2497,24 @@ fn render_capture(
     let view = view.ok_or_else(|| anyhow::anyhow!("the scene view was not built"))?;
     // One frame first, so what the scene draws (an anchor's bounds, a focusable button) exists for its setup.
     cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))?;
+    // Cheap clones: handles and shared cells. Taken before anything can fail, because a panic inside a render (the
+    // render budget's, or a fixture's own) unwinds while GPUI holds the view, and GPUI drops it on the way out: reading
+    // it afterwards panics with "already being updated" instead.
+    let state = cx.update(|cx| view.read(cx).state.clone());
     cx.update_window(window.into(), |_, window, cx| {
-        // Cheap clones: handles and shared cells.
-        let staged = view.read(cx).state.clone();
-        (scene.setup)(&staged, window, cx);
+        (scene.setup)(&state, window, cx)
     })?;
-    let result = catch_render_panic(|| settle(cx, window.into(), &view));
-    cx.update(|cx| {
-        let state = &view.read(cx).state;
+    let result = catch_render_panic(|| settle(cx, window.into(), &view, capture));
+    // The scene's cleanup runs after a failed settle too, but whatever it panics with must not replace the settle's
+    // failure, which is the one that says what went wrong.
+    let cleanup = catch_render_panic(|| {
         if let Some(after) = state.after_capture.take() {
-            after(state);
+            after(&state);
         }
+        cx.run_until_parked();
+        Ok(())
     });
-    cx.run_until_parked();
-    result
+    result.and_then(|screenshot| cleanup.map(|()| screenshot))
 }
 
 /// Give a fixture panic the same scene-level context as an ordinary render error. The panic hook still reports
@@ -2485,6 +2560,40 @@ fn selected_scenes() -> anyhow::Result<Vec<&'static Scene>> {
         .collect()
 }
 
+/// Draw every appearance of `scenes` in catalog order (light, then dark), each in a headless app of its own, and hand
+/// each one's pixels or failure to `report` before starting the next.
+///
+/// A failed appearance never stops the batch: a render error, a fixture panic and the [`MAX_SCENE_RENDERS`] panic all
+/// arrive at `report` as an `Err` naming the scene, and the next appearance starts in a new app. The runner relies on
+/// the order: the first appearance of a stuck worker's group that has no outcome receipt is the one it names as stuck.
+fn render_batch(
+    scenes: &[&'static Scene],
+    renderer: &Renderer,
+    mut report: impl FnMut(String, anyhow::Result<image::RgbaImage>),
+) {
+    for scene in scenes {
+        for (appearance, preference) in [("light", Preference::Light), ("dark", Preference::Dark)] {
+            let name = format!("{}--{appearance}.png", scene.name);
+            let result = catch_render_panic(|| {
+                let mut cx = (renderer.headless)()?;
+                // Teardown may flush deferred fixture callbacks. Catch the render's panic first so teardown runs
+                // outside that unwind, then teardown's own: a render that failed usually leaves the app broken, and
+                // the panic its teardown then hits must not replace the render's failure, which names the cause.
+                let rendered = catch_render_panic(|| {
+                    render_capture(&mut cx, scene, preference, renderer.capture)
+                });
+                let teardown = catch_render_panic(move || {
+                    drop(cx);
+                    Ok(())
+                })
+                .map_err(|error| error.context("tearing down the scene's headless app"));
+                rendered.and_then(|screenshot| teardown.map(|()| screenshot))
+            });
+            report(name, result);
+        }
+    }
+}
+
 /// Reports scene failures together so a broken fixture cannot hide failures or changes further down the catalog.
 #[test]
 #[ignore = "needs the headless renderer selected; run scripts/check-gui-goldens.py"]
@@ -2492,29 +2601,21 @@ fn component_goldens() -> anyhow::Result<()> {
     let run = GoldenRun::from_env()?;
     let outcomes = std::env::var_os("FARHELM_GOLDEN_OUTCOMES_DIR").map(PathBuf::from);
     let mut failures = Vec::new();
-    for scene in selected_scenes()? {
-        for (appearance, preference) in [("light", Preference::Light), ("dark", Preference::Dark)] {
-            let name = format!("{}--{appearance}.png", scene.name);
-            let result = catch_render_panic(|| {
-                let mut cx = test_support::headless()?;
-                // Teardown may flush deferred fixture callbacks. Catch the render's panic first so teardown runs
-                // outside that unwind. The outer catch can then report a teardown panic and the batch continues.
-                catch_render_panic(|| render_capture(&mut cx, scene, preference))
-            })
-            .and_then(|screenshot| run.check(&name, &screenshot));
-            let outcome = result.unwrap_or_else(|error| changes::RenderOutcome::Failed {
+    render_batch(&selected_scenes()?, &GOLDEN_RENDERER, |name, result| {
+        let outcome = result
+            .and_then(|screenshot| run.check(&name, &screenshot))
+            .unwrap_or_else(|error| changes::RenderOutcome::Failed {
                 reason: format!("{error:#}"),
             });
-            if let Some(reason) = outcome.problem() {
-                failures.push(format!("{name}: {reason}"));
-            }
-            if let Some(directory) = &outcomes
-                && let Err(error) = changes::write_outcome(directory, Path::new(&name), &outcome)
-            {
-                failures.push(format!("{name}: could not write render outcome: {error:#}"));
-            }
+        if let Some(reason) = outcome.problem() {
+            failures.push(format!("{name}: {reason}"));
         }
-    }
+        if let Some(directory) = &outcomes
+            && let Err(error) = changes::write_outcome(directory, Path::new(&name), &outcome)
+        {
+            failures.push(format!("{name}: could not write render outcome: {error:#}"));
+        }
+    });
     anyhow::ensure!(
         failures.is_empty(),
         "golden failures:\n{}",
