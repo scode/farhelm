@@ -4730,9 +4730,14 @@ pub(crate) async fn recipe_places(State(state): State<Arc<AppState>>) -> axum::r
         let mut views = Vec::new();
         for (name, recipe, build) in recipes {
             let mut candidates = build.recorded_places();
+            // A failure kept only in the build registry (one with no recipe
+            // entry to store it, such as a refused first Rebuild) counts as
+            // visible state too, or an unusable place would hide its reason.
+            let visible = |place: farhelm_proto::Place| {
+                build.has_visible_state(place) || builds.has_unrecorded_failure(&name, place)
+            };
             for place in &places {
-                if (recipe.base.supports(place.place.provider())
-                    || build.has_visible_state(place.place))
+                if (recipe.base.supports(place.place.provider()) || visible(place.place))
                     && !candidates.contains(&place.place)
                 {
                     candidates.push(place.place);
@@ -4754,7 +4759,7 @@ pub(crate) async fn recipe_places(State(state): State<Arc<AppState>>) -> axum::r
                     || match listed {
                         Some(_) => {
                             view.unavailable_reason.is_none()
-                                || build.has_visible_state(place)
+                                || visible(place)
                                 || recipe.base.sole_provider() == Some(place.provider())
                         }
                         None => build.has_resources(place),

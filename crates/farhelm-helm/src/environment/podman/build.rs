@@ -62,6 +62,18 @@ truncate -s 0 /etc/machine-id || fail
 rm -f "$log" || fail
 "#;
 
+/// The registry entry and place identity that passed one preparation's
+/// admission check ([`PodmanPlaces::fresh`](crate::environment::podman_probe::PodmanPlaces::fresh)).
+/// Both helper reservations of that preparation (build and prepare), one of
+/// which is its first ownership write at a place, are fenced to exactly
+/// these, so settings changed after the check cannot receive the ownership
+/// it records. Other bookkeeping still looks the host up by ID.
+#[derive(Clone, Copy)]
+pub(super) struct Admitted<'a> {
+    pub(super) row: &'a HostRow,
+    pub(super) identity: &'a PodmanPlaceIdentity,
+}
+
 /// Registry bases need inspection before a helper runs. A previously built
 /// layer already belongs to this recipe and can be used directly by ID.
 enum HelperBase<'a> {
@@ -193,12 +205,13 @@ impl Podman {
         &self,
         name: &str,
         recipe: &Recipe,
-        place: HostId,
+        admitted: Admitted<'_>,
         progress: &tokio::sync::watch::Sender<PodmanProgress>,
         events: &FleetEvents,
         cancel: &std::sync::atomic::AtomicBool,
         rebuild: bool,
     ) -> anyhow::Result<BuiltImage> {
+        let place = admitted.row.id;
         if !rebuild && let Some(image) = self.state(name, place).await?.image {
             let identity = self.recipe_place_identity(place).await?;
             let target = PlaceTarget {
@@ -209,18 +222,20 @@ impl Podman {
                 return Ok(image);
             }
         }
-        let (expected, _, ready) = self.place(place).await?;
-        let identity = ready
-            .identity
-            .as_ref()
-            .map_err(|reason| anyhow::Error::msg(*reason))?;
+        // The build helper's reservation is the first recipe write at a place
+        // with no entry yet. It names the row and identity that passed
+        // admission, so a route edited since then fails that write's fence
+        // instead of recording ownership under the new settings. The runtime
+        // observation must still see the admitted identity for the commands.
+        let (expected, identity) = (admitted.row, admitted.identity);
         let target = PlaceTarget::claimed(place, identity);
+        let (_, _, ready) = self.place(target).await?;
         check(cancel)?;
         enter(progress, events, "Preparing the recipe's base image");
         let managed;
         let (source, requested) = match &recipe.base {
             RecipeBase::ManagedUbuntu => {
-                managed = self.managed_base(name, &expected, identity).await?;
+                managed = self.managed_base(name, expected, identity).await?;
                 (HelperBase::Built(&managed), "ubuntu")
             }
             RecipeBase::ContainerImage { reference, user } => {
@@ -231,7 +246,7 @@ impl Podman {
             }
         };
         let id = self
-            .helper(name, &expected, identity, "build", source)
+            .helper(name, expected, identity, "build", source)
             .await?;
         let user = self.login(target, &id, requested).await?;
         self.script(
@@ -316,6 +331,12 @@ impl Podman {
 
     /// Installation runs outside source exclusion. Only the initial Running
     /// boundary and final publication serialize with source retirement.
+    ///
+    /// Every preparation, launch or Rebuild, passes the fresh place check
+    /// before it writes recipe state, and its first write is fenced to the
+    /// row and identity that passed ([`Admitted`]). A failure is stored only
+    /// in an entry that already exists; otherwise the build registry keeps it
+    /// for Settings, so a refused check never creates an empty build record.
     #[allow(
         clippy::too_many_arguments,
         reason = "frozen recipe/place and job progress, cancellation and rebuild admission have distinct owners"
@@ -333,16 +354,22 @@ impl Podman {
         let mut preparation_started = false;
         let mut result = async {
             check(&cancel)?;
-            self.edit(name, place, |state| {
+            // Admission comes before any write, for launches and Rebuild
+            // alike: a place that fails it must not gain a recipe entry, and
+            // the failure is kept in memory below instead.
+            let (admitted_row, ready) = self.0.places.fresh(&self.0.store, place).await?;
+            let identity = ready.identity.map_err(anyhow::Error::msg)?;
+            let admitted = Admitted {
+                row: &admitted_row,
+                identity: &identity,
+            };
+            self.edit_existing_at(name, admitted.row, Some(admitted.identity), |state| {
                 state.last_failure = None;
                 state.last_failure_from_rebuild = false;
             })
             .await?;
-            if rebuild {
-                self.0.places.fresh(&self.0.store, place).await?;
-            }
             preparation_started = true;
-            self.prepare_images_owned(name, recipe, place, progress, &events, &cancel, rebuild)
+            self.prepare_images_owned(name, recipe, admitted, progress, &events, &cancel, rebuild)
                 .await
         }
         .await;
@@ -362,12 +389,20 @@ impl Podman {
         }
         if let Err(error) = &result {
             let reason = crate::tensorlake::shell::shown(&error.to_string());
-            let _ = self
-                .edit(name, place, move |state| {
-                    state.last_failure = Some(reason);
+            let saved = reason.clone();
+            let recorded = self
+                .edit_existing(name, place, move |state| {
+                    state.last_failure = Some(saved);
                     state.last_failure_from_rebuild = rebuild;
                 })
                 .await;
+            // Only a place that already has an entry keeps its failure there.
+            // Creating one here would leave an empty build record behind a
+            // refused admission (or a refused first write), so Settings reads
+            // that failure from the registry until the next attempt.
+            if !matches!(recorded, Ok(true)) {
+                self.0.builds.remember_podman_failure(name, place, reason);
+            }
         }
         events.bump();
         result
@@ -384,12 +419,13 @@ impl Podman {
         &self,
         name: &str,
         recipe: &Recipe,
-        place: HostId,
+        admitted: Admitted<'_>,
         progress: tokio::sync::watch::Sender<PodmanProgress>,
         events: &FleetEvents,
         cancel: &std::sync::atomic::AtomicBool,
         rebuild: bool,
     ) -> anyhow::Result<PreparedImage> {
+        let place = admitted.row.id;
         self.reconcile_helpers(name, place).await?;
         loop {
             check(cancel)?;
@@ -397,7 +433,7 @@ impl Podman {
                 return Ok(prepared);
             }
             let source = self
-                .software(name, recipe, place, &progress, events, cancel, rebuild)
+                .software(name, recipe, admitted, &progress, events, cancel, rebuild)
                 .await?;
             let source_guard = self.0.builds.lock_podman_use(name, place).await?;
             if !rebuild
@@ -412,16 +448,16 @@ impl Podman {
                 continue;
             }
             enter(&progress, events, "Preparing Farhelm's installation");
-            let (expected, _, ready) = self.place(place).await?;
-            let identity = ready
-                .identity
-                .as_ref()
-                .map_err(|reason| anyhow::Error::msg(*reason))?;
+            // Like the build helper's, this reservation is fenced to the
+            // admitted row and identity. When only preparation is stale (a
+            // Farhelm update, say) it is the job's first ownership write.
+            let (expected, identity) = (admitted.row, admitted.identity);
             let target = PlaceTarget::claimed(place, identity);
+            self.place(target).await?;
             let id = self
                 .helper(
                     name,
-                    &expected,
+                    expected,
                     identity,
                     "prepare",
                     HelperBase::Built(&source.id),
@@ -608,6 +644,46 @@ impl Podman {
             .find(|row| row.id == place)
             .context("the container place was removed before its state could be recorded")?;
         self.edit_at(name, &expected, None, edit).await
+    }
+
+    /// Edit the place's entry only when one already exists, never creating
+    /// it. `Ok(false)` means there was none. Bookkeeping that must not leave
+    /// an empty record behind (a failure, or clearing one) goes through here.
+    async fn edit_existing<F>(&self, name: &str, place: HostId, edit: F) -> anyhow::Result<bool>
+    where
+        F: FnOnce(&mut PodmanRecipeState) + Send + 'static,
+    {
+        let expected = self
+            .0
+            .store
+            .list_hosts()
+            .await?
+            .into_iter()
+            .find(|row| row.id == place)
+            .context("the container place was removed before its state could be recorded")?;
+        self.edit_existing_at(name, &expected, None, edit).await
+    }
+
+    /// [`Self::edit_existing`] fenced to an exact row and, with `claim`, to
+    /// the place claim that row holds, as [`Self::edit_at`] fences.
+    async fn edit_existing_at<F>(
+        &self,
+        name: &str,
+        expected: &HostRow,
+        claim: Option<&PodmanPlaceIdentity>,
+        edit: F,
+    ) -> anyhow::Result<bool>
+    where
+        F: FnOnce(&mut PodmanRecipeState) + Send + 'static,
+    {
+        let place = expected.id;
+        self.0
+            .store
+            .update_recipe_place_state(name, expected, claim, move |_, state| {
+                state.podman.get_mut(&place).map(edit).is_some()
+            })
+            .await?
+            .context("the recipe disappeared before its state could be saved")
     }
 
     /// New helper ownership requires the claim paired with the observed route.

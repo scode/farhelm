@@ -228,27 +228,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   exceeded the triage size limit. See `SPEC.md` under “One GUI at a time” and `SPEC_impl.md` under “Questions: the
   prompt”. Plan: `plans/queue/settings-wait-while-saving.md`.
 
-- **Show container recipe admission failures before recording build ownership.** An explicit Rebuild can answer Accepted
-  before a fresh Podman check fails. The existing recipe place record keeps that failure visible after the job ends.
-  Suppressing the record alone loses the reason if the old host check still says Ready, for example after a refresh
-  times out. Return the refusal before acceptance or keep it in the existing build status without creating a recipe
-  place entry. Fence the first recipe place write to the host settings and machine/account claim that passed admission.
-  Looking up the host again by row ID can use different settings after a retarget or an SSH mode change. Cover a first
-  Rebuild that fails admission and still shows the reason, plus a route change between admission and the first write.
-  Recipe Delete now handles historical records with no resources. Preventing those records at the admission boundary
-  also needs a way to show the outcome of an already accepted Rebuild.
-
-  Recheck admission when launch preparation or Rebuild starts, before each new helper's base pull, and before each
-  helper create. Dispatch from the route and Podman executable that passed the final check. A separate runtime lookup
-  can wait on another probe and accept a capable engine even after the ordinary Farhelm connection refuses new work.
-  Keep that runtime path for existing resources. Check for cancellation when the admission and pull waits settle. Clear
-  the helper's name and start marker if admission refuses or cancellation arrives before the create is sent. Keep the
-  existing recovery rules if a create might have been sent. Test a refusal while the final route is resolving and one
-  after a successful pull. Confirm both leave no create and clear the reservation, and cleanup of older work can still
-  run. The connection proof and cached-observation rules this shares are in
-  [Podman places, creation and images](SPEC_impl.md#podman-places-creation-and-images). Plan:
-  `plans/queue/podman-recipe-admission.md`.
-
 - **Keep host proxy settings out of Podman recipe images.** Recipe build and preparation helpers write
   `90-farhelm-proxy.conf` for their systemd user managers. A captured image can carry that file, including passwords, in
   the host account's Podman storage. A new container can then keep a proxy the host removed, because systemd read the

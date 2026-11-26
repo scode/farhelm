@@ -439,6 +439,13 @@ struct Registry {
     /// senders bound retained progress and let concurrent launches join one
     /// outcome rather than starting another build after the first one fails.
     podman_jobs: HashMap<(String, crate::store::HostId), PodmanJob>,
+    /// The latest failure of place work that had no recipe entry to keep it
+    /// in, such as a first Rebuild refused by the fresh Podman check. Writing
+    /// it to storage would create an empty build record for a place that
+    /// never owned anything. It lives only in this process: admitting the
+    /// next job for that recipe and place clears it, and so does admitting
+    /// the recipe's Delete.
+    podman_failures: HashMap<(String, crate::store::HostId), String>,
 }
 
 /// A Rebuild may accept launch joiners, while a preparation-only job cannot
@@ -690,22 +697,26 @@ impl RecipeBuilds {
                                 || state.prepare_started_at.is_some()
                                 || !state.retired_images.is_empty()
                         });
-                    let failure = current.and_then(|state| {
-                        state.last_failure.as_ref().map(|reason| {
-                            if unavailable_reason.is_none()
-                                && state.last_failure_from_rebuild
-                                && state.image.is_some()
-                                && state.prepared.is_some()
-                                && stale.is_none()
-                            {
-                                format!(
-                                    "Rebuild failed: {reason}. New sessions use the previous image."
-                                )
-                            } else {
-                                reason.clone()
-                            }
+                    // A failure with no entry to keep it in comes from the
+                    // registry; it never had an image to fall back on.
+                    let failure = current
+                        .and_then(|state| {
+                            state.last_failure.as_ref().map(|reason| {
+                                if unavailable_reason.is_none()
+                                    && state.last_failure_from_rebuild
+                                    && state.image.is_some()
+                                    && state.prepared.is_some()
+                                    && stale.is_none()
+                                {
+                                    format!(
+                                        "Rebuild failed: {reason}. New sessions use the previous image."
+                                    )
+                                } else {
+                                    reason.clone()
+                                }
+                            })
                         })
-                    });
+                        .or_else(|| self.unrecorded_podman_failure(name, host));
                     (
                         current.and_then(|state| state.image.as_ref().map(|image| image.built_at)),
                         current.and_then(|state| {
@@ -785,6 +796,9 @@ impl RecipeBuilds {
         }
         let (progress, receiver) = watch::channel(PodmanProgress::default());
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // A new attempt replaces the previous one's unrecorded failure, the
+        // way a stored failure is cleared once preparation passes admission.
+        registry.podman_failures.remove(&key);
         registry.podman_jobs.insert(
             key.clone(),
             PodmanJob {
@@ -815,6 +829,51 @@ impl RecipeBuilds {
         drop(registry);
         events.bump();
         Ok(receiver)
+    }
+
+    /// Keep a place job's failure that had no recipe entry to be stored in
+    /// (see [`Registry::podman_failures`]), for Settings to show.
+    ///
+    /// Nothing is kept while the recipe is being deleted. Delete clears the
+    /// recipe's failures when it is admitted and only then cancels its jobs,
+    /// so a job it cancels fails after that clear; keeping that failure would
+    /// show it on a recipe later created under the same name.
+    pub(crate) fn remember_podman_failure(
+        &self,
+        name: &str,
+        place: crate::store::HostId,
+        reason: String,
+    ) {
+        let mut registry = self.registry();
+        if !registry.deleting.contains(name) {
+            registry
+                .podman_failures
+                .insert((name.to_owned(), place), reason);
+        }
+    }
+
+    /// Whether this registry holds a failure for the place that its recipe
+    /// state does not record. Settings shows a place's card while this holds,
+    /// as it does for a stored failure ([`RecipeState::has_visible_state`]).
+    /// Tensorlake always stores its failures, so only Podman places answer
+    /// yes.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub(crate) fn has_unrecorded_failure(&self, name: &str, place: farhelm_proto::Place) -> bool {
+        match place {
+            farhelm_proto::Place::TensorlakeAccount => false,
+            farhelm_proto::Place::PodmanHost(host) => {
+                self.unrecorded_podman_failure(name, host).is_some()
+            }
+        }
+    }
+
+    /// The failure [`Self::remember_podman_failure`] kept for this recipe and
+    /// place, if no later attempt or Delete has cleared it.
+    fn unrecorded_podman_failure(&self, name: &str, place: crate::store::HostId) -> Option<String> {
+        self.registry()
+            .podman_failures
+            .get(&(name.to_owned(), place))
+            .cloned()
     }
 
     /// Select/create and publication share stable place-specific source
@@ -1876,9 +1935,15 @@ impl RecipeBuilds {
         self: &Arc<Self>,
         name: &str,
     ) -> Result<DeleteGuard, CleanupRefusal> {
-        if !self.registry().deleting.insert(name.to_owned()) {
+        let mut registry = self.registry();
+        if !registry.deleting.insert(name.to_owned()) {
             return Err(CleanupRefusal::Deleting);
         }
+        // A recipe created again under this name starts with no failures.
+        registry
+            .podman_failures
+            .retain(|(recipe, _), _| recipe != name);
+        drop(registry);
         Ok(DeleteGuard {
             builds: Arc::clone(self),
             name: name.to_owned(),
