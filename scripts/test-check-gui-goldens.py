@@ -5,11 +5,13 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -372,11 +374,11 @@ class GoldenRunnerTests(unittest.TestCase):
 
         supervisor = runner.run_workers
 
-        def stopped_review(command, requests, env, lock, label):
+        def stopped_review(command, requests, env, lock, label, **options):
             if label == "golden review":
                 self.assertEqual(len(requests), 1)
                 return 128 + signal.SIGTERM
-            return supervisor(command, requests, env, lock, label)
+            return supervisor(command, requests, env, lock, label, **options)
 
         with mock.patch.object(runner, "run_workers", side_effect=stopped_review) as workers:
             status = self.run_suite(render, base={"FARHELM_GOLDENS_DIR": str(self.references)})
@@ -661,6 +663,201 @@ class GoldenRunnerTests(unittest.TestCase):
         )
         self.assertNotIn("incomplete golden render", sys.stderr.getvalue())
         self.assertFalse(self.marker.exists())
+
+    # A renderer that draws the first scene of its group, says so, and then hangs the way a fixture that never
+    # settles does. It records its pid and a ready file beside the captures so the test can see both.
+    STUCK_RENDERER = textwrap.dedent("""\
+        #!/usr/bin/env python3
+        import json
+        import os
+        import sys
+        import time
+        from pathlib import Path
+
+        captures = Path(os.environ["FARHELM_UPDATE_GOLDENS"])
+        outcomes = Path(os.environ["FARHELM_GOLDEN_OUTCOMES_DIR"])
+        first = json.loads(os.environ["FARHELM_GOLDEN_SCENES"])[0]
+        platform = "macos" if sys.platform == "darwin" else sys.platform
+        dest = captures / platform
+        dest.mkdir(exist_ok=True)
+        for appearance in ("light", "dark"):
+            stem = f"{first}--{appearance}"
+            (dest / f"{stem}.png").touch()
+            (outcomes / f"{stem}.json").write_text(json.dumps({"status": "rendered"}))
+        print(f"drew {first}", flush=True)
+        (captures.parent / f"{first}.pid").write_text(str(os.getpid()))
+        (captures.parent / f"{first}.ready").touch()
+        time.sleep(60)
+        (captures.parent / f"{first}.survived").touch()
+        sys.exit(97)
+        """)
+
+    def run_stuck_renderers(self, on_ready, render_timeout):
+        """Run a full update whose two renderers both hang after their first scene, on a clock the test controls.
+
+        The runner's clock stands still until both renderers are ready, then `on_ready` decides what happens; so a
+        loaded machine that starts the children slowly cannot move the deadline past or before the work they did.
+        Returns the run's status, its stdout, and the renderers' pids.
+        """
+        binary = self.tool.WORK / "stuck-renderer"
+        binary.write_text(self.STUCK_RENDERER, encoding="utf-8")
+        binary.chmod(0o700)
+        ready = [self.tool.WORK / f"{first}.ready" for first in ("first", "launcher-new")]
+        start = time.monotonic()
+
+        def clock():
+            # Give up waiting for the premise after half a minute rather than letting a broken fixture hang the test.
+            if all(path.is_file() for path in ready) or time.monotonic() - start > 30:
+                return on_ready(start)
+            return start
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), \
+                mock.patch.object(runner, "build_binary", return_value=binary), \
+                mock.patch.object(runner, "list_scenes", return_value=self.names), \
+                mock.patch.object(runner.os, "sched_getaffinity", return_value={0, 1}, create=True), \
+                mock.patch.object(runner, "time", SimpleNamespace(monotonic=clock)):
+            status = runner.run_suite(self.tool, {}, True, [], [], [], 2, render_timeout)
+        self.assertTrue(all(path.is_file() for path in ready), f"the renderers never became ready: {output.getvalue()}")
+        pids = [int((self.tool.WORK / f"{first}.pid").read_text()) for first in ("first", "launcher-new")]
+        return status, output.getvalue(), pids
+
+    def assert_gone(self, pids):
+        """The renderers were killed, not waited out: neither reached the end of its sleep, and the runner reaped both,
+        so neither has a process left."""
+        for first in ("first", "launcher-new"):
+            self.assertFalse((self.tool.WORK / f"{first}.survived").exists(), f"renderer for {first} was not killed")
+        for pid in pids:
+            with self.assertRaises(ProcessLookupError, msg=f"renderer {pid} is still running"):
+                os.kill(pid, 0)
+
+    def test_a_render_past_its_deadline_is_killed_and_names_the_stuck_appearance(self):
+        """The deadline is the backstop for a renderer that hangs without redrawing, which the render budget cannot see.
+
+        Before it existed, a hung renderer held an executor for hours, and the output stopped at a job header that did
+        not say which scene was stuck. Spec: with both renderers hanging after their group's first scene, a 1-second
+        deadline kills both, prints each job's partial output and the first appearance of its group without a receipt
+        (in catalog order, light before dark), and returns 124. The run then reports the missing renders as a failed
+        render would, on the changes page, and does not certify the update.
+        """
+        status, output, pids = self.run_stuck_renderers(lambda start: start + 2, 1)
+        self.assertEqual(status, runner.TIMEOUT_STATUS, output)
+        self.assert_gone(pids)
+        self.assertIn("[goldens job 1/2, partial output]\ndrew first\n", output)
+        self.assertIn("[goldens job 2/2, partial output]\ndrew launcher-new\n", output)
+        self.assertIn("renderer job 1/2 exceeded 1s: stuck on launcher-search--light", output)
+        self.assertIn("renderer job 2/2 exceeded 1s: stuck on last--light", output)
+        self.assertIn("incomplete golden render", sys.stderr.getvalue())
+        page = self.page.read_text(encoding="utf-8")
+        self.assertIn("<code>launcher-search</code> <span>· light</span> · Missing render", page)
+        self.assertIn("<code>last</code> <span>· dark</span> · Missing render", page)
+        self.assertNotIn("<code>first</code> <span>· light</span> · Missing render", page)
+        self.assertNotIn("<code>launcher-new</code> <span>· dark</span> · Missing render", page)
+        self.assertFalse(self.marker.exists())
+
+    def test_a_stopped_render_prints_its_partial_logs(self):
+        """An operator who stops a hung run needs to see what it was doing; before this, a stopped run printed nothing.
+
+        Spec: SIGTERM while both renderers hang kills both, prints each job's partial output, returns 128 plus the
+        signal, and neither reports a deadline nor builds the changes page.
+        """
+        def stop(start):
+            signal.raise_signal(signal.SIGTERM)
+            return start
+
+        status, output, pids = self.run_stuck_renderers(stop, 3600)
+        self.assertEqual(status, 128 + signal.SIGTERM, output)
+        self.assert_gone(pids)
+        self.assertIn("[goldens job 1/2, partial output]\ndrew first\n", output)
+        self.assertIn("[goldens job 2/2, partial output]\ndrew launcher-new\n", output)
+        self.assertNotIn("exceeded", output)
+        self.assertFalse(self.page.parent.exists())
+        self.assertFalse(self.marker.exists())
+
+    @staticmethod
+    def past_the_deadline():
+        """A runner clock that reads 0 when the deadline is set and 100 seconds later on every read after that."""
+        reads = iter([0.])
+        return SimpleNamespace(monotonic=lambda: next(reads, 100.))
+
+    @staticmethod
+    def stand_in(status, *, running=False):
+        """A stand-in child that has ended with `status`, or with `running`, one that runs until it is killed.
+
+        A running one gives up after 1000 timed waits and ends with 97, as if it had finished on its own, so a runner
+        that never times it out fails the test on that status instead of spinning forever.
+        """
+        child = mock.Mock()
+        child.returncode = None if running else status
+        killed = []
+        waits = []
+
+        def poll():
+            return child.returncode
+
+        def wait(*, timeout=None):
+            if child.returncode is None and timeout is not None:
+                waits.append(timeout)
+                if len(waits) < 1000:
+                    raise subprocess.TimeoutExpired("stand-in", timeout)
+                child.returncode = 97
+            return child.returncode
+
+        def kill():
+            killed.append(True)
+            child.returncode = status
+
+        child.poll.side_effect = poll
+        child.wait.side_effect = wait
+        child.kill.side_effect = kill
+        child.killed = killed
+        return child
+
+    def test_jobs_that_ended_before_the_deadline_was_noticed_are_not_timed_out(self):
+        """Copying one job's log can take the runner past the deadline while the next job has already exited, and
+        calling that a timeout would throw away a complete render. Spec: with the clock past the deadline, jobs that
+        already exited are reported as they ended, and the run returns their status rather than 124."""
+        children = [self.stand_in(0), self.stand_in(0)]
+        with mock.patch.object(runner.subprocess, "Popen", side_effect=children), \
+                mock.patch.object(runner, "time", self.past_the_deadline()):
+            status = runner.render_scenes(["stand-in"], [["first"], ["last"]], {}, None, 1)
+        self.assertEqual(status, 0)
+        self.assertNotIn("exceeded", sys.stdout.getvalue())
+        self.assertEqual([child.killed for child in children], [[], []])
+
+    def test_a_job_a_signal_ended_is_reported_beside_a_timed_out_one(self):
+        """A Ctrl-C at a terminal reaches the renderers too, so a job can be dead of a signal before the runner kills
+        anything; its log is as cut short as a killed one's. Spec: at the deadline, a job still running is killed and
+        named as exceeding it, and a job that had already died of SIGINT has its output marked partial and its signal
+        reported, each printed once, in job order."""
+        children = [self.stand_in(-signal.SIGKILL, running=True), self.stand_in(-signal.SIGINT)]
+        with mock.patch.object(runner.subprocess, "Popen", side_effect=children), \
+                mock.patch.object(runner, "time", self.past_the_deadline()):
+            status = runner.render_scenes(["stand-in"], [["first"], ["last"]], {}, None, 1)
+        self.assertEqual(status, runner.TIMEOUT_STATUS)
+        self.assertEqual([child.killed for child in children], [[True], []])
+        self.assertEqual(sys.stdout.getvalue(), "\n".join([
+            "",
+            "[goldens job 1/2, partial output]",
+            "renderer job 1/2 exceeded 1s: no outcome receipts to say where it was stuck",
+            "",
+            "[goldens job 2/2, partial output]",
+            f"renderer terminated by signal {int(signal.SIGINT)}",
+            "",
+        ]))
+
+    def test_the_stuck_appearance_follows_the_renderers_order(self):
+        """The runner names a stuck appearance only from receipts, so it must read them in the order the renderer
+        draws: scenes in the group's order, light before dark. Spec: with no receipts, the first scene's light
+        appearance is named; with its light receipt only, its dark one; with every receipt present, none."""
+        outcomes = self.tool.WORK / "outcomes"
+        outcomes.mkdir()
+        self.assertEqual(runner.stuck_appearance(outcomes, ["first", "last"]), "first--light")
+        (outcomes / "first--light.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(runner.stuck_appearance(outcomes, ["first", "last"]), "first--dark")
+        for stem in ("first--dark", "last--light", "last--dark"):
+            (outcomes / f"{stem}.json").write_text("{}", encoding="utf-8")
+        self.assertIsNone(runner.stuck_appearance(outcomes, ["first", "last"]))
 
     def test_term_during_spawn_keeps_the_returned_worker_owned(self):
         """TERM during spawn must leave the returned child tracked and reaped, with no later spawns."""

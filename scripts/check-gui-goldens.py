@@ -25,6 +25,12 @@ from a full `--update` run.
 
 Rendering uses up to four worker processes. Pass `--jobs 1` to run in one process.
 
+The render has a wall-clock deadline (`--render-timeout`, 30 minutes by default). A renderer still running at the
+deadline is killed, its partial output is printed with the appearance it was stuck on, and the run fails with status
+124 (as `timeout(1)` does) after reporting the missing renders like any other failed ones. The harness's render budget
+(`MAX_SCENE_RENDERS` in the goldens) already fails a fixture that redraws forever within seconds; the deadline is the
+backstop for a hang that does not redraw.
+
 Extra Cargo build options go before `--`. Only libtest output options (`--nocapture`, `--show-output`, `--quiet`)
 go after it so a second test filter cannot quietly skip the render.
 
@@ -47,6 +53,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import ExitStack, nullcontext
 from functools import partial
 from pathlib import Path
@@ -59,6 +66,15 @@ GUI_CRATE = REPO / "crates/gui/farhelm-gui"
 SCENE_INVENTORY = "FARHELM_GOLDEN_SCENES="
 Item = TypeVar("Item")
 STOP_STATUSES = (128 + signal.SIGINT, 128 + signal.SIGTERM)
+# Distinct from STOP_STATUSES on purpose: a timed-out render still gets its missing appearances reported and its changes
+# page, which an operator's stop does not.
+TIMEOUT_STATUS = 124
+
+# A full-catalog Linux render took about 70 seconds per job with four jobs on 2026-11-25 (73, 71 and 71 s), so about
+# five minutes in one process. There are no macOS or `--jobs 1` measurements. Thirty minutes leaves several times that
+# for a single process on a slower or loaded machine, and still bounds a hang that the render budget misses to half an
+# hour instead of the hours the two hangs that day ran for.
+DEFAULT_RENDER_TIMEOUT = 30 * 60.
 
 # Mesa's software drivers, at the paths Debian and Ubuntu install them to (`mesa-vulkan-drivers`, `libegl-mesa0`).
 LAVAPIPE_ICD = Path("/usr/share/vulkan/icd.d/lvp_icd.json")
@@ -204,19 +220,63 @@ def worker_groups(items: list[Item], jobs: int) -> list[list[Item]]:
     return [items[index::count] for index in range(count)]
 
 
-def render_scenes(command: list[str], groups: list[list[str]], env: dict[str, str], lock: int | None) -> int:
-    """Pass exact names from the inventory to each rendering worker."""
+def stuck_appearance(outcomes: Path, group: list[str]) -> str | None:
+    """Name the appearance a renderer was still drawing when it was killed, or None when every one has its receipt.
+
+    The renderer draws its group in catalog order, light before dark, and writes an outcome receipt as each appearance
+    finishes, so the first appearance without one is the one it was stuck on. This relies on that order in
+    `render_batch` in the goldens; a renderer that drew out of order would make this name the wrong appearance.
+    """
+    for name in group:
+        for appearance in ("light", "dark"):
+            stem = f"{name}--{appearance}"
+            if not (outcomes / f"{stem}.json").exists():
+                return stem
+    return None
+
+
+def render_scenes(command: list[str], groups: list[list[str]], env: dict[str, str], lock: int | None,
+                  timeout: float | None = None) -> int:
+    """Pass exact names from the inventory to each rendering worker, and name what a timed-out worker was stuck on."""
     requests = [{"FARHELM_GOLDEN_SCENES": json.dumps(group)} for group in groups]
-    return run_workers(command, requests, env, lock, "goldens")
+    outcomes = env.get("FARHELM_GOLDEN_OUTCOMES_DIR")
+
+    def stuck(index: int) -> str:
+        if outcomes is None:
+            return "no outcome receipts to say where it was stuck"
+        found = stuck_appearance(Path(outcomes), groups[index])
+        return f"stuck on {found}" if found is not None else "stuck after its last appearance"
+
+    return run_workers(command, requests, env, lock, "goldens", timeout=timeout, stuck=stuck)
+
+
+def format_duration(seconds: float) -> str:
+    """Write a deadline the way an operator passed it, in whole minutes where it is one."""
+    if seconds >= 60 and seconds % 60 == 0:
+        return f"{int(seconds // 60)}m"
+    return f"{seconds:g}s"
 
 
 def run_workers(command: list[str], requests: list[dict[str, str]], env: dict[str, str], lock: int | None,
-                label: str) -> int:
-    """Own every child through exit or cancellation, with a separate output log for each concurrent job."""
+                label: str, *, timeout: float | None = None, stuck=None) -> int:
+    """Own every child through exit, cancellation or the deadline, with a separate output log for each concurrent job.
+
+    `timeout` bounds the whole phase, in seconds from the first spawn, not each job. At the deadline every unfinished
+    child is killed and the result is TIMEOUT_STATUS; on SIGINT or SIGTERM it is 128 plus the signal. Either way, the
+    output of every job not reported yet is printed after the kill, since a job's log is otherwise shown only once it
+    exits and a stuck run would end with nothing that says what it was doing. `stuck(index)` (zero-based) describes
+    what a job unfinished at the deadline was doing.
+    """
     pass_fds = () if lock is None else (lock,)
+    noun = "renderer" if label == "goldens" else label
     with ExitStack() as logs:
         workers = []
         stopping = None
+        timed_out = False
+        # Jobs before this index have had their output printed; the rest are printed after a stop or timeout.
+        reported = 0
+        unfinished = set()
+        status = 0
 
         def stop(signum, _frame):
             # A handler can interrupt spawn before registration or wait before returncode is saved. Let the main
@@ -226,6 +286,7 @@ def run_workers(command: list[str], requests: list[dict[str, str]], env: dict[st
 
         for signum in (signal.SIGINT, signal.SIGTERM):
             logs.callback(signal.signal, signum, signal.signal(signum, stop))
+        deadline = None if timeout is None else time.monotonic() + timeout
         try:
             for request in requests:
                 if stopping is not None:
@@ -239,34 +300,58 @@ def run_workers(command: list[str], requests: list[dict[str, str]], env: dict[st
                     stderr=subprocess.STDOUT if log is not None else None, pass_fds=pass_fds,
                 )
                 workers.append((child, log))
-            if stopping is not None:
-                return 128 + stopping
-            status = 0
             for index, (child, log) in enumerate(workers, 1):
-                # A renderer can take minutes. A timed wait lets a cancellation reach the single cleanup path.
+                # A renderer can take minutes. A timed wait lets a cancellation or the deadline reach the single
+                # cleanup path.
                 while stopping is None:
+                    remaining = None if deadline is None else deadline - time.monotonic()
                     try:
-                        result = child.wait(timeout=0.1)
+                        # Past the deadline this still polls once (a zero timeout), so a job that already exited is
+                        # reported as it ended rather than as timed out.
+                        result = child.wait(timeout=0.1 if remaining is None else max(0., min(0.1, remaining)))
                     except subprocess.TimeoutExpired:
+                        if remaining is not None and remaining <= 0:
+                            timed_out = True
+                            break
                         continue
                     break
-                if stopping is not None:
+                if stopping is not None or timed_out:
                     break
                 if log is not None:
                     print(f"\n[{label} job {index}/{len(workers)}]", flush=True)
                     log.seek(0)
                     shutil.copyfileobj(log, sys.stdout)
+                reported = index
                 if result < 0:
-                    print(f"{'renderer' if label == 'goldens' else label} terminated by signal {-result}")
+                    print(f"{noun} terminated by signal {-result}")
                 status = status or result
         finally:
-            # On a spawn failure or stop, no worker should keep writing partial captures or holding the lease.
+            # On a spawn failure, stop or timeout, no worker should keep writing partial captures or holding the lease.
+            # Which ones were still running is decided before the kill, which makes every one of them exit.
+            unfinished = {index for index, (child, _) in enumerate(workers, 1) if child.poll() is None}
             for child, _ in workers:
                 if child.poll() is None:
                     child.kill()
             for child, _ in workers:
                 child.wait()
-    return status if stopping is None else 128 + stopping
+        if stopping is not None or timed_out:
+            for index, (child, log) in enumerate(workers[reported:], reported + 1):
+                # A job that died of a signal before the runner killed anything is cut short too: a Ctrl-C at a
+                # terminal reaches the renderers in the foreground process group as well as the runner.
+                signalled = index not in unfinished and child.returncode < 0
+                if log is not None:
+                    partial = ", partial output" if index in unfinished or signalled else ""
+                    print(f"\n[{label} job {index}/{len(workers)}{partial}]", flush=True)
+                    log.seek(0)
+                    shutil.copyfileobj(log, sys.stdout)
+                if signalled:
+                    print(f"{noun} terminated by signal {-child.returncode}", flush=True)
+                if timed_out and index in unfinished:
+                    detail = f": {stuck(index - 1)}" if stuck is not None else ""
+                    print(f"{noun} job {index}/{len(workers)} exceeded {format_duration(timeout)}{detail}", flush=True)
+    if stopping is not None:
+        return 128 + stopping
+    return TIMEOUT_STATUS if timed_out else status
 
 
 def review_update(binary: Path, env: dict[str, str], jobs: int, lock: int | None, temp: Path,
@@ -293,7 +378,8 @@ def review_update(binary: Path, env: dict[str, str], jobs: int, lock: int | None
 
 
 def run_suite(tool, base_env: dict[str, str], update: bool, patterns: list[str],
-              cargo_args: list[str], test_args: list[str], jobs: int) -> int:
+              cargo_args: list[str], test_args: list[str], jobs: int,
+              render_timeout: float | None = DEFAULT_RENDER_TIMEOUT) -> int:
     """Run with fresh captures, keeping an incomplete update unpublishable and any comparison failures inspectable."""
     lease = tool.capture_lock(tool.CAPTURES) if update else nullcontext()
     with lease as lock:
@@ -304,12 +390,18 @@ def run_suite(tool, base_env: dict[str, str], update: bool, patterns: list[str],
         with tempfile.TemporaryDirectory(prefix=".baseline-", dir=tool.WORK) as baseline:
             manifest = Path(baseline) / "goldens.txt"
             shutil.copyfile(tool.MANIFEST, manifest)
-            return run_locked(tool, base_env, binary, names, update, patterns, test_args, jobs, lock, manifest)
+            return run_locked(tool, base_env, binary, names, update, patterns, test_args, jobs, lock, manifest,
+                              render_timeout)
 
 
 def run_locked(tool, base_env: dict[str, str], binary: Path, names: list[str], update: bool, patterns: list[str],
-               test_args: list[str], jobs: int, lock: int | None, manifest: Path) -> int:
-    """Render against the pinned manifest. The caller holds the update lease through review and certification."""
+               test_args: list[str], jobs: int, lock: int | None, manifest: Path,
+               render_timeout: float | None = DEFAULT_RENDER_TIMEOUT) -> int:
+    """Render against the pinned manifest. The caller holds the update lease through review and certification.
+
+    A render that runs past `render_timeout` is not a stop: it goes on to the missing-render report and the changes
+    page, so the appearances it never drew are listed like failed ones, and its status stays TIMEOUT_STATUS.
+    """
     references = None
     if update:
         # Preserve the full update and its publish marker when inspecting a subset of scenes.
@@ -340,7 +432,7 @@ def run_locked(tool, base_env: dict[str, str], binary: Path, names: list[str], u
         env = golden_env(base_env, runtime_dir, references, captures)
         env["FARHELM_GOLDEN_OUTCOMES_DIR"] = str(outcomes)
         groups = worker_groups(names, jobs)
-        status = render_scenes(command, groups, env, lock)
+        status = render_scenes(command, groups, env, lock, render_timeout)
     if status in STOP_STATUSES:
         # A cancelled render leaves its captures for inspection. Do not fetch new references or launch more jobs.
         return status
@@ -390,9 +482,14 @@ def main() -> int:
                         help="match a scene name (repeatable, quote wildcards, selected updates cannot publish)")
     parser.add_argument("--jobs", type=int, default=4, metavar="N",
                         help="parallel render or review processes (default: 4, capped at available CPUs)")
+    parser.add_argument("--render-timeout", type=float, default=DEFAULT_RENDER_TIMEOUT, metavar="SECONDS",
+                        help="kill the renderers and fail if rendering takes longer than this "
+                             f"(default: {DEFAULT_RENDER_TIMEOUT:g})")
     args, extras = parser.parse_known_args()
     if args.jobs < 1:
         parser.error("--jobs must be a positive integer")
+    if not args.render_timeout > 0:
+        parser.error("--render-timeout must be a positive number of seconds")
     separator = extras.index("--") if "--" in extras else len(extras)
     cargo_args, test_args = extras[:separator], extras[separator + 1:]
     for arg in test_args:
@@ -405,7 +502,8 @@ def main() -> int:
             return 1
     tool = load_goldens_tool()
     try:
-        return run_suite(tool, dict(os.environ), args.update, args.scene, cargo_args, test_args, args.jobs)
+        return run_suite(tool, dict(os.environ), args.update, args.scene, cargo_args, test_args, args.jobs,
+                         args.render_timeout)
     except tool.Refused as refusal:
         print(f"gui-goldens: {refusal}", file=sys.stderr)
         return 1

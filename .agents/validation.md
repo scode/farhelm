@@ -743,7 +743,11 @@ systemd or SSH substrate ran.
   the changed picture pairs that have references after rendering. Use `--jobs N` to change the process budget for both,
   including `--jobs 1` for a serial run. Use Cargo's `-j N` before `--` to limit build jobs. Parallel output is grouped
   by process. Selected updates write to `target/gui-goldens/selected-captures` and preserve a full update's pictures and
-  completion marker.
+  completion marker. Two bounds keep a broken fixture from hanging the run: a scene that redraws more than the harness's
+  render budget (`MAX_SCENE_RENDERS`, several times the most any scene of the catalog needs) fails within seconds with a
+  message naming it, and the rest of the batch still renders; and the render phase has a wall-clock deadline
+  (`--render-timeout SECONDS`, 30 minutes by default) after which the runner kills its renderers, prints their partial
+  output with the appearance each was stuck on, reports the missing renders and exits 124.
 - `python3 -B scripts/test-check-gui-goldens.py` — checks the golden runner with a stand-in renderer: private comparison
   references and captures keep earlier failures available, the renderer holds the update's capture lock, and a full
   update receives a completion marker only after rendering. Compare and update fail when an expected appearance never
@@ -751,12 +755,22 @@ systemd or SSH substrate ran.
   has no changed PNGs. Failed, incomplete or selected updates cannot be published. The tests also cover Cargo's
   executable discovery, ordered pattern matching and an unmatched pattern refused before rendering. It also checks the
   CPU cap, disjoint work groups and a real killed worker that leaves other workers' captures available without
-  certifying the update. The changes page checks exercise packaged pictures and highlights, native update requests, size
-  changes, removal of stale pages, and an update without access to the store. Run it when the runner or the page
-  generator (`scripts/golden_changes_page.py` and `crates/gui/farhelm-gui/src/goldens/changes.rs`) changes. Seconds, no
-  graphics renderer or network. The Rust unit tests filtered with
-  `cargo test --locked -p farhelm-gui --lib goldens::changes` check exact highlights and size changes without drawing.
-  The stand-in also verifies that a selected update preserves a full capture set.
+  certifying the update. Real stand-in renderers that hang check the render deadline (both killed, their partial output
+  printed with the first appearance of each group that has no receipt, status 124, the missing renders on the changes
+  page, nothing certified) and a stop during a hang (partial output printed, no page). Stand-in children check that a
+  job that had already exited when the deadline passed is not timed out, and that one a signal ended (as a Ctrl-C at the
+  terminal does) is reported as cut short beside a timed-out one. The changes page checks exercise packaged pictures and
+  highlights, native update requests, size changes, removal of stale pages, and an update without access to the store.
+  Run it when the runner or the page generator (`scripts/golden_changes_page.py` and
+  `crates/gui/farhelm-gui/src/goldens/changes.rs`) changes. Seconds, no graphics renderer or network. The Rust unit
+  tests filtered with `cargo test --locked -p farhelm-gui --lib goldens::changes` check exact highlights and size
+  changes without drawing. `cargo nextest run -p farhelm-gui --lib -E 'test(/^goldens::render_budget_tests::/)'`
+  (through the recorder) runs fixtures that re-arm themselves every frame through the goldens' batch loop, without a
+  renderer, one tripping the render budget as its window opens and one inside the staging loop with a cleanup and a
+  teardown that panic as well: each fails with the budget's message for its scene, a teardown panic after a good render
+  is still reported, and the scene after them renders. Run it when the golden harness in
+  `crates/gui/farhelm-gui/src/goldens/mod.rs` changes; under a second, part of the workspace nextest run. The stand-in
+  also verifies that a selected update preserves a full capture set.
 - `python3 -B scripts/gui-goldens.py --self-test` — fetching and publishing the golden references, against a bare
   repository in a temporary directory standing in for the storage repository: a publish and a fetch round-tripping every
   picture under the one ref `refs/gui-goldens/keep` (never a branch or tag), a second publish adding a snapshot of only
