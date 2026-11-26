@@ -97,3 +97,70 @@ seconds waited able to start from an earlier request, focus dropping when the bu
 gaps, and nits. All were fixed, and a verification pass by the same reviewer confirmed the fixes. It left one low issue
 (a mouse press moved focus), fixed afterwards and not reviewed again, and the focus test listed under follow-ups, which
 was not added.
+
+### Landing
+
+#### What landed with it
+
+This round landed this plan, then custom-agent-delete-prompt (the Settings custom agent Delete question). The two change
+different parts of the desktop app and met only in TODO.md, where the landing kept both removals. Since this plan's
+base, main had gained the fix that remembers each custom agent's wrapper separately for each registration (#5073,
+#5074); while it landed, main also gained a fix to the release brick test's own harness (#5076). An independent reviewer
+and I read these against this plan. A bulk Restart sends the same request the row's own Restart does, and reads nothing
+that the recent fix applying "Restart with" settings before the agent reports (#5071) changed. Replace has never
+recorded a custom agent's wrapper, alone or in a batch, so the bulk Replace adds nothing the wrapper fix would need to
+cover. Nothing interacted.
+
+#### What the new button looks like
+
+No screenshot test draws the button, so I rendered the marked-sessions screenshot scene once with an interrupted and an
+exited session marked, in light and dark. This was a local, uncommitted change, reverted afterwards. "Restart/Replace"
+draws legibly between Stop and Delete in both. It is wide enough that, at that scene's sidebar width, the bar wraps: the
+marked menu (…) and Clear (×) move to a second line under "2 marked", Stop, Restart/Replace and Delete. With live
+sessions marked the button does not show, and the bar stays on one line as before. If the second line bothers you, a
+shorter label would keep one line; that would be a follow-up, since the label is the one you chose.
+
+#### Fixes made while landing
+
+None. The independent review found nothing to fix in the code; the one wording gap it found (focus, below) is left for a
+later SPEC.md edit.
+
+#### Worth knowing
+
+- Where focus goes after a press. The fix made after the last review moves focus to "N marked" only when the button
+  itself had focus at the press, so that focus is not lost when the button disappears once a restarted session runs. A
+  keyboard press always qualifies. On Linux a mouse click also gives the button focus first, so a click moves focus to
+  "N marked" too, and a test checks that; on a Mac a click does not focus a button, so focus stays where it was. Nothing
+  has run on a Mac. The report's "a mouse press leaves focus where it was" holds only on a Mac, and SPEC.md mentions
+  only the keyboard press. Possible follow-up: have SPEC.md describe the rule as "when the button had focus".
+- With Skip session confirmations on, a session whose terminal tab closes while it waits its turn in the batch is left
+  out as "changed while it waited", although replacing it would now be safer. Rare, and pressing again starts it. No
+  follow-up proposed.
+
+#### Checks
+
+Run once for the whole round, on bulk-start-sessions and custom-agent-delete-prompt stacked in that order on main as it
+stood when the landing started (`bf468652`); what main gained since each plan's base is in each plan's notes. The brick
+test harness fix (#5076) that landed during the landing is exercised by no check here. The test worker is an aarch64
+Linux machine:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean.
+- On the test worker, `cargo nextest run -p farhelm-gui -p farhelm-desktop`, recorded run
+  bd36cea5-d4a2-4942-86ca-981f0eee85fb: 3,692 passed, 4 skipped. That is every desktop app test, wider than either
+  executor's selection.
+- On the test worker, the desktop app's end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), recorded run
+  25abe428-bee0-437b-9486-34e05898acf1: all 49 steps passed, except the paste step, which runs only on a Mac and was
+  skipped as always on Linux. It marks no sessions, but it exercises the row menus' Stop, Restart and Replace and
+  Settings opening and closing.
+- Locally, every screenshot scene compared with its approved picture, using both plans' scene lists together
+  (`python3 scripts/check-gui-goldens.py`), recorded run 9bb96428-674a-4cb0-98e1-6be02b626c7e: every picture matched,
+  the new custom agent Delete scene included.
+- Locally, `python3 -B scripts/test-gui-screenshot-batch.py`, which checks the screenshot scene list against the golden
+  manifest, recorded run 26eeb3f3-b1a9-43bc-a31e-63b8e02b4697: passed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown and the scene list: passed.
+
+Reused: nothing. Skipped: the helm's, the supervisor's and the end-to-end Rust tests, since both plans change only the
+desktop app and nothing it sends.

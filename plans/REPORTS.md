@@ -32,3 +32,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`wayland-async-text-paste`](reports/wayland-async-text-paste.report.md) landed 2026-11-26 in #5069: Make Wayland desktop text-field paste nonblocking and text-first
 - [`restart-with-generation-sync`](reports/restart-with-generation-sync.report.md) landed 2026-11-26 in #5071: Bind Restart-with launch settings with the replacement generation before startup reports
 - [`custom-agent-per-reg-wrappers`](reports/custom-agent-per-reg-wrappers.report.md) landed 2026-11-26 in #5073, #5074: Remember command wrapper defaults per custom agent registration
+- [`bulk-start-sessions`](reports/bulk-start-sessions.report.md) landed 2026-11-26 in #5065, #5072: Add bulk Restart/Replace action for marked stopped sessions
