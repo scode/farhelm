@@ -43,7 +43,9 @@
 //!   and prints the record directory's absolute path, creating the directory. Any valid name may be read.
 //! - `push <name>... -m <message>` brings the clone up to date the same way, then builds one commit on the remote head
 //!   holding exactly the named records' directories as they are in the working tree, and pushes it to `main` without
-//!   force. It prints `pushed <commit id>`, or `nothing to push` when the named directories match the remote.
+//!   force. It prints `pushed <commit id>`, or `nothing to push` when the named directories match the remote. The
+//!   commit's message ends with a `Slot: <slot>` trailer and, when this machine has a usable tailnet name, a
+//!   `Host: <login>@<tailnet DNS name>` trailer saying where the slot runs (`host` module).
 //! - `backup --dest <dir>` mints a short-lived read token through Cloudflare's REST API and fetches every branch into
 //!   the bare repo at `<dir>`, refusing any non-fast-forward update. It needs no slot (`backup` module).
 //!
@@ -71,8 +73,10 @@ mod clone;
 mod config;
 mod error;
 mod git;
+mod host;
 mod names;
 
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -81,25 +85,31 @@ pub use error::Failure;
 use git::Git;
 use names::RecordName;
 
-/// What the tool reads from its process: the working directory (which picks the slot and the checkout) and `HOME`
-/// (which `~` in the config and the default config path expand against).
+/// What the tool reads from its process: the working directory (which picks the slot and the checkout), `HOME`
+/// (which `~` in the config and the default config path expand against), and the login of the user running it (the
+/// first half of the `Host:` trailer).
 ///
 /// Everything below `main` takes these as values rather than reading the process environment, so unit tests can supply
 /// them directly and integration tests set them only on the child process they spawn.
 pub struct Context {
     pub cwd: PathBuf,
     pub home: Option<PathBuf>,
+    pub login: Option<String>,
 }
 
 impl Context {
-    /// Captures the real working directory and `HOME`.
+    /// Captures the real working directory, `HOME`, and the login from `USER`, or `LOGNAME` when `USER` is unset,
+    /// empty or not UTF-8 (POSIX names `LOGNAME`, BSD tradition `USER`, and an environment may set only one).
     pub fn from_process() -> Result<Self, Failure> {
         let cwd = std::env::current_dir()
             .map_err(|e| Failure::failed(format!("cannot read the working directory: {e}")))?;
         let home = std::env::var_os("HOME")
             .filter(|h| !h.is_empty())
             .map(PathBuf::from);
-        Ok(Self { cwd, home })
+        let login = ["USER", "LOGNAME"]
+            .into_iter()
+            .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()));
+        Ok(Self { cwd, home, login })
     }
 }
 
@@ -198,9 +208,16 @@ fn push_with(
             directories.push(directory);
         }
     }
+    // Looked up once per push, before the retry loop: every attempt's commit names the same host, and a slow lookup
+    // (bounded by its timeout) is paid at most once. A refused push above never gets this far.
+    let host = host::detect(
+        context.login.as_deref(),
+        OsStr::new(host::TAILSCALE),
+        host::LOOKUP_TIMEOUT,
+    );
     let git = Git::new(config.read_token()?);
     let clone = clone::SlotClone::open(&git, &config.clones_dir, &slot.name, &config.remote)?;
-    match clone.push(&directories, message, &slot.name)? {
+    match clone.push(&directories, message, &slot.name, host.as_ref())? {
         clone::PushOutcome::NothingToPush => println!("nothing to push"),
         clone::PushOutcome::Pushed(commit) => println!("pushed {commit}"),
     }

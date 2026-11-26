@@ -18,7 +18,9 @@
 //!      but the client saw fail: the flow stops, appends a note to its log, and resumes, so the live file is the
 //!      pushed version plus more, and the next push carries all of it. Ownership is read from the stamp alone, so it
 //!      relies on slot names being unique across every host that shares the repository: two hosts each running an
-//!      `exec-1` would take each other's changes for their own and overwrite them.
+//!      `exec-1` would take each other's changes for their own and overwrite them. The `Slot:` and `Host:` trailers
+//!      play no part in this, so slots on tool versions that write different trailers still recognize each other's
+//!      commits correctly.
 //!    - Otherwise, during `push`, an overlap inside one of the records being pushed refuses the push (exit 1) and
 //!      changes nothing: it would mean two writers on one record.
 //!    - Any other overlap (any record during `path`, records not being pushed during `push`) is won by the remote.
@@ -58,6 +60,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::Failure;
 use super::git::Git;
+use super::host::HostIdentity;
 
 /// The branch every slot pushes to.
 const MAIN: &str = "refs/heads/main";
@@ -74,7 +77,12 @@ const MAX_PUSH_ATTEMPTS: usize = 12;
 /// slots that collided once do not collide again in lockstep.
 const FIRST_BACKOFF_MS: u64 = 150;
 const MAX_BACKOFF_MS: u64 = 4000;
-/// The committer email on every records commit: a placeholder, so commits carry the slot name and no personal data.
+/// The author and committer email on every records commit: a fixed placeholder, so no address of whoever runs the tool
+/// ends up in the history.
+///
+/// The commits do name the pushing machine, though: the `Host:` trailer carries its login and tailnet DNS name, so
+/// that status tooling can find which machine a slot runs on and ssh there (`host` module). The records repository is
+/// private.
 const AUTHOR_EMAIL: &str = "records@farhelm.invalid";
 /// The lock file inside `.git` that serializes one slot's calls.
 const LOCK_FILE: &str = "records.lock";
@@ -369,11 +377,15 @@ impl<'g> SlotClone<'g> {
 
     /// Commits exactly `directories` (relative to the root) as they are in the working tree, on top of the remote
     /// head, and pushes the commit to `main` without force (rules 2 and 3 in the module docs).
+    ///
+    /// `host` is the pushing machine for the `Host:` trailer, or `None` to leave it out; the caller looks it up once,
+    /// so every retry's commit names the same machine.
     pub fn push(
         &self,
         directories: &[String],
         message: &str,
         slot: &str,
+        host: Option<&HostIdentity>,
     ) -> Result<PushOutcome, Failure> {
         let git_dir = self.root.join(".git");
         let index = git_dir.join(PUSH_INDEX);
@@ -406,7 +418,7 @@ impl<'g> SlotClone<'g> {
                 remove_if_present(&index)?;
                 return Ok(PushOutcome::NothingToPush);
             }
-            let commit = self.commit(&tree, base.as_deref(), message, slot)?;
+            let commit = self.commit(&tree, base.as_deref(), message, slot, host)?;
             match self.send(&commit)? {
                 Sent::Accepted => {
                     let expected_old = base.unwrap_or_default();
@@ -473,16 +485,17 @@ impl<'g> SlotClone<'g> {
         Ok(at().args(["write-tree"]).run()?.text())
     }
 
-    /// Writes the commit object: author and committer `records <slot>`, the message followed by a `Slot:` trailer.
+    /// Writes the commit object: author and committer `records <slot>`, and the message `commit_message` builds.
     fn commit(
         &self,
         tree: &str,
         parent: Option<&str>,
         message: &str,
         slot: &str,
+        host: Option<&HostIdentity>,
     ) -> Result<String, Failure> {
         let name = format!("records {slot}");
-        let body = format!("{}\n\nSlot: {slot}\n", message.trim_end());
+        let body = commit_message(message, slot, host);
         let mut call = self
             .git
             .at(&self.root)
@@ -832,6 +845,20 @@ impl<'g> SlotClone<'g> {
     }
 }
 
+/// A records commit's message: the caller's message, a blank line, then the trailers, `Slot: <slot>` and, when the
+/// machine is known, `Host: <login>@<tailnet DNS name>` right after it.
+///
+/// Both lines sit in one final paragraph, so git's own trailer parsing (`git interpret-trailers`, `%(trailers)` in
+/// `git log --format`) reads them; status tooling relies on that to find where a slot runs.
+fn commit_message(message: &str, slot: &str, host: Option<&HostIdentity>) -> String {
+    let mut body = format!("{}\n\nSlot: {slot}\n", message.trim_end());
+    if let Some(host) = host {
+        body.push_str(&host.trailer());
+        body.push('\n');
+    }
+    body
+}
+
 /// How a push attempt ended, short of an outright failure.
 enum Sent {
     Accepted,
@@ -1096,6 +1123,22 @@ mod tests {
             "farhelm/plans/ab/log.md",
             &strings(&["farhelm/plans/a"])
         ));
+    }
+
+    /// The trailers close the message as one paragraph, `Host:` directly after `Slot:`, so git parses both as
+    /// trailers; without a known machine the message ends at `Slot:`, exactly as before the `Host:` trailer existed.
+    /// Trailing whitespace in the caller's message does not open a second blank line.
+    #[test]
+    fn commit_messages_end_with_the_slot_and_host_trailers() {
+        let host = HostIdentity::new("agent", "host-a.example.ts.net").unwrap();
+        assert_eq!(
+            commit_message("claim x\n\n", "exec-1", Some(&host)),
+            "claim x\n\nSlot: exec-1\nHost: agent@host-a.example.ts.net\n"
+        );
+        assert_eq!(
+            commit_message("claim x", "exec-1", None),
+            "claim x\n\nSlot: exec-1\n"
+        );
     }
 
     /// Set-aside directories are named by UTC time so they sort chronologically.

@@ -12,6 +12,10 @@
 //!   late edit, at exactly the moment between the tool's snapshot and its push.
 //! - Backup's token minting talks to a small fake HTTP server on 127.0.0.1 that records each request and answers with
 //!   canned Cloudflare envelopes.
+//!
+//! The `Host:` trailer comes from `tailscale status` and the child's `USER`, and the machine running the tests may well
+//! have a real tailscale. So every child gets a stand-in `tailscale` first on its `PATH` (by default one that fails,
+//! as a logged-out tailscale does) and a fixed `USER`, and no test depends on, or reveals, the real machine's name.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -105,6 +109,7 @@ impl World {
             checkouts.insert(slot.to_string(), checkout);
         }
         let config = root.join("config.toml");
+        fs::create_dir_all(root.join("stub-bin")).unwrap();
         let world = Self {
             tmp,
             remote,
@@ -114,6 +119,7 @@ impl World {
             checkouts,
         };
         world.write_config(extra);
+        world.fake_tailscale("echo 'Logged out.' >&2\nexit 1");
         world
     }
 
@@ -153,8 +159,9 @@ impl World {
         self.tool_in(self.checkout(slot), args)
     }
 
-    /// The tool, run from `cwd`, with this world's `HOME` and config, and no proxy settings (the backup tests talk to
-    /// 127.0.0.1 and must not be routed elsewhere).
+    /// The tool, run from `cwd`, with this world's `HOME` and config, the stand-in `tailscale` first on `PATH`, `USER`
+    /// set to `agent` (and no `LOGNAME`), and no proxy settings (the backup tests talk to 127.0.0.1 and must not be
+    /// routed elsewhere).
     fn tool_in(&self, cwd: &Path, args: &[&str]) -> Command {
         let mut command = Command::new(TOOL);
         command
@@ -163,7 +170,10 @@ impl World {
             .arg(&self.config)
             .args(args)
             .current_dir(cwd)
-            .env("HOME", &self.home);
+            .env("HOME", &self.home)
+            .env("PATH", self.search_path(&[]))
+            .env("USER", "agent")
+            .env_remove("LOGNAME");
         for proxy in [
             "http_proxy",
             "https_proxy",
@@ -296,10 +306,55 @@ impl World {
         let path = bin.join("git");
         fs::write(&path, script).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        let mut search = OsString::from(bin.as_os_str());
-        search.push(":");
-        search.push(std::env::var_os("PATH").unwrap_or_default());
-        search
+        self.search_path(&[&bin])
+    }
+
+    /// A child `PATH`: `first`, then the stand-in `tailscale`'s directory, then the test process's own `PATH` (for
+    /// git and the shell tools the stand-ins use).
+    fn search_path(&self, first: &[&Path]) -> OsString {
+        let mut dirs: Vec<PathBuf> = first.iter().map(|d| d.to_path_buf()).collect();
+        dirs.push(self.stub_bin());
+        dirs.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        std::env::join_paths(dirs).unwrap()
+    }
+
+    /// The directory holding the stand-in `tailscale`.
+    fn stub_bin(&self) -> PathBuf {
+        self.tmp.0.join("stub-bin")
+    }
+
+    /// Replaces the stand-in `tailscale` with a shell script running `body`, after it appends its working directory
+    /// and arguments to `tailscale.log` (one line per run). The tool runs it from the slot's checkout, so the log says
+    /// which slot looked its host up, and how often.
+    fn fake_tailscale(&self, body: &str) {
+        let script = format!(
+            "#!/bin/sh\necho \"`pwd` $*\" >> '{log}'\n{body}\n",
+            log = self.tailscale_log().display()
+        );
+        let path = self.stub_bin().join("tailscale");
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// A stand-in `tailscale` that answers `status --json` for a machine whose `Self.DNSName` is `dns_name` (given in
+    /// its fully qualified form, with the trailing dot, as tailscale prints it).
+    fn fake_tailscale_named(&self, dns_name: &str) {
+        self.fake_tailscale(&format!(
+            "cat <<'JSON'\n{{\"BackendState\":\"Running\",\"Self\":{{\"HostName\":\"host-a\",\"DNSName\":\"{dns_name}\"}}}}\nJSON"
+        ));
+    }
+
+    /// Every run of the stand-in `tailscale` so far, as `<working directory> <arguments>` lines.
+    fn tailscale_runs(&self) -> Vec<String> {
+        fs::read_to_string(self.tailscale_log())
+            .map(|t| t.lines().map(str::to_string).collect())
+            .unwrap_or_default()
+    }
+
+    fn tailscale_log(&self) -> PathBuf {
+        self.tmp.0.join("tailscale.log")
     }
 
     fn argv_log(&self) -> PathBuf {
@@ -723,7 +778,8 @@ fn nothing_to_push() {
 }
 
 /// Commits are stamped with the slot, as author, committer and `Slot:` trailer, with a placeholder email: the records
-/// repo's history says which slot wrote what, and carries no personal data.
+/// repo's history says which slot wrote what, and no address of whoever ran the tool. With tailscale failing (the
+/// world's default stand-in), the message ends at `Slot:`.
 #[test]
 fn commits_carry_the_slot() {
     let world = World::new(&["exec-4"]);
@@ -737,6 +793,235 @@ fn commits_carry_the_slot() {
         "records exec-4 <records@farhelm.invalid> / records exec-4 <records@farhelm.invalid>"
     );
     assert_eq!(message, "log: started\n\nSlot: exec-4\n\n");
+    assert_eq!(
+        world.tailscale_runs().len(),
+        1,
+        "premise: the lookup ran and failed"
+    );
+}
+
+/// The full message of `commit` and the value of its `Host:` trailer as git itself parses trailers, which is how
+/// status tooling reads it.
+fn message_and_host_trailer(repo: &Path, commit: &str) -> (String, String) {
+    let (_, _, message) = commit_info(repo, commit);
+    let host = git(
+        repo,
+        &[
+            "log",
+            "-1",
+            "--format=%(trailers:key=Host,valueonly)",
+            commit,
+        ],
+    );
+    (message, host.trim().to_string())
+}
+
+/// With a tailnet name and a login, a push's commit names its machine in a `Host:` trailer right after `Slot:`, as
+/// `<login>@<DNS name>` with the DNS name's trailing dot dropped. This is how status tooling finds which machine a
+/// slot runs on to ssh there, so git must parse it as a trailer. The lookup asks tailscale for its own status only.
+#[test]
+fn commits_name_the_pushing_host() {
+    let world = World::new(&["exec-1"]);
+    world.fake_tailscale_named("host-a.example.ts.net.");
+    world.path("exec-1", "executor");
+    world.write("exec-1", "farhelm/executors/exec-1/log.md", "x\n");
+    let output = world.run("exec-1", &["push", "executor", "-m", "log: started"]);
+    assert_success(&output);
+    assert_eq!(stderr(&output), "", "a working lookup prints nothing");
+    let commit = world.remote_main().unwrap();
+
+    let (message, host) = message_and_host_trailer(&world.remote, &commit);
+    assert_eq!(
+        message,
+        "log: started\n\nSlot: exec-1\nHost: agent@host-a.example.ts.net\n\n"
+    );
+    assert_eq!(host, "agent@host-a.example.ts.net");
+    assert_eq!(
+        world.tailscale_runs(),
+        vec![format!(
+            "{} status --self --json --peers=false",
+            world.checkout("exec-1").display()
+        )]
+    );
+}
+
+/// Without a usable machine identity, a push still succeeds, its commit carries `Slot:` and no `Host:`, and stderr
+/// stays empty: a host without tailscale is a normal setup, and executors push before every queue verb, so the
+/// trailer must never cost a push or add noise. Covered: tailscale absent from `PATH`, failing (with its own stderr),
+/// printing junk, printing no name, a login with characters status tooling could not pass to ssh safely, and no login
+/// at all. `LOGNAME` stands in when `USER` is unset.
+#[test]
+fn commits_without_a_usable_host_carry_only_the_slot() {
+    /// One way of having no usable identity (or, for the `LOGNAME` case, of still having one).
+    struct Case {
+        name: &'static str,
+        /// The stand-in `tailscale`'s shell body.
+        tailscale: &'static str,
+        /// Whether `PATH` holds any `tailscale` at all.
+        on_path: bool,
+        user: Option<&'static str>,
+        logname: Option<&'static str>,
+        /// The `Host:` value expected, empty for none.
+        host: &'static str,
+    }
+    let named = "cat <<'JSON'\n{\"Self\":{\"DNSName\":\"host-a.example.ts.net.\"}}\nJSON";
+    let base = Case {
+        name: "",
+        tailscale: named,
+        on_path: true,
+        user: Some("agent"),
+        logname: None,
+        host: "",
+    };
+    let cases = [
+        Case {
+            name: "tailscale not installed",
+            on_path: false,
+            ..base
+        },
+        Case {
+            name: "tailscale fails",
+            tailscale: "echo 'Logged out.' >&2\nexit 1",
+            ..base
+        },
+        Case {
+            name: "junk output",
+            tailscale: "echo 'not json'",
+            ..base
+        },
+        Case {
+            name: "empty DNS name",
+            tailscale: "echo '{\"Self\":{\"DNSName\":\"\"}}'",
+            ..base
+        },
+        Case {
+            name: "option-like login",
+            user: Some("-oProxyCommand=x"),
+            ..base
+        },
+        Case {
+            name: "no login",
+            user: None,
+            ..base
+        },
+        Case {
+            name: "LOGNAME without USER",
+            user: None,
+            logname: Some("agent2"),
+            host: "agent2@host-a.example.ts.net",
+            ..base
+        },
+    ];
+    for case in cases {
+        let name = case.name;
+        let world = World::new(&["exec-1"]);
+        world.fake_tailscale(case.tailscale);
+        world.path("exec-1", "executor");
+        world.write("exec-1", "farhelm/executors/exec-1/log.md", "x\n");
+        let mut command = world.tool("exec-1", &["push", "executor", "-m", "m"]);
+        command.env_remove("USER").env_remove("LOGNAME");
+        if let Some(user) = case.user {
+            command.env("USER", user);
+        }
+        if let Some(logname) = case.logname {
+            command.env("LOGNAME", logname);
+        }
+        if !case.on_path {
+            // Only a directory holding git: no stand-in and no real tailscale either.
+            let bin = world.tmp.0.join("git-only-bin");
+            fs::create_dir_all(&bin).unwrap();
+            std::os::unix::fs::symlink(real_git(), bin.join("git")).unwrap();
+            command.env("PATH", &bin);
+        }
+        let output = command.output().unwrap();
+        assert_success(&output);
+        assert_eq!(stderr(&output), "", "{name}: no noise on stderr");
+        let commit = world.remote_main().unwrap();
+        let (message, host) = message_and_host_trailer(&world.remote, &commit);
+        assert_eq!(host, case.host, "{name}: {message:?}");
+        if case.host.is_empty() {
+            assert_eq!(message, "m\n\nSlot: exec-1\n\n", "{name}");
+        }
+    }
+}
+
+/// A tailscale that hangs is killed after the lookup's timeout and the push goes on without `Host:`. Executors push
+/// before every queue verb, so a wedged tailscale CLI or daemon must cost each push a few seconds at most, never stall
+/// it. The stand-in would hang for two minutes; the bound allows slack for a loaded machine over the three-second
+/// timeout while staying far below that.
+#[test]
+fn a_hanging_tailscale_does_not_hold_up_a_push() {
+    let world = World::new(&["exec-1"]);
+    world.fake_tailscale("exec sleep 120");
+    world.path("exec-1", "executor");
+    world.write("exec-1", "farhelm/executors/exec-1/log.md", "x\n");
+    let started = Instant::now();
+    let output = world.run("exec-1", &["push", "executor", "-m", "m"]);
+    let elapsed = started.elapsed();
+    assert_success(&output);
+    assert!(elapsed < Duration::from_secs(60), "{elapsed:?}");
+    assert_eq!(world.tailscale_runs().len(), 1, "premise: the stand-in ran");
+    let (message, _) = message_and_host_trailer(&world.remote, &world.remote_main().unwrap());
+    assert_eq!(message, "m\n\nSlot: exec-1\n\n");
+}
+
+/// The host is looked up once per push, not once per attempt: a push that loses a race to another slot and retries
+/// still runs tailscale once, and the commit that lands names the machine. `path` and a refused push never run it.
+/// Each slot's lookups are told apart by the working directory the stand-in logs.
+#[test]
+fn the_host_is_looked_up_once_per_push() {
+    let world = World::new(&["exec-1", "exec-2"]);
+    world.fake_tailscale_named("host-a.example.ts.net.");
+    world.path("exec-1", "plan/one");
+    world.path("exec-2", "plan/two");
+    assert_exit(
+        &world.run("exec-1", &["push", "landing", "-m", "x"]),
+        1,
+        "may not push",
+    );
+    assert!(
+        world.tailscale_runs().is_empty(),
+        "path and a refused push ran tailscale: {:?}",
+        world.tailscale_runs()
+    );
+    world.write("exec-1", "farhelm/plans/one/log.md", "from one\n");
+    world.write("exec-2", "farhelm/plans/two/log.md", "from two\n");
+
+    // exec-2 pushes from inside exec-1's first `git push`, so exec-1's first attempt is rejected and it retries.
+    let hook = format!(
+        "cd '{}' && HOME='{}' '{TOOL}' records --config '{}' push plan/two -m 'from two' > /dev/null 2>&1",
+        world.checkout("exec-2").display(),
+        world.home.display(),
+        world.config.display(),
+    );
+    let output = world
+        .tool("exec-1", &["push", "plan/one", "-m", "from one"])
+        .env("PATH", world.git_wrapper(&hook))
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let argv = fs::read_to_string(world.argv_log()).unwrap();
+    let exec_1_pushes = argv
+        .lines()
+        .filter(|l| {
+            l.contains(" push --porcelain ")
+                && l.contains(world.clone_of("exec-1").to_str().unwrap())
+        })
+        .count();
+    assert!(exec_1_pushes >= 2, "premise: exec-1 retried: {argv}");
+
+    let runs_from = |slot: &str| {
+        let prefix = format!("{} ", world.checkout(slot).display());
+        world
+            .tailscale_runs()
+            .iter()
+            .filter(|run| run.starts_with(&prefix))
+            .count()
+    };
+    assert_eq!(runs_from("exec-1"), 1);
+    assert_eq!(runs_from("exec-2"), 1);
+    let (_, host) = message_and_host_trailer(&world.remote, &world.remote_main().unwrap());
+    assert_eq!(host, "agent@host-a.example.ts.net");
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

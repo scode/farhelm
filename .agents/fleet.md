@@ -45,9 +45,11 @@ usual; this list does not replace it.
   (planning, reviews, triage, releases) run here too.
 - **Notifications** go to the maintainer's ntfy topic (`plans/AGENTS.md`, "Notifications"); never read or print its
   file.
-- **Other hosts.** Today every slot runs on the maintainer's host. Running executors or the monitor on VMs is planned
-  (TODO.md, "Run plan executors and the landing monitor on other hosts") and not built: each VM would need its own
-  config with one slot, a repo token, the ntfy topic file, a GitHub login and a checkout.
+- **Other hosts.** An executor slot can also run on a VM on the maintainer's tailnet. The VM has its own config listing
+  that one slot, its own repo token, the ntfy topic file, a GitHub login and a checkout. The status skill finds such
+  slots through the `Host:` trailer on records commits (`.agents/agent-records.md`, "The records tool (unattended flows
+  only)"): the newest commit by a slot names the machine it runs on now. The landing monitor still runs on the
+  maintainer's host (TODO.md, "Run plan executors and the landing monitor on other hosts").
 
 Keeping the executors and the monitor running is the maintainer's job, done out of band. Nothing unattended judges
 whether another agent is alive, and taking a claim away from an agent is the maintainer's manual step, after that agent
@@ -76,8 +78,9 @@ is gone.
 - **Tokens** ("what do I need for a token", "renew the token", "a token for a VM"): `.agents/agent-records.md`,
   "Tokens", has the dashboard link, the one permission, and the API calls. Anything that handles a token is a script
   file that never prints it.
-- **A new host**: not built yet (see the other-hosts item under "The pieces"). Say what it would take and plan it with
-  the maintainer rather than improvising.
+- **A new host**: an executor VM needs what the other-hosts item under "The pieces" lists. Say what is missing and set
+  it up with the maintainer rather than improvising. Moving the landing monitor off the maintainer's host is not built
+  yet.
 
 Fence: loading the fleet flow's context changes nothing. Never print, log or commit a token or the ntfy topic. The
 executors' and the monitor's sessions and checkouts are theirs: read them, do not change them unless the maintainer

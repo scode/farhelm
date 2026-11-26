@@ -1189,15 +1189,18 @@ systemd or SSH substrate ran.
 - `python3 scripts/record-test-run.py --kind development --selection 'xtask records tool' --concurrency 'cargo test default threads' -- cargo test --manifest-path xtask/Cargo.toml --target-dir target/xtask`
   — the agent records tool behind `cargo xtask records` (`xtask/`, its own workspace; `.agents/agent-records.md`): unit
   tests of the config, record names, push permissions, command line, git environment, push-retry classification and
-  backoff, and mint-response parsing, and integration tests that run the built tool against local bare repos with fake
-  checkouts and a config passed with `--config` (first clone, slot detection from a subdirectory, absent checkouts,
-  config and name errors, permission refusals, pushes carrying only the named records, nothing to push, the slot stamp,
-  two slots interleaving and three pushing at once without force, same-slot serialization held by the clone's lock,
-  remote changes merged around local edits, stale edits from an ended claim set aside, an accepted push the client saw
-  fail healing on the next call, overlaps in a pushed record refused, late edits staying local, errors naming no remote
-  URL, the token only in the child environment and on the wire as a Bearer header, and `backup` against a fake HTTP
-  server refusing a rewritten history). Run it from the checkout root when anything under `xtask/` or
-  `.cargo/config.toml` changes, with `cargo fmt --manifest-path xtask/Cargo.toml -- --check` and
+  backoff, mint-response parsing, and the `Host:` trailer (tailscale's status output, the characters allowed, the
+  lookup's timeout), and integration tests that run the built tool against local bare repos with fake checkouts and a
+  config passed with `--config` (first clone, slot detection from a subdirectory, absent checkouts, config and name
+  errors, permission refusals, pushes carrying only the named records, nothing to push, the slot stamp, the `Host:`
+  trailer from a stand-in `tailscale` (present with a usable name and login, absent when tailscale is missing, fails,
+  hangs or prints junk, looked up once per push), two slots interleaving and three pushing at once without force,
+  same-slot serialization held by the clone's lock, remote changes merged around local edits, stale edits from an ended
+  claim set aside, an accepted push the client saw fail healing on the next call, overlaps in a pushed record refused,
+  late edits staying local, errors naming no remote URL, the token only in the child environment and on the wire as a
+  Bearer header, and `backup` against a fake HTTP server refusing a rewritten history). Run it from the checkout root
+  when anything under `xtask/` or `.cargo/config.toml` changes, with
+  `cargo fmt --manifest-path xtask/Cargo.toml -- --check` and
   `cargo clippy --manifest-path xtask/Cargo.toml --target-dir target/xtask --all-targets -- -D warnings` (the root
   workspace's fmt and clippy runs do not reach `xtask/`); about a second after a 30-second first build, no credentials,
   no network beyond 127.0.0.1. Artifacts itself (its `stale ref` and busy answers to concurrent pushes, and that a write
