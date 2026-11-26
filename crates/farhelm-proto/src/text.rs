@@ -19,6 +19,9 @@
 
 use std::borrow::Cow;
 
+/// Maximum byte length of an explicit session title accepted during launch.
+pub const MAX_SESSION_TITLE_BYTES: usize = 64 * 1024;
+
 /// Refuse control characters in an explicit session title. Empty titles pass
 /// so the caller can choose a default. Peer-supplied titles still use the
 /// ordinary rendering rules.

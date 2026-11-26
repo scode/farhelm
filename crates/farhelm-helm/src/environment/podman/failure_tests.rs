@@ -453,6 +453,7 @@ impl Commands {
                 Ok(output(if self.image(last).is_some() { 0 } else { 1 }, ""))
             }
             ("image", Some("inspect")) => {
+                assert_eq!(&args[2..5], ["--format", build::IMAGE_INSPECTION, "--"]);
                 let image = self.image(last).expect("inspect an existing image");
                 let labels = if image.owned {
                     serde_json::json!({"farhelm.helm":self.helm,"farhelm.recipe":"dev","farhelm.artifact":image.artifact})
@@ -461,7 +462,7 @@ impl Commands {
                 };
                 Ok(output(
                     0,
-                    &serde_json::json!([{"Id":image.id,"Config":{"Labels":labels}}]).to_string(),
+                    &serde_json::json!({"Id":image.id,"Labels":labels}).to_string(),
                 ))
             }
             ("pull", _) => {
@@ -762,16 +763,22 @@ impl Commands {
                 state.removed_containers.push(item.id);
                 Ok(output(0, ""))
             }
-            ("ps", _) if args.iter().any(|arg| arg == "--format=json") => {
-                let ids: Vec<_> = self
+            ("ps", _)
+                if args
+                    .iter()
+                    .any(|arg| arg.starts_with("label=farhelm.helm=")) =>
+            {
+                assert!(args.iter().any(|arg| arg == "--no-trunc"));
+                assert!(args.ends_with(&["--format".into(), "{{.ID}}".into()]));
+                let ids = self
                     .state
                     .lock()
                     .unwrap()
                     .containers
                     .keys()
-                    .map(|id| serde_json::json!({"Id":id}))
-                    .collect();
-                Ok(output(0, &serde_json::to_string(&ids).unwrap()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                Ok(output(0, &ids.join("\n")))
             }
             ("ps", _) => {
                 let ancestor = args

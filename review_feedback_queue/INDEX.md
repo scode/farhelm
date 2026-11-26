@@ -159,17 +159,6 @@ consequences.
 - [`trailing-disposable-trust-hint-says-off-by-default.md`](trailing-disposable-trust-hint-says-off-by-default.md) — In
   a session's own sandbox, the trust hint says trust is off by default and points to a switch that does not apply there.
 
-- [`trailing-podman-image-inspect-hits-output-cap.md`](trailing-podman-image-inspect-hits-output-cap.md) — Recipe image
-  retirement still reads Podman's full image report, which can exceed the output cap and block cleanup (size
-  unverified).
-
-- [`trailing-podman-leftover-listing-hits-output-cap.md`](trailing-podman-leftover-listing-hits-output-cap.md) — The
-  leftover container listing still reads Podman's full ps report, so one oversized host hides leftovers on every host
-  (size unverified).
-
-- [`trailing-recipe-home-launch-skips-early-title-check.md`](trailing-recipe-home-launch-skips-early-title-check.md) — A
-  recipe launch into the new home folder creates the environment before refusing an invalid session name.
-
 - [`trailing-stale-references-to-removed-repository-search.md`](trailing-stale-references-to-removed-repository-search.md)
   — SPEC.md, code comments and a test docstring still describe the removed repository search.
 

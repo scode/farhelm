@@ -49991,3 +49991,50 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. The desktop installer creates its fallback lock file with owner-only access. Change
   `wmrqmwsrmrrxrxzvrzsspyukuunstwnk`, bookmark
   `plan/triage-provisioning-podman-and-runtime/01-uninstall-update-and-installer-lock`, https://github.com/scode/farhelm/pull/5027/changes.
+
+## trailing-podman-image-inspect-hits-output-cap.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source (`crates/farhelm-helm/src/environment/podman/build.rs:821-839,984-1000`,
+  `provisioning/backend.rs:106,2123-2156`): both `podman image inspect` calls are unprojected and pass through the 64
+  KiB stdout cap, unlike `container inspect` (fixed in #4880). Real-image exceedance threshold unverified.
+- Decision: Q12 ("Straightforward small product fixes"): maintainer picked "Fix all 14". (2026-11-25 fewest-questions
+  triage page, main `5af40d23e`.)
+- Completion criteria: Project both `podman image inspect` calls in `podman/build.rs` with `--format` extracting only
+  `Id` and the needed `farhelm.*` labels (matching #4880's `container inspect` projection), and update/add unit tests
+  (estimate S, ~35-55 lines). Remove the feedback file and its index entry.
+- Execution: Fixed. Image inspection requests the ID and only the labels Farhelm uses.
+  Change `nmpwwsrpvpvlmuzumukomkxprlkkwoul`, bookmark `plan/triage-provisioning-podman-and-runtime/02-podman-projection-and-recipe-title`, https://github.com/scode/farhelm/pull/5031/changes.
+
+## trailing-podman-leftover-listing-hits-output-cap.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source (`crates/farhelm-helm/src/environment/podman.rs:891-893,917-922,1601-1644`,
+  `provisioning/backend.rs:106,2123-2156`): `list_owned` runs unprojected `podman ps --all --no-trunc --format=json`
+  through the 64 KiB cap even though it keeps only container IDs, and one oversized host fails the listing for all hosts
+  (note `try_join_all` all-or-error semantics at `:891-893` are deliberate). Container-count threshold unverified.
+- Decision: Q12 ("Straightforward small product fixes"): maintainer picked "Fix all 14". (2026-11-25 fewest-questions
+  triage page, main `5af40d23e`.)
+- Completion criteria: Switch `list_owned` in `crates/farhelm-helm/src/environment/podman.rs` to
+  `--no-trunc --format {{.ID}}` (preserving deliberate `try_join_all` all-or-error semantics), and update/add unit tests
+  (estimate S, ~25-40 lines). Remove the feedback file and its index entry.
+- Execution: Fixed. Leftover discovery lists full container IDs and verifies the ownership of each candidate.
+  Change `nmpwwsrpvpvlmuzumukomkxprlkkwoul`, bookmark `plan/triage-provisioning-podman-and-runtime/02-podman-projection-and-recipe-title`, https://github.com/scode/farhelm/pull/5031/changes.
+
+## trailing-recipe-home-launch-skips-early-title-check.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed end-to-end by source (`crates/farhelm-helm/src/sessions.rs:1196-1247`,
+  `main.rs:730-759,1121- 1165`, `agent_requests.rs:4415-4440,4653`, `launcher.rs:1230-1233`):
+  `CreateReq::prepare_sandbox_launch` validates `self.title` only inside
+  `if let Some(checkout) = &self.github_checkout`, so home-folder recipe launches with an invalid `--title` (control
+  chars or >64 KiB) create and briefly bill a disposable environment before the supervisor refuses. GUI paste filtering
+  unverified.
+- Decision: Q12 ("Straightforward small product fixes"): maintainer picked "Fix all 14". (2026-11-25 fewest-questions
+  triage page, main `5af40d23e`.)
+- Completion criteria: Validate `self.title` unconditionally in `CreateReq::prepare_sandbox_launch` (printable check +
+  64 KiB cap with a neutral non-checkout error message) so invalid titles are refused before provisioning for
+  home-folder recipe launches as well as managed checkouts, and add tests for both GUI/REST and agent-request routes
+  (estimate S, ~25-45 lines). Remove the feedback file and its index entry.
+- Execution: Fixed. Recipe launches validate home-folder session titles before provisioning or asking for approval.
+  Change `nmpwwsrpvpvlmuzumukomkxprlkkwoul`, bookmark `plan/triage-provisioning-podman-and-runtime/02-podman-projection-and-recipe-title`, https://github.com/scode/farhelm/pull/5031/changes.

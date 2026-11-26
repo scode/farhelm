@@ -10,6 +10,33 @@ use crate::environment::recipes::{PodmanRecipeState, UnconfirmedImageCapture};
 #[path = "tests.rs"]
 mod tests;
 
+/// Request only the identity and labels used to select or retire an image.
+/// Podman renders this template once for the requested image.
+pub(super) const IMAGE_INSPECTION: &str = r#"{
+    "Id":{{json .ID}},
+    "Labels":{
+        "farhelm.helm":{{json (index .Config.Labels "farhelm.helm")}},
+        "farhelm.recipe":{{json (index .Config.Labels "farhelm.recipe")}},
+        "farhelm.artifact":{{json (index .Config.Labels "farhelm.artifact")}}
+    }
+}"#;
+
+/// A projected image response from the bounded remote Podman command.
+#[derive(serde::Deserialize)]
+struct ImageInspection {
+    #[serde(rename = "Id")]
+    id: String,
+    #[serde(rename = "Labels")]
+    labels: BTreeMap<String, Option<String>>,
+}
+
+impl ImageInspection {
+    /// Missing Podman labels render as null or an empty value, never as ownership.
+    fn label(&self, name: &str) -> Option<&str> {
+        self.labels.get(name).and_then(Option::as_deref)
+    }
+}
+
 /// Bootstrap preserves Ubuntu's existing UID1000 identity. An upstream
 /// account-layout change fails before granting sudo or boot linger.
 const BOOTSTRAP: &str = r#"
@@ -44,6 +71,29 @@ enum HelperBase<'a> {
 }
 
 impl Podman {
+    /// Inspect a single image without exporting unrelated image metadata over SSH.
+    async fn inspect_image(
+        &self,
+        place: PlaceTarget<'_>,
+        reference: &str,
+    ) -> anyhow::Result<ImageInspection> {
+        let text = self
+            .require(
+                place,
+                vec![
+                    "image".into(),
+                    "inspect".into(),
+                    "--format".into(),
+                    IMAGE_INSPECTION.into(),
+                    "--".into(),
+                    reference.into(),
+                ],
+                COMMAND,
+            )
+            .await?;
+        serde_json::from_str(&text).context("Podman returned invalid image inspection")
+    }
+
     /// The registry base is user-owned; the bootstrap's committed layer is
     /// helm-owned and recorded for retirement before another helper uses it.
     async fn managed_base(
@@ -818,25 +868,14 @@ impl Podman {
         };
         for mut id in images {
             if self.exists(target, "image", &id).await? {
-                let text = self
-                    .require(
-                        target,
-                        vec!["image".into(), "inspect".into(), "--".into(), id.clone()],
-                        COMMAND,
-                    )
-                    .await?;
-                let info: serde_json::Value = serde_json::from_str(&text)?;
-                let labels = &info[0]["Config"]["Labels"];
+                let info = self.inspect_image(target, &id).await?;
                 anyhow::ensure!(
-                    labels["farhelm.helm"].as_str() == Some(self.tag().await?.as_str())
-                        && labels["farhelm.recipe"].as_str() == Some(name),
+                    info.label("farhelm.helm") == Some(self.tag().await?.as_str())
+                        && info.label("farhelm.recipe") == Some(name),
                     "an image's ownership labels changed; it was left untouched"
                 );
                 if image_id(&id).is_err() {
-                    let observed = info[0]["Id"]
-                        .as_str()
-                        .context("Podman returned no committed image identity")?
-                        .to_owned();
+                    let observed = info.id;
                     image_id(&observed)?;
                     let pending = id.clone();
                     let saved = observed.clone();
@@ -981,21 +1020,9 @@ impl Podman {
             )
             .await?;
         }
-        let text = self
-            .require(
-                place,
-                vec![
-                    "image".into(),
-                    "inspect".into(),
-                    "--".into(),
-                    reference.into(),
-                ],
-                COMMAND,
-            )
-            .await?;
-        let info: serde_json::Value = serde_json::from_str(&text)?;
+        let info = self.inspect_image(place, reference).await?;
         anyhow::ensure!(
-            info[0]["Config"]["Labels"]["farhelm.artifact"].as_str() != Some("prepared"),
+            info.label("farhelm.artifact") != Some("prepared"),
             "a Farhelm installation checkpoint cannot be a recipe base; choose its original base instead"
         );
         Ok(())
