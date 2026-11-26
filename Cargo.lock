@@ -1934,6 +1934,7 @@ dependencies = [
  "farhelm-terminal-emulator",
  "farhelm-teststate",
  "farhelm-testtrace",
+ "futures-util",
  "libc",
  "reqwest",
  "serde",

@@ -17,9 +17,9 @@
 //!
 //! One gap needs care: a vendor that saves a file by renaming a new copy over it replaces the mirror's symlink and
 //! leaves the real file as it was. A refreshed login token would then be lost with the mirror. [`PrivateConfig::finish`]
-//! copies such a replaced file back when the real one has not changed meanwhile and the case's terminal hosts are
-//! confirmed ended, and names it in a note otherwise, including when its copy-back fails. Entries the vendor creates
-//! inside the private directories themselves are dropped with the mirror.
+//! copies such a replaced file back when the original is unchanged, Delete confirmed the sessions' cleanup, and the
+//! terminal hosts are gone. An unconfirmed create or shutdown leaves the original alone and reports the dropped
+//! copies. A failed replacement fails the case after the other copies have been handled.
 //!
 //! Adding a kind with persistent hooks needs nothing here as long as its paths lie under the home or Grok's home;
 //! the guard test below fails for one that does not, and for one without a drift profile.
@@ -292,11 +292,10 @@ impl Mirror {
     }
 
     /// Copy back regular files the vendor replaced in the mirror, when the real file is unchanged since the mirror
-    /// was built. Returns a note for each replaced file it could not copy back. A failed copy of one file becomes its
-    /// note rather than an early return, so it cannot cost the files after it (a refreshed login among them) or the
-    /// caller's hook check.
-    fn copy_back(&self, protected: &BTreeSet<(u64, u64)>) -> Vec<String> {
-        let mut notes = Vec::new();
+    /// was built. Record each dropped replacement and return whether a write failed. Later files still get a chance
+    /// to copy back, including a refreshed login that comes after an unrelated failure.
+    fn copy_back(&self, protected: &BTreeSet<(u64, u64)>, notes: &mut Vec<String>) -> bool {
+        let mut failed = false;
         for (relative, stamp) in &self.links {
             let private = self.private.join(relative);
             let Ok(metadata) = fs::symlink_metadata(&private) else {
@@ -315,6 +314,7 @@ impl Mirror {
                 continue;
             }
             if let Err(error) = Self::replace_real(&private, &real, protected) {
+                failed = true;
                 notes.push(format!(
                     "{} was rewritten during the case, but copying it back failed: {error:#}; the case's copy was \
                      dropped",
@@ -322,7 +322,7 @@ impl Mirror {
                 ));
             }
         }
-        notes
+        failed
     }
 
     /// Atomically replace the real file with the vendor's copy from the mirror, keeping the real file's permissions.
@@ -367,10 +367,8 @@ impl Mirror {
         copied
     }
 
-    /// Name every file the vendor replaced in the mirror, for a case whose terminal hosts were not confirmed ended
-    /// and whose copies are therefore not copied back. The mirror is deleted with the case, so these notes are the
-    /// only record that the vendor's write was lost.
-    fn dropped_without_shutdown(&self) -> Vec<String> {
+    /// Name replaced files before the mirror disappears when session or terminal-host cleanup is unconfirmed.
+    fn dropped_without_cleanup(&self) -> Vec<String> {
         self.links
             .iter()
             .filter(|(relative, _)| {
@@ -379,8 +377,8 @@ impl Mirror {
             })
             .map(|(relative, _)| {
                 format!(
-                    "{} was rewritten during the case, but its terminal hosts were not confirmed ended; the case's \
-                     copy was dropped and the real {} was not touched",
+                    "{} was rewritten during the case. Session or terminal-host cleanup was unconfirmed, so the \
+                     case's copy was dropped and the real {} was not touched",
                     relative.display(),
                     self.real.join(relative).display()
                 )
@@ -586,14 +584,13 @@ impl PrivateConfig {
         Ok(())
     }
 
-    /// Run after every case: copy back what the vendor replaced, then re-check the real hook files. Copy-back waits
-    /// for confirmed host shutdown, so a still-running vendor cannot race it. When shutdown was not confirmed, each
-    /// replaced file is named instead of silently dropped with the mirror: it may be a refreshed login whose loss
-    /// signs the user out of that vendor. Copy-back runs before the hook check, so a changed hook file does not cost the
-    /// vendor's other writes. The check's error keeps its own message first, since the runner's summary shows only the
-    /// first line, and carries the notes after it.
-    pub(super) fn finish(&self, stopped: bool) -> anyhow::Result<Vec<String>> {
+    /// Copy back after confirmed Delete and terminal-host shutdown, then recheck the original hook files. This uses
+    /// the session's process-tree cleanup guarantee, which cannot account for a detached process outside its scope.
+    /// A changed original takes precedence over the mirrored copy. A failed write or hook check fails the case after
+    /// all mirrors are processed. Print notes before the caller writes the verdict, then preserve them in failures.
+    pub(super) fn finish(&self, cleanup_confirmed: bool) -> anyhow::Result<Vec<String>> {
         let mut notes = Vec::new();
+        let mut failed = false;
         let protected = self
             .mirrors
             .iter()
@@ -605,17 +602,24 @@ impl PrivateConfig {
             })
             .collect();
         for mirror in &self.mirrors {
-            if stopped {
-                notes.extend(mirror.copy_back(&protected));
+            if cleanup_confirmed {
+                failed |= mirror.copy_back(&protected, &mut notes);
             } else {
-                notes.extend(mirror.dropped_without_shutdown());
+                notes.extend(mirror.dropped_without_cleanup());
             }
         }
         let unchanged = self
             .mirrors
             .iter()
             .try_for_each(|mirror| mirror.real_leaves_unchanged());
+        for note in &notes {
+            eprintln!("drift: {note}");
+        }
         match unchanged {
+            Ok(()) if failed => Err(anyhow::anyhow!(
+                "drift copy-back failed\n{}",
+                notes.join("\n")
+            )),
             Ok(()) => Ok(notes),
             Err(error) if notes.is_empty() => Err(error),
             Err(error) => Err(anyhow::anyhow!("{error:#}\n{}", notes.join("\n"))),
@@ -872,6 +876,56 @@ mod tests {
             "{error}"
         );
         assert!(lines.any(|line| line.starts_with("state.json")), "{error}");
+    }
+
+    /// One replacement failure must fail the case after later writes. A hard-link alias to a protected file makes
+    /// the first replacement refuse deterministically without permission tricks or access to real vendor files.
+    #[farhelm_testtrace::test]
+    fn a_copy_back_failure_keeps_later_copies_and_fails_the_case() {
+        let scratch = farhelm_teststate::tempdir().unwrap();
+        let (real, private) = (scratch.path().join("real"), scratch.path().join("private"));
+        real_tree(&real);
+        let later = "config/state.json";
+        fs::write(real.join(later), "state-1").unwrap();
+        fs::hard_link(real.join("auth.json"), real.join("protected.json")).unwrap();
+        let mirror = Mirror::build_with_copies(
+            Root::Home,
+            &real,
+            &private,
+            &[PathBuf::from("config/plugins/farhelm/hooks.json")],
+            &[PathBuf::from("protected.json")],
+            &[],
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        let position = |name: &str| {
+            mirror
+                .links
+                .iter()
+                .position(|(path, _)| path == Path::new(name))
+                .unwrap()
+        };
+        assert!(position("auth.json") < position(later));
+        for (name, content) in [("auth.json", "token-2"), (later, "state-2")] {
+            let link = private.join(name);
+            assert!(fs::symlink_metadata(&link).unwrap().is_symlink());
+            fs::remove_file(&link).unwrap();
+            fs::write(link, content).unwrap();
+        }
+        let config = PrivateConfig {
+            mirrors: vec![mirror],
+            launch_shell: None,
+        };
+        let error = config.finish(true).unwrap_err().to_string();
+        assert!(
+            error.contains("auth.json") && error.contains("protected vendor config"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(real.join("auth.json")).unwrap(),
+            "token-1"
+        );
+        assert_eq!(fs::read_to_string(real.join(later)).unwrap(), "state-2");
     }
 
     /// Claude snapshots its configuration into `backups` beside it and prunes old snapshots there. The private

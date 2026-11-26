@@ -139,8 +139,9 @@ second clippy run on floating stable is needed.
 - `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy, terminal host ownership and cleanup when the
   control socket cannot be created, frame retention on drive failure, and rollback and recovery after a partial pair
   swap, using stand-ins with zero vendor turns)
-- `python3 -B scripts/test-run-harness-drift.py` (runner stand-ins verify category selection, one upgrade per harness,
-  HTTPS installer downloads, per-case timeouts, cancellation and verdict retention with zero vendor turns)
+- `python3 -B scripts/test-run-harness-drift.py` (runner stand-ins verify category selection, refusal of unmatched named
+  harnesses, one upgrade per harness, HTTPS installer downloads, timeouts, cancellation and verdict retention without
+  vendor turns)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
   `deno check scripts/tensorlake/rust-tests.ts` and

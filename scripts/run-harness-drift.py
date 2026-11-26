@@ -281,6 +281,12 @@ def main(argv: list[str] | None = None) -> int:
     unknown = sorted(set(options.harness) - {name for _, name in cases})
     if unknown:
         parser.error(f"unknown harness: {', '.join(unknown)} (choose from {', '.join(available)})")
+    missing = sorted(set(options.harness) - set(available))
+    if missing:
+        parser.error(
+            f"no case for {', '.join(missing)} in the selected categories "
+            f"(available harnesses: {', '.join(available)})"
+        )
     selected = [
         (category, name)
         for category in selected_categories

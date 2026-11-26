@@ -72,6 +72,8 @@ farhelm-teststate.workspace = true
 # E2E tracing assertions must use a test-owned capture so supervisor tasks
 # stay attributable to their invoking test without a process-global layer.
 farhelm-testtrace.workspace = true
+# Drift cases catch an unwinding check long enough to close their owned supervisor and config mirror.
+futures-util = { workspace = true, features = ["std"] }
 # The real-stack e2e tests drive a REAL helm, started through the desktop
 # app's embedded entry, over real loopback HTTP (merged_hosts.rs and others);
 # a hand-rolled HTTP client would be a second, worse thing to maintain.

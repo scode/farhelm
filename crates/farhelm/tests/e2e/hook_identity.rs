@@ -241,19 +241,28 @@ impl ServeTask {
     /// Stop accepting and wait until the task has actually released its
     /// supervisor reference, failing the test if it ended in any way other
     /// than the cancellation this asked for.
-    pub(crate) async fn stop(mut self) {
+    pub(crate) async fn stop(self) {
+        self.stop_checked()
+            .await
+            .expect("the supervisor's accept loop failed");
+    }
+
+    /// Report an accept-loop failure to a caller that must still clean up its other resources.
+    pub(crate) async fn stop_checked(mut self) -> anyhow::Result<()> {
         self.0.abort();
         // Awaited through `&mut` so `self` is still whole for `Drop`,
         // whose second `abort()` on a finished task is a no-op.
         let outcome = (&mut self.0).await;
         match outcome {
             // The expected end: the abort above landed.
-            Err(joined) if joined.is_cancelled() => {}
-            Err(joined) => panic!("the supervisor's accept loop panicked: {joined:?}"),
+            Err(joined) if joined.is_cancelled() => Ok(()),
+            Err(joined) => {
+                Err(anyhow::Error::new(joined).context("the supervisor's accept loop panicked"))
+            }
             // `serve()` returning at all means it stopped accepting on its
             // own — a bind or accept failure the tests would otherwise see
             // only as hooks mysteriously failing to connect.
-            Ok(result) => result.expect("the supervisor's accept loop failed"),
+            Ok(result) => result,
         }
     }
 }
