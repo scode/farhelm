@@ -50567,3 +50567,52 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Change `msnzsuzkzownkywpzpzvopxvpoplwnlo`, bookmark
   `plan/triage-trust-settings-and-ui-wording/02-settings-trust-wording-and-switch-a11y`.
   [Draft PR #5046](https://github.com/scode/farhelm/pull/5046/changes).
+
+## trailing-disposable-trust-hint-says-off-by-default.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Confirmed by source (`crates/gui/farhelm-gui/src/session_pane/trust_band.rs:90-96,340-360`,
+  `settings/agent_trust.rs:348-384`): the workspace-trust hint band does not check `HostRow::is_session_owned`, so when
+  a trust question appears in a session's own sandbox/container, the band says trust is "off by default" and points to a
+  Settings switch that does not apply there. (Reviewer cited plain Replace at `sessions.rs:4829` as plain Restart; both
+  retain stored trust.)
+- Decision: Q8 ("User-visible wording & screen-reader accuracy"): maintainer picked "Fix all 5 as recommended".
+  (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Suppress the workspace-trust hint band when the session's host has `is_session_owned == true`,
+  update `SPEC.md:1887-1917` to state that the hint applies only where the Settings switch applies, and add a regression
+  test (estimate S, ~25-40 lines). Remove the feedback file and its index entry.
+- Execution: Change `sqsmosywulztwwutzkpptykktrpnvuom`, bookmark
+  `plan/triage-trust-settings-and-ui-wording/03-trust-hint-and-restart-chip-wording`.
+  [Draft PR #5049](https://github.com/scode/farhelm/pull/5049/changes).
+
+## trailing-stored-trust-chip-credits-settings-switch.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Partly correct. Confirmed for agent-requested Restart approval cards
+  (`approvals/model.rs:545-563,975- 1001`, `card.rs:559-562,601-607`), which show `TRUSTED_WORKSPACE` crediting the
+  Settings switch even if turned off after launch; incorrect for Prompt cards (`model.rs:526,982-984`), which never show
+  the trust chip. `SPEC.md:4721- 4722` currently prescribes the shared sentence.
+- Decision: Q8 ("User-visible wording & screen-reader accuracy"): maintainer picked "Fix all 5 as recommended".
+  (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Give agent-requested Restart approval cards stored-launch trust-chip wording (e.g. "Saved with
+  this session when it started. Repository hooks, settings and commands can run without asking."), update
+  `SPEC.md:4721-4722` to match, and add/update tests (and goldens if affected) (estimate S, ~20-35 lines). Remove the
+  feedback file and its index entry.
+- Execution: Change `sqsmosywulztwwutzkpptykktrpnvuom`, bookmark
+  `plan/triage-trust-settings-and-ui-wording/03-trust-hint-and-restart-chip-wording`.
+  [Draft PR #5049](https://github.com/scode/farhelm/pull/5049/changes).
+
+## trailing-trust-hint-late-refusal-untested.md
+
+- Outcome: `other`.
+- Assessment: Confirmed as a test-only coverage gap (`trust_band_tests.rs:666-731` covers refusal-then-dismissal and
+  dismissal-then-204, not dismissal-then-refusal against `trust_band.rs:316-327`). Shipped code obeys `SPEC.md:1897`.
+- Decision: Q10 ("Pure product-test coverage gaps"): maintainer picked "Re-apply Nov 21 rule + fix security-binding test
+  (#21)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Apply the Nov 21 rule: fix the test if the fix is a few lines (about 20 at most) and the test
+  guards a user-facing behavior; otherwise make no change (estimate ~12-15 lines). Either way remove the feedback file
+  and its index entry, and record in Execution which way it went.
+- Execution: Added the dismissal-before-refusal case to the existing test within the Nov 21 allowance.
+  Change `sqsmosywulztwwutzkpptykktrpnvuom`, bookmark
+  `plan/triage-trust-settings-and-ui-wording/03-trust-hint-and-restart-chip-wording`.
+  [Draft PR #5049](https://github.com/scode/farhelm/pull/5049/changes).

@@ -14,7 +14,8 @@ pub(super) fn approval_card(_: &SceneState, _: &mut Window, cx: &mut App) -> Any
 }
 
 /// The action beside a YOLO chip matters. Plain Restart uses the session's saved command, while a prompt goes to an
-/// already running agent. The prompt fixture deliberately shows a bypass observed on the agent's status line.
+/// already running agent. The Restart fixture shows the trust saved with its launch. The Prompt fixture shows a
+/// bypass observed on the agent's status line.
 pub(super) fn approval_yolo_actions(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     use farhelm_proto::approvals::ApprovalAction;
     use serde_json::json;
@@ -26,9 +27,9 @@ pub(super) fn approval_yolo_actions(_: &SceneState, _: &mut Window, cx: &mut App
     target.title = Some("Review notes".to_owned());
     let launch = serde_json::from_value(json!({
         "kind": "agent",
-        "selection": {"harness": "codex", "permissions": "yolo"},
-        "start": ["codex", "--yolo", "{farhelm_args}"],
-        "resume": ["codex", "--yolo", "resume", "{conversation}", "{farhelm_args}"],
+        "selection": {"harness": "codex", "permissions": "yolo", "workspace_trust": true},
+        "start": ["codex", "--yolo", "-c", "{codex:trusted-cwd}", "{farhelm_args}"],
+        "resume": ["codex", "--yolo", "-c", "{codex:trusted-cwd}", "resume", "{conversation}", "{farhelm_args}"],
     }))
     .expect("saved YOLO launch fixture");
     restart.action = ApprovalAction::Restart {
