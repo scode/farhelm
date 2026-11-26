@@ -49632,3 +49632,58 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed as decided. Change `wouywkluvwzszzomulrrqxklyzvrsqwr`, bookmark
   `plan/triage-settings-nov24/07b-app-scope-and-play-hitbox`.
   [Draft PR #5016](https://github.com/scode/farhelm/pull/5016/changes).
+
+## trailing-credential-delivery-test-stale-claude-settings-assertion.md
+
+- Outcome: `other`.
+- Assessment: A credential-delivery test still asserts that the old Claude settings file was not created, which is
+  always true now, and does not check the files that actually fail or the Codex file after retry. Verified: confirmed.
+  `credential_delivery_tests.rs:2076` still has the vacuous assertion; no Codex-after-retry assertion (`:2077-2084`).
+  Coverage gap only.
+- Decision: q-tests, "Gaps that exist only in product tests": the maintainer picked "Re-apply the Nov 21 rule".
+  (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior; otherwise make no change. Either way remove the feedback file and its index entry, and say in the execution
+  record which way it went. Recommendation for reference: discard (or fix code) — coverage only; size S.
+- Execution: Fixed as decided. Change `xyzvnomlywvplnytpoovsyrrkknuusxs`, bookmark
+  `plan/triage-settings-nov24/07c-credential-file-test-and-polish-outcomes`.
+  [Draft PR #5019](https://github.com/scode/farhelm/pull/5019/changes).
+
+## trailing-settings-containers-reload-omits-loading-keeps-error.md
+
+- Outcome: `other`.
+- Assessment: In Settings → Containers, after a leftovers refresh failed, pressing Refresh again (or deleting the last
+  listed leftover) shows no "Reading container leftovers…" while the helm checks (up to 20 s); only the old error stays,
+  as if the new check had already failed. Verified: confirmed. Loading text shows only for `(None, None)`
+  (`containers.rs:512-520`); `start_round` and the Delete follow-up read leave `leftover_error` set
+  (`:174-184,350-358`). Self-corrects when the read answers. Not the rare-glitch filter: a retry after a failed refresh
+  is not a rare trigger.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code — track a reading flag and show the status; size S.
+- Execution: No change under the cheap-fix decision. Tracking the pending read across Refresh and the Delete follow-up,
+  preserving cached rows, and adding interaction and visual evidence would exceed the size allowance. Change
+  `xyzvnomlywvplnytpoovsyrrkknuusxs`, bookmark
+  `plan/triage-settings-nov24/07c-credential-file-test-and-polish-outcomes`.
+  [Draft PR #5019](https://github.com/scode/farhelm/pull/5019/changes).
+
+## trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md
+
+- Outcome: `other`.
+- Assessment: In a host's settings, flipping the Tailscale switch while a session launch is starting shows a bare
+  lowercase fragment ("not started, a session launch is in progress…") without naming the setting, can show it beneath
+  an older Tailscale error, and can leave it on screen after an earlier Tailscale save succeeds. Verified: confirmed.
+  `hosts/settings.rs:759-764` sets the flag and returns; the row draws the bare `LAUNCH_IN_FLIGHT` (`:960-966`) beside
+  the draft's refusal (`:957-959`); nothing clears the flag when a save settles. Diagnostic/stale display only.
+- Decision: q-polish, "Small presentation and robustness defects with no spec rule": the maintainer picked "Fix the
+  cheap ones, remove the rest". (2026-11-24 fewest-questions triage page (main c38b93552).)
+- Completion criteria: Fix it if the fix is about 30 lines or less including a test; otherwise make no change. Either
+  way remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation
+  for reference: fix code — prefix, suppress the old error, clear on settle; size S.
+- Execution: No change under the cheap-fix decision. Showing one current refusal requires precedence and settlement on
+  the correct route, plus a concurrent-launch test and a new visual state. The complete fix would exceed the size
+  allowance. Change `xyzvnomlywvplnytpoovsyrrkknuusxs`, bookmark
+  `plan/triage-settings-nov24/07c-credential-file-test-and-polish-outcomes`.
+  [Draft PR #5019](https://github.com/scode/farhelm/pull/5019/changes).

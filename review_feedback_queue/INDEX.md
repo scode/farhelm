@@ -53,18 +53,6 @@ consequences.
 - [`shortcuts-chord-during-composition.md`](shortcuts-chord-during-composition.md) — The Keyboard shortcuts chord can
   interrupt an input method if native handling clears its mark first or the action cannot query the focused field.
 
-- [`trailing-settings-containers-reload-omits-loading-keeps-error.md`](trailing-settings-containers-reload-omits-loading-keeps-error.md)
-  — After a failed refresh in Settings -> Containers, deleting the last leftover or clicking Refresh hides the reading
-  indicator and leaves only the old refresh error visible while the new read waits.
-
-- [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
-  — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
-  agent-credentials and Codex config targets unverified before and after retry.
-
-- [`trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md`](trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md)
-  — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
-  failure above it, and leaves the launch refusal stuck even after an in-flight toggle succeeds.
-
 - [`ui-channel-displaced-notice-lost-to-reader-race.md`](ui-channel-displaced-notice-lost-to-reader-race.md) — A
   displaced UI channel's Displaced notice can be dropped by a reader/writer drain race, so the displaced window
   reconnects and steals the seat back (latent: a second UI cannot arise in the shipped embedded app).

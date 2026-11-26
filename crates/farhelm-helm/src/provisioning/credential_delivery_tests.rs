@@ -2203,6 +2203,8 @@ async fn tokenless_codex_waits_for_hello_and_keeps_unstamped_settings() {
 
 /// Each backend failure is mapped at the delivery boundary; transport context
 /// and stderr must not reach the warning or saved-with-failure acknowledgement.
+/// The failed file stays absent or unchanged until retry. The repaired launch gets
+/// both tokens from the managed launch file after legacy Codex cleanup succeeds.
 #[farhelm_testtrace::test]
 async fn backend_failures_leave_saved_values_and_safe_warnings() {
     for (operation, reason) in [
@@ -2230,12 +2232,11 @@ async fn backend_failures_leave_saved_values_and_safe_warnings() {
         let f = Fixture::new(true).await;
         f.stamp_legacy_codex().await;
         let codex = f.home.join(".codex/config.toml");
+        let legacy = legacy_codex_config("old");
         tokio::fs::create_dir(codex.parent().unwrap())
             .await
             .unwrap();
-        tokio::fs::write(&codex, legacy_codex_config("old"))
-            .await
-            .unwrap();
+        tokio::fs::write(&codex, &legacy).await.unwrap();
         let _lease = f.delivery.enter(&f.row);
         *f.backend.fail.lock().unwrap() = Some(operation.into());
         f.delivery.connect(&f.row, &f.events).await;
@@ -2270,7 +2271,12 @@ async fn backend_failures_leave_saved_values_and_safe_warnings() {
                 .contains("host said no")
         );
         assert_eq!(f.store.credentials().await.unwrap()[0].revision, 2);
-        assert!(!f.home.join(".claude/settings.json").exists());
+        if matches!(operation, "create-directories" | "wrote-agent-credentials") {
+            assert!(!f.claude_path().exists(), "{operation}");
+        } else {
+            let retained = tokio::fs::read_to_string(&codex).await.unwrap();
+            assert_eq!(retained, legacy, "{operation}");
+        }
         *f.backend.fail.lock().unwrap() = None;
         assert!(
             f.delivery
@@ -2279,6 +2285,12 @@ async fn backend_failures_leave_saved_values_and_safe_warnings() {
                 .is_empty()
         );
         assert_eq!(f.delivery.warning(f.row.id), None);
+        let cleaned = tokio::fs::read_to_string(&codex).await.unwrap();
+        assert!(cleaned.contains("editor = 'old'"), "{operation}");
+        assert!(
+            !cleaned.contains("experimental_bearer_token"),
+            "{operation}"
+        );
         let env = f.snapshot().await.env;
         assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], SECOND);
         assert_eq!(env[CODEX_ENDPOINT_TOKEN_ENV], SECOND);
