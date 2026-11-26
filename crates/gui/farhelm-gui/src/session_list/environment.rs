@@ -667,7 +667,9 @@ pub(crate) fn suspend_command(host: i64) -> Result<Command, PathError> {
 }
 
 /// Host `host`'s Resume, `POST /api/hosts/{id}/resume` with no body, as [`Work::Resume`]: what a session's Resume
-/// sends, and the Hosts panel's too (`crate::hosts::lifecycle`).
+/// sends, and the Hosts panel's too (`crate::hosts::lifecycle`). The body stays empty, an untagged Resume whose late
+/// failure the helm does not publish: these surfaces read the pushed host state instead. The launcher's wake sends its
+/// own request-tagged Resume (`crate::launcher::launch::wake`), because it alone holds a draft on that Resume's outcome.
 pub(crate) fn resume_command(host: i64) -> Result<Command, PathError> {
     Ok(Command::new(
         Work::Resume,

@@ -6,7 +6,7 @@ use std::time::Duration;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, HostStateView, HostView, KeyedEntry,
+    Collection, CollectionChanges, HostStateView, HostView, KeyedEntry, WakeOutcome, WakeResult,
 };
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
@@ -785,14 +785,7 @@ fn a_late_resume_failure_keeps_the_provider_diagnosis(cx: &mut TestAppContext) {
 /// and the create still waits for a fresh connection.
 #[gpui::test]
 fn a_stopped_container_starts_before_creating(cx: &mut TestAppContext) {
-    let mut host: HostView =
-        serde_json::from_value(fixture_hosts(&[11]).entries[0].value.clone()).unwrap();
-    host.kind = "podman".into();
-    host.state = HostStateView::Stopped {
-        waiting_for_place: false,
-        start_failed: None,
-    };
-    let (mut helm, cx, mut host) = open_on(cx, host);
+    let (mut helm, cx, mut host) = open_on(cx, stopped_container(None));
     let resume = press(&mut helm, cx);
     assert!(label(cx, "launch-wake").unwrap().starts_with("Starting "));
     helm.reply(resume.id, 200, None);
@@ -859,4 +852,332 @@ fn a_replacement_holds_its_source_through_a_wake_refusal(cx: &mut TestAppContext
     settle(cx);
     assert!(cx.update(|_, cx| !crate::session_list::menu::refused("a", cx)));
     assert!(shown_refusal(cx).is_some());
+}
+
+// ---- The helm's tagged wake outcome ---------------------------------------------------------------------------------
+//
+// The helm answers a Resume within 20 seconds; past that it says only that the Resume carries on, and publishes how
+// the Resume ended on the host's hosts-list entry, under the request tag the launcher sent. These tests pin that the
+// launcher sends its own tag, acts at once on a failure under that tag, and ignores every other outcome.
+
+/// The tag a host's wake fixture already carries in `host-list.json`: another sender's, never the launcher's.
+const FIXTURE_TAG: &str = "contract-fixture";
+
+/// The fixture's registered host turned into a container that is Stopped, with `start_failed` as the container host's
+/// last automatic-start diagnosis. Its installation and connection identity stay the sandbox fixture's, which the wake
+/// only compares with themselves. The late-failure golden scene starts from it too.
+pub(crate) fn stopped_container(start_failed: Option<&str>) -> HostView {
+    let mut host: HostView =
+        serde_json::from_value(fixture_hosts(&[11]).entries[0].value.clone()).unwrap();
+    host.kind = "podman".into();
+    host.state = HostStateView::Stopped {
+        waiting_for_place: false,
+        start_failed: start_failed.map(str::to_owned),
+    };
+    host
+}
+
+/// The request tag a launcher wake's Resume carried, asserting that it carried one in the helm's own body type, so a
+/// change to either side's spelling fails here.
+fn tag_of(resume: &FakeCommand) -> String {
+    let body = resume
+        .body
+        .clone()
+        .expect("the launcher's Resume carries a body");
+    let body: farhelm_proto::ui_channel::ResumeHostBody =
+        serde_json::from_value(body).expect("the body is the helm's resume body");
+    body.request
+        .expect("the launcher's Resume carries a request tag")
+}
+
+/// Publish `host` again in its current state, now listing `outcome` under `request` as its latest tagged Resume, as
+/// the helm's hosts list does once that Resume ends.
+fn push_outcome(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    host: &mut HostView,
+    request: &str,
+    outcome: WakeResult,
+) {
+    host.wake_outcome = Some(WakeOutcome {
+        request: request.to_owned(),
+        outcome,
+    });
+    let state = host.state.clone();
+    push(helm, cx, host, state);
+}
+
+/// The executor's clock, which `advance` moves and the wake's budget reads.
+fn now(cx: &mut VisualTestContext) -> std::time::Instant {
+    cx.update(|_, cx| cx.background_executor().now())
+}
+
+/// The launcher is the one sender that ends a wait on the helm's tagged outcome, so it must tag every Resume it
+/// sends, a busy retry's included, with one tag per wake, and two wakes must never share one: a shared tag would let
+/// the first wake's failure end the second. The tag also must not be the fixture's, which the launcher ignores.
+#[gpui::test]
+fn the_launchers_resume_carries_one_tag_per_wake(cx: &mut TestAppContext) {
+    use farhelm_proto::ui_channel::HelmMarker;
+
+    let (mut helm, cx, mut host) = open(cx);
+    let first = press(&mut helm, cx);
+    let tag = tag_of(&first);
+    assert!(tag.starts_with("launcher-"), "{tag}");
+    assert_ne!(tag, FIXTURE_TAG);
+    helm.reply_marked(
+        first.id,
+        409,
+        vec![HelmMarker::HostBusy],
+        Some(json!("The host is busy")),
+    );
+    settle(cx);
+    let initial = host.state.clone();
+    push(&mut helm, cx, &mut host, initial);
+    advance(cx, Duration::from_secs(1));
+    let retry = wake_commands(&mut helm, cx);
+    let [retry] = &retry[..] else {
+        panic!("one busy retry expected, got {retry:?}")
+    };
+    assert_eq!(retry.path, RESUME);
+    assert_eq!(tag_of(retry), tag, "a busy retry keeps the wake's tag");
+    helm.reply(retry.id, 409, Some(json!("The sandbox is gone")));
+    settle(cx);
+    assert!(shown_refusal(cx).is_some(), "the first wake ended");
+
+    let second = press(&mut helm, cx);
+    assert_ne!(tag_of(&second), tag, "a new wake mints a new tag");
+}
+
+/// A container host checks its container over SSH before it takes the connection hold, so on a slow container host
+/// the helm can answer 504 while the host still reads Stopped with no Starting hold, and then fail: nothing in the
+/// pushed state ever changes. The draft must come back as soon as the helm publishes that failure under this wake's
+/// tag, with the helm's reason behind the container's start lead, not after the minute with a generic timeout.
+#[gpui::test]
+fn a_late_container_failure_before_starting_returns_the_draft_with_its_reason(
+    cx: &mut TestAppContext,
+) {
+    const WHY: &str = "Podman could not inspect the container: ssh timed out";
+    let (mut helm, cx, mut host) = open_on(cx, stopped_container(None));
+    let resume = press(&mut helm, cx);
+    let tag = tag_of(&resume);
+    assert!(label(cx, "launch-wake").unwrap().starts_with("Starting "));
+    helm.reply(resume.id, 504, Some(json!("The resume carries on")));
+    settle(cx);
+    let started = now(cx);
+    let stopped = host.state.clone();
+    push(&mut helm, cx, &mut host, stopped);
+    advance(cx, Duration::from_secs(30));
+    assert!(
+        label(cx, "launch-wake").is_some(),
+        "an unchanged Stopped host alone keeps the wake waiting"
+    );
+    assert!(shown_refusal(cx).is_none());
+
+    push_outcome(
+        &mut helm,
+        cx,
+        &mut host,
+        &tag,
+        WakeResult::Failed { reason: WHY.into() },
+    );
+    assert_eq!(
+        shown_refusal(cx).unwrap(),
+        format!("Not launched. Starting the host failed: {WHY}"),
+    );
+    assert!(
+        now(cx) - started < Duration::from_secs(60),
+        "before the budget"
+    );
+    assert!(label(cx, "launch-wake").is_none());
+    assert!(wake_commands(&mut helm, cx).is_empty(), "no create escapes");
+    assert!(cx.update(|_, cx| !crate::hosts::launch_in_flight(cx)));
+}
+
+/// A sandbox whose earlier Resume already failed shows that diagnosis before the press. When the new Resume fails the
+/// same way, the pushed `resume_failed` does not change, which the state watch reads as nothing new; only the tagged
+/// outcome says this wake failed. The draft must come back at once, with the helm's reason in the sandbox's wording.
+#[gpui::test]
+fn a_repeated_sandbox_failure_returns_the_draft_at_once(cx: &mut TestAppContext) {
+    const WHY: &str = "Tensorlake could not resume this host: the sandbox is unavailable";
+    let mut host: HostView =
+        serde_json::from_value(fixture_hosts(&[11]).entries[0].value.clone()).unwrap();
+    let HostStateView::Suspended { resume_failed, .. } = &mut host.state else {
+        panic!("the fixture's host is suspended")
+    };
+    *resume_failed = Some(WHY.into());
+    let (mut helm, cx, mut host) = open_on(cx, host);
+    // The provider's re-probe after the hold ends publishes the same diagnosis it showed before the press.
+    let failed_again = host.state.clone();
+    let resume = press(&mut helm, cx);
+    let tag = tag_of(&resume);
+    helm.reply(resume.id, 504, Some(json!("The resume carries on")));
+    settle(cx);
+    push(
+        &mut helm,
+        cx,
+        &mut host,
+        changing(LifecycleDirection::Resuming),
+    );
+    push(&mut helm, cx, &mut host, failed_again);
+    assert!(
+        label(cx, "launch-wake").is_some(),
+        "the same diagnosis again is not a new one to the state watch"
+    );
+
+    push_outcome(
+        &mut helm,
+        cx,
+        &mut host,
+        &tag,
+        WakeResult::Failed { reason: WHY.into() },
+    );
+    assert_eq!(
+        shown_refusal(cx).unwrap(),
+        format!("Not launched. Resuming the host failed: {WHY}"),
+    );
+    assert!(label(cx, "launch-wake").is_none());
+    assert!(wake_commands(&mut helm, cx).is_empty());
+}
+
+/// The container counterpart: the automatic start already failed and left `start_failed`, and the launcher's own
+/// start fails with the same text. The draft must come back at once in the container's start wording, which is what
+/// the stopped container's wake says throughout.
+#[gpui::test]
+fn a_repeated_container_start_failure_returns_the_draft_at_once(cx: &mut TestAppContext) {
+    const WHY: &str = "podman start failed: no space left on device";
+    let (mut helm, cx, mut host) = open_on(cx, stopped_container(Some(WHY)));
+    let resume = press(&mut helm, cx);
+    let tag = tag_of(&resume);
+    helm.reply(resume.id, 504, Some(json!("The resume carries on")));
+    settle(cx);
+    push(
+        &mut helm,
+        cx,
+        &mut host,
+        HostStateView::TensorlakeChanging {
+            starting: true,
+            direction: LifecycleDirection::Resuming,
+            requested_at: 1,
+        },
+    );
+    let failed_again = HostStateView::Stopped {
+        waiting_for_place: false,
+        start_failed: Some(WHY.into()),
+    };
+    push(&mut helm, cx, &mut host, failed_again);
+    assert!(
+        label(cx, "launch-wake").is_some(),
+        "the same diagnosis again is not a new one to the state watch"
+    );
+
+    push_outcome(
+        &mut helm,
+        cx,
+        &mut host,
+        &tag,
+        WakeResult::Failed { reason: WHY.into() },
+    );
+    assert_eq!(
+        shown_refusal(cx).unwrap(),
+        format!("Not launched. Starting the host failed: {WHY}"),
+    );
+    assert!(label(cx, "launch-wake").is_none());
+    assert!(wake_commands(&mut helm, cx).is_empty());
+}
+
+/// A stopped container's start refused in the reply itself names the start, not a resume: the reply's lead is the
+/// provider's, like the rest of the container's wake (SPEC.md, "Container sessions").
+#[gpui::test]
+fn a_refused_container_start_says_start(cx: &mut TestAppContext) {
+    let (mut helm, cx, _) = open_on(cx, stopped_container(None));
+    let resume = press(&mut helm, cx);
+    helm.reply(
+        resume.id,
+        409,
+        Some(json!("the container is changing state; try again")),
+    );
+    settle(cx);
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Not launched. Starting the host failed: the container is changing state; try again"),
+    );
+    assert!(label(cx, "launch-wake").is_none());
+}
+
+/// The helm keeps one outcome per host, whoever sent its Resume: the fixture's sender, another window, or an earlier
+/// wake of this launcher. None of those says this wake's Resume failed, so a failure under any other tag must leave
+/// the wake waiting; only the state watch and the minute can end it then.
+#[gpui::test]
+fn a_failure_under_another_tag_is_ignored(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = open(cx);
+    let fixture = host
+        .wake_outcome
+        .clone()
+        .expect("the fixture lists an outcome");
+    assert_eq!(fixture.request, FIXTURE_TAG);
+    assert!(matches!(fixture.outcome, WakeResult::Failed { .. }));
+
+    // An earlier wake of this same launcher, refused, leaves its tag behind.
+    let earlier = press(&mut helm, cx);
+    let earlier_tag = tag_of(&earlier);
+    helm.reply(
+        earlier.id,
+        409,
+        Some(json!("The test refused the first wake")),
+    );
+    settle(cx);
+    assert!(shown_refusal(cx).is_some());
+
+    let resume = press(&mut helm, cx);
+    assert!(shown_refusal(cx).is_none(), "the second wake is under way");
+    helm.reply(resume.id, 504, Some(json!("The resume carries on")));
+    settle(cx);
+    for other in [FIXTURE_TAG, earlier_tag.as_str()] {
+        push_outcome(
+            &mut helm,
+            cx,
+            &mut host,
+            other,
+            WakeResult::Failed {
+                reason: "Another sender's Resume failed".into(),
+            },
+        );
+        assert!(
+            label(cx, "launch-wake").is_some(),
+            "{other} is not this wake's"
+        );
+        assert!(shown_refusal(cx).is_none());
+    }
+    push(&mut helm, cx, &mut host, connected());
+    let sent = creates(&mut helm, cx);
+    assert_eq!(sent.len(), 1, "the connection still completes the wake");
+    helm.reply(sent[0].id, 409, Some(json!("The test refused the create")));
+    settle(cx);
+}
+
+/// `Ready` says only that the provider finished, not that the host connected, so under this wake's own tag it must
+/// neither end the wake nor send the create: the wait for a fresh connection goes on, and the connection still
+/// completes it.
+#[gpui::test]
+fn a_ready_outcome_does_not_end_the_wait(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = open(cx);
+    let resume = press(&mut helm, cx);
+    let tag = tag_of(&resume);
+    helm.reply(resume.id, 504, Some(json!("The resume carries on")));
+    settle(cx);
+    push(
+        &mut helm,
+        cx,
+        &mut host,
+        crate::hosts::tests::connecting(1, None),
+    );
+    push_outcome(&mut helm, cx, &mut host, &tag, WakeResult::Ready);
+    assert!(label(cx, "launch-wake").is_some());
+    assert!(shown_refusal(cx).is_none());
+    assert!(wake_commands(&mut helm, cx).is_empty(), "no early create");
+    push(&mut helm, cx, &mut host, connected());
+    let sent = creates(&mut helm, cx);
+    assert_eq!(sent.len(), 1);
+    helm.reply(sent[0].id, 409, Some(json!("The test refused the create")));
+    settle(cx);
 }

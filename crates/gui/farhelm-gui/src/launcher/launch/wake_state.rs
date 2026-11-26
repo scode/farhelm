@@ -8,12 +8,10 @@ use std::time::{Duration, Instant};
 use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::HostStateView;
 
+use crate::environment_ui::WakeWords;
+
 pub(super) const CONNECTION_BUDGET: Duration = Duration::from_secs(60);
 pub(super) const BUSY_RETRY: Duration = Duration::from_secs(1);
-
-/// A checkout that never saw its new connection cannot have allocated a folder or started a session. Keep the
-/// established checkout refusal even though the desktop app has only one connection wait.
-const CHECKOUT_CONNECTION_TIMEOUT: &str = "The host resumed, but this window did not see it connect within 60 seconds. The session was not launched; try again.";
 
 /// Which evidence the wake still needs. Ready retains the destination hold through the hidden launcher’s
 /// folder-default or preview wait.
@@ -206,11 +204,14 @@ impl ResumeWait {
         self.retry_at = None;
     }
 
+    /// Advance on one pushed host state. Every failure it reports is worded by `words`, the provider's words for
+    /// this wake ([`crate::environment_ui::ProviderUi::wake_words`]), so a stopped container's wake speaks of
+    /// starting it while a sandbox's speaks of resuming it.
     pub(super) fn observe(
         &mut self,
         state: &HostStateView,
         now: Instant,
-        provider_failure: &'static str,
+        words: &WakeWords,
     ) -> Advance {
         let observation = self.watch.observe(state);
         let failure = match observation {
@@ -227,10 +228,8 @@ impl ResumeWait {
         }
         if let Some(failure) = self.pending_failure {
             return Advance::Fail(match failure {
-                ObservationFailure::Provider => provider_failure,
-                ObservationFailure::SuspendedAgain => {
-                    "The host was suspended again while it was waking; resume it and launch again"
-                }
+                ObservationFailure::Provider => words.diagnosed,
+                ObservationFailure::SuspendedAgain => words.suspended_again,
                 ObservationFailure::Unavailable => {
                     "The host is unavailable; wait for it to reconnect before launching"
                 }
@@ -248,9 +247,12 @@ impl ResumeWait {
             let reason = if self.phase == Phase::Busy {
                 "The host stayed busy with another operation for 60 seconds; try again when it finishes"
             } else if self.checkout {
-                CHECKOUT_CONNECTION_TIMEOUT
+                // A checkout that never saw its new connection cannot have allocated a folder or started a
+                // session. Keep the established checkout refusal even though the desktop app has only one
+                // connection wait.
+                words.checkout_unconnected
             } else {
-                "The host resumed but did not connect within 60 seconds; try again when it connects"
+                words.unconnected
             };
             return Advance::Fail(reason);
         }

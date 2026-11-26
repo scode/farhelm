@@ -404,9 +404,11 @@ fails before it answers shows its error and reconnects rather than claiming the 
 shows **Resuming…** during the Tensorlake call, then **Connecting…** while a fresh connection is established. A Suspend
 or Resume that has not finished within 20 seconds answers that it carries on, and the host keeps showing **Suspending…**
 or **Resuming…** until it ends. A failure after that answer ends as it would have before it, a failed Suspend
-reconnecting the host and a failed Resume leaving it **Suspended**, with the reason only in the helm's log. Neither
-transition offers a competing lifecycle action or host setup/update. Repeating Resume on an already-running, connected
-sandbox preserves its live sessions' connections.
+reconnecting the host and a failed Resume leaving it **Suspended**. A Suspend's reason, and the reason of a Resume from
+Hosts or a session's controls, then reaches only the helm's log; the session launcher's own Resume carries a request tag
+of its own, and the helm reports that Resume's outcome to it (see below). Neither transition offers a competing
+lifecycle action or host setup/update. Repeating Resume on an already-running, connected sandbox preserves its live
+sessions' connections.
 
 The Suspend confirmation is titled **Suspend &lt;host&gt;?**, with its explanation below the heading and **Cancel** /
 **Suspend** in the footer. Its close control, Escape and Cancel dismiss without suspending. The sandbox name, recipe and
@@ -414,8 +416,11 @@ resources use the normal subdued details styling in Hosts.
 
 The session launcher shows its own **Resuming** preparation through the provider call and reconnection, including quick
 launch. It says the session starts when the host is ready. A failed preparation uses the launcher's refusal alert with
-**Restart error.** for Restart with and **Not launched.** for other launches. A host another surface is suspending or
-resuming remains unavailable for a new launch.
+**Restart error.** for Restart with and **Not launched.** for other launches. When the launcher's own Resume fails, the
+draft comes back at once with that Resume's reason after **Resuming the host failed:**, whether the failure came in the
+reply or after the 20-second answer, before the provider began **Resuming…**, or repeated the diagnosis the host already
+showed. Only the launcher's own Resume is reported that way; another surface's Resume reaches the launch only through
+the host's state. A host another surface is suspending or resuming remains unavailable for a new launch.
 
 Environment supervisor connections use a two-minute input-silence limit. The helm sends a lightweight heartbeat every 30
 seconds independently of session refreshes or storage work. If the helm vanishes while the gateway keeps its connection
@@ -1587,7 +1592,8 @@ keeps the launcher hidden through the wake (see "Topology"). Once the host recon
 send its create and a fresh checkout obtains its preview on the new connection before sending it. Busy retries and
 connection waiting share one 60-second budget. An accepted Resume and the provider's subsequent **Resuming** phase pause
 that budget. A checkout preview can finish after the minute once the host has connected. On expiry the launcher returns
-with its draft and explains why it did not start. A later connection cannot start the expired launch.
+with its draft and explains why it did not start. A failure of the launch's own Resume ends the wait before the minute
+does (see "Topology"). A later connection cannot start the expired launch.
 
 Once the request has waited about two seconds, a small pill at the bottom of the window shows a spinner and a status:
 Launching, Restarting or Replacing, the captured host's name and elapsed seconds, updated about once a second, including
@@ -5699,13 +5705,14 @@ whole container. Suspend and Resume affect any leftover sessions too.
 A container host reboot stops the container while retaining its files. Whenever the helm finds a container Stopped while
 connected to its container host, it attempts one automatic start. This also covers an external `podman stop` or
 out-of-memory kill. Stopped has its own state and is never labelled Suspended. A launch on a stopped container that
-offers Resume starts it and waits for a fresh connection. Its preparation pill says **Starting**. While starting, the
-ordinary unavailable card explains that Farhelm is starting the container again. A failed start shows the reason and
-offers Resume. Successful start brings back its supervisor with ordinary session classification. A host reboot
-interrupts sessions last known live, while known exits keep their outcome. A container stopped and started on the same
-host boot returns ended sessions through ordinary exit classification. Captured resumable conversations offer Restart,
-and agents never restart automatically. A helm restart reconnects running containers and leaves paused containers
-paused.
+offers Resume starts it and waits for a fresh connection. Its preparation pill says **Starting**, and its failures speak
+of starting it and of it being stopped again, never of resuming or suspension: a failed start brings the draft back with
+**Starting the host failed:** and the reason. While starting, the ordinary unavailable card explains that Farhelm is
+starting the container again. A failed start shows the reason and offers Resume. Successful start brings back its
+supervisor with ordinary session classification. A host reboot interrupts sessions last known live, while known exits
+keep their outcome. A container stopped and started on the same host boot returns ended sessions through ordinary exit
+classification. Captured resumable conversations offer Restart, and agents never restart automatically. A helm restart
+reconnects running containers and leaves paused containers paused.
 
 Session metadata names **&lt;recipe&gt; container on &lt;host&gt;**, with a container mark distinct from the sandbox
 cube. The launch action's accessible name names the new container and its host. Its session-owned host appears in Hosts,

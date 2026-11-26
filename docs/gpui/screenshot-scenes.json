@@ -3001,6 +3001,11 @@
       "reference": null
     },
     {
+      "golden": "launcher-late-wake-failure",
+      "title": "The launcher back with its draft after a stopped container's start failed past the helm's reply bound, its alert naming the failure",
+      "reference": null
+    },
+    {
       "golden": "launcher-held-host-help",
       "title": "Restart with's held host, its hover help naming the host in full where the address segment clips it",
       "reference": null

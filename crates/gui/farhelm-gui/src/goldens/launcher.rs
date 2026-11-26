@@ -164,6 +164,126 @@ fn refuse_wake(_: &Entity<SessionList>, state: &SceneState, window: &mut Window,
     assert!(!lines.is_empty() && lines.iter().all(|line| line.visible_bounds == line.bounds));
 }
 
+/// The reason the late-failure scene's helm publishes for the container's failed start.
+const LATE_WAKE_FAILURE: &str = "Podman could not inspect the container: ssh timed out";
+
+/// Capture the launcher back with its draft after a stopped container's start failed past the helm's reply bound, the
+/// one wake failure that reaches the launcher only through the helm's tagged outcome. A container rather than the
+/// sandbox, so the picture pins the container's start wording too.
+pub(super) fn launcher_late_wake_failure_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let mut hosts = fixture_hosts(&[0, 11]);
+    hosts.entries[1].value =
+        serde_json::to_value(crate::launcher::wake_tests::stopped_container(None)).unwrap();
+    setup_sandbox(
+        state,
+        window,
+        cx,
+        listing(&[], &[]),
+        hosts,
+        open_stopped_wake_launcher,
+    );
+}
+
+/// Open New on the stopped container once the fake has published it, then press Launch to start its wake.
+fn open_stopped_wake_launcher(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use farhelm_proto::ui_channel::{HostStateView, HostView};
+    let Some(store) = crate::session::current_store(cx) else {
+        state.after.set(Some(open_stopped_wake_launcher));
+        return;
+    };
+    let host = store
+        .read(cx)
+        .collections()
+        .get::<HostView>(&HostView::key(12))
+        .expect("the fixture lists its stopped container");
+    assert!(matches!(host.state, HostStateView::Stopped { .. }));
+    let mut draft = crate::launcher::launch_tests::command_draft();
+    draft.choose_host(12, "~".into());
+    draft.edit_folder("/home/user/work".into());
+    let mark = crate::focus::Mark::take(cx);
+    assert!(crate::launcher::view::open(draft, &mark, window, cx).is_some());
+    state.after.set(Some(press_stopped_wake));
+}
+
+/// Press Launch once the drawn form offers it, as [`press_wake_launcher`] does, then go on to fail the wake.
+fn press_stopped_wake(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if click_control(window, cx, "launcher-launch") {
+        assert!(crate::launcher::launch::waking(cx));
+        state.after.set(Some(fail_wake_late));
+    } else {
+        state.after.set(Some(press_stopped_wake));
+    }
+}
+
+/// Answer the container's start with the helm's 504 (it carries on), leave the host Stopped with no Starting hold,
+/// and publish the start's failure under the wake's own request tag; then wait for the launcher's alert.
+fn fail_wake_late(_: &Entity<SessionList>, state: &SceneState, window: &mut Window, _: &mut App) {
+    use crate::launcher::wake_tests::{push_host, stopped_container};
+    use farhelm_proto::ui_channel::{WakeOutcome, WakeResult};
+    let mut keep = state.keep.borrow_mut();
+    let helm = keep
+        .iter_mut()
+        .find_map(|item| item.downcast_mut::<FakeHelm>())
+        .unwrap();
+    for command in helm.commands() {
+        assert_ne!(
+            command.path, "/api/sessions",
+            "a failed wake sends no create"
+        );
+        if command.path != "/api/hosts/12/resume" {
+            helm.reply(command.id, 200, None);
+            continue;
+        }
+        let request = command.body.as_ref().expect("a tagged Resume")["request"]
+            .as_str()
+            .expect("the launcher's request tag")
+            .to_owned();
+        helm.reply(command.id, 504, Some(json!("The resume carries on")));
+        let mut host = stopped_container(None);
+        host.wake_outcome = Some(WakeOutcome {
+            request,
+            outcome: WakeResult::Failed {
+                reason: LATE_WAKE_FAILURE.into(),
+            },
+        });
+        let stopped = host.state.clone();
+        push_host(helm, &mut host, stopped);
+    }
+    let nodes = window.driver_nodes();
+    if !nodes
+        .iter()
+        .any(|node| node.element_id.as_deref() == Some("launcher-refusal"))
+    {
+        state.after.set(Some(fail_wake_late));
+        return;
+    }
+    let alert = within(nodes, "launcher-notices")
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-refusal"))
+        .unwrap();
+    assert_eq!(alert.role, Some(gpui::Role::Alert));
+    assert_eq!(
+        alert.label.as_deref(),
+        Some(format!("Not launched. Starting the host failed: {LATE_WAKE_FAILURE}").as_str())
+    );
+    let lines = texts_within(nodes, "launcher-wake-refusal");
+    assert!(!lines.is_empty() && lines.iter().all(|line| line.visible_bounds == line.bounds));
+}
+
 /// Click only after the Restart button's source consent has been presented.
 fn open_restart(_: &Entity<SessionList>, state: &SceneState, window: &mut Window, cx: &mut App) {
     use farhelm_proto::ui_channel::SessionRow;
