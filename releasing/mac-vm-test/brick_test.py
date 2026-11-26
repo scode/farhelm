@@ -355,6 +355,15 @@ def tier(entry, check_id):
     return entry['required'][check_id].get('priority', entry.get('priority', 'bonus'))
 
 
+def skip_origin(result):
+    """Read the structured cause of an automatic skip. Older skips have no replay authority."""
+    cause = result.get('derived_from')
+    if (isinstance(cause, dict) and set(cause) == {'pass_id', 'check_id'}
+            and all(isinstance(value, str) and value for value in cause.values())):
+        return cause['pass_id'], cause['check_id']
+    return None
+
+
 def subset(entry, keys):
     """Project a pass onto some of its declared checks, keeping pass-level facts.
 
@@ -1143,6 +1152,8 @@ checkpoint is safe after repair. This transition never clears a product fail,
 an automation error, a pending action, a P1 continuity check (its sequence
 already went on past it) or any feedback attempt. It records the operator's
 judgment beside the unchanged original result and its byte hashes.
+Later automatic skips whose cause is this checkpoint are archived with it.
+Earlier slots have already passed. A later legacy skip may conceal a different cause.
 """
         if not isinstance(reason, str) or not 20 <= len(reason.strip()) <= 2000:
             raise Refused('explain the fixture repair and why this checkpoint can be repeated safely')
@@ -1159,8 +1170,13 @@ judgment beside the unchanged original result and its byte hashes.
                     or not self.result_evidence_retained(result)):
                 raise Refused('retry only a stopped unavailable P0 or bonus checkpoint with intact evidence, never feedback')
             ordered = list(entry['required'])
-            if any(key in entry['results'] for key in ordered[ordered.index(check) + 1:]):
-                raise Refused('later checkpoint observations prevent replaying this fixture boundary')
+            discarded_skips = {}
+            for key in ordered[ordered.index(check) + 1:]:
+                later = entry['results'].get(key)
+                if later is not None and (later['status'] != 'skipped' or skip_origin(later) is None):
+                    raise Refused('later checkpoint observations prevent replaying this fixture boundary')
+                if later is not None and skip_origin(later) == (pass_id, check):
+                    discarded_skips[key] = later
             native = result.get('native', {})
             rows = [json.loads(line) for line in artifact(self.directory, native['events'],
                                                         limit=96 * 1024 * 1024).splitlines() if line]
@@ -1175,8 +1191,10 @@ judgment beside the unchanged original result and its byte hashes.
             with c.locked():
                 if any(c.state(role)['State'] != 'running' for role in ('mac', 'linux')):
                     raise Refused('retry requires both unchanged owned guests running')
-            entry.setdefault('checkpoint_retries', []).append({
-                'reason': reason.strip(), 'tester': dict(claim), 'result': result})
+            entry.setdefault('checkpoint_retries', []).append({'reason': reason.strip(), 'tester': dict(claim),
+                                                               'result': result, 'discarded_skips': discarded_skips})
+            for key in discarded_skips:
+                del entry['results'][key]
             del entry['results'][check]
             entry['tester'] = {'phase': 'retry-ready', 'check_id': check}
             self.save()
@@ -1453,15 +1471,20 @@ P1 and P2 fence their own chains instead (`chain_block`).
         """List the earlier checkpoints of this pass that a P0 or P1 checkpoint depends on (`prerequisite_checks`)."""
         return prerequisite_checks(entry['required'], check_id)
 
-    def skip(self, pass_id, check_id, reason):
+    def skip(self, pass_id, check_id, reason, cause):
         """Record that a P1 or P2 checkpoint can never run, and why (`dead_end`).
 
 The skip is a terminal result like any other: it counts as could not run,
 needs no evidence, and lets the send and cleanup proceed without waiting on a
 check that cannot run.
+When the decision comes from a checkpoint, keep its identity so a supported
+retry can undo this scheduling decision without erasing an observation.
 """
         entry = self.selected(pass_id)
-        entry['results'][check_id] = {'status': 'skipped', 'evidence': [], 'detail': reason, 'sha256': {}}
+        result = {'status': 'skipped', 'evidence': [], 'detail': reason, 'sha256': {}}
+        if cause is not None:
+            result['derived_from'] = {'pass_id': cause[0], 'check_id': cause[1]}
+        entry['results'][check_id] = result
         self.save()
         self.note('decision', f'Skipped `{pass_id}/{check_id}`: {reason}')
 
@@ -1487,12 +1510,12 @@ same sweep. A checkpoint a guest tester has claimed is left to that tester.
                     continue
                 if claim.get('phase') in ('running', 'reconciliation-required') and claim.get('check_id') == check_id:
                     continue
-                reason = self.dead_end(pass_id, check_id)
-                if reason:
-                    self.skip(pass_id, check_id, reason)
+                block = self.dead_end(pass_id, check_id)
+                if block:
+                    self.skip(pass_id, check_id, *block)
 
-    def order_block(self, entry, check_id, stopping):
-        """Say why a pair's order forbids `check_id` for good, or None.
+    def order_block(self, pass_id, check_id, stopping):
+        """Return the reason and original checkpoint when pair order forbids this check.
 
 A failed, unavailable or skipped result in one of the `stopping` tiers stops
 the rest of that chain. A checkpoint whose place in the pair's order has
@@ -1500,19 +1523,31 @@ passed (a later one ran; a skip did not) cannot run any more: `old-sessions` ski
 under a stop after P0 must not start its "previous release" sessions on the
 candidate once the run is widened again.
 """
-        stopped = [key for key, result in entry['results'].items()
-                   if key != check_id and result['status'] != 'pass' and tier(entry, key) in stopping]
-        if stopped:
-            return f'stop after the first failed or unavailable check: {stopped[0]} stopped its chain'
+        entry = self.selected(pass_id)
         ordered = list(entry['required'])
+        # Once a later check ran, this earlier slot is spent independently
+        # of any stop encountered afterward. This matters when P1 is enabled
+        # after the installer has already crossed the old-session boundary.
+        retried = {row['tester']['check_id'] for row in entry.get('checkpoint_retries', [])}
         later = [key for key in ordered[ordered.index(check_id) + 1:]
-                 if entry['results'].get(key, {}).get('status', 'skipped') != 'skipped']
-        if later:
-            return f'{check_id} can no longer run: {later[0]}, later in the pair, already ran'
+                 if key in retried or entry['results'].get(key, {}).get('status', 'skipped') != 'skipped']
+        stopped = [key for key in ordered if key != check_id and key in entry['results']
+                   and entry['results'][key]['status'] != 'pass' and tier(entry, key) in stopping]
+        if later and ('P1' in stopping or not stopped):
+            return f'{check_id} can no longer run: {later[0]}, later in the pair, already ran', (pass_id, later[0])
+        if stopped:
+            key = stopped[0]
+            result = entry['results'][key]
+            cause = skip_origin(result) if result['status'] == 'skipped' else (pass_id, key)
+            # A skipped earlier slot stays skipped when its later witness
+            # is retried. Dependents are blocked by that earlier slot itself.
+            if cause and cause[0] == pass_id and cause[1] in ordered and ordered.index(cause[1]) > ordered.index(key):
+                cause = pass_id, key
+            return f'stop after the first failed or unavailable check: {key} stopped its chain', cause
         return None
 
     def dead_end(self, pass_id, check_id):
-        """Say why a pending P1 or P2 checkpoint can never be recorded, or None while it still might be.
+        """Return the reason and checkpoint cause, if known, for settling a pending P1 or P2 check.
 
 P1 follows its pair's order (`order_block`). P2 is dead once a P0 check
 anywhere in the run did not pass, or a P0 pair was released before its P0
@@ -1523,19 +1558,24 @@ the send instead (`chain_block`), since it calls for the maintainer.
         entry = self.selected(pass_id)
         priority = tier(entry, check_id)
         if priority == 'P1':
-            return self.order_block(entry, check_id, ('P0', 'P1'))
+            return self.order_block(pass_id, check_id, ('P0', 'P1'))
         if priority != 'P2':
             return None
         for key in self.data['plan']['p0_sequence']:
             pair = self.selected(key)
             part = priority_entry(pair, 'P0')
-            if any(result['status'] != 'pass' for result in part['results'].values()):
-                return f'a P0 check of {key} did not pass'
-            if pair['phase'] == 'deleted' and set(part['results']) != set(part['required']):
-                return f'{key} was released before its P0 checks finished'
-            if pair['phase'] == 'deleted' and (pair.get('preparation_error')
-                    or pair.get('automation_failure', {}).get('check_id') in {*part['required'], 'native-preflight'}):
-                return f'{key} was released after a P0 fixture or automation failure'
+            failed = next((check for check, result in part['results'].items() if result['status'] != 'pass'), None)
+            if failed is not None:
+                return f'a P0 check of {key} did not pass', (key, failed)
+            if pair['phase'] == 'deleted':
+                missing = next((check for check in part['required'] if check not in part['results']), None)
+                if missing is not None:
+                    return f'{key} was released before its P0 checks finished', (key, missing)
+                failure = pair.get('automation_failure', {}).get('check_id')
+                if failure in {*part['required'], 'native-preflight'}:
+                    return f'{key} was released after a P0 fixture or automation failure', (key, failure)
+                if pair.get('preparation_error'):
+                    return f'{key} was released after a P0 fixture or automation failure', None
         return None
 
     def chain_block(self, pass_id, check_id, status):
@@ -1559,9 +1599,9 @@ their pass instead.
             return None
         if priority not in ('P0', 'P1'):
             return None
-        reason = self.order_block(entry, check_id, ('P0',) if priority == 'P0' else ('P0', 'P1'))
-        if reason:
-            return reason
+        block = self.order_block(pass_id, check_id, ('P0',) if priority == 'P0' else ('P0', 'P1'))
+        if block:
+            return block[0]
         earlier = self.prerequisites(entry, check_id)
         if (status == 'pass' or priority == 'P1') and any(
                 entry['results'].get(key, {}).get('status') != 'pass' for key in earlier):

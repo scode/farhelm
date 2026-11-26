@@ -1195,6 +1195,143 @@ No native product action occurs unless the caller asks for the unsafe case.
         (self.run.directory / archive).unlink()
         self.assertEqual(self.run.verdict(entry), 'could not run')
 
+    def test_installer_retry_reopens_only_skips_caused_by_the_unavailable_p0(self):
+        """Replaying a repaired supervisor check frees P2 without reviving the lost previous-release sessions."""
+        self.finish_preceding_pairs()
+        self.approve_feedback()
+        self.widen('full')
+        pass_id = 'p0-installer-upgrade'
+        target = 'local-supervisor-agent'
+
+        def unavailable(controller, envelope, files):
+            """Keep the P1 baseline loss and the unrelated retryable P0 observation in one run."""
+            status = 'could-not-run' if envelope['check_id'] in ('old-sessions', target) else 'pass'
+            return self.archive(controller, envelope, status)
+
+        with self.assertRaises(Refused):
+            self.drive_pair(pass_id, unavailable)
+        entry = self.run.selected(pass_id)
+        independent = {key: entry['results'][key] for key in (
+            'local-old-session', 'remote-old-session', 'remote-host-remove', 'remote-host-uninstall')}
+        dependent = {key: entry['results'][key] for key in ('p2-feedback-send', 'p2-announcements')}
+        for skips, cause in ((independent, 'old-sessions'), (dependent, target)):
+            for skip in skips.values():
+                self.assertEqual(skip['status'], 'skipped')
+                self.assertEqual(skip['derived_from'], {'pass_id': pass_id, 'check_id': cause})
+        self.assertEqual(entry['results'][target]['status'], 'could-not-run')
+        self.assertEqual(entry['tester']['check_id'], target)
+        self.assertTrue(entry['tester']['termination_observed'])
+        original = entry['results'][target]
+        reason = 'Repaired the owned fixture and verified the unavailable check is safe to repeat.'
+        self.run.retry_unavailable(pass_id, reason)
+        with self.run.locked():
+            entry = self.run.selected(pass_id)
+            self.assertEqual(entry['checkpoint_retries'][0]['discarded_skips'], dependent)
+            self.assertEqual(entry['checkpoint_retries'][0]['reason'], reason)
+            self.assertEqual(entry['checkpoint_retries'][0]['result'], original)
+            for key, observation in independent.items():
+                self.assertEqual(entry['results'][key], observation)
+            for key in (*dependent, target):
+                self.assertNotIn(key, entry['results'])
+
+        self.seen.clear()
+        self.run.tester = self.execute_fixture
+        self.run.test(pass_id, source=self.source)
+        self.assertEqual([row['check_id'] for row in self.seen],
+                         [target, 'remote-supervisor-agent', 'p2-feedback-send', 'p2-announcements'])
+
+    def test_unavailable_retry_preserves_later_executed_results_and_legacy_skips(self):
+        """A later observation or a provenance-free skip can make replay unsafe.
+
+The saved states stand in for a legacy manifest or one with a later result.
+The original stopped attempt and its evidence still come through real import.
+"""
+        self.unavailable_app()
+        target = 'app-start'
+        later = 'later-observation'
+        for status in ('skipped', 'pass'):
+            with self.subTest(status=status):
+                with self.run.locked():
+                    entry = self.run.selected('p0-fresh')
+                    entry['required'][later] = entry['required'][target]
+                    entry['results'][later] = {'status': status, 'evidence': [], 'detail': 'Synthetic later result',
+                                               'sha256': {}}
+                    self.run.save()
+                with self.assertRaisesRegex(Refused, 'later checkpoint observations'):
+                    self.run.retry_unavailable('p0-fresh', 'Inspected the fixture and repaired a prerequisite.')
+                with self.run.locked():
+                    entry = self.run.selected('p0-fresh')
+                    self.assertEqual(entry['results'][later]['status'], status)
+                    self.assertIn(target, entry['results'])
+                    self.assertNotIn('checkpoint_retries', entry)
+
+    def test_widening_after_an_unavailable_upgrade_retry_cannot_seed_old_sessions(self):
+        """A retry archives the upgrade attempt, including the fact that the old-session slot passed."""
+        self.finish_preceding_pairs()
+        self.approve_feedback()
+        pass_id = 'p0-installer-upgrade'
+
+        def unavailable(controller, envelope, files):
+            """The first upgrade attempt crossed the baseline boundary before reporting unavailable."""
+            status = 'could-not-run' if envelope['check_id'] == 'update-relaunch' else 'pass'
+            return self.archive(controller, envelope, status)
+
+        with self.assertRaises(Refused):
+            self.drive_pair(pass_id, unavailable)
+        entry = self.run.selected(pass_id)
+        self.assertEqual(entry['results']['update-relaunch']['status'], 'could-not-run')
+        self.assertNotIn('old-sessions', entry['results'])
+        self.run.retry_unavailable(pass_id, 'Inspected the owned fixture and repaired the upgrade prerequisite.')
+        with self.run.locked():
+            self.run.continue_full()
+            results = self.run.selected(pass_id)['results']
+            self.assertNotIn('update-relaunch', results)
+            self.assertEqual(results['old-sessions']['status'], 'skipped')
+            self.assertEqual(results['local-old-session']['derived_from'],
+                             {'pass_id': pass_id, 'check_id': 'old-sessions'})
+
+        self.seen.clear()
+        self.run.tester = self.execute_fixture
+        self.run.test(pass_id, source=self.source)
+        captured = [row['check_id'] for row in self.seen]
+        self.assertEqual(captured[0], 'update-relaunch')
+        self.assertNotIn('old-sessions', captured)
+        self.assertNotIn('local-old-session', captured)
+
+    def test_installer_retry_keeps_skip_from_an_incomplete_released_pair(self):
+        """A missing fresh-install observation still blocks feedback after retrying an unrelated installer check."""
+        self.fixture.prepare('p0-fresh')
+        with self.run.locked():
+            self.run.cleanup('p0-fresh', discard_failed=True)
+            earlier = self.run.selected('p0-fresh')
+            self.assertEqual(earlier['phase'], 'deleted')
+            self.assertNotIn('app-start', earlier['results'])
+        self.drive_pair('p0-updater-upgrade')
+        with self.run.locked():
+            self.run.cleanup('p0-updater-upgrade')
+        self.approve_feedback()
+        self.widen('full')
+        pass_id = 'p0-installer-upgrade'
+        target = 'local-supervisor-agent'
+
+        def unavailable(controller, envelope, files):
+            """Leave only the installer agent observation eligible for replay."""
+            return self.archive(controller, envelope, 'could-not-run' if envelope['check_id'] == target else 'pass')
+
+        with self.assertRaises(Refused):
+            self.drive_pair(pass_id, unavailable)
+        entry = self.run.selected(pass_id)
+        skipped = entry['results']['p2-feedback-send']
+        self.assertEqual(skipped['status'], 'skipped')
+        self.assertEqual(skipped['derived_from'], {'pass_id': 'p0-fresh', 'check_id': 'artifact-verification'})
+        self.assertEqual(entry['tester']['check_id'], target)
+        self.run.retry_unavailable(pass_id, 'Inspected the owned installer fixture and repaired its agent prerequisite.')
+        with self.run.locked():
+            entry = self.run.selected(pass_id)
+            self.assertEqual(entry['results']['p2-feedback-send'], skipped)
+            self.assertNotIn(target, entry['results'])
+            self.assertNotIn('p2-feedback-send', entry['checkpoint_retries'][0]['discarded_skips'])
+
     def test_unavailable_retry_cannot_clear_product_failure_or_retry_feedback(self):
         """Operator reasoning does not authorize suppressing a product fail or an external-send outcome."""
         self.unavailable_app(status='fail')
