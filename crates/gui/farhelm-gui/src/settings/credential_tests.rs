@@ -856,44 +856,124 @@ fn close_answer_preserves_later_codex_file(cx: &mut TestAppContext, answer: &'st
     assert_eq!(body, json!({ "secret": contents }));
 }
 
-/// A Delete's reply can arrive after the user went Back and opened another editor; closing whatever editor is open
-/// then would throw away a secret the user is typing (the old editor's `mounted` check dropped such a reply).
-/// Specified: Delete of `free` is out, Back, Add endpoint token and a typed secret; the Delete's done reply leaves the
-/// new editor open with its secret, and the catalog is read again.
+/// SPEC.md, "Settings": waiting for the helm's round trip after Save is accepted, so the editor does not let the user
+/// leave while its save or Delete is out. Leaving early used to drop the reply, so a replacement's delivery failures
+/// never reached the overview, and a late Delete reply needed a guard against closing an editor opened since.
+/// Specified: while a replacement's save is out, Back and Cancel are unavailable and a click on Cancel sends nothing and
+/// keeps the editor; the done reply with a host it did not reach closes the editor and shows that host on the overview.
+/// While a Delete is out, Back and Cancel are unavailable likewise and Cancel keeps the editor; the done reply closes it
+/// and reads the catalog again.
 #[gpui::test]
-fn a_delete_answered_after_back_leaves_a_newer_editor_open(cx: &mut TestAppContext) {
+fn back_and_cancel_wait_for_a_save_or_delete(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
-    let catalog = json!([entry("free", "endpoint_token", 1, &[])]);
-    show_credentials(&mut helm, cx, catalog.clone());
-    press(cx, "credential-edit-free");
+    let saved = entry("ci-token", "github_token", 1, &[]);
+    show_credentials(&mut helm, cx, json!([saved.clone()]));
+    press(cx, "credential-edit-ci-token");
+    fill(cx, "credential-secret", "fictional-replacement");
+    press(cx, "credential-save");
+    let (save, method, _, _) = one_command(&mut helm);
+    assert_eq!(method, Method::Put, "the premise: the save is out");
+    assert_eq!(available(cx, "credential-back"), Some(false));
+    assert_eq!(available(cx, "credential-cancel"), Some(false));
+    click(cx, "credential-cancel");
+    assert!(drawn(cx, "credential-editor"), "Cancel waits for the save");
+    assert_eq!(sent(&mut helm), [], "and sends nothing");
+
+    let replaced = entry("ci-token", "github_token", 2, &[]);
+    helm.reply(
+        save,
+        200,
+        Some(json!({ "credential": replaced, "delivery_failures": [
+            { "host": "Example host", "reason": "could not install the agent settings" }] })),
+    );
+    settle(cx);
+    assert!(!drawn(cx, "credential-editor"), "the done save closes it");
+    assert_eq!(
+        label_of(cx, "credentials-undelivered-0").as_deref(),
+        Some("Saved; not delivered to Example host: could not install the agent settings"),
+        "and its delivery failures reach the overview"
+    );
+    let (read, _, _, _) = one_command(&mut helm);
+    helm.reply(read, 200, Some(json!([replaced])));
+    settle(cx);
+
+    press(cx, "credential-edit-ci-token");
     press(cx, "credential-delete");
     let (delete, method, _, _) = one_command(&mut helm);
     assert_eq!(method, Method::Delete, "the premise: the Delete is out");
-    press(cx, "credential-back");
-    // Back's read goes out after the Delete, so the helm answers the Delete first, whenever it answers.
-    let back_reads = sent(&mut helm);
-    press(cx, "credentials-add-endpoint");
-    fill(cx, "credential-secret", "fictional-typed-secret");
-
-    helm.reply(delete, 200, Some(json!({})));
-    // The helm runs Back's read after the Delete, so it no longer lists `free`.
-    answer(&mut helm, back_reads, &json!([]));
-    settle(cx);
+    assert_eq!(available(cx, "credential-back"), Some(false));
+    assert_eq!(available(cx, "credential-cancel"), Some(false));
+    click(cx, "credential-cancel");
     assert!(
         drawn(cx, "credential-editor"),
-        "the newer editor stays open"
+        "Cancel waits for the Delete"
     );
-    assert_eq!(
-        label_of(cx, "credential-editor-title").as_deref(),
-        Some("New endpoint token")
-    );
-    assert_eq!(secret(cx).1, "fictional-typed-secret", "with its secret");
+    assert_eq!(sent(&mut helm), [], "and sends nothing");
+
+    helm.reply(delete, 200, Some(json!({})));
+    settle(cx);
+    assert!(!drawn(cx, "credential-editor"), "the done Delete closes it");
     let (_, method, path, _) = one_command(&mut helm);
     assert_eq!(
         (method, path.as_str()),
         (Method::Get, "/api/credentials"),
         "read again"
     );
+}
+
+/// A refused Tensorlake key save in Credentials brings the overview forward over an open credential editor, so its
+/// error shows. When a later Save and Close then sees the editor's own save refused, the page must show the editor
+/// again, or the person sees the overview with no error and the editor's refusal stays hidden behind "Resume editing
+/// credential". Specified: with a key typed on the overview and a new endpoint token's draft open, Close and Save sends
+/// the key first; its refusal shows the overview and Resume editing credential. Close and Save again sends the key,
+/// whose save is answered, then the credential, whose refusal shows the editor with the helm's words and no Resume
+/// button.
+#[gpui::test]
+fn a_refused_editor_save_comes_back_in_front_of_the_key_form(cx: &mut TestAppContext) {
+    let refusal = "a credential named test-endpoint already exists";
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_credentials(&mut helm, cx, json!([]));
+    fill(cx, "tensorlake-key", "fictional-tensorlake-key");
+    press(cx, "credentials-add-endpoint");
+    fill(cx, "credential-name", "test-endpoint");
+    fill(cx, "credential-secret", "fictional-endpoint-token");
+
+    click(cx, "settings-close");
+    click(cx, "prompt-confirm");
+    let (key_save, method, path, _) = one_command(&mut helm);
+    assert_eq!(
+        (method, path.as_str()),
+        (Method::Put, "/api/tensorlake"),
+        "the premise: the key is saved first"
+    );
+    helm.reply(key_save, 400, Some(json!("the key is not valid")));
+    settle(cx);
+    assert!(
+        drawn(cx, "credential-resume"),
+        "the premise: the key's refusal brought the overview forward"
+    );
+    assert!(!drawn(cx, "credential-editor"));
+
+    click(cx, "settings-close");
+    click(cx, "prompt-confirm");
+    let (key_save, _, path, _) = one_command(&mut helm);
+    assert_eq!(path, "/api/tensorlake");
+    helm.reply(key_save, 200, Some(account(true)));
+    settle(cx);
+    assert!(
+        drawn(cx, "credential-resume") && !drawn(cx, "credential-editor"),
+        "the premise: the key form still covers the editor when the credential's refusal arrives"
+    );
+    let (credential_save, method, path, _) = one_command(&mut helm);
+    assert_eq!((method, path.as_str()), (Method::Post, "/api/credentials"));
+    helm.reply(credential_save, 409, Some(json!(refusal)));
+    settle(cx);
+    assert!(
+        drawn(cx, "credential-editor"),
+        "the editor is in front again"
+    );
+    assert_eq!(label_of(cx, "credential-error").as_deref(), Some(refusal));
+    assert!(!drawn(cx, "credential-resume"));
 }
 
 /// SPEC.md: "Reference changes refresh an open credential editor without discarding its unsaved replacement text":
