@@ -36,3 +36,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`custom-agent-delete-prompt`](reports/custom-agent-delete-prompt.report.md) landed 2026-11-26 in #5075: Port Settings custom-agent Delete to the shared inline confirmation prompt
 - [`tensorlake-sandbox-key-consent`](reports/tensorlake-sandbox-key-consent.report.md) landed 2026-11-26 in #5077: Bind Settings leftover-sandbox Delete confirmation and list to the active Tensorlake key
 - [`launcher-visible-consent`](reports/launcher-visible-consent.report.md) landed 2026-11-26 in #5081, #5082: Lock host and destination in Replace with and record launcher list Enter visibility rule
+- [`podman-host-verification`](reports/podman-host-verification.report.md) landed 2026-11-26 in #5084: Verify container host identity with cheap sanity checks and record concurrent SSH config policy
