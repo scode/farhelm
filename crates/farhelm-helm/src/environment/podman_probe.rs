@@ -34,18 +34,31 @@ else
 fi
 "#;
 const IDENTITY_TOOLS_MISSING: &str = "This container host needs sha256sum and tr to verify its machine and account. Make these commands available on the host, then press Refresh.";
-/// The command sees a single shell and a single SSH login. The private
-/// marker is written only after a match, so an exit 1 before the guard runs
-/// cannot be mistaken for Podman returning "absent". The expected operand
-/// is a per-invocation digest so a moved SSH route does not see the old
-/// machine ID.
+/// The command sees a single shell and a single SSH login. It runs only
+/// after the place proves itself, in two steps with digests in separate
+/// domains (`place_digest`), both keyed by a per-invocation nonce so a
+/// moved SSH route never sees the recorded machine ID:
+///
+/// - `$1` is the helm's `check` digest. A host whose machine or account
+///   differs (an honest wrong host, say after `~/.ssh/config` re-pointed the
+///   alias) exits 125 here, before `"$@"` runs, so a mutating command such
+///   as `podman rm` never reaches it.
+/// - On a match the place prints its own `proof` digest before `exec`. The
+///   helm computes the same digest and accepts the output only when the
+///   first line matches. Unlike the nonce, which is in argv for anyone to
+///   echo back, the proof needs the machine ID, so a shell that merely
+///   repeats its arguments cannot pass.
+///
+/// The proof is written only after a match, so an exit 1 before the guard
+/// runs cannot be mistaken for Podman returning "absent".
 const VERIFY_PLACE_AND_EXEC: &str = r#"
 machine=$(cat /etc/machine-id 2>/dev/null) &&
     machine=$(printf '%s' "$machine" | tr 'ABCDEF' 'abcdef') &&
     uid=$(id -u 2>/dev/null) &&
-    digest=$(printf '%s\n%s\n%s\n' "$2" "$machine" "$uid" | sha256sum) &&
-    [ "${digest%% *}" = "$1" ] || exit 125
-printf '%s\n' "$2" || exit 125
+    check=$(printf 'check\n%s\n%s\n%s\n' "$2" "$machine" "$uid" | sha256sum) &&
+    [ "${check%% *}" = "$1" ] || exit 125
+proof=$(printf 'proof\n%s\n%s\n%s\n' "$2" "$machine" "$uid" | sha256sum) || exit 125
+printf '%s\n' "${proof%% *}" || exit 125
 shift 2
 exec "$@"
 "#;
@@ -159,34 +172,8 @@ pub(crate) trait PlaceCommands: Send + Sync {
         identity: &PodmanPlaceIdentity,
         timeout: Duration,
     ) -> anyhow::Result<crate::provisioning::CommandResult> {
-        let nonce = format!("farhelm-place-verified-{}", uuid::Uuid::new_v4().simple());
-        let marker = format!("{nonce}\n");
-        let mut wrapped = vec![
-            "sh".into(),
-            "-c".into(),
-            VERIFY_PLACE_AND_EXEC.into(),
-            "farhelm-container-place".into(),
-            place_digest(identity, &nonce),
-            nonce,
-        ];
-        wrapped.extend_from_slice(argv);
-        let mut result = self.run_bounded(route, &wrapped, timeout).await?;
-        if !result.stdout.starts_with(marker.as_bytes()) {
-            // Without the proof line the command did not run. Exit 125 with
-            // nothing printed is the guard itself: it ran and could not prove
-            // the recorded machine and account (a different host, or one that
-            // lacks what the check needs). Anything else, such as SSH failing
-            // to connect to a host that is asleep, never reached the check, so
-            // it is reported as the host not answering, with its own
-            // diagnostic, rather than as a changed destination. Both stay
-            // errors, so neither can be read as Podman's own answer.
-            if result.code == Some(125) && result.stdout.is_empty() {
-                anyhow::bail!("{CONTAINER_PLACE_UNVERIFIED}");
-            }
-            anyhow::bail!("{}", container_host_unanswered(&result));
-        }
-        result.stdout.drain(..marker.len());
-        Ok(result)
+        let (wrapped, proof) = verified_argv(argv, identity);
+        accept_verified(self.run_bounded(route, &wrapped, timeout).await?, &proof)
     }
 
     /// Sensitive input shares ordinary argv lowering and bounded capture, but
@@ -203,10 +190,73 @@ pub(crate) trait PlaceCommands: Send + Sync {
     }
 }
 
+/// Which of `VERIFY_PLACE_AND_EXEC`'s two digests to compute.
+#[derive(Clone, Copy)]
+enum PlaceDigest {
+    /// What the place compares before running anything.
+    Check,
+    /// What the place prints back once its check passed.
+    Proof,
+}
+
+/// A command wrapped in `VERIFY_PLACE_AND_EXEC` for `identity`, and the proof
+/// line its output must start with.
+fn verified_argv(argv: &[String], identity: &PodmanPlaceIdentity) -> (Vec<String>, String) {
+    let nonce = format!("farhelm-place-verified-{}", uuid::Uuid::new_v4().simple());
+    let proof = format!("{}\n", place_digest(identity, &nonce, PlaceDigest::Proof));
+    let mut wrapped = vec![
+        "sh".into(),
+        "-c".into(),
+        VERIFY_PLACE_AND_EXEC.into(),
+        "farhelm-container-place".into(),
+        place_digest(identity, &nonce, PlaceDigest::Check),
+        nonce,
+    ];
+    wrapped.extend_from_slice(argv);
+    (wrapped, proof)
+}
+
+/// Accept a wrapped command's output only after the place's proof, and strip
+/// the proof before Podman's parser sees the output.
+fn accept_verified(
+    mut result: crate::provisioning::CommandResult,
+    proof: &str,
+) -> anyhow::Result<crate::provisioning::CommandResult> {
+    if !result.stdout.starts_with(proof.as_bytes()) {
+        // Without the proof line the output is not trusted: the command did
+        // not run, or something other than the guard answered (an echo of the
+        // arguments proves nothing, since the proof needs the machine ID). Exit
+        // 125 with nothing printed is the guard itself: it ran and could not
+        // prove the recorded machine and account (a different host, or one
+        // that lacks what the check needs). Anything else, such as SSH failing
+        // to connect to a host that is asleep, is reported as the host not
+        // answering, with its own diagnostic, rather than as a changed
+        // destination. Both stay errors, so neither can be read as Podman's
+        // own answer.
+        if result.code == Some(125) && result.stdout.is_empty() {
+            anyhow::bail!("{CONTAINER_PLACE_UNVERIFIED}");
+        }
+        anyhow::bail!("{}", container_host_unanswered(&result));
+    }
+    result.stdout.drain(..proof.len());
+    Ok(result)
+}
+
 /// Bind the comparison to this command and the account without sending the
 /// recorded machine ID to the endpoint being checked.
-fn place_digest(identity: &PodmanPlaceIdentity, nonce: &str) -> String {
-    let value = format!("{nonce}\n{}\n{}\n", identity.machine_id, identity.uid);
+///
+/// `domain` keeps the place's pre-`exec` check (`check`) and the proof it
+/// prints back (`proof`) from being interchangeable: knowing one digest for a
+/// nonce gives nothing about the other.
+fn place_digest(identity: &PodmanPlaceIdentity, nonce: &str, domain: PlaceDigest) -> String {
+    let domain = match domain {
+        PlaceDigest::Check => "check",
+        PlaceDigest::Proof => "proof",
+    };
+    let value = format!(
+        "{domain}\n{nonce}\n{}\n{}\n",
+        identity.machine_id, identity.uid
+    );
     Sha256::digest(value.as_bytes())
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -366,7 +416,7 @@ pub(super) async fn lowered_command_for_test(
 }
 
 /// Model the shell's admission before passing argv to a scripted engine.
-/// The production method still checks and removes the returned nonce.
+/// The production method still checks and removes the returned proof.
 #[cfg(test)]
 pub(super) async fn simulate_verified_place<'a, F, Fut>(
     argv: &'a [String],
@@ -381,7 +431,7 @@ where
         return execute(argv).await;
     }
     let identity = parse_place_identity(observed).expect("a scripted endpoint has an identity");
-    if argv[4] != place_digest(&identity, &argv[5]) {
+    if argv[4] != place_digest(&identity, &argv[5], PlaceDigest::Check) {
         return Ok(crate::provisioning::CommandResult {
             code: Some(125),
             signal: None,
@@ -390,7 +440,13 @@ where
         });
     }
     let mut output = execute(&argv[6..]).await?;
-    output.stdout.splice(..0, argv[5].bytes().chain(*b"\n"));
+    output.stdout.splice(
+        ..0,
+        place_digest(&identity, &argv[5], PlaceDigest::Proof)
+            .into_bytes()
+            .into_iter()
+            .chain(*b"\n"),
+    );
     Ok(output)
 }
 
@@ -644,10 +700,20 @@ impl PodmanPlaces {
     /// Reconnection cannot depend on somebody opening the launcher. Runtime
     /// accepts an older success for the current endpoint, and refreshes only
     /// this place on a miss. The refresh survives a timed-out actor attempt.
+    ///
+    /// `expected` is the identity the caller's resources were made on (a
+    /// session container's binding, a recipe's place claim). A cached success
+    /// for another identity is a miss too: the route's text is unchanged but
+    /// it now reaches another machine or account (`~/.ssh/config` re-pointed,
+    /// say). One refresh follows; if the place still differs the caller gets
+    /// [`CONTAINER_PLACE_UNVERIFIED`], and once the destination is restored the
+    /// next refresh matches again, so existing containers recover without a
+    /// second cache keyed by identity.
     pub(crate) async fn runtime(
         self: &Arc<Self>,
         store: &HelmStore,
         host: HostId,
+        expected: Option<&PodmanPlaceIdentity>,
     ) -> anyhow::Result<(BaseRoute, ReadyPlace)> {
         tokio::time::timeout(Duration::from_secs(30), async {
             let mut requested = false;
@@ -667,15 +733,26 @@ impl PodmanPlaces {
                         .map(|probe| probe.result.clone())
                 };
                 if let Some(result) = cached {
+                    let settled =
+                        || requested && !self.cache.lock().unwrap().refreshing.contains_key(&host);
                     match result {
-                        Ok(ready) => return Ok((route, ready)),
-                        Err(reason)
-                            if requested
-                                && !self.cache.lock().unwrap().refreshing.contains_key(&host) =>
+                        Ok(ready)
+                            if expected
+                                .is_none_or(|want| ready.identity.as_ref().ok() == Some(want)) =>
                         {
+                            return Ok((route, ready));
+                        }
+                        // A check that could not read the identity at all says why,
+                        // rather than blaming a moved destination.
+                        Ok(ReadyPlace {
+                            identity: Err(reason),
+                            ..
+                        }) if expected.is_some() && settled() => {
                             return Err(anyhow::Error::msg(reason));
                         }
-                        Err(_) => {}
+                        Ok(_) if settled() => anyhow::bail!("{CONTAINER_PLACE_UNVERIFIED}"),
+                        Err(reason) if settled() => return Err(anyhow::Error::msg(reason)),
+                        Ok(_) | Err(_) => {}
                     }
                 }
                 self.refresh(store.clone(), host).await?;
@@ -733,13 +810,16 @@ impl PodmanPlaces {
 
     /// A new session container inherits the place's environment at setup.
     /// Cached capabilities can outlive a change to the manager's settings.
+    /// With an identity, the read goes through the place proof, so a moved
+    /// route cannot hand another host's proxy values to the new container.
     pub(super) async fn creation_proxy(
         &self,
         store: &HelmStore,
         host: HostId,
+        identity: Option<&PodmanPlaceIdentity>,
     ) -> anyhow::Result<BTreeMap<String, String>> {
         let route = base_route(&current_row(store, host).await?)?;
-        read_proxy(self.commands.as_ref(), &route).await
+        read_proxy(self.commands.as_ref(), &route, identity).await
     }
 
     /// All provider commands retain the probe's lowering, scrub and capture
@@ -763,16 +843,32 @@ impl PodmanPlaces {
 
     /// Private script bytes never enter the command description. Callers keep
     /// the same place route, output bounds and cleanup ownership as commands.
+    /// With an identity the command goes through the same place proof as
+    /// [`PodmanPlaces::command`]. The input still travels to whatever answers
+    /// the route, since it is not withheld until the proof arrives; on a wrong
+    /// host the guard exits before any command reads it (SPEC_impl.md keeps
+    /// to cheap checks here rather than a two-phase exchange).
     pub(crate) async fn command_with_input(
         &self,
         route: &BaseRoute,
         argv: &[String],
+        identity: Option<&PodmanPlaceIdentity>,
         input: &[u8],
         timeout: Duration,
     ) -> anyhow::Result<crate::provisioning::CommandResult> {
-        self.commands
-            .run_with_input(route, argv, input, timeout)
-            .await
+        let Some(identity) = identity else {
+            return self
+                .commands
+                .run_with_input(route, argv, input, timeout)
+                .await;
+        };
+        let (wrapped, proof) = verified_argv(argv, identity);
+        accept_verified(
+            self.commands
+                .run_with_input(route, &wrapped, input, timeout)
+                .await?,
+            &proof,
+        )
     }
 
     /// Schedule only this host and return immediately. The current row is read
@@ -1104,7 +1200,7 @@ async fn probe_inner(
     )
     .await?;
     let version = validate_info(&info)?;
-    let proxy = read_proxy(commands, route).await?;
+    let proxy = read_proxy(commands, route, None).await?;
     let unit = format!("farhelm-env-probe-{}.scope", uuid::Uuid::new_v4().simple());
     let scope = run(
         commands,
@@ -1170,29 +1266,70 @@ pub(super) fn parse_place_identity(output: &str) -> Option<PodmanPlaceIdentity> 
     PodmanPlaceIdentity::from_parts(machine_id, uid.parse().ok()?)
 }
 
+/// A successful command's text, through the place proof when `identity` is
+/// known. A failed proof stays its own error, so a moved destination is not
+/// reported as an unreadable environment.
+async fn read_place_text(
+    commands: &dyn PlaceCommands,
+    route: &BaseRoute,
+    argv: &[String],
+    identity: &PodmanPlaceIdentity,
+) -> anyhow::Result<String> {
+    let output = commands
+        .run_verified(route, argv, identity, Duration::from_secs(20))
+        .await?;
+    anyhow::ensure!(
+        output.code == Some(0),
+        "could not read the container host's user manager environment"
+    );
+    String::from_utf8(output.stdout).context("the user manager returned invalid text")
+}
+
 /// Keep exact proxy values, including empty ones, private to the caller.
 /// The systemctl fallback supports hosts without structured busctl output.
+/// The probe reads them before it knows the place's identity; a new
+/// container's setup reads them again with the identity it was admitted on.
 async fn read_proxy(
     commands: &dyn PlaceCommands,
     route: &BaseRoute,
+    identity: Option<&PodmanPlaceIdentity>,
 ) -> anyhow::Result<BTreeMap<String, String>> {
     let mut busctl = vec!["busctl".to_string(), "--user".into()];
     busctl.extend(MANAGER_ENVIRONMENT_BUSCTL_ARGS.map(str::to_string));
-    let environment = match commands
-        .run(route, &busctl)
-        .await
+    let structured = match identity {
+        Some(identity) => read_place_text(commands, route, &busctl, identity).await,
+        None => commands.run(route, &busctl).await,
+    };
+    let environment = match structured
         .ok()
         .and_then(|text| ManagerEnvironment::from_busctl_json(&text).ok())
     {
         Some(environment) => environment,
         None => {
-            let text = run(
-                commands,
-                route,
-                &["systemctl", "--user", "show-environment"],
-                "could not read the container host's user manager environment",
-            )
-            .await?;
+            let text = match identity {
+                Some(identity) => {
+                    read_place_text(
+                        commands,
+                        route,
+                        &[
+                            "systemctl".into(),
+                            "--user".into(),
+                            "show-environment".into(),
+                        ],
+                        identity,
+                    )
+                    .await?
+                }
+                None => {
+                    run(
+                        commands,
+                        route,
+                        &["systemctl", "--user", "show-environment"],
+                        "could not read the container host's user manager environment",
+                    )
+                    .await?
+                }
+            };
             ManagerEnvironment::from_show_environment_exact(&text).map_err(|_| {
                 anyhow::anyhow!("the user manager returned an unreadable environment")
             })?
@@ -1368,8 +1505,78 @@ mod tests {
         );
         let second_row = current_row(&store, second).await.unwrap();
         assert!(!places.view(&second_row).unwrap().usable);
-        let (_, ready) = places.runtime(&store, second).await.unwrap();
+        let (_, ready) = places.runtime(&store, second, None).await.unwrap();
         assert_eq!(ready.podman, PathBuf::from("/usr/bin/podman"));
+    }
+
+    /// Why this matters: an existing container's commands reuse the cached
+    /// place check, whose route text cannot show that `~/.ssh/config` now
+    /// points the alias at another machine. Without comparing identities the
+    /// container's next command would go to the wrong host; with a second
+    /// cache keyed by identity (ruled out by the plan) it would cost more
+    /// state than the sanity check is worth.
+    ///
+    /// Specification: with the cache holding place B, a lookup expecting A
+    /// refreshes the check exactly once and, still seeing B, refuses with the
+    /// changed-destination reason; once the route answers as A again, the next
+    /// lookup expecting A refreshes and succeeds; a lookup expecting nothing
+    /// takes the cached result as before.
+    #[farhelm_testtrace::test]
+    async fn runtime_refreshes_once_for_a_moved_identity_and_recovers_when_it_returns() {
+        const MOVED: &str = "ab001122aabbccddeeff001122aabbcc\n1000\n";
+        let directory = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&directory.path().join("helm.db"))
+            .await
+            .unwrap();
+        let host = store.add_ssh_host("place.test", None, None).await.unwrap();
+        let commands = scripted_places(&[TEST_PLACE_IDENTITY, MOVED, MOVED, TEST_PLACE_IDENTITY]);
+        let places = PodmanPlaces::with_commands(commands.clone());
+        let original = parse_place_identity(TEST_PLACE_IDENTITY).unwrap();
+        let moved = parse_place_identity(MOVED).unwrap();
+        let probes = || {
+            commands
+                .seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|argv| {
+                    argv[0] == "sh" && argv.get(2).map(String::as_str) == Some(PLACE_IDENTITY_READ)
+                })
+                .count()
+        };
+
+        let (_, ready) = places.runtime(&store, host, None).await.unwrap();
+        assert_eq!(ready.identity.as_ref().ok(), Some(&original));
+        let (_, ready) = places.runtime(&store, host, Some(&moved)).await.unwrap();
+        assert_eq!(
+            ready.identity.as_ref().ok(),
+            Some(&moved),
+            "the premise: the route now answers as another machine"
+        );
+        assert_eq!(probes(), 2);
+
+        let refusal = places
+            .runtime(&store, host, Some(&original))
+            .await
+            .err()
+            .expect("a moved place is refused");
+        assert_eq!(refusal.to_string(), CONTAINER_PLACE_UNVERIFIED);
+        assert_eq!(probes(), 3, "exactly one refresh before refusing");
+        let (_, ready) = places.runtime(&store, host, None).await.unwrap();
+        assert_eq!(
+            ready.identity.as_ref().ok(),
+            Some(&moved),
+            "a lookup with no expectation takes the cache"
+        );
+        assert_eq!(probes(), 3);
+
+        let (_, ready) = places.runtime(&store, host, Some(&original)).await.unwrap();
+        assert_eq!(
+            ready.identity.as_ref().ok(),
+            Some(&original),
+            "restoring the destination recovers the place"
+        );
+        assert_eq!(probes(), 4);
     }
 
     /// An ordinary supervisor can refuse its registered identity even when
@@ -1426,7 +1633,7 @@ mod tests {
                 .contains("different Farhelm installation")
         );
         assert!(!places.view(&row).unwrap().usable);
-        assert!(places.runtime(&harness.store, host).await.is_ok());
+        assert!(places.runtime(&harness.store, host, None).await.is_ok());
         assert!(
             places.fresh(&harness.store, usable).await.is_ok(),
             "the refused actor did not displace the usable place"
@@ -1557,7 +1764,7 @@ mod tests {
                 .unwrap()
         );
         assert!(places.fresh(&harness.store, former).await.is_err());
-        assert!(places.runtime(&harness.store, former).await.is_ok());
+        assert!(places.runtime(&harness.store, former, None).await.is_ok());
     }
 
     /// A refused incumbent can point to a third registry entry. That hello
@@ -1728,7 +1935,7 @@ mod tests {
                 .err()
                 .expect("unusable identity must block new work");
             assert_eq!(refusal.to_string(), reason);
-            let (_, ready) = places.runtime(&store, host).await.unwrap();
+            let (_, ready) = places.runtime(&store, host, None).await.unwrap();
             assert_eq!(ready.identity, Err(reason));
         }
     }
@@ -2062,7 +2269,8 @@ mod tests {
     /// after the guard evaluates and proves the expected account and machine.
     /// A failure before the guard runs (a shell exiting 1, or 255 standing in
     /// for SSH failing to connect) is reported as an unreachable host with its
-    /// bounded diagnostic tail. The guard's 125 reports a changed destination.
+    /// bounded diagnostic tail. The guard's 125 reports a changed destination, and a
+    /// shell that echoes the nonce instead of proving the place is refused.
     #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
     async fn absence_needs_a_same_shell_place_proof() {
@@ -2135,7 +2343,7 @@ mod tests {
             "-c".into(),
             VERIFY_PLACE_AND_EXEC.into(),
             "test-guard".into(),
-            place_digest(&expected, "unused-proof"),
+            place_digest(&expected, "unused-proof", PlaceDigest::Check),
             "unused-proof".into(),
             "sh".into(),
             "-c".into(),
@@ -2187,6 +2395,27 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "Farhelm could not reach this container host (exit status 255)."
+        );
+
+        // A shell that skips the guard and echoes the nonce it was handed,
+        // then runs the command, has not proved the place: the nonce is in
+        // argv for anyone to repeat, and the proof needs the machine ID.
+        commands.before_guard = "printf '%s\\n' \"$2\"; shift 2; exec \"$@\"";
+        let error = commands
+            .run_verified(
+                &BaseRoute::Local,
+                &command,
+                &expected,
+                Duration::from_secs(5),
+            )
+            .await
+            .expect_err("an echoed nonce is not a proof");
+        // The command's own exit 1 shows the forged shell reached `exec`: only
+        // the missing proof rejected its output.
+        assert_eq!(
+            error.to_string(),
+            "Farhelm could not reach this container host (exit status 1).",
+            "the forged output is an error, never Podman's answer"
         );
     }
 

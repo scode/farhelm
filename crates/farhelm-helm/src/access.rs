@@ -452,7 +452,9 @@ pub(crate) async fn resolve_host_access(
                 .iter()
                 .find(|place| place.id == binding.place_host)
                 .context("the container's place host is no longer registered")?;
-            let (via, ready) = places.runtime(store, place.id).await?;
+            let (via, ready) = places
+                .runtime(store, place.id, binding.place_identity.as_ref())
+                .await?;
             Ok(HostAccess::Remote(RemoteRoute::PodmanExec {
                 via,
                 podman: ready.podman,
