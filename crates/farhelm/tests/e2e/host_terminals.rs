@@ -445,6 +445,156 @@ async fn restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts() {
     wait_until_pid_gone(new_pid, WAIT_SECS).await;
 }
 
+// ---- A child that outlives its host ------------------------------------------------
+
+/// A host's child that ignores the hangup and then becomes `sleep`: once its
+/// host is killed outright it runs on, reparented, as the same process the
+/// runtime pinned (an `exec` keeps the pid and the start time). It records
+/// its pid only once its trap is set, so a test that has read the pid can
+/// rely on the disposition.
+fn hangup_immune_child_script(dir: &Path) -> String {
+    format!(
+        "trap '' HUP; echo $$ > {child}; printf 'host child ready\\n'; exec sleep 1000",
+        child = shell_words::quote(dir.join("child.pid").to_str().unwrap()),
+    )
+}
+
+/// The child [`hangup_immune_child_script`] started, left running after its
+/// host was killed with SIGKILL, with a guard that kills it should the test
+/// fail before the verb under test does.
+struct Survivor {
+    installed: Installed,
+    child: u32,
+    _guard: PidKillGuard,
+}
+
+/// Give `session_id`'s agent a host running [`hangup_immune_child_script`],
+/// kill that host with SIGKILL, and check the premises the survivor tests
+/// rest on: the child ignores SIGHUP, the host is gone, the runtime reads it
+/// gone (the one state in which Stop and Restart root at the pinned child
+/// rather than a live one), and the child still runs.
+async fn kill_host_leaving_its_child(h: &Harness, session_id: &str, dir: &Path) -> Survivor {
+    let installed = install_host(h, session_id, &hangup_immune_child_script(dir)).await;
+    wait_for_screen(&installed.host, "host child ready").await;
+    let child = wait_for_pid_file(&dir.join("child.pid"), WAIT_SECS).await;
+    let guard = PidKillGuard::arm(child);
+    let status =
+        std::fs::read_to_string(format!("/proc/{child}/status")).expect("read the child's status");
+    let ignored = status
+        .lines()
+        .find_map(|line| line.strip_prefix("SigIgn:"))
+        .map(|mask| u64::from_str_radix(mask.trim(), 16).expect("a signal mask"))
+        .expect("a SigIgn line");
+    assert_ne!(
+        ignored & (1 << (libc::SIGHUP - 1)),
+        0,
+        "premise: the host's child ignores SIGHUP"
+    );
+    let killed = std::process::Command::new("kill")
+        .args(["-KILL", &installed.pid.to_string()])
+        .status()
+        .expect("run kill");
+    assert!(killed.success(), "kill the agent's host");
+    wait_until_pid_gone(installed.pid, WAIT_SECS).await;
+    wait_for_liveness(
+        &installed.host,
+        "the runtime reading its host gone",
+        |liveness| matches!(liveness, Liveness::Gone),
+    )
+    .await;
+    assert!(
+        !process_is_gone(child),
+        "premise: the child outlived its host"
+    );
+    Survivor {
+        installed,
+        child,
+        _guard: guard,
+    }
+}
+
+/// Stop with only an ended agent's consent reaps a host's child that outlived
+/// its host, rooted at the child the runtime pinned.
+///
+/// Why: SPEC.md ("Lifecycle operations") treats a program that ignored the
+/// hangup of a host killed outright as a leftover process that Stop reaps.
+/// Its probe reads no live agent, and the child carries no session marker
+/// and sits in no launch scope, so a sweep without the pinned child as its
+/// root would leave it running for good. The session reads as ended, so the
+/// desktop asks with the consent an ended agent gets, which SPEC.md says
+/// covers reaping such a leftover. Spec: with the session's agent in a host
+/// whose child ignores SIGHUP, after the host is killed with SIGKILL and the
+/// child runs on (premises checked), a Stop guarded on the agent having
+/// ended succeeds and the child is gone by its reply.
+#[farhelm_testtrace::test]
+async fn stop_reaps_a_child_that_outlived_its_killed_host() {
+    let h = harness().await;
+    let (session, work) = basic_session(&h).await;
+    let survivor = kill_host_leaving_its_child(&h, &session.id, work.path()).await;
+
+    h.client
+        .stop_session_guarded(&session.id, false, true)
+        .await
+        .expect("a Stop with an ended agent's consent succeeds");
+    assert!(
+        process_is_gone(survivor.child),
+        "Stop replied with the host's child still running"
+    );
+}
+
+/// Restart without consent to stop a working agent reaps a host's child that
+/// outlived its host, and the new agent then starts.
+///
+/// Why: a Restart that started the new agent beside the old one would run
+/// two agents on one conversation, which SPEC.md ("Lifecycle operations")
+/// forbids; and as for Stop, the survivor of a host killed outright is found
+/// only from the child the runtime pinned. Spec: with the session's agent in
+/// a host whose child ignores SIGHUP, after the host is killed with SIGKILL
+/// and the child runs on (premises checked), a Restart that does not consent
+/// to stopping a working agent (none reads as running) succeeds with the old
+/// child gone by its reply, and the session's agent terminal is a new host
+/// at another socket showing the resumed agent's ready marker. The reap runs
+/// before the new launch in the code; this test observes only its result at
+/// the reply.
+#[farhelm_testtrace::test]
+async fn restart_reaps_a_child_that_outlived_its_killed_host() {
+    let h = harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = create_resumable_session(
+        &h,
+        &work.path().to_string_lossy(),
+        &fixture_cmd("fake-agent --script basic"),
+        80,
+        24,
+    )
+    .await;
+    wait_for_agent_ready(&h, &session.id).await;
+    let survivor = kill_host_leaving_its_child(&h, &session.id, work.path()).await;
+
+    h.client
+        .restart_session(&session.id, false)
+        .await
+        .expect("the restart succeeds");
+    assert!(
+        process_is_gone(survivor.child),
+        "Restart replied with the old host's child still running"
+    );
+    let new = h
+        .sup
+        .agent_host_for_test(&session.id)
+        .await
+        .expect("the session's agent terminal is a host");
+    assert_ne!(new.socket(), survivor.installed.socket, "a new host");
+    wait_for_screen(&new, AGENT_READY_MARKER).await;
+    let new_pid = host_process(new.socket()).expect("the new host's process");
+    let report = tokio::time::timeout(Duration::from_secs(WAIT_SECS), new.shutdown())
+        .await
+        .expect("the new host's shutdown finishes in time")
+        .expect("the runtime was still running the host");
+    assert!(report.ended, "the new host ended: {report:?}");
+    wait_until_pid_gone(new_pid, WAIT_SECS).await;
+}
+
 // ---- Delete --------------------------------------------------------------------------
 
 /// A script like [`tree_script`] whose grandchild ignores the terminal's

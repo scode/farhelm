@@ -2423,6 +2423,16 @@ so these are accepted limits of such hosts, not defects to engineer around. The 
 processes when the tab is closed, reaped, or deleted. Detached services started by shell initialization before the agent
 launches are outside the cleanup guarantee: they may serve the user's login environment beyond this session.
 
+Farhelm does not add significant complexity to handle programs that do not handle SIGHUP when their terminal host gets
+SIGKILL. Basic sanity checking, simple and cheap things that make the experience more reasonable, are fine; Farhelm does
+not try to handle this with any kind of extremely strong guarantee, which is not worth the complexity it would carry.
+Such a program runs on after its host is gone, and is a leftover process. When the agent itself ignored the hangup,
+Stop, Restart (before relaunching) and Delete reap it, with what it started, from the agent process the supervisor
+identified when it took up the host, even on a launch with no scope. When the agent died of the hangup and only a
+process it started ignored it, that process is found only within the containment limits above. Until Stop, Restart or
+Delete runs, the session reads as ended, nothing watches for such survivors, and consent given for an ended agent covers
+reaping them.
+
 On Linux with systemd scopes, Farhelm first asks Podman to stop containers whose main Podman monitor still belongs to a
 scope the operation is cleaning up. Podman can also put its monitor in a separate scope. Stop and Restart cover the
 agent's scope, closing a tab covers that tab's scope, and Delete covers all scopes of the session. Stop also cleans up

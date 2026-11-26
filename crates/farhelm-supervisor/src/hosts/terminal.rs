@@ -2598,6 +2598,34 @@ impl HostTerminal {
         }
     }
 
+    /// The `(pid, start time)` root for the leftover reap Stop and Restart
+    /// run when [`Self::probe`] found no live agent: the host's child as the
+    /// runtime pinned it at adoption, if that very process still runs,
+    /// whatever the host now says ([`HostStatus::pinned_child_root`], the
+    /// root Delete sweeps from too).
+    ///
+    /// This is the case of a terminal host killed outright (SIGKILL) whose
+    /// child ignored the hangup: the probe reads the host as gone, yet the
+    /// child runs on, reparented, and on a launch with no confirmed scope
+    /// and no marker the sweep can see nothing else would find it. SPEC.md
+    /// ("Lifecycle operations") treats such a survivor as a leftover process
+    /// that Stop, Restart and Delete reap, and deliberately no more: status
+    /// still reads the agent as ended, and nothing watches for survivors
+    /// between those operations. `None` when there is no such process (none
+    /// pinned, reaped, or no longer the same process); an error when the
+    /// process table cannot be read, since a root must be certain and the
+    /// callers refuse rather than report a sweep that could not see it.
+    pub(crate) fn leftover_child_root(&self) -> anyhow::Result<Option<(u32, u64)>> {
+        self.status()
+            .pinned_child_root()
+            .map(|root| root.map(|root| (root.pid, root.start)))
+            .map_err(|why| {
+                anyhow::anyhow!(
+                    "could not read whether the terminal host's child outlived its host ({why})"
+                )
+            })
+    }
+
     /// For a terminal whose process its probe reported dead, wait up to
     /// `bound` for the terminal to hold everything the process left (its
     /// final output and its exit status), and say whether it does.
