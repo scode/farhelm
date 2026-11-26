@@ -99,6 +99,15 @@ recipe falls back to the vendor's documented installer. An agent with no recipe 
 case also needs one. The summary names the version each case ran against, and a failed upgrade makes the run exit
 nonzero even when its case passed, because that pass is for a release users may no longer get.
 
+Each updater and fallback installer runs in a transient systemd user scope of its own, so a background worker it starts
+(even one that detaches with `setsid`) cannot replace the binary while the runner probes its version or a case runs.
+After the updater exits, the runner waits, within the same ten-minute limit, for everything in the scope to finish;
+whatever is still running then, or when the updater itself overruns the limit, is stopped, and the upgrade fails; if the
+scope cannot be confirmed stopped, the run ends there rather than go on beside it. An updater that starts a long-lived
+process on purpose (a daemon it expects to keep) would therefore make its harness wait the full limit and fail; none is
+known to, but watch for it after a vendor change. Ctrl-C or SIGTERM during an upgrade stops the scope first and then
+ends the run without running a case. Without a systemd user manager no updater runs and every upgrade fails saying so.
+
 `--no-upgrade` probes the installed versions without changing them. Use it to reproduce a failure on the version that
 produced it, or when the agents were upgraded moments ago. `--upgrade-only` upgrades the selected harnesses without
 building the test binary. It accepts `--harness` and rejects `--list` and `--category`. An agent session that is already

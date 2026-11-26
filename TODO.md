@@ -264,16 +264,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   exceeded the triage size target, and the cache transition needs its own coverage to preserve working recipes. Plan:
   `plans/queue/podman-proxy-free-images.md`.
 
-- **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
-  out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
-  its version, so a case can report a verdict for the wrong binary. Cover both timeouts and cancellation during
-  preparation, including a signal arriving as the process starts. Reuse the same teardown for the updater and the
-  fallback shell, and verify with a local child process that no write can race the version probe or a case. The first
-  implementation could kill a worker still finishing a successful update. Waiting instead with a process listing could
-  miss a successor forked during the scan. The next design needs to confirm the group has finished with kernel-backed
-  evidence and keep its identity safe to signal through timeout and cancellation. Plan:
-  `plans/queue/drift-updater-teardown.md`.
-
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
   watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
   Checkout Trash can send up to 2N reads in quick succession. Revisit the choices to stop rechecking after a failed read

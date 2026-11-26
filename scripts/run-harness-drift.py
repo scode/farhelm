@@ -199,7 +199,9 @@ def prepare(names: list[str], env: dict[str, str], upgrade: bool) -> dict[str, h
     """Upgrade (or only probe) each selected harness before any case runs, so every case tests the latest release.
 
     A drift case with no recipe is reported as a failed upgrade rather than silently tested on whatever is installed:
-    adding a harness to the suite means deciding how it gets upgraded too.
+    adding a harness to the suite means deciding how it gets upgraded too. SIGINT or SIGTERM during an upgrade ends the
+    run with 128 + the signal, as a cancelled case does, once the updater's scope is gone (`harness_upgrades.run_updater`);
+    an updater's scope that cannot be confirmed stopped ends it with 1 before any further installer, probe or case runs.
     """
     upgrades = {}
     for name in names:
@@ -207,7 +209,14 @@ def prepare(names: list[str], env: dict[str, str], upgrade: bool) -> dict[str, h
         if recipe is None:
             result = harness_upgrades.Upgrade("failed", "unknown", "unknown", "no recipe in scripts/harness_upgrades.py")
         elif upgrade:
-            result = harness_upgrades.upgrade(recipe, env)
+            try:
+                result = harness_upgrades.upgrade(recipe, env)
+            except harness_upgrades.Cancelled as cancelled:
+                print(f"upgrade of {name} cancelled; no case ran", flush=True)
+                raise SystemExit(128 + cancelled.signum) from None
+            except harness_upgrades.ContainmentLost as lost:
+                print(f"UPGRADE FAILED {name}: {lost}; stopping before anything else runs", flush=True)
+                raise SystemExit(1) from None
         else:
             result = harness_upgrades.probe(recipe, env)
         upgrades[name] = result
