@@ -128,6 +128,9 @@ pub struct EnvironmentCreateBody {
 /// assertion); a plain Restart sets neither.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RestartSessionBody {
+    /// Restart with pins each dispatch to the connection it was prepared against. A plain Restart omits this guard.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_incarnation: Option<u64>,
     /// A one-time conversation to resume instead of the captured one, offered
     /// only with an agent launch.
     pub conversation: Option<String>,

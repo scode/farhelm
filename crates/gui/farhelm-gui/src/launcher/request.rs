@@ -770,6 +770,8 @@ impl LaunchDraft {
     /// Restart with's request (`POST /api/sessions/{id}/restart`): the edited launch in the baseline's shape, and the
     /// conversation the user named, if any. `stop_if_running` says the user confirmed stopping a working agent ("Stop
     /// and restart").
+    /// Pin the routed connection at dispatch, as a create does. A verified YOLO answer can first follow a reconnect
+    /// to the same installation, then the retry pins that newly observed connection.
     pub fn restart_body(
         &self,
         target: Target<'_>,
@@ -779,12 +781,13 @@ impl LaunchDraft {
         if self.launch_refusal(target, live).is_some() {
             return None;
         }
-        self.connected_host(target.hosts)?;
+        let host = self.connected_host(target.hosts)?;
         let (with, with_command) = match self.restart_edit()? {
             RestartBaseline::Agent(selection) => (Some(selection), None),
             RestartBaseline::Command(command) => (None, Some(command)),
         };
         Some(RestartSessionBody {
+            expected_incarnation: Some(host.incarnation),
             conversation: self.active_conversation().map(str::to_owned),
             stop_if_running,
             with,

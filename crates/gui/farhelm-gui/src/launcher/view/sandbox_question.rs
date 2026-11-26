@@ -142,7 +142,7 @@ impl Launcher {
                 // The answer is the press the launch's moved-on check counts from.
                 let mark = Mark::take(cx);
                 let _ = launcher.update(cx, |launcher, cx| {
-                    launcher.submit(false, Some(ask.size), Default::default(), mark, window, cx)
+                    launcher.submit(None, Some(ask.size), Default::default(), mark, window, cx)
                 });
             },
             window,

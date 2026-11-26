@@ -3301,6 +3301,10 @@ pub(crate) async fn get_session(
 /// or hand-written body never kills a live agent by omission.
 #[derive(Deserialize)]
 pub(crate) struct RestartReq {
+    /// The connection the edited launch was sent for. It also fences the request that asks for approval, so the
+    /// refusal can witness which connection asked.
+    #[serde(default)]
+    expected_incarnation: Option<u64>,
     /// A one-time named target, offered only with an agent launch edit.
     conversation: Option<String>,
     #[serde(default)]
@@ -3357,7 +3361,10 @@ pub(crate) async fn restart_session(
         };
         match resolve_and_restart_session(
             &state,
-            &key,
+            RestartTarget {
+                key: &key,
+                expected_incarnation: req.expected_incarnation,
+            },
             req.stop_if_running,
             with,
             req.confirm_yolo,
@@ -3393,7 +3400,10 @@ pub(crate) async fn do_restart_session(
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     resolve_and_restart_session(
         state,
-        key,
+        RestartTarget {
+            key,
+            expected_incarnation: None,
+        },
         stop_if_running,
         with,
         confirm_yolo,
@@ -3401,6 +3411,12 @@ pub(crate) async fn do_restart_session(
         None,
     )
     .await
+}
+
+/// A session key survives reconnects. An optional incarnation keeps a connection-scoped decision from doing so.
+struct RestartTarget<'a> {
+    key: &'a store::SessionKey,
+    expected_incarnation: Option<u64>,
 }
 
 /// Resolve a restart's optional edit and selector before the typed dispatch tail.
@@ -3412,13 +3428,17 @@ pub(crate) async fn do_restart_session(
 /// refusal precedence without making dispatch accept an unresolved launch.
 async fn resolve_and_restart_session(
     state: &AppState,
-    key: &store::SessionKey,
+    target: RestartTarget<'_>,
     stop_if_running: bool,
     with: Option<LaunchRequest>,
     confirm_yolo: bool,
     expected_launch: Option<farhelm_proto::SessionLaunch>,
     conversation: Option<String>,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
+    let RestartTarget {
+        key,
+        expected_incarnation,
+    } = target;
     let id = key.session_id.as_str();
     // Resolved before routing: a malformed edit is the caller's to fix
     // wherever the session lives.
@@ -3435,6 +3455,7 @@ async fn resolve_and_restart_session(
         launches::named_start(launch, value.clone()).map_err(invalid_request)?;
     }
     let (claim, client) = route_active_session(state, key).await?;
+    crate::precondition::incarnation_holds(&claim, expected_incarnation)?;
     // Restart with composes for the session's recorded directory. Plain
     // Restart carries no replacement launch and replays the stored choice.
     let with = match with {

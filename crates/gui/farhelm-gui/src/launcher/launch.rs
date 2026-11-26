@@ -65,7 +65,7 @@ use farhelm_proto::provisioning::{ProvisioningView, RunStatus};
 use farhelm_proto::session_requests::{
     CreateSessionBody, EnvironmentCreateBody, ReplaceSessionBody, RestartSessionBody,
 };
-use farhelm_proto::ui_channel::{Availability, Collection, HostView, SessionList};
+use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView, SessionList};
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, Window};
 
 use super::draft::Install;
@@ -436,6 +436,18 @@ pub(super) enum Request {
 }
 
 impl Request {
+    /// The directory a connected managed checkout is about to use. The preview key alone does not identify this
+    /// directory because an unnamed checkout may get a different number on its next preview.
+    pub(super) fn checkout_path(&self) -> Option<&str> {
+        let create = match self {
+            Self::Create(body) => body,
+            Self::Replace { body, .. } => body.with.as_ref()?,
+            Self::Environment(_) | Self::Restart { .. } => return None,
+        };
+        create.github_checkout.as_ref()?;
+        Some(&create.cwd)
+    }
+
     /// The operation store's key: a fresh launch key for a create, the source's own key for a Replace with or Restart
     /// with, which shares that key's one-request-at-a-time rule and its failure line with the plain Replace and
     /// Restart.
@@ -504,15 +516,6 @@ impl Request {
         }
     }
 
-    /// The host an ordinary create is sent to; `None` for every other request, which acts on its source's host or
-    /// creates a new one.
-    fn created_on(&self) -> Option<i64> {
-        match self {
-            Request::Create(body) => body.host,
-            Request::Environment(_) | Request::Replace { .. } | Request::Restart { .. } => None,
-        }
-    }
-
     /// The progress pill's verb (the old `LaunchAction::present`).
     fn verb(&self) -> &'static str {
         match self {
@@ -538,7 +541,8 @@ impl Request {
 /// slot while it is out. `mark` is the user's answer the reply's moved-on check counts from: taken in the handler of
 /// the press of Launch (a quick launch's shortcut press), or of the YOLO question's answer whose host write this request
 /// waited for. `host` is the target host's name as the launcher shows it now, which the progress pill keeps for the
-/// request's life. Returns whether the request went out; it does not without a UI session, with a request that will
+/// request's life. `installation` is captured with this request, so a later refusal cannot ask about a replacement
+/// installation on the same row. Returns whether the request went out; it does not without a UI session, with a request that will
 /// not encode (see [`Request::command`]), or while the source of a Replace with or Restart with has another request in
 /// flight, which the launcher refuses before pressing gets here (`SOURCE_BUSY` in the view).
 ///
@@ -550,6 +554,7 @@ pub(super) fn start(
     launcher: Entity<Launcher>,
     request: Request,
     host: HostText,
+    target: Option<YoloTarget>,
     mark: Mark,
     window: &mut Window,
     cx: &mut App,
@@ -571,7 +576,8 @@ pub(super) fn start(
         key: key.clone(),
         source: request.source(),
         work: request.work(),
-        installation: request.created_on().and_then(|host| install_of(host, cx)),
+        target,
+        checkout_path: request.checkout_path().map(str::to_owned),
     };
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
@@ -667,16 +673,65 @@ fn hide_progress(window: AnyWindowHandle, cx: &mut App) {
     }
 }
 
+/// The host that received the original launch. Only a verified installation lets an answer outlive a connection.
+#[derive(Clone, PartialEq)]
+pub(super) enum YoloTarget {
+    Installation(Install),
+    Connection {
+        installation: Install,
+        incarnation: u64,
+    },
+}
+
+impl YoloTarget {
+    pub(super) fn of(host: &HostView) -> Self {
+        let installation = Install::of(host);
+        if super::request::has_checkout_identity(host) {
+            Self::Installation(installation)
+        } else {
+            Self::Connection {
+                installation,
+                incarnation: host.incarnation,
+            }
+        }
+    }
+
+    pub(super) fn installation(&self) -> &Install {
+        match self {
+            Self::Installation(install)
+            | Self::Connection {
+                installation: install,
+                ..
+            } => install,
+        }
+    }
+
+    /// A registry row alone cannot prove continuity when it has no verified identity.
+    pub(super) fn applies_to(&self, host: &HostView) -> bool {
+        if self.installation() != &Install::of(host) {
+            return false;
+        }
+        match self {
+            Self::Installation(_) => true,
+            Self::Connection { incarnation, .. } => {
+                *incarnation != 0
+                    && *incarnation == host.incarnation
+                    && matches!(host.state, HostStateView::Connected { .. })
+            }
+        }
+    }
+}
+
 /// What a sent request's reply is settled against: the key it went under, the session a Replace with or Restart with
 /// acts on, and its work.
 struct Sent {
     key: OpKey,
     source: Option<String>,
     work: Work,
-    /// The installation an ordinary create was sent to, as the store held it at the press; `None` for every other
-    /// request. A refusal that comes back after that host's registry row moved to another installation is not shown in
-    /// its own words ([`EARLIER_SETUP_REFUSED`], [`EARLIER_SETUP_TIMED_OUT`]).
-    installation: Option<Install>,
+    /// A new environment has no host yet. A host's refusal can authorize dispatch only for this original target.
+    target: Option<YoloTarget>,
+    /// The exact managed checkout the first dispatch targeted, even if reconnecting invalidates its preview.
+    checkout_path: Option<String>,
 }
 
 /// The installation `host`'s registry row names in the current store, if the store lists the host.
@@ -737,7 +792,8 @@ fn settle(
         key,
         source,
         work,
-        installation,
+        target,
+        checkout_path,
     } = sent;
     hide_progress(window, cx);
     // The store counts from when it sent the create; `mark` from the answer that asked for it, which for a create sent
@@ -775,7 +831,9 @@ fn settle(
             {
                 operations.update(cx, |operations, cx| operations.forget(&key, cx));
             }
-            launcher.update(cx, |launcher, cx| launcher.yolo_asked(cx));
+            launcher.update(cx, |launcher, cx| {
+                launcher.yolo_asked(target, checkout_path, cx);
+            });
             come_back(
                 launcher,
                 window,
@@ -791,9 +849,11 @@ fn settle(
             // its marker, and is refused like any other.
             let may_still_start =
                 refusal.status == 504 && !refusal.has(HelmMarker::CreateUnaccepted);
-            let moved = installation
-                .as_ref()
-                .is_some_and(|sent| install_of(sent.host, cx).as_ref() != Some(sent));
+            let moved = source.is_none()
+                && target
+                    .as_ref()
+                    .map(YoloTarget::installation)
+                    .is_some_and(|sent| install_of(sent.host, cx).as_ref() != Some(sent));
             if moved && let Some(operations) = session::current_operations(cx) {
                 operations.update(cx, |operations, cx| {
                     let words = if may_still_start {

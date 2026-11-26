@@ -2692,6 +2692,221 @@ fn a_woken_checkout_can_preview_after_the_connection_deadline(cx: &mut TestAppCo
     settle(cx);
 }
 
+/// Bring back the original YOLO question after a verified checkout dispatch.
+fn checkout_yolo_question(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, HostView) {
+    let (mut helm, cx, mut host) = suspended_checkout(cx, None);
+    edit(cx, |draft| draft.choose_command_yolo(true));
+    let resume = press_checkout_wake(&mut helm, cx);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    connect_checkout_host(&mut helm, cx, &mut host);
+    let preview = hold_woken_preview(&mut helm, cx, &host, "");
+    let first = create_woken_checkout(&mut helm, cx, &host, preview, "bar-1");
+    let body = first.body.as_ref().unwrap();
+    assert_eq!(body["command"]["yolo"], true);
+    assert!(
+        body.get("confirm_yolo")
+            .is_none_or(|value| value == &json!(false))
+    );
+    super::yolo_tests::refuse_for_yolo(&mut helm, cx, first.id);
+    assert!(name_of(cx, "prompt-confirm").is_some());
+    (helm, cx, host)
+}
+
+/// A YOLO answer shown the wake allocation policy can create in a different directory after Resume reconnects the
+/// same installation. The new preview still has to name that directory.
+#[gpui::test]
+fn a_confirmed_checkout_keeps_yolo_consent_through_wake_and_preview(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = checkout_yolo_question(cx);
+    super::wake_tests::push(
+        &mut helm,
+        cx,
+        &mut host,
+        crate::session_list::environment_tests::suspended_at(100),
+    );
+    super::wake_tests::assert_published_host(cx, &host);
+    assert!(name_of(cx, "prompt-confirm").is_some());
+    assert_folder_status(
+        cx,
+        "launcher-preview-wake",
+        "launcher-preview-message",
+        "The folder is picked automatically when the host is ready",
+    );
+    for command in sent(&mut helm, cx) {
+        match command.path.as_str() {
+            "/api/launch-history?host=12" => {
+                reply_checkout_launcher_read(&mut helm, command, false)
+            }
+            "/api/checkout-trash/list" => reply_checkout_trash(&mut helm, &command),
+            _ => panic!("unexpected command before the answer: {command:?}"),
+        }
+    }
+    settle(cx);
+    assert!(sent(&mut helm, cx).is_empty());
+    test_support::click(cx, "prompt-confirm");
+    let confirmed_resume = one_checkout_wake(&mut helm, cx);
+    helm.reply(confirmed_resume.id, 200, None);
+    settle(cx);
+    connect_checkout_host(&mut helm, cx, &mut host);
+    let preview = hold_woken_preview(&mut helm, cx, &host, "");
+    assert!(
+        sent(&mut helm, cx).is_empty(),
+        "the new preview is still unanswered"
+    );
+    let create = create_woken_checkout(&mut helm, cx, &host, preview, "bar-2");
+    assert_eq!(create.body.as_ref().unwrap()["confirm_yolo"], true);
+}
+
+/// A reconnect outside the launcher also invalidates its old preview. The
+/// answer waits for the matching preview instead of losing the accepted press.
+#[gpui::test]
+fn checkout_yolo_consent_waits_for_the_preview_after_an_independent_reconnect(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, mut host) = checkout_yolo_question(cx);
+    let original_incarnation = host.incarnation;
+    connect_checkout_host(&mut helm, cx, &mut host);
+    assert_ne!(host.incarnation, original_incarnation);
+    assert!(name_of(cx, "prompt-confirm").is_some());
+    assert_folder_status(
+        cx,
+        "launcher-preview-pending",
+        "launcher-preview-message",
+        "Waiting for a current checkout preview",
+    );
+    test_support::click(cx, "prompt-confirm");
+    answer_reopened_checkout_preview(&mut helm, cx, &host, "bar-1");
+    let commands = sent(&mut helm, cx);
+    let [create] = &commands[..] else {
+        panic!("one confirmed create after its preview expected, got {commands:?}");
+    };
+    assert_eq!(create.path, "/api/sessions");
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["confirm_yolo"], true);
+    assert_eq!(body["expected_incarnation"], host.incarnation);
+    assert_eq!(
+        body["github_checkout"]["preview"]["incarnation"],
+        host.incarnation
+    );
+    assert_eq!(body["cwd"], "/work/bar-1");
+}
+
+/// An independent reconnect can keep the installation and change the numbered checkout directory. The old answer
+/// cannot authorize the new path, whether the preview settles before or after the answer.
+fn changed_checkout_requires_a_fresh_press(cx: &mut TestAppContext, preview_before_answer: bool) {
+    let (mut helm, cx, mut host) = checkout_yolo_question(cx);
+    let original_incarnation = host.incarnation;
+    connect_checkout_host(&mut helm, cx, &mut host);
+    super::wake_tests::assert_published_host(cx, &host);
+    assert_ne!(host.incarnation, original_incarnation);
+    assert!(name_of(cx, "prompt-confirm").is_some());
+    assert_folder_status(
+        cx,
+        "launcher-preview-pending",
+        "launcher-preview-message",
+        "Waiting for a current checkout preview",
+    );
+    if preview_before_answer {
+        answer_reopened_checkout_preview(&mut helm, cx, &host, "bar-2");
+        assert_eq!(checkout_folder(cx), "/work/bar-2");
+    }
+    test_support::click(cx, "prompt-confirm");
+    if !preview_before_answer {
+        answer_reopened_checkout_preview(&mut helm, cx, &host, "bar-2");
+    }
+    assert!(sent(&mut helm, cx).is_empty());
+    assert_eq!(checkout_folder(cx), "/work/bar-2");
+    assert!(name_of(cx, "prompt-confirm").is_none());
+
+    test_support::click(cx, "launcher-launch");
+    let commands = sent(&mut helm, cx);
+    let [create] = &commands[..] else {
+        panic!("one create from the fresh press expected, got {commands:?}");
+    };
+    assert_eq!(create.path, "/api/sessions");
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["cwd"], "/work/bar-2");
+    assert!(
+        body.get("confirm_yolo")
+            .is_none_or(|value| value == &json!(false))
+    );
+}
+
+/// The pending-preview continuation spends the answer only if the new preview names the accepted path.
+#[gpui::test]
+fn checkout_yolo_consent_expires_when_the_awaited_preview_changes_the_path(
+    cx: &mut TestAppContext,
+) {
+    changed_checkout_requires_a_fresh_press(cx, false);
+}
+
+/// A refreshed preview already on screen does not change which directory the original one-time question approved.
+#[gpui::test]
+fn checkout_yolo_consent_expires_when_a_ready_preview_changes_the_path(cx: &mut TestAppContext) {
+    changed_checkout_requires_a_fresh_press(cx, true);
+}
+
+/// A press on the connected frame approves its exact directory. A suspension delivered before the next frame does
+/// not also give that press permission to Resume the host and let it pick a different directory.
+#[gpui::test]
+fn a_checkout_yolo_answer_before_the_wake_notice_cannot_resume(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = checkout_yolo_question(cx);
+    assert_eq!(checkout_folder(cx), "/work/bar-1");
+    assert!(name_of(cx, "prompt-confirm").is_some());
+    test_support::show_next_frame(cx);
+    let confirm = test_support::center(cx, "prompt-confirm");
+    host.state = crate::session_list::environment_tests::suspended_at(100);
+    cx.update(|window, cx| {
+        let store = crate::session::current_store(cx).unwrap();
+        let meta = store
+            .read(cx)
+            .collections()
+            .meta(Collection::Hosts)
+            .unwrap()
+            .clone();
+        let changes = farhelm_helm_client::collections::decode_changes(CollectionChanges {
+            collection: Collection::Hosts,
+            meta,
+            upsert: vec![KeyedEntry {
+                key: HostView::key(host.id),
+                value: serde_json::to_value(&host).unwrap(),
+            }],
+            remove: Vec::new(),
+        })
+        .unwrap();
+        store.update(cx, |store, cx| store.apply(&changes, cx));
+        assert_eq!(
+            store
+                .read(cx)
+                .collections()
+                .get::<HostView>(&HostView::key(host.id))
+                .unwrap()
+                .state,
+            host.state,
+        );
+        test_support::click_before_redraw(confirm, window, cx);
+    });
+    settle(cx);
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some(
+            "Not launched. The host now needs to wake before it can prepare a checkout. Launch again to review the current setup."
+        ),
+        "the answer reached the launcher against the connected frame"
+    );
+    assert_folder_status(
+        cx,
+        "launcher-preview-wake",
+        "launcher-preview-message",
+        "The folder is picked automatically when the host is ready",
+    );
+    assert!(
+        sent(&mut helm, cx)
+            .iter()
+            .all(|command| { !matches!(command.path.as_str(), WAKE_RESUME | "/api/sessions") })
+    );
+}
+
 /// A late connection belongs to the host, not the expired press. The reopened form may preview for a new
 /// press, but will not spend the old one.
 #[gpui::test]

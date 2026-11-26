@@ -11,9 +11,11 @@ use farhelm_proto::ui_channel::{
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 
+use super::draft::Mode;
 use super::environment_launch_tests::answer_except;
 use super::launch_tests::{command_draft, creates};
 use super::view_tests::{fixture_hosts, launcher_with_hosts, shown_refusal};
+use super::yolo_tests::{refuse_for_yolo, yolo_command_draft};
 use crate::session_list::environment_tests::{changing, connected, suspended_at};
 use crate::test_support::{advance, click, label, meta, settle};
 
@@ -39,6 +41,503 @@ fn open_on(
     draft.choose_host(host.id, "~".into());
     let (helm, cx) = launcher_with_hosts(cx, draft, hosts);
     (helm, cx, host)
+}
+
+/// Send an ordinary YOLO request to a connected environment. The folder is
+/// already chosen so the initial press tests dispatch, independent of history.
+fn yolo_dispatched(
+    cx: &mut TestAppContext,
+    mode: Mode,
+    verified: bool,
+) -> (FakeHelm, &mut VisualTestContext, HostView, FakeCommand) {
+    let mut hosts = fixture_hosts(&[0, 11]);
+    let mut host: HostView = serde_json::from_value(hosts.entries[1].value.clone()).unwrap();
+    if !verified {
+        host.identity = None;
+    }
+    assert_eq!(host.identity.is_some(), verified);
+    host.state = connected_as(&host);
+    hosts.entries[1].value = serde_json::to_value(&host).unwrap();
+    let mut draft = yolo_command_draft();
+    draft.mode = mode;
+    draft.choose_host(host.id, "~".into());
+    draft.edit_folder("/work".into());
+    let (mut helm, cx) = launcher_with_hosts(cx, draft, hosts);
+    assert_published_host(cx, &host);
+    let first = press_yolo_create(&mut helm, cx, &host);
+    (helm, cx, host, first)
+}
+
+/// Keep the registry identity and the connection identity consistent, including
+/// the unverified fixture whose connection has no identity yet.
+fn connected_as(host: &HostView) -> HostStateView {
+    let mut state = connected();
+    if let HostStateView::Connected { identity, .. } = &mut state {
+        identity.clone_from(&host.identity);
+    }
+    state
+}
+
+/// Witness the exact host phase and installation in the GUI's store before
+/// relying on a suspended, reconnected or retargeted fixture.
+pub(super) fn assert_published_host(cx: &mut VisualTestContext, expected: &HostView) {
+    cx.update(|_, cx| {
+        let store = crate::session::current_store(cx).unwrap();
+        let host = store
+            .read(cx)
+            .collections()
+            .get::<HostView>(&HostView::key(expected.id))
+            .unwrap();
+        assert_eq!(host.identity, expected.identity);
+        assert_eq!(host.incarnation, expected.incarnation);
+        assert_eq!(host.state, expected.state);
+    });
+}
+
+/// A new press requires its own permission even in a launcher that recovered
+/// from an earlier question or a refused create.
+fn press_yolo_create(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    host: &HostView,
+) -> FakeCommand {
+    click(cx, "launcher-launch");
+    let sent = wake_commands(helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create expected, got {sent:?}")
+    };
+    assert_eq!(create.path, "/api/sessions");
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["host"], host.id);
+    assert_eq!(body["expected_incarnation"], host.incarnation);
+    assert_eq!(body["cwd"], "/work");
+    assert_eq!(body["command"]["yolo"], true);
+    assert!(
+        body.get("confirm_yolo")
+            .is_none_or(|value| value == &json!(false))
+    );
+    create.clone()
+}
+
+/// Drive a one-off answer with a suspended target. Only a resumed connection
+/// to the same verified installation may see the confirmation bit.
+fn answer_yolo_during_suspension(cx: &mut TestAppContext, mode: Mode) {
+    let (mut helm, cx, mut host, first) = yolo_dispatched(cx, mode, true);
+    refuse_for_yolo(&mut helm, cx, first.id);
+    assert!(label(cx, "prompt-confirm").is_some());
+    push(&mut helm, cx, &mut host, suspended_at(100));
+    assert_published_host(cx, &host);
+    assert!(matches!(host.state, HostStateView::Suspended { .. }));
+    assert!(label(cx, "prompt-confirm").is_some());
+    assert!(wake_commands(&mut helm, cx).is_empty());
+    click(cx, "prompt-confirm");
+    let sent = wake_commands(&mut helm, cx);
+    let [resume] = &sent[..] else {
+        panic!("one Resume expected, got {sent:?}")
+    };
+    assert_eq!(resume.path, RESUME);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    assert!(wake_commands(&mut helm, cx).is_empty());
+    assert!(label(cx, "launch-wake").is_some());
+    let connection = connected_as(&host);
+    push(&mut helm, cx, &mut host, connection);
+    assert_published_host(cx, &host);
+    let sent = wake_commands(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one resumed create expected, got {sent:?}")
+    };
+    assert_eq!(create.path, "/api/sessions");
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["host"], host.id);
+    assert_eq!(body["expected_incarnation"], host.incarnation);
+    assert_eq!(body["cwd"], "/work");
+    assert_eq!(body["command"], first.body.as_ref().unwrap()["command"]);
+    assert_eq!(body["confirm_yolo"], true);
+
+    helm.reply(
+        create.id,
+        409,
+        Some(json!("Fixture refused the confirmed launch")),
+    );
+    settle(cx);
+    assert!(label(cx, "prompt-confirm").is_none());
+    let fresh = press_yolo_create(&mut helm, cx, &host);
+    refuse_for_yolo(&mut helm, cx, fresh.id);
+    assert!(label(cx, "prompt-confirm").is_some());
+}
+
+/// New keeps one confirmed dispatch through wake and releases it after the reply.
+#[gpui::test]
+fn new_keeps_one_yolo_confirmation_through_wake(cx: &mut TestAppContext) {
+    answer_yolo_during_suspension(cx, Mode::New);
+}
+
+/// Clone uses the same destination pipeline. Its first press also has no permission
+/// to bypass the destination host's confirmation.
+#[gpui::test]
+fn clone_keeps_one_yolo_confirmation_through_wake(cx: &mut TestAppContext) {
+    answer_yolo_during_suspension(cx, Mode::Clone);
+}
+
+/// The refusal names the previous installation even if its registry row kept
+/// the same ID. It cannot ask for confirmation on behalf of a replacement.
+#[gpui::test]
+fn a_yolo_refusal_from_an_earlier_installation_cannot_ask(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, first) = yolo_dispatched(cx, Mode::New, true);
+    host.identity = Some("replacement-installation".into());
+    let connection = connected_as(&host);
+    push(&mut helm, cx, &mut host, connection);
+    assert_published_host(cx, &host);
+    refuse_for_yolo(&mut helm, cx, first.id);
+    assert!(label(cx, "prompt-confirm").is_none());
+    assert!(
+        shown_refusal(cx)
+            .unwrap()
+            .contains("original host installation")
+    );
+    assert!(wake_commands(&mut helm, cx).is_empty());
+    let fresh = press_yolo_create(&mut helm, cx, &host);
+    refuse_for_yolo(&mut helm, cx, fresh.id);
+    assert!(label(cx, "prompt-confirm").is_some());
+}
+
+/// An older supervisor can ask on its existing connection. The retry keeps that connection's token and the
+/// original folder and applies permission once.
+#[gpui::test]
+fn an_unverified_installation_accepts_yolo_on_the_same_connection(cx: &mut TestAppContext) {
+    let (mut helm, cx, host, first) = yolo_dispatched(cx, Mode::New, false);
+    assert_ne!(host.incarnation, 0);
+    refuse_for_yolo(&mut helm, cx, first.id);
+    assert!(label(cx, "prompt-confirm").is_some());
+    click(cx, "prompt-confirm");
+    let sent = wake_commands(&mut helm, cx);
+    let [retry] = &sent[..] else {
+        panic!("one create expected, got {sent:?}");
+    };
+    assert_eq!(retry.path, first.path);
+    let mut expected = first.body.unwrap();
+    expected["confirm_yolo"] = json!(true);
+    assert_eq!(retry.body.as_ref(), Some(&expected));
+}
+
+/// A sleeping identity-less host can wake from a fresh launch, but an earlier answer has no connection to follow.
+#[gpui::test]
+fn an_unverified_yolo_answer_cannot_wake_a_host(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, first) = yolo_dispatched(cx, Mode::New, false);
+    refuse_for_yolo(&mut helm, cx, first.id);
+    assert!(label(cx, "prompt-confirm").is_some());
+    push(&mut helm, cx, &mut host, suspended_at(100));
+    assert_published_host(cx, &host);
+    assert!(matches!(host.state, HostStateView::Suspended { .. }));
+    click(cx, "prompt-confirm");
+    assert!(wake_commands(&mut helm, cx).is_empty());
+    assert!(
+        shown_refusal(cx)
+            .unwrap()
+            .contains("original host installation")
+    );
+}
+
+/// The same registry entry can reconnect without gaining an identity. The old prompt cannot authorize that client.
+#[gpui::test]
+fn an_unverified_yolo_answer_cannot_follow_a_reconnect(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, first) = yolo_dispatched(cx, Mode::New, false);
+    refuse_for_yolo(&mut helm, cx, first.id);
+    assert!(label(cx, "prompt-confirm").is_some());
+    let previous = host.incarnation;
+    let connection = connected_as(&host);
+    push(&mut helm, cx, &mut host, connection);
+    assert_published_host(cx, &host);
+    assert!(host.identity.is_none());
+    assert_ne!(host.incarnation, previous);
+    click(cx, "prompt-confirm");
+    assert!(wake_commands(&mut helm, cx).is_empty());
+    assert!(shown_refusal(cx).is_some());
+    let fresh = press_yolo_create(&mut helm, cx, &host);
+    refuse_for_yolo(&mut helm, cx, fresh.id);
+    assert!(label(cx, "prompt-confirm").is_some());
+}
+
+/// A replacement can be resumable while the old question is still visible.
+/// The stale answer cannot send Resume even though an ordinary press could.
+#[gpui::test]
+fn a_stale_yolo_answer_cannot_wake_a_replacement_installation(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, first) = yolo_dispatched(cx, Mode::New, true);
+    refuse_for_yolo(&mut helm, cx, first.id);
+    host.identity = Some("replacement-installation".into());
+    push(&mut helm, cx, &mut host, suspended_at(100));
+    assert_published_host(cx, &host);
+    assert!(label(cx, "prompt-confirm").is_some());
+    assert!(wake_commands(&mut helm, cx).is_empty());
+
+    click(cx, "prompt-confirm");
+    assert!(label(cx, "launch-wake").is_none());
+    assert!(
+        shown_refusal(cx)
+            .unwrap()
+            .contains("original host installation")
+    );
+    assert!(wake_commands(&mut helm, cx).is_empty());
+}
+
+/// A wake already admitted for a specific installation cannot authorize the
+/// fresh connection when its registry row now names a different one.
+#[gpui::test]
+fn replacing_the_installation_during_wake_retires_yolo_consent(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, first) = yolo_dispatched(cx, Mode::New, true);
+    refuse_for_yolo(&mut helm, cx, first.id);
+    push(&mut helm, cx, &mut host, suspended_at(100));
+    assert_published_host(cx, &host);
+    assert!(label(cx, "prompt-confirm").is_some());
+    click(cx, "prompt-confirm");
+    let sent = wake_commands(&mut helm, cx);
+    let [resume] = &sent[..] else {
+        panic!("one Resume expected, got {sent:?}")
+    };
+    assert_eq!(resume.path, RESUME);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    assert!(label(cx, "launch-wake").is_some());
+
+    host.identity = Some("replacement-installation".into());
+    let connection = connected_as(&host);
+    push(&mut helm, cx, &mut host, connection);
+    assert_published_host(cx, &host);
+    assert!(label(cx, "launch-wake").is_none());
+    assert!(
+        shown_refusal(cx)
+            .unwrap()
+            .contains("different installation")
+    );
+    assert!(wake_commands(&mut helm, cx).is_empty());
+    let fresh = press_yolo_create(&mut helm, cx, &host);
+    refuse_for_yolo(&mut helm, cx, fresh.id);
+    assert!(label(cx, "prompt-confirm").is_some());
+}
+
+/// Dispatch the real source launch while its original destination is connected.
+fn yolo_source_dispatched<'a>(
+    cx: &'a mut TestAppContext,
+    route: &str,
+    open: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> bool,
+) -> (FakeHelm, &'a mut VisualTestContext, HostView, FakeCommand) {
+    let mut hosts = fixture_hosts(&[0, 8]);
+    let mut host: HostView = serde_json::from_value(hosts.entries[1].value.clone()).unwrap();
+    host.kind = "tensorlake".into();
+    assert!(host.identity.is_some());
+    assert_eq!(host.id, 9);
+    host.state = connected_as(&host);
+    hosts.entries[1].value = serde_json::to_value(&host).unwrap();
+    let (mut helm, cx) = super::entry_tests::window_on(cx, Some("a"), hosts, Vec::new());
+    assert_published_host(cx, &host);
+    assert!(cx.update(open), "the source launcher is available");
+    settle(cx);
+    super::folder_default_tests::edit_draft(cx, |draft| {
+        draft.choose_effort(Some(farhelm_proto::LaunchEffort::Medium));
+    });
+    super::view_tests::answer_catalog(
+        &mut helm,
+        cx,
+        Some(json!([{ "id": "gpt-5", "harness": "codex", "efforts": ["high", "medium"] }])),
+    );
+    let draft = super::view_tests::draft(cx);
+    assert_eq!(draft.agent.model.as_deref(), Some("gpt-5"));
+    assert_eq!(
+        draft.agent_selection().unwrap().effort,
+        Some(farhelm_proto::LaunchEffort::Medium.into()),
+    );
+    assert!(source_commands(&mut helm, cx, route).is_empty());
+    assert!(label(cx, "launcher-source-warning").is_some());
+    click(cx, "launcher-launch");
+    let sent = source_commands(&mut helm, cx, route);
+    let [initial] = &sent[..] else {
+        let refusal = shown_refusal(cx);
+        let help = super::view_tests::launch_help(cx);
+        panic!(
+            "one source dispatch on {route} expected, got {sent:?}; refusal={refusal:?}; help={help:?}"
+        );
+    };
+    assert_eq!(initial.path, route);
+    (helm, cx, host, initial.clone())
+}
+
+const RESUME_SOURCE: &str = "/api/hosts/9/resume";
+
+/// Leave source lifecycle traffic unanswered while draining independent reads.
+fn source_commands(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    route: &str,
+) -> Vec<FakeCommand> {
+    answer_except(helm, cx, |command| {
+        command.path == route || command.path == RESUME_SOURCE
+    })
+}
+
+/// Update the source's own host, keeping the other fixture host visible.
+fn publish_source_host(helm: &mut FakeHelm, cx: &mut VisualTestContext, host: &HostView) {
+    helm.push(CollectionChanges {
+        collection: Collection::Hosts,
+        meta: meta(&["1", "9"]),
+        upsert: vec![KeyedEntry {
+            key: HostView::key(host.id),
+            value: serde_json::to_value(host).unwrap(),
+        }],
+        remove: Vec::new(),
+    });
+    settle(cx);
+    assert_published_host(cx, host);
+}
+
+/// End the source and its shell tab while the answered launch is still held.
+/// Recomputing either source guard after wake would now dispatch different fields.
+fn finish_source_during_wake(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
+    use farhelm_proto::{SessionStatus, ui_channel::SessionRow};
+    let read_source = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            crate::session::current_store(cx)
+                .unwrap()
+                .read(cx)
+                .collections()
+                .get::<SessionRow>("a")
+                .unwrap()
+                .clone()
+        })
+    };
+    let mut source = read_source(cx);
+    assert_eq!(source.info.status, SessionStatus::Running);
+    assert_eq!(source.info.tabs.len(), 1);
+    source.info.status = SessionStatus::Exited { exit_code: Some(0) };
+    source.info.tabs.clear();
+    helm.push(CollectionChanges {
+        collection: Collection::Sessions,
+        meta: crate::session_list::tests::listing_meta(&["a", "b", "c", "d"], 5, false),
+        upsert: vec![KeyedEntry {
+            key: "a".into(),
+            value: serde_json::to_value(source).unwrap(),
+        }],
+        remove: Vec::new(),
+    });
+    settle(cx);
+    let current = read_source(cx);
+    assert_eq!(
+        current.info.status,
+        SessionStatus::Exited { exit_code: Some(0) }
+    );
+    assert!(current.info.tabs.is_empty());
+}
+
+/// Restart and Replace keep the source permission the user actually saw,
+/// with just the dispatch connection refreshed.
+fn answer_yolo_for_source(
+    cx: &mut TestAppContext,
+    route: &str,
+    open: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> bool,
+) {
+    let (mut helm, cx, mut host, initial) = yolo_source_dispatched(cx, route, open);
+    let mut expected = initial.body.clone().unwrap();
+    assert_eq!(expected["confirm_yolo"], false);
+    if route.ends_with("/replace") {
+        assert_eq!(expected["only_if_nothing_alive"], false);
+        assert_eq!(expected["only_if_agent_ended"], false);
+    } else {
+        assert_eq!(expected["stop_if_running"], true);
+        assert_eq!(expected["expected_incarnation"], host.incarnation);
+    }
+    refuse_for_yolo(&mut helm, cx, initial.id);
+    host.state = suspended_at(100);
+    publish_source_host(&mut helm, cx, &host);
+    assert!(label(cx, "prompt-confirm").is_some());
+    assert!(label(cx, "launcher-source-warning").is_some());
+    click(cx, "prompt-confirm");
+    let sent = source_commands(&mut helm, cx, route);
+    let [resume] = &sent[..] else {
+        panic!("one source Resume expected, got {sent:?}")
+    };
+    assert_eq!(resume.path, RESUME_SOURCE);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    assert!(source_commands(&mut helm, cx, route).is_empty());
+    finish_source_during_wake(&mut helm, cx);
+    assert!(label(cx, "launch-wake").is_some());
+
+    host.incarnation += 1;
+    host.state = connected_as(&host);
+    publish_source_host(&mut helm, cx, &host);
+    let sent = source_commands(&mut helm, cx, route);
+    let [confirmed] = &sent[..] else {
+        panic!("one confirmed source request expected, got {sent:?}")
+    };
+    assert_eq!(confirmed.path, route);
+    expected["confirm_yolo"] = json!(true);
+    if let Some(create) = expected
+        .get_mut("with")
+        .filter(|with| with.get("cwd").is_some())
+    {
+        create["expected_incarnation"] = json!(host.incarnation);
+    } else {
+        expected["expected_incarnation"] = json!(host.incarnation);
+    }
+    assert_eq!(confirmed.body.as_ref(), Some(&expected));
+}
+
+/// The refusal of a source operation must use the install recorded at
+/// dispatch, even when the row retargeted while the operation was out.
+fn source_refusal_after_retarget(
+    cx: &mut TestAppContext,
+    route: &str,
+    open: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> bool,
+) {
+    let (mut helm, cx, mut host, initial) = yolo_source_dispatched(cx, route, open);
+    host.identity = Some("replacement-installation".into());
+    host.incarnation += 1;
+    host.state = connected_as(&host);
+    publish_source_host(&mut helm, cx, &host);
+    refuse_for_yolo(&mut helm, cx, initial.id);
+    assert!(label(cx, "prompt-confirm").is_none());
+    assert!(
+        shown_refusal(cx)
+            .unwrap()
+            .contains("original host installation")
+    );
+    assert!(source_commands(&mut helm, cx, route).is_empty());
+}
+
+/// Replace with cannot mistake the currently registered host for its original target.
+#[gpui::test]
+fn a_replace_with_yolo_refusal_cannot_authorize_a_replacement_installation(
+    cx: &mut TestAppContext,
+) {
+    source_refusal_after_retarget(cx, "/api/sessions/a/replace", |window, cx| {
+        super::entry::open_replace_with("a", window, cx)
+    });
+}
+
+/// Restart with's source key alone cannot authorize a different installation.
+#[gpui::test]
+fn a_restart_with_yolo_refusal_cannot_authorize_a_replacement_installation(
+    cx: &mut TestAppContext,
+) {
+    source_refusal_after_retarget(cx, "/api/sessions/a/restart", |window, cx| {
+        super::entry::open_restart_with("a", window, cx)
+    });
+}
+
+/// Replace with carries both answers across wake, for the same folder and source.
+#[gpui::test]
+fn replace_with_carries_yolo_and_source_guards_through_wake(cx: &mut TestAppContext) {
+    answer_yolo_for_source(cx, "/api/sessions/a/replace", |window, cx| {
+        super::entry::open_replace_with("a", window, cx)
+    });
+}
+
+/// Restart with may wake before spending its one-time permission to stop a working source.
+#[gpui::test]
+fn restart_with_carries_yolo_and_stop_consent_through_wake(cx: &mut TestAppContext) {
+    answer_yolo_for_source(cx, "/api/sessions/a/restart", |window, cx| {
+        super::entry::open_restart_with("a", window, cx)
+    });
 }
 
 /// The launch must send Resume alone, hide the form, and keep the destination held while it waits.

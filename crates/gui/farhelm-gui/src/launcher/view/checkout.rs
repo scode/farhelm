@@ -143,6 +143,8 @@ impl PreviewKey {
 struct Armed {
     /// A later preview can supply the destination while the answer still owns the source permission.
     source: SourceConsent,
+    /// A wake can refresh the preview on another connection to this same installation.
+    yolo_consent: Option<super::YoloConsent>,
     mark: Mark,
     key: PreviewKey,
     window: AnyWindowHandle,
@@ -393,19 +395,25 @@ impl Launcher {
         }
     }
 
-    /// A launch to start once its managed checkout's preview is ready: the YOLO question's guarded answer, whose
-    /// switch to Guarded made the preview stale, and a quick launch prepared out of sight (`prepare_unseen`), whose
-    /// preview has not been asked for yet. When the first thing the launch waits for is that preview, it waits for it
-    /// ([`Self::settle_waiting_launch`]) and returns `true`; otherwise it is submitted now, refused as a press would be,
-    /// and this returns `false`. A quick launch waits out of sight, as the old app's did ("quick launch waits for a
-    /// managed preview and starts directly").
-    pub(in crate::launcher) fn submit_or_wait_for_preview(
+    /// Keep a launch pending while a quick launch, a wake, or an answer to the
+    /// YOLO question needs a current checkout preview. Return `true` if it is
+    /// armed for that preview. Otherwise submit now with the ordinary press
+    /// checks and return `false`. Quick launch and host wake can wait out of sight.
+    pub(super) fn submit_or_wait_for_preview(
         &mut self,
+        yolo_consent: Option<super::YoloConsent>,
         source: SourceConsent,
         mark: Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if yolo_consent
+            .as_ref()
+            .is_some_and(|consent| !self.matches_yolo_target(&consent.target, cx))
+        {
+            self.yolo_installation_changed(cx);
+            return false;
+        }
         // A quick launch's launcher is never drawn, so its preview is asked for here rather than while drawing.
         self.follow_preview(cx);
         // Compared with the launcher's own constant, never with helm words: a reworded reason must reword the constant.
@@ -415,6 +423,7 @@ impl Launcher {
         {
             self.checkout.armed = Some(Armed {
                 source,
+                yolo_consent,
                 mark,
                 key,
                 window: window.window_handle(),
@@ -423,7 +432,7 @@ impl Launcher {
             cx.notify();
             return true;
         }
-        self.submit(false, None, source, mark, window, cx);
+        self.submit(yolo_consent, None, source, mark, window, cx);
         false
     }
 
@@ -489,7 +498,14 @@ impl Launcher {
         if start {
             let _ = cx.update_window(armed.window, |_, window, cx| {
                 entity.update(cx, |launcher, cx| {
-                    launcher.submit(false, None, armed.source, armed.mark, window, cx)
+                    launcher.submit(
+                        armed.yolo_consent,
+                        None,
+                        armed.source,
+                        armed.mark,
+                        window,
+                        cx,
+                    )
                 });
             });
         }
@@ -761,7 +777,7 @@ impl Launcher {
 
     /// The Folder status for a resumable destination. A wake can promise an allocation only for an installation
     /// that can obtain its own preview after reconnecting.
-    fn checkout_wake_notice(&self, cx: &App) -> Option<(&'static str, &'static str)> {
+    pub(super) fn checkout_wake_notice(&self, cx: &App) -> Option<(&'static str, &'static str)> {
         self.draft.checkout.as_ref()?.repo.as_ref()?;
         let host = self.chosen_host(cx)?;
         if !self.draft.can_wake(host) {

@@ -194,18 +194,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the replacement view in light and dark. The ordering, refusal, test, and capture changes together exceeded the triage
   size gate.
 
-- **Keep one-time YOLO confirmation through a host wake.** When a sandbox suspends or a container stops while “Start
-  YOLO session anyway” is open, answering can wake the host and then ask the same question again. Capture the selected
-  installation when New, Clone, Replace with, or Restart with sends the original launch request. Check that the question
-  still applies before waking the host. Carry the one-time answer with the held launch through the wake and any checkout
-  preview. Retain the original folder and source consent guards for Replace with and Restart with. Allow a fresh
-  connection to the same verified installation. Clear the answer when that launch ends. Ordinary and guarded launches
-  carry no override. Update SPEC_impl.md under “Questions: the prompt”. Exercise suspension between the question and
-  answer, confirm the launch on the new connection, and show that changing installations before the refusal or during
-  the wait, or starting a later launch, requires its own answer. Binding the original dispatch and testing the resumed
-  launch across these paths exceeds the launcher triage budget. Plan:
-  `plans/queue/launcher-consent-and-custom-agent-fixes.md`.
-
 - **Report late wake failures when launching on a suspended sandbox or stopped container.** When Resume takes longer
   than the reply deadline, a later failure can leave the session launcher waiting for a minute before it gives the wrong
   reason. A slow Podman check can fail before Starting appears. The next host row can still say Stopped and carry the
