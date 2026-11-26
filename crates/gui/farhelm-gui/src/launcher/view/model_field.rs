@@ -415,6 +415,7 @@ fn draw_model_rows(
         list,
         children,
         highlighted: active_child,
+        footer: None,
     }
 }
 

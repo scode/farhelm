@@ -3679,6 +3679,16 @@
       "reference": null
     },
     {
+      "golden": "launcher-recent-custom-flags",
+      "title": "Saved Custom approval flags below the highlighted Recent setup in the wide pane",
+      "reference": null
+    },
+    {
+      "golden": "launcher-recent-custom-flags-narrow",
+      "title": "Saved Custom approval flags below the highlighted Recent setup in narrow search results",
+      "reference": null
+    },
+    {
       "golden": "launcher-custom-restart-blocked",
       "title": "Restart with open after a custom agent's registration lost resumption, More options folded",
       "reference": null

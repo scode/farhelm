@@ -1544,6 +1544,18 @@ static SCENES: &[Scene] = &[
         setup: launcher_narrow_custom_recents_setup,
     },
     Scene {
+        name: "launcher-recent-custom-flags",
+        size: (1080., 950.),
+        draw: session_lists_then,
+        setup: |state, window, cx| launcher_recent_flags_setup(state, false, window, cx),
+    },
+    Scene {
+        name: "launcher-recent-custom-flags-narrow",
+        size: (720., 900.),
+        draw: session_lists_then,
+        setup: |state, window, cx| launcher_recent_flags_setup(state, true, window, cx),
+    },
+    Scene {
         name: "launcher-shell-wrapper",
         size: (1080., 1040.),
         draw: session_lists_then,

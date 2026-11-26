@@ -707,11 +707,7 @@ pub(crate) fn scroll_stop_on(
         if !focused.is_focused(window) {
             return;
         }
-        if let Some(top) = scrolled_to(event, &keys) {
-            cx.stop_propagation();
-            keys.set_offset(point(keys.offset().x, top));
-            window.refresh();
-        }
+        apply_scroll_key(event, &keys, window, cx);
     });
     focus_stop(stop, id, focus, role, label, ring, window, cx)
 }
@@ -743,12 +739,37 @@ pub(crate) fn scroll_from_controls(region: Stateful<Div>, scroll: &ScrollHandle)
         ) {
             return;
         }
-        if let Some(top) = scrolled_to(event, &keys) {
-            cx.stop_propagation();
-            keys.set_offset(point(keys.offset().x, top));
-            window.refresh();
-        }
+        apply_scroll_key(event, &keys, window, cx);
     })
+}
+
+/// Page an overflowing detail from its focused editor. Leave Home and End to the editor and leave all keys alone
+/// if the detail fits, unlike an ordinary scrolling dialog body.
+pub(crate) fn scroll_detail_page(
+    event: &KeyDownEvent,
+    scroll: &ScrollHandle,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if matches!(event.keystroke.key.as_str(), "pageup" | "pagedown")
+        && scroll.max_offset().y > px(0.)
+    {
+        apply_scroll_key(event, scroll, window, cx);
+    }
+}
+
+/// Consume only keys the scroll calculation handles. Refresh around the same focused control.
+fn apply_scroll_key(
+    event: &KeyDownEvent,
+    scroll: &ScrollHandle,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(top) = scrolled_to(event, scroll) {
+        cx.stop_propagation();
+        scroll.set_offset(point(scroll.offset().x, top));
+        window.refresh();
+    }
 }
 
 /// Where `event`, a key pressed on a scroll stop, puts the scrolling content's offset (zero at the top, negative
