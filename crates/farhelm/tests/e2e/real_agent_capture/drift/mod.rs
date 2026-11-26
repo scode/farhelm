@@ -17,6 +17,9 @@ use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchSelection, RestartOffer};
 use farhelm_supervisor::agent_kind::AgentHooks;
 use farhelm_supervisor::hook_report::{HookLogLine, ReportAdmission, parse_log_line};
 use farhelm_supervisor::hosts::{HostTerminal, Liveness};
+use futures_util::FutureExt as _;
+use std::cell::Cell;
+use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -831,8 +834,42 @@ struct DriftEnv<'a> {
     work: &'a Path,
     state: &'a Path,
     private: Option<&'a private_config::PrivateConfig>,
+    session_cleanup: &'a SessionCleanup,
     /// Whether this fixture's supervisor may install this agent's persistent reporter files.
     installs_hooks: bool,
+}
+
+/// A create can leave an agent behind even when the supervisor fails to return a session ID.
+/// Count each attempt until Delete confirms cleanup. Terminal-host shutdown alone cannot provide that confirmation.
+#[derive(Default)]
+struct SessionCleanup(Cell<usize>);
+
+impl SessionCleanup {
+    fn begin_create(&self) {
+        self.0.set(self.0.get() + 1);
+    }
+
+    fn record_delete(&self, result: &anyhow::Result<()>) {
+        if result.is_ok() {
+            self.0.set(self.0.get() - 1);
+        }
+    }
+
+    fn allows_copy_back(&self, terminal_hosts_closed: bool) -> bool {
+        terminal_hosts_closed && self.0.get() == 0
+    }
+
+    /// Once Create returned an ID, Delete owns the process-tree sweep even if the live assertion unwinds.
+    async fn check_and_delete<T>(
+        &self,
+        check: impl Future<Output = Result<T, DriftError>>,
+        delete: impl Future<Output = anyhow::Result<()>>,
+    ) -> Result<T, DriftError> {
+        let result = AssertUnwindSafe(check).catch_unwind().await;
+        let deleted = delete.await;
+        self.record_delete(&deleted);
+        finish_check(result, deleted)
+    }
 }
 
 impl DriftEnv<'_> {
@@ -856,6 +893,7 @@ impl DriftEnv<'_> {
         }
         extras.setup_persistent_hooks =
             self.harness.agent_kind().offers_persistent_hooks() && self.private.is_some();
+        self.session_cleanup.begin_create();
         let session = self
             .client
             .create_session_with_extras(
@@ -867,14 +905,17 @@ impl DriftEnv<'_> {
                 extras,
             )
             .await?;
-        let result = async {
-            if let Some(private) = self.private {
-                private.check_hook_setup(self.installs_hooks)?;
-            }
-            check(&session.id).await
-        }
-        .await;
-        after_cleanup(result, self.client.delete_session(&session.id).await)
+        self.session_cleanup
+            .check_and_delete(
+                async {
+                    if let Some(private) = self.private {
+                        private.check_hook_setup(self.installs_hooks)?;
+                    }
+                    check(&session.id).await
+                },
+                self.client.delete_session(&session.id),
+            )
+            .await
     }
 }
 
@@ -971,31 +1012,72 @@ async fn with_drift_supervisor_using(
     }
     let launch = farhelm_helm::compile_agent_launch(selection).map_err(anyhow::Error::msg)?;
     let (sup, client, accepting) = serving_supervisor(state.path(), seams).await;
-    let result = run(
-        DriftEnv {
-            harness,
-            sup: &sup,
-            client: &client,
-            work: work.path(),
-            state: state.path(),
-            private: private.as_ref(),
-            installs_hooks,
-        },
-        launch,
-    )
+    let session_cleanup = SessionCleanup::default();
+    let result = AssertUnwindSafe(async {
+        run(
+            DriftEnv {
+                harness,
+                sup: &sup,
+                client: &client,
+                work: work.path(),
+                state: state.path(),
+                private: private.as_ref(),
+                session_cleanup: &session_cleanup,
+                installs_hooks,
+            },
+            launch,
+        )
+        .await
+    })
+    .catch_unwind()
     .await;
-    accepting.stop().await;
+    let accept_stopped = accepting.stop_checked().await;
     drop(client);
     drop(sup);
-    // Even a failed create can leave a host. The state directory has the authoritative reap check.
-    let stopped = state.close().map_err(anyhow::Error::from);
-    let finished = private.as_ref().map_or(Ok(()), |config| {
-        for note in config.finish(stopped.is_ok())? {
-            eprintln!("drift: {note}");
+    finish_case(result, |result| {
+        let stopped = state.close().map_err(anyhow::Error::from);
+        let finished = private.as_ref().map_or(Ok(()), |config| {
+            config
+                .finish(session_cleanup.allows_copy_back(stopped.is_ok()))
+                .map(drop)
+        });
+        after_cleanup(
+            after_cleanup(after_cleanup(result, accept_stopped), stopped),
+            finished,
+        )
+    })
+}
+
+/// Report a failed Delete before propagating a check panic to the outer case cleanup.
+fn finish_check<T>(
+    result: std::thread::Result<Result<T, DriftError>>,
+    deleted: anyhow::Result<()>,
+) -> Result<T, DriftError> {
+    match result {
+        Ok(result) => after_cleanup(result, deleted),
+        Err(payload) => {
+            if let Err(error) = deleted {
+                eprintln!("drift: Delete after panic failed: {error:#}");
+            }
+            resume_unwind(payload)
         }
-        Ok(())
-    });
-    after_cleanup(after_cleanup(result, stopped), finished)
+    }
+}
+
+/// Keep cleanup diagnostics when a case panics, then resume that same panic so the runner still sees a failure.
+fn finish_case(
+    result: std::thread::Result<DriftResult>,
+    cleanup: impl FnOnce(DriftResult) -> DriftResult,
+) -> DriftResult {
+    match result {
+        Ok(result) => cleanup(result),
+        Err(payload) => {
+            if let Err(DriftError::Failed(error)) = cleanup(Ok(())) {
+                eprintln!("drift: cleanup after panic failed: {error:#}");
+            }
+            resume_unwind(payload)
+        }
+    }
 }
 
 /// Keep the original check's evidence if cleanup also failed. Cleanup failure makes the whole case fail even
@@ -1068,6 +1150,64 @@ mod workspace_trust;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reaping the terminal hosts cannot make up for a failed Create or an unconfirmed Delete.
+    /// A later successful Delete accounts for only its own create.
+    #[farhelm_testtrace::test]
+    fn copy_back_requires_every_created_session_to_be_accounted_for() {
+        let cleanup = SessionCleanup::default();
+        cleanup.begin_create();
+        assert!(!cleanup.allows_copy_back(true), "no session ID returned");
+        cleanup.begin_create();
+        cleanup.record_delete(&Ok(()));
+        assert!(
+            !cleanup.allows_copy_back(true),
+            "earlier attempt still unconfirmed"
+        );
+
+        let cleanup = SessionCleanup::default();
+        cleanup.begin_create();
+        cleanup.record_delete(&Err(anyhow::anyhow!("owned Delete refused")));
+        assert!(!cleanup.allows_copy_back(true), "Delete failed");
+        cleanup.record_delete(&Ok(()));
+        assert!(
+            !cleanup.allows_copy_back(false),
+            "terminal hosts still unconfirmed"
+        );
+        assert!(cleanup.allows_copy_back(true));
+    }
+
+    /// A case panic after Create must attempt Delete before the outer mirror cleanup decides whether it can copy.
+    #[farhelm_testtrace::test]
+    async fn a_panicking_drift_check_runs_cleanup_and_resumes_the_original_panic() {
+        let session_cleanup = SessionCleanup::default();
+        session_cleanup.begin_create();
+        let result = AssertUnwindSafe(session_cleanup.check_and_delete::<()>(
+            async { panic!("fixture check panicked") },
+            async {
+                assert!(!session_cleanup.allows_copy_back(true));
+                Ok(())
+            },
+        ))
+        .catch_unwind()
+        .await;
+        let cleaned = Cell::new(false);
+        let resumed = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            finish_case(result, |result| {
+                assert!(
+                    session_cleanup.allows_copy_back(true),
+                    "Delete settled the prior create"
+                );
+                cleaned.set(true);
+                result
+            })
+        }));
+        assert!(cleaned.get());
+        assert_eq!(
+            resumed.unwrap_err().downcast_ref::<&str>(),
+            Some(&"fixture check panicked")
+        );
+    }
 
     /// Other directories are never fallback candidates. Two rows in the same directory cannot identify the seed.
     #[farhelm_testtrace::test]

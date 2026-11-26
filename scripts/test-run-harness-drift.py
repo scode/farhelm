@@ -191,6 +191,11 @@ class DriftRunnerTests(unittest.TestCase):
             (["--upgrade-only", "--category", "base"], "--category cannot be used with --upgrade-only", False),
             (["--list", "--upgrade-only"], "--list cannot be used with --upgrade-only", False),
             (["--category", "model_selection", "--harness", "grok"], "available harnesses: codex", True),
+            (
+                ["--category", "model_selection", "--harness", "codex", "--harness", "grok"],
+                "no case for grok in the selected categories",
+                True,
+            ),
             (["--category", "missing"], "unknown category: missing", True),
         ]:
             with patch.dict(globals_of_runner, {

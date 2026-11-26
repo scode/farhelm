@@ -50354,3 +50354,63 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Completion criteria: Remove the feedback file and its index entry without changing code or spec.
 - Execution: complete (discarded per triage). Change `opulpvmorrnzzqmvyoolqlqxpnzrkotl`, bookmark
   `plan/triage-queue-discards/01-queue-discards`, https://github.com/scode/farhelm/pull/5042/changes.
+
+## trailing-drift-copyback-runs-while-agent-may-live.md
+
+- Outcome: `fix code`.
+- Assessment: Partly correct. Confirmed control flow in
+  `crates/farhelm/tests/e2e/real_agent_capture/drift/mod.rs:741- 760,873-880` and `private_config.rs:18-22,589-595`:
+  copy-back gates only on `state.close().is_ok()` (terminal host shutdown), even when session create failed partway
+  without deleting or session delete failed its process-tree sweep. Vendor rename-save during those windows is
+  unverified.
+- Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
+  items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Track confirmed session deletion and absence of failed-create leftovers in `DriftEnv` so
+  `PrivateConfig::finish` gates copy-back accurately (and emits notes when skipped), update the misleading comments in
+  `private_config.rs`, and add unit tests (estimate S-M, ~40-65 lines). Remove the feedback file and its index entry.
+- Execution: Fixed as decided. Change `tzyzkromqutqoypsopukkpnqyzsxmmrp`, bookmark
+  `plan/triage-drift-and-brick-tooling/01-drift-copyback-and-runner`, [#5044](https://github.com/scode/farhelm/pull/5044/changes).
+
+## trailing-drift-runner-drops-requested-harness.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source (`scripts/run-harness-drift.py:279-296`): `--harness` validates against all
+  categories' cases rather than the selected categories, so passing multiple `--harness` values where one has no case in
+  the selected category silently drops it and can exit 0 (`PASSED`).
+- Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
+  items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: In `scripts/run-harness-drift.py`, refuse with a clear error when any explicitly requested
+  `--harness` has no matching case in the selected categories, and cover this in `scripts/test-run-harness-drift.py`
+  (estimate S, ~20-35 lines). Remove the feedback file and its index entry.
+- Execution: Fixed as decided. Change `tzyzkromqutqoypsopukkpnqyzsxmmrp`, bookmark
+  `plan/triage-drift-and-brick-tooling/01-drift-copyback-and-runner`, [#5044](https://github.com/scode/farhelm/pull/5044/changes).
+
+## trailing-drift-panic-skips-copyback.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed for control flow (`crates/farhelm/tests/e2e/real_agent_capture/drift/mod.rs:856-880`): a panic
+  inside `run(...).await` unwinds past `config.finish(...)`, dropping the private mirror without copying back refreshed
+  vendor logins or printing a note.
+- Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
+  items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Catch unwinds around `run(...).await` in `with_drift_supervisor_using`, run normal teardown and
+  `config.finish(...)`, then resume unwind on panic, with a unit test (estimate S, ~20-35 lines). Remove the feedback
+  file and its index entry.
+- Execution: Fixed as decided. Change `tzyzkromqutqoypsopukkpnqyzsxmmrp`, bookmark
+  `plan/triage-drift-and-brick-tooling/01-drift-copyback-and-runner`, [#5044](https://github.com/scode/farhelm/pull/5044/changes).
+
+## trailing-drift-failed-copyback-passes-case.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by source
+  (`crates/farhelm/tests/e2e/real_agent_capture/drift/private_config.rs:294-326,595-623`;
+  `drift/mod.rs:874-880,906-925`): a failed `replace_real` copy-back appends a note and still returns `Ok`, letting the
+  drift case report `PASSED` (commit `39f269bc0b` avoided early-aborting later files, which can be preserved while still
+  failing the case after the loop).
+- Decision: Q11 ("Maintainer drift, docs-shot & brick-test tooling"): maintainer picked "Fix the 9 drift & brick-test
+  items; discard frozen shot (#32)". (2026-11-25 fewest-questions triage page, main `5af40d23e`.)
+- Completion criteria: Continue copying all remaining files and running `real_leaves_unchanged()`, then fail the drift
+  case (after printing notes) when any copy-back I/O replacement failed, update `docs/harness-drift-tests.md`, and add a
+  unit test (estimate S, ~20-35 lines). Remove the feedback file and its index entry.
+- Execution: Fixed as decided. Change `tzyzkromqutqoypsopukkpnqyzsxmmrp`, bookmark
+  `plan/triage-drift-and-brick-tooling/01-drift-copyback-and-runner`, [#5044](https://github.com/scode/farhelm/pull/5044/changes).

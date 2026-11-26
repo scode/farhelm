@@ -20,8 +20,8 @@ python3 -B scripts/run-harness-drift.py --upgrade-only
 
 With no selection the runner upgrades and checks every harness in the `base` category. Use `--category <name>` to select
 a category, repeat it to select several, or pass `--category all` to run every discovered category. Combine it with
-`--harness <name>` to narrow the selection. Each selected harness upgrades once, even when it runs in several
-categories.
+`--harness <name>` to narrow the selection. Each named harness must have a case in at least one selected category. Each
+selected harness upgrades once, even when it runs in several categories.
 
 `--list` builds the e2e binary and prints the discovered `category/harness` pairs without starting agents or upgrading
 them. It lists all categories by default and accepts the same filters. These cases are ignored in normal nextest, CI,
@@ -114,10 +114,11 @@ Antigravity). Every entry in it is a symlink to your real one, except the files 
 directories above them. The agent keeps its login, settings and sessions. Farhelm's real setup writes its files into the
 copy, and the agent is started with the copy's variable set, also on Restart. The case fails if any of your real hook
 files changed. A vendor that saves a file by renaming a new copy over it (a refreshed login, say) replaces the copy's
-symlink rather than writing your file; the case copies such a file back afterwards, once its terminal hosts are
-confirmed ended and when your real one is unchanged, and prints a `drift:` note naming any it could not, so a replaced
-file (a refreshed login, say) is never dropped without a note. Files the vendor creates new inside the copy's private
-directories are dropped with it.
+symlink. The case copies that file back only after it has confirmed each session's deletion and terminal-host shutdown,
+and only if your original is unchanged. A create that failed to return a session keeps cleanup unconfirmed. This proof
+covers the processes Farhelm can settle during Delete. If cleanup is unconfirmed or the original changed, the case
+reports the dropped replacement. A failed copy-back makes the case fail after it has tried the remaining files and
+checked the real hook files. Files the vendor creates inside the copy's private directories are dropped with it.
 
 Claude's workspace trust case uses a private copy too, for a different reason: Farhelm records the trust in Claude's
 configuration file, `~/.claude.json` or the one under `CLAUDE_CONFIG_DIR`, so the case starts Claude with a private home

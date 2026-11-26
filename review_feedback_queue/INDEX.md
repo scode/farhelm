@@ -25,23 +25,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`trailing-drift-copyback-runs-while-agent-may-live.md`](trailing-drift-copyback-runs-while-agent-may-live.md) — A
-  Grok or Antigravity drift case copies refreshed vendor files back once its terminal hosts end, even when the agent may
-  still be running (failed Delete sweep, failed create, detached process), so a later vendor save such as a refreshed
-  login can be lost without a note.
-
-- [`trailing-drift-runner-drops-requested-harness.md`](trailing-drift-runner-drops-requested-harness.md) — The drift
-  runner silently skips an explicitly requested agent that has no case in the chosen category and can exit successfully
-  without checking it.
-
-- [`trailing-drift-panic-skips-copyback.md`](trailing-drift-panic-skips-copyback.md) — A panic inside a Grok or
-  Antigravity drift case skips copying a refreshed vendor login back to the maintainer's real config, with no note
-  (pre-existing).
-
-- [`trailing-drift-failed-copyback-passes-case.md`](trailing-drift-failed-copyback-passes-case.md) — A failed copy-back
-  of a refreshed vendor login is only a console note and the drift case still reports passed, so the maintainer may be
-  signed out unnoticed.
-
 - [`trailing-drift-cursor-initial-prompt-never-passes.md`](trailing-drift-cursor-initial-prompt-never-passes.md) —
   Cursor's launch-prompt drift case always ends "could not run" even when Cursor accepts the prompt, so the check can
   never pass.
