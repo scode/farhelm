@@ -57,6 +57,9 @@
 //! takes focus only from the press that starts its drag, and the rest are status marks), so their help shows for the
 //! pointer only.
 //!
+//! The row's list item takes a right press anywhere on the row and Shift+F10 from any control in it, and opens the
+//! row's context menu for both ([`super::menu`], "Right-click").
+//!
 //! The row's list item records whether the pointer is over it ([`RowHover`]), for its menu button's reveal
 //! ([`super::menu`]).
 //!
@@ -92,9 +95,9 @@ use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
     AnyElement, App, ClickEvent, Div, ElementId, Entity, FocusHandle, FontWeight,
-    HoverListenerMode, InteractiveElement, IntoElement, ParentElement, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
-    relative,
+    HoverListenerMode, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString,
+    Stateful, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
+    prelude::FluentBuilder as _, px, relative,
 };
 
 use super::environment::{self, Environment};
@@ -545,6 +548,26 @@ pub(crate) fn row(
         "{ITEM_ID_PREFIX}{}",
         session.key
     )));
+    // A right press anywhere on the row (its open control, its marks and bell, its pin grip, its ⋯ button), and
+    // Shift+F10 while any control in it holds focus, open its context menu: both reach the item from whatever inside
+    // took them, since neither of those handles a right press or that key itself ([`SessionList::open_context_menu`]).
+    let (pressed_list, pressed_key) = (list.clone(), session.key.to_owned());
+    let (keyed_list, keyed_key) = (list.clone(), session.key.to_owned());
+    let item = item
+        .on_mouse_down(MouseButton::Right, move |event, window, cx| {
+            cx.stop_propagation();
+            let _ = pressed_list.update(cx, |list, cx| {
+                list.open_context_menu(&pressed_key, Some(event.position), window, cx);
+            });
+        })
+        .on_key_down(move |event, window, cx| {
+            if crate::components::is_context_menu_key(event) {
+                cx.stop_propagation();
+                let _ = keyed_list.update(cx, |list, cx| {
+                    list.open_context_menu(&keyed_key, None, window, cx);
+                });
+            }
+        });
     // A press on the item's own space leaves focus where it is (`OnPress::Keep`): the controls inside take their
     // presses first, and the handle is no tab stop.
     focus::track(item, focus, focus::OnPress::Keep)

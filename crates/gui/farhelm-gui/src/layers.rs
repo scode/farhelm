@@ -24,8 +24,10 @@
 //!   [`Anchor`], state the anchor element keeps in its element state: it follows the element wherever it is drawn,
 //!   and closes when the element is no longer drawn (a deleted row's menu). A layer may also name a [`Subject`]: an
 //!   entity whose release closes it, or a session the helm's listing proves gone (`Subject::session`, a
-//!   confirmation about a session that was deleted elsewhere). Every overlay is anchored to an element: SPEC.md has no
-//!   menu opened at a pointer position.
+//!   confirmation about a session that was deleted elsewhere). Every overlay is anchored to an element. The one menu
+//!   SPEC.md opens at a pointer position, a session row's or group header's context menu opened by a right press, is
+//!   still anchored to its row's ⋯ button and only placed at the press ([`Anchor::at_point`]), so it closes with its row
+//!   as any row menu does.
 //! - **Three kinds of layer.** A dialog is centered over a veil (or near the window's top, for an opener that asks:
 //!   [`Dialog::placement`]). A popover (a menu, opened from [`Popover::menu`]) is drawn below its anchor, or
 //!   beside it when the anchor asks for that ([`Anchor::beside`], the session row's menu flying out beside the
@@ -394,6 +396,12 @@ pub enum Placement {
     /// Prefer the right of the parent item, with the left side available
     /// when it has more room and the right would cover part of the menu.
     Submenu,
+    /// Its top-left corner at this point, in window coordinates, whatever the anchor's bounds: a context menu opened by
+    /// a right press, at the press, as a desktop app's context menu opens (SPEC.md, "Session list"). The anchor still
+    /// decides when the popover closes, and the shared clamp keeps it inside the content area, so a press near the
+    /// window's right or bottom edge shifts the menu back in rather than flipping it. The point does not follow the
+    /// anchor: a list that scrolls under an open context menu leaves the menu where it opened.
+    AtPoint(Point<Pixels>),
     /// Wherever the anchor's owner says ([`Anchor::placed_by`]), asked as each frame is laid out ([`PlaceBy`] has the
     /// rule's inputs and what it may do). For an overlay whose rule needs its own measured size and facts only its
     /// owner knows. Its one caller is the terminal's drag-copy notice, which sits three terminal rows above or below
@@ -583,6 +591,15 @@ impl Anchor {
     pub fn beside(self) -> Anchor {
         Anchor {
             placement: Placement::Beside,
+            ..self
+        }
+    }
+
+    /// This anchor, with the layer opened on it placed at `at` ([`Placement::AtPoint`]): a context menu opened by a
+    /// right press, still closing when this anchor's element is no longer drawn.
+    pub(crate) fn at_point(self, at: Point<Pixels>) -> Anchor {
+        Anchor {
+            placement: Placement::AtPoint(at),
             ..self
         }
     }
@@ -2671,6 +2688,7 @@ pub(crate) fn popover_origin(
         }
         // The rule keeps inside the area itself ([`PlaceBy`]); the clamp below only catches one that does not.
         (Some(anchor), Placement::By(place)) => place(anchor, size, area),
+        (Some(_), Placement::AtPoint(at)) => *at,
         (None, _) => area.origin,
     };
     // Shift left when it overflows the right edge, up when it overflows the bottom, and back to the left and top edges

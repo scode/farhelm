@@ -14,6 +14,17 @@
 //! to fit. The questions the commands ask open from the same anchor ([`SessionList::ask_about_row`]), so they stand
 //! beside the row too.
 //!
+//! **Right-click.** A right press anywhere on a row or a live group header (a macOS Ctrl+click is one by the time GPUI
+//! delivers it), or Shift+F10 while any control in it holds focus, opens the same menu as its ⋯ button
+//! ([`SessionList::open_context_menu`]; SPEC.md, "Session list"). The row's list item takes both, so they reach it from
+//! the open control, the marks, the bell, the pin grip and the button alike. The menu is still anchored to the row's ⋯
+//! button, so it closes with its row, but a right press places it at the press ([`Anchor::at_point`]); Shift+F10
+//! keeps the beside placement. Any row menu or marked menu still open closes first, so one press moves the menu to
+//! another row. A menu opened this way has no opener of its own, since a right press moves no focus, so closing it
+//! returns focus where it was before (usually the terminal), and a command chosen from it leaves focus there too
+//! rather than on the button, as SPEC.md's "Keyboard focus" asks. With two or more marks shown, a right press on a
+//! marked row opens the marked menu instead, with the bar's lifecycle actions ([`super::marking`]).
+//!
 //! **It never outgrows the window.** The layer manager only shifts a popover, so a menu taller than the window's
 //! content area would sit at the area's top and run past its bottom, out of reach. A row's menu can grow that tall:
 //! the session's last refusal shows in it uncut, under the commands, and the helm's words can run long. So the panel
@@ -40,9 +51,11 @@
 //! the arrows move on leaves no second fill behind (SPEC.md, "A menu has one highlight"; the old
 //! `menu-highlight.spec.ts`).
 //!
-//! The menu names its button as where closing returns focus ([`focus::ReturnTo::Control`]), so Escape and every command
-//! chosen from it leave focus on the button, also on macOS, where the click that opened the menu left the button
-//! unfocused (the old app named the button through `RETURN_FOCUS`). When the button is no longer drawn, focus goes back
+//! A menu its button opened names the button as where closing returns focus ([`focus::ReturnTo::Control`]), so Escape
+//! and every command chosen from it leave focus on the button, also on macOS, where the click that opened the menu left
+//! the button unfocused (the old app named the button through `RETURN_FOCUS`). A context menu returns focus where it
+//! was instead, and so do the commands chosen from it ("Right-click" above); "leaves focus on the menu's button" below
+//! means the button's own menu. When the button is no longer drawn, focus goes back
 //! to what held it before the menu opened, or, when that was the button itself (a click focuses it on Linux), home.
 //!
 //! Rename comes first, as in the old app. Choosing it closes the menu, which leaves focus on the menu's button, and
@@ -180,10 +193,23 @@ const REPLACE_WITH_HELP: &str =
 /// [`entry::open_replace_with`]): it returns whether the launcher opened.
 type LauncherEntry = fn(&str, &mut Window, &mut App) -> bool;
 
+/// What opened a row's menu ([`SessionList::open_menu`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Opening {
+    /// Its ⋯ button (a click, Enter, Space, Down or Up on it): the menu opens beside the button, and closing it returns
+    /// focus to the button.
+    Button,
+    /// A right press at this point, or Shift+F10 with `None` (the module docs, "Right-click"): the menu opens at the
+    /// press, or beside the button for the key, and closing it returns focus where it was before, since neither moved
+    /// focus to the button.
+    Context(Option<gpui::Point<gpui::Pixels>>),
+}
+
 /// The layer a row last opened from its menu button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Opened {
-    /// The row's menu.
+    /// The row's menu, or the marked menu a right press on the row opened ([`super::marking`]): either way a menu
+    /// that closes with the row and that the row's button closes.
     Menu,
     /// A question one of its commands asked (Delete's), during which the button is inert.
     Question,
@@ -336,7 +362,9 @@ pub(super) fn menu_button(
     .focus(&focus)
     // Down and Up on the closed button open the menu on its first or last command, as the old toggle did.
     .on_key_down(toggle_arrow_keys(move |start, window, cx| {
-        let _ = keyed_list.update(cx, |list, cx| list.open_menu(&keyed, start, window, cx));
+        let _ = keyed_list.update(cx, |list, cx| {
+            list.open_menu(&keyed, start, Opening::Button, window, cx)
+        });
     }))
     .on_click(move |_, window, cx| {
         // The list may be gone with its window; then there is no menu to open.
@@ -374,17 +402,62 @@ impl SessionList {
             layers::close(menu, window, cx);
             return;
         }
-        self.open_menu(key, MenuStart::First, window, cx);
+        self.open_menu(key, MenuStart::First, Opening::Button, window, cx);
+    }
+
+    /// Open the context menu of `key`'s row or group header: a right press anywhere on it, at `at`, the press's point in
+    /// window coordinates, or Shift+F10 while any control in it holds focus, with `at` `None`, beside its ⋯ button as
+    /// the button's own menu opens (the module docs, "Right-click").
+    ///
+    /// Any row menu or marked menu still open closes first, so one right press moves the menu from one row to another,
+    /// as the host rail's avatars do: the layer manager closes a popover on a press outside it, but a press on its own
+    /// anchor (this row's ⋯ button) is left to the anchor. A right press elsewhere on the row is outside a question a
+    /// row's command asked, which therefore closes first; a right press on the button itself, or Shift+F10, leaves
+    /// such a question open, and the row then opens nothing, neither its own menu nor the marked one, since the row's
+    /// button is inert while its question is open. With two or more sessions marked and shown, a press on a marked
+    /// session opens the marked menu with the lifecycle actions too ([`SessionList::open_marked_context_menu`]); a
+    /// press on any other row, a group header among them, opens that row's own menu and leaves the marks as they are.
+    pub(super) fn open_context_menu(
+        &mut self,
+        key: &str,
+        at: Option<gpui::Point<gpui::Pixels>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let opened = self.current.current(cx).rows.borrow().opened_rows();
+        for row in opened {
+            self.close_menu(&row, window, cx);
+        }
+        self.close_marked_menu(window, cx);
+        // What can still be open under this row now is a question one of its commands asked.
+        let asking = self
+            .current
+            .current(cx)
+            .rows
+            .borrow_mut()
+            .still_open(key, window, cx)
+            .is_some();
+        if asking {
+            return;
+        }
+        let shown = self.marking.shown();
+        if shown.len() >= 2 && shown.iter().any(|marked| marked == key) {
+            self.open_marked_context_menu(key, at, window, cx);
+        } else {
+            self.open_menu(key, MenuStart::First, Opening::Context(at), window, cx);
+        }
     }
 
     /// Open `key`'s menu with focus on the command `start` names: Rename, its first, or Delete, its last (Up on the
     /// closed button). Nothing opens while the row's menu or a question it asked is open, when the button was not
     /// drawn, while the window is inert, or once the user has moved on since the key or click that asked. A row
-    /// scrolled out of view is scrolled back first, so the menu opens beside a row the user can see.
+    /// scrolled out of view is scrolled back first, so the menu opens beside a row the user can see. `opening` says
+    /// what opened it, which decides where it opens and where closing returns focus ([`Opening`]).
     fn open_menu(
         &mut self,
         key: &str,
         start: MenuStart,
+        opening: Opening,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -399,6 +472,10 @@ impl SessionList {
         };
         let (None, Some(anchor), Some(button)) = (open, anchor, button) else {
             return;
+        };
+        let anchor = match opening {
+            Opening::Context(Some(at)) => anchor.at_point(at),
+            Opening::Context(None) | Opening::Button => anchor,
         };
         let mark = Mark::take(cx);
         let rename_focus = cx.focus_handle().tab_stop(true);
@@ -429,11 +506,15 @@ impl SessionList {
             delete_focus,
             scroll: ScrollHandle::new(),
         });
+        // From the ⋯ button, the button, not what held focus before: on macOS the click that opened the menu left the
+        // button unfocused, and SPEC.md returns focus to the button when the menu closes. A context menu has no
+        // opener of its own (a right press moves no focus), so it returns focus where it was.
+        let returns_to = match opening {
+            Opening::Button => focus::ReturnTo::Control(button),
+            Opening::Context(_) => focus::ReturnTo::Opener,
+        };
         let opened = layers::open_popover(
-            Popover::menu(view, cx.focus_handle(), anchor, start.clone())
-                // The button, not what held focus before: on macOS the click that opened the menu left the button
-                // unfocused, and SPEC.md returns focus to the button when the menu closes.
-                .returns_to(focus::ReturnTo::Control(button)),
+            Popover::menu(view, cx.focus_handle(), anchor, start.clone()).returns_to(returns_to),
             &mark,
             window,
             cx,
@@ -452,8 +533,10 @@ impl SessionList {
         }
     }
 
-    /// Close `key`'s menu if it is still open, which returns focus to its button (the menu names it, so on every
-    /// platform): what every command chosen from the menu does first, at acceptance rather than at a reply.
+    /// Close `key`'s menu if it is still open, which returns focus where that menu sends it: to its button for a menu the
+    /// button opened (the menu names it, so on every platform), where it was before for a context menu (the module
+    /// docs, "Right-click"). What every command chosen from the menu does first, at acceptance rather than at a reply.
+    /// It closes the marked menu a right press on this row opened too, which is recorded as the row's menu.
     pub(super) fn close_menu(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let open = self
             .current
@@ -466,8 +549,9 @@ impl SessionList {
         }
     }
 
-    /// The menu's Rename was chosen at `mark`: close the menu, which returns focus to its button, then open the Rename
-    /// editor, which returns focus there when it closes.
+    /// The menu's Rename was chosen at `mark`: close the menu, which returns focus where the menu sends it (its button,
+    /// or for a context menu where focus was before), then open the Rename editor, which returns focus there when it
+    /// closes.
     fn rename_from_menu(
         &mut self,
         key: &str,
@@ -521,8 +605,9 @@ impl SessionList {
         seen::send(key, toggle, cx);
     }
 
-    /// One of the menu's lifecycle commands was chosen at `mark`: close the menu, which returns focus to its button,
-    /// then go on as `command` goes on for the row (its Replace, Stop or Delete), so any question opens from there.
+    /// One of the menu's lifecycle commands was chosen at `mark`: close the menu, which returns focus where the menu
+    /// sends it (its button, or for a context menu where focus was before), then go on as `command` goes on for the row
+    /// (its Replace, Stop or Delete), so any question opens from there and returns focus there.
     fn lifecycle_from_menu(
         &mut self,
         target: &Actionable,
@@ -1028,7 +1113,8 @@ impl RowMenu {
             .description(reason.unwrap_or(description))
             .disabled(launcher_busy)
             .on_click(move |_, window, cx| {
-                // Closed first, which returns focus to the menu's button: the entry point refuses while a menu is open,
+                // Closed first, which returns focus where the menu sends it (its button, or where it was for a context
+                // menu): the entry point refuses while a menu is open,
                 // and the launcher returns focus to what held it when it opened.
                 let _ = list.update(cx, |list, cx| list.close_menu(&key, window, cx));
                 // A press drawn a frame before the session's commands were refused: the entry points check only

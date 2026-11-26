@@ -566,7 +566,8 @@ impl SessionList {
     }
 
     /// The attention list's drawn layout changed: close the open row menu and the marked menu, which return focus to
-    /// their buttons, as the old list retired the menus whose anchors it moved. Reopened, a menu opens where its button
+    /// their buttons (or, for a context menu, where focus was before it), as the old list retired the menus whose
+    /// anchors it moved. Reopened, a menu opens where its button
     /// is drawn now.
     fn attention_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let keys = self.current.current(cx).rows.borrow().opened_rows();

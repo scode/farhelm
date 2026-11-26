@@ -196,6 +196,9 @@ mod bulk_start_tests;
 mod compact_tests;
 
 #[cfg(test)]
+mod context_menu_tests;
+
+#[cfg(test)]
 mod delete_notice_tests;
 
 #[cfg(test)]

@@ -27,7 +27,7 @@
 //!   visually to the field's right. Closing it, however it closes, moves focus only if focus is still inside it. That is the
 //!   layer manager's rule, and it is also the rule decided for a successful save
 //!   ([`crate::operations::Settled::user_moved_on`]). Opened from a row's menu, focus then goes back to what held it
-//!   when the editor opened (the menu's button). Opened with the shortcut, it goes to the open session's terminal,
+//!   when the editor opened (the menu's button, or for a context menu what held focus before it). Opened with the shortcut, it goes to the open session's terminal,
 //!   whatever held focus when the shortcut was pressed (SPEC.md, "Desktop window chrome": "Closing that
 //!   shortcut-opened dialog returns focus to the terminal"; [`ReturnTo::Home`]).
 //! - **The session going away.** The editor has no layer subject, so nothing but the user closes it. When a complete
@@ -94,7 +94,7 @@ use super::{groups, outcome};
 /// `mark` is the [`Mark`] taken in the handler of the user's action (the item's click); nothing opens when the user has
 /// moved on since (the layer manager's rule). Focus starts in the title field, and closing the editor returns it to
 /// whatever held focus when it opened ([`ReturnTo::Opener`]), so a caller that wants focus back somewhere
-/// particular opens it from there (the row menu closes itself first, which leaves focus on its button).
+/// particular opens it from there (the row menu closes itself first, which leaves focus on its button, or for a context menu where it was before).
 ///
 /// Returns the editor's layer, or `None` when nothing opened: the window is inert, the session has work in flight (a
 /// Delete, say: SPEC.md, "an open lifecycle confirmation or a pending request refuses another lifecycle action"), the

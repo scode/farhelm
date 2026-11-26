@@ -72,7 +72,7 @@ use super::{HEADING_ICON_SIDE, SessionList, bulk, menu, mute, pins, retired, sta
 use crate::assets::Icon;
 use crate::components::{
     Button, HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, TOOLBAR_ACTION_GAP, Tier,
-    home_end_keys, submenu, toggle_arrow_keys,
+    home_end_keys, menu_separator, submenu, toggle_arrow_keys,
 };
 use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
@@ -449,6 +449,9 @@ pub(super) struct Kept {
     /// was not available. A failed read keeps its rows on screen (the list's module docs), but SPEC.md has it expose
     /// no targets, so no gesture marks over it.
     projection: Option<Projection>,
+    /// Whether the marked menu last opened was a right press's, which offers the lifecycle actions too: the list then
+    /// closes it when those change ([`SessionList::marks_projected`]).
+    menu_lifecycle: bool,
 }
 
 impl Kept {
@@ -471,6 +474,19 @@ impl Kept {
             clear_focus: cx.focus_handle().tab_stop(true),
             anchor: None,
             projection: None,
+            menu_lifecycle: false,
+        }
+    }
+
+    /// The first lifecycle item a right press's marked menu draws, in its order (Restart/Replace, Stop, Delete), as
+    /// the last frame offered them: where the menu's focus starts.
+    fn lifecycle_first<'a>(&self, items: &'a LifecycleItems) -> &'a FocusHandle {
+        if self.offers_start() {
+            &items.start
+        } else if self.offers_stop() {
+            &items.stop
+        } else {
+            &items.delete
         }
     }
 
@@ -552,7 +568,21 @@ impl SessionList {
             != projection
                 .as_ref()
                 .map_or_else(Vec::new, |projection| actions(&projection.offers));
-        if changed && let Some(menu) = self.marked_menu_open(window, cx) {
+        // A menu opened by a right press also offers the lifecycle actions, which it drew from the same projection:
+        // it closes when those change too, or when fewer than two marks are shown, the least it opens for.
+        let lifecycle_changed = self.marking.menu_lifecycle
+            && projection.as_ref().is_none_or(|frame| {
+                frame.shown.len() < 2
+                    || Some((frame.stop, frame.start))
+                        != self
+                            .marking
+                            .projection
+                            .as_ref()
+                            .map(|last| (last.stop, last.start))
+            });
+        if (changed || lifecycle_changed)
+            && let Some(menu) = self.marked_menu_open(window, cx)
+        {
             window.defer(cx, move |window, cx| layers::close(menu, window, cx));
         }
         // A button that disappears has to present its action again when it returns.
@@ -705,7 +735,7 @@ impl SessionList {
             (
                 bulk::Lifecycle::Stop,
                 bulk::STOP_ID,
-                "Stop the marked sessions currently shown and close their terminal tabs",
+                bulk::STOP_HELP,
                 Tier::Neutral,
                 &self.marking.stop_focus,
                 &mut self.marking.stop_frame,
@@ -713,7 +743,7 @@ impl SessionList {
             (
                 bulk::Lifecycle::Delete,
                 bulk::DELETE_ID,
-                "Delete the marked sessions currently shown",
+                bulk::DELETE_HELP,
                 Tier::Danger,
                 &self.marking.delete_focus,
                 &mut self.marking.delete_frame,
@@ -793,7 +823,8 @@ impl SessionList {
             // menu covers the session pane rather than the rows it acts on.
             let anchor = Anchor::for_element("session-marked-menu-anchor", window, cx).beside();
             self.marking.anchor = Some(anchor.clone());
-            let open = self.marked_menu_open(window, cx).is_some();
+            // Only for its own menu: a right press's marked menu belongs to the row it opened from, whose ⋯ shows it.
+            let open = self.marked_menu_open(window, cx).is_some() && !self.marking.menu_lifecycle;
             let (clicked, keyed) = (cx.weak_entity(), cx.weak_entity());
             let toggle = IconButton::new(
                 MENU_TOGGLE_ID,
@@ -865,8 +896,10 @@ impl SessionList {
             .filter(|menu| layers::is_open(*menu, window, cx))
     }
 
-    /// Close the marked menu if it is open, which returns focus to its toggle: the Hosts attention list moved the bar
-    /// it opened from ([`super::attention`]). Reopened, it opens where the toggle is drawn then.
+    /// Close the marked menu if it is open, which returns focus where that menu sends it: the bar's ⋯ toggle for the
+    /// toggle's menu, where focus was before a right press's. The Hosts attention list closes it when it moves the bar
+    /// it opened from ([`super::attention`]), and a right press or a chosen lifecycle item closes it before what comes
+    /// next. Reopened, it opens where its opener is drawn then.
     pub(super) fn close_marked_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(menu) = self.marked_menu_open(window, cx) {
             layers::close(menu, window, cx);
@@ -886,39 +919,111 @@ impl SessionList {
     /// toggle is not drawn or no action applies. Opening counts as a marking choice ([`Marks::touch`]), as the old one
     /// did.
     fn open_marked_menu(&mut self, start: MenuStart, window: &mut Window, cx: &mut Context<Self>) {
-        if self.marked_menu_open(window, cx).is_some() {
-            return;
-        }
         let Some(anchor) = self.marking.anchor.clone() else {
             return;
         };
+        // The toggle, not what held focus before: on macOS the click that opened the menu left it unfocused.
+        let returns_to = focus::ReturnTo::Control(self.marking.menu_focus.clone());
+        self.open_marked_menu_on(anchor, returns_to, start, false, window, cx);
+    }
+
+    /// The marked menu for a right press on `key`, a marked session's row, at `at` (`None` for Shift+F10, beside the
+    /// row's ⋯ button), with the bar's lifecycle actions above the metadata ones ([`MarkedMenu`]).
+    ///
+    /// It is anchored to the row's ⋯ button, so it closes with that row, and it is recorded as that row's open menu,
+    /// so the button shows it open, a click on the button closes it rather than stacking the row's own menu on it, and
+    /// the next right press closes it as it closes any row menu. Closing it returns focus where it was before the press
+    /// or the key (SPEC.md, "Keyboard focus": a right press moves no focus, so that is usually the terminal). The bulk
+    /// question a lifecycle action asks still returns to the bar, as it does from the bar ([`super::bulk`]): it is the
+    /// bar's question about the marks, which the bar shows. Nothing opens for a row the last frame did not draw.
+    pub(super) fn open_marked_context_menu(
+        &mut self,
+        key: &str,
+        at: Option<gpui::Point<gpui::Pixels>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(anchor) = self.current.current(cx).rows.borrow().anchor(key) else {
+            return;
+        };
+        let anchor = match at {
+            Some(at) => anchor.at_point(at),
+            None => anchor,
+        };
+        let opened = self.open_marked_menu_on(
+            anchor,
+            focus::ReturnTo::Opener,
+            MenuStart::First,
+            true,
+            window,
+            cx,
+        );
+        if let Some(layer) = opened {
+            self.current
+                .current(cx)
+                .rows
+                .borrow_mut()
+                .opened(key, layer, menu::Opened::Menu);
+        }
+    }
+
+    /// Open the marked menu on `anchor`, returning focus as `returns_to` says when it closes, with focus on the item
+    /// `start` names, offering the lifecycle actions too when `lifecycle` says so, unless it is open already or it would
+    /// hold no item. Returns the menu's layer when it opened.
+    fn open_marked_menu_on(
+        &mut self,
+        anchor: Anchor,
+        returns_to: focus::ReturnTo,
+        start: MenuStart,
+        lifecycle: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<LayerId> {
+        if self.marked_menu_open(window, cx).is_some() {
+            return None;
+        }
+        let lifecycle_items = lifecycle.then(|| LifecycleItems {
+            start: cx.focus_handle().tab_stop(true),
+            stop: cx.focus_handle().tab_stop(true),
+            delete: cx.focus_handle().tab_stop(true),
+            start_frame: ActionFrame::default(),
+            stop_frame: ActionFrame::default(),
+            delete_frame: ActionFrame::default(),
+        });
         let offers = self.marking.offers();
         let items: Vec<_> = offers
             .iter()
             .map(|offer| (offer.action, cx.focus_handle().tab_stop(true)))
             .collect();
-        let Some((_, start)) = (match start {
-            MenuStart::First => items.first(),
-            MenuStart::Last => items.last(),
-        }) else {
-            return;
-        };
-        let start = start.clone();
+        // The lifecycle items come first; Delete is offered for every mark, so a lifecycle menu always has one.
+        let first = lifecycle_items
+            .as_ref()
+            .map(|lifecycle| self.marking.lifecycle_first(lifecycle))
+            .or_else(|| items.first().map(|(_, focus)| focus));
+        let last = items
+            .last()
+            .map(|(_, focus)| focus)
+            .or(lifecycle_items.as_ref().map(|lifecycle| &lifecycle.delete));
+        let start = (match start {
+            MenuStart::First => first,
+            MenuStart::Last => last,
+        })?
+        .clone();
         let mark = Mark::take(cx);
         let list = cx.weak_entity();
         let view = cx.new(|_| MarkedMenu {
             list,
             items,
+            lifecycle: lifecycle_items,
             scroll: ScrollHandle::new(),
         });
         let opened = layers::open_popover(
-            // The toggle, not what held focus before: on macOS the click that opened the menu left it unfocused.
-            Popover::menu(view, cx.focus_handle(), anchor, start.clone())
-                .returns_to(focus::ReturnTo::Control(self.marking.menu_focus.clone())),
+            Popover::menu(view, cx.focus_handle(), anchor, start.clone()).returns_to(returns_to),
             &mark,
             window,
             cx,
         );
+        self.marking.menu_lifecycle = lifecycle && opened.is_some();
         let current = self.current.current(cx);
         if opened.is_some() {
             current.marks.touch();
@@ -930,6 +1035,7 @@ impl SessionList {
             focus::focus_in_layer(&start, &mark, window, cx);
         }
         cx.notify();
+        opened
     }
 
     /// A marked menu action was chosen, whose targets the menu drew as `drawn`: close the menu, send each admitted
@@ -1029,13 +1135,150 @@ impl SessionList {
 /// the overlay the menu sits in on every frame (the row menu reads the list's Move neighbors the same way), and no view
 /// in the window is cached, so a listing that changes under the open menu redraws both. The list closes it when the
 /// actions on offer change ([`SessionList::marks_projected`]).
+///
+/// Opened by a right press on a marked row ([`SessionList::open_marked_context_menu`]), it also offers the marked
+/// bar's lifecycle actions, above the metadata ones and a separator, in the order Restart/Replace, Stop, Delete, each
+/// only when the bar offers it, and the header reads "Session actions". Each acts exactly as the bar's button does:
+/// it captures its targets and availability when drawn ([`ActionFrame`]), so a press acts on what the menu showed, and
+/// it closes the menu before the batch or its question starts.
 pub(super) struct MarkedMenu {
     list: WeakEntity<SessionList>,
     /// Focus follows the offered item for this opening. The list closes the
     /// menu when the choices change, and new openings can have any item count.
     items: Vec<(MetadataAction, FocusHandle)>,
+    /// The lifecycle items' state, for a menu a right press opened; `None` for the bar's ⋯.
+    lifecycle: Option<LifecycleItems>,
     /// The metadata actions stay reachable if the window is short.
     scroll: ScrollHandle,
+}
+
+/// The focus handles and drawn captures of a right press's marked menu's lifecycle items ([`MarkedMenu`]): the menu's
+/// own, apart from the bar's, since both can be drawn in the same frame and each press must act on what its own control
+/// showed.
+pub(super) struct LifecycleItems {
+    start: FocusHandle,
+    stop: FocusHandle,
+    delete: FocusHandle,
+    start_frame: ActionFrame<bulk::DrawnStart, bool>,
+    stop_frame: ActionFrame<bulk::DrawnAction, bool>,
+    delete_frame: ActionFrame<bulk::DrawnAction, bool>,
+}
+
+/// A right press's marked menu's Restart/Replace item.
+pub(super) const MENU_START_ID: &str = "session-marked-menu-start";
+/// A right press's marked menu's Stop item.
+pub(super) const MENU_STOP_ID: &str = "session-marked-menu-stop";
+/// A right press's marked menu's Delete item.
+pub(super) const MENU_DELETE_ID: &str = "session-marked-menu-delete";
+
+impl MarkedMenu {
+    /// The lifecycle items as this frame offers them, in the menu's order, each with its focus handle (for Home and
+    /// End); empty for the bar's ⋯ menu, or when the list or its store is gone.
+    fn lifecycle_items(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<(FocusHandle, AnyElement)> {
+        let (Some(items), Some(list)) = (self.lifecycle.as_mut(), self.list.upgrade()) else {
+            return Vec::new();
+        };
+        let Some(store) = session::current_store(cx) else {
+            return Vec::new();
+        };
+        let (shown, offers_stop, offers_start) = {
+            let kept = &list.read(cx).marking;
+            (kept.shown(), kept.offers_stop(), kept.offers_start())
+        };
+        let store_id = store.entity_id();
+        let mut drawn = Vec::new();
+        if offers_start {
+            let start = bulk::DrawnStart::capture(&shown, store_id, store.read(cx).collections());
+            let wait = menu::launch_wait(cx);
+            let none = start.none_can_start();
+            let start = items
+                .start_frame
+                .capture(start, wait.is_some() || none, window);
+            let words = match wait {
+                Some(reason) => reason,
+                None if none => bulk::NONE_CAN_START,
+                None => bulk::START_HELP,
+            };
+            let list = self.list.clone();
+            let item = MenuItem::new(
+                MENU_START_ID,
+                Icon::Restart,
+                bulk::START_LABEL,
+                HoverHelp::tooltip(words),
+                Role::MenuItem,
+            )
+            .description(words)
+            .disabled(wait.is_some() || none)
+            .focus(&items.start)
+            .on_click(move |_, window, cx| {
+                if let Some(start) = start.shown() {
+                    let _ = list.update(cx, |list, cx| {
+                        list.close_marked_menu(window, cx);
+                        list.bulk_start(start, window, cx);
+                    });
+                }
+            });
+            drawn.push((items.start.clone(), item.into_any_element()));
+        }
+        let actions = [
+            (
+                bulk::Lifecycle::Stop,
+                MENU_STOP_ID,
+                Icon::Stop,
+                bulk::STOP_HELP,
+            ),
+            (
+                bulk::Lifecycle::Delete,
+                MENU_DELETE_ID,
+                Icon::Trash,
+                bulk::DELETE_HELP,
+            ),
+        ];
+        for (action, id, icon, help) in actions {
+            if action == bulk::Lifecycle::Stop && !offers_stop {
+                continue;
+            }
+            let (focus, frame) = match action {
+                bulk::Lifecycle::Stop => (&items.stop, &mut items.stop_frame),
+                bulk::Lifecycle::Delete => (&items.delete, &mut items.delete_frame),
+            };
+            let captured =
+                bulk::DrawnAction::capture(action, &shown, store_id, store.read(cx).collections());
+            let unavailable = captured.all_being_deleted();
+            let captured = frame.capture(captured, unavailable, window);
+            let words = if unavailable {
+                bulk::ALL_BEING_DELETED
+            } else {
+                help
+            };
+            let list = self.list.clone();
+            let item = MenuItem::new(
+                id,
+                icon,
+                action.label(),
+                HoverHelp::tooltip(words),
+                Role::MenuItem,
+            )
+            .description(words)
+            .danger()
+            .disabled(unavailable)
+            .focus(focus)
+            .on_click(move |_, window, cx| {
+                if let Some(captured) = captured.shown() {
+                    let _ = list.update(cx, |list, cx| {
+                        list.close_marked_menu(window, cx);
+                        list.bulk_lifecycle(action, captured, window, cx);
+                    });
+                }
+            });
+            drawn.push((focus.clone(), item.into_any_element()));
+        }
+        drawn
+    }
 }
 
 impl Render for MarkedMenu {
@@ -1053,8 +1296,11 @@ impl Render for MarkedMenu {
             let kept = &list.read(cx).marking;
             (kept.shown().len(), kept.offers().to_vec())
         };
+        let lifecycle = self.lifecycle_items(window, cx);
+        let with_lifecycle = self.lifecycle.is_some();
         // The drawn items' focus handles, in order, for Home and End.
-        let mut drawn: Vec<FocusHandle> = Vec::new();
+        let mut drawn: Vec<FocusHandle> =
+            lifecycle.iter().map(|(focus, _)| focus.clone()).collect();
         let items: Vec<_> = offers
             .into_iter()
             .filter_map(|Offer { action, targets }| {
@@ -1123,10 +1369,15 @@ impl Render for MarkedMenu {
         if let (Some(first), Some(last)) = (drawn.first(), drawn.last()) {
             panel = panel.on_key_down(home_end_keys(first.clone(), last.clone()));
         }
+        let separator = (!lifecycle.is_empty() && !items.is_empty()).then(|| menu_separator(cx));
         let panel = panel
             .child(MenuHeader::app(
                 format!("{count} marked"),
-                "Session metadata",
+                if with_lifecycle {
+                    "Session actions"
+                } else {
+                    "Session metadata"
+                },
             ))
             .child(
                 div()
@@ -1135,6 +1386,8 @@ impl Render for MarkedMenu {
                     .aria_label(MENU_NAME)
                     .flex()
                     .flex_col()
+                    .children(lifecycle.into_iter().map(|(_, item)| item))
+                    .children(separator)
                     .children(items),
             );
         focus::scroll_region(panel, &self.scroll)
