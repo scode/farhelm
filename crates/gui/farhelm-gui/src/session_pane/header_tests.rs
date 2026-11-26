@@ -528,12 +528,12 @@ fn role_of(cx: &mut VisualTestContext, id: &str) -> Option<Option<gpui::Role>> {
         .map(|node| node.role)
 }
 
-/// A wait shown twice must be announced once: while the open session's Replace waits, its row and the header both show
-/// the line, and the old row stayed silent then (`announce: !selected`), leaving the header to say it; a Restart's
-/// line is the header's alone, and announced. Specified: with the open session's Replace waiting three seconds, the
-/// header's `session-header-replace-progress-a` line is a status and the row's `session-replace-progress-a` line, also
-/// drawn, has no role; with an idle session's Restart waiting three seconds, the header's
-/// `session-header-restart-progress-a` line is a status.
+/// A wait shown twice must be announced once: while the open session's Replace or Restart waits, its row and the header
+/// both show the line, and the old row stayed silent then (`announce: !selected`), leaving the header to say it.
+/// Specified: with the open session's Replace waiting three seconds, the header's `session-header-replace-progress-a`
+/// line is a status and the row's `session-replace-progress-a` line, also drawn, has no role; with an idle session's
+/// Restart waiting three seconds, the header's `session-header-restart-progress-a` line is a status and the row's
+/// `session-restart-progress-a` line, also drawn, has no role.
 #[gpui::test]
 fn only_the_headers_copy_of_a_wait_line_is_announced(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
@@ -571,6 +571,45 @@ fn only_the_headers_copy_of_a_wait_line_is_announced(cx: &mut TestAppContext) {
         role_of(cx, "session-header-restart-progress-a"),
         Some(Some(gpui::Role::Status)),
         "the header announces a Restart's wait"
+    );
+    assert_eq!(
+        role_of(cx, "session-restart-progress-a"),
+        Some(None),
+        "the open row's copy of a Restart's wait is drawn but stays silent"
+    );
+}
+
+/// Why this matters: a Restart's wait used to show only where its session is open, so one that outlasted a switch to
+/// another session left no trace in the list, and the row is then the one copy left to announce it. Specified: with
+/// idle a's Restart sent from its header and unanswered, and b opened (the premise), three seconds in a's row draws
+/// "Restarting on buildbox…" and its `session-restart-progress-a` line is an announced status.
+#[gpui::test]
+fn a_restart_still_waiting_after_switching_away_shows_and_announces_on_its_row(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(
+        cx,
+        snapshot_of(vec![entry(&idle("a"), 0), entry(&idle("b"), 0)], false),
+    );
+    pending(&mut fake);
+    test_support::click(cx, "session-header-restart");
+    assert_eq!(
+        pending(&mut fake).len(),
+        1,
+        "the premise: a's Restart was sent unasked"
+    );
+    test_support::click(cx, "session-row-b");
+    assert_eq!(selected(cx).as_deref(), Some("b"), "the premise: b is open");
+    // The fake answers in order, and a's Restart stays unanswered, so what the switch sent stays unanswered too.
+    test_support::advance(cx, Duration::from_secs(3));
+    assert_eq!(
+        label_of(cx, "session-restart-progress-label-a").as_deref(),
+        Some("Restarting on buildbox…")
+    );
+    assert_eq!(
+        role_of(cx, "session-restart-progress-a"),
+        Some(Some(gpui::Role::Status)),
+        "the unselected row announces the wait"
     );
 }
 

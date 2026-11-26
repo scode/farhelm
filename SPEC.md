@@ -2264,9 +2264,10 @@ submission and focus-return behavior.
   until they are closed. Restart may carry changed launch settings (Restart with, below); the launch kind, agent type,
   host, and working directory remain fixed. If a harness rejects a changed model or other setting while resuming, that
   is an ordinary launch failure; restart again with settings the harness accepts. After a Restart request has waited
-  about two seconds, an adjacent status shows a spinner, the host and elapsed seconds, updated about once a second until
-  the reply arrives. Restart makes no promise that a second press is harmless. Bash and Zsh have no conversation to
-  resume. Their Restart actions are unavailable, and Replace starts a fresh shell.
+  about two seconds, the sidebar row, session header and interrupted-session card share a spinner, the host and elapsed
+  seconds, updated about once a second until the reply arrives. Restart makes no promise that a second press is
+  harmless. Bash and Zsh have no conversation to resume. Their Restart actions are unavailable, and Replace starts a
+  fresh shell.
 
 - **Restart with** opens the session launcher in restart mode before resuming the session's own or a user-named
   conversation. It edits model, effort, permissions, wrapper prefix and conversation for an agent launch, or command,

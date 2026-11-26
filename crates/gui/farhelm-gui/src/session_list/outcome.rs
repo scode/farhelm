@@ -244,12 +244,12 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
 /// "this host" when the helm names none, as in the old app), then the whole seconds, all in `ink`. The old
 /// `.launch-progress`, at 12 pixels, the spinner in the text's color. `surface` prefixes its element ids
 /// (`<surface>-<replace|restart>-progress-<key>`, and `…-progress-label-<key>` for the label), so the row's line and the
-/// header's can be told apart while both show one Replace. No padding: the surface places it. `None` while there is
+/// header's can be told apart while both show one wait. No padding: the surface places it. `None` while there is
 /// nothing to show.
 ///
 /// `announce` makes the line a status that assistive technology announces, named by its label. Only one copy of a wait
-/// may be: while the open session's Replace waits, its row and the header both show it, and the old row stayed silent
-/// then (`announce: !selected`), leaving the header to say it.
+/// may be: while the open session's Restart or Replace waits, its row and the header both show it, and the old row
+/// stayed silent then (`announce: !selected`), leaving the header to say it ([`row_wait_line`]).
 #[allow(
     clippy::too_many_arguments,
     reason = "one line's inputs: where it is drawn, what it waits on, and how it is drawn"
@@ -296,6 +296,34 @@ pub(crate) fn wait_line(
             .child(div().flex_1().min_w_0().child(label))
             .child(div().flex_none().child(format!("{seconds} s"))),
     )
+}
+
+/// The line under `row`'s lines while its Restart or Replace has waited two seconds or more: [`wait_line`]'s
+/// "Restarting on <host>… <n> s" or "Replacing on <host>… <n> s" with the spinner at `step`, in `--fg-0`, or in the
+/// fill's ink on the selected row, inset as the row's other lines are. `None` while neither is in flight on `key` or
+/// its wait has not reached the threshold. A session has at most one request in flight, so the row needs one slot.
+///
+/// The row shows a Restart's wait as it shows a Replace's, whichever surface sent it (the open session's header, its
+/// interrupted card, or the launcher's Restart with, whose request runs as the same work on the same key), so a row
+/// waiting on its host says so wherever the user looks.
+pub(super) fn row_wait_line(
+    key: &str,
+    row: &SessionRow,
+    step: u8,
+    selected: bool,
+    cx: &App,
+) -> Option<Stateful<Div>> {
+    // `wait_line` draws nothing for any other work, so whatever is in flight can go to it as it is.
+    let work = in_flight(key, cx)?;
+    let palette = theme::palette(cx);
+    let ink = theme::color(if selected {
+        palette.on_fill
+    } else {
+        palette.fg_0
+    });
+    // The open session's header announces the wait; its row's copy stays a plain line (see `wait_line`).
+    let line = wait_line("session", work, !selected, key, row, step, ink, cx)?;
+    Some(line.pt(px(2.)).pb(px(8.)).px(px(14.)))
 }
 
 // ---- What is kept ----------------------------------------------------------------------------------------------------

@@ -23,9 +23,10 @@
 //! on it marks the session read or unread without opening it ([`super::seen`]). A pending Delete shows its spinner and
 //! words in place of the title, which stays the row's accessible name ([`super::delete`]); a pending Stop shows its
 //! spinner and "Stopping…" before the title, which stays on screen, since the session stays too ([`super::stop`]); a
-//! Replace that has waited two seconds says so on a line under the row ([`super::replace`]). The refusal of the row's
-//! last request, or the notice its last success left, shows under the row for as long as [`super::outcome`] says, and
-//! below that the YOLO question a Replace from the row's menu met ([`super::replace_yolo`]).
+//! Restart or Replace that has waited two seconds says so on a line under the row, whichever surface sent it
+//! ([`super::outcome::row_wait_line`]). The refusal of the row's last request, or the notice its last success left,
+//! shows under the row for as long as [`super::outcome`] says, and below that the YOLO question a Replace from the
+//! row's menu met ([`super::replace_yolo`]).
 //!
 //! A session with notifications has a bell before its age, in the age track ([`crate::notices_bell`], which draws it
 //! and its list and keeps its press from the open control), so the track widens by the bell on that row only and its
@@ -102,7 +103,7 @@ use super::row_marks::{self, HelpPlace, RowMarks};
 use super::selection::{self, Listed};
 use super::status::{self, Badge};
 use super::summary::{self, SummaryCard};
-use super::{SessionList, age, delete, outcome, replace, replace_yolo, stop};
+use super::{SessionList, age, delete, outcome, replace_yolo, stop};
 use crate::assets::{self, Icon};
 use crate::components::{HoverHelp, ListRow, Role, StatusMark, spinner_icon};
 use crate::focus;
@@ -588,7 +589,7 @@ pub(crate) fn row(
                 .child(menu),
         )
         .children(
-            replace::progress_line(session.key, row, steps.spinner, selected, cx)
+            outcome::row_wait_line(session.key, row, steps.spinner, selected, cx)
                 .map(|line| inset_inline(line, indent)),
         )
         .children(

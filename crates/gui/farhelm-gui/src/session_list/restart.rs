@@ -21,8 +21,9 @@
 //!   that consent, so an agent that turned working after the click is refused rather than stopped unconfirmed (SPEC.md,
 //!   "Confirmed 2026-10-01").
 //! - **A host change comes first.** Restart waits for one ([`super::menu::launch_wait`]).
-//! - **A long wait says so, as Replace's does.** After two seconds the open session's header shows "Restarting on
-//!   <host>… <n> s" ([`super::outcome`]'s clock, shared with Replace's).
+//! - **A long wait says so, as Replace's does.** After two seconds the open session's header and the session's row show
+//!   "Restarting on <host>… <n> s" ([`super::outcome`]'s clock, shared with Replace's, and its
+//!   [`super::outcome::row_wait_line`]).
 //! - **A refusal stays on the session** as "Restart: <the helm's words>", in the operation store's slot for the session,
 //!   for as long as [`super::outcome`] says. A success says nothing: the pushed list shows the session running again,
 //!   once the host's next listing reaches the helm (the interrupted card bridges that gap).
