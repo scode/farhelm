@@ -2359,6 +2359,32 @@ pub fn conversation_report_slot(
     }
 }
 
+/// The full runtime conversation ID a report's hook log acknowledgment carries as `id=`, for the harnesses whose report
+/// field can hold more than that ID.
+///
+/// Grok reports its file evidence in the same field as the conversation ID, so the log can shorten the field past the
+/// ID; the acknowledgment then names the ID in full for the drift check's committed witness. Every other harness's
+/// report field is the ID itself, so it gets `None` and the acknowledgment adds nothing.
+pub(crate) fn acknowledgment_runtime_id(
+    vendor: farhelm_proto::ReportVendor,
+    conversation: &str,
+) -> Option<String> {
+    use farhelm_proto::ReportVendor;
+    match vendor {
+        ReportVendor::Grok => grok::GrokLocator::parse(conversation)
+            .ok()
+            .map(|locator| locator.session_id),
+        ReportVendor::Claude
+        | ReportVendor::Codex
+        | ReportVendor::Goose
+        | ReportVendor::Pi
+        | ReportVendor::Omp
+        | ReportVendor::Muse
+        | ReportVendor::Antigravity
+        | ReportVendor::Custom => None,
+    }
+}
+
 /// The doorway refusal for a report whose foreground-transition `source` is
 /// outside its vendor's vocabulary, or `None` when it is inside it (or the
 /// vendor has no such vocabulary).

@@ -11,6 +11,7 @@
 use crate::boot_id_durable_outcome::listed;
 use crate::harness::*;
 use crate::hook_identity::{ServeTask, wait_for_after_from};
+use farhelm_supervisor::hook_report::{ReportAdmission, parse_log_line};
 
 /// A copied executable is only the filesystem fallback for filesystems that
 /// cannot make a hard link. Both shapes give the kernel executable a real
@@ -89,12 +90,12 @@ async fn supervisor_verdict(
     added
         .lines()
         .find(|line| {
-            let identified = match source {
-                Some(source) => line.ends_with(&format!(" {conversation} {source}")),
-                None => line.contains(&format!(" {conversation} ")),
-            };
-            let word = line.split_whitespace().nth(1);
-            identified && matches!(word, Some("acked" | "refused"))
+            parse_log_line(line).is_some_and(|entry| {
+                matches!(entry.word, "acked" | "refused")
+                    && entry.about.is_some_and(|(id, reported_source)| {
+                        id == conversation && source.is_none_or(|source| source == reported_source)
+                    })
+            })
         })
         .unwrap_or_else(|| {
             panic!(
@@ -131,8 +132,17 @@ async fn assert_hook_reply_since(
     expected: &str,
 ) {
     let line = supervisor_verdict(sup, path, offset, conversation, Some(source)).await;
+    let expected = expected.trim();
     assert!(
-        line.contains(expected),
+        parse_log_line(&line).is_some_and(|entry| {
+            if expected == "acked" {
+                entry.word == "acked"
+            } else if let Some(detail) = expected.strip_prefix("refused") {
+                entry.word == "refused" && entry.detail.starts_with(detail.trim_start())
+            } else {
+                entry.detail.contains(expected)
+            }
+        }),
         "the report did not get the required supervisor verdict:\n{line}"
     );
 }
@@ -478,7 +488,7 @@ async fn child_first_codex_capture_corrects_and_resumes_the_parent() {
             .join("hook-log")
             .join(format!("{}.log", session.id));
         let verdict = supervisor_verdict(&h.sup, &log, 0, &root, None).await;
-        assert!(verdict.contains(" acked "), "{verdict}");
+        assert_eq!(parse_log_line(&verdict).unwrap().word, "acked", "{verdict}");
         let binding = durable_binding(h.state.path(), &session.id).await;
         assert!(binding.0.as_ref().unwrap().contains(&root));
         assert_eq!(binding.1, 1);
@@ -1240,7 +1250,11 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     .unwrap();
     assert_eq!(other_meta["payload"]["session_id"], other);
     let other_reply = supervisor_verdict(&h.sup, &hook_log, other_offset, other, None).await;
-    assert!(other_reply.contains(" acked "), "{other_reply}");
+    assert_eq!(
+        parse_log_line(&other_reply).unwrap().word,
+        "acked",
+        "{other_reply}"
+    );
     assert_eq!(
         durable_binding(h.state.path(), &session.id).await,
         pending_binding,
@@ -1282,10 +1296,9 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     loop {
         let log = std::fs::read(&hook_log).unwrap_or_default();
         let added = String::from_utf8_lossy(log.get(race_log_offset..).unwrap_or_default());
-        if added
-            .lines()
-            .any(|line| line.contains(" written ") && line.ends_with(" compact"))
-        {
+        if added.lines().filter_map(parse_log_line).any(|entry| {
+            entry.word == "written" && entry.about.is_some_and(|(_, source)| source == "compact")
+        }) {
             break;
         }
         assert!(
@@ -1490,15 +1503,20 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     // A ready Resume offer can survive from the predecessor while the new
     // foreground's startup report is still queued. Judge that report before
     // poisoning its record, or its refusal could masquerade as Stop's verdict.
-    assert_hook_reply_since(
-        &h.sup,
-        &hook_log,
-        resume_offset,
-        &cleared_b,
-        "resume",
-        " acked ",
-    )
-    .await;
+    let resumed_report =
+        supervisor_verdict(&h.sup, &hook_log, resume_offset, &cleared_b, Some("resume")).await;
+    let generation = h
+        .sup
+        .session_snapshot(&session.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .generation;
+    assert_eq!(
+        parse_log_line(&resumed_report).unwrap().admission,
+        Some(ReportAdmission::Committed { generation }),
+        "the acknowledged Resume startup must commit for its own generation"
+    );
     // Post-relaunch survivor: the proven binding — exact target plus
     // provenance — survives the owner exit and the Resume relaunch that
     // replaced the foreground process, and the public offer still serves
@@ -1519,13 +1537,6 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     let path = records.path().join(format!("{cleared_b}.jsonl"));
     let intact = std::fs::read(&path).unwrap();
     let before = listed(&h.client, &session.id).await;
-    let generation = h
-        .sup
-        .session_snapshot(&session.id)
-        .await
-        .unwrap()
-        .unwrap()
-        .generation;
     let stop_offset = std::fs::read(&hook_log).unwrap().len();
     std::fs::write(&path, b"not JSON\n").unwrap();
     send_and_wait(
@@ -1538,7 +1549,16 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     )
     .await;
     let stop_reply = supervisor_verdict(&h.sup, &hook_log, stop_offset, &cleared_b, None).await;
-    assert!(stop_reply.contains(" acked "), "{stop_reply}");
+    assert_eq!(
+        parse_log_line(&stop_reply).unwrap().word,
+        "acked",
+        "{stop_reply}"
+    );
+    assert_eq!(
+        parse_log_line(&stop_reply).unwrap().admission,
+        Some(ReportAdmission::Ignored),
+        "a same-identity Stop can acknowledge the hook without refreshing the binding"
+    );
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
         farhelm_proto::RestartOffer::Resume,

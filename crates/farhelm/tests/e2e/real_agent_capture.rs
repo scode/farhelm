@@ -326,19 +326,20 @@ fn hook_log_lines(state: &std::path::Path, session_id: &str) -> Vec<String> {
 ///
 /// Tolerates a log file that does not exist yet, because it is called while
 /// polling: before any hook has run there is nothing to read, and that is
-/// an ordinary "not yet" rather than a failure. The line shape is
-/// `<unix-seconds> acked <conversation> <source>` (`crate::hook`'s module
-/// docs), and `acked` carries no detail, so the id is always the third
-/// field.
+/// an ordinary "not yet" rather than a failure.
 fn hook_acked(state: &std::path::Path, session_id: &str, runtime_session_id: &str) -> bool {
     let path = state.join("hook-log").join(format!("{session_id}.log"));
     let Ok(text) = std::fs::read_to_string(&path) else {
         return false;
     };
-    text.lines().any(|line| {
-        let mut fields = line.split_whitespace().skip(1);
-        fields.next() == Some("acked") && fields.next() == Some(runtime_session_id)
-    })
+    text.lines()
+        .filter_map(farhelm_supervisor::hook_report::parse_log_line)
+        .any(|entry| {
+            entry.word == "acked"
+                && entry
+                    .about
+                    .is_some_and(|(id, _)| hook_log_names_identity(id, runtime_session_id))
+        })
 }
 
 /// Assert this session's stored identity STAYS `expected` for `secs`, with
@@ -395,19 +396,47 @@ fn resume_identity(conversation: &str) -> String {
         .to_string()
 }
 
-/// Extract the exact runtime id the hook reported. Codex stores this beside
-/// its persistent thread id so a later transcript recheck can prove both
-/// sides of the vendor's identity contract.
+/// Extract the exact runtime id the hook reported. Stored locators carry other evidence for the later resume check.
 fn reported_runtime_identity(conversation: &str) -> String {
-    let Some(locator) = conversation.strip_prefix("codex:") else {
+    let Some((locator, field)) = conversation
+        .strip_prefix("codex:")
+        .map(|locator| (locator, "runtime_session_id"))
+        .or_else(|| {
+            conversation
+                .strip_prefix("grok:")
+                .map(|locator| (locator, "session_id"))
+        })
+    else {
         return conversation.to_string();
     };
     serde_json::from_str::<serde_json::Value>(locator)
-        .expect("the stored Codex locator is valid JSON")
-        .get("runtime_session_id")
+        .expect("the stored locator is valid JSON")
+        .get(field)
         .and_then(serde_json::Value::as_str)
-        .expect("a Codex locator carries the hook's runtime session id")
+        .expect("the locator carries the hook's runtime session id")
         .to_string()
+}
+
+/// Locator reports carry the ID before their file evidence, which can be sanitized or cut short in the log.
+/// Compare the JSON string field without relying on the rest of the logged locator being parseable.
+fn hook_log_names_identity(reported: &str, identity: &str) -> bool {
+    reported == identity
+        || (["grok:", "pi:", "omp:"]
+            .into_iter()
+            .any(|prefix| reported.starts_with(prefix))
+            && reported.contains(&format!("\"session_id\":{}", serde_json::json!(identity))))
+}
+
+/// Source is part of a report's base fields. Both hook events and supervisor decisions can have a suffix.
+fn hook_log_has_source(lines: &[String], identity: &str, source: &str) -> bool {
+    lines
+        .iter()
+        .filter_map(|line| farhelm_supervisor::hook_report::parse_log_line(line))
+        .any(|entry| {
+            entry.about.is_some_and(|(id, observed_source)| {
+                observed_source == source && hook_log_names_identity(id, identity)
+            })
+        })
 }
 
 /// Assert the resume the supervisor would run names the captured persistent
@@ -582,13 +611,11 @@ async fn real_claude_session_reports_its_identity_across_clear() {
 
     let log = hook_log_lines(state.path(), &session.id);
     assert!(
-        log.iter()
-            .any(|line| line.contains(&first) && line.ends_with(" startup")),
+        hook_log_has_source(&log, &first, "startup"),
         "claude must report at process start with source `startup`: {log:?}"
     );
     assert!(
-        log.iter()
-            .any(|line| line.contains(&cleared) && line.ends_with(" clear")),
+        hook_log_has_source(&log, &cleared, "clear"),
         "claude must report again after /clear with source `clear`: {log:?}"
     );
 
@@ -710,7 +737,13 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
     // this audit is about.
     let child_line = |text: &str| {
         text.lines()
-            .find(|line| !line.contains(&parent) && !line.contains(" written "))
+            .find(|line| {
+                farhelm_supervisor::hook_report::parse_log_line(line).is_some_and(|entry| {
+                    entry.word == "no-credential"
+                        || matches!(entry.word, "refused" | "acked")
+                            && entry.identity().is_some_and(|identity| identity != parent)
+                })
+            })
             .map(str::to_string)
     };
     let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
@@ -737,7 +770,11 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
     eprintln!("observed child ancestry (pid ppid comm), innermost first:\n{ancestry}");
 
     assert!(
-        child.contains(" refused conflict ") && child.contains("pinned emitter"),
+        farhelm_supervisor::hook_report::parse_log_line(&child).is_some_and(|entry| {
+            entry.word == "refused"
+                && entry.detail.starts_with("conflict ")
+                && entry.detail.contains("pinned emitter")
+        }),
         "the child's report must reach the supervisor and be refused as another process than \
          the pinned emitter (`no-credential` would mean the Bash tool no longer passes the \
          credential through); line: {child}\nancestry:\n{ancestry}"
@@ -967,8 +1004,7 @@ async fn real_codex_session_reports_its_identity_across_new() {
     for conversation in [&first, &renewed] {
         let runtime = reported_runtime_identity(conversation);
         assert!(
-            log.iter()
-                .any(|line| line.contains(&runtime) && line.ends_with(" startup")),
+            hook_log_has_source(&log, &runtime, "startup"),
             "codex reports `startup` both times, before and after /new: {log:?}"
         );
     }

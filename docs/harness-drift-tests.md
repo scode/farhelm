@@ -32,7 +32,8 @@ Each case starts the shipped launch command in its own supervisor, terminal host
 base case asks the agent to remember a random code word and waits for its reply and an accepted conversation report. It
 then stops the session, records how many hook reports were accepted, and uses Restart with the saved resume arguments.
 The resumed agent must recall the code word in a second reply. Farhelm must also accept a new hook report that leaves
-the original resume arguments intact. The launch-only base cases check that the interactive screen or workspace trust
+the original resume arguments intact. The Codex, Antigravity and Grok checks require a committed report for the resumed
+generation and its conversation ID. The launch-only base cases check that the interactive screen or workspace trust
 prompt opens. Every category has up to 720 seconds per harness, including startup, checks and cleanup.
 
 The `model_selection` category launches the current catalog models and checks which model the agent shows as active.

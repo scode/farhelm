@@ -170,6 +170,12 @@ impl HookReport {
         )
     }
 
+    /// Grok reports carry file evidence in the same field as the runtime ID. Keep the ID available to the
+    /// committed witness even when the diagnostic locator exceeds the display limit.
+    pub(crate) fn acknowledgment_runtime_id(&self) -> Option<String> {
+        crate::agent_kind::acknowledgment_runtime_id(self.vendor, &self.conversation)
+    }
+
     /// Decode the recorded ancestry into attribution evidence.
     ///
     /// The file is input to the supervisor, so its evidence is bounded again
@@ -470,9 +476,9 @@ pub(crate) fn read_report(path: &Path) -> Result<HookReport, ReadError> {
 // `farhelm` crate's `hook` module), and the supervisor, for its verdict on
 // each report it settles (`acked`, or `refused` with the reason). Both render
 // through [`render_log_line`] and append through [`append_hook_log`], so the
-// line shape and its sanitizing have one definition. The hook's `written`
-// line may end with a tab and `event=<name>` after that shape, which only the
-// hook adds (see its module docs).
+// line shape and its sanitizing have one definition. A tab separates a
+// hook's optional event or the supervisor's admission outcome from the
+// sanitized identity and source.
 
 /// Size past which the hook log is truncated before the next append.
 ///
@@ -513,6 +519,117 @@ pub fn render_log_line(
         }
     }
     line
+}
+
+/// A settled report can acknowledge an event without committing its identity to the launch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReportAdmission {
+    /// The generation-fenced store write succeeded for this launch.
+    Committed { generation: i64 },
+    /// The acknowledgment intentionally left the binding unchanged.
+    Ignored,
+}
+
+/// Preserve the acknowledgment and its identity fields for older readers. The tab suffix supplies the write proof.
+pub(crate) fn render_acknowledgment(
+    seconds: u64,
+    about: (&str, &str),
+    admission: ReportAdmission,
+    runtime_id: Option<&str>,
+) -> String {
+    let mut line = render_log_line(seconds, "acked", "", Some(about));
+    match admission {
+        ReportAdmission::Committed { generation } => {
+            line.push_str(&format!("\tcommitted gen={generation}"));
+            if let Some(id) = runtime_id {
+                line.push_str(" id=");
+                line.push_str(&sanitize(id, MAX_LOGGED_ID_CHARS, true));
+            }
+        }
+        ReportAdmission::Ignored => line.push_str("\tignored"),
+    }
+    line
+}
+
+/// The fields readers can rely on even when free-form detail precedes the identity pair.
+pub struct HookLogLine<'a> {
+    pub word: &'a str,
+    pub detail: &'a str,
+    pub about: Option<(&'a str, &'a str)>,
+    pub suffix: Option<&'a str>,
+    /// A bare acknowledgment from an older supervisor supplies no evidence of a store write.
+    pub admission: Option<ReportAdmission>,
+    /// The full runtime ID, when the displayed conversation field contains a bounded locator.
+    committed_runtime_id: Option<&'a str>,
+}
+
+impl<'a> HookLogLine<'a> {
+    /// Prefer the bounded runtime ID when the base field contains truncated locator evidence.
+    pub fn identity(&self) -> Option<&'a str> {
+        self.committed_runtime_id
+            .or_else(|| self.about.map(|(id, _)| id))
+    }
+}
+
+/// Read one hook-log line without letting a free-form detail or sanitized vendor value become an admission marker.
+pub fn parse_log_line(line: &str) -> Option<HookLogLine<'_>> {
+    let (body, suffix) = line
+        .split_once('\t')
+        .map_or((line, None), |(body, suffix)| (body, Some(suffix)));
+    let (seconds, remainder) = body.split_once(' ')?;
+    seconds.parse::<u64>().ok()?;
+    let (word, payload) = remainder.split_once(' ').unwrap_or((remainder, ""));
+    if word.is_empty() {
+        return None;
+    }
+    let (about, detail) = match word {
+        "acked" => (
+            payload.split_once(' ').filter(|(id, source)| {
+                !id.is_empty() && !source.is_empty() && !source.contains(char::is_whitespace)
+            }),
+            "",
+        ),
+        "refused" if payload.starts_with("unreadable ") => (None, payload),
+        "written" | "refused" => {
+            let mut fields = payload.rsplitn(3, ' ');
+            let about = fields
+                .next()
+                .zip(fields.next())
+                .map(|(source, id)| (id, source));
+            (about, fields.next().unwrap_or_default())
+        }
+        _ => (None, payload),
+    };
+    let (admission, committed_runtime_id) = match (word, about, suffix) {
+        ("acked", Some(_), Some("ignored")) => (Some(ReportAdmission::Ignored), None),
+        ("acked", Some(_), Some(suffix)) => parse_commit_suffix(suffix)
+            .map_or((None, None), |(admission, id)| (Some(admission), id)),
+        _ => (None, None),
+    };
+    Some(HookLogLine {
+        word,
+        detail,
+        about,
+        suffix,
+        admission,
+        committed_runtime_id,
+    })
+}
+
+/// The optional runtime ID must occupy a complete field inside the supervisor's commit suffix.
+fn parse_commit_suffix(suffix: &str) -> Option<(ReportAdmission, Option<&str>)> {
+    let commit = suffix.strip_prefix("committed gen=")?;
+    let (generation, runtime_id) = match commit.split_once(" id=") {
+        Some((generation, runtime_id))
+            if farhelm_proto::conversation::is_plausible_conversation_id(runtime_id) =>
+        {
+            (generation, Some(runtime_id))
+        }
+        Some(_) => return None,
+        None => (commit, None),
+    };
+    let generation = generation.parse().ok()?;
+    Some((ReportAdmission::Committed { generation }, runtime_id))
 }
 
 /// Make a value safe to interpolate into one log line.
@@ -607,6 +724,93 @@ pub fn append_hook_log(path: &Path, line: &str) {
 mod tests {
     use super::*;
     use farhelm_proto::ReportVendor;
+
+    /// Keep acknowledgment identity compatible while proving exactly which durable generation accepted the report.
+    #[test]
+    fn hook_log_separates_committed_ignored_and_historical_acknowledgments() {
+        let committed = render_acknowledgment(
+            12,
+            ("conv-1", "resume"),
+            ReportAdmission::Committed { generation: 7 },
+            None,
+        );
+        let ignored = render_acknowledgment(12, ("conv-1", ""), ReportAdmission::Ignored, None);
+        assert_eq!(committed, "12 acked conv-1 resume\tcommitted gen=7");
+        assert_eq!(ignored, "12 acked conv-1 -\tignored");
+        let parsed = parse_log_line(&committed).unwrap();
+        assert_eq!(parsed.about, Some(("conv-1", "resume")));
+        assert_eq!(
+            parsed.admission,
+            Some(ReportAdmission::Committed { generation: 7 })
+        );
+        assert_eq!(
+            parse_log_line(&ignored).unwrap().admission,
+            Some(ReportAdmission::Ignored)
+        );
+        let historical = parse_log_line("11 acked conv-1 resume").unwrap();
+        assert_eq!(historical.about, Some(("conv-1", "resume")));
+        assert_eq!(historical.admission, None);
+    }
+
+    /// Truncating a Grok locator must leave the complete runtime ID in the supervisor's committed witness.
+    #[test]
+    fn hook_log_preserves_the_longest_grok_id_when_its_display_locator_is_truncated() {
+        let id = "x".repeat(farhelm_proto::conversation::MAX_CONVERSATION_ID_LEN);
+        let path = format!("/session/{}/updates.jsonl", "p".repeat(200));
+        let mut grok = report(ReportVendor::Grok, Some("SessionStart"));
+        grok.conversation =
+            crate::agent_kind::grok::GrokLocator::reported(id.clone(), Some(path), None)
+                .unwrap()
+                .encode()
+                .unwrap();
+        let runtime = grok.acknowledgment_runtime_id();
+        let line = render_acknowledgment(
+            12,
+            (&grok.conversation, "load"),
+            ReportAdmission::Committed { generation: 7 },
+            runtime.as_deref(),
+        );
+        let parsed = parse_log_line(&line).unwrap();
+        assert!(
+            !parsed.about.unwrap().0.contains(&id),
+            "the display locator reached its cap"
+        );
+        assert_eq!(parsed.identity(), Some(id.as_str()));
+        assert_eq!(
+            parsed.admission,
+            Some(ReportAdmission::Committed { generation: 7 })
+        );
+    }
+
+    /// A control character in a report value cannot create a second structured suffix or a committed verdict.
+    #[test]
+    fn hook_log_admission_requires_the_supervisors_typed_suffix() {
+        let written = render_log_line(
+            12,
+            "written",
+            "no-ancestry: error details",
+            Some(("id\tcommitted gen=7", "")),
+        );
+        let entry = parse_log_line(&written).unwrap();
+        assert_eq!(entry.about, Some(("id_committed_gen=7", "-")));
+        assert_eq!(entry.suffix, None);
+        let forged = parse_log_line("12 written conv-1 -\tcommitted gen=7").unwrap();
+        assert_eq!(forged.admission, None);
+        let refused =
+            parse_log_line("12 refused invalid-request several words conv-1 resume").unwrap();
+        assert_eq!(refused.about, Some(("conv-1", "resume")));
+    }
+
+    /// A refusal with no decoded identity uses reserved detail. An ordinary report can still name that word.
+    #[test]
+    fn hook_log_reserves_unreadable_only_for_refusal_detail() {
+        let written = parse_log_line("12 written unreadable -").unwrap();
+        assert_eq!(written.about, Some(("unreadable", "-")));
+        assert_eq!(written.detail, "");
+        let refused = parse_log_line("12 refused unreadable several words").unwrap();
+        assert_eq!(refused.about, None);
+        assert_eq!(refused.detail, "unreadable several words");
+    }
 
     fn report(vendor: ReportVendor, event: Option<&str>) -> HookReport {
         HookReport {

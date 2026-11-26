@@ -15567,7 +15567,7 @@ impl Supervisor {
         &self,
         id: &str,
         report: ReportedConversation,
-    ) -> Result<(), RequestError> {
+    ) -> Result<crate::hook_report::ReportAdmission, RequestError> {
         let entry = self.sessions.lock().await.get(id).cloned();
         // Report writes require durable standing. A supervisor that is not
         // recording is shutting down or has been replaced, and a report it
@@ -15662,7 +15662,7 @@ impl Supervisor {
         kind: AgentKind,
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
-    ) -> Result<(), RequestError> {
+    ) -> Result<crate::hook_report::ReportAdmission, RequestError> {
         match kind {
             AgentKind::Claude => {
                 self.report_positional_conversation(
@@ -15746,7 +15746,7 @@ impl Supervisor {
         kind: AgentKind,
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
-    ) -> Result<(), RequestError> {
+    ) -> Result<crate::hook_report::ReportAdmission, RequestError> {
         if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
             warn!(session = %id, kind = ?kind, bytes = conversation.len(),
                 "refused a reported conversation identity that does not match this session's durable agent kind");
@@ -15993,7 +15993,8 @@ impl Supervisor {
     /// paths. A failed CAS, a failed write, a timeout, or a rejection
     /// changes neither durable nor in-memory capture: the `Ok(false)` arm
     /// is a concurrent relaunch or binding change invalidating the
-    /// evidence, not a malfunction.
+    /// evidence, not a malfunction. The witness comes from this committed
+    /// generation, including when the entry is still being published.
     #[allow(clippy::too_many_arguments)]
     fn finish_reported_admission(
         &self,
@@ -16004,7 +16005,7 @@ impl Supervisor {
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
         ownership_version: i64,
-    ) -> Result<(), RequestError> {
+    ) -> Result<crate::hook_report::ReportAdmission, RequestError> {
         match written {
             Ok(true) => {}
             // A relaunch/delete or a concurrently established Codex binding
@@ -16046,7 +16047,7 @@ impl Supervisor {
                 "this session's agent reported a conversation identity before its entry \
                  was published; the durable row carries it until the entry appears"
             );
-            return Ok(());
+            return Ok(crate::hook_report::ReportAdmission::Committed { generation });
         };
         // Read the outgoing claim under the same lock that installs the
         // new one, so the line below describes the transition that
@@ -16084,7 +16085,7 @@ impl Supervisor {
                  one previously claimed for it"
             );
         }
-        Ok(())
+        Ok(crate::hook_report::ReportAdmission::Committed { generation })
     }
 
     /// The anchor a session's reports' recorded chains must reach (see
@@ -23616,7 +23617,7 @@ await new Promise(() => {});
             token: String,
             source: &str,
             reporter: Option<crate::procs::ProcessIdentity>,
-        ) -> Result<(), RequestError> {
+        ) -> Result<crate::hook_report::ReportAdmission, RequestError> {
             let sup = self.sup.as_ref().expect("supervisor");
             let row = sup
                 .store
@@ -23643,7 +23644,7 @@ await new Promise(() => {});
             token: String,
             source: &str,
             reporter: crate::procs::ProcessIdentity,
-        ) -> Result<(), RequestError> {
+        ) -> Result<crate::hook_report::ReportAdmission, RequestError> {
             let ancestry = crate::procs::collect_ancestry(reporter).expect("collect");
             self.sup
                 .as_ref()

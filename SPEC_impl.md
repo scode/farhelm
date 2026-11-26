@@ -4707,14 +4707,15 @@ no path values are stored in the notice.
   conversation it is about to resume, and after the relaunch that report would be discarded as the old launch's. The
   watch task also waits for the drain lock, so an event is never lost to an already-running drain. Every settled report
   leaves a verdict line in the session's hook log, beside the hook's own `written` line: `acked`, or `refused` with the
-  error kind and reason. An `acked` Stop need not change the conversation: Claude's or Muse's pin can silently turn a
-  rival away, and Codex can acknowledge a Stop without effect. Delete removes the drop directory; a pass removes one
-  whose session no longer exists, which a hook racing the delete can recreate. The supervisor creates the report root
-  with mode 0700 before attaching notify's recommended recursive watcher (inotify on Linux, default FSEvents on macOS).
-  An independent task drains the whole root; a single stored wake coalesces bursts and retains events during a drain. A
-  100 ms pause between drains bounds the feedback from retried reports linked back into place. Access events are ignored
-  so the drain's own reads cannot keep waking it. The timer remains the backstop. Watch setup or backend failure logs
-  once and disables the watch for that supervisor lifetime, without changing periodic pickup. The ticker handle owns the
+  error kind and reason. An acknowledgment's tab suffix says `committed gen=<generation>` after the fenced write, or
+  `ignored` when admission leaves the binding untouched. An `acked` Stop can be ignored when the emitter is subordinate
+  or the reported identity is already ready. Delete removes the drop directory. A pass removes one whose session no
+  longer exists, which a hook racing the delete can recreate. The supervisor creates the report root with mode 0700
+  before attaching notify's recommended recursive watcher (inotify on Linux, default FSEvents on macOS). An independent
+  task drains the whole root; a single stored wake coalesces bursts and retains events during a drain. A 100 ms pause
+  between drains bounds the feedback from retried reports linked back into place. Access events are ignored so the
+  drain's own reads cannot keep waking it. The timer remains the backstop. Watch setup or backend failure logs once and
+  disables the watch for that supervisor lifetime, without changing periodic pickup. The ticker handle owns the
   watcher's cooperative stop; in-flight admission completes before backend drop requests native shutdown (notify's
   inotify thread finishes asynchronously). A closed supervisor lifetime channel ends an idle watch when the last
   supervisor reference disappears. macOS backend batching can add latency; pickup on Linux is normally well below a

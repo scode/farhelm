@@ -302,12 +302,11 @@ The hook writes one line each time it runs, saying what it did:
 The supervisor adds one line for each saved report once it has decided about it, usually within two seconds, or when it
 next starts if it was not running:
 
-- `acked` — the supervisor has finished with the report. It may have saved the conversation, confirmed it, or left it
-  unchanged: a nested Claude's or Muse's `Stop` and a Codex `Stop` that cannot confirm a conversation can be
-  acknowledged without changing anything. An Antigravity `Stop` is also acknowledged if Farhelm can't verify the
-  [conversation log](/docs/agents/antigravity/#gotchas-and-quirks). Whether Restart can resume it yet depends on the
-  agent: Codex and Grok wait for the conversation's saved files, and Pi and OMP for their session files (see each
-  agent's guide).
+- `acked` — the supervisor has finished with the report. After the tab, `committed gen=<number>` means it saved the
+  reported conversation for that launch of the session. Grok can also include the full conversation ID as `id=<id>`.
+  `ignored` means the report left the saved conversation unchanged. Older logs can show a bare `acked` for either
+  result. Whether Restart can resume it yet depends on the agent: Codex and Grok wait for the conversation's saved
+  files, and Pi and OMP for their session files (see each agent's guide).
 - `refused` — the report was turned down; the detail carries the error kind and the reason, or `unreadable` and why when
   the saved file itself could not be read (that line names no conversation). A `conflict` about the session's foreground
   means the report came from something other than the agent in your terminal (a separately started or shelled-out agent)

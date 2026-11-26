@@ -3,6 +3,7 @@
 
 use super::super::*;
 use crate::agent_kind::report_pin::{PinDecision, ReportPin};
+use crate::hook_report::ReportAdmission;
 use crate::service::notifications::{GROK_PIN_CORRECTED_TEXT, NotificationKind};
 
 impl Supervisor {
@@ -83,7 +84,7 @@ impl Supervisor {
         kind: AgentKind,
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
-    ) -> Result<(), RequestError> {
+    ) -> Result<ReportAdmission, RequestError> {
         let ReportedConversation {
             vendor: _,
             conversation,
@@ -179,7 +180,7 @@ impl Supervisor {
         let correction = decision == PinDecision::Correct;
         if event != "SessionStart" && decision != PinDecision::Accept {
             // A turn callback cannot select a different conversation, even from a recorded ancestor.
-            return Ok(());
+            return Ok(ReportAdmission::Ignored);
         }
         if decision == PinDecision::Refuse {
             return Err(RequestError::new(
@@ -249,11 +250,19 @@ impl Supervisor {
                     .await
             }
         };
-        self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)?;
+        let admission = self.finish_reported_admission(
+            id,
+            written,
+            &conversation,
+            &source,
+            generation,
+            entry,
+            1,
+        )?;
         // Reload only after the correction and its notice have committed together.
         if correction && self.reload_notification_cell(id).await {
             self.hint_sessions_changed();
         }
-        Ok(())
+        Ok(admission)
     }
 }

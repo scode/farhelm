@@ -72,7 +72,11 @@ async fn startup_capture(
         let log = std::fs::read_to_string(log).unwrap_or_default();
         if snapshot.restart_offer == RestartOffer::Resume
             && let Some(identity) = snapshot.captured_conversation
-            && acknowledged_reports(&log).any(|candidate| candidate == identity)
+            && acknowledged_reports(&log).any(|candidate| {
+                candidate.identity().is_some_and(|id| {
+                    hook_log_names_identity(id, &reported_runtime_identity(&identity))
+                })
+            })
         {
             return Ok(identity);
         }
@@ -277,13 +281,14 @@ fn turn_identity(snapshot: &SessionSnapshot, conversation: &str) -> anyhow::Resu
 
 /// The event suffix is separated from sanitized vendor fields by a tab. Plain source names occupy their own field.
 fn names_report(line: &str, identity: &str, expected: &str) -> bool {
-    let (body, event) = line.split_once('\t').unwrap_or((line, ""));
-    let mut about = body.rsplitn(3, ' ');
-    let source = about.next();
-    let reported = about.next().unwrap_or_default();
-    body.split_whitespace().nth(1) == Some("written")
-        && (reported == identity || reported.contains(&format!("\"session_id\":\"{identity}\"")))
-        && (event == expected || source == Some(expected) && !expected.starts_with("event="))
+    parse_log_line(line).is_some_and(|entry| {
+        entry.word == "written"
+            && entry.about.is_some_and(|(reported, source)| {
+                hook_log_names_identity(reported, identity)
+                    && (entry.suffix == Some(expected)
+                        || source == expected && !expected.starts_with("event="))
+            })
+    })
 }
 
 /// The two Grok callbacks can replace the same durable slot. The hook's written event records each actual payload

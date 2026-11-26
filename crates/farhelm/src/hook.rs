@@ -91,13 +91,14 @@
 //! the supervisor accepted it. The supervisor judges the report later, on its
 //! next reconciliation pass, and appends its own verdict line to the same file
 //! (`acked`, or `refused <error kind> <reason>`, with the same identity pair).
+//! An acknowledgment records whether admission committed for a launch generation or ignored the report.
 //! The report is in place before this run appends its own line, so a pass
 //! that lands in between can, rarely, put the verdict above the `written`
 //! line it answers.
 //! Both writers use the same base format and sanitizing rules from `farhelm_supervisor::hook_report`.
 //!
 //! ```text
-//! <unix-seconds> <outcome> [<outcome detail> ][<conversation-id> <source>][TAB event=<event>]
+//! <unix-seconds> <outcome> [<outcome detail> ][<conversation-id> <source>][TAB <event or admission>]
 //! ```
 //!
 //! The `<conversation-id> <source>` pair is present only once the
@@ -135,8 +136,9 @@
 //!
 //! ```text
 //! 1724470000 written conv-1 startup
-//! 1724470002 acked conv-1 startup
+//! 1724470002 acked conv-1 startup<TAB>committed gen=3
 //! 1724470003 written conv-1 -<TAB>event=Stop
+//! 1724470004 acked conv-1 -<TAB>ignored
 //! 1724470000 write-failed No such file or directory (os error 2) conv-1 -
 //! 1724470000 timeout stdin
 //! ```

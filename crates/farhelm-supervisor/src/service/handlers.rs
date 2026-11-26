@@ -8272,7 +8272,7 @@ mod tests {
             }
         };
         match admitted {
-            Ok(()) => Reply::Reported { req_id },
+            Ok(_) => Reply::Reported { req_id },
             Err(error) => Reply::Error {
                 req_id,
                 kind: error.kind,
