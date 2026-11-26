@@ -304,7 +304,7 @@ pub(crate) fn send(
         mark: Mark::take(cx),
         consent: false,
     };
-    start(key, sent, None, window, cx);
+    send_as(key, sent, None, window, cx);
 }
 
 /// Settle the YOLO question by sending a guarded replacement or confirming
@@ -325,46 +325,85 @@ pub(super) fn send_after_yolo_question(
         mark: answer,
         consent: guarded.is_none(),
     };
-    start(key, sent, guarded, window, cx);
+    send_as(key, sent, guarded, window, cx);
 }
 
-/// Send `key`'s Replace as `sent` says through the operation store, its completion settling in `window`, and start its
-/// row's clock. A session that already has a request in flight sends nothing, and nothing is sent while a host change
-/// is in flight ([`menu::refuse_for_host_change`]). A YOLO question's permanent answer confirmed then has already
-/// written its host's setting, which stays written while the Replace waits for the user to ask again. Returns whether
-/// it was sent.
-fn start(
+/// Send `key`'s Replace as `sent` says, unless a host change is in flight ([`menu::refuse_for_host_change`], which says
+/// so on the session). A YOLO question's permanent answer confirmed then has already written its host's setting, which
+/// stays written while the Replace waits for the user to ask again.
+fn send_as(
     key: &str,
     sent: Sent,
     with: Option<CreateSessionBody>,
     window: AnyWindowHandle,
     cx: &mut App,
-) -> bool {
+) {
     if menu::refuse_for_host_change(key, Work::Replace, cx) {
-        return false;
+        return;
     }
+    match start_sent(key, sent, with, window, |_| {}, cx) {
+        Ok(()) | Err(NotStarted::Retired | NotStarted::Path(_)) => {}
+        Err(refused) => tracing::debug!(?refused, "a Replace was not sent"),
+    }
+}
+
+/// The plain Replace a bulk Restart/Replace of the marked sessions (`super::bulk`) sends `key` with `guard`, settling
+/// in `window` as the row's own Replace does: asked on the row ([`Surface::Row`], where a YOLO question for it shows)
+/// and counting "moved on" from `mark`, the press of the bar's button. A row queued behind others on its host is sent
+/// well after that press, so the mark must be the press's rather than one taken here: otherwise a replacement would
+/// take focus, or its YOLO question would, after the user had moved on (SPEC.md, "Who may move focus"). Says why
+/// nothing was sent, and otherwise runs `then` once the Replace has settled, so the batch can move its host's queue on;
+/// a reset drops `then` with the Replace's own waiting.
+///
+/// Unlike the row's own send it does not check for a host change in flight: the caller does, with
+/// [`menu::refuse_for_host_change`], since that refusal leaves its own line on the row and must not be mistaken for the
+/// busy refusal this returns.
+pub(super) fn start(
+    key: &str,
+    guard: DeleteGuard,
+    mark: Mark,
+    window: AnyWindowHandle,
+    then: impl FnOnce(&mut App) + 'static,
+    cx: &mut App,
+) -> Result<(), NotStarted> {
+    let sent = Sent {
+        guard,
+        surface: Surface::Row,
+        mark,
+        consent: false,
+    };
+    start_sent(key, sent, None, window, then, cx)
+}
+
+/// Send `key`'s Replace as `sent` says through the operation store, its completion settling in `window` before `then`
+/// runs, and start its row's clock. A session that already has a request in flight sends nothing, and the reason comes
+/// back.
+fn start_sent(
+    key: &str,
+    sent: Sent,
+    with: Option<CreateSessionBody>,
+    window: AnyWindowHandle,
+    then: impl FnOnce(&mut App) + 'static,
+    cx: &mut App,
+) -> Result<(), NotStarted> {
     let source = key.to_owned();
     let started = super::start_request(
         &OpKey::session(key),
         command(key, sent.guard, sent.consent, with),
         cx,
-        move |settled, cx| settle_sent(&source, sent, window, settled, cx),
+        move |settled, cx| {
+            settle_sent(&source, sent, window, settled, cx);
+            then(cx);
+        },
     );
-    match started {
-        Ok(()) => {
-            outcome::start_clock(key, Work::Replace, cx);
-            true
-        }
-        Err(NotStarted::Retired) => false,
+    match &started {
+        Ok(()) => outcome::start_clock(key, Work::Replace, cx),
         Err(NotStarted::Path(_)) => {
             tracing::warn!("a session key that cannot be a path segment was not replaced");
-            false
         }
-        Err(refused) => {
-            tracing::debug!(?refused, "a Replace was not sent");
-            false
-        }
+        Err(NotStarted::Retired | NotStarted::Busy(_)) => {}
     }
+    started
 }
 
 /// `source`'s plain Replace, sent as `sent`, settled. A refusal that carries the helm's YOLO marker asks the YOLO

@@ -419,6 +419,22 @@ impl RowOutcomes {
     }
 }
 
+/// Drop `key`'s clock, if it has one. A bulk Restart/Replace holds a queued row as its Restart or Replace before that
+/// request goes out (`super::bulk`), and the hold reads as that work in flight: a clock an earlier request of the same
+/// work left behind, settled but not pruned yet (the prune runs on the one-second tick), would then show a wait counted
+/// from that earlier request. The row's own request starts a fresh clock when it is sent ([`start_clock`]).
+pub(super) fn forget_clock(key: &str, cx: &mut App) {
+    let Some(outcomes) = current(cx) else {
+        return;
+    };
+    outcomes.update(cx, |outcomes, cx| {
+        if outcomes.clocks.remove(key).is_some() {
+            outcomes.hold_second(cx);
+            cx.notify();
+        }
+    });
+}
+
 /// Start `key`'s clock for `work` (a Restart or a Replace), at the moment its request was sent: it shows two seconds
 /// from now. A clock already running for the key (an earlier request whose settle has not been heard yet) starts over.
 pub(crate) fn start_clock(key: &str, work: Work, cx: &mut App) {

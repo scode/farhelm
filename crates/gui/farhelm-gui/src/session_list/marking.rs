@@ -22,8 +22,9 @@
 //! - **Targets never grow.** An action takes the targets as they were drawn, keeps only those still shown and marked
 //!   when it runs, and never adds one ([`admitted`]).
 //! - **The marked bar.** While any mark is effective, the heading's band holds "N marked", Stop (drawn only while some
-//!   mark shown is not a retired session, which supports Delete only) and Delete (their batches and question are
-//!   [`super::bulk`]'s), the marked menu's ⋯ (drawn only while one of its actions applies to a marked row) and Clear,
+//!   mark shown is not a retired session, which supports Delete only), Restart/Replace (drawn only while every such mark
+//!   has ended or lost its terminal, [`Projection::start`]) and Delete (their batches, and Stop's and Delete's question,
+//!   are [`super::bulk`]'s), the marked menu's ⋯ (drawn only while one of its actions applies to a marked row) and Clear,
 //!   in place of the order's title, the count, Trash, Templates and New. The cut listing's warning and the failure line
 //!   stay under it. Trash's view and any dialog it opened stay alive; only its button is not drawn. New's shortcut
 //!   still opens the launcher.
@@ -373,6 +374,11 @@ pub(super) struct Projection {
     /// Whether some mark shown is not a retired containerized session, which supports Delete only
     /// ([`super::retired`]): the bar draws Stop only then, as the old bar did.
     pub(super) stop: bool,
+    /// Whether the bar offers Restart/Replace ([`super::bulk`]): some mark shown is not a retired session, and every
+    /// such mark is a session whose program has ended or whose terminal is gone ([`bulk::startable`]), as after a host
+    /// reboot. A live session among them hides it, so one press never mixes restarting what ended with replacing what
+    /// runs; retired marks neither offer nor withhold it, as they neither offer nor withhold Stop.
+    pub(super) start: bool,
 }
 
 /// One metadata action the marks shown offer, and its targets as drawn.
@@ -402,10 +408,16 @@ pub(super) fn project(listed: &[Listed], marks: &Marks) -> Projection {
     let stop = listed
         .iter()
         .any(|session| marks.contains(session.key) && !retired::is(session.row));
+    let start = stop
+        && listed
+            .iter()
+            .filter(|session| marks.contains(session.key) && !retired::is(session.row))
+            .all(|session| bulk::startable(session.row));
     Projection {
         shown: shown.into_iter().map(str::to_owned).collect(),
         offers,
         stop,
+        start,
     }
 }
 
@@ -420,9 +432,13 @@ pub(super) struct Kept {
     /// Stop's and Delete's tab stops also give the question a return target when the marked menu is absent.
     stop_focus: FocusHandle,
     delete_focus: FocusHandle,
+    /// Restart/Replace's tab stop. It asks no question, so nothing returns focus to it.
+    start_focus: FocusHandle,
     /// Each destructive control admits presses only after its own targets and availability have been presented.
     stop_frame: ActionFrame<bulk::DrawnAction, bool>,
     delete_frame: ActionFrame<bulk::DrawnAction, bool>,
+    /// Restart/Replace's, whose offer is whether a host change held it back when drawn.
+    start_frame: ActionFrame<bulk::DrawnStart, bool>,
     /// The ⋯ toggle's handle, a tab stop.
     menu_focus: FocusHandle,
     /// Clear's handle, a tab stop.
@@ -447,8 +463,10 @@ impl Kept {
             count_focus: cx.focus_handle(),
             stop_focus: cx.focus_handle().tab_stop(true),
             delete_focus: cx.focus_handle().tab_stop(true),
+            start_focus: cx.focus_handle().tab_stop(true),
             stop_frame: ActionFrame::default(),
             delete_frame: ActionFrame::default(),
+            start_frame: ActionFrame::default(),
             menu_focus: cx.focus_handle().tab_stop(true),
             clear_focus: cx.focus_handle().tab_stop(true),
             anchor: None,
@@ -461,6 +479,13 @@ impl Kept {
         self.projection
             .as_ref()
             .is_some_and(|projection| projection.stop)
+    }
+
+    /// Whether the last frame offered Restart/Replace ([`Projection::start`]).
+    fn offers_start(&self) -> bool {
+        self.projection
+            .as_ref()
+            .is_some_and(|projection| projection.start)
     }
 
     /// The bar's own button for `action`, Stop's or Delete's focus handle: where a bulk question returns focus on
@@ -489,6 +514,11 @@ impl Kept {
     /// "N marked"'s focus handle, where a confirmed bulk question sends focus.
     pub(super) fn count_focus(&self) -> &FocusHandle {
         &self.count_focus
+    }
+
+    /// Restart/Replace's focus handle, which a press from the keyboard leaves focus on ([`super::bulk`]).
+    pub(super) fn start_focus(&self) -> &FocusHandle {
+        &self.start_focus
     }
 
     /// The ⋯ toggle's focus handle while the last frame drew the toggle, where a cancelled bulk question returns focus.
@@ -528,6 +558,9 @@ impl SessionList {
         // A button that disappears has to present its action again when it returns.
         if !projection.as_ref().is_some_and(|frame| frame.stop) {
             self.marking.stop_frame.clear();
+        }
+        if !projection.as_ref().is_some_and(|frame| frame.start) {
+            self.marking.start_frame.clear();
         }
         if projection
             .as_ref()
@@ -628,10 +661,11 @@ const MENU_NAME: &str = "Marked session actions";
 const PANEL_WIDTH: f32 = 246.;
 
 impl SessionList {
-    /// The heading's band while marks are effective (`.marked-bar`): "N marked", Stop, Delete, the ⋯ toggle when an
-    /// action applies, and Clear, on the heading's ground. `None` while no mark is effective, when the heading is drawn
-    /// instead. Each lifecycle button captures the targets and consent supplied by this store at draw time, so a
-    /// press delivered before the next redraw uses the same guards as the presented bar.
+    /// The heading's band while marks are effective (`.marked-bar`): "N marked", Stop, Restart/Replace when every mark
+    /// it acts on has ended, Delete, the ⋯ toggle when an action applies, and Clear, on the heading's ground. `None`
+    /// while no mark is effective, when the heading is drawn instead. Each lifecycle button captures the targets and
+    /// consent supplied by this store at draw time, so a press delivered before the next redraw uses the same guards
+    /// as the presented bar.
     pub(super) fn marked_bar(
         &mut self,
         window: &mut Window,
@@ -710,7 +744,50 @@ impl SessionList {
                     }
                 })
         })
+        .map(IntoElement::into_any_element)
         .collect::<Vec<_>>();
+        // Restart/Replace sits beside Stop, before Delete, and asks nothing (`SessionList::bulk_start`). While a
+        // host change is in flight it is busy, still focusable, with the reason as its help, as the open session's
+        // header's Restart and Replace wait for one; a press that beats that frame leaves each row the same reason.
+        // While no marked session could start from here, it is drawn unavailable and says why, as Stop and Delete do
+        // while every environment they would act on is being deleted.
+        let start = self.marking.offers_start().then(|| {
+            let drawn = bulk::DrawnStart::capture(&shown, store.entity_id(), collections);
+            let wait = menu::launch_wait(cx);
+            let none = drawn.none_can_start();
+            let drawn = self
+                .marking
+                .start_frame
+                .capture(drawn, wait.is_some() || none, window);
+            let list = cx.weak_entity();
+            let help = match wait {
+                Some(reason) => reason,
+                None if none => bulk::NONE_CAN_START,
+                None => bulk::START_HELP,
+            };
+            Button::new(
+                bulk::START_ID,
+                bulk::START_LABEL,
+                HoverHelp::tooltip(help),
+                Role::Button,
+            )
+            .tier(Tier::Neutral)
+            .toolbar()
+            .busy(wait.is_some())
+            .disabled(wait.is_none() && none)
+            .focus(&self.marking.start_focus)
+            .on_click(move |_, window, cx| {
+                if let Some(drawn) = drawn.shown() {
+                    let _ = list.update(cx, |list, cx| list.bulk_start(drawn, window, cx));
+                }
+            })
+            .into_any_element()
+        });
+        // In the bar's order: Stop when offered, then Restart/Replace when offered, then Delete, which every mark offers
+        // and the array above therefore always ends with.
+        let mut lifecycle = lifecycle.into_iter();
+        let delete = lifecycle.next_back();
+        let lifecycle: Vec<AnyElement> = lifecycle.chain(start).chain(delete).collect();
         let toggle = (!self.marking.offers().is_empty()).then(|| {
             // Beside the toggle, as the row menu opens and as the old flyout stood out past the sidebar's edge, so the
             // menu covers the session pane rather than the rows it acts on.

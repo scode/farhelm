@@ -2196,11 +2196,12 @@ and container sessions additionally offer Suspend, Resume and Stop and suspend, 
 under [Sandbox sessions](#sandbox-sessions) and [Container sessions](#container-sessions). Retired containerized
 sessions support only Delete.
 
-Pending Stop, Restart, Replace and Delete requests do not block opening another session from the sidebar or quick
-switcher, marking rows, clearing marks, or acting on other sessions. Each session excludes its own competing actions: an
-open lifecycle confirmation or a pending request refuses another lifecycle action, New terminal or Clone on that
-session. Opening the session remains possible, including while its Delete is pending. A Stop shows a spinner and
-**Stopping…** on its row and at the top of the open session until it finishes.
+Marked sessions can be stopped, deleted, or restarted or replaced together from the session list's marked bar (see
+[Session list](#session-list)). Pending Stop, Restart, Replace and Delete requests do not block opening another session
+from the sidebar or quick switcher, marking rows, clearing marks, or acting on other sessions. Each session excludes its
+own competing actions: an open lifecycle confirmation or a pending request refuses another lifecycle action, New
+terminal or Clone on that session. Opening the session remains possible, including while its Delete is pending. A Stop
+shows a spinner and **Stopping…** on its row and at the top of the open session until it finishes.
 
 Actions and their results survive switching sessions. A failure or partial result appears on the source session's row
 and at the top when it is opened again. A view opened during Stop or Restart observes that operation's completion,
@@ -2246,28 +2247,29 @@ submission and focus-return behavior.
   is accepted. The supervisor applies the same rule from its own reading at the moment of the restart, so an agent that
   started working after the user clicked is refused rather than stopped unconfirmed, and the next attempt asks unless
   session confirmations are skipped (below). Replace keeps its confirmation whatever the agent is doing unless session
-  confirmations are skipped (below). Restart keeps whatever scrollback the session's agent terminal retained: the
-  terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in
-  default modes. What is carried over is the scrollback's text with color references, styles and links, up to the new
-  terminal's limits, the oldest lines left out first (the terminal then says that some earlier output could not be
-  recovered). The new terminal starts with its default palette, so a program's palette changes can leave its old lines
-  looking different after Restart. If the new terminal does not start and Farhelm confirms that the failed start has
-  ended, the session keeps its previous terminal, its agent stopped, and Restart can be tried again; when Farhelm cannot
-  confirm that, the session is left with no terminal and its next Restart starts an empty one. The new terminal starts
-  empty instead, with a log entry, when the old one's scrollback cannot be read or copied. When the terminal no longer
-  exists (the process that kept it ended, or the host rebooted), Restart starts with an empty one. Restart does NOT
-  preserve the previous run's last visible screen: the terminal is blank until the new agent draws, and a full-screen
-  program's final frame (which was never in scrollback to begin with) is gone. Losing it is accepted. Farhelm must never
-  capture a terminal's screen and paint it back into a relaunched terminal ahead of the new process — a frame with no
-  process behind it looks live, accepts typing, and is overwritten when the real program draws, which is worse than
-  blank. Restart touches the agent terminal only: the session's open terminal tabs keep running in their own terminals
-  until they are closed. Restart may carry changed launch settings (Restart with, below); the launch kind, agent type,
-  host, and working directory remain fixed. If a harness rejects a changed model or other setting while resuming, that
-  is an ordinary launch failure; restart again with settings the harness accepts. After a Restart request has waited
-  about two seconds, the sidebar row, session header and interrupted-session card share a spinner, the host and elapsed
-  seconds, updated about once a second until the reply arrives. Restart makes no promise that a second press is
-  harmless. Bash and Zsh have no conversation to resume. Their Restart actions are unavailable, and Replace starts a
-  fresh shell.
+  confirmations are skipped (below); the marked bar's Restart/Replace replaces a session without asking only when it
+  shows nothing that may still be running, or when session confirmations are skipped (see
+  [Session list](#session-list)). Restart keeps whatever scrollback the session's agent terminal retained: the terminal
+  is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in default
+  modes. What is carried over is the scrollback's text with color references, styles and links, up to the new terminal's
+  limits, the oldest lines left out first (the terminal then says that some earlier output could not be recovered). The
+  new terminal starts with its default palette, so a program's palette changes can leave its old lines looking different
+  after Restart. If the new terminal does not start and Farhelm confirms that the failed start has ended, the session
+  keeps its previous terminal, its agent stopped, and Restart can be tried again; when Farhelm cannot confirm that, the
+  session is left with no terminal and its next Restart starts an empty one. The new terminal starts empty instead, with
+  a log entry, when the old one's scrollback cannot be read or copied. When the terminal no longer exists (the process
+  that kept it ended, or the host rebooted), Restart starts with an empty one. Restart does NOT preserve the previous
+  run's last visible screen: the terminal is blank until the new agent draws, and a full-screen program's final frame
+  (which was never in scrollback to begin with) is gone. Losing it is accepted. Farhelm must never capture a terminal's
+  screen and paint it back into a relaunched terminal ahead of the new process — a frame with no process behind it looks
+  live, accepts typing, and is overwritten when the real program draws, which is worse than blank. Restart touches the
+  agent terminal only: the session's open terminal tabs keep running in their own terminals until they are closed.
+  Restart may carry changed launch settings (Restart with, below); the launch kind, agent type, host, and working
+  directory remain fixed. If a harness rejects a changed model or other setting while resuming, that is an ordinary
+  launch failure; restart again with settings the harness accepts. After a Restart request has waited about two seconds,
+  the sidebar row, session header and interrupted-session card share a spinner, the host and elapsed seconds, updated
+  about once a second until the reply arrives. Restart makes no promise that a second press is harmless. Bash and Zsh
+  have no conversation to resume. Their Restart actions are unavailable, and Replace starts a fresh shell.
 
 - **Restart with** opens the session launcher in restart mode before resuming the session's own or a user-named
   conversation. It edits model, effort, permissions, wrapper prefix and conversation for an agent launch, or command,
@@ -2352,13 +2354,14 @@ submission and focus-return behavior.
   meanwhile; if the delete fails, the row and header come back with the refusal shown, and a held notice appears.
 
 The off-by-default **Skip session confirmations** switch in Settings skips session row, header and bulk Stop, session
-row and bulk Delete, row Replace, header Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close.
-Each runs on the first click through the ordinary action path, with consent from the state shown by that render. It does
-not skip an environment session's Delete in either form, including bulk Delete: neither the Delete that asks the
-environment's Farhelm and may remove the environment with its last session, nor the whole-resource Delete. Nor does it
-skip YOLO, host or trash questions, or the Restart with or Replace with launcher. Host setup and removal retain their
-separate choices. Environment Suspend and Stop and suspend keep the host-wide activity confirmation described under
-Sandbox sessions and Container sessions.
+row and bulk Delete, row Replace, header Restart, Replace and Delete, interrupted-card Replace, terminal-tab Close, and
+the running-program check of bulk Restart/Replace's Replace (see [Session list](#session-list)). Each runs on the first
+click through the ordinary action path, with consent from the state shown by that render. It does not skip an
+environment session's Delete in either form, including bulk Delete: neither the Delete that asks the environment's
+Farhelm and may remove the environment with its last session, nor the whole-resource Delete. Nor does it skip YOLO, host
+or trash questions, or the Restart with or Replace with launcher. Host setup and removal retain their separate choices.
+Environment Suspend and Stop and suspend keep the host-wide activity confirmation described under Sandbox sessions and
+Container sessions.
 
 Where keyboard focus starts in a confirmation, and how modal dialogs keep it, is under
 [Keyboard focus](#keyboard-focus).
@@ -2567,24 +2570,24 @@ now. Filtering or opening Hosts retains hidden marks but never counts or acts on
 targets. A complete authoritative listing prunes vanished session keys, while a partial, filtered, failed or
 non-authoritative reply does not establish disappearance.
 
-With any effective marks, **N marked**, **Stop**, **Delete**, a metadata menu and Clear replace the ordinary title,
-count and icon buttons; the filters and any truncation or unsupported-filter warning remain available. Stop and Delete
-apply to every marked row displayed at acceptance. **Pin** applies only to unpinned marked rows and **Unpin** only to
-pinned ones. **Mark read**, **Mark unread**, **Mute** and **Unmute** apply only to marked rows whose own menus offer
-that action. Metadata choices reuse the ordinary writes and row-local errors, and clear marks once their eligible writes
-have been dispatched.
+With any effective marks, **N marked**, **Stop**, **Restart/Replace** (below), **Delete**, a metadata menu and Clear
+replace the ordinary title, count and icon buttons; the filters and any truncation or unsupported-filter warning remain
+available. Stop and Delete apply to every marked row displayed at acceptance. **Pin** applies only to unpinned marked
+rows and **Unpin** only to pinned ones. **Mark read**, **Mark unread**, **Mute** and **Unmute** apply only to marked
+rows whose own menus offer that action. Metadata choices reuse the ordinary writes and row-local errors, and clear marks
+once their eligible writes have been dispatched.
 
-Each bulk Stop or Delete batch runs one request at a time on each host, with different hosts progressing independently;
-a second batch started while the first is still running has its own pace, so it can send to a host the first batch is
-also working on. Accepted queued rows remain pending until their completions finish; filtering or a listing failure does
-not cancel accepted work or add new targets. A failure remains on its own row without undoing successful siblings. Each
-refused row gets the ordinary action-specific not-started message, including a row engaged by its own question or
-rename. An accepted batch clears its own targets when every completion has finished, including when some rows failed or
-were refused, only if the user has made no newer marking choice or opened a marked-actions menu or bulk question.
-Otherwise it leaves the current marks alone, including its original targets, even if that newer menu or question was
-then cancelled. Pending rows do not prevent opening sessions, marking other rows, Clear or actions on other rows.
-Automatic selection after Delete waits until every admitted Delete has settled, queued rows and other hosts included,
-and never opens a session that is still being deleted. Pending Stop batches do not delay automatic selection.
+Each bulk Stop, Delete or Restart/Replace batch runs one request at a time on each host, with different hosts
+progressing independently; a second batch started while the first is still running has its own pace, so it can send to a
+host the first batch is also working on. Accepted queued rows remain pending until their completions finish; filtering
+or a listing failure does not cancel accepted work or add new targets. A failure remains on its own row without undoing
+successful siblings. Each refused row gets the ordinary action-specific not-started message, including a row engaged by
+its own question or rename. An accepted batch clears its own targets when every completion has finished, including when
+some rows failed or were refused, only if the user has made no newer marking choice or opened a marked-actions menu or
+bulk question. Otherwise it leaves the current marks alone, including its original targets, even if that newer menu or
+question was then cancelled. Pending rows do not prevent opening sessions, marking other rows, Clear or actions on other
+rows. Automatic selection after Delete waits until every admitted Delete has settled, queued rows and other hosts
+included, and never opens a session that is still being deleted. Pending Stop batches do not delay automatic selection.
 
 Bulk Stop and Delete ask once when any target would need its ordinary confirmation, unless **Skip session
 confirmations** is on. A batch containing an environment Delete always asks. Their structured modal lists one row per
@@ -2604,10 +2607,27 @@ count, which remains programmatically focusable. Pending launches and actions on
 buttons; each action still refuses its own busy targets. Completion and failures use the ordinary rows and open-session
 surfaces.
 
+**Restart/Replace** starts the marked sessions again after they ended, such as after a host reboot. Beside Stop, it is
+offered only while some marked row displayed is not a retired containerized session, and every such row has ended
+(stopped, exited, interrupted or never started) or has lost its terminal. Its hover help says "Restart when possible,
+Replace when not": each session whose conversation can be resumed gets its ordinary Restart, and every other one its
+ordinary Replace, so a session that can resume is never started over. It runs on the click with no question, as Restart
+of an ended session does, and each request is the one its row's action sends when it asks nothing: Restart carries the
+consent of an unasked click, and Replace the Delete guard of the displayed row. Because Replace's own question is
+skipped, a row whose Replace would end something that may still be running, such as an open terminal tab, is left out
+with a not-started line pointing to its own Replace, unless session confirmations are skipped; the helm creates a
+replacement before it removes the source, so a refused removal would leave both sessions. Retired sessions are left out
+without a line and keep their marks, and so are sessions already restarting or being replaced. A session whose
+environment is being deleted, suspended, stopped or changing is left out with a line saying so. While no marked session
+could start, the button is unavailable and says why. While a host change is in flight the button waits, with that reason
+as its help, and a row reached in that state is not sent; nor is a row whose state changed while it waited so that it
+would now get something else, which says so instead. Rows show the ordinary Restart and Replace progress and refusals,
+and a Replace's YOLO question asks on its row. A press from the keyboard moves focus to the marked count.
+
 Escape clears marks only from the session list, without preventing default handling, and yields to a menu, dialog or
 terminal that owns the key. Quick switching and shortcuts keep their existing meaning: session shortcuts act only on the
-open session, whatever is marked. Each row's menu still acts only on itself. Rename, Clone, Replace, Replace with and
-Restart remain single-session actions.
+open session, whatever is marked. Each row's menu still acts only on itself. Rename, Clone, Replace with and Restart
+with remain single-session actions; Restart and Replace run on several sessions only through Restart/Replace.
 
 Below the list title, a single-status segmented choice offers **All**, **Running**, **Waiting** and **Idle**, without
 counts. It combines with the host choice in the helm's query and is not persisted. Ended sessions appear only under All.

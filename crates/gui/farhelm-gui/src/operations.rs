@@ -22,10 +22,10 @@
 //!   handling until it settles. Where an area says that a start was refused because its key already has work in
 //!   flight, it gives the shared reason ([`NotStarted::BUSY_REASON`]) after a lead-in of its own ("Not saved:",
 //!   "Not started:") rather than a reason of its own, unless the line ports the old app's words, which it keeps.
-//! - A key can be held before its request is sent ([`Operations::hold`]): a bulk Stop or Delete row queued behind the
-//!   other rows of its host reads as that work in flight, so it is drawn pending and refuses every other start, with
-//!   nothing on the wire until its holder releases it and starts the request ([`Operations::release`]). A reset drops
-//!   holds with everything else.
+//! - A key can be held before its request is sent ([`Operations::hold`]): a bulk Stop, Delete, Restart or Replace row
+//!   queued behind the other rows of its host reads as that work in flight, so it is drawn pending and refuses every
+//!   other start, with nothing on the wire until its holder releases it and starts the request
+//!   ([`Operations::release`]). A reset drops holds with everything else.
 //! - "Latest wins" is not built. It applies only to work that is explicitly supersedable for the same resource (a
 //!   search being retyped), and none of the work here is. The first supersedable work adds it here, as a property of
 //!   its [`Work`] variant, so that no other work can be superseded by accident.
@@ -1192,12 +1192,12 @@ impl Operations {
         }
     }
 
-    /// Hold `key` for `work` that the user accepted but that is not sent yet: a bulk Stop or Delete row queued behind
-    /// the other rows of its host (`session_list::bulk`). SPEC.md, "Session list": "Accepted queued rows remain pending
-    /// until their completions finish", and the old app reserved every admitted row at acceptance. While held, the key
-    /// reads as `work` in flight ([`Operations::in_flight`], [`Operations::any_in_flight`]), so every view draws it
-    /// pending and every other start on it is refused, but nothing is sent and nothing settles. Holding clears the
-    /// key's last failure, as a start does.
+    /// Hold `key` for `work` that the user accepted but that is not sent yet: a bulk Stop, Delete, Restart or Replace
+    /// row queued behind the other rows of its host (`session_list::bulk`). SPEC.md, "Session list": "Accepted queued
+    /// rows remain pending until their completions finish", and the old app reserved every admitted row at acceptance.
+    /// While held, the key reads as `work` in flight ([`Operations::in_flight`], [`Operations::any_in_flight`]), so
+    /// every view draws it pending and every other start on it is refused, but nothing is sent and nothing settles.
+    /// Holding clears the key's last failure, as a start does.
     ///
     /// Refused, holding nothing, whenever a start would be (the store's one admission rule, `admit`): while the key
     /// already has work in flight or held, or the store is retired. The holder ends the hold with

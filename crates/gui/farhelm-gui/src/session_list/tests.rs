@@ -99,6 +99,9 @@ pub(crate) struct Fixture {
     agent_kind: Option<&'static str>,
     /// A launch waiting for an installed callback and the supervisor's result from that launch.
     hook_setup: Option<farhelm_proto::PersistentHookSetup>,
+    /// Whether and why the supervisor offers Restart (`restart_offer`, in the helm's wire form), when the test names it;
+    /// else the helm fixture's, `resume`.
+    restart_offer: Option<&'static str>,
 }
 
 pub(crate) fn session(key: &'static str) -> Fixture {
@@ -129,10 +132,17 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         group: None,
         agent_kind: None,
         hook_setup: None,
+        restart_offer: None,
     }
 }
 
 impl Fixture {
+    /// List the supervisor's Restart offer as `offer` (`not_captured`, say, for a session Restart cannot resume).
+    pub(crate) fn restart_offer(mut self, offer: &'static str) -> Self {
+        self.restart_offer = Some(offer);
+        self
+    }
+
     /// Report a missing agent terminal. Keep the rest of the listing intact so hiding the tabs is the pane's choice.
     pub(crate) fn terminal_missing(mut self) -> Self {
         self.terminal_missing = true;
@@ -316,6 +326,9 @@ impl Fixture {
         if let Some(setup) = &self.hook_setup {
             value["restart_offer"] = json!("not_captured");
             value["persistent_hook_setup"] = json!(setup);
+        }
+        if let Some(offer) = self.restart_offer {
+            value["restart_offer"] = json!(offer);
         }
         entry
     }

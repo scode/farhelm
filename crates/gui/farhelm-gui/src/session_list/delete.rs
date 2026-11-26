@@ -422,7 +422,7 @@ pub(crate) fn deleted_here(key: &str, cx: &mut App) -> bool {
 
 // ---- What the row shows ----------------------------------------------------------------------------------------------
 
-/// Whether `key` has any request in flight, whatever its kind, or is held for a bulk Stop or Delete not sent yet
+/// Whether `key` has any request in flight, whatever its kind, or is held for a bulk action not sent yet
 /// ([`crate::operations::Operations::hold`]): then every lifecycle command of the session (Rename, Replace, Stop and
 /// Delete) is refused ([`super::menu::actionable`]) and its menu draws them unavailable, as SPEC.md's "a pending
 /// request refuses another lifecycle action" asks.
