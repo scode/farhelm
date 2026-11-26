@@ -229,7 +229,7 @@ impl Podman {
         // observation must still see the admitted identity for the commands.
         let (expected, identity) = (admitted.row, admitted.identity);
         let target = PlaceTarget::claimed(place, identity);
-        let (_, _, ready) = self.place(target).await?;
+        self.place(target).await?;
         check(cancel)?;
         enter(progress, events, "Preparing the recipe's base image");
         let managed;
@@ -258,7 +258,11 @@ impl Podman {
         )
         .await?;
         self.prepare_user_manager(place, &id, &user).await?;
-        self.proxies(target, &id, &user, &ready.proxy).await?;
+        // No proxy step here: every software command below carries the place's
+        // proxies in its own private exports, and none runs a user-manager unit.
+        // A boot file on disk would be captured; an in-memory manager import
+        // would be harmless, since the helper stops before its commit, but
+        // nothing here needs one.
         check(cancel)?;
         enter(progress, events, "Installing recipe packages");
         self.script(
@@ -295,11 +299,12 @@ impl Podman {
         self.script(
             target,
             &id,
-            user,
+            user.clone(),
             &crate::tensorlake::build_script::prepare(),
             COMMAND,
         )
         .await?;
+        self.scrub_boot_proxies(target, &id, &user).await?;
         let tag = format!(
             "localhost/farhelm-{}-software:{}",
             self.tag().await?,
@@ -482,8 +487,12 @@ impl Podman {
             };
             let user = self.login(target, &id, requested).await?;
             self.prepare_user_manager(place, &id, &user).await?;
+            // The installer's user units see the place's current proxies
+            // through the running manager only, never a boot file the
+            // capture below would keep.
             let (_, _, ready) = self.place(place).await?;
-            self.proxies(target, &id, &user, &ready.proxy).await?;
+            self.import_manager_proxies(target, &id, &user, &ready.proxy)
+                .await?;
             let route = self.route(place, &id, user.clone()).await?;
             let facts = self
                 .0
@@ -491,6 +500,9 @@ impl Podman {
                 .prepare(&route, user.home.clone().into())
                 .await?;
             check(cancel)?;
+            // A software image an earlier release captured may still carry
+            // the boot file its build wrote, so the preparer scrubs too.
+            self.scrub_boot_proxies(target, &id, &user).await?;
             anyhow::ensure!(
                 facts.farhelm_version == farhelm_proto::BUILD_VERSION
                     && facts.home.is_absolute()

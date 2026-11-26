@@ -55,6 +55,10 @@ const PROXY_NAMES: [&str; 10] = [
     "ALL_PROXY",
     "NO_PROXY",
 ];
+/// The user manager reads this `environment.d` file at every boot, so it is
+/// how a session container keeps its creation-time proxies across restarts.
+/// Only session creation writes it; an image capture must never contain it.
+const PROXY_BOOT_FILE: &str = "90-farhelm-proxy.conf";
 
 /// Only this wrapper enters argv. The script itself may contain proxy
 /// credentials, so receive it through stdin into a mode-0600 temporary and
@@ -693,17 +697,17 @@ impl Podman {
         Ok(image)
     }
 
-    /// Install exact manager proxy values for future boots and update the
-    /// already-running manager. PID1's environment alone is insufficient.
-    /// The credential installer owns private file transfer and replacement;
-    /// the running manager imports values from the shell's environment by name.
-    async fn proxies(
+    /// The user manager's `environment.d` directory, where the boot proxy file
+    /// lives: its own absolute `XDG_CONFIG_HOME`, else `~/.config`, the same
+    /// resolution systemd applies. Writing and scrubbing share this so a scrub
+    /// before a capture removes exactly the file a session's install would
+    /// write, wherever this image's manager keeps its configuration.
+    async fn proxy_directory(
         &self,
         place: PlaceTarget<'_>,
         id: &str,
         user: &ContainerUser,
-        values: &BTreeMap<String, String>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<String> {
         let environment = self
             .script(
                 place,
@@ -727,7 +731,28 @@ impl Podman {
                 "the container user manager returned an unreadable configuration path"
             ),
         };
-        let file = format!("{directory}/environment.d/90-farhelm-proxy.conf");
+        Ok(format!("{directory}/environment.d"))
+    }
+
+    /// Install exact manager proxy values for future boots and update the
+    /// already-running manager. PID1's environment alone is insufficient.
+    /// The credential installer owns private file transfer and replacement;
+    /// the running manager imports values from the shell's environment by name.
+    ///
+    /// Only a session container calls this. A boot file written in an image
+    /// helper would be captured into the image, and every container created
+    /// from it would boot with the build host's proxies (credentials included)
+    /// until its own create replaced them; builders use
+    /// [`Self::import_manager_proxies`] and [`Self::scrub_boot_proxies`].
+    async fn proxies(
+        &self,
+        place: PlaceTarget<'_>,
+        id: &str,
+        user: &ContainerUser,
+        values: &BTreeMap<String, String>,
+    ) -> anyhow::Result<()> {
+        let directory = self.proxy_directory(place, id, user).await?;
+        let file = format!("{directory}/{PROXY_BOOT_FILE}");
         let text = proxy_file(values);
         let backend = self
             .0
@@ -741,14 +766,14 @@ impl Podman {
             user.clone(),
             &format!(
                 "umask 077\nmkdir -p -- {} || exit 1\n",
-                crate::ssh::shell_quote(&format!("{directory}/environment.d"))
+                crate::ssh::shell_quote(&directory)
             ),
             COMMAND,
         )
         .await?;
         let path = std::path::Path::new(&file);
         let temporary = path.with_file_name(format!(
-            ".90-farhelm-proxy.conf.farhelm-tmp-{}",
+            ".{PROXY_BOOT_FILE}.farhelm-tmp-{}",
             uuid::Uuid::new_v4()
         ));
         backend
@@ -757,6 +782,20 @@ impl Podman {
             .map_err(|error| {
                 anyhow::anyhow!(error.redacted_reason("could not install the proxy settings"))
             })?;
+        self.import_manager_proxies(place, id, user, values).await
+    }
+
+    /// Replace the running user manager's proxy variables with `values`, in
+    /// memory only: nothing is written that a later capture could keep. An
+    /// image helper's own units (the preparer's installer) then see the place's
+    /// current proxies without them reaching the image.
+    async fn import_manager_proxies(
+        &self,
+        place: PlaceTarget<'_>,
+        id: &str,
+        user: &ContainerUser,
+        values: &BTreeMap<String, String>,
+    ) -> anyhow::Result<()> {
         // import-environment reads values from this process's environment. Only
         // names enter systemctl's argv; set-environment NAME=value would expose
         // passwords even when the enclosing script arrived over private stdin.
@@ -776,6 +815,37 @@ impl Podman {
         }
         self.script_with_proxy(place, id, user.clone(), &script, COMMAND, values)
             .await?;
+        Ok(())
+    }
+
+    /// Remove the boot proxy file from an image helper before it is captured,
+    /// and refuse the capture when removal fails. Builders no longer write the
+    /// file, but a prepared image is built on a software image an earlier
+    /// release may have captured with one, so every capture scrubs rather than
+    /// trusting its source. It runs as the login account, which owns the file,
+    /// from `/`, a directory every login can enter, so the removal does not
+    /// depend on the state of the home; the path it removes is absolute. The
+    /// directory read keeps the real account, whose home the `~/.config`
+    /// fallback needs.
+    async fn scrub_boot_proxies(
+        &self,
+        place: PlaceTarget<'_>,
+        id: &str,
+        user: &ContainerUser,
+    ) -> anyhow::Result<()> {
+        let directory = self.proxy_directory(place, id, user).await?;
+        let file = format!("{directory}/{PROXY_BOOT_FILE}");
+        self.script(
+            place,
+            id,
+            ContainerUser {
+                home: "/".into(),
+                ..user.clone()
+            },
+            &format!("rm -f -- {} || exit 1\n", crate::ssh::shell_quote(&file)),
+            COMMAND,
+        )
+        .await?;
         Ok(())
     }
 
