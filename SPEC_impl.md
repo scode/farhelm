@@ -9148,13 +9148,17 @@ launch checked by the command-launch rules; the REST body names one of `with` (c
 Attached-session relay calls omit it. The supervisor validates the launch exactly as create does before it looks the
 session up, then, before destructive work, checks it against the stored launch (same launch kind and agent type, a
 resume command, no legacy session) and the current `Resume` offer, and fills the new resume command with the captured
-conversation. After the new process spawns, one generation-fenced store write replaces the stored launch while the
-working directory stays fixed. A spawn failure leaves the prior launch untouched. If the post-spawn write fails after an
-otherwise successful relaunch, the restart still reports success because the new process is already running; the failure
-is logged, and the reply and live session retain the old stored launch. A relaunch that published its new process but
-hit an independent cleanup or reply error still attempts the write and retains that error reply. A later restart uses
-the saved launch, or the old one if the write failed, as it would after a crash between spawn and the write. This is the
-only exception to the ordinary create-time immutability of a session's launch.
+conversation. The replacement launch is stored in the same transaction that opens the new launch generation, before
+anything is spawned, while the working directory stays fixed. It has to be in the row before the new process can report
+a conversation: report admission reads the launch's conversation-reporting setting from the row, and a startup report
+judged under the previous launch's setting would be refused after reporting was turned on, or accepted after it was
+turned off. Publication builds the new session entry, its listing and the reply (restart offer included) from the
+replacement launch and its snapshot. A definitive relaunch failure (nothing outside the database left running) restores
+the previous launch with the rest of the previous run. Every other outcome keeps the replacement, because its process
+has started or may have: a relaunch that published its new process and then hit a cleanup or reply error, an ambiguous
+failure left for reload to reconcile, and a crash after the generation opened. The entry a failed relaunch republishes
+describes whichever launch the row then holds. A later restart uses the stored launch. This is the only exception to the
+ordinary create-time immutability of a session's launch.
 
 Protocol 50 adds a transient `NamedConversationStart { conversation, argv }` beside `with` and ordinary create inputs.
 The client's raw `conversation` stays outside `LaunchSelection`, history and templates. The helm validates it with the
