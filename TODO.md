@@ -61,328 +61,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ## Immediate
 
 - **Start several selected sessions at once.** When multiple sessions are selected we need to be able to start sessions
-  if all the marked ones are stopped.
+  if all the marked ones are stopped. Plan: `plans/queue/bulk-start-sessions.md`.
 
 - **Right-click a session for its context menu.** Allow right clicking on sessions to bring up their context menu
   (instead of using the ... menu on the right). When right clicking and multiple sessions are selected, it should bring
-  up the menu that applies to all selected sessions.
+  up the menu that applies to all selected sessions. Plan: `plans/queue/session-right-click-menu.md`.
 
-## Plan follow-ups
-
-- **Name each custom-agent draft when closing Settings.** With unsaved changes on two custom-agent pages, or on Add
-  custom agent and a registered agent, the Close question in `crates/gui/farhelm-gui/src/settings/editing.rs` says
-  “Custom agent” once and can jump to a different page. Name every affected form. Give each registration a separate
-  accessible row with its escaped display name and stable ID, and give Add and any other named forms accessible labels
-  too, including when Add is the only draft. Use the question’s keyboard scroll stop for long lists. Stay on the current
-  page when more than one section is affected, and preserve the existing behavior for distinct forms sharing
-  Credentials. Save and Discard still apply to the versions of the drafts the question approved. Save waits for pending
-  saves and leaves Settings open on the first refusal, with that form and its error visible. Test real changes to Add
-  and a registered agent, the accessible labels, and the page retained behind the question. Capture and review the new
-  prompt in light and dark, publish the accepted references, and include their manifest entries in the fix. See the
-  Settings close contract in `SPEC.md`. The separate form names, keyboard access and their required evidence exceed this
-  item’s size allowance. The triage decision asked only to reveal a page when one section is affected and to name each
-  custom-agent draft in one sentence (size S); the separate rows, labels, scroll stop and new screenshots above are the
-  plan executor's proposal, not a decision, and a smaller fix that meets the decision is fine.
-
-- **Keep credential delivery reports visible when Settings closes.** A replacement saved through Save and Close can
-  reach storage while some hosts miss delivery. `crates/gui/farhelm-gui/src/settings/credentials/editor.rs` sends the
-  committed receipt and clears the editor. `settings/credentials.rs` puts the host names and reasons on the overview,
-  but `settings/editing.rs` can close Settings before anyone sees them. Preserve the fresh delivery report and show it
-  on the Credentials overview before closing. Continue other approved writes until the first refusal. A newer
-  confirmation must keep its page and focus. If it delays revealing a report, or another refusal or dirty draft keeps
-  Settings open, the next Close must give the person a chance to see the report. Once shown, retire the old automatic
-  close while any remaining approved writes finish. Keep editing retires that close attempt, and an unrelated later Save
-  must not inherit it. An older report that was shown must not hold a later Close open, and a replacement that committed
-  must not be resent. See the Settings and Credentials paragraphs under “Session list” in `SPEC.md`. Test the exact
-  committed PUT and host report, including a tunnel question opened before the receipt, then Cancel and Close. Review
-  the Credentials overview in both appearances. The ordinary path, the deferred reveal after a newer action, and their
-  required evidence together exceed this item's size allowance. The triage decision asked only to keep Settings open on
-  Credentials when a close-save returns delivery warnings (size S); the rules above for a deferred reveal, retiring the
-  old close and a later Save are the plan executor's proposal, not a decision.
-
-- **Wait for credential saves after Back or Cancel.** A credential editor can start Save, then close while the helm
-  still owns the write. Settings can close without waiting or offer Discard for another draft, and a refused write has
-  no editor left to show its reason. In `crates/gui/farhelm-gui/src/settings/credentials/editor.rs`, Back and Cancel
-  remove the editor through `Credentials::close_editor`; `settings/editing.rs` includes only the mounted editor and
-  saves already owned by its batch. Track each admitted credential write by attempt after its editor leaves. Include all
-  outstanding saves in the close question and join them on Save. On refusal, stop the close and show the reason in
-  Credentials without replacing a newer editor or resending the write. Keep independently authorized saves and later
-  close decisions separate as described in “Stop Settings Save and Close when an independent save fails”. Test Back and
-  Cancel with a real pending request, both successful and refused replies, and another draft whose Save must wait and
-  whose Discard must be absent. Assert that another editor's draft survives the refusal, and review the visible result
-  in light and dark. See `SPEC.md` under “Settings” and “Credentials”. This needs receipt ownership outside the editor,
-  integration with the multi-form close, and a new visible refusal with tests and references. The complete change
-  exceeds this triage item's size allowance.
-
-- **Show a failed hook setup save after Settings closes.** A person can turn off Set up conversation hooks on all hosts
-  for Grok or Antigravity and close Settings before the helm answers. If the write fails, the previous consent can still
-  apply to later launches and the reason is gone. `crates/gui/farhelm-gui/src/settings/editing.rs` inventories staged
-  forms for Close. The immediate write in `SettingsDialog::toggle_configured` settles through `drafts::save`, whose
-  callback only updates the original dialog. Keep the inline error when that dialog is open. If it has closed, use the
-  same write's refusal to post an agent-specific notice with the reason and a way to retry in Settings. Reuse the window
-  notice center and preserve the earlier choice on refusal. When a staged form brings up the close question, include the
-  pending hook write in its pending state. If it refuses while that question or its Save and Close answer owns the
-  write, stay on the agent's page with the reason and stop before sending more drafts. Leave a newer question or an
-  independently authorized page Save alone. Use the same receipt for both paths and never send the hook write twice.
-  Test the exact opt-out with plain Close before the reply, its success counterpart, and the refusal before and after
-  accepting the close question with another draft staged. Review the notice and revealed refusal in light and dark. See
-  `SPEC.md` under “Settings” and “Errors and diagnostics”. The receipt must outlive the dialog for plain Close and join
-  the close decision for staged drafts. The triage assessment left the fix's shape open (hold the close, or a notice
-  that survives it); choosing both, and an agent-specific notice with a retry route, is the plan executor's proposal,
-  not a decision. Those paths and their test and visual evidence exceed this triage item's size allowance.
-
-- **Reveal the credential editor when Save and Close fails.** Resolving a Tensorlake key conflict from the Credentials
-  overview footer can leave that overview in front of a retained credential draft. Save and Close still submits the
-  draft, but if the helm refuses the write, the overview offers only Resume editing credential. The reason stays in the
-  hidden editor. In `crates/gui/farhelm-gui/src/settings/editing.rs`, use the failed editor's identity in
-  `reveal_edit_failure` to clear `key_revealed` in `settings/credentials.rs` only for that editor. Keep its replacement
-  secret and error in view as required by `SPEC.md` under “Settings” and “Credentials”. Confirm Save and Close while
-  Resume editing credential is still shown in the overview. Check the exact credential PUT, refuse it, and assert that
-  the same editor shows both the error and the retained draft. Capture the mounted error and staged draft in both
-  appearances. The tested reveal, interaction test, and dedicated golden fixture together exceeded this triage item's
-  size allowance. The separate independent-save follow-up covers a refusal that arrives while the close question is
-  still open.
-
-- **Stop Settings Save and Close when an independent save fails.** An editor can save on its own while a page Save waits
-  for another write. If the editor fails before the page finishes, Save and Close must show its reason and stop before
-  sending the remaining drafts. The frozen draft list prevents replaying the failed write, but does not show the refusal
-  or stop other writes that the close answer queued. In `crates/gui/farhelm-gui/src/settings/editing.rs`, `ask_to_close`
-  skips `watch_close_question` when a page batch exists. Keep the receipts joined for closing distinct from those the
-  page Save already owns. Watch independent saves while the question is open and transfer them to the accepted close
-  decision only if the user chooses Save. Opening another Close question gives up the previous close decision. A refusal
-  dismisses the new question and shows the error if it is still open. Let the older page Save finish either way. Cover a
-  refused editor save followed by an acknowledged checkout folder write. Confirmed close must show the refusal and send
-  neither a retry nor the queued post-clone command. A newer unanswered or dismissed question must preserve the original
-  page Save's post-clone write with its original draft. See `SPEC.md` under “Settings” and “One GUI at a time”. Deferred
-  because separating receipt ownership and testing and capturing the revealed refusal exceeded this Settings triage
-  item's size allowance.
-
-- **Bind Settings footer Save and Discard to the page and drafts shown.** Navigation can move Save to another page's
-  draft, including a different replacement for the one stored Tensorlake key. A late save refusal can move Discard to
-  the page with the refused draft. In `settings/editing.rs`, bind `page_answers` to the presented page, form identities,
-  draft revisions and available actions. Require the action to remain visible and eligible at keypress and across a
-  pointer gesture. Search, an open Credentials editor or a busy form can change what the footer offers. GPUI can install
-  a footer's handlers before presenting it and can carry a pending mouse-down across redraws. Capture the valid
-  presented action on primary-down and require the same action at release. Keep keyboard activation at its normal press
-  and preserve Close and the footer's focus and layout. Reuse the shared action frame and existing field revisions.
-  Include the checkout field's loaded comparison base and cover the compound Notifications draft without copying its
-  token. Test a held press across a page change and a down after the new footer is installed but before it is shown,
-  followed by release after presentation. Cover a later same-page edit and an ordinary Save. The complete correction
-  exceeded the triage size limit. See `SPEC.md` under “One GUI at a time” and `SPEC_impl.md` under “Questions: the
-  prompt”.
-
-- **Keep checkout notices after an agent Delete times out.** If an approved agent Delete outlasts the supervisor's reply
-  budget and then leaves a checkout on disk, keep the checkout path and reason in the notices bell. The target host's
-  result reaches `agent_delete` in `crates/farhelm-helm/src/agent_requests.rs`, while the asking connection's actual
-  deadline and retained reply are in `crates/farhelm-supervisor/src/service/agent_relay.rs`. Under
-  [Managed checkouts](SPEC.md#managed-checkouts), the helm must record the notice for the original target when the
-  asking relay's answer budget has expired. Reuse the late Delete notice store. Correlate the deadline and result to
-  that request on its own connection, including when the target is on a different host or in the asker's environment.
-  Preserve the ordinary agent reply, retained Delete fence and existing timeout semantics. Exercise a real relay timeout
-  followed by the matching checkout warning, and show that a timely reply still carries its notice. Reliable correlation
-  spans both sides of the relay and exceeds this triage item's size gate.
-
-- **Bind leftover sandbox consent to the saved Tensorlake key.** In Settings → Tensorlake, an open leftover sandbox
-  Delete confirmation can survive clearing or replacing the API key in either key form. It can keep the old list on
-  screen or send a Delete using a different key. Apply [Keyboard focus](SPEC.md#keyboard-focus)'s rule that a question
-  closes when its subject is gone. In `settings/tensorlake_sandboxes.rs`, retire the question, old rows, and the refusal
-  on key change. Reuse the account generation in `settings/tensorlake_key.rs` to reject consent from a previous key.
-  Confirm must not queue a Delete behind a pending key write. A successful write without account data, or a server error
-  after the helm may have stored the key, invalidates prior consent immediately. Re-read the account and require a fresh
-  list before offering Delete again. Keep the draft and error on refusal, and show unfinished cleanup reported by the
-  helm's next list. Test both key forms, a held write, a re-read after an ambiguous reply, and stale discovery. Verify
-  the replacement view in light and dark. The ordering, refusal, test, and capture changes together exceeded the triage
-  size gate.
-
-- **Report late wake failures when launching on a suspended sandbox or stopped container.** When Resume takes longer
-  than the reply deadline, a later failure can leave the session launcher waiting for a minute before it gives the wrong
-  reason. A slow Podman check can fail before Starting appears. The next host row can still say Stopped and carry the
-  error from an earlier automatic start. Watching for a new phase or comparing error text cannot establish the outcome
-  of the current request. Give the launcher the terminal result of the wake it is waiting on, including failure before
-  the provider takes its connection hold. Start with the bounded reply in
-  `crates/farhelm-helm/src/tensorlake/lifecycle.rs` and the existing launch wait in `launcher/launch/wake_state.rs`.
-  Keep the 20-second reply deadline, the shared minute for a busy host and a fresh connection, and allow a successful
-  Resume elsewhere to satisfy the wait. Restore the held launch draft on failure. Report a repeated diagnosis promptly
-  if it belongs to this wake. Update SPEC.md's launcher wake contract and SPEC_impl.md under “The UI channel” for this
-  launcher-specific result. A failed start or a container that stops again should use Starting or Stopped wording, per
-  [Container sessions](SPEC.md#container-sessions). Exercise a late failure before Starting, repeated failures for both
-  providers, and a direct start refusal. Verify the launcher alert in both appearances. The fix needs a result the helm
-  can attribute to the bounded request, beyond the launcher-only triage budget.
-
-- **Require the fresh-clone warning before Replace with can act.** In Replace with, a recent setup can switch the
-  destination from the source's managed checkout to a fresh clone. On a suspended host, the same Enter can start waking
-  the host. On a connected host, a second press can launch once the preview returns while the old frame still shows the
-  source folder. The replacement leaves the source's changes behind and can move its checkout to Trash. Bind the launch
-  to the checkout consequence actually shown. A warning laid out inside the scrollable form can be clipped, and GPUI can
-  replace a visible draw before presenting it. The triage attempt tracked prepaint visibility but the next-frame
-  callback could admit it before the clipped replacement frame. Establish actual presentation or keep the disclosure
-  visible through the press. Bind it to the current checkout and carry the admitted consent through hook settings, host
-  wake and checkout preview. A newer frame with an unrelated change to the source's tab count should not cancel a launch
-  whose consent already covered it. A changed checkout requires new consent. See `SPEC.md` under “Managed checkouts” and
-  “One GUI at a time” and `SPEC_impl.md` under “Questions: the prompt”. Test both recent-setup paths, a visible draw
-  replaced by a clipped frame before presentation, and a successful continuation after a wait. Update the documented
-  Enter behavior and key hint if the fill now needs another press.
-
-- **Keep wrapper defaults per custom agent registration.** Farhelm remembers one wrapper for all custom agents. A
-  launcher switch or template can carry an explicit prefix from one agent into another, and launching a second agent
-  without a prefix can erase the first agent's default. When a user agent launch succeeds, update only that
-  registration's wrapper memory, clearing it for an unwrapped launch. Ignore the old shared Custom default because its
-  owner cannot be recovered. Reload the destination agent's default and clear the previous explicit choice on a chip,
-  search or template switch. A template's explicit prefix or clear overrides the remembered default. Use the existing
-  switch notice when a deliberately chosen model or effort is cleared. Preserve saved launch commands and built-in
-  defaults. Prune only that registration's memory in the Delete transaction and prevent an in-flight launch from putting
-  it back after deletion or re-registration of the same ID. Update the creation rules in SPEC.md and the preferences
-  contract in SPEC_impl.md. Cover two registrations, blank and explicit prefixes, template replay, upgrades and
-  re-registration. The triage plan deferred the combined change because it spans stored and pushed preferences, launch
-  history, deletion and both launcher paths.
-
-- **Publish Restart with settings with the replacement generation.** A custom agent can report a conversation as soon as
-  it starts. Restart with currently publishes its new generation before saving the edited launch in the supervisor
-  store, so startup reports can be accepted or permanently refused under the previous reporting setting. The reply and
-  concurrent listings can also give the old Restart offer. Bind the new launch to the generation before its reports can
-  be admitted, then publish the matching snapshot and derive the offer from it. Preserve the old launch on a definitive
-  abort and retain the new settings when the process starts but building the reply fails. This spans the generation
-  transaction, recovery and terminal publication, above the triage size gate. Test startup reports with reporting
-  switched in both directions, the offer after a named restart, and the persisted launch on each failure side of spawn.
-
-- **Use the shared Delete confirmation for custom agents in Settings.** The footer asks with two ordinary buttons.
-  Escape can close Settings instead of cancelling Delete, focus stays away from Cancel, and the question never names the
-  registration. Port `settings/custom_agents.rs` to the recipe editor's inline prompt as described in
-  [Questions: the prompt](SPEC_impl.md#questions-the-prompt). Freeze the name and stable registration ID, start on
-  Cancel, and keep the Delete button's focus handle alive so Escape can return to it after the footer redraws. If Delete
-  fails to start, keep the draft and show the reason without replacing the text of an open question. An unanswered
-  Delete must also let an accepted Save and Close proceed, or show why the save could not start. Coordinate that part
-  with the Close → Save outcome in `triage-settings-nov24`. The prototype passed the screenshot and cancellation checks
-  but exceeded the triage budget before it covered focus restoration and the silent Save refusal. Test both from a dirty
-  registration and check light and dark captures.
-
-- **Make Wayland text-field paste nonblocking.** Pasting into a text field such as an SSH sign-in answer can freeze the
-  window while another app supplies clipboard data. [Terminal experience](SPEC.md#terminal-experience) requires Farhelm
-  to stay responsive during clipboard operations on Wayland. Kit's Paste checks the synchronous read before its async
-  fallback. Give that path an async text-first read on Wayland, reusing Kit's focus, document and selection checks and
-  its atomic undo. Keep the terminal's file-first paste and keep text-field newline handling. The vendored async path
-  currently prefers files and images, so sending both callers through it can lose text from a mixed offer. The split
-  spans the Wayland receive code and the clipboard API used by Kit and the terminal. Cover keyboard and Edit menu paste,
-  mixed offers and a reply that arrives after the target changes.
-
-- **Show container recipe admission failures before recording build ownership.** An explicit Rebuild can answer Accepted
-  before a fresh Podman check fails. The existing recipe place record keeps that failure visible after the job ends.
-  Suppressing the record alone loses the reason if the old host check still says Ready, for example after a refresh
-  times out. Return the refusal before acceptance or keep it in the existing build status without creating a recipe
-  place entry. Fence the first recipe place write to the host settings and machine/account claim that passed admission.
-  Looking up the host again by row ID can use different settings after a retarget or an SSH mode change. Cover a first
-  Rebuild that fails admission and still shows the reason, plus a route change between admission and the first write.
-  Recipe Delete now handles historical records with no resources. Preventing those records at the admission boundary
-  also needs a way to show the outcome of an already accepted Rebuild.
-
-  Recheck admission when launch preparation or Rebuild starts, before each new helper's base pull, and before each
-  helper create. Dispatch from the route and Podman executable that passed the final check. A separate runtime lookup
-  can wait on another probe and accept a capable engine even after the ordinary Farhelm connection refuses new work.
-  Keep that runtime path for existing resources. Check for cancellation when the admission and pull waits settle. Clear
-  the helper's name and start marker if admission refuses or cancellation arrives before the create is sent. Keep the
-  existing recovery rules if a create might have been sent. Test a refusal while the final route is resolving and one
-  after a successful pull. Confirm both leave no create and clear the reservation, and cleanup of older work can still
-  run. See “Verify container hosts before trusting results or sending private input” for the shared requirements on
-  connection proof and cached observations.
-
-- **Verify container hosts before trusting results or sending private input.** Each provider command for a claimed
-  container host must verify the recorded machine and account on the connection that will run it, before executing or
-  accepting an engine result. Use a proof tied to that authenticated endpoint. A token sent with the command does not
-  establish who answered. Accept capabilities and claims only from the verified machine and account. The probe collects
-  capabilities over several commands, so verifying its last reply alone cannot establish where the earlier replies came
-  from. Verify those observations before accepting a newly discovered place's first claim. Apply the same check to
-  recipe scripts, the creation-time proxy read and delivery of the container's proxy file. Hold private input until
-  verification succeeds on the connection that will receive it. A separate preflight can succeed while a later
-  connection reaches a different account. The existing command runner sends private input immediately and exposes the
-  final output after the process finishes. The full fix needs a transport boundary that verifies before sending bytes
-  while preserving cleanup on timeout and cancellation. Leftover discovery and Delete must carry any existing claim
-  across every command, including absence checks. When the runtime has no cached host observation, its probe can replace
-  the claim before cleanup reads it because a leftover has no registry row. Preserve the cleanup identity across that
-  refresh and retry, while keeping explicit route changes and adoption consistent. A check that refuses a moved place
-  can currently replace the runtime's last matching Podman path and proxy settings. Keep that matching observation
-  available to existing resources and recheck when the cache has no observation for their recorded machine and account.
-  Keep the refusal visible to new launches and builds. This includes a cold cache after Adopt when existing resources
-  still need their claimed machine. Only retire an unused claim after an ordinary supervisor refusal when the place
-  check establishes that the endpoint moved. Use a claim established by the first probe if one becomes available, and
-  preserve the existing ownership checks for legacy rows without a claim. Update the container-session contract and
-  cover withheld private input, a cold-cache refusal, a refused retry and successful discovery or cleanup after the
-  original destination is restored.
-
-- **Keep host proxy settings out of Podman recipe images.** Recipe build and preparation helpers write
-  `90-farhelm-proxy.conf` for their systemd user managers. A captured image can carry that file, including passwords, in
-  the host account's Podman storage. A new container can then keep a proxy the host removed, because systemd read the
-  image's file at boot before Farhelm imports the current settings. Remove the exact file before each software and
-  prepared image capture and require removal to succeed on the verified place. Use an explicit working directory the
-  recipe login can enter. A prepared image made from an older software image would still carry that image's layers even
-  after the file is removed from the helper. A same-version prepared image can also hit the cache directly. Track
-  proxy-free capture in image provenance and replace ineligible software and prepared images through the existing
-  publication and retirement paths. Check eligibility when a recipe names a Farhelm-built software image as its base as
-  well. Keep readiness in Settings aligned with launch eligibility, and preserve recorded build inputs and existing
-  sessions during the transition. Cover legacy-cache replacement, refusal before capture and the exact boot file for a
-  new container, including a removed key and a different key set to empty. The capture and boot-file changes alone
-  exceeded the triage size target, and the cache transition needs its own coverage to preserve working recipes.
-
-- **Handle programs that outlive their terminal host.** The desktop can describe a session as ended while its main
-  program still runs. Stop or Delete can then exceed what the user confirmed. On an unscoped launch, Stop or Restart can
-  miss the survivor if it cannot find a session marker. Count a surviving main program as alive for consent and root
-  authorized Stop and Restart at its retained PID and start identity, checked against the process table as Delete
-  already does. Refuse Stop, Delete and Restart on a process-table read error, and refuse ended-only consent while the
-  program is alive. Keep terminal availability separate so recovery stays available and the desktop can ask for the
-  consent it actually needs. Use current evidence for the recovery Restart decision as well as for ordinary Stop and
-  Delete. The ticker must wait for evidence of exit or successful cleanup before it records a completed Stop. The triage
-  experiment fixed only the supervisor's action checks, which left desktop retries repeating the wrong consent and let
-  an old activity sample block recovery Restart. The full fix needs shared evidence for status, confirmations and
-  cleanup, with tests covering those boundaries.
-- **Settle an unconfirmed agent start before Stop reports success.** A launch can stay pending with no terminal when
-  Farhelm cannot confirm its terminal host ended. Authorized Stop can record an exit and return success without checking
-  the recorded start. A first stage that still holds the launch spec can start the agent after that reply. Use Restart's
-  recorded-start settlement under the lifecycle claim and after both consent guards. Include pinned agent children in
-  cleanup and keep the launch evidence if the recorded scope or process sweep is unconfirmed. Preserve the distinction
-  between a launch that left no live agent and a Stop that found one. The latter needs the user-stop annotation even if
-  a sweep retry no longer sees the child, and an outcome write failure must report that cleanup already ran. A direct
-  early sweep missed both cases. The final fix needs a durable stop-intent and retry path beyond the triage budget.
-  Extend the retained-create fixture in `host_creates.rs` to drive authorized Stop against an unanswering and a gone
-  host, and add an answering host with a live child. Assert refusal preserves the launch, a completed retry preserves
-  its stop annotation, and a failed write reports the work already done. The existing durable Stop intent treats a
-  missing terminal as exit evidence. Same-boot recovery can also clear the intent when it rediscovers a live host, or
-  complete it from a dead child even though the scope has not been checked. Carry the pending sweep through observation,
-  status and consent, and retries after adoption. An empty terminal address also occurs when create confirmation fails
-  after the terminal became usable, so changing that case's recovery needs an explicit decision. A keyed create retry
-  already preserves an existing Stop intent without starting another agent.
-
-- **Keep a failed tab close retryable after the terminal host ends.** Close can end the terminal host and then fail to
-  confirm the final sweep for surviving shell processes. It returns an error after forgetting the tab and removing its
-  launch record, so Close and the automatic cleanup cannot retry it. If the host end also fails, the error claims the
-  processes were reaped even when their sweep failed. Keep the cleanup evidence until both checks pass, as SPEC.md's
-  “Lifecycle operations” requires. Start with `close_host_tab` and the tab reap's existing backoff. Retaining the record
-  in Close alone leaves a gap after a normal supervisor restart. Reload drops tabs whose host is gone and startup
-  reclaim removes their records. The launch record also lacks the scope selection that the ended host's tag supplied.
-  Carry that selection and the pending cleanup across reload without re-adopting a closed tab or sweeping unrelated
-  tabs. This needs a durable recovery design beyond the triage budget. Exercise a successful host end with an injected
-  final sweep failure, a failure of both checks, and a retry across supervisor restart with the scope initially
-  unavailable and then verified gone. A pending close's first sweep can fail before the failure branch that advances the
-  retry deadline. Advance the deadline on every failed automatic retry and assert that cleanup waits until the new
-  deadline.
-
-- **Ignore Enter on a clipped recent setup.** In the session launcher's empty command pane, highlight a recent setup
-  with the arrow keys and scroll it out of view. Enter can still launch that setup or replace the source session. Keep
-  the highlight and consume Enter until a frame has shown the whole row again, as SPEC.md's “One GUI at a time”
-  requires. In the launcher search view (`launcher/view/search.rs` and `launcher/view/search/start.rs`), extend the
-  existing Enter action snapshot with the row's visibility after layout and scroll clipping, including the ancestor
-  clip. Invalidate it when the row disappears or is clipped. The next visible frame authorizes a fresh press. Preserve
-  the existing stale-choice refusal if the setup disappears before dispatch. Test partial and full clipping by scrolling
-  a selected row, then reveal it and verify the next Enter sends the stored setup's distinct model. The fix exceeds the
-  triage size gate because the existing snapshot is taken before layout, and the regression needs a scrollable pane and
-  a real Replace request.
-
-- **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
-  out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
-  its version, so a case can report a verdict for the wrong binary. Cover both timeouts and cancellation during
-  preparation, including a signal arriving as the process starts. Reuse the same teardown for the updater and the
-  fallback shell, and verify with a local child process that no write can race the version probe or a case. The first
-  implementation could kill a worker still finishing a successful update. Waiting instead with a process listing could
-  miss a successor forked during the scan. The next design needs to confirm the group has finished with kernel-backed
-  evidence and keep its identity safe to signal through timeout and cancellation.
+### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
   started with `cursor-agent -- "$prompt"`, where the prompt starts with `--` and includes a newline. Run
@@ -420,6 +105,333 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   model to catch silent fallbacks. Run the named cases with `OPENROUTER_API_KEY` and verify both fields for
   `--provider openrouter --model <id>`. Pi 1.6.0 can omit the provider in its footer, including on an OpenRouter-only
   setup, so that case may need a provider-bearing readout.
+
+## Plan follow-ups
+
+- **Name each custom-agent draft when closing Settings.** With unsaved changes on two custom-agent pages, or on Add
+  custom agent and a registered agent, the Close question in `crates/gui/farhelm-gui/src/settings/editing.rs` says
+  “Custom agent” once and can jump to a different page. Name every affected form. Give each registration a separate
+  accessible row with its escaped display name and stable ID, and give Add and any other named forms accessible labels
+  too, including when Add is the only draft. Use the question’s keyboard scroll stop for long lists. Stay on the current
+  page when more than one section is affected, and preserve the existing behavior for distinct forms sharing
+  Credentials. Save and Discard still apply to the versions of the drafts the question approved. Save waits for pending
+  saves and leaves Settings open on the first refusal, with that form and its error visible. Test real changes to Add
+  and a registered agent, the accessible labels, and the page retained behind the question. Capture and review the new
+  prompt in light and dark, publish the accepted references, and include their manifest entries in the fix. See the
+  Settings close contract in `SPEC.md`. The separate form names, keyboard access and their required evidence exceed this
+  item’s size allowance. The triage decision asked only to reveal a page when one section is affected and to name each
+  custom-agent draft in one sentence (size S); the separate rows, labels, scroll stop and new screenshots above are the
+  plan executor's proposal, not a decision, and a smaller fix that meets the decision is fine. Plan:
+  `plans/queue/settings-close-save-hardening.md`.
+
+- **Keep credential delivery reports visible when Settings closes.** A replacement saved through Save and Close can
+  reach storage while some hosts miss delivery. `crates/gui/farhelm-gui/src/settings/credentials/editor.rs` sends the
+  committed receipt and clears the editor. `settings/credentials.rs` puts the host names and reasons on the overview,
+  but `settings/editing.rs` can close Settings before anyone sees them. Preserve the fresh delivery report and show it
+  on the Credentials overview before closing. Continue other approved writes until the first refusal. A newer
+  confirmation must keep its page and focus. If it delays revealing a report, or another refusal or dirty draft keeps
+  Settings open, the next Close must give the person a chance to see the report. Once shown, retire the old automatic
+  close while any remaining approved writes finish. Keep editing retires that close attempt, and an unrelated later Save
+  must not inherit it. An older report that was shown must not hold a later Close open, and a replacement that committed
+  must not be resent. See the Settings and Credentials paragraphs under “Session list” in `SPEC.md`. Test the exact
+  committed PUT and host report, including a tunnel question opened before the receipt, then Cancel and Close. Review
+  the Credentials overview in both appearances. The ordinary path, the deferred reveal after a newer action, and their
+  required evidence together exceed this item's size allowance. The triage decision asked only to keep Settings open on
+  Credentials when a close-save returns delivery warnings (size S); the rules above for a deferred reveal, retiring the
+  old close and a later Save are the plan executor's proposal, not a decision. Plan:
+  `plans/queue/settings-close-save-hardening.md`.
+
+- **Wait for credential saves after Back or Cancel.** A credential editor can start Save, then close while the helm
+  still owns the write. Settings can close without waiting or offer Discard for another draft, and a refused write has
+  no editor left to show its reason. In `crates/gui/farhelm-gui/src/settings/credentials/editor.rs`, Back and Cancel
+  remove the editor through `Credentials::close_editor`; `settings/editing.rs` includes only the mounted editor and
+  saves already owned by its batch. Track each admitted credential write by attempt after its editor leaves. Include all
+  outstanding saves in the close question and join them on Save. On refusal, stop the close and show the reason in
+  Credentials without replacing a newer editor or resending the write. Keep independently authorized saves and later
+  close decisions separate as described in “Stop Settings Save and Close when an independent save fails”. Test Back and
+  Cancel with a real pending request, both successful and refused replies, and another draft whose Save must wait and
+  whose Discard must be absent. Assert that another editor's draft survives the refusal, and review the visible result
+  in light and dark. See `SPEC.md` under “Settings” and “Credentials”. This needs receipt ownership outside the editor,
+  integration with the multi-form close, and a new visible refusal with tests and references. The complete change
+  exceeds this triage item's size allowance. Plan: `plans/queue/settings-close-save-hardening.md`.
+
+- **Show a failed hook setup save after Settings closes.** A person can turn off Set up conversation hooks on all hosts
+  for Grok or Antigravity and close Settings before the helm answers. If the write fails, the previous consent can still
+  apply to later launches and the reason is gone. `crates/gui/farhelm-gui/src/settings/editing.rs` inventories staged
+  forms for Close. The immediate write in `SettingsDialog::toggle_configured` settles through `drafts::save`, whose
+  callback only updates the original dialog. Keep the inline error when that dialog is open. If it has closed, use the
+  same write's refusal to post an agent-specific notice with the reason and a way to retry in Settings. Reuse the window
+  notice center and preserve the earlier choice on refusal. When a staged form brings up the close question, include the
+  pending hook write in its pending state. If it refuses while that question or its Save and Close answer owns the
+  write, stay on the agent's page with the reason and stop before sending more drafts. Leave a newer question or an
+  independently authorized page Save alone. Use the same receipt for both paths and never send the hook write twice.
+  Test the exact opt-out with plain Close before the reply, its success counterpart, and the refusal before and after
+  accepting the close question with another draft staged. Review the notice and revealed refusal in light and dark. See
+  `SPEC.md` under “Settings” and “Errors and diagnostics”. The receipt must outlive the dialog for plain Close and join
+  the close decision for staged drafts. The triage assessment left the fix's shape open (hold the close, or a notice
+  that survives it); choosing both, and an agent-specific notice with a retry route, is the plan executor's proposal,
+  not a decision. Those paths and their test and visual evidence exceed this triage item's size allowance. Plan:
+  `plans/queue/settings-hook-save-notice.md`.
+
+- **Reveal the credential editor when Save and Close fails.** Resolving a Tensorlake key conflict from the Credentials
+  overview footer can leave that overview in front of a retained credential draft. Save and Close still submits the
+  draft, but if the helm refuses the write, the overview offers only Resume editing credential. The reason stays in the
+  hidden editor. In `crates/gui/farhelm-gui/src/settings/editing.rs`, use the failed editor's identity in
+  `reveal_edit_failure` to clear `key_revealed` in `settings/credentials.rs` only for that editor. Keep its replacement
+  secret and error in view as required by `SPEC.md` under “Settings” and “Credentials”. Confirm Save and Close while
+  Resume editing credential is still shown in the overview. Check the exact credential PUT, refuse it, and assert that
+  the same editor shows both the error and the retained draft. Capture the mounted error and staged draft in both
+  appearances. The tested reveal, interaction test, and dedicated golden fixture together exceeded this triage item's
+  size allowance. The separate independent-save follow-up covers a refusal that arrives while the close question is
+  still open. Plan: `plans/queue/settings-close-save-hardening.md`.
+
+- **Stop Settings Save and Close when an independent save fails.** An editor can save on its own while a page Save waits
+  for another write. If the editor fails before the page finishes, Save and Close must show its reason and stop before
+  sending the remaining drafts. The frozen draft list prevents replaying the failed write, but does not show the refusal
+  or stop other writes that the close answer queued. In `crates/gui/farhelm-gui/src/settings/editing.rs`, `ask_to_close`
+  skips `watch_close_question` when a page batch exists. Keep the receipts joined for closing distinct from those the
+  page Save already owns. Watch independent saves while the question is open and transfer them to the accepted close
+  decision only if the user chooses Save. Opening another Close question gives up the previous close decision. A refusal
+  dismisses the new question and shows the error if it is still open. Let the older page Save finish either way. Cover a
+  refused editor save followed by an acknowledged checkout folder write. Confirmed close must show the refusal and send
+  neither a retry nor the queued post-clone command. A newer unanswered or dismissed question must preserve the original
+  page Save's post-clone write with its original draft. See `SPEC.md` under “Settings” and “One GUI at a time”. Deferred
+  because separating receipt ownership and testing and capturing the revealed refusal exceeded this Settings triage
+  item's size allowance. Plan: `plans/queue/settings-close-save-hardening.md`.
+
+- **Bind Settings footer Save and Discard to the page and drafts shown.** Navigation can move Save to another page's
+  draft, including a different replacement for the one stored Tensorlake key. A late save refusal can move Discard to
+  the page with the refused draft. In `settings/editing.rs`, bind `page_answers` to the presented page, form identities,
+  draft revisions and available actions. Require the action to remain visible and eligible at keypress and across a
+  pointer gesture. Search, an open Credentials editor or a busy form can change what the footer offers. GPUI can install
+  a footer's handlers before presenting it and can carry a pending mouse-down across redraws. Capture the valid
+  presented action on primary-down and require the same action at release. Keep keyboard activation at its normal press
+  and preserve Close and the footer's focus and layout. Reuse the shared action frame and existing field revisions.
+  Include the checkout field's loaded comparison base and cover the compound Notifications draft without copying its
+  token. Test a held press across a page change and a down after the new footer is installed but before it is shown,
+  followed by release after presentation. Cover a later same-page edit and an ordinary Save. The complete correction
+  exceeded the triage size limit. See `SPEC.md` under “One GUI at a time” and `SPEC_impl.md` under “Questions: the
+  prompt”. Plan: `plans/queue/settings-close-save-hardening.md`.
+
+- **Keep checkout notices after an agent Delete times out.** If an approved agent Delete outlasts the supervisor's reply
+  budget and then leaves a checkout on disk, keep the checkout path and reason in the notices bell. The target host's
+  result reaches `agent_delete` in `crates/farhelm-helm/src/agent_requests.rs`, while the asking connection's actual
+  deadline and retained reply are in `crates/farhelm-supervisor/src/service/agent_relay.rs`. Under
+  [Managed checkouts](SPEC.md#managed-checkouts), the helm must record the notice for the original target when the
+  asking relay's answer budget has expired. Reuse the late Delete notice store. Correlate the deadline and result to
+  that request on its own connection, including when the target is on a different host or in the asker's environment.
+  Preserve the ordinary agent reply, retained Delete fence and existing timeout semantics. Exercise a real relay timeout
+  followed by the matching checkout warning, and show that a timely reply still carries its notice. Reliable correlation
+  spans both sides of the relay and exceeds this triage item's size gate. Plan:
+  `plans/queue/agent-delete-late-notice.md`.
+
+- **Bind leftover sandbox consent to the saved Tensorlake key.** In Settings → Tensorlake, an open leftover sandbox
+  Delete confirmation can survive clearing or replacing the API key in either key form. It can keep the old list on
+  screen or send a Delete using a different key. Apply [Keyboard focus](SPEC.md#keyboard-focus)'s rule that a question
+  closes when its subject is gone. In `settings/tensorlake_sandboxes.rs`, retire the question, old rows, and the refusal
+  on key change. Reuse the account generation in `settings/tensorlake_key.rs` to reject consent from a previous key.
+  Confirm must not queue a Delete behind a pending key write. A successful write without account data, or a server error
+  after the helm may have stored the key, invalidates prior consent immediately. Re-read the account and require a fresh
+  list before offering Delete again. Keep the draft and error on refusal, and show unfinished cleanup reported by the
+  helm's next list. Test both key forms, a held write, a re-read after an ambiguous reply, and stale discovery. Verify
+  the replacement view in light and dark. The ordering, refusal, test, and capture changes together exceeded the triage
+  size gate. Plan: `plans/queue/tensorlake-sandbox-key-consent.md`.
+
+- **Report late wake failures when launching on a suspended sandbox or stopped container.** When Resume takes longer
+  than the reply deadline, a later failure can leave the session launcher waiting for a minute before it gives the wrong
+  reason. A slow Podman check can fail before Starting appears. The next host row can still say Stopped and carry the
+  error from an earlier automatic start. Watching for a new phase or comparing error text cannot establish the outcome
+  of the current request. Give the launcher the terminal result of the wake it is waiting on, including failure before
+  the provider takes its connection hold. Start with the bounded reply in
+  `crates/farhelm-helm/src/tensorlake/lifecycle.rs` and the existing launch wait in `launcher/launch/wake_state.rs`.
+  Keep the 20-second reply deadline, the shared minute for a busy host and a fresh connection, and allow a successful
+  Resume elsewhere to satisfy the wait. Restore the held launch draft on failure. Report a repeated diagnosis promptly
+  if it belongs to this wake. Update SPEC.md's launcher wake contract and SPEC_impl.md under “The UI channel” for this
+  launcher-specific result. A failed start or a container that stops again should use Starting or Stopped wording, per
+  [Container sessions](SPEC.md#container-sessions). Exercise a late failure before Starting, repeated failures for both
+  providers, and a direct start refusal. Verify the launcher alert in both appearances. The fix needs a result the helm
+  can attribute to the bounded request, beyond the launcher-only triage budget. Plan:
+  `plans/queue/launcher-late-wake-failures.md`.
+
+- **Require the fresh-clone warning before Replace with can act.** In Replace with, a recent setup can switch the
+  destination from the source's managed checkout to a fresh clone. On a suspended host, the same Enter can start waking
+  the host. On a connected host, a second press can launch once the preview returns while the old frame still shows the
+  source folder. The replacement leaves the source's changes behind and can move its checkout to Trash. Bind the launch
+  to the checkout consequence actually shown. A warning laid out inside the scrollable form can be clipped, and GPUI can
+  replace a visible draw before presenting it. The triage attempt tracked prepaint visibility but the next-frame
+  callback could admit it before the clipped replacement frame. Establish actual presentation or keep the disclosure
+  visible through the press. Bind it to the current checkout and carry the admitted consent through hook settings, host
+  wake and checkout preview. A newer frame with an unrelated change to the source's tab count should not cancel a launch
+  whose consent already covered it. A changed checkout requires new consent. See `SPEC.md` under “Managed checkouts” and
+  “One GUI at a time” and `SPEC_impl.md` under “Questions: the prompt”. Test both recent-setup paths, a visible draw
+  replaced by a clipped frame before presentation, and a successful continuation after a wait. Update the documented
+  Enter behavior and key hint if the fill now needs another press. Plan: `plans/queue/launcher-visible-consent.md`.
+
+- **Keep wrapper defaults per custom agent registration.** Farhelm remembers one wrapper for all custom agents. A
+  launcher switch or template can carry an explicit prefix from one agent into another, and launching a second agent
+  without a prefix can erase the first agent's default. When a user agent launch succeeds, update only that
+  registration's wrapper memory, clearing it for an unwrapped launch. Ignore the old shared Custom default because its
+  owner cannot be recovered. Reload the destination agent's default and clear the previous explicit choice on a chip,
+  search or template switch. A template's explicit prefix or clear overrides the remembered default. Use the existing
+  switch notice when a deliberately chosen model or effort is cleared. Preserve saved launch commands and built-in
+  defaults. Prune only that registration's memory in the Delete transaction and prevent an in-flight launch from putting
+  it back after deletion or re-registration of the same ID. Update the creation rules in SPEC.md and the preferences
+  contract in SPEC_impl.md. Cover two registrations, blank and explicit prefixes, template replay, upgrades and
+  re-registration. The triage plan deferred the combined change because it spans stored and pushed preferences, launch
+  history, deletion and both launcher paths. Plan: `plans/queue/custom-agent-per-reg-wrappers.md`.
+
+- **Publish Restart with settings with the replacement generation.** A custom agent can report a conversation as soon as
+  it starts. Restart with currently publishes its new generation before saving the edited launch in the supervisor
+  store, so startup reports can be accepted or permanently refused under the previous reporting setting. The reply and
+  concurrent listings can also give the old Restart offer. Bind the new launch to the generation before its reports can
+  be admitted, then publish the matching snapshot and derive the offer from it. Preserve the old launch on a definitive
+  abort and retain the new settings when the process starts but building the reply fails. This spans the generation
+  transaction, recovery and terminal publication, above the triage size gate. Test startup reports with reporting
+  switched in both directions, the offer after a named restart, and the persisted launch on each failure side of spawn.
+  Plan: `plans/queue/restart-with-generation-sync.md`.
+
+- **Use the shared Delete confirmation for custom agents in Settings.** The footer asks with two ordinary buttons.
+  Escape can close Settings instead of cancelling Delete, focus stays away from Cancel, and the question never names the
+  registration. Port `settings/custom_agents.rs` to the recipe editor's inline prompt as described in
+  [Questions: the prompt](SPEC_impl.md#questions-the-prompt). Freeze the name and stable registration ID, start on
+  Cancel, and keep the Delete button's focus handle alive so Escape can return to it after the footer redraws. If Delete
+  fails to start, keep the draft and show the reason without replacing the text of an open question. An unanswered
+  Delete must also let an accepted Save and Close proceed, or show why the save could not start. Coordinate that part
+  with the Close → Save outcome in `triage-settings-nov24`. The prototype passed the screenshot and cancellation checks
+  but exceeded the triage budget before it covered focus restoration and the silent Save refusal. Test both from a dirty
+  registration and check light and dark captures. Plan: `plans/queue/custom-agent-delete-prompt.md`.
+
+- **Make Wayland text-field paste nonblocking.** Pasting into a text field such as an SSH sign-in answer can freeze the
+  window while another app supplies clipboard data. [Terminal experience](SPEC.md#terminal-experience) requires Farhelm
+  to stay responsive during clipboard operations on Wayland. Kit's Paste checks the synchronous read before its async
+  fallback. Give that path an async text-first read on Wayland, reusing Kit's focus, document and selection checks and
+  its atomic undo. Keep the terminal's file-first paste and keep text-field newline handling. The vendored async path
+  currently prefers files and images, so sending both callers through it can lose text from a mixed offer. The split
+  spans the Wayland receive code and the clipboard API used by Kit and the terminal. Cover keyboard and Edit menu paste,
+  mixed offers and a reply that arrives after the target changes. Plan: `plans/queue/wayland-async-text-paste.md`.
+
+- **Show container recipe admission failures before recording build ownership.** An explicit Rebuild can answer Accepted
+  before a fresh Podman check fails. The existing recipe place record keeps that failure visible after the job ends.
+  Suppressing the record alone loses the reason if the old host check still says Ready, for example after a refresh
+  times out. Return the refusal before acceptance or keep it in the existing build status without creating a recipe
+  place entry. Fence the first recipe place write to the host settings and machine/account claim that passed admission.
+  Looking up the host again by row ID can use different settings after a retarget or an SSH mode change. Cover a first
+  Rebuild that fails admission and still shows the reason, plus a route change between admission and the first write.
+  Recipe Delete now handles historical records with no resources. Preventing those records at the admission boundary
+  also needs a way to show the outcome of an already accepted Rebuild.
+
+  Recheck admission when launch preparation or Rebuild starts, before each new helper's base pull, and before each
+  helper create. Dispatch from the route and Podman executable that passed the final check. A separate runtime lookup
+  can wait on another probe and accept a capable engine even after the ordinary Farhelm connection refuses new work.
+  Keep that runtime path for existing resources. Check for cancellation when the admission and pull waits settle. Clear
+  the helper's name and start marker if admission refuses or cancellation arrives before the create is sent. Keep the
+  existing recovery rules if a create might have been sent. Test a refusal while the final route is resolving and one
+  after a successful pull. Confirm both leave no create and clear the reservation, and cleanup of older work can still
+  run. See “Verify container hosts before trusting results or sending private input” for the shared requirements on
+  connection proof and cached observations. Plan: `plans/queue/podman-recipe-admission.md`.
+
+- **Verify container hosts before trusting results or sending private input.** Each provider command for a claimed
+  container host must verify the recorded machine and account on the connection that will run it, before executing or
+  accepting an engine result. Use a proof tied to that authenticated endpoint. A token sent with the command does not
+  establish who answered. Accept capabilities and claims only from the verified machine and account. The probe collects
+  capabilities over several commands, so verifying its last reply alone cannot establish where the earlier replies came
+  from. Verify those observations before accepting a newly discovered place's first claim. Apply the same check to
+  recipe scripts, the creation-time proxy read and delivery of the container's proxy file. Hold private input until
+  verification succeeds on the connection that will receive it. A separate preflight can succeed while a later
+  connection reaches a different account. The existing command runner sends private input immediately and exposes the
+  final output after the process finishes. The full fix needs a transport boundary that verifies before sending bytes
+  while preserving cleanup on timeout and cancellation. Leftover discovery and Delete must carry any existing claim
+  across every command, including absence checks. When the runtime has no cached host observation, its probe can replace
+  the claim before cleanup reads it because a leftover has no registry row. Preserve the cleanup identity across that
+  refresh and retry, while keeping explicit route changes and adoption consistent. A check that refuses a moved place
+  can currently replace the runtime's last matching Podman path and proxy settings. Keep that matching observation
+  available to existing resources and recheck when the cache has no observation for their recorded machine and account.
+  Keep the refusal visible to new launches and builds. This includes a cold cache after Adopt when existing resources
+  still need their claimed machine. Only retire an unused claim after an ordinary supervisor refusal when the place
+  check establishes that the endpoint moved. Use a claim established by the first probe if one becomes available, and
+  preserve the existing ownership checks for legacy rows without a claim. Update the container-session contract and
+  cover withheld private input, a cold-cache refusal, a refused retry and successful discovery or cleanup after the
+  original destination is restored. Plan: `plans/queue/podman-host-verification.md`.
+
+- **Keep host proxy settings out of Podman recipe images.** Recipe build and preparation helpers write
+  `90-farhelm-proxy.conf` for their systemd user managers. A captured image can carry that file, including passwords, in
+  the host account's Podman storage. A new container can then keep a proxy the host removed, because systemd read the
+  image's file at boot before Farhelm imports the current settings. Remove the exact file before each software and
+  prepared image capture and require removal to succeed on the verified place. Use an explicit working directory the
+  recipe login can enter. A prepared image made from an older software image would still carry that image's layers even
+  after the file is removed from the helper. A same-version prepared image can also hit the cache directly. Track
+  proxy-free capture in image provenance and replace ineligible software and prepared images through the existing
+  publication and retirement paths. Check eligibility when a recipe names a Farhelm-built software image as its base as
+  well. Keep readiness in Settings aligned with launch eligibility, and preserve recorded build inputs and existing
+  sessions during the transition. Cover legacy-cache replacement, refusal before capture and the exact boot file for a
+  new container, including a removed key and a different key set to empty. The capture and boot-file changes alone
+  exceeded the triage size target, and the cache transition needs its own coverage to preserve working recipes. Plan:
+  `plans/queue/podman-proxy-free-images.md`.
+
+- **Handle programs that outlive their terminal host.** The desktop can describe a session as ended while its main
+  program still runs. Stop or Delete can then exceed what the user confirmed. On an unscoped launch, Stop or Restart can
+  miss the survivor if it cannot find a session marker. Count a surviving main program as alive for consent and root
+  authorized Stop and Restart at its retained PID and start identity, checked against the process table as Delete
+  already does. Refuse Stop, Delete and Restart on a process-table read error, and refuse ended-only consent while the
+  program is alive. Keep terminal availability separate so recovery stays available and the desktop can ask for the
+  consent it actually needs. Use current evidence for the recovery Restart decision as well as for ordinary Stop and
+  Delete. The ticker must wait for evidence of exit or successful cleanup before it records a completed Stop. The triage
+  experiment fixed only the supervisor's action checks, which left desktop retries repeating the wrong consent and let
+  an old activity sample block recovery Restart. The full fix needs shared evidence for status, confirmations and
+  cleanup, with tests covering those boundaries. Plan: `plans/queue/supervisor-outliving-programs.md`.
+
+- **Settle an unconfirmed agent start before Stop reports success.** A launch can stay pending with no terminal when
+  Farhelm cannot confirm its terminal host ended. Authorized Stop can record an exit and return success without checking
+  the recorded start. A first stage that still holds the launch spec can start the agent after that reply. Use Restart's
+  recorded-start settlement under the lifecycle claim and after both consent guards. Include pinned agent children in
+  cleanup and keep the launch evidence if the recorded scope or process sweep is unconfirmed. Preserve the distinction
+  between a launch that left no live agent and a Stop that found one. The latter needs the user-stop annotation even if
+  a sweep retry no longer sees the child, and an outcome write failure must report that cleanup already ran. A direct
+  early sweep missed both cases. The final fix needs a durable stop-intent and retry path beyond the triage budget.
+  Extend the retained-create fixture in `host_creates.rs` to drive authorized Stop against an unanswering and a gone
+  host, and add an answering host with a live child. Assert refusal preserves the launch, a completed retry preserves
+  its stop annotation, and a failed write reports the work already done. The existing durable Stop intent treats a
+  missing terminal as exit evidence. Same-boot recovery can also clear the intent when it rediscovers a live host, or
+  complete it from a dead child even though the scope has not been checked. Carry the pending sweep through observation,
+  status and consent, and retries after adoption. An empty terminal address also occurs when create confirmation fails
+  after the terminal became usable, so changing that case's recovery needs an explicit decision. A keyed create retry
+  already preserves an existing Stop intent without starting another agent. Plan:
+  `plans/queue/supervisor-stop-pending-launch.md`.
+
+- **Keep a failed tab close retryable after the terminal host ends.** Close can end the terminal host and then fail to
+  confirm the final sweep for surviving shell processes. It returns an error after forgetting the tab and removing its
+  launch record, so Close and the automatic cleanup cannot retry it. If the host end also fails, the error claims the
+  processes were reaped even when their sweep failed. Keep the cleanup evidence until both checks pass, as SPEC.md's
+  “Lifecycle operations” requires. Start with `close_host_tab` and the tab reap's existing backoff. Retaining the record
+  in Close alone leaves a gap after a normal supervisor restart. Reload drops tabs whose host is gone and startup
+  reclaim removes their records. The launch record also lacks the scope selection that the ended host's tag supplied.
+  Carry that selection and the pending cleanup across reload without re-adopting a closed tab or sweeping unrelated
+  tabs. This needs a durable recovery design beyond the triage budget. Exercise a successful host end with an injected
+  final sweep failure, a failure of both checks, and a retry across supervisor restart with the scope initially
+  unavailable and then verified gone. A pending close's first sweep can fail before the failure branch that advances the
+  retry deadline. Advance the deadline on every failed automatic retry and assert that cleanup waits until the new
+  deadline. Plan: `plans/queue/supervisor-tab-close-retry.md`.
+
+- **Ignore Enter on a clipped recent setup.** In the session launcher's empty command pane, highlight a recent setup
+  with the arrow keys and scroll it out of view. Enter can still launch that setup or replace the source session. Keep
+  the highlight and consume Enter until a frame has shown the whole row again, as SPEC.md's “One GUI at a time”
+  requires. In the launcher search view (`launcher/view/search.rs` and `launcher/view/search/start.rs`), extend the
+  existing Enter action snapshot with the row's visibility after layout and scroll clipping, including the ancestor
+  clip. Invalidate it when the row disappears or is clipped. The next visible frame authorizes a fresh press. Preserve
+  the existing stale-choice refusal if the setup disappears before dispatch. Test partial and full clipping by scrolling
+  a selected row, then reveal it and verify the next Enter sends the stored setup's distinct model. The fix exceeds the
+  triage size gate because the existing snapshot is taken before layout, and the regression needs a scrollable pane and
+  a real Replace request. Plan: `plans/queue/launcher-visible-consent.md`.
+
+- **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
+  out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
+  its version, so a case can report a verdict for the wrong binary. Cover both timeouts and cancellation during
+  preparation, including a signal arriving as the process starts. Reuse the same teardown for the updater and the
+  fallback shell, and verify with a local child process that no write can race the version probe or a case. The first
+  implementation could kill a worker still finishing a successful update. Waiting instead with a process listing could
+  miss a successor forked during the scan. The next design needs to confirm the group has finished with kernel-backed
+  evidence and keep its identity safe to signal through timeout and cancellation. Plan:
+  `plans/queue/drift-updater-teardown.md`.
 
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
   watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
