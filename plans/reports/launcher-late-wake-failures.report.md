@@ -93,3 +93,78 @@ and SPEC_impl.md to say that a crashed wake records nothing and why the last rec
 the shared hosts fixture to be run (done, 244 passed). #5092: nothing blocking; it asked for a corrected changelog
 sentence, two SPEC_impl.md clarifications (a failure after the host connected changes nothing; the time on a tag comes
 from the app, not the helm) and one doc fix, all done.
+
+### Landing
+
+#### What landed with it
+
+This round landed session-right-click-menu first (a session's menu on right-click), then this plan, then
+supervisor-stop-pending-launch (Stop refused while a start is unconfirmed) and drift-updater-teardown (the drift tests'
+agent upgrades kept in their own temporary scope); see the first plan's notes for the round. They met only in TODO.md,
+where the landing kept every plan's removal. Since this plan's base, main had gained the container host proof (#5084),
+Stop and Restart ending an agent that outlived its killed terminal (#5083), the tab close retry (#5087), an agent
+Delete's notice in the notices bell (#5088) and a TODO entry (#5089). Two independent reviewers and I read these against
+this plan:
+
+- The container host check that landed meanwhile (#5084), where a container host must prove it is the machine Farhelm
+  set up, adds new ways a container's start can fail. Those failures simply become the reason this plan records and the
+  launcher shows.
+- Keeping only the latest launcher wake's outcome per host still holds with the container changes: while a container is
+  starting, other operations on that host wait until its outcome is recorded, so two launcher wakes cannot finish out of
+  order.
+- The notices-bell change touched the same part of the helm as this plan; every way the helm builds a host's entry in
+  the hosts list still includes the wake outcome this plan adds.
+- The wake outcome is optional, so no protocol change is needed: a helm and an app from different builds fall back to
+  the old one-minute wait. The Hosts panel's own Resume sends no tag and behaves as before.
+
+#### Fixes made while landing
+
+The new screenshot of the launcher after a late container start failure was in the list of approved pictures but not in
+the screenshot scene list, which every approved picture must also be in, so that list's check failed. The scene is now
+listed; no picture or code changed.
+
+#### Worth knowing
+
+- **One rule from the report has no test.** "Once the host has connected, a failure recorded under the launcher's tag no
+  longer cancels the launch" is in the specs and the report, but no test covers it. A follow-up could add one.
+- The launcher's messages for resuming a sandbox and for resuming a suspended container are the same seven sentences,
+  written out twice; a stopped container has its own "starting" wording. Harmless; a cleanup could share them.
+
+#### Checks
+
+Run once for the whole round, on its four plans stacked in queue order (session-right-click-menu,
+launcher-late-wake-failures, supervisor-stop-pending-launch, drift-updater-teardown) on main as it stood when the
+landing started; what main gained since each plan's base is in each plan's notes. The test worker is an aarch64 Linux
+machine with a systemd user manager:
+
+- On the test worker, the four clippy configurations (`cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` with and without
+  `--features agent`, each with `-D warnings`): clean.
+- On the test worker,
+  `cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm-gui -p farhelm-desktop`: the
+  first attempt, recorded run b6571c52-9267-4c9b-9635-f7c159c2a3f1, never ran a test, because the compiler was killed
+  while building the helm's tests (the worker ran out of memory with four build jobs). The rerun with two build jobs,
+  recorded run 264e5b64-065f-46f0-8dcb-ab15f3ef799d: 7,624 passed, 17 skipped (tests marked ignored). That is every test
+  of the shared message types, the helm, the supervisor, the desktop app and its GUI.
+- On the test worker, the end-to-end tests of host creates, host terminals, relaunches, supervisor restarts and every
+  test whose name contains `restart` or `stop` (`cargo nextest run -p farhelm --test e2e` filtered to them), recorded
+  run 08bd628d-e968-4273-8466-14c3e4f84735: 160 passed, and none skipped for lack of systemd.
+- On the test worker, the desktop app's end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), recorded run
+  2a146ce3-50ae-460e-a84b-d597d7d7b659: 48 of the 49 steps passed; the paste step runs only on a Mac and was skipped, as
+  it always is on Linux.
+- Locally, every screenshot scene compared with its approved picture (`python3 scripts/check-gui-goldens.py`), recorded
+  run 33bc1d03-4b78-4cc2-a05e-d822d0dce764: every picture matched, the new late wake failure picture included. This
+  covers the re-render launcher-late-wake-failures' report skipped after its rebase.
+- Locally, `python3 -B scripts/test-gui-screenshot-batch.py`, which checks the screenshot scene list against the golden
+  manifest: recorded run b81cb326-fd3c-4921-9f49-69ff01bb3f0d failed because the new late wake failure picture was
+  missing from the scene list; after the landing fix in launcher-late-wake-failures, recorded run
+  ffecfaab-79e4-4bfd-942e-a25925a47bd5 passed.
+- Locally, the drift runner's own tests (`python3 -B scripts/test-run-harness-drift.py`), recorded run
+  029c1d18-8368-4a93-b71c-ea765289da54: passed, on this machine's systemd user manager.
+- Locally, `python3 scripts/check-agents-md.py` (0 errors; its one warning is an old one about the frozen triage
+  archive), `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown: passed.
+
+Reused: nothing. Skipped: the Podman suites, since no plan changes how a container is actually started or stopped
+(launcher-late-wake-failures changes only how the launcher's own start reports a failure, which the helm's tests cover
+with stand-ins); the real-agent drift cases themselves, which spend vendor turns and run only on request.
