@@ -1019,6 +1019,24 @@ pub struct HostView {
     pub incarnation: u64,
     /// This helm's last observed Trash change, independent of session status.
     pub trash_epoch: u64,
+    /// How the latest Resume of this host that carried a request tag
+    /// ([`ResumeHostBody::request`]) ended, or `None` when no tagged Resume
+    /// of it has ended since the helm started.
+    ///
+    /// It exists so that the client that sent a Resume can learn that
+    /// Resume's own result after the reply bound has cut the reply short:
+    /// past 20 seconds the route answers only that the change carries on,
+    /// and `state` then shows where the host stands afterwards, not whether
+    /// that Resume failed or why. A client matches the tag against the one
+    /// it sent and ignores any other, so this says nothing to a client that
+    /// sent none.
+    ///
+    /// Latest per host, kept only in the helm's memory: the next tagged
+    /// Resume of the host replaces it, and a helm restart forgets it. A
+    /// busy refusal is never recorded, since the sender sees that one in its
+    /// reply and may retry it. Left out of the JSON when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake_outcome: Option<WakeOutcome>,
 }
 
 impl HostView {
@@ -1035,6 +1053,56 @@ impl HostView {
     pub fn is_local(&self) -> bool {
         self.kind == "local"
     }
+}
+
+/// The optional body of `POST /api/hosts/{id}/resume`.
+///
+/// It lives here, beside [`HostView`] and [`WakeOutcome`], rather than with
+/// the launch bodies in [`crate::session_requests`], because its one field
+/// is only meaningful as the key of [`HostView::wake_outcome`]: the two
+/// halves of that contract change together. Suspend takes no body.
+///
+/// Every field defaults, so an absent body and `{}` both mean an untagged
+/// Resume, which is what the hosts panel and the session controls send.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ResumeHostBody {
+    /// A tag the sender chooses for this one Resume. When present, the helm
+    /// publishes the Resume's terminal outcome under it in the host's
+    /// [`HostView::wake_outcome`], whether or not the sender was still
+    /// waiting for the reply. The helm treats it as opaque text and never
+    /// checks it for uniqueness: a sender that wants to recognize its own
+    /// outcome must pick a tag no other sender would.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+}
+
+/// The terminal outcome of one tagged Resume, as [`HostView::wake_outcome`]
+/// carries it: `{"request": "...", "result": "ready"}` or
+/// `{"request": "...", "result": "failed", "reason": "..."}`.
+///
+/// Shaped like [`SshSignInCompletion`] (a tag plus a flattened, internally
+/// tagged result), the other place the helm publishes a finished operation's
+/// outcome for a client that may have stopped waiting for it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WakeOutcome {
+    /// The [`ResumeHostBody::request`] the Resume carried, verbatim.
+    pub request: String,
+    #[serde(flatten)]
+    pub outcome: WakeResult,
+}
+
+/// How a tagged Resume ended.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "result", rename_all = "kebab-case")]
+pub enum WakeResult {
+    /// The provider confirmed the host resumed (or found it already
+    /// running). This says nothing about the host's connection, which
+    /// follows separately in [`HostView::state`].
+    Ready,
+    /// The Resume failed or was refused. `reason` is the same text the
+    /// route's error reply would have carried, meant for display.
+    Failed { reason: String },
 }
 
 /// One host's Podman check as `GET /api/hosts` reports it: the readiness part
@@ -1628,5 +1696,61 @@ mod tests {
             serde_json::from_str::<ServerMessage>(unknown).is_err(),
             "an unknown marker does not decode"
         );
+    }
+
+    /// The resume route's body and the outcome it keys are a contract between
+    /// the launcher and the helm, so their spelling is pinned here: an empty
+    /// body (`{}`, which existing callers send) decodes as untagged, the tag
+    /// is left out of the JSON when unset, and an outcome is the tag beside a
+    /// kebab-case `result` with the failure's `reason` flattened in, the same
+    /// shape as an SSH sign-in completion.
+    #[test]
+    fn a_resume_tag_is_optional_and_its_outcome_is_flat_and_kebab_case() {
+        assert_eq!(
+            serde_json::from_str::<ResumeHostBody>("{}").unwrap(),
+            ResumeHostBody { request: None }
+        );
+        assert_eq!(
+            serde_json::to_value(ResumeHostBody::default()).unwrap(),
+            serde_json::json!({})
+        );
+        let tagged = ResumeHostBody {
+            request: Some("wake-1".into()),
+        };
+        let json = serde_json::json!({ "request": "wake-1" });
+        assert_eq!(serde_json::to_value(&tagged).unwrap(), json);
+        assert_eq!(
+            serde_json::from_value::<ResumeHostBody>(json).unwrap(),
+            tagged
+        );
+
+        for (outcome, json) in [
+            (
+                WakeOutcome {
+                    request: "wake-1".into(),
+                    outcome: WakeResult::Ready,
+                },
+                serde_json::json!({ "request": "wake-1", "result": "ready" }),
+            ),
+            (
+                WakeOutcome {
+                    request: "wake-2".into(),
+                    outcome: WakeResult::Failed {
+                        reason: "the sandbox is gone".into(),
+                    },
+                },
+                serde_json::json!({
+                    "request": "wake-2",
+                    "result": "failed",
+                    "reason": "the sandbox is gone",
+                }),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), json);
+            assert_eq!(
+                serde_json::from_value::<WakeOutcome>(json).unwrap(),
+                outcome
+            );
+        }
     }
 }

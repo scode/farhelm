@@ -377,7 +377,12 @@
         "suspended_by_farhelm_at": 1700000000000,
         "resume_failed": null
       },
-      "is_session_owned": false
+      "is_session_owned": false,
+      "wake_outcome": {
+        "request": "contract-fixture",
+        "result": "failed",
+        "reason": "Tensorlake did not finish resuming this host within 120 seconds; try again"
+      }
     }
   ]
 }

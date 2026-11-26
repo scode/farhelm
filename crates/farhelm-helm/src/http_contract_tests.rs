@@ -149,6 +149,7 @@ fn host_list_body() -> serde_json::Value {
         state,
         incarnation: 4,
         trash_epoch: 0,
+        wake_outcome: None,
     };
     let mut hosts = vec![
         host(
@@ -271,8 +272,18 @@ fn host_list_body() -> serde_json::Value {
                 },
             )
         },
+        // The suspended sandbox carries a late Resume failure's outcome, so
+        // `wake_outcome`'s tag, `result` word and `reason` are pinned too.
         HostView {
             tensorlake: Some(tensorlake_view(12)),
+            wake_outcome: Some(farhelm_proto::ui_channel::WakeOutcome {
+                request: "contract-fixture".to_string(),
+                outcome: farhelm_proto::ui_channel::WakeResult::Failed {
+                    reason: "Tensorlake did not finish resuming this host within 120 seconds; \
+                             try again"
+                        .to_string(),
+                },
+            }),
             ..host(
                 12,
                 "tensorlake",

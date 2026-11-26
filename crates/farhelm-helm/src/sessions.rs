@@ -3792,9 +3792,12 @@ pub(crate) async fn within_host_reply_bound(
 /// [`HOST_REPLY_BOUND`]. `timed_out` is the whole message the 504 carries, and
 /// it is the caller's because only the caller knows which.
 ///
-/// A failure the work produces after the 504 went out reaches nobody, so it is
-/// logged with its status and the start of its text; the caller's pushed state
-/// (the session or hosts list) shows whatever actually happened.
+/// A failure the work produces after the 504 went out reaches nobody through
+/// the reply, so it is logged with its status and the start of its text; the
+/// caller's pushed state (the session or hosts list) shows whatever actually
+/// happened. Work that has to tell its sender why it failed records that
+/// itself before it returns, as a Resume carrying a request tag does on its
+/// host's entry in the hosts list (`crate::tensorlake::lifecycle::bounded`).
 pub(crate) async fn within_host_reply_bound_saying(
     work: impl std::future::Future<Output = axum::response::Response> + Send + 'static,
     timed_out: String,

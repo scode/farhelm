@@ -340,6 +340,7 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                 state: HostStateView::from(&snapshot.state),
                 incarnation: snapshot.incarnation,
                 trash_epoch: state.trash_requests.epoch(snapshot.id),
+                wake_outcome: state.manager.wake_outcome(snapshot.id),
             }
         })
         .collect())
