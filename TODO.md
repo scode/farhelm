@@ -419,13 +419,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   guest receipt validation and host import. The counter and version checks alone cannot establish the transition. Plan:
   `plans/queue/brick-test-reopen-and-retry-fixes.md`.
 
-- **Keep the brick test's installer pair retryable after an unavailable P0 check.** `record()` settles derived P1 and P2
-  skips from a recoverable P0 observation. `retry-unavailable` then reads those skips as later executed checks. Keep
-  later observations and independent skips, and let the supported recovery discard only skips derived from the retried
-  checkpoint. Record why the eligible attempt can be repeated and preserve its evidence. Cover older saved manifests as
-  well as new ones. A change to the retry predicate alone leaves derived skips permanently recorded. Plan:
-  `plans/queue/brick-test-reopen-and-retry-fixes.md`.
-
 - **Stop the agent updater's process group before running drift cases.** `scripts/harness_upgrades.py` currently times
   out the top-level process. An updater or fallback installer child can still replace the CLI after the runner probes
   its version, so a case can report a verdict for the wrong binary. Cover both timeouts and cancellation during

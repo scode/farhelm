@@ -217,10 +217,11 @@ or clears a real product failure. If it refuses, inspect why and use a clean run
 For a diagnosed fixture prerequisite recorded as `could-not-run`, repair it and inspect the native event sequence for
 uncertain or already-completed actions. When repeating the checkpoint is safe, use
 `brick_test.py retry-unavailable "$test_run" <pass> --reason '<verified repair and replay-safety evidence>'`, then
-`test`. This retains the original observation and hashes in `checkpoint_retries`; it refuses product failures,
-automation errors, uncertain tool calls, later accepted checkpoints, P1 (whose sequence already went on past an
-unavailable check) and P2. The recorded reason is the host's evidence-based judgment, not a waiver of the checkpoint. If
-a product action has an uncertain outcome, use a new fixture instead.
+`test`. This retains the original observation, its hashes and later skips caused by that observation in
+`checkpoint_retries`. Earlier slots and skips caused by other checkpoints stay settled. Later executed checkpoints and
+older skips without a recorded cause prevent retry, as do product failures, automation errors, uncertain tool calls, P1
+and P2. Record what the host verified before retrying. If a product action has an uncertain outcome, use a new fixture
+instead.
 
 Continue feasible independent diagnosis and checks while repairing a blocker; preserve the declared P0 and P1
 dependencies and do not send P2 until P0 passes. A confirmed product defect remains a failure even if another scenario
