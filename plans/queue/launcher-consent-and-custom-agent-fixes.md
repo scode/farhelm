@@ -260,47 +260,76 @@ updated `TODO.md` note and `DECISION` log entry). Delivering the report is the e
 
 No release note needed.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-11-26 (claim 12e19e).
+### 2026-11-26: answer to a blocked question
 
-### Landing blocked: the YOLO question can no longer be asked on a host without a recorded installation
+The question, as the executor put it:
 
-Nothing of this plan has merged; main holds none of its four PRs (#4999, #5003, #5029, #5037).
+> Blocked while landing on 2026-11-26 (claim 12e19e).
+>
+> ### Landing blocked: the YOLO question can no longer be asked on a host without a recorded installation
+>
+> Nothing of this plan has merged; main holds none of its four PRs (#4999, #5003, #5029, #5037).
+>
+> **What went wrong for users.** When a host asks before YOLO launches, the launcher answers the helm's refusal with the
+> YOLO question, and its one-time answer lets that one launch start. This plan's first PR anchors that answer to the
+> host's installation so that a host wake cannot carry it to a different machine, as the plan asked. But the check is
+> applied to asking the question at all, not only to carrying an answer through a wake. A host whose supervisor reports
+> no installation identity (SPEC.md accepts supervisors that report none) therefore never gets the question: every YOLO
+> launch there shows "The original host installation could not be verified. Launch again to confirm the current host.",
+> and launching again shows the same note, so neither the one-time answer nor "stop asking" is reachable. Before this
+> plan those hosts got the question as usual. SPEC.md says the app answers that refusal with a prominent confirmation.
+> One of the plan's new tests pins the new behavior.
+>
+> **What the plan decided.** Its acceptance criterion requires the one-time consent to be anchored to a verified
+> installation (one with an identity) captured when the launch is first sent, and never carried across changed or
+> unverified installations. Read literally, that leaves no anchor on a host without an identity, which is what was
+> built. The plan's design section, though, places the identity check "before waking", and the plan says nothing about
+> taking the question away from hosts without an identity when no wake is involved.
+>
+> **Two smaller things the landing found, for the same round trip.** A launcher test that existed before this plan now
+> fails on every run: the repository suggestions list is one pixel wider than its field
+> (`launcher::checkout_tests::repository_history_loads_on_open_and_enter_picks_a_filtered_match`, test-worker recorder
+> run `65a17e4d-a6c7-426a-9074-2de84829ef64`). And when the launch shown with a hook setup question has changed by the
+> time the user answers it, **Set up and launch** saves the setting and then starts nothing, with no line saying the
+> setting was saved or that Launch needs a fresh press.
+>
+> **The question.** What should the launcher do on a host with no recorded installation identity when it refuses a YOLO
+> launch?
+>
+> - **A. Ask as before while the answer goes straight back to the same connection; require a verified installation
+>   whenever the answer would outlive that connection** (recommended): a host wake, or a reconnect before the launch is
+>   sent. The answer then goes with a launch to the host it was just refused on, as it did before this plan, and a wake
+>   or reconnect, the cases the plan exists for, still cannot carry it to an unverified machine. When such a host has to
+>   wake or reconnect first, the launcher says it cannot confirm the host and asks again once it is back.
+> - **B. Keep the plan as built.** Hosts whose supervisor reports no identity cannot use the one-time answer at all;
+>   their users must turn off asking before YOLO for that host. Safer in theory, but it removes a working path with no
+>   way through.
+>
+> I recommend A, plus fixing the failing test and adding a line after a hook setup answer whose launch changed.
 
-**What went wrong for users.** When a host asks before YOLO launches, the launcher answers the helm's refusal with the
-YOLO question, and its one-time answer lets that one launch start. This plan's first PR anchors that answer to the
-host's installation so that a host wake cannot carry it to a different machine, as the plan asked. But the check is
-applied to asking the question at all, not only to carrying an answer through a wake. A host whose supervisor reports no
-installation identity (SPEC.md accepts supervisors that report none) therefore never gets the question: every YOLO
-launch there shows "The original host installation could not be verified. Launch again to confirm the current host.",
-and launching again shows the same note, so neither the one-time answer nor "stop asking" is reachable. Before this plan
-those hosts got the question as usual. SPEC.md says the app answers that refusal with a prominent confirmation. One of
-the plan's new tests pins the new behavior.
+The maintainer's answer:
 
-**What the plan decided.** Its acceptance criterion requires the one-time consent to be anchored to a verified
-installation (one with an identity) captured when the launch is first sent, and never carried across changed or
-unverified installations. Read literally, that leaves no anchor on a host without an identity, which is what was built.
-The plan's design section, though, places the identity check "before waking", and the plan says nothing about taking the
-question away from hosts without an identity when no wake is involved.
+The landing monitor answered this block on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering blocks"
+(the maintainer's standing instruction to make a call on any block that is not huge and record it for them to revisit).
+A later change of mind is a follow-up, not a reason to stop the plan.
 
-**Two smaller things the landing found, for the same round trip.** A launcher test that existed before this plan now
-fails on every run: the repository suggestions list is one pixel wider than its field
-(`launcher::checkout_tests::repository_history_loads_on_open_and_enter_picks_a_filtered_match`, test-worker recorder run
-`65a17e4d-a6c7-426a-9074-2de84829ef64`). And when the launch shown with a hook setup question has changed by the time
-the user answers it, **Set up and launch** saves the setting and then starts nothing, with no line saying the setting
-was saved or that Launch needs a fresh press.
+Decisions:
 
-**The question.** What should the launcher do on a host with no recorded installation identity when it refuses a YOLO
-launch?
+1. **Option A.** On a host whose supervisor reports no installation identity, the launcher asks the YOLO question as it
+   did before this plan whenever the answer goes straight back to the connection the launch was just refused on. A
+   verified installation is required only when the answer would outlive that connection: a host wake, or a reconnect
+   before the launch is sent. In that case the launcher says it cannot confirm the host and asks again once the host is
+   back. Keep the plan's anchoring for hosts that do report an identity exactly as built. Replace the test that pins the
+   current behavior with tests of both halves: an unverified host is asked and its one-time answer launches on the same
+   connection, and an unverified host that has to wake or reconnect is not carried an answer.
+2. **Fix the failing launcher test**
+   (`launcher::checkout_tests::repository_history_loads_on_open_and_enter_picks_a_filtered_match`): the repository
+   suggestions list must again be exactly as wide as its field.
+3. **After a hook setup answer whose shown launch has changed,** keep the saved setting and add a one-line note in the
+   launcher saying the setting was saved and the launch changed, so Launch needs a fresh press; assert the note in the
+   plan's tests.
 
-- **A. Ask as before while the answer goes straight back to the same connection; require a verified installation
-  whenever the answer would outlive that connection** (recommended): a host wake, or a reconnect before the launch is
-  sent. The answer then goes with a launch to the host it was just refused on, as it did before this plan, and a wake or
-  reconnect, the cases the plan exists for, still cannot carry it to an unverified machine. When such a host has to wake
-  or reconnect first, the launcher says it cannot confirm the host and asks again once it is back.
-- **B. Keep the plan as built.** Hosts whose supervisor reports no identity cannot use the one-time answer at all; their
-  users must turn off asking before YOLO for that host. Safer in theory, but it removes a working path with no way
-  through.
-
-I recommend A, plus fixing the failing test and adding a line after a hook setup answer whose launch changed.
+Update SPEC.md and SPEC_impl.md where they describe these. Everything else in the four PRs stays as delivered; the
+landing's review found no other problem that needs a change.
