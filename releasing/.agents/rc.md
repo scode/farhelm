@@ -24,12 +24,11 @@ cut), so dist publishes the download tables alone. The one exception is an RC cu
 version has already landed on main: dist then falls back to that section and titles it with the RC version, which the
 `announce` check reports as a note rather than a failure.
 
-When asked for an RC, settle the base and version first, along with the announcement selection below. Ask about each
-base or version choice unless the request states it explicitly or the version default described next applies; guessing
-wrong publishes the wrong binaries or version to a real, public prerelease:
+When asked for an RC, settle the base and version first, along with the announcement selection below. Use the request
+and the defaults below to choose the source and version.
 
-- The BASE: cut from main, or from the current in-flight PR stack's tip? "cut an rc with this stack" is explicit; "cut
-  an rc" is not.
+- The base is current `origin/main` by default. "Cut an RC with this stack" selects the stack tip. Ask about the base
+  only if the maintainer specifies a source that cannot be resolved unambiguously.
 - The VERSION: is this the next attempt at the SAME candidate — a previous `X.Y.Z-rc.N` exists for the target version
   and this continues it, so it is `X.Y.Z-rc.N+1` — or the FIRST rc of a new target version? If the latter, which
   component bumps is the maintainer's semantic call, not something to infer from the diff: patch (`X.Y.Z+1-rc.1`), minor
@@ -49,8 +48,7 @@ excludes prereleases and cannot answer this question.
 Announce the exact version without asking about the version itself. Stop and ask about it instead when there is no
 published stable release to bump from, or when the default's tag already exists (a dev release published after an RC can
 make the "otherwise" branch land on a version that was already cut). An explicit version always wins, so a patch or
-major candidate is requested by naming it. The base still needs to be stated or confirmed, and an existing tag must
-never be reused.
+major candidate is requested by naming it. Report the chosen base and check that the tag is available before proceeding.
 
 In that same request-settling reply, ask about in-app announcements per `releasing/AGENTS.md`, "In-app announcements".
 The first candidate asks which to include; later candidates show main's selected list for `X.Y.Z` and its prereleases
