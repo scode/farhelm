@@ -642,8 +642,8 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
         }
     }
     if selection.permissions == Some(LaunchPermission::Custom) {
-        // Validation established the shape; use the same permission position
-        // as YOLO, before trust arguments and each harness's resume suffix.
+        // Keep user-authored words together so each harness's option boundary
+        // stays available when adding compiler-owned arguments.
         argv.extend(
             selection
                 .permission_flags
@@ -655,7 +655,8 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
     }
     // This final compiler-owned segment can also be replaced when cloning
     // a stored launch, without recomposing its historical permission flags.
-    let trust_at = argv.len() - trust_custom_tail_len(&selection);
+    let positional_tail_len = custom_positional_tail_len(&selection);
+    let trust_at = argv.len() - positional_tail_len;
     argv.splice(
         trust_at..trust_at,
         workspace_trust_arguments(selection.harness, selection.workspace_trust)
@@ -665,7 +666,11 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
 
     let resume = resume_arguments(selection.harness).map(|suffix| {
         let mut resume = argv.clone();
-        resume.extend(suffix.iter().map(|element| element.to_string()));
+        let resume_at = resume.len() - positional_tail_len;
+        resume.splice(
+            resume_at..resume_at,
+            suffix.iter().map(|element| element.to_string()),
+        );
         resume.push(FARHELM_ARGS_PLACEHOLDER.to_string());
         resume
     });
@@ -830,10 +835,11 @@ fn antigravity_custom_words(selection: &LaunchSelection) -> &[String] {
     }
 }
 
-/// Antigravity's settings option must precede a Custom end-of-options marker.
-/// Return the number of Custom words left after the compiler-owned trust slot.
+/// Count the Custom words beginning with a harness's end-of-options marker.
+/// Workspace settings and conversation selectors belong before that tail
+/// because the CLI reads the rest as operands.
 #[warn(clippy::wildcard_enum_match_arm)]
-fn trust_custom_tail_len(selection: &LaunchSelection) -> usize {
+fn custom_positional_tail_len(selection: &LaunchSelection) -> usize {
     match selection.harness {
         LaunchHarness::Antigravity => {
             let words = antigravity_custom_words(selection);
@@ -910,9 +916,10 @@ fn workspace_trust_arguments(
 /// Clones and inherited spawns keep the source's other words, including
 /// permission omissions and models no longer offered by today's catalog. The
 /// start command records the segment before its final Farhelm marker or
-/// Antigravity's Custom positional tail. Resume shares that entire prefix
-/// before adding its conversation selector.
-/// This structural boundary keeps custom permission words out of the edit.
+/// Antigravity's Custom positional tail. Resume may insert a conversation
+/// selector ahead of that tail, but its trust segment stays at the same
+/// index. Older saved launches can also have the selector after the tail.
+/// Checking the shared boundary keeps user-authored words out of the edit.
 /// Callers must check the original launch against the agent YOLO guard first:
 /// rewriting a copy must never erase the evidence that a source was forged.
 pub(crate) fn with_workspace_trust(
@@ -933,12 +940,13 @@ pub(crate) fn with_workspace_trust(
     }
     let old_words = workspace_trust_arguments(selection.harness, selection.workspace_trust);
     let new_words = workspace_trust_arguments(selection.harness, trust);
+    let farhelm_slot = [FARHELM_ARGS_PLACEHOLDER.to_string()];
     let old_prefix = start
-        .strip_suffix(&[FARHELM_ARGS_PLACEHOLDER.to_string()])
+        .strip_suffix(&farhelm_slot)
         .ok_or("the stored launch has no final Farhelm argument boundary")?;
     let trust_end = old_prefix
         .len()
-        .checked_sub(trust_custom_tail_len(selection))
+        .checked_sub(custom_positional_tail_len(selection))
         .ok_or("the stored launch has no workspace-trust boundary")?;
     let trust_start = trust_end
         .checked_sub(old_words.len())
@@ -951,7 +959,24 @@ pub(crate) fn with_workspace_trust(
         .ok_or("the stored launch's workspace-trust segment does not match its selection")?;
     if let Some(resume) = resume {
         if !resume.starts_with(old_prefix) {
-            return Err("the stored resume command does not share its start command's workspace-trust boundary".into());
+            // A new delimited resume inserts exactly its selector between the
+            // shared option prefix and the literal tail from Start.
+            let (options, tail) = old_prefix.split_at(trust_end);
+            let shares_delimited_boundary = !tail.is_empty()
+                && resume
+                    .strip_prefix(options)
+                    .and_then(|rest| rest.strip_suffix(&farhelm_slot))
+                    .and_then(|rest| rest.strip_suffix(tail))
+                    .zip(resume_arguments(selection.harness))
+                    .is_some_and(|(actual, expected)| {
+                        actual
+                            .iter()
+                            .map(String::as_str)
+                            .eq(expected.iter().copied())
+                    });
+            if !shares_delimited_boundary {
+                return Err("the stored resume command does not share its start command's workspace-trust boundary".into());
+            }
         }
         resume.splice(
             trust_start..trust_end,
@@ -970,10 +995,9 @@ pub(crate) fn with_workspace_trust(
 /// the captured conversation, or `None` for an agent type Farhelm cannot
 /// resume (Cursor, OpenCode and the plain shells).
 ///
-/// Appended after every start-command choice: each agent type reads these
-/// selectors wherever they stand among its options, and the start commands
-/// this module composes carry no positional prompt or `--` they could fall
-/// behind. Goose's `session` subcommand is already in the start command.
+/// These follow the start-command options. The compiler inserts them before
+/// any Custom positional tail so an end-of-options marker cannot turn the
+/// selector into an operand. Goose's `session` subcommand is already in Start.
 fn resume_arguments(harness: LaunchHarness) -> Option<&'static [&'static str]> {
     match harness {
         LaunchHarness::Claude => Some(&["--resume", CONVERSATION_PLACEHOLDER]),
@@ -2957,6 +2981,63 @@ mod tests {
         assert_eq!(
             &named.argv[expected.len()..],
             ["--conversation", "explicit-id", FARHELM_ARGS_PLACEHOLDER]
+        );
+    }
+
+    /// The same saved selector feeds Restart and a one-time named start. If it falls after Custom's delimiter,
+    /// Antigravity sees it as a positional word and can launch without selecting the intended conversation.
+    #[test]
+    fn antigravity_custom_delimiter_keeps_both_conversation_selectors_in_options() {
+        let mut choice = selection(LaunchHarness::Antigravity);
+        choice.permissions = Some(LaunchPermission::Custom);
+        choice.permission_flags = Some(
+            [
+                "--mode",
+                "auto",
+                "--settings",
+                "{}",
+                "--",
+                "literal operand",
+            ]
+            .map(String::from)
+            .into(),
+        );
+        let launch = super::compile(choice).unwrap();
+        assert_eq!(
+            launch.start_argv().unwrap(),
+            [
+                "agy",
+                "--mode",
+                "auto",
+                "--settings",
+                "{}",
+                "--",
+                "literal operand",
+                FARHELM_ARGS_PLACEHOLDER,
+            ]
+        );
+        let expected = [
+            "agy",
+            "--mode",
+            "auto",
+            "--settings",
+            "{}",
+            "--conversation",
+            "saved-thread",
+            "--",
+            "literal operand",
+            FARHELM_ARGS_PLACEHOLDER,
+        ];
+        let integration = farhelm_supervisor::agent_kind::IntegrationSnapshot::of(&launch);
+        assert_eq!(
+            integration.filled_resume_argv("saved-thread").unwrap(),
+            expected
+        );
+        assert_eq!(
+            super::named_start(&launch, "saved-thread".into())
+                .unwrap()
+                .argv,
+            expected
         );
     }
 

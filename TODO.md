@@ -488,13 +488,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   case, which seeds a chat from `cursor-agent create-chat` and reopens it by ID, also stopped at the login screen and
   still needs a run with the same login.
 
-- **Keep Antigravity's Restart selector before a Custom `--`.** With Antigravity 1.5.16, a launch with
-  `--mode auto --settings '{}' --` reaches the composer, completes a turn and captures a conversation. The saved command
-  places `--conversation` after `--`, where it is a positional argument. Keep the settings and conversation options
-  before the delimiter, preserving stored Custom words and workspace-trust edits. The `permission_modes` drift case
-  reports this boundary before it would start the wrong conversation. Plan:
-  `plans/queue/hooks-restart-and-antigravity-fixes.md`.
-
 - **Finish OpenRouter and saved-default model verification.** Goose 1.60.2, Pi 1.6.0 and OMP 19.1.1 opened with an
   active model when started without `--provider` or `--model`. Compare the active choice with the saved provider and
   model to catch silent fallbacks. Run the named cases with `OPENROUTER_API_KEY` and verify both fields for

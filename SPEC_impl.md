@@ -5447,8 +5447,9 @@ Restart and Replace; new composition uses true or omission. Older selection JSON
 Antigravity true adds `--settings` with the canonical-directory JSON slot. Its switch applies to structured launches on
 installed hosts in plain folders as well as managed checkouts. The supervisor resolves the directory when it fills the
 slot. Custom `--settings` and `--settings=...` options take precedence over Farhelm's opt-in. The resolved selection
-then omits trust, including on approval cards. A bare `--` ends the Custom options, so the compiled trust option goes
-before that token.
+then omits trust, including on approval cards. A bare `--` ends the Custom options. The compiler puts the trust option
+and the conversation selector before that token. Editing a stored launch's trust choice preserves both its literal
+Custom tail and the selector placement already saved for that session.
 
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order
