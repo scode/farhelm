@@ -48,3 +48,32 @@ generation or doctest role (`AGENTS.md`, "Tests and validation"). Nothing was re
 A single fresh-context Opus 5.5 reviewer at high effort, using the plan's general charter, reviewed the PR's commit and
 found nothing to fix. It confirmed the change is confined to the two files, that the sentence's description matches the
 sections of `.agents/agent-records.md`, and that the commit title is valid Conventional Commits.
+
+### Landing
+
+#### What landed with it
+
+Only this plan landed this round. Since the plan's base, main gained only queue bookkeeping. Before the plan was queued,
+main had gained the new fleet flow ("add a fleet flow for looking after the agents", #5056), so the executor already
+worked on top of it. That change reworded the opening of the agent records doc and moved that doc's entry in the root
+instructions' list of flows to the new fleet doc. I checked the new pointer against that: the agent records doc still
+describes the records repository, the files each host keeps for it and the records tool, as the sentence says, and the
+fleet doc itself sends readers to the agent records doc for how records work, so pointing the landing README at the
+agent records doc rather than the fleet doc is right. The stack moved onto the latest main without conflicts, and
+nothing in the executor's report became untrue.
+
+#### Fixes made while landing
+
+None. An independent review of the diff against main found nothing to fix.
+
+#### Checks
+
+Run locally on the plan's change, unaltered from what the executor pushed, rebased onto main as it stood when the
+landing started (`7192ed9b`). What merged differs from that tree only by the landing's own queue bookkeeping:
+
+- `dprint check scripts/plans-landing/README.md TODO.md`: passed.
+- `python3 scripts/check-agents-md.py`: passed with 0 errors. Its one warning is about a citation in the triage outcomes
+  archive, a frozen file this plan does not touch, and was there before.
+
+Reused: nothing. Skipped: every Rust, JavaScript, desktop, installer and provisioning test, since this is a
+Markdown-only change with no generation or doctest role; and CI, which runs only on demand.
