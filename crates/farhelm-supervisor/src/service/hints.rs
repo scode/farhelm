@@ -203,6 +203,22 @@ pub(crate) mod test_support {
                 "only hints are sent on the probe's link: {what}"
             );
         }
+
+        /// Fail with `what` if a hint arrives within `window`.
+        ///
+        /// An absence is only evidence when the window outlasts the sender's
+        /// coalescing gap ([`SESSIONS_CHANGED_MIN_GAP`]), so a mark made just
+        /// before the call would have been sent inside it; callers pass
+        /// several gaps' worth.
+        pub(crate) async fn expect_no_hint(&mut self, window: Duration, what: &str) {
+            assert!(
+                window > SESSIONS_CHANGED_MIN_GAP * 2,
+                "a window shorter than the coalescing gap proves nothing"
+            );
+            if let Ok(frame) = tokio::time::timeout(window, self.receiver.recv()).await {
+                panic!("unexpected hint ({frame:?}): {what}");
+            }
+        }
     }
 }
 

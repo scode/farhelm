@@ -4328,12 +4328,23 @@ no path values are stored in the notice.
   per busy session every two seconds; and a fleet-wide UI wake, which is COALESCED — the helm detects a changed session
   by comparing whole serialized `SessionInfo`s, but bumps the invalidation feed at most once per host refresh that found
   anything different, however many sessions moved. So the wake is bounded per refresh while the writes are bounded per
-  session, and without a quantum a single busy agent would re-render every connected client on every drain. No user
-  distinguishes two sessions whose last output was twenty seconds apart; the same quantum applies to the moment waiting
-  begins, so a question asked within a minute of the last working stamp keeps that older stamp. Writes are monotonic in
-  SQL as well as in memory, so a backwards clock step cannot make displayed activity younger or undo an unseen
-  observation; a lost write costs age precision after restart until another dated sample crosses the quantum, and
-  nothing else.
+  session, and without a quantum a single busy agent would re-render every connected client on every drain. A
+  per-session quantum alone does not keep the wake rare at scale, though: with hundreds of working sessions their
+  crossings spread across the sampler's rotation and changed nearly every refresh, about one a second at 500 sessions
+  (`lore/2026-11-26-desktop-idle-cpu.md`). So an advance is published at once only when the same sample already hints
+  for its session (a status transition, a work start, a permission change), which costs no extra refresh; that includes
+  the sample that sees a working session go idle, which publishes the advance the session held, and the ticker noticing
+  that a session ended (an exit or a Stop), which no later sample would see. Every other advance, the steady drift of a
+  session that keeps working, is held and published with all other held advances in one flush per quantum, with one
+  hint. The published value is always the observed sample time, never the flush time. The age shown for a session that
+  is still working can therefore lag by up to about two quanta (plus the sampler's rotation period beyond its per-tick
+  budget) rather than one; an idle, waiting or ended row's age, and the unseen dot only idle rows show, are not delayed.
+  Held advances the supervisor never published before it stopped are lost: the reloaded stamp can trail the last
+  observed activity by up to about two quanta, one more than before activity was held. No user distinguishes two
+  sessions whose last output was twenty seconds apart; the same quantum applies to the moment waiting begins, so a
+  question asked within a minute of the last working stamp keeps that older stamp. Writes are monotonic in SQL as well
+  as in memory, so a backwards clock step cannot make displayed activity younger or undo an unseen observation; a lost
+  write costs age precision after restart until another dated sample crosses the quantum, and nothing else.
 - Work-start ordering: the ticker separately advances `last_work_started_at` when a sample's reading moves a session
   from idle or waiting to working, or from idle or working to waiting. Both sides must be readings of the same run's
   samples. The first sample that says something about the agent establishes the baseline. A "can't tell" sample keeps

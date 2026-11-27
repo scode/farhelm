@@ -49,9 +49,13 @@
 //! restart, and moved forward only here — only when
 //! [`ActivitySample::observe_screen`] reports the screen actually changed, and
 //! only when the change is at least [`ACTIVITY_STAMP_QUANTUM`] newer than
-//! the value already held. Everything else — every reply, every listing —
-//! only ever reads it. A lost write costs activity-age precision after
-//! restart: this process keeps answering from the
+//! the value already published. Everything else — every reply, every listing —
+//! only ever reads it. An advance is published at once when the same sample
+//! already hints for the session, and otherwise HELD and published with every
+//! other held advance in one flush per quantum (see [`hold_activity`] and
+//! [`flush_held_activity`]), so a fleet that keeps working costs the helm one
+//! refresh a minute rather than one per tick. A lost write costs activity-age
+//! precision after restart: this process keeps answering from the
 //! in-memory cell, and the next observed change past the quantum writes
 //! again. `may_record` gates the durable half exactly as it does
 //! capture's, for the same reason.
@@ -112,17 +116,22 @@
 //!   retry keeps its lifecycle claim through its generation-fenced SQLite
 //!   write; a sample keeps its screen read and the write that follows it
 //!   whole.
-//! - NOT inside either operation. Splitting either could separate a
+//! - Between individual sessions of the activity flush that ends each pass
+//!   ([`flush_held_activity`]), and of the publish for sessions found ended
+//!   (`publish_held_for_ended`). One session's publish and its durable write
+//!   stay whole; held advances a stopped ticker never reached are lost with
+//!   the process (see the flush for what that costs).
+//! - NOT inside any of these operations. Splitting one could separate a
 //!   durable write from the in-memory state that mirrors it.
 //! - NOT during a conversation-capture pass: once begun, its durable writes
 //!   and in-memory mirrors complete together before shutdown returns.
 //!
 //! So the retry phase adds at most the lifecycle wait and SQLite write for
 //! one entry before honoring a stop. The sampling phase adds one pane capture
-//! and its immediate work-start write; an already-started conversation pass
-//! must also finish. It is NOT "the next await
-//! point", which the first version of this doc claimed while the code only
-//! checked at the top of the loop.
+//! and its immediate work-start write, and the activity publishes one
+//! activity write; an already-started conversation pass must also finish.
+//! It is NOT "the next await point", which the first version of this doc
+//! claimed while the code only checked at the top of the loop.
 //!
 //! The handle also owns the independent report watcher. Its drain does not
 //! delay sampling; it finishes an in-flight admission before stopping, while
@@ -215,25 +224,35 @@ const SAMPLE_TAIL_BUDGET: usize = 16;
 /// sample would be a write per active session per two seconds, forever,
 /// for a value nobody reads that fast.
 ///
-/// The other is a FLEET-WIDE UI wake, and it is coalesced rather than
-/// per-session — a distinction worth stating so nobody sizes this
-/// constant against a cost that does not exist. The helm detects a
-/// changed session by comparing the whole serialized `SessionInfo`
-/// against what its cache holds (`farhelm-helm`'s
-/// `replace_host_sessions`), but it bumps the fleet invalidation feed at
-/// most ONCE per host refresh that found anything different, however many
-/// sessions moved. So the wake is per refresh, not per session: without
-/// this quantum, a host with even one busy agent would wake every
-/// connected UI client on every drain, every few seconds for as long as
-/// anyone is working. A minute means an otherwise
-/// settled fleet goes back to waking on real changes.
+/// The other is the helm's refresh. The helm detects a changed session by
+/// comparing the whole serialized `SessionInfo` against what its cache
+/// holds (`farhelm-helm`'s `replace_host_sessions`), and each refresh
+/// that finds anything different costs it a re-read and comparison of
+/// everything it pushes to every connected window, work that grows with the
+/// fleet. That wake is coalesced per refresh, not per session, but a
+/// per-session quantum alone does not keep it rare at scale: with N busy
+/// sessions, N stamps cross it every minute, spread across the sampler's
+/// rotation, so a host of hundreds of working agents produced a changed
+/// refresh about once a second (`lore/2026-11-26-desktop-idle-cpu.md`).
+/// This quantum is therefore ALSO the period of the fleet-wide flush:
+/// steady drift is held and published once per quantum for all sessions
+/// together ([`flush_held_activity`]), while a sample that already hints
+/// for its session publishes that session's advance at once
+/// ([`publish_held_activity`]). A working fleet then costs the helm one refresh a
+/// minute for activity, and an otherwise settled fleet wakes on real
+/// changes only.
 ///
 /// A minute is also all the resolution the consumer needs: this exists to
 /// feed the displayed "last active" age and the seen/unseen comparison,
 /// and no user distinguishes two sessions whose last output was 20 seconds
-/// apart. The visible cost is that a session's reported activity can lag
-/// reality by up to this long, which is the right trade for a rendered age
-/// and would not be for a status.
+/// apart. The visible cost: the age shown for a session that is STILL
+/// WORKING can lag reality by up to about two of these (the gate, then the
+/// wait for the flush), plus the sampler's rotation period once more than
+/// [`SAMPLE_TAIL_BUDGET`] sessions are live. A session that goes idle,
+/// starts waiting or ends publishes when the ticker sees it, so an idle,
+/// waiting or ended row's age, and the unseen dot only idle rows show, are
+/// not delayed by the flush. That is the right trade for a rendered age and
+/// would not be for a status.
 pub(crate) const ACTIVITY_STAMP_QUANTUM: Duration = Duration::from_secs(60);
 
 /// Decide whether an observed change may move `stored` to `now`.
@@ -1036,6 +1055,47 @@ async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
         return;
     }
     observe_entries(sup, &newly_dead).await;
+    publish_held_for_ended(sup, &newly_dead, stop).await;
+}
+
+/// Publish the held activity of every session in `entries` whose terminal
+/// says it has ENDED: no terminal at all, a program that exited, or a host
+/// that ended (killed, crashed, or confirmed shut down).
+///
+/// No later sample sees an ended session, so without this its held stamp
+/// would wait for the fleet-wide flush and its row would show an age up to a
+/// quantum older than its last output just when it stopped. Called by both
+/// paths that notice an exit (the wake's `reap_pass` and the tick's
+/// `sample_terminals`) after they observe outcomes, under the sampling
+/// permit like every other activity writer. An unreadable host
+/// (`Unattributed`) proves nothing either way, so it is left to the flush.
+///
+/// Checks `stop` between sessions, like the flush: after a mass exit there
+/// can be one durable write per ended session, and a shutdown waits out at
+/// most one of them.
+async fn publish_held_for_ended(
+    sup: &Arc<Supervisor>,
+    entries: &[Arc<SessionEntry>],
+    stop: &mut oneshot::Receiver<()>,
+) {
+    for entry in entries {
+        if entry.session.held_activity_at.load(Ordering::Relaxed) == 0 {
+            continue;
+        }
+        if stop_requested(stop) {
+            return;
+        }
+        let ended = !matches!(
+            entry.terminal.as_ref().map(|host| host.evidence()),
+            Some(
+                crate::hosts::HostEvidence::Owned { dead: false, .. }
+                    | crate::hosts::HostEvidence::Unattributed
+            )
+        );
+        if ended {
+            publish_held_activity(sup, entry).await;
+        }
+    }
 }
 
 /// Whether the ticker has been asked to stop.
@@ -1279,7 +1339,25 @@ pub(super) async fn observe_for_test(sup: &Supervisor) {
 /// A close the REAP phase started that fails warns (see
 /// `Supervisor::try_close_tab`), because it can mean leftover processes with
 /// no user-visible handle left to retry through.
+///
+/// Every pass ends with [`flush_held_activity`], whichever way the sampling
+/// part returned, so held activity advances are published on schedule even
+/// when nothing is live to sample (see [`sample_terminals`]).
 async fn sample_pass(
+    sup: &Arc<Supervisor>,
+    cursor: &mut SampleCursor,
+    budget: usize,
+    stop: &mut oneshot::Receiver<()>,
+) {
+    sample_terminals(sup, cursor, budget, stop).await;
+    flush_held_activity(sup, stop).await;
+}
+
+/// The sampling part of [`sample_pass`]: work-start retries, the tab reap,
+/// outcome observation, and the budgeted round robin of terminal samples
+/// described there. Returns early when nothing is live; the pass's activity
+/// flush runs regardless.
+async fn sample_terminals(
     sup: &Arc<Supervisor>,
     cursor: &mut SampleCursor,
     budget: usize,
@@ -1307,6 +1385,7 @@ async fn sample_pass(
     // started again here.
     reap_dead_host_tabs(sup, &entries, stop);
     observe_entries(sup, &entries).await;
+    publish_held_for_ended(sup, &entries, stop).await;
 
     // Running as far as its screen goes: the exit record has not been
     // processed. An unreadable host is not sampled. Nor is one still
@@ -1394,11 +1473,22 @@ async fn sample_pass(
                  the agent's UI may have changed, see docs/agent-screen-fixtures.md)"
             );
         }
-        if permission_changed || super::status::live_status(entry) != status_before {
+        let status_changed = super::status::live_status(entry) != status_before;
+        if permission_changed || status_changed {
             sup.hint_sessions_changed();
         }
+        // Activity is always held first. When this sample already makes the
+        // helm re-list the host for this session, whatever the session holds
+        // is published now rather than at the flush, since that costs no
+        // extra refresh (see `hold_activity`). That includes working to
+        // idle, which dates nothing itself: the stamp the session held while
+        // it worked goes out with the status change.
+        let hints = permission_changed || status_changed || observation.starts_work();
         if observation.dates_activity() {
-            note_activity(sup, entry).await;
+            hold_activity(sup, entry);
+        }
+        if hints {
+            publish_held_activity(sup, entry).await;
         }
         if observation.starts_work() {
             persist_work_started(sup, entry, true).await;
@@ -1519,76 +1609,184 @@ async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, 
     }
 }
 
-/// Date this session's just-observed change, in memory and — only if that
-/// moved the value — on disk.
+/// Date this session's just-observed change by HOLDING it for publication:
+/// in `core::SessionCells::held_activity_at`, not the cell listings read.
 ///
-/// The quantization gate is checked against the IN-MEMORY cell before any
-/// lock or task is taken, which is the point: a supervisor watching a
-/// dozen busy agents observes changes several times a second, and this
-/// path must cost a relaxed atomic load in all but one of those. Only a
-/// crossing of [`ACTIVITY_STAMP_QUANTUM`] reaches SQLite.
+/// Every listing reads the published cell, so moving that cell is what makes
+/// the helm see a change. Holding the advance instead, and publishing it
+/// either on a sample that already hints for the session
+/// ([`publish_held_activity`], which the sampler calls right after this) or
+/// in the fleet-wide flush ([`flush_held_activity`]), is what keeps a fleet
+/// of continuously working sessions at one helm refresh per quantum instead
+/// of one per sample tick (`lore/2026-11-26-desktop-idle-cpu.md` measured
+/// about one a second at 500 sessions). A hinting sample publishes at once
+/// because the helm re-lists the host for that hint anyway, so the row's age
+/// and the helm's unseen comparison stay prompt exactly when the session's
+/// state changes.
+///
+/// The quantization gate is checked against the PUBLISHED cell, which is the
+/// point: a supervisor watching a dozen busy agents observes changes several
+/// times a second, and this path must cost a few relaxed atomic operations,
+/// no lock and no I/O. Holding stores the newest observed time, never a
+/// flush time, so what is eventually published is when the work was
+/// actually seen; later crossings keep overwriting it until it is published.
+///
+/// The atomic stores are deliberately unconditional rather than
+/// compare-and-swaps. Only the ticker writes these cells, there is one
+/// ticker, and its captures are sequential, so nothing can interleave
+/// between a load and the store after it — even though the cells are shared
+/// across a session's entries rather than re-minted per launch
+/// (`core::SessionCells::last_activity_at`), because sharing changes which
+/// cell is written, not how many writers there are. Monotonicity where it
+/// actually matters — across processes, across a clock step — is enforced by
+/// [`publish_activity`] in memory and by the store's own predicate on disk.
+fn hold_activity(sup: &Supervisor, entry: &SessionEntry) {
+    let published = entry.session.last_activity_at.load(Ordering::Relaxed);
+    // A quantum too large to express in seconds means "never advance",
+    // which is the only sane reading of an absurd setting and keeps this
+    // conversion from needing a panic. Returned from rather than clamped
+    // to `i64::MAX`: the gate below compares a SATURATING difference, so a
+    // clamp would still let a sufficiently strange pair of timestamps
+    // (`published` near `i64::MIN`) saturate up to `i64::MAX` and satisfy
+    // the comparison — "never" would then not mean never.
+    let Ok(quantum) = i64::try_from(sup.seams.activity_quantum.as_secs()) else {
+        return;
+    };
+    let held = entry.session.held_activity_at.load(Ordering::Relaxed);
+    if let Some(at) = activity_to_hold(published, held, crate::store::now_unix(), quantum) {
+        entry.session.held_activity_at.store(at, Ordering::Relaxed);
+    }
+}
+
+/// The whole hold rule of [`hold_activity`], as a pure function so it can be
+/// asserted without a running terminal (for the same reason
+/// [`advanced_activity_stamp`] is one).
+///
+/// `published` and `held` are the session's two cells (`held` is `0` for
+/// none), `now` the sample's wall time and `quantum` the gate in seconds. A
+/// crossing of the gate, measured against what is PUBLISHED, yields the newer
+/// of the observation and what was already held; `None` leaves the held cell
+/// as it is (nothing held, or the earlier held value standing).
+fn activity_to_hold(published: i64, held: i64, now: i64, quantum: i64) -> Option<i64> {
+    advanced_activity_stamp(published, now, quantum).map(|observed| observed.max(held))
+}
+
+/// Publish this session's held activity advance, if it holds one, and hint.
+///
+/// Called for every sample that already hints for the session, and for a
+/// session the ticker finds ended (an exit or a Stop, which no later sample
+/// sees). Above all it covers the sample that reads a working session as
+/// idle: idle never dates activity, so without this the stamp the session
+/// held while it worked would wait for the flush, and the idle or ended row
+/// would show an age up to a quantum older than when it actually stopped.
+/// On the sampling path the hint it sends coalesces with the one the status
+/// change already marked, and is kept because the work-start hint is skipped
+/// while the lifecycle claim is busy. On the ended-session paths it can cost
+/// the helm one more refresh per session end than the exit's own hint, which
+/// is accepted (2026-11-26).
+async fn publish_held_activity(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>) {
+    let held = entry.session.held_activity_at.load(Ordering::Relaxed);
+    if held != 0 && publish_activity(sup, entry, held).await {
+        sup.hint_sessions_changed();
+    }
+}
+
+/// Move the session's published activity stamp to `at`, clear what it held,
+/// and persist the new value. Returns whether the published value moved; the
+/// caller decides how to hint, since a flush hints once for many sessions.
+///
+/// Never moves the stamp backwards: a held value at or behind what is
+/// already published (a clock step, or a publish that overtook it) is
+/// dropped instead.
 ///
 /// A lost write costs sort precision and nothing else. The in-memory cell
 /// is already advanced, so every reply this supervisor serves reports the
 /// new value; what a failed write loses is the value a FUTURE supervisor
 /// would reload. The bound on that loss is NOT one quantum — nothing
 /// retries — it is "until another observed change crosses the gate". For
-/// a session that goes on producing output that is the next minute; for
-/// one that goes quiet immediately after the failed write, the row keeps
-/// whatever it last held for as long as the session stays quiet, and a
+/// a session that goes on producing output that is the next minute or two;
+/// for one that goes quiet immediately after the failed write, the row
+/// keeps whatever it last held for as long as the session stays quiet, and a
 /// reload would place it that much lower in a recency sort. That is still
 /// the right trade, which is why this warns and moves on rather than
 /// retrying or unwinding the in-memory advance: the reverse would give up
 /// a certainly-correct live answer for a marginally fresher durable one.
-///
-/// The atomic store is deliberately unconditional rather than a
-/// compare-and-swap. Only the ticker writes this cell, there is one
-/// ticker, and its captures are sequential, so nothing can interleave
-/// between the load above and this store — even now that the cell is
-/// shared across a session's entries rather than re-minted per launch
-/// (`core::SessionCells::last_activity_at`), because sharing changes which
-/// cell is written, not how many writers there are. A CAS would defend
-/// against nothing while making the common path harder to read.
-/// Monotonicity where it actually matters — across processes, across a
-/// clock step — is enforced by the store's own predicate.
-async fn note_activity(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>) {
-    let stored = entry
-        .session
-        .last_activity_at
-        .load(std::sync::atomic::Ordering::Relaxed);
-    // A quantum too large to express in seconds means "never advance",
-    // which is the only sane reading of an absurd setting and keeps this
-    // conversion from needing a panic. Returned from rather than clamped
-    // to `i64::MAX`: the gate below compares a SATURATING difference, so a
-    // clamp would still let a sufficiently strange pair of timestamps
-    // (`stored` near `i64::MIN`) saturate up to `i64::MAX` and satisfy the
-    // comparison — "never" would then not mean never.
-    let Ok(quantum) = i64::try_from(sup.seams.activity_quantum.as_secs()) else {
-        return;
-    };
-    let Some(advanced) = advanced_activity_stamp(stored, crate::store::now_unix(), quantum) else {
-        return;
-    };
-    entry
-        .session
-        .last_activity_at
-        .store(advanced, std::sync::atomic::Ordering::Relaxed);
-    // The row's age and the unseen-output marker read this; it moves at
-    // most once a quantum (see `hints`).
-    sup.hint_sessions_changed();
+async fn publish_activity(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, at: i64) -> bool {
+    entry.session.held_activity_at.store(0, Ordering::Relaxed);
+    if at <= entry.session.last_activity_at.load(Ordering::Relaxed) {
+        return false;
+    }
+    entry.session.last_activity_at.store(at, Ordering::Relaxed);
     if !sup.may_record() {
         // A supervisor with no claim on this state directory tracks the
         // value for its own replies but does not write facts about
         // sessions that are not its to own — the same standing rule the
         // first-input anchor follows.
-        return;
+        return true;
     }
-    if let Err(e) = sup.store.record_activity(&entry.info.id, advanced).await {
+    if let Err(e) = sup.store.record_activity(&entry.info.id, at).await {
         warn!(
             session = %entry.info.id, error = %format!("{e:#}"),
             "could not persist this session's last-activity time; this supervisor still \
              reports it, and the next observed change past the quantum retries the write"
         );
+    }
+    true
+}
+
+/// Publish every session's held activity advance together, at most once per
+/// activity quantum, with ONE hint for all of them.
+///
+/// This is the other half of [`hold_activity`]'s hold: the steady drift of
+/// continuously working sessions reaches the helm in one refresh a quantum
+/// instead of one per sample tick. Gated by
+/// [`Supervisor::activity_flushed_at`] on the monotonic clock, compared with
+/// the same `activity_quantum` seam the gate uses, so a supervisor whose
+/// quantum is zero (tests) flushes after every pass and keeps today's
+/// immediate behavior. Runs at the end of every [`sample_pass`], whatever the
+/// pass sampled, so a session whose host became unreadable still has its
+/// held value published (an ended one is published when the ticker sees it
+/// end; see [`publish_held_activity`]).
+///
+/// The cost this accepts: a session that keeps working can show a "last
+/// active" age up to about two quanta old (the gate, plus the wait for the
+/// flush, plus the sampler's rotation period beyond [`SAMPLE_TAIL_BUDGET`]
+/// live sessions), instead of about one. Only a still-working row shows it:
+/// going idle, starting to wait, and ending all publish at once.
+///
+/// Stops cooperatively like the sampling loop: `stop` is checked between
+/// sessions, never inside one session's publish and write, so a shutdown
+/// waits out at most one durable write. Held values a stopped supervisor
+/// never published are lost with the process: the reloaded stamp can then
+/// trail the last observed activity by up to about two quanta, one more than
+/// before activity was held.
+async fn flush_held_activity(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
+    {
+        let mut flushed_at = sup
+            .activity_flushed_at
+            .lock()
+            .expect("activity flush mutex poisoned");
+        let now = tokio::time::Instant::now();
+        if flushed_at.is_some_and(|at| now.duration_since(at) < sup.seams.activity_quantum) {
+            return;
+        }
+        *flushed_at = Some(now);
+    }
+    // Cloned out of the map and the lock released before anything below
+    // awaits, as in `sample_pass`.
+    let entries: Vec<Arc<SessionEntry>> = sup.sessions.lock().await.values().cloned().collect();
+    let mut published = false;
+    for entry in &entries {
+        if stop_requested(stop) {
+            break;
+        }
+        let held = entry.session.held_activity_at.load(Ordering::Relaxed);
+        if held != 0 {
+            published |= publish_activity(sup, entry, held).await;
+        }
+    }
+    if published {
+        sup.hint_sessions_changed();
     }
 }
 
@@ -4005,8 +4203,8 @@ mod tests {
     /// indistinguishable from "it never moved".
     ///
     /// No terminal, because none of these drive a sampling pass — they
-    /// call [`note_activity`] directly, which is where the durable
-    /// decision is made.
+    /// call [`hold_activity`] and [`publish_held_activity`] directly,
+    /// which is where the durable decision is made.
     async fn session_with_stale_activity(
         sup: &Arc<Supervisor>,
         id: &str,
@@ -4381,7 +4579,8 @@ mod tests {
         let entry = session_with_stale_activity(&sup, "s1", seeded).await;
         sup.may_record.store(false, Ordering::SeqCst);
 
-        note_activity(&sup, &entry).await;
+        hold_activity(&sup, &entry);
+        publish_held_activity(&sup, &entry).await;
 
         assert!(
             stamp_of(&sup, "s1").await > seeded,
@@ -4398,6 +4597,387 @@ mod tests {
             seeded,
             "and it must not write a fact about a session another supervisor owns"
         );
+    }
+
+    /// The hold rule, pinned as a table. Why it matters: holding steady drift
+    /// instead of publishing it is what keeps a working fleet from costing
+    /// the helm a full refresh per sample tick
+    /// (`lore/2026-11-26-desktop-idle-cpu.md`). Specified: a crossing of the
+    /// gate, measured against the PUBLISHED value, is held as the newer of
+    /// the observation and what was already held; inside the gate nothing
+    /// changes (an earlier held value stands); a clock stepped back behind
+    /// the published value holds nothing new.
+    #[test]
+    fn activity_to_hold_holds_the_newest_crossing_against_the_published_value() {
+        const PUBLISHED: i64 = 1_000;
+        const Q: i64 = 60;
+        assert_eq!(
+            activity_to_hold(PUBLISHED, 0, 1_030, Q),
+            None,
+            "inside the gate"
+        );
+        assert_eq!(
+            activity_to_hold(PUBLISHED, 0, 1_060, Q),
+            Some(1_060),
+            "a crossing"
+        );
+        assert_eq!(
+            activity_to_hold(PUBLISHED, 1_060, 1_120, Q),
+            Some(1_120),
+            "a later crossing replaces what was held"
+        );
+        assert_eq!(
+            activity_to_hold(PUBLISHED, 1_120, 1_090, Q),
+            Some(1_120),
+            "an observation older than what is held (a clock step) keeps the held value"
+        );
+        assert_eq!(
+            activity_to_hold(PUBLISHED, 0, 900, Q),
+            None,
+            "a clock behind the published value"
+        );
+    }
+
+    /// The durable row's `last_activity_at`, read from the store.
+    async fn row_stamp(sup: &Arc<Supervisor>, id: &str) -> i64 {
+        sup.store
+            .session(id)
+            .await
+            .expect("read the row")
+            .expect("the row is there")
+            .last_activity_at
+    }
+
+    /// Keep [`flush_held_activity`] from publishing for the rest of the test,
+    /// by recording a flush an hour in the FUTURE: tokio's `duration_since`
+    /// saturates to zero, so the gate holds however long a pass takes on a
+    /// loaded machine. Tests that must tell "published by a hinting sample or
+    /// an end" apart from "published by the flush" call this once.
+    fn gate_the_flush(sup: &Supervisor) {
+        *sup.activity_flushed_at.lock().unwrap() =
+            Some(tokio::time::Instant::now() + Duration::from_secs(3_600));
+    }
+
+    /// The fleet-wide flush end to end, with a real minute-long quantum and
+    /// the hints a connected helm would get. Why it matters: this is the
+    /// mechanism that turns a working fleet's per-tick stream of activity
+    /// changes into one helm refresh per quantum
+    /// (`lore/2026-11-26-desktop-idle-cpu.md`). Specified: a held crossing
+    /// moves neither the published cell nor the row and sends no hint; the
+    /// flush publishes every held value as the OBSERVED time (not the flush
+    /// time) into both, with a hint; a flush inside the quantum of the
+    /// previous one publishes nothing; one a quantum later does. The flush
+    /// instant is set directly rather than waited out, so nothing here
+    /// depends on elapsed time but the hint windows.
+    ///
+    /// What the hint check can and cannot show: marks made before the hint
+    /// sender wakes collapse into one `Notify` permit, so "one hint, not one
+    /// per session" is only observable when the sender happens to run
+    /// between two sessions' writes. The flush marks once by construction
+    /// (`flush_held_activity`); this test pins that a hint arrives, and no
+    /// second one after it.
+    #[farhelm_testtrace::test]
+    async fn held_activity_is_published_by_the_flush_once_per_quantum() {
+        let state = StateDir::new();
+        let quantum = Duration::from_secs(60);
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                activity_quantum: quantum,
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        let seeded = now_unix() - 3_600;
+        let first = session_with_stale_activity(&sup, "s1", seeded).await;
+        let second = session_with_stale_activity(&sup, "s2", seeded).await;
+        let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
+        let window = Duration::from_secs(1);
+        hints
+            .expect_no_hint(
+                window,
+                "the premise: setting up the sessions marked nothing",
+            )
+            .await;
+
+        hold_activity(&sup, &first);
+        hold_activity(&sup, &second);
+        let held = first.session.held_activity_at.load(Ordering::Relaxed);
+        assert!(held > seeded, "a crossing is held: {held}");
+        assert_eq!(stamp_of(&sup, "s1").await, seeded, "held, not published");
+        assert_eq!(row_stamp(&sup, "s1").await, seeded, "and not written");
+        hints
+            .expect_no_hint(
+                window,
+                "steady drift reaches the helm only through the flush",
+            )
+            .await;
+
+        let (_keep_running, mut stop) = oneshot::channel::<()>();
+        flush_held_activity(&sup, &mut stop).await;
+        assert_eq!(
+            stamp_of(&sup, "s1").await,
+            held,
+            "the observed time is published"
+        );
+        assert_eq!(row_stamp(&sup, "s1").await, held, "and written");
+        assert!(
+            stamp_of(&sup, "s2").await > seeded,
+            "every held session is published"
+        );
+        assert_eq!(
+            first.session.held_activity_at.load(Ordering::Relaxed),
+            0,
+            "nothing held"
+        );
+        hints.expect_hint("the flush hints").await;
+        hints.expect_no_hint(window, "and only once").await;
+
+        let later = held + 120;
+        first
+            .session
+            .held_activity_at
+            .store(later, Ordering::Relaxed);
+        flush_held_activity(&sup, &mut stop).await;
+        assert_eq!(
+            stamp_of(&sup, "s1").await,
+            held,
+            "a flush inside the quantum waits"
+        );
+
+        *sup.activity_flushed_at.lock().unwrap() = Some(
+            tokio::time::Instant::now()
+                .checked_sub(quantum)
+                .expect("the monotonic clock is past one quantum"),
+        );
+        flush_held_activity(&sup, &mut stop).await;
+        assert_eq!(
+            stamp_of(&sup, "s1").await,
+            later,
+            "a quantum later it publishes"
+        );
+        hints.expect_hint("and hints again").await;
+    }
+
+    /// Publishing what a session holds moves the published cell and the row
+    /// at once, hints, and leaves nothing held; with nothing held it does
+    /// nothing at all. Why it matters: this is what a sample that already
+    /// hints (a status change) and an ended session go through, the moments
+    /// a user looks at a row's age and unseen state.
+    #[farhelm_testtrace::test]
+    async fn publishing_held_activity_moves_the_stamp_at_once_and_hints() {
+        let state = StateDir::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                activity_quantum: Duration::from_secs(60),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        let seeded = now_unix() - 3_600;
+        let entry = session_with_stale_activity(&sup, "s1", seeded).await;
+        let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
+        let window = Duration::from_secs(1);
+        hints
+            .expect_no_hint(window, "the premise: setting up the session marked nothing")
+            .await;
+
+        publish_held_activity(&sup, &entry).await;
+        assert_eq!(
+            stamp_of(&sup, "s1").await,
+            seeded,
+            "nothing held, nothing published"
+        );
+        hints.expect_no_hint(window, "and nothing hinted").await;
+
+        hold_activity(&sup, &entry);
+        let held = entry.session.held_activity_at.load(Ordering::Relaxed);
+        assert!(held > seeded, "the premise: a crossing is held");
+        publish_held_activity(&sup, &entry).await;
+        assert_eq!(
+            stamp_of(&sup, "s1").await,
+            held,
+            "the held value is published"
+        );
+        assert_eq!(row_stamp(&sup, "s1").await, held, "and written");
+        assert_eq!(entry.session.held_activity_at.load(Ordering::Relaxed), 0);
+        hints.expect_hint("publishing what was held hints").await;
+    }
+
+    /// Through real sampling passes over a live terminal: while a session
+    /// keeps working, its crossings are held and its published stamp stays
+    /// put; the pass that reads it as idle publishes exactly the value it
+    /// held, with the flush kept from running the whole time. Why it
+    /// matters: this is the sampler's wiring of the rule (hold on a dated
+    /// sample, publish on a hinting one), which no direct call of the
+    /// functions above exercises, and the working-to-idle case is the one
+    /// the hold must not delay (`lore/2026-11-26-desktop-idle-cpu.md`). A
+    /// one-second quantum lets crossings happen within the test; gating the
+    /// flush for the whole test is what makes "published by the hinting
+    /// sample" observable rather than indistinguishable from the flush.
+    #[farhelm_testtrace::test]
+    async fn a_session_going_idle_publishes_what_it_held_while_it_worked() {
+        let state = StateDir::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                activity_quantum: Duration::from_secs(1),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        // About three seconds of output, then silence. `sleep 600` rather
+        // than an exit, so the session goes idle instead of ending.
+        install_live_session(
+            &sup,
+            "s1",
+            "i=0; while [ $i -lt 150 ]; do i=$((i+1)); echo \"line $i\"; sleep 0.02; done; sleep 600",
+        )
+        .await;
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get("s1")
+            .cloned()
+            .expect("the session is in the map");
+        let seeded = now_unix() - 3_600;
+        entry
+            .session
+            .last_activity_at
+            .store(seeded, Ordering::Relaxed);
+
+        gate_the_flush(&sup);
+        let mut cursor = None;
+        let (_keep_running, mut stop) = oneshot::channel::<()>();
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        // The premise: a working session holding a crossing it has not
+        // published. Its first transition to running may publish once (that
+        // sample hints), so the premise is a held value above whatever is
+        // published, observed while it still reads running.
+        loop {
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+            let held = entry.session.held_activity_at.load(Ordering::Relaxed);
+            let published = entry.session.last_activity_at.load(Ordering::Relaxed);
+            if live_status(&entry) == SessionStatus::Running && held > published {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the working session never held a crossing (status {:?}, held {held}, published \
+                 {published})",
+                live_status(&entry)
+            );
+            // sleep-ok: the gap between sampler passes is this test's stimulus; crossings need a second of wall time.
+            tokio::time::sleep(TEST_HOST_POLL_INTERVAL).await;
+        }
+        let published_while_working = entry.session.last_activity_at.load(Ordering::Relaxed);
+
+        loop {
+            let held_before = entry.session.held_activity_at.load(Ordering::Relaxed);
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+            let published = entry.session.last_activity_at.load(Ordering::Relaxed);
+            if live_status(&entry) == SessionStatus::Idle {
+                assert!(
+                    held_before > published_while_working,
+                    "something was held to publish"
+                );
+                assert_eq!(
+                    published, held_before,
+                    "the idle pass publishes what was held"
+                );
+                assert_eq!(entry.session.held_activity_at.load(Ordering::Relaxed), 0);
+                break;
+            }
+            assert_eq!(
+                published, published_while_working,
+                "while it keeps working, crossings are held, not published"
+            );
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the session never went idle (status {:?})",
+                live_status(&entry)
+            );
+            // sleep-ok: the gap between sampler passes is this test's stimulus; idle needs several quiet samples.
+            tokio::time::sleep(TEST_HOST_POLL_INTERVAL).await;
+        }
+    }
+
+    /// A session that ENDS publishes what it held while it worked, through
+    /// the exit wake's `reap_pass`, with the flush kept from running. Why it
+    /// matters: no later sample sees an ended session, so without this path
+    /// its row would show an age up to a quantum older than its last output
+    /// at exactly the moment it stopped (`lore/2026-11-26-desktop-idle-cpu.md`).
+    /// Specified: after the program exits, one reap publishes exactly the
+    /// value held before the exit and clears it.
+    #[farhelm_testtrace::test]
+    async fn a_session_that_exits_publishes_what_it_held_while_it_worked() {
+        let state = StateDir::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                activity_quantum: Duration::from_secs(1),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        install_live_session(
+            &sup,
+            "s1",
+            "i=0; while [ $i -lt 150 ]; do i=$((i+1)); echo \"line $i\"; sleep 0.02; done",
+        )
+        .await;
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get("s1")
+            .cloned()
+            .expect("the session is in the map");
+        let seeded = now_unix() - 3_600;
+        entry
+            .session
+            .last_activity_at
+            .store(seeded, Ordering::Relaxed);
+        gate_the_flush(&sup);
+
+        let mut cursor = None;
+        let (_keep_running, mut stop) = oneshot::channel::<()>();
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        // The premise: a held crossing above what is published, while the
+        // program still runs.
+        let held = loop {
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+            let held = entry.session.held_activity_at.load(Ordering::Relaxed);
+            let published = entry.session.last_activity_at.load(Ordering::Relaxed);
+            if held > published {
+                break held;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the working session never held a crossing (held {held}, published {published})"
+            );
+            // sleep-ok: the gap between sampler passes is this test's stimulus; crossings need a second of wall time.
+            tokio::time::sleep(TEST_HOST_POLL_INTERVAL).await;
+        };
+        let published_before_exit = entry.session.last_activity_at.load(Ordering::Relaxed);
+        assert!(held > published_before_exit);
+
+        wait_for_dead_terminal(
+            entry
+                .terminal
+                .as_ref()
+                .expect("a live session has a terminal"),
+        )
+        .await;
+        reap_pass(&sup, &mut stop).await;
+        assert_eq!(
+            entry.session.last_activity_at.load(Ordering::Relaxed),
+            held,
+            "the exit publishes what the session held"
+        );
+        assert_eq!(entry.session.held_activity_at.load(Ordering::Relaxed), 0);
     }
 
     /// A durable write that FAILS costs sort precision and nothing else:
