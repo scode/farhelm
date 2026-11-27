@@ -25,8 +25,8 @@ use farhelm_proto::grid::GridInput;
 use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry, PREFERENCES_KEY};
 use gpui::{
     AppContext as _, ClipboardString, Context, Entity, ExternalPaths, FileDropEvent, FocusHandle,
-    ImageFormat, IntoElement, ParentElement, Render, Styled, TestAppContext, VisualTestContext,
-    Window, div, px,
+    ImageFormat, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke, ParentElement, Render, Styled,
+    TestAppContext, VisualTestContext, Window, div, px,
 };
 
 use super::*;
@@ -661,6 +661,141 @@ fn pasted_text_that_looks_like_a_path_is_typed(cx: &mut TestAppContext) {
     assert_eq!(h.sent(), [(typed("/etc/hosts"), true)]);
     assert!(h.uploads().is_empty(), "text is not an attachment");
     assert_eq!(h.lines(), Vec::<String>::new());
+}
+
+// ---- Paste via file upload ------------------------------------------------------------------------------------------
+
+/// Paste via file upload's chord on this platform (SPEC.md, "Attachments"): Shift+Cmd+V on a Mac, Ctrl+Alt+V on Linux.
+const PASTE_VIA_FILE_UPLOAD: &str = match THIS_PLATFORM {
+    Platform::Mac => "cmd-shift-v",
+    Platform::Linux => "ctrl-alt-v",
+};
+
+impl Harness<'_> {
+    /// Put `entries` on the clipboard and paste them via file upload, as the Mac Edit menu's item does.
+    fn paste_via_upload(&mut self, entries: Vec<ClipboardEntry>) {
+        self.cx.write_to_clipboard(ClipboardItem { entries });
+        self.cx.dispatch_action(actions::PasteViaFileUpload);
+        settle(self.cx);
+    }
+
+    /// Press `chord` in the focused terminal and hold it for two auto-repeats, then release it, as a held key arrives
+    /// from the platform.
+    fn hold(&mut self, chord: &'static str) {
+        let keystroke = Keystroke::parse(chord)
+            .unwrap_or_else(|error| panic!("{chord} does not parse: {error}"));
+        for held in [false, true, true] {
+            self.cx.simulate_event(KeyDownEvent {
+                native_key: None,
+                keystroke: keystroke.clone(),
+                is_held: held,
+                prefer_character_input: false,
+            });
+            settle(self.cx);
+        }
+        self.cx.simulate_event(KeyUpEvent {
+            native_key: None,
+            keystroke,
+        });
+        settle(self.cx);
+    }
+}
+
+/// The point of Paste via file upload is that a giant block of text never lands in an agent's input as typing: the
+/// agent gets a short path to a file holding it instead. Specified, pressing the chord itself in a focused live
+/// terminal and holding it through two auto-repeats: clipboard text with line breaks, a tab, an escape sequence and
+/// non-ASCII characters uploads once, byte for byte as UTF-8, as `pasted-1.txt` to the terminal's session; none of it
+/// is typed, while the upload runs or after; once the host answers, the host path is typed as one closed paste followed
+/// by a space, and no line is shown.
+#[gpui::test]
+fn the_chord_uploads_clipboard_text_once_and_types_its_path_instead(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let clipboard = "line one\n\tdeux é ☃\r\n\u{1b}[31mred\u{1b}[0m\n";
+    h.cx.write_to_clipboard(ClipboardItem {
+        entries: vec![text(clipboard)],
+    });
+    h.hold(PASTE_VIA_FILE_UPLOAD);
+    let answer = h.upload(
+        UploadSource::Bytes(clipboard.as_bytes().to_vec()),
+        "pasted-1.txt",
+    );
+    assert_eq!(h.sent(), [], "the text is not typed while it uploads");
+    h.answer(answer, Ok("/state/attachments/s1/pasted-1.txt".into()));
+    assert_eq!(
+        h.sent(),
+        [(typed("/state/attachments/s1/pasted-1.txt "), true)],
+        "only the path is typed"
+    );
+    assert!(
+        h.uploads().is_empty(),
+        "the held repeats uploaded nothing more"
+    );
+    assert_eq!(h.lines(), Vec::<String>::new());
+}
+
+/// Paste via file upload differs from Paste only for text, so a user can reach for it whatever the clipboard holds and
+/// never get a surprise. Specified: a pasted image uploads as Paste's does (`pasted-1.png`), and the text pasted after
+/// it takes the next number of the same counter (`pasted-2.txt`), so generated names never collide within a terminal; a
+/// file beside the text of its path uploads the file under its own name and nothing of the text; and an empty clipboard
+/// does nothing at all, with no upload, nothing typed and no line.
+#[gpui::test]
+fn paste_via_file_upload_treats_files_and_images_as_paste_does(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let png = Image::from_bytes(ImageFormat::Png, b"png bytes".to_vec());
+    h.paste_via_upload(vec![ClipboardEntry::Image(png)]);
+    let image = h.upload(UploadSource::Bytes(b"png bytes".to_vec()), "pasted-1.png");
+    h.answer(image, Ok("/state/attachments/s1/pasted-1.png".into()));
+    assert_eq!(
+        h.sent(),
+        [(typed("/state/attachments/s1/pasted-1.png "), true)]
+    );
+
+    h.paste_via_upload(vec![text("notes")]);
+    let notes = h.upload(UploadSource::Bytes(b"notes".to_vec()), "pasted-2.txt");
+    h.answer(notes, Ok("/state/attachments/s1/pasted-2.txt".into()));
+    assert_eq!(
+        h.sent(),
+        [(typed("/state/attachments/s1/pasted-2.txt "), true)]
+    );
+
+    let path = real_file();
+    h.paste_via_upload(vec![
+        file(path.to_str().unwrap()),
+        text(path.to_str().unwrap()),
+    ]);
+    let attached = h.upload(UploadSource::File(path), "Cargo.toml");
+    h.answer(attached, Ok("/state/attachments/s1/Cargo.toml".into()));
+    assert_eq!(
+        h.sent(),
+        [(typed("/state/attachments/s1/Cargo.toml "), true)]
+    );
+
+    h.paste_via_upload(vec![text("")]);
+    assert!(h.uploads().is_empty(), "an empty clipboard uploads nothing");
+    assert_eq!(h.sent(), []);
+    assert_eq!(h.lines(), Vec::<String>::new());
+}
+
+/// Unlike an ordinary paste, whose text simply goes nowhere while the terminal is not connected, Paste via file upload
+/// is an upload the user asked for, so silence would read as an upload that got lost. Specified: with the link dropped,
+/// pasting text via file upload uploads nothing, types nothing, and shows the not-connected refusal, which goes once
+/// the terminal is live again.
+#[gpui::test]
+fn paste_via_file_upload_into_a_terminal_that_is_not_live_is_refused_visibly(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    h.drop_link();
+    h.paste_via_upload(vec![text("notes")]);
+    assert!(h.uploads().is_empty(), "nothing is uploaded");
+    assert_eq!(h.sent(), []);
+    assert_eq!(h.lines(), [DETACHED_TEXT]);
+    h.attach();
+    assert_eq!(
+        h.lines(),
+        Vec::<String>::new(),
+        "live again, the refusal goes"
+    );
 }
 
 /// SPEC.md rejects directories visibly in v1, and the failure to guard against is quietly typing the folder's path

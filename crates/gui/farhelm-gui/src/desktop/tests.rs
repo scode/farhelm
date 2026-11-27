@@ -17,8 +17,8 @@ use super::{
 };
 use crate::actions::{
     CopyTerminalSelection, DeleteSession, HideApp, HideOtherApps, MinimizeWindow,
-    OpenSourceNotices, Paste, Quit, SelectAllInTerminal, ShowAllApps, TERMINAL_CONTEXT,
-    TERMINAL_KEYS, TEXT_INPUT_CONTEXT, ToggleFullScreen, ZoomWindow,
+    OpenSourceNotices, Paste, PasteViaFileUpload, Quit, SelectAllInTerminal, ShowAllApps,
+    TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, ToggleFullScreen, ZoomWindow,
 };
 use crate::test_support;
 
@@ -81,11 +81,12 @@ fn item(name: &str, action: &'static str, os: Option<OsAction>) -> Item {
 ///
 /// The Edit items' actions are pinned too, because they decide what each item reaches and which chord it shows. Undo,
 /// Redo and Cut dispatch the text field's own actions, which a focused field binds in its own key context. Copy, Paste
-/// and Select All dispatch the terminal's, so they reach a focused terminal as well as a field. Beside an item GPUI
+/// and Select All dispatch the terminal's, so they reach a focused terminal as well as a field, and Paste via File
+/// Upload (SPEC.md, "Attachments") dispatches the terminal's own action, which no field handles. Beside an item GPUI
 /// shows the first binding of its action that has no context (or matches Zed's default editor context), and failing
 /// that the first binding of all. The terminal's chords are bound in the terminal's context, so they show only as that
-/// fallback: a context-free binding of one of these actions would win over them. So each of the three must have
-/// exactly one Mac chord, its row of the terminal's key table (Cmd+C, Cmd+V, Cmd+A), and no binding outside the
+/// fallback: a context-free binding of one of these actions would win over them. So each of the four must have exactly
+/// one Mac chord, its row of the terminal's key table (Cmd+C, Cmd+V, Shift+Cmd+V, Cmd+A), and no binding outside the
 /// terminal's context; otherwise the menu could show a chord that does something else, or none. The Mac chords are
 /// checked from the table rather than the keymap, since this test does not run on a Mac.
 #[gpui::test]
@@ -121,6 +122,7 @@ fn the_mac_menu_is_the_old_apps_with_no_close_window(cx: &mut TestAppContext) {
                     edit("Cut", "input::Cut", OsAction::Cut),
                     edit("Copy", CopyTerminalSelection.name(), OsAction::Copy),
                     edit("Paste", Paste.name(), OsAction::Paste),
+                    item("Paste via File Upload", PasteViaFileUpload.name(), None),
                     Item::Separator,
                     edit(
                         "Select All",
@@ -167,6 +169,7 @@ fn the_mac_menu_is_the_old_apps_with_no_close_window(cx: &mut TestAppContext) {
         let terminals = [
             (CopyTerminalSelection.name(), "cmd-c"),
             (Paste.name(), "cmd-v"),
+            (PasteViaFileUpload.name(), "cmd-shift-v"),
             (SelectAllInTerminal.name(), "cmd-a"),
         ];
         for (action, shown) in terminals {
@@ -206,10 +209,11 @@ fn the_mac_menu_is_the_old_apps_with_no_close_window(cx: &mut TestAppContext) {
 
 /// Every app or window command in the menu has an app-wide handler, so its item is enabled whatever holds focus and a
 /// click on it is never silently dropped. The Edit items are enabled exactly where their action is handled, which is
-/// what GPUI asks before macOS enables an item: all six in a focused text field, Copy, Paste and Select All included
-/// although they dispatch the terminal's actions (the field hands them on to its own), and none with a control focused,
-/// where nothing could be edited or copied. Asked in a real window wrapped in Kit's root, with the field focused and
-/// then a control. A focused terminal's Edit items are the terminal tests'
+/// what GPUI asks before macOS enables an item: in a focused text field every item but Paste via File Upload (Copy,
+/// Paste and Select All included, although they dispatch the terminal's actions, since the field hands them on to its
+/// own), while Paste via File Upload stays disabled there, since it uploads to a session's host and only a terminal has
+/// one; and none with a control focused, where nothing could be edited or copied. Asked in a real window wrapped in
+/// Kit's root, with the field focused and then a control. A focused terminal's Edit items are the terminal tests'
 /// (`the_edit_menus_copy_paste_and_select_all_reach_a_focused_terminal`).
 #[gpui::test]
 fn the_menus_commands_are_handled_app_wide_and_the_edit_items_by_a_focused_field(
@@ -283,7 +287,9 @@ fn the_menus_commands_are_handled_app_wide_and_the_edit_items_by_a_focused_field
         "the premise: the text field holds focus"
     );
     for (name, on) in available(cx) {
-        assert!(on, "{name} is enabled in a focused text field");
+        // Paste via File Upload is the terminal's alone: a text field has no host to upload to.
+        let expected = name != "Edit > Paste via File Upload";
+        assert_eq!(on, expected, "{name} in a focused text field");
     }
     let Some(handle) = button.borrow().clone() else {
         panic!("the control was drawn");

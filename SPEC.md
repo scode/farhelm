@@ -3949,6 +3949,14 @@ at the cursor, so the agent picks it up with no manual copying. Plain text passe
 Dropped directories are rejected with a visible error in v1. Interception is unconditional for files and images — remote
 and local sessions alike, regardless of any native paste handling the agent would have had in a plain local terminal.
 
+**Paste via file upload** pastes the same way, except that plain text is intercepted too: its exact UTF-8 bytes become
+an attachment named `pasted-<n>.txt`, numbered with pasted images, and the host-side path is inserted instead of the
+text, so a large block of text never reaches an agent's input as typing. Its chord is Shift+Cmd+V on macOS and
+Ctrl+Alt+V on Linux, where Ctrl+Shift+V is ordinary paste; the chord works from a focused terminal, never reaches the
+terminal's program, and uploads once while held. The Mac app's Edit menu lists it as **Paste via File Upload**, enabled
+only while a terminal has focus. Files and images upload as for an ordinary paste, and an empty clipboard does nothing.
+A terminal that is not connected refuses it visibly, as it refuses files and images, rather than dropping the text.
+
 Files land in a per-session attachments directory under the supervisor's own data area, never in the working directory —
 dropping untracked files into a workspace would be exactly the kind of implicit mutation this system promises not to
 make. Attachment files are removed as part of deleting their session. An explicitly requested Delete may remove them
@@ -4236,14 +4244,15 @@ the physical Slash key, with no extra modifiers. Held repeats do nothing. Compos
 [Linux XKB compose cancellation case](SPEC_impl.md#actions-and-keymap). The chord never reaches the terminal's program,
 and does nothing while another modal is open or before preferences finish loading. The same dialog is also available
 from the **?** menu, where the item shows its shortcut. Its Sessions, Launching and Terminal groups show every app-wide
-shortcut and the keys inside a quick-launch sequence, with action names beside key chips. New appears only in the Mac
-desktop app. Each shortcut shows only the form this client handles: quick switcher, template list, ⚡, terminal text
-size, terminal tab switching and this dialog follow the operating system, while New, Delete, Rename, number keys and the
-sequence prefix use Command only in the Mac desktop app. The dialog names the current ⚡ template, or says none is
-marked, and lists assigned number keys with their template names. It refreshes those shared bindings once each time it
-opens; a failed read keeps cached names. Keys used only inside other dialogs are omitted. Escape, Close or a click
-outside closes the ordinary modal and restores the opener's focus, including the terminal or the **?** button. The
-documentation's Keyboard shortcuts page lists both platform forms.
+shortcut, the terminal's [paste via file upload](#attachments), and the keys inside a quick-launch sequence, with action
+names beside key chips; the terminal's other keys (paste, copy, select all and paging) are not listed. New appears only
+in the Mac desktop app. Each shortcut shows only the form this client handles: quick switcher, template list, ⚡,
+terminal text size, terminal tab switching, paste via file upload and this dialog follow the operating system, while
+New, Delete, Rename, number keys and the sequence prefix use Command only in the Mac desktop app. The dialog names the
+current ⚡ template, or says none is marked, and lists assigned number keys with their template names. It refreshes
+those shared bindings once each time it opens; a failed read keeps cached names. Keys used only inside other dialogs are
+omitted. Escape, Close or a click outside closes the ordinary modal and restores the opener's focus, including the
+terminal or the **?** button. The documentation's Keyboard shortcuts page lists both platform forms.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size

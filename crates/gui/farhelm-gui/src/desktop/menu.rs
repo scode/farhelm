@@ -13,9 +13,11 @@
 //! app's windows menu, as the old app did with that same submenu, so AppKit lists the open windows at its foot. Edit's
 //! Undo, Redo and Cut dispatch the text field's own editing actions, and its Copy, Paste and Select All the terminal's
 //! ([`EditCommand`]), which a focused text field also handles as its own; [`EditCommand`] says which items each focused
-//! element enables. The old debug-only Help menu held the web view's developer tools and Float on Top, which went with
-//! the web view; it is not ported. The one item the old menu lacked is Open-Source Notices, above Quit, which opens the notices window
-//! (`licenses`; the maintainer decided on 2026-11-13 that the notices live there).
+//! element enables. Paste via File Upload, after Paste, is the terminal's alone (SPEC.md, "Attachments"), so it is a
+//! plain item rather than an [`EditCommand`]. The old debug-only Help menu held the web view's developer tools and
+//! Float on Top, which went with the web view; it is not ported. The one item the old menu lacked is Open-Source
+//! Notices, above Quit, which opens the notices window (`licenses`; the maintainer decided on 2026-11-13 that the
+//! notices live there).
 //!
 //! Every item dispatches a declared action (SPEC_impl.md, "Actions and keymap"): the window and app commands are
 //! Farhelm's (`actions.rs`), handled app-wide here because a menu command has no element of its own; their chords are
@@ -30,8 +32,8 @@ use gpui::{App, Menu, MenuItem, OsAction};
 
 use super::licenses;
 use crate::actions::{
-    HideApp, HideOtherApps, MinimizeWindow, OpenSourceNotices, Quit, ShowAllApps, ToggleFullScreen,
-    ZoomWindow,
+    HideApp, HideOtherApps, MinimizeWindow, OpenSourceNotices, PasteViaFileUpload, Quit,
+    ShowAllApps, ToggleFullScreen, ZoomWindow,
 };
 use crate::bootstrap::WINDOW_TITLE;
 use crate::components::EditCommand;
@@ -61,6 +63,9 @@ pub(crate) fn menus() -> Vec<Menu> {
             edit("Cut", EditCommand::Cut, OsAction::Cut),
             edit("Copy", EditCommand::Copy, OsAction::Copy),
             edit("Paste", EditCommand::Paste, OsAction::Paste),
+            // The terminal's own command, not a standard editing one: no OS action, and no text field handles it, so
+            // macOS enables it only while a terminal holds focus. It shows its one binding's chord, Shift+Cmd+V.
+            MenuItem::action("Paste via File Upload", PasteViaFileUpload),
             MenuItem::separator(),
             edit("Select All", EditCommand::SelectAll, OsAction::SelectAll),
         ]),

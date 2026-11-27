@@ -2927,11 +2927,12 @@ fn nothing_is_sent_unless_the_terminal_is_live(cx: &mut TestAppContext) {
 /// program nothing. Each is pressed in a live, focused terminal, which sends a program key typed after them.
 ///
 /// Two kinds of chord are left out. Paste's whole job is to send the clipboard to the program, and on a Mac the select
-/// all and copy chords pressed before it fill the clipboard (`a_paste_sends_the_clipboards_text_as_a_paste` covers
-/// it). And on a Mac, Hide, Hide Others and Minimize call the platform, whose test stand-in in GPUI does not implement
-/// them and panics; patching the vendored GPUI for a test was declined by the migration's orchestrator on 2026-11-16.
-/// The app menu's other chords are still pressed and still never reach the program; that their bindings run is the
-/// keymap tests' to show.
+/// all and copy chords pressed before it fill the clipboard (`a_paste_sends_the_clipboards_text_as_a_paste` covers it);
+/// Paste via file upload would upload that clipboard and type its path (the attachments' tests cover it). And on a Mac,
+/// Hide, Hide Others and Minimize call the platform, whose test stand-in in GPUI does not implement them and panics;
+/// patching the vendored GPUI for a test was declined by the migration's orchestrator on 2026-11-16. The app menu's
+/// other chords are still pressed and still never reach the program; that their bindings run is the keymap tests' to
+/// show.
 #[gpui::test]
 fn app_and_terminal_keys_never_reach_the_program(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -2958,7 +2959,11 @@ fn app_and_terminal_keys_never_reach_the_program(cx: &mut TestAppContext) {
         3,
         "the premise: the Mac menu binds hide, hide others and minimize"
     );
-    let left_out: Vec<&str> = left_out.into_iter().chain(paste_chords()).collect();
+    let left_out: Vec<&str> = left_out
+        .into_iter()
+        .chain(paste_chords())
+        .chain(chords_of(&actions::PasteViaFileUpload))
+        .collect();
     let kept: Vec<&str> = TERMINAL_KEYS
         .iter()
         .filter(|row| row.owner != KeyOwner::Program)
@@ -4133,9 +4138,9 @@ fn select_all_and_copy_copy_the_whole_terminal(cx: &mut TestAppContext) {
 /// nothing (GPUI Kit's window root took it). Undo, Redo and Cut have nothing to act on in a terminal (the old app's did
 /// nothing useful there either), so they must stay disabled rather than look usable.
 ///
-/// Spec: with a live terminal focused, the menu's Copy, Paste and Select All are enabled and its Undo, Redo and Cut are
-/// not; the menu's Select All and then Copy put everything the terminal shows, history included, on the clipboard; the
-/// menu's Paste sends the clipboard's text to the program as one paste.
+/// Spec: with a live terminal focused, the menu's Copy, Paste, Paste via File Upload and Select All are enabled and its
+/// Undo, Redo and Cut are not; the menu's Select All and then Copy put everything the terminal shows, history included,
+/// on the clipboard; the menu's Paste sends the clipboard's text to the program as one paste.
 #[gpui::test]
 fn the_edit_menus_copy_paste_and_select_all_reach_a_focused_terminal(cx: &mut TestAppContext) {
     use crate::components::EditCommand;
@@ -4158,6 +4163,11 @@ fn the_edit_menus_copy_paste_and_select_all_reach_a_focused_terminal(cx: &mut Te
                 .update(|cx| cx.is_action_available(command.action().as_ref()));
         assert_eq!(on, expected, "{command:?} with a live terminal focused");
     }
+    assert!(
+        h.cx.cx
+            .update(|cx| cx.is_action_available(&actions::PasteViaFileUpload)),
+        "Paste via File Upload is enabled with a live terminal focused"
+    );
     let from_menu = |h: &mut Harness, command: EditCommand| {
         h.cx.update(|window, cx| window.dispatch_action(command.action(), cx));
         settle(h.cx);
@@ -9094,17 +9104,27 @@ fn reduced_motion_keeps_the_cursor_steady(cx: &mut TestAppContext) {
 /// Shift+PageDown with further modifiers held, which the keymap leaves to the terminal's listener on purpose: it pages
 /// them there (`program_input_routes_keys_to_the_program_or_text_input` pins that).
 ///
-/// Some program keys have no legacy encoding, so the terminal sends nothing for them, and both sides are right:
-/// GPUI Kit's inspector toggle (Cmd+Option+I, Ctrl+Shift+I) is the program's only so that Kit's debug-only binding
-/// cannot take it from a focused terminal, and the input mapping, like the old app, has no sequence for either chord
-/// and neither types text. They are listed, so that a program key that starts or stops sending fails here and whoever
-/// changes it updates the list.
+/// Some program keys have no legacy encoding, so the terminal sends nothing for them, and both sides are right: GPUI
+/// Kit's inspector toggle (Cmd+Option+I, Ctrl+Shift+I) is the program's only so that Kit's debug-only binding cannot
+/// take it from a focused terminal, and the input mapping, like the old app, has no sequence for either chord and
+/// neither types text. They are listed, so that a program key that starts or stops sending fails here and whoever
+/// changes it updates the list. One terminal chord is the other way round: Linux's Paste via file upload, Ctrl+Alt+V,
+/// is a key the input mapping would send, kept from the program by its binding (and, should the key get past that, by
+/// the terminal's listener, which drops a terminal key). It is listed too, so that the entry fails once the mapping
+/// stops sending the chord, and `the_chord_uploads_clipboard_text_once_and_types_its_path_instead` (in the attachments'
+/// tests) shows that pressing it in a focused terminal sends the program nothing but the uploaded path.
 #[test]
 fn the_keymap_and_the_input_mapping_agree_on_terminal_keys() {
     let no_legacy_encoding: [(Platform, &str); 2] = [
         (Platform::Mac, "cmd-alt-i"),
         (Platform::Linux, "ctrl-shift-i"),
     ];
+    // Terminal chords the input mapping would send if the keymap let them through. Paste via file upload's Linux chord
+    // is an ordinary Ctrl+Alt key to the mapping, which ports the old terminal's encoding and knows no GUI command (a
+    // carve-out there would make it judge the keymap's rules), while the binding in the terminal's context takes the
+    // key before the terminal's listener, and so before the mapping, ever sees it; should it get there anyway, the
+    // listener drops it as a terminal key (`terminal_key_owner`).
+    let bound_before_the_mapping: [(Platform, &str); 1] = [(Platform::Linux, "ctrl-alt-v")];
     let event = |chord: &'static str, held: bool| KeyDownEvent {
         native_key: None,
         keystroke: keystroke(chord),
@@ -9130,6 +9150,12 @@ fn the_keymap_and_the_input_mapping_agree_on_terminal_keys() {
             match row.owner {
                 KeyOwner::Program if !delivers => silent.push((platform, chord)),
                 KeyOwner::Program => {}
+                KeyOwner::Terminal if bound_before_the_mapping.contains(&(platform, chord)) => {
+                    assert!(
+                        delivers,
+                        "{platform:?} {chord}: the mapping no longer sends it, so drop it from the list"
+                    );
+                }
                 KeyOwner::Terminal => assert!(!delivers, "{platform:?} {chord}"),
                 KeyOwner::App => {
                     for held in [false, true] {

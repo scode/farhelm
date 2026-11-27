@@ -186,7 +186,8 @@
 //! - An app shortcut whose feature has no binding yet is dropped, press and repeats alike. It is Farhelm's, so it
 //!   must not reach the program in the meantime either.
 //! - The terminal's own commands have their actions, whose bindings take their keys before this listener sees them:
-//!   paste ([`actions::Paste`], [`AttachedTerminal::paste`]), the page keys, Shift+PageUp and Shift+PageDown
+//!   paste ([`actions::Paste`], [`AttachedTerminal::paste`]) and paste via file upload
+//!   ([`actions::PasteViaFileUpload`]), the page keys, Shift+PageUp and Shift+PageDown
 //!   ([`actions::ScrollTerminalPageUp`] and its sibling), and on a Mac select all and copy, Cmd+A and Cmd+C
 //!   ([`actions::SelectAllInTerminal`], [`actions::CopyTerminalSelection`]). Should one of their keys reach the
 //!   listener anyway it is dropped rather than sent, so a program never learns to depend on getting it.
@@ -1667,10 +1668,31 @@ impl AttachedTerminal {
     /// the time the text arrives. Each paste waits for the one before it, so two quick pastes reach the program in the
     /// order asked even if their reads finish the other way round.
     fn paste(&mut self, _: &actions::Paste, _: &mut Window, cx: &mut Context<Self>) {
+        self.start_paste(false, cx);
+    }
+
+    /// The user's Paste via file upload ([`actions::PasteViaFileUpload`], from its key or the Mac Edit menu): a
+    /// [`AttachedTerminal::paste`] whose text is uploaded as a file and whose path is typed, rather than the text
+    /// itself (SPEC.md, "Attachments"). Files and an image upload exactly as Paste's do, and an empty clipboard does
+    /// nothing. It shares Paste's queue, so the two are handled in the order asked, but the uploaded file's path is
+    /// typed only when its upload completes: an ordinary paste made meanwhile reaches the program first.
+    fn paste_via_file_upload(
+        &mut self,
+        _: &actions::PasteViaFileUpload,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_paste(true, cx);
+    }
+
+    /// Read the clipboard for a paste and hand what it holds to [`AttachedTerminal::pasted`] once it arrives, behind
+    /// every paste still waiting; `as_file` says whether text is uploaded rather than typed.
+    fn start_paste(&mut self, as_file: bool, cx: &mut Context<Self>) {
         if self.retired {
             return;
         }
-        // Read even when nothing is live: text then goes nowhere, but a file or an image must be refused visibly.
+        // Read even when nothing is live: ordinary text then goes nowhere, but a file, an image or text to upload must
+        // be refused visibly.
         let attachment = self.attachment.filter(|_| self.is_live());
         let read = cx.read_from_clipboard_payload_async();
         let earlier = self.paste.take();
@@ -1682,21 +1704,26 @@ impl AttachedTerminal {
             let Ok(Some(item)) = read.await else {
                 return;
             };
-            let _ = owner.update(cx, |owner, cx| owner.pasted(attachment, &item, cx));
+            let _ = owner.update(cx, |owner, cx| owner.pasted(attachment, &item, as_file, cx));
         }));
     }
 
     /// The paste hook: `item`, read for a paste the user made while `attachment` was live (`None` when none was),
     /// typed as text or handed to the attachments ([`attachments::classify`]). Text keeps the paste's stamp, so it goes
     /// nowhere if another attachment is live by now, or if none was; an attachment's path is typed into whichever is
-    /// live when its upload completes. Files or an image go where a drop's do ([`AttachedTerminal::offer`]).
+    /// live when its upload completes. Files or an image go where a drop's do ([`AttachedTerminal::offer`]), and so
+    /// does text when `as_file` says to upload it: then, like a file, it is refused visibly by a terminal that is not
+    /// connected rather than dropped, since the user asked for an upload and would otherwise see nothing happen. (An
+    /// inert terminal takes no paste at all: it registers no actions, and going inert drops a read still in flight.)
     fn pasted(
         &mut self,
         attachment: Option<Attachment>,
         item: &ClipboardItem,
+        as_file: bool,
         cx: &mut Context<Self>,
     ) {
         match attachments::classify(item) {
+            Paste::Text(text) if as_file => self.offer(vec![Offered::Text(text)], cx),
             Paste::Text(text) => {
                 if let Some(attachment) = attachment {
                     self.send_user(attachment, pasted_text(&text), cx);
@@ -2400,6 +2427,7 @@ impl Render for AttachedTerminal {
                 body.key_context(actions::TERMINAL_CONTEXT)
                     .on_key_down(cx.listener(Self::key))
                     .on_action(cx.listener(Self::paste))
+                    .on_action(cx.listener(Self::paste_via_file_upload))
                     .on_action(cx.listener(Self::select_all))
                     .on_action(cx.listener(Self::copy_selection))
                     .on_action(
@@ -4477,7 +4505,7 @@ impl AttachedTerminal {
     /// It does not wait behind the app's own pastes still reading the clipboard.
     fn paste_item(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) {
         let attachment = self.attachment.filter(|_| self.is_live());
-        self.pasted(attachment, item, cx);
+        self.pasted(attachment, item, false, cx);
     }
 }
 

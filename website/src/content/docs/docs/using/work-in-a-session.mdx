@@ -72,6 +72,12 @@ same. If you leave the session before an upload finishes, a notice names the fil
 the host. On Linux, a file you copy in a file manager pastes as text, usually its path on your machine, instead of being
 uploaded; pasted screenshots and other images still upload.
 
+To hand the agent a long piece of text as a file instead, press Cmd+Shift+V on a Mac (or choose **Edit > Paste via File
+Upload**), or Ctrl+Alt+V on Linux. Farhelm uploads the text on your clipboard to the session's host as a file and types
+that file's path at the prompt, so the agent reads the text from there instead of getting it as one giant paste.
+Screenshots and files upload just as they do with an ordinary paste, and a file that an ordinary paste on Linux turns
+into its path is uploaded as that path's text.
+
 Clicking a web link in the terminal opens it once in your browser. Farhelm keeps that click from reaching the program,
 so an agent that opens links itself does not open a second tab. If a program needs those clicks, change
 the link choices under [**Terminal** in settings](/docs/using/session-list/#terminal-links). File downloads keep working
