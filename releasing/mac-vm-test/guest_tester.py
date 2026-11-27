@@ -21,10 +21,10 @@ import subprocess
 import time
 
 from checkpoint_contract import (EffectFailure, old_session_side, require_old_session, relaunch_checks_app_only,
-                                 fixed_operations, required_operations, require_remote_host_effect, is_bonus_pass,
+                                 fixed_operations, required_operations, require_remote_host_effect,
                                  reopen_quit_call, reopen_transition_ref, require_new_desktop_pids,
                                  require_reopen_transition)
-from window_geometry import require_drag_delivery, require_window_trace
+from window_geometry import require_window_trace
 
 
 MAX_INPUT = 1024 * 1024
@@ -379,11 +379,10 @@ failure that would stop the pair's remaining P0 checks.
                 require_old_session(record['observations'], side)
             except (ValueError, KeyError, TypeError) as error:
                 raise TesterError('managed old-session premise failed: ' + str(error)) from error
-        bonus_preflight = task['check_id'] == 'native-preflight' and is_bonus_pass(task['pass_id'])
-        if task['check_id'] == 'window-drag' or bonus_preflight:
+        if task['check_id'] == 'window-drag':
             try:
                 trace = json.loads((root / 'work/managed-window-frames.json').read_text())
-                (require_drag_delivery if bonus_preflight else require_window_trace)(trace['observations'])
+                require_window_trace(trace['observations'])
             except (OSError, ValueError, RuntimeError, TypeError, KeyError) as error:
                 raise TesterError('managed window measurement premise failed: ' + str(error)) from error
     return {'identity': identity, **value, 'evidence': record['receipts'], 'continuity': record['continuity']}
@@ -614,24 +613,16 @@ not discard an otherwise safe screenshot or failure receipt.
     if (value['status'] == 'pass' and task['check_id'] == 'reopen'
             and not any(reopen_quit_call(call) for call in calls)):
         raise TesterError('reopen did not use the structured native Quit action')
-    bonus_preflight = task['check_id'] == 'native-preflight' and is_bonus_pass(task['pass_id'])
     if (value['status'] == 'pass' and task['context'].get('managed_operations')
-            and (task['check_id'] == 'window-drag' or bonus_preflight)):
+            and task['check_id'] == 'window-drag'):
         count = sum(block.get('type') == 'image' for call in calls for block in call.get('result', {}).get('content', []))
-        if task['check_id'] == 'window-drag' and count != 10:
+        if count != 10:
             raise TesterError('window check requires exactly ten native image observations')
         trace = json.loads((root / 'managed-window-frames.json').read_text())
         hashes = native_image_digests(events)
         if any(row['observation']['image']['sha256'] not in hashes for row in trace['observations']
                if row['observation']['image'] is not None):
             raise TesterError('window geometry references an image absent from the native event stream')
-        if bonus_preflight:
-            gestures = [call.get('arguments', {}) for call in calls]
-            if (not any(call.get('method') == 'drag' for call in gestures)
-                    or not any(call.get('method') == 'click' and len(call.get('args', [])) == 2
-                               and isinstance(call['args'][1], dict) and call['args'][1].get('clickCount') == 2
-                               for call in gestures)):
-                raise TesterError('bonus native readiness omitted an actual drag or double-click')
     if value['status'] == 'pass' and task['gui'] and not calls:
         raise TesterError('passing GUI check has no actual native CUA calls')
     if value['status'] == 'pass' and task['gui']:

@@ -9,7 +9,7 @@ import copy
 import unittest
 
 from test_guest_tester import PNG
-from window_geometry import calibrate, image_metadata, require_drag_delivery, require_window_trace, select_frame
+from window_geometry import calibrate, image_metadata, require_window_trace, select_frame
 
 
 def observation():
@@ -93,20 +93,6 @@ class WindowGeometryTests(unittest.TestCase):
         moved['observation']['image'] = None
         with self.assertRaisesRegex(RuntimeError, 'control interaction'):
             require_window_trace(rows)
-
-    def test_bonus_readiness_requires_an_independent_same_window_move(self):
-        """Working clicks do not imply that held input can move a window; reject stationary and replaced oracles."""
-        rows = trace()[:2]
-        for row in rows:
-            row['target'] = 'finder'
-        require_drag_delivery(rows)
-        rows[1]['observation']['frame']['window_id'] += 1
-        with self.assertRaisesRegex(RuntimeError, 'actual window-drag'):
-            require_drag_delivery(rows)
-        rows = [dict(row, target='finder') for row in trace()[7:]]
-        with self.assertRaisesRegex(RuntimeError, 'actual window-drag'):
-            require_drag_delivery(rows)
-
 
 if __name__ == '__main__':
     unittest.main()

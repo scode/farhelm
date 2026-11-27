@@ -120,22 +120,3 @@ The native event stream separately proves the gestures and image provenance.
                          if row['image'] is not None and row['image']['sequence'] == control_sequence)
     if any(not same(row['frame'], baseline, rectangle) for row in owned[control_start:]):
         raise RuntimeError('a control interaction moved or resized the window')
-
-
-def require_drag_delivery(history):
-    """Prove the bonus fixture can move a native window before investing in product setup.
-
-Finder's ordinary window is the independent input oracle. Successful native
-tool calls can leave it stationary, so readiness needs an observed same-size
-move on one process/window, with genuine image-associated measurements.
-"""
-    rows = [row['observation'] for row in history if row['target'] == 'finder'
-            and row['observation']['image'] is not None]
-    for before, after in zip(rows, rows[1:]):
-        first, last = before['frame'], after['frame']
-        if ((first['window_id'], first['pid']) == (last['window_id'], last['pid'])
-                and (first['width'], first['height']) == (last['width'], last['height'])
-                and (first['x'], first['y']) != (last['x'], last['y'])
-                and before['image']['sequence'] != after['image']['sequence']):
-            return
-    raise RuntimeError('bonus native readiness did not establish actual window-drag delivery')

@@ -277,12 +277,12 @@ its image association; it is neither a capture nor a tool failure. The tester di
 requesting an acceptance image. Frame-only measurements still count for stationary-control checks, so a missing image
 cannot hide transient window movement or borrow an earlier screenshot's calibration.
 
-Bonus native readiness exercises a real Finder window drag and folder double-click before Farhelm installation. P0 keeps
-its smaller screenshot/click/text prerequisites. With the native provider bundled in desktop build `26.1013.31256`
-(`@oai/sky` 0.7.8), held drags returned success but moved neither Farhelm nor an ordinary Finder window, including after
-Bring All to Front. Folder double-click navigation did work. The independent frame query distinguishes that missing
-delivery from a Farhelm drag failure. Revalidate a different runtime rather than assuming these gestures work because
-clicks and text do; do not substitute direct OS input or host Tart gestures for acceptance.
+Use Finder to diagnose a gesture that has no effect during the window check. Ordinary fixture readiness checks
+screenshots, clicks and exact text. With the native provider bundled in desktop build `26.1013.31256` (`@oai/sky`
+0.7.8), held drags returned success but moved neither Farhelm nor an ordinary Finder window, including after Bring All
+to Front. Folder double-click navigation did work. The independent frame query distinguishes that missing delivery from
+a Farhelm drag failure. Revalidate a different runtime rather than assuming these gestures work because clicks and text
+do; do not substitute direct OS input or host Tart gestures for acceptance.
 
 Separate fixture diagnostics also reproduced the stationary Finder window with desktop `26.1111.21308`, `@oai/sky`
 0.7.21 and native helper `26.1111.1001923`, after verifying the official app's strict signature, normally quitting the

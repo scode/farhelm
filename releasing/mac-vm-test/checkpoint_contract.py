@@ -21,11 +21,6 @@ import json
 REMOTE_MAC_PASS = 'p1-remote-mac'
 
 
-def is_bonus_pass(pass_id):
-    """Only the broader fresh and historical fixtures need bonus gesture readiness."""
-    return not pass_id.startswith('p0-') and pass_id != REMOTE_MAC_PASS
-
-
 def require_new_desktop_pids(before, launched, observed):
     """Bind an observation to a newly launched desktop, distinct from the previous app."""
     if any(not isinstance(pids, list) or not pids or any(type(pid) is not int or pid <= 0 for pid in pids)
@@ -247,8 +242,6 @@ def required_operations(check, pass_id, update_path):
         'remote-update': {'remote_version', 'continuity_remote_after'},
         'reopen': {'launch', 'versions', 'remote_version', 'continuity_reopen_before', 'continuity_reopen_after'}}
     result = set(requirements.get(check, {'prior_receipts'}))
-    if check == 'native-preflight' and is_bonus_pass(pass_id):
-        result.add('finder_frame')
     # The updater pair checks discovery and relaunch only; every other old
     # fixture provisions the remote host its later checks upgrade.
     if check == 'old-fixture' and pass_id != 'p0-updater-upgrade':

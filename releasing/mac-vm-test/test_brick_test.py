@@ -75,7 +75,7 @@ raise, and a floor beyond every previous stable must fail before guest setup.
         result = plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.24.0')
         self.assertEqual([v['id'] for v in result['passes']],
                          ['p0-fresh', 'p0-updater-upgrade', 'p0-installer-upgrade',
-                          REMOTE_MAC_PASS, 'fresh', 'upgrade-v0.24.0'])
+                          REMOTE_MAC_PASS, 'upgrade-v0.24.0', 'fresh'])
         self.assertTrue(all(v['previous'] == 'v0.24.0' for v in result['passes']))
         with self.assertRaisesRegex(Refused, 'from v0.25.0 onward'):
             plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.25.0')
@@ -84,15 +84,15 @@ raise, and a floor beyond every previous stable must fail before guest setup.
         """Testing only the latest old stable must not silently waive the older upgrade contracts within the cap.
 
 Discovery is planned before the installer pair, because the installer pair
-goes on to P1 and P2 while its candidate still runs. The plan carries the
-layout marker that lets this coordinator continue it.
+goes on to P1 and P2 while its candidate still runs. Historical upgrades run
+before the only pair that can stop on a missing window gesture.
 """
         result = plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.23.0')
         self.assertEqual([v['id'] for v in result['passes']],
                          ['p0-fresh', 'p0-updater-upgrade', 'p0-installer-upgrade',
-                          REMOTE_MAC_PASS, 'fresh', 'upgrade-v0.24.0', 'upgrade-v0.23.0'])
+                          REMOTE_MAC_PASS, 'upgrade-v0.24.0', 'upgrade-v0.23.0', 'fresh'])
         self.assertEqual(result['p0_sequence'], [v['id'] for v in result['passes'][:3]])
-        self.assertEqual(result['passes'][5]['update_path'], 'manual')
+        self.assertEqual(result['passes'][4]['update_path'], 'manual')
         self.assertEqual(result['priority_layout'], 2)
 
     def test_bonus_upgrades_cover_at_most_the_three_newest_previous_stables(self):
@@ -151,14 +151,13 @@ relaunch; the updater pair checks discovery and relaunch only.
     def test_fresh_pass_checks_window_drag_after_its_sessions(self):
         """The title-bar check needs a selected session and must not cost the bonus session coverage.
 
-Only the full fresh pass declares `window-drag`, as a GUI-only check that comes
-after the session checks and before the addendum: the main pane's top row
-exists only with a session open, and a failed check stops the pass. P0's
-fresh fixture keeps its four checkpoints.
+Only the full fresh pass declares `window-drag`. The main pane's top row
+exists only with a session open. Running this last gives the addendum and the
+session checks their own results even when the native drag is unavailable.
 """
         self.assertEqual(list(checks('fresh')),
                          ['artifact-verification', 'fixture-clean', 'install', 'app-start', 'remote-provision',
-                          'codex-conversation', 'remote-terminal', 'window-drag', 'addendum'])
+                          'codex-conversation', 'remote-terminal', 'addendum', 'window-drag'])
         self.assertEqual(checks('fresh')['window-drag'], {'gui': True, 'command': False, 'continuity': False})
         self.assertNotIn('window-drag', checks('p0-fresh'))
         self.assertNotIn('window-drag', checks('upgrade-v0.24.0'))

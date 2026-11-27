@@ -189,7 +189,7 @@ Bonus pairs combine discovery and Restart to update in the relaunch checkpoint.
         return f'var {variable} = await cua.getApp({json.dumps(selector)});'
 
     def complete(self, parameters, response):
-        """Bind geometry to actual image bytes, including during bonus fixture readiness.
+        """Bind window-check geometry to actual image bytes from either app.
 
 The provider response stays unchanged. Some menu states return AX without an
 image; that is an observation, not a failed tool. Clear the image association
@@ -206,8 +206,7 @@ so frame evidence cannot silently borrow a previous screenshot's calibration.
                 self.operations.completed.add('reopen_quit')
             self.bound.discard(parameters['target'])
         task = self.operations.task
-        needs_geometry = task['check_id'] == 'window-drag' or (
-            task['check_id'] == 'native-preflight' and not task['pass_id'].startswith('p0-'))
+        needs_geometry = task['check_id'] == 'window-drag'
         if (needs_geometry and parameters['target'] != 'desktop'
                 and parameters['method'] in ('getScreenshot', 'getAXStateAndScreenshot')):
             images = [block for block in response.get('result', {}).get('content', []) if block.get('type') == 'image']
