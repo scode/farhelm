@@ -68,16 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Decide whether Settings "Save changes before closing?" should dismiss an open custom-agent Delete confirmation (and
-  align `SPEC.md`).** From PR #5075 (`custom-agent-delete-prompt`): suppose you edit a custom agent in Settings → Custom
-  agents, click Delete (so the inline "Delete this custom agent?" confirmation opens in the footer without you clicking
-  Confirm or Cancel), and then close Settings. Settings asks "Save changes before closing?" over that Delete
-  confirmation; if you choose Save, Farhelm now dismisses the unanswered Delete prompt and saves your edits instead.
-  That matches the planning decision for #5075, but `SPEC.md` has a general UI rule saying no action may close a
-  confirmation prompt that it did not open, with no exception for Settings' Save-and-Close. Decide whether to keep this
-  behavior and add an explicit exception to `SPEC.md` (recommended), or change it back so Save-and-Close keeps the
-  Delete confirmation open. Plan: `plans/queue/settings-save-close-delete-prompt.md`.
-
 - **Make the helm Replace API refuse destination changes to match the desktop launcher and `SPEC.md`.** From PR #5081
   (`launcher-visible-consent`): the desktop app's **Replace with** dialog now keeps the session's original folder and
   checkout fixed (using Clone instead when you want to move a session), and `SPEC.md` now describes Replace with as

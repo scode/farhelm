@@ -15,7 +15,7 @@ use super::Section;
 use super::recipe_editor_tests::{draft, one_command, open_editor_with, show};
 use super::recipe_tests::{answer_account, entry, idle};
 use super::tests::{
-    available, drawn, fill, label_of, open_settings, painted, section_button, sent,
+    available, drawn, fill, into_view, label_of, open_settings, painted, section_button, sent,
 };
 use crate::operations::{HelmMarker, OpKey, Work};
 use crate::session;
@@ -84,6 +84,78 @@ fn recipe_key(cx: &mut VisualTestContext, name: &str) -> (Option<Work>, Option<S
                 .map(|failure| failure.message.raw().to_owned()),
         )
     })
+}
+
+/// The Delete question's opening words for `rust-dev`, enough to tell whether it is drawn.
+const DELETE_ASKED: &str = "Delete recipe rust-dev?";
+
+/// The label of the focused control. Needed while an unsaved-changes question is up over an open Delete question: both
+/// are drawn, and both use the shared prompt's answer ids, so an id cannot say which question holds focus.
+fn focused_label(cx: &mut VisualTestContext) -> Option<String> {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.flags.focused && node.element_id.is_some())
+        .and_then(|node| node.label.map(|label| label.to_string()))
+}
+
+/// Type a change into `rust-dev`'s editor and ask Delete, so its Delete question is up in the footer.
+fn change_and_ask_delete(cx: &mut VisualTestContext) {
+    fill(cx, "recipe-disk", "30");
+    click(cx, "recipe-delete");
+    assert!(
+        painted(cx).contains(DELETE_ASKED),
+        "the premise: the Delete question is up"
+    );
+}
+
+/// Which unsaved-changes question a test asks over the Delete question.
+#[derive(Clone, Copy, Debug)]
+enum Over {
+    /// The recipe editor's own question, asked by Back.
+    Leave,
+    /// Settings' question, asked by Escape from an editable field.
+    Close,
+}
+
+impl Over {
+    fn title(self) -> &'static str {
+        match self {
+            Over::Leave => LEAVE,
+            Over::Close => CLOSE,
+        }
+    }
+}
+
+/// With the Delete question up, ask `over`'s question over it: the leave question by Back, or Settings' close question
+/// by Escape from the disk field (the saved recipe's name is read-only and takes no focus). Back is the only way to the
+/// leave question here: while the Delete question is up it replaces the footer row, the editor's own Cancel included.
+/// Either question must open on its Save with the Delete question still drawn behind it; a test of what an answer does
+/// to the Delete question needs that premise, or it would pass on an editor that took the question away on asking.
+fn ask_over_delete(cx: &mut VisualTestContext, over: Over) {
+    // Each control is wheeled into view first, as a user scrolls to it: typing into the disk field scrolls the body
+    // down past Back, and scrolling back up for Back can leave the disk field below the fold, where a click misses.
+    match over {
+        Over::Leave => {
+            into_view(cx, "recipe-back");
+            click(cx, "recipe-back");
+        }
+        Over::Close => {
+            into_view(cx, "recipe-disk");
+            click(cx, "recipe-disk");
+            keys(cx, "escape");
+        }
+    }
+    let title = over.title();
+    assert!(painted(cx).contains(title), "the premise: {title} is up");
+    assert!(
+        painted(cx).contains(DELETE_ASKED),
+        "the premise: the Delete question stays behind {title}"
+    );
+    assert_eq!(
+        focused_label(cx).as_deref(),
+        Some("Save"),
+        "the premise: {title} opens on its Save"
+    );
 }
 
 // ---- The question before leaving -----------------------------------------------------------------------------------
@@ -476,41 +548,94 @@ fn a_delete_while_the_recipes_build_is_out_says_why_and_sends_nothing(cx: &mut T
     );
 }
 
+/// SPEC.md, "Opening and closing": nothing closes a confirmation it did not open, and Keep editing is the user taking
+/// back the leave or the close, not answering the Delete. Before this was aligned with Settings' close and custom
+/// agents, merely asking the recipe editor's leave question took the Delete question away, so Keep editing came back
+/// to a footer without it. Specified: with a change typed and Delete asked, Back's leave question, and then Settings'
+/// close question, each leave the Delete question drawn behind them; each one's Keep editing sends nothing and returns
+/// to the editor with the Delete question still up; that question still answers, and its Delete sends
+/// `DELETE /api/tensorlake/recipes/rust-dev`.
+#[gpui::test]
+fn keep_editing_keeps_an_unanswered_delete_question(cx: &mut TestAppContext) {
+    let (mut helm, cx) = edit_rust_dev(cx);
+    change_and_ask_delete(cx);
+    for over in [Over::Leave, Over::Close] {
+        // Asserts, among its premises, that asking left the Delete question in the footer.
+        ask_over_delete(cx, over);
+        let title = over.title();
+        // Keep editing is the first answer and Save the last, so two steps back from Save.
+        keys(cx, "shift-tab shift-tab");
+        assert_eq!(
+            focused_label(cx).as_deref(),
+            Some("Keep editing"),
+            "{title}: the premise: Keep editing has focus"
+        );
+        keys(cx, "enter");
+        assert!(
+            !painted(cx).contains(title),
+            "{title}: Keep editing took the question away"
+        );
+        assert!(
+            any_open(cx) && drawn(cx, "recipe-editor"),
+            "{title}: the editor stays"
+        );
+        assert!(
+            painted(cx).contains(DELETE_ASKED),
+            "{title}: the Delete question is still up"
+        );
+        assert_eq!(draft(cx).disk_gb, "30", "{title}: the draft is kept");
+    }
+    assert_eq!(sent(&mut helm), [], "Keep editing sends nothing");
+    click(cx, "prompt-confirm");
+    let delete = one_command(&mut helm);
+    assert_eq!(
+        (delete.method, delete.path.as_str()),
+        (Method::Delete, "/api/tensorlake/recipes/rust-dev"),
+        "the kept Delete question still answers"
+    );
+}
+
+/// The leave question's Save is the newer answer, so it takes an unanswered Delete question away, as Settings' close
+/// does (`a_close_save_takes_an_unanswered_delete_question_away`): a Delete still answerable after the user chose to
+/// save could delete what they just kept. Specified: with a change typed and Delete asked, Back's leave question opens
+/// with the Delete question still behind it; its Save sends the update, and the Delete question is gone while the save
+/// is out.
+#[gpui::test]
+fn the_leave_questions_save_takes_an_unanswered_delete_question_away(cx: &mut TestAppContext) {
+    let (mut helm, cx) = edit_rust_dev(cx);
+    change_and_ask_delete(cx);
+    ask_over_delete(cx, Over::Leave);
+    keys(cx, "enter");
+    let update = one_command(&mut helm);
+    assert_eq!(
+        (update.method, update.path.as_str()),
+        (Method::Put, "/api/tensorlake/recipes/rust-dev"),
+        "the leave question's Save sent the update"
+    );
+    assert!(drawn(cx, "recipe-editor"), "the editor waits for the save");
+    assert!(
+        !painted(cx).contains(DELETE_ASKED),
+        "the unanswered Delete question is gone"
+    );
+}
+
 // ---- Closing while work is out -------------------------------------------------------------------------------------
 
 /// An unanswered inline Delete confirmation must not outlive a newer answer: once the close question's Save sends the
 /// recipe, a Delete still answerable in the footer could delete what the person just chose to keep (as a custom
 /// agent's Save takes its own Delete question away, `custom_agents.rs` `Editor::save`). Specified: with a change typed
-/// and the inline Delete asked, Escape from a field asks the close question; its Save sends the update, and the Delete
-/// confirmation is gone.
+/// and the inline Delete asked, Escape from a field asks the close question with the Delete question still behind it;
+/// its Save sends the update, and the Delete confirmation is gone.
 #[gpui::test]
 fn a_close_save_takes_an_unanswered_delete_question_away(cx: &mut TestAppContext) {
     let (mut helm, cx) = edit_rust_dev(cx);
-    fill(cx, "recipe-disk", "30");
-    click(cx, "recipe-delete");
-    assert!(
-        painted(cx).contains("Delete recipe rust-dev?"),
-        "the premise: the Delete question is up"
-    );
-    // Escape from an editable field is Settings' own close; the saved recipe's name is read-only and takes no focus.
-    click(cx, "recipe-disk");
-    keys(cx, "escape");
-    assert!(painted(cx).contains("Save changes before closing?"));
-    // Both questions are drawn and both confirming answers are `prompt-confirm`; the close question opens on its Save.
-    let focused = frame(cx)
-        .into_iter()
-        .find(|node| node.flags.focused && node.element_id.is_some())
-        .and_then(|node| node.label.map(|label| label.to_string()));
-    assert_eq!(
-        focused.as_deref(),
-        Some("Save"),
-        "the premise: focus on Save"
-    );
+    change_and_ask_delete(cx);
+    ask_over_delete(cx, Over::Close);
     keys(cx, "enter");
     let update = one_command(&mut helm);
     assert_eq!(update.method, Method::Put, "the close Save sent the update");
     assert!(
-        !painted(cx).contains("Delete recipe rust-dev?"),
+        !painted(cx).contains(DELETE_ASKED),
         "the unanswered Delete question is gone"
     );
 }
