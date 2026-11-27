@@ -782,14 +782,18 @@ async fn wait_for_mutation_reply(
     }
 }
 
-/// Stop's refusal of a session whose launch was never confirmed and that has no main terminal
-/// ([`terminal_less_launch_may_be_live`]). It names what settles such a launch, so the user is not left retrying a
-/// Stop that can never succeed. Delete always can. Restart settles it too, but is offered only when a conversation
-/// was captured (never for a create interrupted before its agent ran, or for Bash or Zsh), so the message names it
-/// conditionally rather than promise an action the session may not have.
-const UNCONFIRMED_LAUNCH_STOP_REFUSAL: &str = "this session's start was never confirmed, so there is no terminal for \
-    Stop to stop and nothing was stopped; its agent may still be starting. Delete the session to end whatever its \
-    start left, or Restart it if Restart is offered";
+/// Stop's refusal of a session whose latest launch was never confirmed and that has no main terminal
+/// ([`terminal_less_launch_may_be_live`]): a create that was interrupted or whose host reported an error, or a Restart
+/// that failed without knowing whether its agent started. It says "latest launch" because the Restart case has a
+/// confirmed start behind it. It does not claim there is nothing to stop (an agent may be starting with no terminal
+/// to reach it), and it says the session's open terminal tabs were left alone too, since an ordinary Stop closes them
+/// and this one returns before touching anything. It names what settles such a launch, so the user is not left
+/// retrying a Stop that can never succeed. Delete always can. Restart settles it too, but is offered only when a
+/// conversation was captured (never for a create interrupted before its agent ran, or for Bash or Zsh), so the
+/// message names it conditionally rather than promise an action the session may not have.
+const UNCONFIRMED_LAUNCH_STOP_REFUSAL: &str = "this session's latest launch was never confirmed, so Stop cannot tell \
+    what is running and nothing was stopped, open terminal tabs included; its agent may still be starting or \
+    running. Delete the session to end whatever its launch left, or Restart it if Restart is offered";
 
 /// Start a stop without making its process sweep connection-cancellable.
 /// The supervisor-owned mutation keeps the lifecycle claim and admission
@@ -848,17 +852,18 @@ async fn handle_stop_session(
             reply_error(&tx, req_id, error.kind, error.message).await;
             return;
         }
-        // An interrupted, unconfirmed launch with no main terminal may have
-        // started a program, but there is no terminal to probe or stop, so
-        // Stop cannot tell what it would be stopping. It refuses for every
-        // caller, guarded or not, rather than record an exit it never
-        // observed and report success: Delete settles the launch record and
-        // fences or ends whatever the start left, and Restart, where it is
-        // offered, settles it before relaunching (SPEC.md, "Lifecycle
-        // operations"). This also covers a Restart that failed without
-        // knowing whether its agent started, which leaves the same launching,
-        // terminal-less state. Nothing is
-        // recorded here, so the launching state and its record stay for
+        // A session whose latest launch was never confirmed and that has no
+        // main terminal recorded may have started a program: a create that
+        // was interrupted or whose host reported an error, or a Restart that
+        // failed without knowing whether its agent started. With no recorded
+        // terminal to probe, Stop cannot tell what it would be stopping. It
+        // refuses for every caller, guarded or not, rather than record an
+        // exit it never observed and report success: Delete settles the
+        // launch record and fences or ends whatever the launch left, and
+        // Restart, where it is offered, settles it before relaunching
+        // (SPEC.md, "Lifecycle operations"). Nothing is recorded or closed
+        // here (the session's open tabs included, which an ordinary Stop
+        // would close), so the launching state and its record stay for
         // those to settle.
         if terminal_less_launch_may_be_live(&entry) {
             reply_error(
@@ -4164,9 +4169,9 @@ mod tests {
     }
 
     /// Stop refuses an unconfirmed terminal-less launch whoever asks, the
-    /// ended-agent display's guarded Stop and an unguarded Stop alike: there
-    /// is no terminal for Stop to stop, and reporting success would claim a
-    /// stop while the agent may still be starting. The refusal must come
+    /// ended-agent display's guarded Stop and an unguarded Stop alike: with
+    /// no terminal to probe, Stop cannot tell what is running, and reporting
+    /// success would claim a stop while the agent may still be starting. The refusal must come
     /// before classification (no durable row is seeded, so falling through
     /// would surface a recording failure instead), must leave the launch's
     /// outcome untouched, and must name what settles it.

@@ -68,18 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Decide whether Stop should keep refusing sessions after an ambiguous failed Restart or post-terminal failed create
-  (and review refusal wording and tab closing).** From PR #5091 (`supervisor-stop-pending-launch`): #5091 made every
-  Stop refuse a session whose start was never confirmed (directing the user to Delete, or Restart if offered) instead of
-  recording a false stopped state. Two edge cases where the old Stop actually worked are now also refused: (1) a Restart
-  that failed without knowing whether its new agent started, and (2) a create where the host reported an error after the
-  agent's terminal had already started (so no main terminal was recorded, even though one exists). In both cases, Stop
-  can no longer close the session's open shell tabs either, and the refusal message ("there is no terminal for Stop to
-  stop") is inaccurate (after a failed Restart, the workaround to keep the session is Restart again and then Stop; after
-  a failed create, only Delete works). Decide whether to keep the uniform refusal (and optionally reword the refusal
-  message to fit these two cases) or let Stop act in these cases (ending the launch's processes and tabs and closing the
-  unsettled start record). Plan: `plans/queue/stop-ambiguous-failed-restart-create.md`.
-
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
