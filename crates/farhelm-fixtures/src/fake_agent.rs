@@ -3295,7 +3295,7 @@ mod tests {
     /// have one row answer for the other and clone onto the wrong machine.
     #[farhelm_testtrace::test]
     fn the_hosts_listing_check_matches_a_whole_name_column() {
-        // Byte-for-byte what `farhelm agent hosts` prints (main.rs's
+        // Byte-for-byte what `farhelm agent hosts` prints (render.rs's
         // `aligned`): a two-character marker column, then each non-final
         // cell padded to its column's width plus one space.
         //
@@ -3304,9 +3304,9 @@ mod tests {
         // whitespace this fixture is about — the same trap
         // `agent_cli.rs`'s table assertions call out.
         let listing = [
-            "  ID      NAME         KIND  STATE",
-            "* local   this machine local connected",
-            "  builder builder      ssh   connected",
+            "  ID      NAME         KIND  STATE     TAILSCALE",
+            "* local   this machine local connected no",
+            "  builder builder      ssh   connected yes",
             "",
         ]
         .join("\n");

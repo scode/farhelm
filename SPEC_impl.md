@@ -7808,8 +7808,8 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   resolves to. Named templates show their effective `name_kind` explicitly in JSON, including `base` when the wire reply
   omits it; the table labels the quoted title as a base or fixed name. This additive discovery default does not change
   the schema version. It does not change the normalized storage or write replies, which omit Base. Each host row's
-  `tailscale` flag (protocol 92) is additive too and also leaves the version at 8. The flag is in the JSON form only:
-  the table has no column for it, and `KIND` stays the host's kind. Version 3 is the restart-only-resumes change:
+  `tailscale` flag (protocol 92) is additive too and also leaves the version at 8. The table shows it as its last
+  column, `TAILSCALE` (`yes` or `no`), and `KIND` stays the host's kind. Version 3 is the restart-only-resumes change:
   `restart_offer` lost `fresh_only` and `fallback_template`, while `resume` kept its spelling and meaning. Version 4 is
   the profile removal: a session's `agent` is always its agent type's word or `custom`, never a profile name, and the
   profiles listing is gone. Version 5 is launch kinds: `restart_offer` gained `no_resume_command`, for a command launch

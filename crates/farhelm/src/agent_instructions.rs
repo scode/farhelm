@@ -243,7 +243,7 @@ fn render(agent: &Command) -> String {
          necessarily your original argument, and says \"with Tailscale\" exactly when the\n\
          user approved that option. Accepted is not installed: adding may fail, need setup, or be\n\
          cancelled. Check farhelm agent hosts and the host's state before relying on it;\n\
-         hosts --json shows whether each host uses Tailscale.\n\
+         the hosts table's TAILSCALE column says whether each host uses Tailscale.\n\
          host edit HOST changes only alias, icon and color; host remove HOST forgets it while\n\
          its supervisor and sessions keep running. You cannot remove this machine or your own host.\n\
          Listings and instructions never wait. Run acting verbs with a tool timeout of at least\n\

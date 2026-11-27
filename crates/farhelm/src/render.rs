@@ -69,6 +69,7 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
                 "NAME".to_string(),
                 "KIND".to_string(),
                 "STATE".to_string(),
+                "TAILSCALE".to_string(),
             ]];
             rows.extend(hosts.iter().map(|host| {
                 vec![
@@ -77,6 +78,12 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
                     host.name.clone(),
                     host.kind.clone(),
                     host.state.clone(),
+                    // Every row says yes or no, never a blank, so the last
+                    // word of every row is always this cell (a blank here
+                    // would leave STATE as the last word, since `aligned`
+                    // trims trailing spaces). The spelling matches the
+                    // agents listing's.
+                    if host.tailscale { "yes" } else { "no" }.to_string(),
                 ]
             }));
             // NAME (column 2) is printed WHOLE, exempt from the clamp every
