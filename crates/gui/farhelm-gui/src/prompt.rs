@@ -594,9 +594,10 @@ impl<T: Clone + 'static> Question<T> {
     /// to `control` rather than to what held focus when it opened: the layer manager's [`ReturnTo::Control`], with its
     /// fallback when `control` is not drawn as the question closes (then focus goes back to what held it when the
     /// question opened). For a question about a control other than the one that asked it: the bulk Stop and Delete
-    /// question returns focus to the marked bar's ⋯, as the old one did, though its Stop or Delete button asked it.
-    /// Naming the control costs no focus move before the question opens, where focusing the control first is one more
-    /// visible move, and one the focus coordinator refuses once the user has moved on.
+    /// question the marked bar asks returns focus to the bar's ⋯, as the old one did, though its Stop or Delete button
+    /// asked it (the same question asked from a marked row's right-click menu names no control and returns to its
+    /// opener). Naming the control costs no focus move before the question opens, where focusing the control first is
+    /// one more visible move, and one the focus coordinator refuses once the user has moved on.
     ///
     /// An answer's own action may still move focus after the question has closed (the bulk question's Confirm sends it
     /// to the marked count). Not for an inline question, which returns focus to what held it inside its owner's dialog

@@ -68,14 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Return keyboard focus to the pre-right-click target when cancelling a Stop or Delete confirmation from a marked
-  right-click menu.** From PR #5090 (`session-right-click-menu`): right-clicking one of several marked sessions opens
-  the bulk menu, and dismissing that menu returns focus to where it was before (usually the terminal). However, if you
-  pick Stop or Delete from that right-click menu and then press Cancel on its confirmation prompt, focus currently jumps
-  to the marked-sessions bar's menu button instead of returning to where focus was before the right-click (usually the
-  terminal). Change Cancel on bulk confirmations opened from a marked right-click menu to return focus to the
-  pre-right-click target (usually the terminal). Plan: `plans/queue/marked-right-click-cancel-focus.md`.
-
 - **Decide whether Stop should keep refusing sessions after an ambiguous failed Restart or post-terminal failed create
   (and review refusal wording and tab closing).** From PR #5091 (`supervisor-stop-pending-launch`): #5091 made every
   Stop refuse a session whose start was never confirmed (directing the user to Delete, or Restart if offered) instead of

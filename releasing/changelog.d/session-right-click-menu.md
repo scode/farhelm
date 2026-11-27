@@ -9,3 +9,7 @@ Delete as well as the actions that change their pins, groups, mutes and read sta
 
 Right-clicking a session that is not marked opens that session's own menu and leaves the marks alone. With only one
 session marked, right-clicking it opens its own menu. The ⋯ button still shows on hover and focus.
+
+Backing out of Stop, Delete or Move to group's New group… chosen from that menu (Cancel, Escape or Close) puts keyboard
+focus back where it was before the right-click, usually the terminal, as closing the menu itself does. Chosen from the
+marked-sessions bar instead, they still return focus to the bar's ⋯ button.
