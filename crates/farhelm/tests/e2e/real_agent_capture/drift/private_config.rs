@@ -1137,6 +1137,63 @@ mod tests {
         );
     }
 
+    /// Spec: when Claude's private configuration is saved atomically during the case (a new file renamed over the
+    /// old one) while the user's real configuration stays untouched, a confirmed finish copies nothing back and leaves
+    /// the real file byte for byte as it was, its ancestor trust still set.
+    ///
+    /// Why: the private copy has the ancestor's trust stripped so the drift case can see Farhelm's own trust write. A
+    /// save during the case leaves a regular file in the mirror and the real file unchanged, which is exactly what
+    /// copy-back looks for among the names it may return; if the trust config were ever one of them, finishing would
+    /// clear the user's real trust for the parent directory. The rename models the mid-case save behind that risk. The
+    /// neighbouring trust test changes the real file before finishing, so it never reaches this case.
+    #[farhelm_testtrace::test]
+    fn a_renamed_claude_trust_mirror_never_replaces_the_unchanged_real_config() {
+        let scratch = farhelm_teststate::tempdir().unwrap();
+        let home = scratch.path().join("real-home");
+        let isolated = scratch.path().join("isolated");
+        let work = scratch.path().join("parent/project");
+        for dir in [&home, &isolated, &work] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let work = work.canonicalize().unwrap();
+        let parent = work.parent().unwrap().to_str().unwrap();
+        let key = work.to_str().unwrap();
+        let real = home.join(".claude.json");
+        let before = serde_json::to_vec(&serde_json::json!({"projects": {
+            parent: {"hasTrustDialogAccepted": true}
+        }}))
+        .unwrap();
+        fs::write(&real, &before).unwrap();
+        assert!(claude_project_is_trusted(&before, parent));
+
+        let config = PrivateConfig::claude_trust_mirrors(&isolated, &home, None, &work).unwrap();
+        let private = isolated.join("private-home/.claude.json");
+        let private_bytes = fs::read(&private).unwrap();
+        assert!(!claude_project_is_trusted(&private_bytes, parent));
+        let mut document: serde_json::Value = serde_json::from_slice(&private_bytes).unwrap();
+
+        // A save during the case, done the way Farhelm's own trust write does it (written beside the file and renamed
+        // over it): the workspace's trust plus an unrelated field that a later vendor save might add.
+        let inode = fs::metadata(&private).unwrap().ino();
+        document["projects"][key] = serde_json::json!({"hasTrustDialogAccepted": true});
+        document["numStartups"] = serde_json::json!(1);
+        let staged = private.with_file_name(".claude.json.tmp");
+        fs::write(&staged, serde_json::to_vec(&document).unwrap()).unwrap();
+        fs::rename(&staged, &private).unwrap();
+        assert_ne!(
+            fs::metadata(&private).unwrap().ino(),
+            inode,
+            "the save must replace the private file with a new one"
+        );
+        assert_eq!(fs::read(&real).unwrap(), before);
+
+        let notes = config.finish(true).unwrap();
+        assert!(notes.is_empty(), "{notes:?}");
+        let after = fs::read(&real).unwrap();
+        assert_eq!(after, before);
+        assert!(claude_project_is_trusted(&after, parent));
+    }
+
     /// A vendor directory that does not exist yet mirrors as an empty private tree with the ancestors in place.
     #[farhelm_testtrace::test]
     fn a_missing_real_directory_mirrors_as_empty() {
