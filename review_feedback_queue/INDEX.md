@@ -27,6 +27,18 @@ consequences.
   report and exit, or reaching a queued row hidden from the list, starts over a session that could have resumed; bucket
   uncertain, SPEC.md's sub-second rule may cover part.
 
+- [`trailing-close-tab-shortcut-acts-on-unshown-tab.md`](trailing-close-tab-shortcut-acts-on-unshown-tab.md) — With Skip
+  session confirmations on, Cmd+W (Ctrl+Shift+W on Linux) pressed just as the shown shell tab changes on its own (its
+  shell exited, another client closed it) closes the newly shown tab at once, ending its processes.
+
+- [`trailing-delete-guard-ends-unseen-tab.md`](trailing-delete-guard-ends-unseen-tab.md) — Deleting (or Replacing) a
+  session whose row shows a running agent and no shell tabs authorizes ending everything, so a tab opened after the row
+  was drawn is ended unasked, with or without the Delete question; SPEC.md says such a Delete should be refused.
+
+- [`trailing-claude-fresh-start-keeps-old-capture.md`](trailing-claude-fresh-start-keeps-old-capture.md) — After Restart
+  starts Claude fresh, Farhelm keeps the old never-saved conversation; if the new Claude cannot report its own, every
+  later Restart silently starts yet another blank Claude and drops the conversation the user worked in.
+
 ## High priority: material UX degradation
 
 - [`trailing-recent-setup-wrapper-prefix-elided.md`](trailing-recent-setup-wrapper-prefix-elided.md) — Two Recent setups
@@ -36,6 +48,26 @@ consequences.
 - [`trailing-grok-resume-after-custom-double-dash.md`](trailing-grok-resume-after-custom-double-dash.md) — For a Grok
   session whose Custom permission words end in `-- <words>`, Restart and named starts place `--resume <id>` after the
   tail, so Grok reads it as prompt text and starts a fresh conversation instead of resuming.
+
+- [`trailing-copy-late-clipboard-overwrite.md`](trailing-copy-late-clipboard-overwrite.md) — A slow Shift-Cmd-click file
+  copy writes the clipboard when its read finishes, over anything the user copied meanwhile, so the next paste is the
+  file instead.
+
+- [`trailing-custom-agent-footer-press-across-pages.md`](trailing-custom-agent-footer-press-across-pages.md) — In
+  Settings, a press on one custom agent's Save or Discard, released after the keyboard switched to another agent's page,
+  saves or discards that other agent's draft.
+
+- [`trailing-owed-hint-try-send-starved.md`](trailing-owed-hint-try-send-starved.md) — Over a slow link kept full by a
+  busy terminal, the supervisor's 'sessions changed' hint never wins a queue slot, so the host's session list in the
+  helm can lag by up to the 30-second poll.
+
+- [`trailing-activity-hold-marks-watched-unseen.md`](trailing-activity-hold-marks-watched-unseen.md) — Watching a
+  working agent finish and switching away before it is recognized idle now leaves its row with the blue new-output dot,
+  although the user saw every line.
+
+- [`trailing-close-wait-reason-scrolled-off.md`](trailing-close-wait-reason-scrolled-off.md) — When Settings stays open
+  because a close met a refused save or missed hosts, the page it shows can scroll to the top or bottom, leaving the
+  reason off-screen, so Close seems to do nothing.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -173,3 +205,101 @@ consequences.
 - [`trailing-marked-menu-metadata-steals-terminal-focus.md`](trailing-marked-menu-metadata-steals-terminal-focus.md) —
   Pin, Mark read, Mute or Move to group from the right-press marked menu moves keyboard focus off the terminal to the
   list's sort title.
+
+- [`trailing-copy-download-status-line-overwrite.md`](trailing-copy-download-status-line-overwrite.md) — A file copy's
+  and a file save's status lines replace each other, so a copy failure can vanish when an earlier save finishes and a
+  running save can lose its Downloading line.
+
+- [`trailing-skip-confirmations-help-omits-open-tabs.md`](trailing-skip-confirmations-help-omits-open-tabs.md) — The
+  Skip session confirmations switch's help still promises Delete on the first click, though a session with open shell
+  tabs is now always asked about.
+
+- [`trailing-tailscale-approved-path-untested.md`](trailing-tailscale-approved-path-untested.md) — Test gap: no helm
+  test covers an agent's approved Tailscale host add being reported back to the agent as Tailscale.
+
+- [`trailing-claude-refused-start-command-restart-untested.md`](trailing-claude-refused-start-command-restart-untested.md)
+  — Test gap: nothing pins that a Claude Restart still resumes when the stored start command fails this build's checks.
+
+- [`trailing-ntfy-disclosure-omits-blocked-reason.md`](trailing-ntfy-disclosure-omits-blocked-reason.md) — SPEC.md's
+  outbound-network and non-goal text still says ntfy carries only waiting alerts with titles and host names; blocked
+  alerts also send the agent's free-text reason.
+
+- [`trailing-blocked-alert-master-switch-untested.md`](trailing-blocked-alert-master-switch-untested.md) — Test gap:
+  nothing pins that a blocked-agent ntfy alert needs ntfy alerts switched on, or that it does not depend on the waiting
+  switch.
+
+- [`trailing-ntfy-criteria-refusal-test-unchecked.md`](trailing-ntfy-criteria-refusal-test-unchecked.md) — Test gap: the
+  test for refusing over-long blocked criteria never checks that the refused save changed nothing.
+
+- [`trailing-restart-extra-instructions-untested.md`](trailing-restart-extra-instructions-untested.md) — Test gap: no
+  supervisor test pins that a Restart's blocked-agent instruction reaches the relaunched agent.
+
+- [`trailing-paste-upload-docs-linux-file-copy.md`](trailing-paste-upload-docs-linux-file-copy.md) — The Work in a
+  session docs say a Linux file-manager copy pasted with Paste via file upload uploads its path as text; on Wayland it
+  now uploads the file itself.
+
+- [`trailing-restart-always-resumes-text-stale.md`](trailing-restart-always-resumes-text-stale.md) — SPEC_impl.md's CLI
+  section and the agent CLI's --mode refusal still say every Restart resumes, which a Claude fresh start now
+  contradicts.
+
+- [`trailing-drift-runner-budget-too-short.md`](trailing-drift-runner-budget-too-short.md) — Maintainer tooling: the
+  drift runner's fixed 720 s per case can kill a slow conversation-rotation or Codex base case before the test reports
+  which step stalled.
+
+- [`trailing-credential-delete-refusal-close-untested.md`](trailing-credential-delete-refusal-close-untested.md) — Test
+  gap: nothing checks that a credential Delete refused while Settings waits to close keeps Settings open with the
+  reason.
+
+- [`trailing-notify-reason-limit-messages-disagree.md`](trailing-notify-reason-limit-messages-disagree.md) — farhelm
+  agent notify can refuse a reason as over 2000 bytes and then, shortened, as over 500 characters; a reason the helm
+  would clean down to size is refused outright.
+
+- [`trailing-notify-accepts-invalid-asking-id.md`](trailing-notify-accepts-invalid-asking-id.md) — A notify from a
+  broken or hostile host is recorded for a session id the helm refuses everywhere else (empty, too long, control
+  characters), stored bare where a full id is promised.
+
+- [`trailing-spec-impl-host-refresh-cadence-stale.md`](trailing-spec-impl-host-refresh-cadence-stale.md) — SPEC_impl.md
+  still says a connected host's session list refreshes every 3 seconds in one place and every 30 in another.
+
+- [`trailing-custom-agent-delete-close-untested.md`](trailing-custom-agent-delete-close-untested.md) — Test gap: closing
+  Settings during a custom agent Delete is tested only when the catalog update beats the reply, and the reworked test
+  lost its post-Delete page checks.
+
+- [`trailing-tensorlake-key-clear-close-untested.md`](trailing-tensorlake-key-clear-close-untested.md) — Test gap:
+  closing Settings while a Tensorlake key Clear or a failing key Test is out is untested.
+
+- [`trailing-two-tensorlake-keys-close-save-replaces.md`](trailing-two-tensorlake-keys-close-save-replaces.md) — With
+  two different Tensorlake keys typed, saving one and closing now offers Save for the other, with no hint that it
+  replaces the key just saved.
+
+- [`trailing-spec-impl-codex-clear-test-claim-stale.md`](trailing-spec-impl-codex-clear-test-claim-stale.md) —
+  SPEC_impl.md still says a real-agent test pins Codex's transcript availability after /clear; the rotation category
+  that replaced that test does not.
+
+- [`trailing-rotation-driver-echo-matches-menu-row.md`](trailing-rotation-driver-echo-matches-menu-row.md) — Test
+  tooling: the rotation drift driver accepts the slash-menu row as the typed command's echo, so Enter can fire on a
+  partial or different command.
+
+- [`trailing-brick-override-launch-after-quit-fatal.md`](trailing-brick-override-launch-after-quit-fatal.md) —
+  Maintainer tooling: in a brick-test override pass, the managed launch right after the harness's own Quit is fatal
+  while the old app is still exiting.
+
+- [`trailing-brick-managed-envelope-feedback-guard.md`](trailing-brick-managed-envelope-feedback-guard.md) — Maintainer
+  tooling: the brick test's 'do not send feedback yet' guard is only in the plain instructions, not the managed ones
+  live runs use, while Welcome now offers Send feedback.
+
+- [`trailing-brick-addendum-checks-after-window-drag.md`](trailing-brick-addendum-checks-after-window-drag.md) —
+  Maintainer tooling: a candidate's extra brick-test checks still run after window-drag on the fresh pass, so a VM that
+  cannot drag still blocks them.
+
+- [`trailing-cmd-w-double-tap-test-overstates.md`](trailing-cmd-w-double-tap-test-overstates.md) — Test text: the Cmd+W
+  double-tap test claims a second press can never reach the session, but it covers only the moment the tab's close is in
+  flight (SPEC.md accepts the later Delete).
+
+- [`trailing-second-close-inherits-first-refusal.md`](trailing-second-close-inherits-first-refusal.md) — A second Close
+  pressed while Settings still waits on earlier work re-shows the first press's refused page when that work lands,
+  instead of asking about unsaved changes.
+
+- [`trailing-docs-shots-marks-left-after-failure.md`](trailing-docs-shots-marks-left-after-failure.md) — Maintainer
+  tooling: a failed bulk Restart/Replace release-notes shot leaves sessions marked, so later shots can be captured with
+  a stray marked bar.
