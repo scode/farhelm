@@ -21809,6 +21809,110 @@ pub(crate) mod tests {
         }
     }
 
+    /// A Codex fork is how a user leaves the lock screen of a conversation another app holds,
+    /// and before `fork` was accepted such a session never became resumable (the incident in
+    /// `lore/2026-11-26-codex-fork-and-vscode-session-sources.md`). Admission must treat a fork
+    /// exactly like the selections it already took, and keep refusing what it refused.
+    /// Specified, all from the session's own Codex process: a fork's `SessionStart` on a row
+    /// with no capture binds the fork's own persistent thread, resumable; after a `startup`
+    /// bound a parent, a fork in the same process moves the binding to the fork; a fork whose
+    /// transcript is missing is refused as a conflict, and an unknown source (`forked`) as an
+    /// invalid request, each leaving the binding, its provenance and the process pin as they
+    /// were.
+    #[farhelm_testtrace::test]
+    async fn codex_fork_reports_capture_and_rotate_like_other_selections() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let root = crate::procs::ProcessIdentity::read(std::process::id()).unwrap();
+        let reported = |runtime: &str, source: &str| {
+            let mut report = codex_pin_report(state.path(), runtime, &[root], "SessionStart");
+            report.source = source.into();
+            report
+        };
+        let bound_thread = |row: &crate::store::StoredSession| {
+            let locator = crate::agent_kind::codex::CodexLocator::parse(
+                row.captured_conversation
+                    .as_deref()
+                    .expect("a conversation is bound"),
+            )
+            .expect("a Codex locator");
+            assert!(locator.resumable, "the bound conversation can resume");
+            locator.thread_id
+        };
+
+        let id = "fork-capture";
+        seed_codex_row(&sup, id, None, None, 0).await;
+        sup.report_codex_conversation(id, reported("forked", "fork"), AgentKind::Codex, 0, None)
+            .await
+            .expect("a fork is admitted as the first capture");
+        let row = sup.store.session(id).await.unwrap().unwrap();
+        assert_eq!(bound_thread(&row).as_deref(), Some("thread-forked"));
+        assert_eq!(row.capture_ownership_version, 1);
+
+        let id = "fork-rotation";
+        seed_codex_row(&sup, id, None, None, 0).await;
+        sup.report_codex_conversation(id, reported("parent", "startup"), AgentKind::Codex, 0, None)
+            .await
+            .unwrap();
+        let parent = sup.store.session(id).await.unwrap().unwrap();
+        assert_eq!(
+            bound_thread(&parent).as_deref(),
+            Some("thread-parent"),
+            "the premise: the parent is bound before the fork"
+        );
+        sup.report_codex_conversation(
+            id,
+            reported("in-session-fork", "fork"),
+            AgentKind::Codex,
+            0,
+            None,
+        )
+        .await
+        .expect("a fork in the same process rotates the binding");
+        let forked = sup.store.session(id).await.unwrap().unwrap();
+        assert_eq!(
+            bound_thread(&forked).as_deref(),
+            Some("thread-in-session-fork")
+        );
+
+        let pin = sup.store.report_pin(id).await.unwrap();
+        let missing = reported("lost-fork", "fork");
+        std::fs::remove_file(state.path().join("lost-fork.jsonl")).unwrap();
+        let error = sup
+            .report_codex_conversation(id, missing, AgentKind::Codex, 0, None)
+            .await
+            .expect_err("a fork with no transcript is refused");
+        assert_eq!(error.kind, ErrorKind::Conflict, "{error:#}");
+        assert!(
+            format!("{error:#}").contains("no persisted root record"),
+            "refused for the missing transcript: {error:#}"
+        );
+        let error = sup
+            .report_codex_conversation(
+                id,
+                reported("unvetted", "forked"),
+                AgentKind::Codex,
+                0,
+                None,
+            )
+            .await
+            .expect_err("an unknown source is refused");
+        assert_eq!(error.kind, ErrorKind::InvalidRequest, "{error:#}");
+        assert!(
+            format!("{error:#}").contains("unsupported foreground transition"),
+            "refused for the source: {error:#}"
+        );
+        let after = sup.store.session(id).await.unwrap().unwrap();
+        assert_eq!(after.captured_conversation, forked.captured_conversation);
+        assert_eq!(
+            after.capture_ownership_version,
+            forked.capture_ownership_version
+        );
+        assert_eq!(sup.store.report_pin(id).await.unwrap(), pin);
+    }
+
     /// Pinning fences rivals while alive and descendants after exit, then releases
     /// for a fresh Codex outside the old chain. A Stop acknowledged without effect
     /// must not pin, even for an older row that already holds a ready conversation.

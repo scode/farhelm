@@ -20,8 +20,21 @@ use farhelm_proto::conversation::CODEX_LOCATOR_PREFIX as PREFIX;
 /// legitimate top-level `--agent` invocation carries one — while a
 /// present subagent `agent_id` is rejected separately at the doorway,
 /// before sanitation could blur it.
+///
+/// `fork` is a user's fork of a top-level conversation: pressing `f` on
+/// Codex's "This conversation is open in another app" lock screen, which
+/// offers only that and retry, or forking in a session. Codex reports it
+/// only for a fork with a parent conversation; a spawned subagent's fork
+/// arrives as `SubagentStart`, which Farhelm does not subscribe to. The
+/// fork's transcript is a self-contained root record with the fork's own
+/// id, so it passes the same exact-record proof as any other source
+/// (`lore/2026-11-26-codex-fork-and-vscode-session-sources.md` has the
+/// upstream evidence). Unlike `clear`, a `fork` gets no pending-capture
+/// exception in admission: Codex writes the fork's transcript before the
+/// hook runs, so a fork without one is refused like any other missing
+/// record.
 pub(crate) fn is_foreground_source(source: &str) -> bool {
-    matches!(source, "startup" | "resume" | "clear" | "compact")
+    matches!(source, "startup" | "resume" | "clear" | "compact" | "fork")
 }
 
 /// Recognize selection and confirmation callbacks before checking process authority.
@@ -343,6 +356,55 @@ mod tests {
         })
         .to_string()
             + "\n"
+    }
+
+    /// Codex's lock screen for a conversation held by another app offers only
+    /// retry and fork, so a fork that Farhelm refused left the session without
+    /// Restart for good (the incident in
+    /// `lore/2026-11-26-codex-fork-and-vscode-session-sources.md`, where the
+    /// hook log showed "Codex reported an unsupported foreground transition"
+    /// for `fork`). The doorway and admission both consult this one
+    /// vocabulary, so this pins it and the doorway's use of it; admission's
+    /// own handling of a fork is
+    /// `service::core::tests::codex_fork_reports_capture_and_rotate_like_other_selections`.
+    /// Both must still refuse a source nobody vetted. Specified: a `SessionStart`
+    /// with `startup`, `resume`, `clear`, `compact` or `fork` is a foreground
+    /// report and the hook doorway (`foreground_source_refusal`) lets it
+    /// through; an unknown source (`subagent`, `forked`, `Fork`, empty) is
+    /// refused there with the vocabulary's words; a source-less `Stop` still
+    /// passes and a `Stop` naming `fork` does not.
+    #[test]
+    fn a_fork_is_in_the_foreground_vocabulary_and_passes_the_doorway() {
+        let doorway = |source: &str, event: &str| {
+            crate::agent_kind::foreground_source_refusal(
+                farhelm_proto::ReportVendor::Codex,
+                source,
+                Some(event),
+            )
+        };
+        for source in ["startup", "resume", "clear", "compact", "fork"] {
+            assert!(
+                is_foreground_report(source, Some("SessionStart")),
+                "{source}"
+            );
+            assert_eq!(doorway(source, "SessionStart"), None, "{source}");
+        }
+        for source in ["subagent", "forked", "Fork", ""] {
+            assert!(
+                !is_foreground_report(source, Some("SessionStart")),
+                "{source:?}"
+            );
+            assert_eq!(
+                doorway(source, "SessionStart"),
+                Some("Codex reported an unsupported foreground transition"),
+                "{source:?}"
+            );
+        }
+        assert_eq!(doorway("", "Stop"), None, "a source-less Stop confirms");
+        assert!(
+            doorway("fork", "Stop").is_some(),
+            "a Stop names no transition"
+        );
     }
 
     /// A valid report binds a runtime process identity to the persistent
