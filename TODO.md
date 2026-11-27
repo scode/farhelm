@@ -164,6 +164,73 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   stripped Claude trust file (checking `self.copied` vs `self.links` and whether current Claude rewrites it) and, if it
   can, ensure stripped ancestor trust entries are never copied back to the real config (and add a regression test).
 
+- **Decide whether Settings "Save changes before closing?" should dismiss an open custom-agent Delete confirmation (and
+  align `SPEC.md`).** From PR #5075 (`custom-agent-delete-prompt`): suppose you edit a custom agent in Settings → Custom
+  agents, click Delete (so the inline "Delete this custom agent?" confirmation opens in the footer without you clicking
+  Confirm or Cancel), and then close Settings. Settings asks "Save changes before closing?" over that Delete
+  confirmation; if you choose Save, Farhelm now dismisses the unanswered Delete prompt and saves your edits instead.
+  That matches the planning decision for #5075, but `SPEC.md` has a general UI rule saying no action may close a
+  confirmation prompt that it did not open, with no exception for Settings' Save-and-Close. Decide whether to keep this
+  behavior and add an explicit exception to `SPEC.md` (recommended), or change it back so Save-and-Close keeps the
+  Delete confirmation open.
+
+- **Make the helm Replace API refuse destination changes to match the desktop launcher and `SPEC.md`.** From PR #5081
+  (`launcher-visible-consent`): the desktop app's **Replace with** dialog now keeps the session's original folder and
+  checkout fixed (using Clone instead when you want to move a session), and `SPEC.md` now describes Replace with as
+  keeping the destination. However, the helm's Replace API still accepts requests that name a different folder or a
+  fresh managed checkout (the `farhelm` CLI does not have a replace command today). Update the helm's Replace endpoint
+  to refuse requests that try to change the folder or switch to a managed checkout so the API, CLI (if any), desktop
+  launcher, and `SPEC.md` are consistent.
+
+- **Decide whether leftover container cleanup should hold its host identity across a refused check and retry.** From PR
+  #5084 (`podman-host-verification`): Farhelm records which machine and Unix account a container host is (its claim) so
+  re-pointing an SSH alias in `~/.ssh/config` while Farhelm runs won't silently send container commands to the wrong
+  machine. In Settings → Containers, listing or deleting leftover containers now checks against that stored claim for a
+  single operation and refuses if the host moved. However, if that refused check ran against a container host that
+  currently has no tracked containers, images, or recipe build helpers, the host check can overwrite the stored claim
+  with the newly reached machine; retrying Delete after that binds to the new claim and could act on the moved machine
+  (only if a container with the exact same 64-character ID exists there). Decide among: (a) keeping the cleanup claim
+  across a refused operation and its retry, (b) refusing to overwrite a stored claim while the host disagrees (requiring
+  Remove and re-add if the user moved the host on purpose), or (c) leaving it as-is under the `SPEC.md` policy that
+  re-pointing `~/.ssh/config` while Farhelm runs is undefined behavior.
+
+- **Back off automatic retries when a finished shell tab's first close sweep fails.** From PR #5087
+  (`supervisor-tab-close-retry`): when a user closes a shell tab and cleanup fails, Farhelm now retries automatically
+  with backoff (from ~1-2 s up to ~1 min). One pre-existing case is still missing backoff: when a tab's shell exits on
+  its own and Farhelm's first automatic cleanup of that exited tab fails during its initial process sweep (before ending
+  the tab's terminal host), Farhelm retries it on every cleanup pass (~every 2 seconds) without backing off. Mark that
+  failure path for backed-off retry in the same function and add a regression test.
+
+- **Align `SPEC.md` and code on which agent-requested Delete warnings go to the notices bell.** From PR #5088
+  (`agent-delete-late-notice`): when an agent deletes a session via `farhelm agent delete` and cleanup produces a
+  warning (for example, a managed checkout folder could not be archived safely, or stopping a container session's
+  container could not be confirmed), Farhelm posts that warning to the desktop app's notices bell in addition to
+  returning it to the agent, so the user still sees it even if the agent ignores it or times out. The mismatch is that
+  the code posts every notice Delete produces (including container-stop warnings that have no checkout path), whereas
+  `SPEC.md`'s agent-Delete rule says only leftover-checkout notices go to the bell. Decide whether to keep posting all
+  agent-Delete notices and widen `SPEC.md` from "checkout notice" to "Delete notice" (or narrow the code to checkout
+  notices only).
+
+- **Return keyboard focus to the pre-right-click target when cancelling a Stop or Delete confirmation from a marked
+  right-click menu.** From PR #5090 (`session-right-click-menu`): right-clicking one of several marked sessions opens
+  the bulk menu, and dismissing that menu returns focus to where it was before (usually the terminal). However, if you
+  pick Stop or Delete from that right-click menu and then press Cancel on its confirmation prompt, focus currently jumps
+  to the marked-sessions bar's menu button instead of returning to where focus was before the right-click (usually the
+  terminal). Change Cancel on bulk confirmations opened from a marked right-click menu to return focus to the
+  pre-right-click target (usually the terminal).
+
+- **Decide whether Stop should keep refusing sessions after an ambiguous failed Restart or post-terminal failed create
+  (and review refusal wording and tab closing).** From PR #5091 (`supervisor-stop-pending-launch`): #5091 made every
+  Stop refuse a session whose start was never confirmed (directing the user to Delete, or Restart if offered) instead of
+  recording a false stopped state. Two edge cases where the old Stop actually worked are now also refused: (1) a Restart
+  that failed without knowing whether its new agent started, and (2) a create where the host reported an error after the
+  agent's terminal had already started (so no main terminal was recorded, even though one exists). In both cases, Stop
+  can no longer close the session's open shell tabs either, and the refusal message ("there is no terminal for Stop to
+  stop") is inaccurate (after a failed Restart, the workaround to keep the session is Restart again and then Stop; after
+  a failed create, only Delete works). Decide whether to keep the uniform refusal (and optionally reword the refusal
+  message to fit these two cases) or let Stop act in these cases (ending the launch's processes and tabs and closing the
+  unsettled start record).
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
