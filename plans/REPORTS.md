@@ -4,3 +4,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 
 - [`delete-dead-replace-checkout-ui`](reports/delete-dead-replace-checkout-ui.report.md) landed 2026-11-27 in #5160: Delete dead fresh-checkout Replace UI remnants and close matching review finding
 - [`file-hover-too-large-hint`](reports/file-hover-too-large-hint.report.md) landed 2026-11-27 in #5162: Show "too large to copy contents" on terminal file hover cards over the 10 MB copy cap
+- [`agent-hosts-tailscale-column`](reports/agent-hosts-tailscale-column.report.md) landed 2026-11-27 in #5161: Add a TAILSCALE column to plain `farhelm agent hosts` table output
