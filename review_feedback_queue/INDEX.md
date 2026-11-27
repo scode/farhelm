@@ -173,7 +173,3 @@ consequences.
 - [`trailing-marked-menu-metadata-steals-terminal-focus.md`](trailing-marked-menu-metadata-steals-terminal-focus.md) —
   Pin, Mark read, Mute or Move to group from the right-press marked menu moves keyboard focus off the terminal to the
   list's sort title.
-
-- [`trailing-existing-environment-checkout-note-dead.md`](trailing-existing-environment-checkout-note-dead.md) — Spec
-  and dead code: no launcher path can show the existing-environment checkout note any more, but SPEC.md still promises
-  it.

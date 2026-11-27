@@ -1358,8 +1358,9 @@ impl LaunchDraft {
         if let (Some(base), Some(checkout)) = (self.numbered_base(), &self.checkout) {
             return checkout.naming.name(&base);
         }
-        let copied = matches!(self.mode, Mode::Clone | Mode::ReplaceWith { .. });
-        if copied && !self.name.is_touched() {
+        // Callers ask only while a checkout is chosen, which only New and Clone can have (Replace with and Restart with
+        // hold their destination), so Clone is the one mode whose copied title is ignored here.
+        if matches!(self.mode, Mode::Clone) && !self.name.is_touched() {
             return String::new();
         }
         self.name.value().clone()
