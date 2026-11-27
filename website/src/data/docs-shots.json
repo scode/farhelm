@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-11-24T16:22:41Z",
-  "captured_from": "4c8af11921cd414596bf633fad539e7ce3bae322",
-  "commit": "408a871c8084c7fc3b55aff0b4472096c0259a1e",
+  "captured_at": "2026-11-27T16:59:08Z",
+  "captured_from": "16547752a4da19417115c5cf9d01f6e467be0d36",
+  "commit": "ae878b58152c19340aecb7096ab7caec6b0a7080",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 699,
@@ -26,7 +26,7 @@
       "width": 1860
     },
     "first-session/statuses": {
-      "height": 780,
+      "height": 818,
       "width": 1368
     },
     "first-session/this-machine": {
@@ -429,6 +429,26 @@
       "height": 957,
       "width": 1312
     },
+    "release-notes/v0-46-0-blocked-alerts": {
+      "height": 744,
+      "width": 1710
+    },
+    "release-notes/v0-46-0-bulk-restart-replace": {
+      "height": 895,
+      "width": 1236
+    },
+    "release-notes/v0-46-0-replace-with-destination": {
+      "height": 476,
+      "width": 836
+    },
+    "release-notes/v0-46-0-right-click-session": {
+      "height": 1588,
+      "width": 862
+    },
+    "release-notes/v0-46-0-terminal-tab-close": {
+      "height": 390,
+      "width": 1450
+    },
     "session-list/controls": {
       "height": 1166,
       "width": 1656
@@ -442,7 +462,7 @@
       "width": 1866
     },
     "session-list/statuses": {
-      "height": 834,
+      "height": 819,
       "width": 1368
     },
     "session-list/trash-button": {
@@ -511,7 +531,7 @@
     },
     "work-in-a-session/download-hover": {
       "height": 361,
-      "width": 1274
+      "width": 1480
     },
     "work-in-a-session/header": {
       "height": 386,
@@ -519,7 +539,7 @@
     },
     "work-in-a-session/tabs": {
       "height": 390,
-      "width": 624
+      "width": 1570
     }
   }
 }

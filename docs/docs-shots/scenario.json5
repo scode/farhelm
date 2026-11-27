@@ -73,6 +73,17 @@
       age: 86400,
       transcript: "filler-codex.txt",
     },
+    // Bulk Restart/Replace needs two ended sessions in the selection.
+    {
+      title: "review deployment logs",
+      host: "local",
+      cwd: "~/src/farhelm",
+      wrapper: "codex",
+      status: "exited",
+      exit_code: 0,
+      age: 129600,
+      transcript: "filler-codex.txt",
+    },
     // Development review needs real OSC 8 bytes without changing the original
     // open transcript. This older, quiet row leaves the existing representative
     // sessions in their original order and reuses the ordinary replay writer.

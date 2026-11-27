@@ -1,0 +1,29 @@
+{
+  "screenshots": [
+    {
+      "entry": 5125,
+      "name": "release-notes/v0-46-0-blocked-alerts",
+      "alt": "The ntfy settings with separate switches for waiting and blocked agents."
+    },
+    {
+      "entry": 5072,
+      "name": "release-notes/v0-46-0-bulk-restart-replace",
+      "alt": "Two marked stopped sessions and the Restart/Replace button above the session list."
+    },
+    {
+      "entry": 5090,
+      "name": "release-notes/v0-46-0-right-click-session",
+      "alt": "A session's actions menu opened by right-clicking its row."
+    },
+    {
+      "entry": 5142,
+      "name": "release-notes/v0-46-0-replace-with-destination",
+      "alt": "The Replace with launcher showing the session's fixed host and directory."
+    },
+    {
+      "entry": 5096,
+      "name": "release-notes/v0-46-0-terminal-tab-close",
+      "alt": "The close confirmation below the tab's left-side close button, with the new tab button at the right."
+    }
+  ]
+}
