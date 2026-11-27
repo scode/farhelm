@@ -124,3 +124,93 @@ passed, and neither review found a bug in the behavior.
   It asked for tests of a second Cmd+W during a close, of a held Cmd+T and of the covered-terminal case, a fix to the
   Stop, restart and resume page, which still said Cmd+W always deletes, a focus check in one test, and wording fixes.
   All of it was applied, and the new tests were seen failing with their guards removed.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained three changes, none in the desktop app: `farhelm agent hosts`
+gained a `TAILSCALE` column (agent-hosts-tailscale-column, #5161), and the command line stopped letting a free-text
+option swallow the next flag and had its parsing quirks cleaned up (cli-flag-parsing-audit, #5163 and #5165). In the
+same round, after this plan, two drift-test plans landed: drift-base-isolation-and-turns (#5167, #5168) and
+drift-permission-footer (#5169). They change only the opt-in real-agent tests, their docs and a test-only hook in the
+supervisor, so none of these meets this plan. The overflow plan for the tab strip (terminal-tab-overflow-ux) has not
+landed yet, so this plan's scrolling of a tab into view before its close question still works as tested.
+
+An independent reviewer and I read the change and found nothing that must change before landing. The reviewer went
+through what Cmd+W does with each part of the window focused: the main terminal, a shell tab, a tab already closing, a
+card covering the terminals, no session, the launcher, Settings, a dialog, a menu, a question. No path deletes a session
+that the window shows with open tabs without asking (the report's own caveat about a tab opened from elsewhere in the
+moment before the press still applies). Cmd+T refuses exactly where the New terminal button is disabled. The Linux
+chords clash with no existing shortcut. Plain Ctrl+T and Ctrl+W still reach programs in the terminal; only the Shift
+variants are taken. Only the Linux Keyboard shortcuts dialog's two screenshots changed. I looked at the new light one: a
+Terminal section lists "New terminal tab" and "Close terminal tab" with their Ctrl+Shift chords.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** The round's plans each removed their own TODO entries, and one added a follow-up entry, so
+  stacking them conflicted there. I kept main's TODO.md with each plan's own TODO change applied; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing changed by the landing itself, but the review found that the report overstates one point:
+
+- **A fast double Cmd+W can still end the session.** The report says a second Cmd+W while the tab's close is under way
+  does nothing, which "keeps a double tap with confirmations skipped from ending the session after its tab". That holds
+  only while the tab's close is still in progress. With **Skip session confirmations** on, once the last shell tab has
+  closed, a second Cmd+W lands on the main terminal, and with no tabs left the session is deleted without a question. So
+  a quick double tap on the last tab can close it and then delete the session. That follows the decisions (Delete asks
+  only while tabs are open), but it is the case the report says is prevented. Possible follow-up: ignore a Delete from
+  Cmd+W for a moment after Cmd+W closed a tab.
+
+#### Worth knowing
+
+- **Two places on a Mac still show ⌘W as Delete while a shell tab is shown:** the header Delete button's tooltip and the
+  row menu's Delete shortcut label. While a shell tab is in front, ⌘W now closes that tab instead. Possible follow-up:
+  show those hints only while the main terminal is in front.
+- **Some new tests would pass without what they check.** The test for a second Cmd+W during a tab's close fails if that
+  press falls through to Delete, but would still pass if the guard were deleted outright. The test that Linux's
+  Ctrl+Shift+W does nothing on the main terminal would pass with no close handling at all. No test checks that, with
+  confirmations on, a second Cmd+W after the tab's question was answered, while the close is still in progress, does not
+  ask about the same tab again, and none checks where focus goes after a close or a cancelled question.
+
+#### Checks
+
+Run once, on the round's three plans stacked on main as it stood when the landing started (terminal-tab-shortcuts, then
+drift-base-isolation-and-turns, then drift-permission-footer), so each was tested with the others and with the earlier
+changes above. The desktop plan got the desktop app's tests, screenshots and end-to-end smoke test. The drift plans'
+real-agent cases are opt-in and spend vendor turns, so they were built and listed, not run, and the ordinary tests of
+the drift code and of the supervisor's footer reading ran instead. The SSH test worker was unreachable, so the smoke ran
+on a boat sandbox (an x86_64 Ubuntu 24.04 VM), and the rest ran locally:
+
+- `cargo clippy --all-targets`, and `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent`
+  (the build with the desktop app's test-automation hooks): each reported one warning and nothing else. That warning is
+  the unused ntfy settings method in the helm, on main since #5120 and outside this round, which makes `-D warnings`
+  fail, so these ran without it. `cargo clippy -p farhelm-gui --all-targets -- -D warnings` (the desktop app's GUI
+  crate, which does not depend on the helm's code): clean.
+- The GUI crate's whole default test suite (`cargo nextest run -p farhelm-gui`), recorded run
+  790d4ebc-9b6a-46d4-b81b-12cdbc9a08f6: 3,603 passed, none failed, and it skipped its 4 opt-in tests, among them the
+  screenshot test the next item runs.
+- The full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run 9be720dc-7a79-40ae-b77a-eec843eafb24:
+  passed.
+- On a boat, the desktop app's end-to-end smoke test (`scripts/gui-e2e-smoke.py`), recorded run
+  94e567ef-c5b4-4bbd-9a83-c0bac7dd24de: 48 of its 49 steps passed, and the paste step was skipped, as on every Linux
+  run. Its steps include Delete from a session's menu; none presses Cmd+T or Cmd+W.
+- The supervisor's per-agent tests, the footer reader and its captured screens among them
+  (`cargo nextest run -p farhelm-supervisor --lib -E 'test(/agent_kind::/)'`), recorded run
+  7c2a5d10-f11a-46a9-a5d5-7ff23f798176: 112 passed, none failed.
+- The ordinary tests of the real-agent test code, without the opt-in cases
+  (`cargo nextest run -p farhelm --test e2e -E 'test(/real_agent_capture/)'`), recorded run
+  56b688c2-75da-476f-baad-df4c39ca17a7: 50 passed, none failed, and no test reported that it skipped for a missing
+  system service. Listing the opt-in drift cases
+  (`cargo nextest list -p farhelm --test e2e --run-ignored only -E 'test(/real_agent_capture::drift::/)'`) built them
+  and found 71.
+- The docs website build (`bun run build` in `website/`): built. `python3 scripts/check-agents-md.py` for the drift
+  tests' docs page, which the instruction files point to: passed.
+- `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format` and `dprint check` on the changed Markdown: passed.
+
+Reused: nothing. Not rerun: the drift plans' live runs against the real agents, described in their reports; the landing
+ran none, since they spend vendor turns, so the drift plans have not run live together. Skipped: the rest of the Rust
+workspace's tests, since nothing else changed; the other opt-in tests; and any run on a Mac, since none was available to
+the landing. No Mac ran Cmd+T or Cmd+W: the Mac's rule is covered only by the tests that pass the platform in.

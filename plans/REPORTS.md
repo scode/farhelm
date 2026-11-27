@@ -8,3 +8,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`cli-flag-parsing-audit`](reports/cli-flag-parsing-audit.report.md) landed 2026-11-27 in #5163, #5165: Stop free-text CLI options and positionals from swallowing flags and clean up clap parsing quirks
 - [`drift-base-isolation-and-turns`](reports/drift-base-isolation-and-turns.report.md) landed 2026-11-27 in #5167, #5168: Add Codex process-tree isolation and Cursor/OpenCode interactive turns to the base drift category
 - [`drift-permission-footer`](reports/drift-permission-footer.report.md) landed 2026-11-27 in #5169: Extend permission_modes drift checks with Guarded launches and tri-state permission-footer verification
+- [`terminal-tab-shortcuts`](reports/terminal-tab-shortcuts.report.md) landed 2026-11-27 in #5164, #5166: Add Cmd+T/Cmd+W terminal-tab shortcuts and always confirm Delete when shell tabs are open
