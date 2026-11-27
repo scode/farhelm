@@ -2362,9 +2362,12 @@ fn prompt_refuses_blank_literal_file_and_stdin_before_dialing() {
                 command
             };
             let output = output_with_timeout(command);
+            // A literal is refused by clap, as a usage error; a file's or
+            // stdin's contents once the command line has parsed.
+            let status = if flag == "--prompt" { 2 } else { 1 };
             assert_eq!(
                 output.status.code(),
-                Some(2),
+                Some(status),
                 "{text:?}, {flag}: {output:?}"
             );
             assert!(output.stdout.is_empty(), "{output:?}");
@@ -2433,6 +2436,9 @@ fn prompt_requires_target_and_one_source_and_refuses_launch_flags() {
 /// The running-agent command must keep the launch parser's byte and control
 /// limits. File cases cover NUL (which cannot occur in argv), invalid UTF-8,
 /// and cap-plus-one reads without relying on a live relay for validation.
+/// A literal `--prompt` is refused by clap, as a usage error (exit status 2);
+/// a file's contents are judged once the command line has parsed, so they
+/// are refused with exit status 1, still before any dial.
 #[farhelm_testtrace::test]
 fn prompt_refuses_invalid_literal_and_file_contents_before_dialing() {
     let temp = farhelm_teststate::tempdir().unwrap();
@@ -2466,7 +2472,7 @@ fn prompt_refuses_invalid_literal_and_file_contents_before_dialing() {
                 file.to_str().unwrap(),
             ],
         ));
-        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(output.stdout.is_empty());
         assert!(
             String::from_utf8_lossy(&output.stderr).contains(diagnostic),
@@ -3068,7 +3074,8 @@ fn a_template_create_sends_its_fields_and_refuses_template() {
         &socket,
         &["template", "create", "t", "--template", "other"],
     ));
-    assert_eq!(refused.status.code(), Some(1));
+    // Refused by clap, as a usage error, before anything is dialed.
+    assert_eq!(refused.status.code(), Some(2));
     assert!(
         String::from_utf8(refused.stderr)
             .unwrap()
@@ -3460,6 +3467,105 @@ fn template_shortcut_only_edits_send_their_flags() {
         &temp.path().join("unused.sock"),
         &["template", "edit", "fast", "--key", "10"],
     ));
-    assert_ne!(refused.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("one digit"));
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&refused.stderr)
+            .contains("[possible values: 1, 2, 3, 4, 5, 6, 7, 8, 9, 0]"),
+        "{refused:?}"
+    );
+}
+
+/// Spec: `farhelm custom-agent report-conversation --help` (and `-h`), with
+/// nothing else after it, prints the command's usage and exits 0, while
+/// `--id --help` and `--help --id conv` stay silent with exit 0 like every
+/// other malformed report.
+///
+/// Why: the reporter is silent so it never writes into an agent's terminal
+/// (the custom-agent contract), but that silence also swallowed the help a
+/// person typing the command asked for. Only the exact one-word shape is a
+/// person; a wrapper's callback always carries `--id`, so the help cases
+/// that include it must stay silent. Run with no session variables, so a
+/// silent case writes no report anywhere either way.
+#[farhelm_testtrace::test]
+fn report_conversation_prints_help_only_for_a_lone_help_word() {
+    let reporter = |args: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_farhelm"));
+        for name in [
+            "FARHELM_SESSION_ID",
+            "FARHELM_SESSION_TOKEN",
+            "FARHELM_SUPERVISOR_SOCK",
+        ] {
+            command.env_remove(name);
+        }
+        command
+            .args(["custom-agent", "report-conversation"])
+            .args(args);
+        output_with_timeout(command)
+    };
+    for help in ["--help", "-h"] {
+        let output = reporter(&[help]);
+        assert_eq!(output.status.code(), Some(0), "{help}: {output:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("Usage: farhelm custom-agent report-conversation"),
+            "{help}: {stdout}"
+        );
+        assert!(stdout.contains("--id"), "{help}: {stdout}");
+    }
+    for args in [&["--id", "--help"][..], &["--help", "--id", "conv"][..]] {
+        let output = reporter(args);
+        assert_eq!(output.status.code(), Some(0), "{args:?}: {output:?}");
+        assert!(
+            output.stdout.is_empty() && output.stderr.is_empty(),
+            "{args:?} must stay silent: {output:?}"
+        );
+    }
+}
+
+/// Spec: `farhelm agent create --prompt-file - --bogus` with a standard
+/// input that stays open and never sends anything exits at once with the
+/// usage error for `--bogus` (status 2), reading nothing from stdin.
+///
+/// Why: the file used to be read by clap's value parser as clap reached the
+/// flag, so `-` waited on stdin before `--bogus` could be reported, and a
+/// caller with an idle stdin (an agent's tool call, a script holding a pipe)
+/// waited until it closed. The fixture's stdin is a FIFO the child opens
+/// read-write, so the child holds a writer itself and the read never sees
+/// an end of file: a CLI that reads before reporting the usage error hangs
+/// until the runner's deadline, which fails this test, rather than reading
+/// an empty message. The runner gives every command a null stdin, so the
+/// redirect happens in a `/bin/sh` that then execs farhelm.
+#[farhelm_testtrace::test]
+fn prompt_file_dash_does_not_wait_for_stdin_before_a_usage_error() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("not-listening.sock");
+    let fifo = temp.path().join("stdin.fifo");
+    let fifo_c = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    // SAFETY: a valid NUL-terminated path; mkfifo touches nothing else.
+    assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0, "mkfifo");
+    let command = agent_command_with_args(&socket, &["create", "--prompt-file", "-", "--bogus"]);
+    let mut redirected = Command::new("/bin/sh");
+    redirected
+        .args(["-c", "exec \"$@\" <> \"$0\""])
+        .arg(&fifo)
+        .arg(command.get_program())
+        .args(command.get_args());
+    for (name, value) in command.get_envs() {
+        match value {
+            Some(value) => {
+                redirected.env(name, value);
+            }
+            None => {
+                redirected.env_remove(name);
+            }
+        }
+    }
+    let output = output_with_timeout(redirected);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--bogus"),
+        "{output:?}"
+    );
 }

@@ -893,7 +893,7 @@ mod tests {
         let lines = verb_lines(&agent_command());
         for expected in [
             "farhelm agent create [--cwd <DIR>] [--gh <REPO>] [--conversation <ID>] [--host <NAME>] \
-             [--recipe <NAME>] [--container-host <NAME>] [--prompt <TEXT>] [--prompt-file <PATH>] [--template <NAME>] \
+             [--recipe <NAME>] [--container-host <NAME>] [--template <NAME>] [--prompt <TEXT>] [--prompt-file <PATH>] \
              [--agent <TYPE>] [--model <ID>] [--effort <LEVEL>] [--permissions <MODE>] \
              [--wrapper <COMMAND>] [--command <CMD>] [--yolo] [--no-yolo] \
              [--resume-command <CMD>] [--no-resume-command] [--title <TITLE>] \

@@ -7787,10 +7787,11 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   the helm and waits for the user's approval (see "Permission prompts for agent actions"). `--inherit-agent` takes the
   asking session's own stored launch, filled in by its supervisor, and needs `--cwd`; the launch flags are the ones
   `farhelm agent create` takes (see "Agent launches from the CLI"). clap refuses `--inherit-agent` beside any launch
-  flag, and a spawn with neither is refused before anything is dialed. `--confirm-yolo` is still parsed, hidden, only so
-  it can be refused with a message saying an agent cannot confirm a YOLO launch for the user. `--agent` took a profile
-  name before profiles were removed and is now the agent type flag; `--profile-id <id>` is still parsed, hidden, only so
-  it can be refused with a message naming the launch flags and `--template`.
+  flag or `--conversation`, and a spawn with neither `--inherit-agent` nor a launch flag (`--conversation` alone is not
+  a launch) as a usage error, through a required argument group, before anything is dialed. `--confirm-yolo` is still
+  parsed, hidden, only so it can be refused with a message saying an agent cannot confirm a YOLO launch for the user.
+  `--agent` took a profile name before profiles were removed and is now the agent type flag; `--profile-id <id>` is
+  still parsed, hidden, only so it can be refused with a message naming the launch flags and `--template`.
 - `farhelm agent hosts|sessions|agents|templates [--json]` — the in-session ASKING CLI from SPEC.md, on the same
   injected credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and
   puts a refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is
@@ -7833,10 +7834,13 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   agent deletes share the helm's approval denial, teardown and best-effort local cleanup; Replace shares the successful
   local cleanup after inheriting its pin.
 - `farhelm agent create` and ordinary `farhelm spawn` accept mutually exclusive `--prompt` and `--prompt-file` (`-`
-  reads stdin). Shared flag parsing materializes at most one launch budget of UTF-8 text, allowing newline and tab but
-  refusing other controls. Template writes use that same field, and listings include its text. The prompt travels beside
-  the reusable launch, through `CreateExtras` and `CreateSession` to `CreateInputs`. The supervisor appends its
-  per-harness literal arguments only after cwd and Farhelm-argument expansion, in the shim spec for this create.
+  reads stdin). The CLI materializes at most one launch budget of UTF-8 text, allowing newline and tab but refusing
+  other controls. A `--prompt-file` is read once the whole command line has parsed (and before anything is dialed), not
+  by clap's value parser, so a usage error later on the line shows at once rather than after `-` waited for stdin; its
+  content errors are not usage errors and exit with status 1. Template writes use that same field, and listings include
+  its text. The prompt travels beside the reusable launch, through `CreateExtras` and `CreateSession` to `CreateInputs`.
+  The supervisor appends its per-harness literal arguments only after cwd and Farhelm-argument expansion, in the shim
+  spec for this create.
 - `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`, and
   `farhelm agent restart --session <id> [--stop-if-running]` — the in-session ACTING CLI, on the same relay and
   credential. Every target is explicit, including a deliberate self-action. Rename compares the observed title and
@@ -7898,16 +7902,17 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   `--agent` accepts built-in names and registered IDs, which start with a lowercase letter or digit.
 - `farhelm agent template create <name> [--cwd <dir>] [--title ...] [--title-kind base|fixed] [--host <name>] <launch flags>`,
   `farhelm agent template edit <name> ...` with the same flags, and `farhelm agent template delete <name>` — an agent's
-  template writes (SPEC.md, Agent-spawned sessions). The launch flags are `farhelm agent create`'s; `--template` is
-  parsed, hidden, only so it can be refused, since a template written from other templates would copy command text the
-  agent never saw. `--host` names a host by the name `farhelm agent hosts` prints and is resolved to that host's install
-  when the template is written. Create records the agent launch kind for agent-launch choices, including an agent type
-  alone; command fields record the command kind. Placement and title alone leave the kind absent, and existing kindless
-  templates are not migrated. An edit sends only the fields given: omitted name kind keeps the saved kind, while
-  explicit Base replaces Fixed before the shared writer normalizes Base out. A kind-only edit merges before shape
-  validation so it can use an existing name; a kind without a name after merging is refused. Each write is relayed to
-  the helm and waits for the user's approval (see "Permission prompts for agent actions"); stdout gets one confirmation
-  line naming the template, as the lifecycle verbs confirm on stdout.
+  template writes (SPEC.md, Agent-spawned sessions). The launch flags are `farhelm agent create`'s edit flags;
+  `--template` is parsed, hidden, only so its parser can refuse it as a usage error, since a template written from other
+  templates would copy command text the agent never saw. `--key` and `--title-kind` take clap's possible values, so a
+  refusal lists the choices. `--host` names a host by the name `farhelm agent hosts` prints and is resolved to that
+  host's install when the template is written. Create records the agent launch kind for agent-launch choices, including
+  an agent type alone; command fields record the command kind. Placement and title alone leave the kind absent, and
+  existing kindless templates are not migrated. An edit sends only the fields given: omitted name kind keeps the saved
+  kind, while explicit Base replaces Fixed before the shared writer normalizes Base out. A kind-only edit merges before
+  shape validation so it can use an existing name; a kind without a name after merging is refused. Each write is relayed
+  to the helm and waits for the user's approval (see "Permission prompts for agent actions"); stdout gets one
+  confirmation line naming the template, as the lifecycle verbs confirm on stdout.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
   instructions pointer") locally, generated by walking this same `AgentCmd` definition. Neither spelling touches the
   supervisor, the helm, or the session credential: both must work for an agent that has just been handed the pointer

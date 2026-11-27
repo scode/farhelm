@@ -325,7 +325,8 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # arguments, environment and standard streams through untouched, except
   # for a custom agent's conversation reporter, whose output goes to
   # /dev/null and whose exit is 0 even when the forwarder itself fails
-  # (custom-agent-contract.md). Its own
+  # (custom-agent-contract.md); a lone --help or -h to the reporter is a
+  # person asking, and keeps its output and status. Its own
   # variables carry a prefix nothing exports, because assigning to a name
   # that came in exported would change the child's environment.
   write_forwarder() {
@@ -349,10 +350,13 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
 # FARHELM_VERSION_LOCK_FD, into the program started next, which adopts it. A
 # farhelm that predates version locks rejects the claim as an unknown command
 # (exit status 2) and is started without one, as before.
-if [ "${1:-}" = custom-agent ] && [ "${2:-}" = report-conversation ]; then
+if [ "${1:-}" = custom-agent ] && [ "${2:-}" = report-conversation ] &&
+  ! { [ $# -eq 3 ] && { [ "$3" = --help ] || [ "$3" = -h ]; }; }; then
   # This callback runs on the agent's terminal. If the forwarder cannot get
   # as far as exec, it still owes the quiet exit in custom-agent-contract.md.
-  # An exec that succeeds replaces this shell and handles its own exit.
+  # An exec that succeeds replaces this shell and handles its own exit. A
+  # lone --help or -h is a person asking, not a callback: it keeps its
+  # output, as farhelm itself prints help for exactly that shape.
   trap 'exit 0' 0
   exec >/dev/null 2>&1
 fi

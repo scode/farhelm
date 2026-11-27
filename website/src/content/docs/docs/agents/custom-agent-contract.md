@@ -29,6 +29,9 @@ after a Farhelm upgrade, read the [Contract changelog](#contract-changelog) belo
   and look for `committed`.
 - **`claude:` prefix reserved (2026-11-26):** Farhelm now stores Claude conversations with a `claude:` prefix, so an ID
   that starts with `claude:` is refused like the other reserved prefixes. Nothing else changed.
+- **`--help` prints help (2026-11-27):** `farhelm custom-agent report-conversation --help` (or `-h`), with nothing else
+  after it, now prints the command's help and exits 0. Every other invocation, including `--id --help` and any other
+  malformed one, still stays silent, so a wrapper's report is unchanged.
 
 ## 1. How Farhelm invokes your executable
 
@@ -111,7 +114,8 @@ Farhelm rejects IDs that fail any of these rules:
 
 - **Always exits 0 and stays silent:** `farhelm custom-agent report-conversation` writes nothing to stdout or stderr and
   exits 0 even on invalid input or internal error, so it never pollutes your agent's terminal or triggers a vendor hook
-  error.
+  error. The one exception is a person asking for help: `report-conversation --help` or `-h`, with no other argument,
+  prints the help.
 - **Works offline / during supervisor restarts:** It writes a small file into Farhelm's local state directory and
   returns immediately without waiting for the supervisor or desktop app. The supervisor picks up saved reports within
   about 2 seconds (or when it next starts).

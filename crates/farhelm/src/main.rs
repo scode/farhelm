@@ -38,7 +38,6 @@
 
 use agent_client::{SessionEnv, SpawnArgs, SpawnLaunch, agent_request, spawn_session};
 use anyhow::Context as _;
-use clap::builder::TypedValueParser as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use farhelm_proto::AgentReply;
 use render::{host_cell, quoted, render_agent_reply, safe_cell, truncation_notice};
@@ -72,13 +71,29 @@ enum Cmd {
     /// The child runs this session's own launch (`--inherit-agent`), or the
     /// launch its launch flags and templates describe. Either way the request
     /// goes to the helm that owns this host, which asks the user first.
+    // `.multiple(true)`: the group is "at least one of these", and any number
+    // of launch flags may come together; `--inherit-agent`'s own conflicts
+    // keep it apart from them. `--conversation` alone describes no launch, so
+    // it is not a member.
+    #[command(
+        after_help = "Describe the child's launch with --inherit-agent, --template NAME, \
+        --agent TYPE, or --command CMD with --yolo or --no-yolo; the other launch flags edit one of \
+        those."
+    )]
+    #[command(group(
+        clap::ArgGroup::new("spawn_launch")
+            .required(true)
+            .multiple(true)
+            .arg("inherit_agent")
+            .args(LAUNCH_FLAG_IDS)
+    ))]
     Spawn {
         /// Child working directory. Relative paths resolve against this
         /// process's real current directory before crossing the wire;
         /// `~` and `~/path` are forwarded as written and expand on the
         /// supervisor (`~user` forms are refused there). Required with
         /// `--inherit-agent`; otherwise a template may set the folder.
-        #[arg(long)]
+        #[arg(long, value_name = "DIR")]
         cwd: Option<PathBuf>,
         /// Optional display title; omitted derives from the directory.
         #[arg(long)]
@@ -98,8 +113,8 @@ enum Cmd {
         )]
         profile_id: Option<String>,
         /// Run this session's own stored launch in the child. Exclusive
-        /// with every launch flag.
-        #[arg(long, conflicts_with_all = LAUNCH_FLAG_IDS)]
+        /// with every launch flag and --conversation.
+        #[arg(long, conflicts_with_all = LAUNCH_FLAG_IDS, conflicts_with = "conversation")]
         inherit_agent: bool,
         #[command(flatten)]
         launch: LaunchFlags,
@@ -107,7 +122,7 @@ enum Cmd {
         #[arg(long)]
         parent: Option<String>,
         /// Retry key, valid only for the child session's lifetime.
-        #[arg(long)]
+        #[arg(long, value_name = "KEY")]
         idempotency_key: Option<String>,
         /// Removed: an agent cannot override the YOLO confirmation (SPEC.md,
         /// Agent-spawned sessions). Its parser refuses every use, under both
@@ -313,8 +328,9 @@ enum AgentCmd {
         prompt: Option<String>,
         /// Read the message from a UTF-8 file, or - for stdin (64 KiB cap).
         /// Cannot be combined with --prompt; takes contents, not a target-host path.
-        #[arg(long, value_name = "PATH", value_parser = read_agent_prompt)]
-        prompt_file: Option<String>,
+        // Read after parsing, into `prompt`, by [`resolve_prompt_files`].
+        #[arg(long, value_name = "PATH")]
+        prompt_file: Option<PathBuf>,
     },
     /// Delete an explicitly named session and its stored state; never this session.
     Delete {
@@ -514,11 +530,6 @@ const HYPHEN_VALUE_HELP: &str = "A value starting with - is joined to its option
 enum TemplateCmd {
     /// Create a launch template; refused if the name is taken.
     #[command(after_help = HYPHEN_VALUE_HELP)]
-    // `--template` is refused on both writes (`TemplateFieldFlags::fields`)
-    // but comes with the flattened launch flags; hiding it keeps `--help`
-    // and the instructions' usage lines from teaching a spelling that only
-    // earns a refusal, as `verb_lines` does for every refused flag.
-    #[command(mut_arg("templates", |arg| arg.hide(true)))]
     Create {
         /// The new template's name.
         name: String,
@@ -528,12 +539,11 @@ enum TemplateCmd {
         #[arg(long)]
         quick_launch: bool,
         /// Give this template a physical number key, 1–9 or 0.
-        #[arg(long, value_name = "DIGIT", value_parser = parse_template_key)]
+        #[arg(long, value_name = "DIGIT", value_parser = TEMPLATE_KEYS)]
         key: Option<String>,
     },
     /// Set the given fields on an existing template; others stay as they are.
     #[command(after_help = HYPHEN_VALUE_HELP)]
-    #[command(mut_arg("templates", |arg| arg.hide(true)))]
     Edit {
         /// The template to change.
         name: String,
@@ -546,7 +556,7 @@ enum TemplateCmd {
         #[arg(long, conflicts_with = "quick_launch")]
         no_quick_launch: bool,
         /// Give this template a physical number key, 1–9 or 0.
-        #[arg(long, value_name = "DIGIT", value_parser = parse_template_key, conflicts_with = "no_key")]
+        #[arg(long, value_name = "DIGIT", value_parser = TEMPLATE_KEYS, conflicts_with = "no_key")]
         key: Option<String>,
         /// Remove this template's current number key.
         #[arg(long, conflicts_with = "key")]
@@ -638,7 +648,8 @@ fn host_color_parser()
 }
 
 /// The fields a template write sets: a create's folder, title and host, and
-/// its launch flags.
+/// its launch edit flags. A create's `--template` is not among them; a
+/// hidden field of the same name refuses it ([`TemplateCmd`]).
 #[derive(clap::Args)]
 struct TemplateFieldFlags {
     /// Folder sessions launched from the template start in, on their host.
@@ -651,34 +662,50 @@ struct TemplateFieldFlags {
     #[arg(long, value_name = "TITLE")]
     title: Option<String>,
     /// Reusable base name or exact fixed name; an edit without this keeps its kind.
-    #[arg(long, value_name = "base|fixed", value_parser = parse_template_title_kind)]
+    #[arg(long, value_name = "base|fixed", value_parser = template_title_kind_parser())]
     title_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
     /// Host the template launches on, by the name `farhelm agent hosts` shows.
     #[arg(long, value_name = "NAME")]
     host: Option<String>,
     #[command(flatten)]
-    launch: LaunchFlags,
+    edits: LaunchEditFlags,
+    /// Refused (see [`TemplateCmd`]). Parsed, hidden, only so a caller who
+    /// carries `farhelm agent create`'s `--template` over gets the reason
+    /// rather than clap's "unexpected argument"; its parser refuses every
+    /// value, so a parsed command never carries one.
+    #[arg(
+        long = "template",
+        hide = true,
+        num_args = 0..=1,
+        default_missing_value = "",
+        value_parser = refuse_template_on_template_write,
+    )]
+    template: Option<String>,
+}
+
+/// The refusal for `--template` on `farhelm agent template create` and
+/// `edit`, whatever value it was given; see [`TemplateCmd`].
+fn refuse_template_on_template_write(_value: &str) -> Result<String, String> {
+    Err(
+        "a template write takes no --template: give the fields themselves, so the template \
+         holds only what you wrote"
+            .to_string(),
+    )
 }
 
 impl TemplateFieldFlags {
-    /// The fields as the helm's template verbs carry them, or the refusal of
-    /// a `--template` (see [`TemplateCmd`]). Shape validation belongs after
-    /// the helm's merge: a kind-only edit can use the stored session name.
-    fn fields(&self) -> anyhow::Result<farhelm_proto::launcher::TemplateFields> {
-        if !self.launch.templates.is_empty() {
-            anyhow::bail!(
-                "a template write takes no --template: give the fields themselves, so the \
-                 template holds only what you wrote"
-            );
-        }
-        let mut fields = self.launch.edits(self.cwd.clone(), self.title.clone());
+    /// The fields as the helm's template verbs carry them. Shape validation
+    /// belongs after the helm's merge: a kind-only edit can use the stored
+    /// session name.
+    fn fields(&self) -> farhelm_proto::launcher::TemplateFields {
+        let mut fields = self.edits.fields(self.cwd.clone(), self.title.clone());
         fields.name_kind = self.title_kind;
         if let Some(repo) = &self.gh {
             fields.destination = Some(farhelm_proto::launcher::TemplateDestination::Github(
                 repo.clone(),
             ));
         }
-        Ok(fields)
+        fields
     }
 }
 
@@ -724,13 +751,18 @@ impl AgentCmd {
                 session,
                 prompt,
                 prompt_file,
-            } => Some(farhelm_proto::AgentVerb::Prompt {
-                session_id: Some(session.clone()),
-                prompt: prompt
-                    .clone()
-                    .or_else(|| prompt_file.clone())
-                    .expect("clap requires exactly one prompt source"),
-            }),
+            } => {
+                debug_assert!(
+                    prompt_file.is_none(),
+                    "resolve_prompt_files reads --prompt-file before the verb is built"
+                );
+                Some(farhelm_proto::AgentVerb::Prompt {
+                    session_id: Some(session.clone()),
+                    prompt: prompt
+                        .clone()
+                        .expect("clap requires one prompt source, and a file is read into prompt"),
+                })
+            }
             AgentCmd::Delete {
                 session,
                 stop_if_running,
@@ -759,7 +791,7 @@ impl AgentCmd {
                 ..
             } => {
                 let edits = {
-                    let mut edits = launch.edits(cwd.clone(), title.clone());
+                    let mut edits = launch.edits.fields(cwd.clone(), title.clone());
                     if let Some(repo) = gh {
                         edits.destination = Some(
                             farhelm_proto::launcher::TemplateDestination::Github(repo.clone()),
@@ -802,8 +834,8 @@ impl AgentCmd {
                 intent_key: idempotency_key.clone(),
                 confirm_yolo: false,
             }),
-            // Built in `run_agent`, where a `--template` can be refused
-            // with a message; see `TemplateFieldFlags::fields`.
+            // Built and printed by `run_template_write`, whose verbs carry
+            // a quick-launch mark and number key besides the fields.
             AgentCmd::Template(_) => None,
             // Built and printed by `run_host_change`, which `run_agent`
             // hands it to before asking this.
@@ -813,27 +845,26 @@ impl AgentCmd {
     }
 }
 
-/// Keep CLI number keys to the ten physical digits the launcher listens for.
-fn parse_template_key(value: &str) -> Result<String, String> {
-    matches!(
-        value,
-        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "0"
-    )
-    .then(|| value.to_string())
-    .ok_or_else(|| "a template key must be one digit, 1–9 or 0".to_string())
-}
+/// The number keys a template write may give a template: the ten physical
+/// digits the launcher listens for, in keyboard order. Offered to clap as its
+/// possible values, so a refusal lists them.
+const TEMPLATE_KEYS: [&str; 10] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
 
-/// Name policy belongs to template writes only. Parse the shared enum here
-/// so omission remains distinct from explicitly selecting Base on an edit.
-fn parse_template_title_kind(
-    value: &str,
-) -> Result<farhelm_proto::launcher::TemplateNameKind, String> {
+/// Parse `--title-kind` against its two words, offered to clap as its
+/// possible values as [`host_icon_parser`] does. Name policy belongs to
+/// template writes only; parsing to the shared enum here keeps omission
+/// distinct from explicitly selecting Base on an edit. A local parser rather
+/// than a `clap::ValueEnum` on the enum, which would make `farhelm-proto`
+/// depend on clap.
+fn template_title_kind_parser()
+-> impl clap::builder::TypedValueParser<Value = farhelm_proto::launcher::TemplateNameKind> {
+    use clap::builder::TypedValueParser as _;
     use farhelm_proto::launcher::TemplateNameKind;
-    match value {
-        "base" => Ok(TemplateNameKind::Base),
-        "fixed" => Ok(TemplateNameKind::Fixed),
-        _ => Err("a template title kind must be base or fixed".into()),
-    }
+    clap::builder::PossibleValuesParser::new(["base", "fixed"]).map(|word| match word.as_str() {
+        "base" => TemplateNameKind::Base,
+        "fixed" => TemplateNameKind::Fixed,
+        _ => unreachable!("clap admitted only the two words"),
+    })
 }
 
 /// Validate repository spellings with the launcher's parser while retaining
@@ -1028,13 +1059,13 @@ fn parse_permissions(value: &str) -> Result<Choice<farhelm_proto::LaunchPermissi
         })
 }
 
-/// The ids of every [`LaunchFlags`] argument, which `spawn --inherit-agent`
-/// conflicts with: a spawn either reuses its own launch or describes one.
-const LAUNCH_FLAG_IDS: [&str; 14] = [
-    "conversation",
+/// The ids of every [`LaunchFlags`] argument. `spawn --inherit-agent`
+/// conflicts with each, and `spawn` needs one of them or `--inherit-agent`:
+/// a spawn either reuses its own launch or describes one.
+const LAUNCH_FLAG_IDS: [&str; 13] = [
+    "templates",
     "prompt",
     "prompt_file",
-    "templates",
     "agent",
     "model",
     "effort",
@@ -1047,30 +1078,44 @@ const LAUNCH_FLAG_IDS: [&str; 14] = [
     "no_resume_command",
 ];
 
-/// The launcher's fields as flags, shared by `farhelm agent create` and
-/// `farhelm spawn` (SPEC.md, Agent-spawned sessions).
+/// The launch flags of `farhelm agent create` and `farhelm spawn` (SPEC.md,
+/// Agent-spawned sessions): the templates to apply and the edits after them.
 ///
 /// The flags travel as launcher edits, not as a launch: the helm applies
-/// the `--template`s first, in order, then these as further edits, and
-/// validates the result exactly like a GUI launch (`farhelm-helm`'s
-/// `agent_launch`). Nothing is checked against a launch here, because a
-/// template may supply what a flag leaves out. Each flag may appear once;
-/// clap refuses a repeat, and `--yolo` with `--no-yolo`, rather than
-/// resolving them by order.
+/// the `--template`s first, in order, then the [`LaunchEditFlags`] as further
+/// edits, and validates the result exactly like a GUI launch
+/// (`farhelm-helm`'s `agent_launch`). Nothing is checked against a launch
+/// here, because a template may supply what a flag leaves out.
 #[derive(clap::Args, Debug, Clone, Default)]
 struct LaunchFlags {
+    /// Apply a launch template by its exact name; repeat to apply several,
+    /// in order. `farhelm agent templates` lists them.
+    #[arg(long = "template", value_name = "NAME")]
+    templates: Vec<String>,
+    #[command(flatten)]
+    edits: LaunchEditFlags,
+}
+
+/// The launcher's fields as flags: what a launch's edits set, shared by
+/// [`LaunchFlags`] and a template write ([`TemplateFieldFlags`]), which takes
+/// everything a create does but `--template`.
+///
+/// Each flag may appear once; clap refuses a repeat, and `--yolo` with
+/// `--no-yolo`, rather than resolving them by order.
+#[derive(clap::Args, Debug, Clone, Default)]
+struct LaunchEditFlags {
     /// First message, sent once when the new session starts. Newlines and
     /// tabs are allowed; other control characters are refused.
     #[arg(long, value_name = "TEXT", allow_hyphen_values = true, value_parser = parse_initial_prompt)]
     prompt: Option<String>,
     /// Read the first message from a UTF-8 file, or - for stdin (64 KiB
     /// launch budget). Cannot be combined with --prompt.
-    #[arg(long, value_name = "PATH", conflicts_with = "prompt", value_parser = read_initial_prompt)]
-    prompt_file: Option<String>,
-    /// Apply a launch template by its exact name; repeat to apply several,
-    /// in order. `farhelm agent templates` lists them.
-    #[arg(long = "template", value_name = "NAME")]
-    templates: Vec<String>,
+    // A path, not its contents: the file is read by [`resolve_prompt_files`]
+    // once the whole command line has parsed, which moves the text into
+    // `prompt` and leaves this `None`. Read by the parser instead, a `-`
+    // would wait for stdin before a later flag's usage error could show.
+    #[arg(long, value_name = "PATH", conflicts_with = "prompt")]
+    prompt_file: Option<PathBuf>,
     /// Built-in agent type, such as claude or codex, or a registered custom agent ID.
     /// With --command, declares its agent type. The command needs {farhelm_args}.
     #[arg(long, value_name = "TYPE", value_parser = parse_agent_type)]
@@ -1123,35 +1168,28 @@ struct LaunchFlags {
     no_resume_command: bool,
 }
 
-impl LaunchFlags {
-    /// Whether any launch flag was given.
-    fn any(&self) -> bool {
-        self.prompt.is_some()
-            || self.prompt_file.is_some()
-            || !self.templates.is_empty()
-            || self.agent.is_some()
-            || self.model.is_some()
-            || self.effort.is_some()
-            || self.permissions.is_some()
-            || self.wrapper.is_some()
-            || self.command.is_some()
-            || self.yolo
-            || self.no_yolo
-            || self.resume_command.is_some()
-            || self.no_resume_command
-    }
-
+impl LaunchEditFlags {
     /// The flags, with the verb's folder and title, as the launcher edits
     /// the helm applies after the templates. `--command` is what makes the
     /// launch a command launch; the agent-launch flags set no launch kind,
     /// so on a command template they are refused naming the flag, as the
     /// same edit is refused in the GUI.
-    fn edits(
+    ///
+    /// Asked only after [`resolve_prompt_files`] moved a `--prompt-file`'s
+    /// contents into `prompt`.
+    fn fields(
         &self,
         cwd: Option<String>,
         title: Option<String>,
     ) -> farhelm_proto::launcher::TemplateFields {
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
+        // A plain `assert!`: a verb added later that flattens these flags
+        // without an arm in `resolve_prompt_files` would otherwise launch,
+        // in a release build, without the message the caller gave.
+        assert!(
+            self.prompt_file.is_none(),
+            "resolve_prompt_files reads --prompt-file before the edits are built"
+        );
         TemplateFields {
             custom_agent: self
                 .agent
@@ -1159,7 +1197,7 @@ impl LaunchFlags {
                 .filter(|agent| agent.harness.uses_custom_catalog())
                 .map(|agent| agent.custom_agent.clone()),
             target: None,
-            prompt: self.prompt.clone().or_else(|| self.prompt_file.clone()),
+            prompt: self.prompt.clone(),
             permission_flags: None,
             kind: self.command.as_ref().map(|_| LauncherKind::Command),
             agent: self.agent.as_ref().map(|agent| agent.harness),
@@ -1212,9 +1250,9 @@ fn parse_agent_prompt(text: &str) -> Result<String, String> {
 /// Materialize one bounded UTF-8 message for initial or running-agent prompts.
 /// Reading the cap plus one byte also bounds stdin. Approval and any create
 /// retry digest see these contents, never a path that could change while waiting.
-fn read_initial_prompt(path: &str) -> Result<String, String> {
+fn read_initial_prompt(path: &Path) -> Result<String, String> {
     use std::io::Read;
-    let reader: Box<dyn Read> = if path == "-" {
+    let reader: Box<dyn Read> = if path == Path::new("-") {
         Box::new(std::io::stdin())
     } else {
         Box::new(std::fs::File::open(path).map_err(|e| format!("cannot read prompt file: {e}"))?)
@@ -1230,10 +1268,59 @@ fn read_initial_prompt(path: &str) -> Result<String, String> {
 /// Apply the running-agent rule to the materialized file or stdin contents.
 /// Reusing the initial reader preserves its UTF-8 and byte limits without
 /// changing what a new session accepts. The message itself is never trimmed.
-fn read_agent_prompt(path: &str) -> Result<String, String> {
+fn read_agent_prompt(path: &Path) -> Result<String, String> {
     let text = read_initial_prompt(path)?;
     farhelm_proto::launcher::check_agent_prompt(&text)?;
     Ok(text)
+}
+
+/// Read every `--prompt-file` the command names into the `--prompt` beside
+/// it, once the whole command line has parsed and before anything is dialed.
+///
+/// The read happens here rather than in clap's value parser because a parser
+/// runs as clap reaches the flag: `--prompt-file -` waited for stdin there,
+/// and a usage error later on the line (an unknown flag, a conflict) showed
+/// only once stdin closed, or never, when the caller was waiting for the
+/// command to fail. A content error is reported from here, with exit status
+/// 1, rather than as a usage error.
+fn resolve_prompt_files(command: &mut Cmd) -> anyhow::Result<()> {
+    fn initial(edits: &mut LaunchEditFlags) -> anyhow::Result<()> {
+        if let Some(path) = edits.prompt_file.take() {
+            edits.prompt =
+                Some(read_initial_prompt(&path).map_err(|error| {
+                    anyhow::anyhow!("--prompt-file {}: {error}", path.display())
+                })?);
+        }
+        Ok(())
+    }
+    match command {
+        Cmd::Spawn { launch, .. }
+        | Cmd::Agent {
+            command: AgentCmd::Create { launch, .. },
+        } => initial(&mut launch.edits),
+        Cmd::Agent {
+            command:
+                AgentCmd::Template(
+                    TemplateCmd::Create { fields, .. } | TemplateCmd::Edit { fields, .. },
+                ),
+        } => initial(&mut fields.edits),
+        Cmd::Agent {
+            command:
+                AgentCmd::Prompt {
+                    prompt,
+                    prompt_file,
+                    ..
+                },
+        } => {
+            if let Some(path) = prompt_file.take() {
+                *prompt = Some(read_agent_prompt(&path).map_err(|error| {
+                    anyhow::anyhow!("--prompt-file {}: {error}", path.display())
+                })?);
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 #[derive(Subcommand)]
@@ -1411,10 +1498,10 @@ enum InternalCmd {
         /// The run's own directory, absolute and short (the scripts make
         /// one directly under `/tmp`): the host's state directory and the
         /// control socket's home.
-        #[arg(long)]
+        #[arg(long, value_parser = absolute_path_parser())]
         run_dir: PathBuf,
         /// The program's working directory, absolute.
-        #[arg(long)]
+        #[arg(long, value_parser = absolute_path_parser())]
         cwd: PathBuf,
         /// The terminal's size, `COLSxROWS`.
         #[arg(long, value_parser = parse_terminal_size)]
@@ -1449,7 +1536,7 @@ enum InternalCmd {
         /// The state directory, as an absolute path: the command has no
         /// default, and a relative one would depend on the caller's
         /// working directory.
-        #[arg(long, value_parser = clap::builder::PathBufValueParser::new().try_map(absolute_state_dir))]
+        #[arg(long, value_parser = absolute_path_parser())]
         state_dir: PathBuf,
     },
     /// Print this build's version and whether it carries the release mark
@@ -1675,20 +1762,21 @@ fn parse_terminal_size(text: &str) -> Result<(u16, u16), String> {
         .ok_or_else(|| format!("{text:?} is not COLSxROWS"))
 }
 
-/// `internal stop-terminal-hosts --state-dir`'s rule: an absolute path,
+/// Parse a path the internal commands take only as an absolute one
+/// (`stop-terminal-hosts --state-dir`, `agent-screen --run-dir` and `--cwd`),
 /// which also refuses an empty one. Refused as a usage error (exit status
 /// 2), before anything is looked at: an empty value from a caller's unset
-/// variable would otherwise stop the hosts of whatever `./hosts` the
-/// working directory has.
-fn absolute_state_dir(path: PathBuf) -> Result<PathBuf, String> {
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        Err(format!(
-            "{:?} is not an absolute path; the state directory must be given as one",
-            path
-        ))
-    }
+/// variable would otherwise act on whatever the working directory holds
+/// (stop-terminal-hosts would stop the hosts of its `./hosts`).
+fn absolute_path_parser() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
+    use clap::builder::TypedValueParser as _;
+    clap::builder::PathBufValueParser::new().try_map(|path: PathBuf| {
+        if path.is_absolute() {
+            Ok(path)
+        } else {
+            Err(format!("{path:?} is not an absolute path"))
+        }
+    })
 }
 
 /// Hold this program's own version for the rest of the process, when it runs
@@ -1846,6 +1934,17 @@ fn licenses_text() -> String {
     )
 }
 
+/// Whether the words after `farhelm custom-agent report-conversation` are
+/// exactly one `--help` or `-h`, the only malformed invocation of it that
+/// prints anything (see the custom-agent contract's changelog). Any other
+/// shape, `--id --help` and `--help --id x` included, stays the silent report
+/// a custom agent's wrapper relies on.
+fn is_lone_help_request(mut rest: impl Iterator<Item = std::ffi::OsString>) -> bool {
+    rest.next()
+        .is_some_and(|word| word == "--help" || word == "-h")
+        && rest.next().is_none()
+}
+
 /// What `farhelm internal build-info` prints, in the form its doc comment
 /// promises. Takes the version and the mark as arguments so the tests can
 /// render a marked build's answer: a test build is never marked, and the
@@ -1864,7 +1963,7 @@ fn main() -> anyhow::Result<()> {
     if invoked_as.is_some_and(|name| name == farhelm_helm::ASKPASS_JUMP_PROGRAM_NAME) {
         return farhelm_helm::run_askpass_jump(arguments).context("starting SSH for a jump host");
     }
-    let cli = if invoked_as.is_some_and(|name| name == farhelm_helm::ASKPASS_PROGRAM_NAME) {
+    let mut cli = if invoked_as.is_some_and(|name| name == farhelm_helm::ASKPASS_PROGRAM_NAME) {
         // OpenSSH supplies a single argument, which may begin with a dash or contain multiple lines.
         let question = arguments.next().context("missing SSH question")?;
         anyhow::ensure!(
@@ -1880,9 +1979,12 @@ fn main() -> anyhow::Result<()> {
         && arguments
             .next()
             .is_some_and(|word| word == "report-conversation")
+        && !is_lone_help_request(std::env::args_os().skip(3))
     {
         // Admission recognizes this exact argv shape. Keep malformed invocations quiet and
         // update the contract changelog in custom-agent-contract.md if the grammar changes.
+        // The one exception is a lone `--help` or `-h`, which a person types, never a
+        // wrapper reporting a conversation: it goes to clap below, which prints the help.
         let id = if arguments.next().is_some_and(|word| word == "--id") {
             arguments
                 .next()
@@ -1900,6 +2002,7 @@ fn main() -> anyhow::Result<()> {
         Cli::parse()
     };
     hold_own_version(&cli.command)?;
+    resolve_prompt_files(&mut cli.command)?;
     match cli.command {
         Cmd::CustomAgent {
             command: CustomAgentCmd::Spec,
@@ -1937,19 +2040,14 @@ fn main() -> anyhow::Result<()> {
                     cwd,
                     title,
                     conversation,
+                    // clap's `spawn_launch` group requires one or the other.
                     launch: if inherit_agent {
                         SpawnLaunch::Inherit
-                    } else if launch.any() {
+                    } else {
                         SpawnLaunch::Flags {
                             templates: launch.templates.clone(),
-                            edits: Box::new(launch.edits(None, None)),
+                            edits: Box::new(launch.edits.fields(None, None)),
                         }
-                    } else {
-                        anyhow::bail!(
-                            "farhelm spawn needs --inherit-agent to run this session's own \
-                             launch, or launch flags (--agent, --command with --yolo or \
-                             --no-yolo, --template) describing the child's"
-                        );
                     },
                     parent,
                     idempotency_key,
@@ -2144,10 +2242,8 @@ fn main() -> anyhow::Result<()> {
                 argv,
             } => {
                 use farhelm_supervisor::agent_screen;
-                anyhow::ensure!(
-                    run_dir.is_absolute() && cwd.is_absolute(),
-                    "--run-dir and --cwd must be absolute paths"
-                );
+                // Absolute by its parser; whether it is short enough depends
+                // on the socket names the run makes inside it.
                 anyhow::ensure!(
                     agent_screen::run_dir_fits(&run_dir),
                     "--run-dir {} is too long for the sockets it must hold",
@@ -2419,7 +2515,7 @@ fn run_template_write(command: &TemplateCmd) -> anyhow::Result<()> {
         } => (
             farhelm_proto::AgentVerb::TemplateCreate {
                 name: name.clone(),
-                fields: fields.fields()?,
+                fields: fields.fields(),
                 host: fields.host.clone(),
                 shortcuts: farhelm_proto::TemplateShortcutEdit {
                     quick_launch: quick_launch.then_some(true),
@@ -2438,7 +2534,7 @@ fn run_template_write(command: &TemplateCmd) -> anyhow::Result<()> {
         } => (
             farhelm_proto::AgentVerb::TemplateEdit {
                 name: name.clone(),
-                fields: fields.fields()?,
+                fields: fields.fields(),
                 host: fields.host.clone(),
                 shortcuts: farhelm_proto::TemplateShortcutEdit {
                     quick_launch: if *quick_launch {
@@ -3406,9 +3502,8 @@ mod tests {
         else {
             panic!("spawn")
         };
-        assert!(launch.any());
         assert_eq!(
-            launch.edits(None, None).wrapper_prefix,
+            launch.edits.fields(None, None).wrapper_prefix,
             Some(Some(words.clone()))
         );
         assert!(
@@ -3442,7 +3537,7 @@ mod tests {
         else {
             panic!("template create")
         };
-        assert_eq!(fields.fields().unwrap().wrapper_prefix, Some(Some(words)));
+        assert_eq!(fields.fields().wrapper_prefix, Some(Some(words)));
     }
     use super::*;
 
@@ -3939,9 +4034,14 @@ mod tests {
             (TEMPLATE, "--title", "--quick-launch"),
             (TEMPLATE, "--host", "--quick-launch"),
         ];
+        // A template write's `--template` is refused whatever follows it
+        // (`a_template_write_refuses_template_however_it_is_given`).
+        cases.extend([
+            (CREATE, "--template", "--yolo"),
+            (SPAWN, "--template", "--yolo"),
+        ]);
         for verb in [CREATE, SPAWN, TEMPLATE] {
             for flag in [
-                "--template",
                 "--prompt-file",
                 "--wrapper",
                 "--command",
@@ -3974,8 +4074,8 @@ mod tests {
                 );
             }
             // The `=` form carries the value. A verb may still fail for a
-            // reason of its own (a required argument these argv leave out, a
-            // `--prompt-file` that names no file); what must not happen is
+            // reason of its own (a required argument these argv leave out);
+            // what must not happen is
             // `-v` read as a flag or the option left without a value.
             let joined = format!("{flag}=-v");
             let mut args = vec!["farhelm"];
@@ -4201,7 +4301,7 @@ mod tests {
                     _ => panic!("template write"),
                 };
                 assert_eq!(
-                    fields.fields().unwrap().destination,
+                    fields.fields().destination,
                     Some(TemplateDestination::Github("acme/web".into()))
                 );
                 assert!(
@@ -4274,7 +4374,7 @@ mod tests {
                 };
                 let fields = match template {
                     TemplateCmd::Create { fields, .. } | TemplateCmd::Edit { fields, .. } => {
-                        fields.fields().unwrap()
+                        fields.fields()
                     }
                     _ => panic!("template write"),
                 };
@@ -4293,7 +4393,7 @@ mod tests {
             .err()
             .expect("unknown kind refused")
             .to_string();
-            assert!(error.contains("base or fixed"), "{error}");
+            assert!(error.contains("[possible values: base, fixed]"), "{error}");
         }
         for args in [
             vec!["farhelm", "agent", "create", "--title-kind", "base"],
@@ -4392,5 +4492,342 @@ mod tests {
             Some(None),
             "--no-resume-command resets"
         );
+    }
+
+    /// Spec: parsing a command line reads no `--prompt-file`: a path that names no file parses, on every verb that
+    /// takes one, and the file's contents reach `--prompt` only through `resolve_prompt_files`, which `main` runs once
+    /// the whole line has parsed. A usage error later on the line is reported by the parse itself.
+    ///
+    /// Why: the file used to be read by clap's value parser as clap reached the flag, so `--prompt-file -` waited for
+    /// stdin before a later unknown flag or conflict could be reported, and a caller waiting for that error waited
+    /// until stdin closed. That a missing file parses is what shows the parser did not open it.
+    #[farhelm_testtrace::test]
+    fn prompt_files_are_read_after_the_command_line_parses() {
+        let temp = farhelm_teststate::tempdir().unwrap();
+        let file = temp.path().join("message.txt");
+        std::fs::write(&file, "- first bullet\n").unwrap();
+        let missing = temp.path().join("missing.txt");
+        let missing = missing.to_str().unwrap();
+        let verbs: [&[&str]; 5] = [
+            &["spawn", "--cwd", "/w"],
+            &["agent", "create"],
+            &["agent", "template", "create", "t"],
+            &["agent", "template", "edit", "t"],
+            &["agent", "prompt", "--session", "s"],
+        ];
+        for verb in verbs {
+            let argv = |path: &str| {
+                let mut argv = vec!["farhelm"];
+                argv.extend_from_slice(verb);
+                argv.extend(["--prompt-file", path]);
+                argv.into_iter().map(str::to_string).collect::<Vec<_>>()
+            };
+            Cli::try_parse_from(argv(missing))
+                .unwrap_or_else(|error| panic!("{verb:?} read the file while parsing: {error}"));
+            // With stdin at /dev/null this guards only the order of the two
+            // errors; `prompt_file_dash_does_not_wait_for_stdin_before_a_usage_error`
+            // in `tests/agent_cli.rs` runs it against a stdin left open.
+            let mut unknown = argv("-");
+            unknown.push("--bogus".into());
+            let error = Cli::try_parse_from(unknown)
+                .err()
+                .unwrap_or_else(|| panic!("{verb:?} took --bogus"));
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::UnknownArgument,
+                "{verb:?}: {error}"
+            );
+
+            let mut cli = Cli::try_parse_from(argv(file.to_str().unwrap())).unwrap();
+            resolve_prompt_files(&mut cli.command).unwrap();
+            let prompt = match cli.command {
+                Cmd::Spawn { launch, .. }
+                | Cmd::Agent {
+                    command: AgentCmd::Create { launch, .. },
+                } => {
+                    assert_eq!(launch.edits.prompt_file, None, "{verb:?}");
+                    launch.edits.prompt
+                }
+                Cmd::Agent {
+                    command:
+                        AgentCmd::Template(
+                            TemplateCmd::Create { fields, .. } | TemplateCmd::Edit { fields, .. },
+                        ),
+                } => {
+                    assert_eq!(fields.edits.prompt_file, None, "{verb:?}");
+                    fields.edits.prompt
+                }
+                Cmd::Agent {
+                    command:
+                        AgentCmd::Prompt {
+                            prompt,
+                            prompt_file,
+                            ..
+                        },
+                } => {
+                    assert_eq!(prompt_file, None, "{verb:?}");
+                    prompt
+                }
+                _ => panic!("{verb:?} parsed as another command"),
+            };
+            assert_eq!(prompt.as_deref(), Some("- first bullet\n"), "{verb:?}");
+
+            let mut cli = Cli::try_parse_from(argv(missing)).unwrap();
+            let error = resolve_prompt_files(&mut cli.command)
+                .expect_err("a missing file is refused once it is read");
+            assert!(
+                error.to_string().contains("--prompt-file"),
+                "{verb:?}: {error}"
+            );
+        }
+    }
+
+    /// Spec: `farhelm agent template create` and `edit` refuse `--template` as a usage error naming the reason, with a
+    /// value, with none, and with a hyphen-leading one, and it stays out of their help; `agent create` still takes
+    /// it, and `spawn --inherit-agent` with it is a conflict.
+    ///
+    /// Why: a template written from other templates would copy their withheld command text into one the agent wrote,
+    /// so the flag must be refused rather than resolved. It is parsed at all only so a caller who carries it over from
+    /// `agent create` learns why, instead of clap's "unexpected argument".
+    #[farhelm_testtrace::test]
+    fn a_template_write_refuses_template_however_it_is_given() {
+        use clap::CommandFactory as _;
+        use clap::error::ErrorKind;
+        for verb in ["create", "edit"] {
+            for tail in [
+                &["--template", "other"][..],
+                &["--template"][..],
+                &["--template=-other"][..],
+                &["--template", "--yolo"][..],
+            ] {
+                let mut argv = vec!["farhelm", "agent", "template", verb, "t"];
+                argv.extend_from_slice(tail);
+                let error = Cli::try_parse_from(argv.iter().copied())
+                    .err()
+                    .unwrap_or_else(|| panic!("{argv:?} parsed"));
+                assert_eq!(
+                    error.kind(),
+                    ErrorKind::ValueValidation,
+                    "{argv:?}: {error}"
+                );
+                assert!(
+                    error.to_string().contains("takes no --template"),
+                    "{argv:?}: {error}"
+                );
+            }
+            let help = Cli::command()
+                .find_subcommand_mut("agent")
+                .and_then(|agent| agent.find_subcommand_mut("template"))
+                .and_then(|template| template.find_subcommand_mut(verb))
+                .expect("the template verb")
+                .render_long_help()
+                .to_string();
+            assert!(!help.contains("--template"), "{verb}: {help}");
+        }
+        let Cmd::Agent {
+            command: AgentCmd::Create { launch, .. },
+        } = Cli::try_parse_from(["farhelm", "agent", "create", "--template", "a"])
+            .unwrap()
+            .command
+        else {
+            panic!("agent create")
+        };
+        assert_eq!(launch.templates, ["a"]);
+        let error = Cli::try_parse_from([
+            "farhelm",
+            "spawn",
+            "--cwd",
+            "/w",
+            "--inherit-agent",
+            "--template",
+            "a",
+        ])
+        .err()
+        .expect("--inherit-agent with --template");
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict, "{error}");
+    }
+
+    /// Spec: `farhelm spawn` needs `--inherit-agent` or at least one launch flag, which clap reports as a usage error
+    /// before anything is dialed; any number of launch flags may come together; `--conversation` alone is not a
+    /// launch, and `--inherit-agent` conflicts with it as with every launch flag.
+    ///
+    /// Why: the same rule used to be checked after parsing, which made a missing launch exit 1 with a message of its
+    /// own instead of clap's usage error. `--conversation` used to sit in the list of launch flags only so that
+    /// `--inherit-agent` conflicted with it; it is no launch, so it must neither satisfy the requirement nor lose
+    /// that conflict.
+    #[farhelm_testtrace::test]
+    fn spawn_requires_inherit_agent_or_a_launch_flag() {
+        use clap::error::ErrorKind;
+        for (argv, kind) in [
+            (&["--cwd", "/w"][..], ErrorKind::MissingRequiredArgument),
+            (
+                &["--cwd", "/w", "--conversation", "c"][..],
+                ErrorKind::MissingRequiredArgument,
+            ),
+            (
+                &["--cwd", "/w", "--inherit-agent", "--conversation", "c"][..],
+                ErrorKind::ArgumentConflict,
+            ),
+            (
+                &["--cwd", "/w", "--inherit-agent", "--yolo"][..],
+                ErrorKind::ArgumentConflict,
+            ),
+        ] {
+            let mut full = vec!["farhelm", "spawn"];
+            full.extend_from_slice(argv);
+            let error = Cli::try_parse_from(full.iter().copied())
+                .err()
+                .unwrap_or_else(|| panic!("{full:?} parsed"));
+            assert_eq!(error.kind(), kind, "{full:?}: {error}");
+        }
+        for argv in [
+            &["--cwd", "/w", "--inherit-agent"][..],
+            &[
+                "--cwd",
+                "/w",
+                "--inherit-agent",
+                "--title",
+                "t",
+                "--parent",
+                "p",
+            ][..],
+            &["--template", "a"][..],
+            &["--agent", "codex", "--model", "m", "--prompt", "go"][..],
+            &["--command", "sh", "--no-yolo", "--conversation", "c"][..],
+        ] {
+            let mut full = vec!["farhelm", "spawn"];
+            full.extend_from_slice(argv);
+            Cli::try_parse_from(full.iter().copied())
+                .unwrap_or_else(|error| panic!("{full:?}: {error}"));
+        }
+    }
+
+    /// Spec: `--key` takes one of the ten digits and `--title-kind` one of `base` and `fixed`, refused otherwise as an
+    /// invalid value whose message lists the choices; the parsed values are the digit and the shared name kind.
+    ///
+    /// Why: clap's possible values are what make the refusal and `--help` list the choices, so a caller can correct
+    /// the value from the error alone, and the parsed kind is what keeps an edit's omission distinct from Base.
+    #[farhelm_testtrace::test]
+    fn template_keys_and_title_kinds_are_closed_choices() {
+        use clap::error::ErrorKind;
+        use farhelm_proto::launcher::TemplateNameKind;
+        for (flag, value) in [("--key", "12"), ("--key", "a"), ("--title-kind", "other")] {
+            let error =
+                Cli::try_parse_from(["farhelm", "agent", "template", "create", "t", flag, value])
+                    .err()
+                    .unwrap_or_else(|| panic!("{flag} {value} parsed"));
+            assert_eq!(error.kind(), ErrorKind::InvalidValue, "{error}");
+            let message = error.to_string();
+            assert!(message.contains("possible values"), "{message}");
+        }
+        for (key, kind, expected_kind) in [
+            ("0", "base", TemplateNameKind::Base),
+            ("9", "fixed", TemplateNameKind::Fixed),
+        ] {
+            let Cmd::Agent {
+                command:
+                    AgentCmd::Template(TemplateCmd::Edit {
+                        key: parsed,
+                        fields,
+                        ..
+                    }),
+            } = Cli::try_parse_from([
+                "farhelm",
+                "agent",
+                "template",
+                "edit",
+                "t",
+                "--key",
+                key,
+                "--title-kind",
+                kind,
+            ])
+            .unwrap()
+            .command
+            else {
+                panic!("template edit")
+            };
+            assert_eq!(parsed.as_deref(), Some(key));
+            assert_eq!(fields.fields().name_kind, Some(expected_kind));
+        }
+    }
+
+    /// Spec: `farhelm internal agent-screen` refuses a relative `--run-dir` or `--cwd`, and `stop-terminal-hosts` a
+    /// relative or empty `--state-dir`, as a usage error at parse time (a relative one naming the value); absolute
+    /// paths parse.
+    ///
+    /// Why: these commands act on what the path names, and a relative or empty one (a caller's unset variable, say)
+    /// would act on whatever the working directory holds. One shared parser keeps the rule and its message the same
+    /// for all three.
+    #[farhelm_testtrace::test]
+    fn internal_paths_must_be_absolute_at_parse_time() {
+        use clap::error::ErrorKind;
+        let screen = |run_dir: &str, cwd: &str| {
+            Cli::try_parse_from([
+                "farhelm",
+                "internal",
+                "agent-screen",
+                "--run-dir",
+                run_dir,
+                "--cwd",
+                cwd,
+                "--size",
+                "80x24",
+                "--",
+                "sh",
+            ])
+        };
+        let stop = |state_dir: &str| {
+            Cli::try_parse_from([
+                "farhelm",
+                "internal",
+                "stop-terminal-hosts",
+                "--state-dir",
+                state_dir,
+            ])
+        };
+        // An empty value is refused by clap's own path parser, before ours.
+        assert_eq!(
+            stop("").err().expect("an empty path is refused").kind(),
+            ErrorKind::InvalidValue
+        );
+        for result in [screen("run", "/w"), screen("/tmp/run", "w"), stop("state")] {
+            let error = result.err().expect("a relative path is refused");
+            assert_eq!(error.kind(), ErrorKind::ValueValidation, "{error}");
+            assert!(
+                error.to_string().contains("is not an absolute path"),
+                "{error}"
+            );
+        }
+        screen("/tmp/run", "/w").unwrap();
+        stop("/tmp/state").unwrap();
+    }
+
+    /// Spec: only `custom-agent report-conversation` followed by exactly one `--help` or `-h` counts as a help
+    /// request; `--id --help`, `--help --id x`, `--help -h` and nothing at all do not.
+    ///
+    /// Why: every other shape must stay the silent report a custom agent's wrapper relies on (custom-agent contract),
+    /// so the carve-out is the exact one-word shape a person types and nothing a wrapper could produce by accident.
+    #[farhelm_testtrace::test]
+    fn only_a_lone_help_word_asks_report_conversation_for_help() {
+        let words = |words: &[&str]| {
+            words
+                .iter()
+                .map(std::ffi::OsString::from)
+                .collect::<Vec<_>>()
+                .into_iter()
+        };
+        assert!(is_lone_help_request(words(&["--help"])));
+        assert!(is_lone_help_request(words(&["-h"])));
+        for rest in [
+            &[][..],
+            &["--id", "--help"][..],
+            &["--help", "--id", "x"][..],
+            &["--help", "-h"][..],
+            &["--id", "x"][..],
+            &["help"][..],
+        ] {
+            assert!(!is_lone_help_request(words(rest)), "{rest:?}");
+        }
     }
 }
