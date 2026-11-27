@@ -7,7 +7,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `agent-hosts-tailscale-column.md` — Add a TAILSCALE column to plain `farhelm agent hosts` table output
 - [pending] `delete-dead-replace-checkout-ui.md` — Delete dead fresh-checkout Replace UI remnants and close matching review finding
 - [pending] `terminal-tab-shortcuts.md` — Add Cmd+T/Cmd+W terminal-tab shortcuts and always confirm Delete when shell tabs are open
-- [held] `terminal-tab-overflow-ux.md` — Pin the main Agent tab and add auto-scroll, edge fades, arrows, and an all-tabs menu for overflowing tabs
+- [pending] `terminal-tab-overflow-ux.md` — Pin the main Agent tab and add auto-scroll, edge fades, arrows, and an all-tabs menu for overflowing tabs
 - [held] `blocked-notify-attention-and-debounce.md` — Move blocked-agent alerts to the red waiting indicator and sound with an ntfy awareness grace period
 - [held] `ntfy-quiet-hours-urgency.md` — Add local-time quiet hours and quiet-hours priority/off setting for ntfy alerts
 - [held] `drift-base-isolation-and-turns.md` — Add Codex process-tree isolation and Cursor/OpenCode interactive turns to the base drift category
