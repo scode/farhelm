@@ -4428,12 +4428,13 @@ match. A failed check withdraws the durable resume offer, which makes Restart un
 request so the user can refresh; it never silently launches fresh under that request.
 
 Custom agents report their conversation explicitly through `farhelm custom-agent report-conversation --id <ID>`. The
-reporter stays silent and exits successfully even if it cannot write a report. Valid reports can be recorded while the
-supervisor is down. Admission checks the current launch and uses ancestry to keep a nested agent's report from replacing
-its parent's capture. If a nested process reports first, a recorded ancestor can correct the selection and post a
-correction notice once per launch. Plain Restart needs both a recorded conversation and a saved resume command. A named
-Restart with keeps the old capture until a report from the new launch replaces it, and clears it in the relaunch when
-the new launch has reporting disabled.
+reporter stays silent and exits successfully even if it cannot write a report; only a lone `--help` or `-h`, which a
+person types and no wrapper sends, prints its help. Valid reports can be recorded while the supervisor is down.
+Admission checks the current launch and uses ancestry to keep a nested agent's report from replacing its parent's
+capture. If a nested process reports first, a recorded ancestor can correct the selection and post a correction notice
+once per launch. Plain Restart needs both a recorded conversation and a saved resume command. A named Restart with keeps
+the old capture until a report from the new launch replaces it, and clears it in the relaunch when the new launch has
+reporting disabled.
 
 Codex's first admitted selecting report pins the process that ran the hook under the session's agent terminal, skipping
 narrow shell trampolines. Renamed Codex executables and resident launchers above the emitter work with this rule. Later

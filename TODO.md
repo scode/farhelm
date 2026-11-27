@@ -68,13 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Stop other free-text CLI options from swallowing following flags, and audit CLI parsing.** Give the remaining
-  free-text options (`--alias`, `--title`, `--host`, etc.) the same treatment as `--model` and `--effort` (#5129) so
-  omitted values do not swallow a following flag (for example, `farhelm agent host add dev --alias --tailscale`). During
-  planning, do a full sweep of Farhelm's command-line parsing and surface anything that departs from normal
-  best-practice Rust `clap` subcommands and default behavior to the maintainer so agent-introduced quirks can be
-  reviewed. Plan: `plans/queue/cli-flag-parsing-audit.md`.
-
 - **Cmd+T to create a new terminal tab.** Cmd+T to create a new terminal tab. Plan:
   `plans/queue/terminal-tab-shortcuts.md`.
 

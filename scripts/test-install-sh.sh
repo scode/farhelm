@@ -1308,6 +1308,17 @@ check "forwarder (claimed custom reporter): succeeds" \
 check "forwarder (claimed custom reporter): starts the callback with its arguments" \
   [ "$(cat "$FWD_MARKER" 2>/dev/null || true)" = "custom-agent report-conversation --id conv" ]
 
+# A lone --help or -h is a person asking for the reporter's help, which farhelm prints, so the forwarder keeps its
+# output; every other shape stays the quiet callback, however help-like.
+for help in --help -h; do
+  check "forwarder (report-conversation $help alone): keeps the program's output" \
+    contains "$(forward "$FWD" custom-agent report-conversation "$help" 2>&1)" "arg [$help]"
+done
+check "forwarder (report-conversation --id --help): stays quiet" \
+  [ -z "$(forward "$FWD" custom-agent report-conversation --id --help 2>&1)" ]
+check "forwarder (report-conversation --help --id conv): stays quiet" \
+  [ -z "$(forward "$FWD" custom-agent report-conversation --help --id conv 2>&1)" ]
+
 # A Running record that names a version which is gone means the supervisor
 # that wrote it is not running any more, so the forwarder uses the Installed
 # version rather than failing.

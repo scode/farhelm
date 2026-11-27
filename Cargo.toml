@@ -105,7 +105,7 @@ axum = { version = "0.8", features = ["ws"] }
 # (It once also encoded the session list's pagination cursors; the list is
 # served whole now and there are none.)
 base64 = "0.22"
-clap = { version = "4", features = ["derive", "env"] }
+clap = { version = "4", features = ["derive"] }
 # Decompresses a downloaded/staged release `.tar.gz` archive (D14) before
 # `tar` reads the archive layer — the provisioning payload extractor
 # (`provisioning/payloads.rs`) and the verified download source
