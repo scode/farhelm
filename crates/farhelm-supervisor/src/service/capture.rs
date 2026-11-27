@@ -355,7 +355,8 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
         let Some(conversation) = row.captured_conversation else {
             continue;
         };
-        if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
+        // A stored value, not a hook report: Claude's may be the locator admission built from its report.
+        if !crate::agent_kind::accepts_stored_conversation(kind, &conversation) {
             continue;
         }
         let ownership_version = row.capture_ownership_version;

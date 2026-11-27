@@ -832,6 +832,86 @@ async fn stop_silences_rivals_but_preserves_validation_and_write_errors(case: Pi
     );
 }
 
+/// Restart can only tell whether Claude saved its conversation if the transcript Claude named reaches the stored
+/// capture, and only Claude's report may store one: Muse and Antigravity reports stay plain ids. Specified, through
+/// each vendor's own dispatch with a live emitter: a Claude report carrying an absolute `transcript_path` stores a
+/// `claude:` locator holding exactly the reported id and that path, keeps the version-0 Resume offer, and fills the
+/// resume command with the id alone; a historical bare-id capture of the same conversation moving to that locator
+/// posts no notification; the next report without a path stores the bare id; and a Muse report carrying a path
+/// stores its bare id.
+#[farhelm_testtrace::test]
+async fn only_a_claude_report_stores_its_transcript_beside_the_id() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .unwrap();
+    let emitter = ProcessIdentity::read(std::process::id()).unwrap();
+    // The seeded bare id: the same conversation, now reported with its transcript.
+    let transcript = "/home/u/.claude/projects/-tmp/historical-claude.jsonl";
+
+    let id = "claude-transcript";
+    seed_pin_session(&sup, id, CLAUDE).await;
+    let seeded = observe_claude_pin(&sup, id).await;
+    assert!(
+        seeded.notifications.is_empty(),
+        "the premise: the seeded session has no notification"
+    );
+    let mut report = positional_pin_report(CLAUDE, "historical-claude", &[emitter]);
+    report.transcript_path = Some(serde_json::json!(transcript));
+    sup.report_conversation(id, report).await.unwrap();
+    let observed = observe_claude_pin(&sup, id).await;
+    let stored = observed
+        .conversation
+        .as_deref()
+        .expect("a capture was stored");
+    assert_eq!(
+        crate::agent_kind::parse_locator(crate::agent_kind::LocatorVendor::Claude, stored)
+            .expect("a Claude locator was stored"),
+        crate::agent_kind::SessionLocator {
+            version: 1,
+            session_id: "historical-claude".into(),
+            session_file: Some(transcript.into()),
+        }
+    );
+    assert_eq!(observed.version, 0);
+    assert_eq!(observed.row_offer, RestartOffer::Resume);
+    assert_eq!(observed.mirror_offer, RestartOffer::Resume);
+    assert!(
+        observed.notifications.is_empty(),
+        "{:?}",
+        observed.notifications
+    );
+    let entry = sup.sessions.lock().await.get(id).unwrap().clone();
+    assert_eq!(
+        entry.snapshot.filled_resume_argv(stored),
+        Some(vec![
+            "claude".to_string(),
+            "--resume".into(),
+            "historical-claude".into()
+        ]),
+        "the id alone is the resume selector"
+    );
+
+    sup.report_conversation(id, positional_pin_report(CLAUDE, "conv-2", &[emitter]))
+        .await
+        .unwrap();
+    assert_eq!(
+        observe_claude_pin(&sup, id).await.conversation.as_deref(),
+        Some("conv-2"),
+        "a report without a path stores the bare id"
+    );
+
+    let muse = "muse-transcript";
+    seed_pin_session(&sup, muse, MUSE).await;
+    let mut report = positional_pin_report(MUSE, "muse-1", &[emitter]);
+    report.transcript_path = Some(serde_json::json!("/home/u/.muse/muse-1.jsonl"));
+    sup.report_conversation(muse, report).await.unwrap();
+    assert_eq!(
+        observe_claude_pin(&sup, muse).await.conversation.as_deref(),
+        Some("muse-1")
+    );
+}
+
 /// Claude's original ancestor-correction and version-0 contract survives sharing.
 #[farhelm_testtrace::test]
 async fn claude_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {

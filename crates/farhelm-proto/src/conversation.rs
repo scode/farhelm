@@ -14,16 +14,20 @@ pub const OMP_LOCATOR_PREFIX: &str = "omp:";
 pub const CODEX_LOCATOR_PREFIX: &str = "codex:";
 /// Prefix on stored Grok locators.
 pub const GROK_LOCATOR_PREFIX: &str = "grok:";
+/// Prefix on stored Claude locators: the reported session id together with the transcript file Claude named, which
+/// Restart checks for before resuming.
+pub const CLAUDE_LOCATOR_PREFIX: &str = "claude:";
 
 /// Encoded locators cannot be reused as literal IDs in a custom agent's resume arguments.
 ///
 /// Keep the contract changelog in `website/src/content/docs/docs/agents/custom-agent-contract.md`
 /// up to date when this vocabulary changes.
-pub const RESERVED_LOCATOR_PREFIXES: [&str; 4] = [
+pub const RESERVED_LOCATOR_PREFIXES: [&str; 5] = [
     PI_LOCATOR_PREFIX,
     OMP_LOCATOR_PREFIX,
     CODEX_LOCATOR_PREFIX,
     GROK_LOCATOR_PREFIX,
+    CLAUDE_LOCATOR_PREFIX,
 ];
 
 /// Whether a token claims Farhelm's encoded locator format. Even a malformed locator keeps its prefix reserved.

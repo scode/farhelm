@@ -27,6 +27,8 @@ after a Farhelm upgrade, read the [Contract changelog](#contract-changelog) belo
   log now ends with a tab and `committed gen=<number>` when the supervisor saved the report, or `ignored` when it left
   the saved conversation unchanged. A check that matched the whole line `acked <id> -` should match its start instead
   and look for `committed`.
+- **`claude:` prefix reserved (2026-11-26):** Farhelm now stores Claude conversations with a `claude:` prefix, so an ID
+  that starts with `claude:` is refused like the other reserved prefixes. Nothing else changed.
 
 ## 1. How Farhelm invokes your executable
 
@@ -102,8 +104,8 @@ Farhelm rejects IDs that fail any of these rules:
 - Must be non-empty printable ASCII, at most 128 bytes.
 - Must not start with `-` (so it can never be mistaken for a CLI flag when passed back to `--resume`).
 - Must not contain whitespace, quotes (`'`, `"`), backslashes (`\`), or control characters.
-- Must not start with Farhelm's internal locator prefixes (`pi:`, `omp:`, `codex:`, `grok:`) or equal a Farhelm
-  placeholder (such as `{conversation}` or `{cwd}`).
+- Must not start with Farhelm's internal locator prefixes (`pi:`, `omp:`, `codex:`, `grok:`, `claude:`) or equal a
+  Farhelm placeholder (such as `{conversation}` or `{cwd}`).
 
 ### Guarantees from Farhelm
 

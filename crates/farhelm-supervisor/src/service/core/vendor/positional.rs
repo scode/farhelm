@@ -16,6 +16,15 @@ enum RecordCheck {
     AntigravityMainTranscript,
 }
 
+/// What admission stores for an accepted report's plain id.
+enum StoredValue {
+    /// The id itself.
+    PlainId,
+    /// A `claude:` locator carrying the transcript Claude reported with the id, or the bare id when the report named
+    /// none it can store (`agent_kind::claude::stored_conversation`). Restart reads the file's existence from it.
+    ClaudeTranscript,
+}
+
 /// Facts selected by per-kind dispatch, separate from the shared authority rules.
 /// Built-in vendors currently emit Stop. The public custom reporter has no event selector.
 pub(in crate::service::core) struct PositionalReportPolicy {
@@ -24,6 +33,7 @@ pub(in crate::service::core) struct PositionalReportPolicy {
     quiet_event: Option<&'static str>,
     grammar: PositionalReporter,
     record_check: RecordCheck,
+    stored_value: StoredValue,
     correction_kind: crate::service::notifications::NotificationKind,
     correction_text: &'static str,
 }
@@ -34,6 +44,7 @@ pub(in crate::service::core) const CLAUDE: PositionalReportPolicy = PositionalRe
     quiet_event: Some("Stop"),
     grammar: PositionalReporter::BuiltIn,
     record_check: RecordCheck::None,
+    stored_value: StoredValue::ClaudeTranscript,
     correction_kind: crate::service::notifications::NotificationKind::ClaudePinCorrected,
     correction_text: crate::service::notifications::CLAUDE_PIN_CORRECTED_TEXT,
 };
@@ -46,6 +57,7 @@ pub(in crate::service::core) const MUSE: PositionalReportPolicy = PositionalRepo
     quiet_event: Some("Stop"),
     grammar: PositionalReporter::BuiltIn,
     record_check: RecordCheck::None,
+    stored_value: StoredValue::PlainId,
     correction_kind: crate::service::notifications::NotificationKind::MusePinCorrected,
     correction_text: crate::service::notifications::MUSE_PIN_CORRECTED_TEXT,
 };
@@ -58,6 +70,7 @@ pub(in crate::service::core) const ANTIGRAVITY: PositionalReportPolicy = Positio
     quiet_event: Some("Stop"),
     grammar: PositionalReporter::BuiltIn,
     record_check: RecordCheck::AntigravityMainTranscript,
+    stored_value: StoredValue::PlainId,
     correction_kind: crate::service::notifications::NotificationKind::AntigravityPinCorrected,
     correction_text: crate::service::notifications::ANTIGRAVITY_PIN_CORRECTED_TEXT,
 };
@@ -69,6 +82,7 @@ pub(in crate::service::core) const CUSTOM: PositionalReportPolicy = PositionalRe
     quiet_event: None,
     grammar: PositionalReporter::Custom,
     record_check: RecordCheck::None,
+    stored_value: StoredValue::PlainId,
     correction_kind: crate::service::notifications::NotificationKind::CustomPinCorrected,
     correction_text: crate::service::notifications::CUSTOM_PIN_CORRECTED_TEXT,
 };
@@ -78,7 +92,8 @@ impl Supervisor {
     /// The capture claim protects both the recorded process pin and the current
     /// binding. Ancestor correction and its once-per-launch notification commit
     /// together after any required vendor record check. The stored binding is
-    /// a plain ID with ownership version 0. Stop is a selecting report, but
+    /// a plain ID with ownership version 0, except that Claude's carries the
+    /// transcript path its report named, as a `claude:` locator. Stop is a selecting report, but
     /// acknowledgments of rival or unverified Stops leave capture untouched.
     /// Validation and storage failures remain errors.
     pub(in crate::service::core) async fn report_positional_conversation(
@@ -206,6 +221,14 @@ impl Supervisor {
                 }
             }
         }
+        // Built after every check that reads the raw id, so the locator is only ever what gets stored.
+        let conversation = match policy.stored_value {
+            StoredValue::PlainId => conversation,
+            StoredValue::ClaudeTranscript => crate::agent_kind::claude::stored_conversation(
+                &conversation,
+                transcript_path.as_ref(),
+            ),
+        };
         let correction = decision == PinDecision::Correct;
         let replacement_pin = ReportPin::replacement_json(
             stored_pin.as_deref().zip(pin.as_ref()),
