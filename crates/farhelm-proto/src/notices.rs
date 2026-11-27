@@ -30,6 +30,16 @@ pub enum NoticeContent {
         /// The supervisor names any checkout left behind and explains other cleanup outcomes.
         detail: String,
     },
+    /// An agent said it is blocked (`farhelm agent notify`). One per session: a later one replaces it under a new id,
+    /// so the bell shows it unread again. Marking it read resolves it.
+    AgentBlocked {
+        /// The session's id as clients know it: its host entry and bare id, as `GET /api/sessions` serves it.
+        session_id: String,
+        /// The session's title when the agent asked, for the bell's line.
+        session_title: String,
+        /// The agent's reason, as the helm cleaned and capped it.
+        reason: String,
+    },
 }
 
 /// Stable identity and first observation belong to the notice, not to each removal attempt. Resolved notices are

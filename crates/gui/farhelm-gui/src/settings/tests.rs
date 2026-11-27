@@ -4525,7 +4525,8 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
     fill(cx, "ntfy-topic", "saved-more");
     let (id, body) = save_ntfy(&mut helm, cx);
     let expected = json!({ "enabled": false, "server_url": "https://ntfy.example", "topic": "saved-more",
-                               "priority": "high", "token": null, "notify_waiting": true });
+                               "priority": "high", "token": null, "notify_waiting": true,
+                               "notify_blocked": false });
     assert_eq!(body, expected);
     assert_eq!(
         preference_work(cx),
@@ -4594,6 +4595,30 @@ fn the_line_beside_send_test_says_what_the_saved_settings_send(cx: &mut TestAppC
     assert!(!drawn(cx, "ntfy-saved-state"));
 }
 
+/// The blocked switch decides whether an agent's `farhelm agent notify` reaches the user's phone, so the form must show
+/// what the helm stores and send what the user chose. Specified: with the helm storing blocked alerts on, the Agent is
+/// blocked switch shows on and the form has no unsaved changes; turning it off shows the unsaved line, and Save sends
+/// `"notify_blocked": false`.
+#[gpui::test]
+fn the_blocked_switch_shows_and_saves_the_stored_choice(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let mut stored = ntfy("https://ntfy.sh", "alerts", "default", false);
+    stored["enabled"] = json!(true);
+    stored["notify_blocked"] = json!(true);
+    show_ntfy(&mut helm, cx, stored);
+    assert_eq!(switch_on(cx, "ntfy-blocked"), Some(true));
+    assert!(!drawn(cx, "ntfy-saved-state"), "nothing unsaved or off");
+    reach(cx, "ntfy-blocked");
+    keys(cx, "space");
+    assert_eq!(switch_on(cx, "ntfy-blocked"), Some(false));
+    assert_eq!(
+        label_of(cx, "ntfy-saved-state").as_deref(),
+        Some(ntfy::UNSAVED_LINE)
+    );
+    let (_, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["notify_blocked"], json!(false));
+}
+
 /// SPEC.md: the settings "are explicitly saved helm configuration", and "The stored token is never returned": the form
 /// must send what was typed, show the helm's answer, and then hold no token, or the next Save would send it again,
 /// possibly to another server. Specified: a server, topic and token typed, the switch turned on and High pressed in the
@@ -4618,7 +4643,8 @@ fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext)
 
     let (id, body) = save_ntfy(&mut helm, cx);
     let mut form = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",
-                           "priority": "high", "token": "browser-token", "notify_waiting": true });
+                           "priority": "high", "token": "browser-token", "notify_waiting": true,
+                           "notify_blocked": false });
     assert_eq!(body, form);
     assert_eq!(label_of(cx, "ntfy-working").as_deref(), Some("Working…"));
     let stored = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",

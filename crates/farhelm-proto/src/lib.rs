@@ -258,7 +258,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_92` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_93` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -269,7 +269,12 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 92;
+pub const PROTOCOL_VERSION: u32 = 93;
+
+/// The most characters an [`AgentVerb::Notify`] reason may have once the helm has cleaned it; the helm refuses a longer
+/// one rather than cut it. One short sentence is what the instruction asks for; the cap keeps a runaway reason out of
+/// the bell and the ntfy alert.
+pub const AGENT_NOTIFY_REASON_CAP: usize = 500;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -2028,6 +2033,16 @@ pub enum AgentVerb {
     /// Ask to open an absolute web URL on the user's machine. Waits for the user's answer
     /// but takes no session mutation fence: a pending link must not hold lifecycle work.
     OpenUrl { url: String },
+    /// Tell the user the asking session is blocked: `farhelm agent notify`. Always about the asking session itself, so
+    /// it names no target and needs no approval card. The helm records it as a notice in the desktop's Notifications
+    /// bell and, when ntfy alerts and their blocked switch are on, sends an ntfy alert. Answered with
+    /// [`AgentReply::Notified`].
+    Notify {
+        /// Why the session is blocked, in the agent's words: what is blocked and what it needs. The helm strips
+        /// characters that must not be shown as themselves, and refuses an empty one or one longer than
+        /// [`AGENT_NOTIFY_REASON_CAP`] characters.
+        reason: String,
+    },
     /// Change a session's title — SPEC.md's rename verb, reached through
     /// the same routing and recording the REST `/rename` route uses.
     /// Answered with [`AgentReply::Session`], the session's freshly
@@ -2311,6 +2326,13 @@ impl AgentVerb {
     pub fn is_mutating(&self) -> bool {
         match self {
             AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Agents {} | AgentVerb::Templates {} | AgentVerb::OpenUrl { .. } => false,
+            // Notify leaves a notice and maybe an alert behind, but it must not
+            // take the session's change fence: an agent is often blocked on its
+            // own change still waiting for an approval card, which holds that
+            // fence for minutes, and notify is how it says so. A retry after a
+            // lost answer replaces the session's one notice and adds at most one
+            // alert under the rate cap, so it is safe to repeat.
+            AgentVerb::Notify { .. } => false,
             // The creating verbs sit on this side for a stronger reason
             // than the lifecycle four: what they leave behind is a session
             // that did not exist, running an agent process on some host. A
@@ -2358,7 +2380,9 @@ impl AgentVerb {
             AgentVerb::Hosts {}
             | AgentVerb::Sessions {}
             | AgentVerb::Agents {}
-            | AgentVerb::Templates {} => false,
+            | AgentVerb::Templates {}
+            // Asks nobody: the notice and the alert are the whole answer.
+            | AgentVerb::Notify { .. } => false,
             AgentVerb::Rename { .. }
             | AgentVerb::Stop { .. }
             | AgentVerb::Prompt { .. }
@@ -2401,6 +2425,7 @@ impl AgentVerb {
             | AgentVerb::Agents {}
             | AgentVerb::Templates {}
             | AgentVerb::OpenUrl { .. }
+            | AgentVerb::Notify { .. }
             | AgentVerb::Rename { .. }
             | AgentVerb::Stop { .. }
             | AgentVerb::Prompt { .. }
@@ -2547,6 +2572,8 @@ pub enum AgentReply {
     /// The user opened or allowed the link, or the desktop's native opener returned success.
     /// The old web client could not tell whether its popup blocker accepted the new window.
     UrlOpened {},
+    /// The helm recorded the asking session's [`AgentVerb::Notify`] and queued its alert, if one was due.
+    Notified {},
     Hosts {
         hosts: Vec<AgentHost>,
         /// Host discovery is all-or-error; a partial catalog could make a
@@ -6092,6 +6119,7 @@ mod tests {
     /// Version 91 removes supervisor repository discovery. Suggestions use the helm's launch history.
     /// Version 92 adds the Tailscale request to agent host add. An older helm would ignore it and add the
     /// host as ordinary SSH.
+    /// Version 93 adds the Notify verb and its Notified reply. Older relays cannot decode their tags.
     /// Pinning the value here makes an accidental re-bump (or a forgotten
     /// one, if a later change needed it) a loud test failure rather than
     /// a silent drift discovered only by two builds refusing to talk to each other.
@@ -6102,8 +6130,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_92() {
-        assert_eq!(PROTOCOL_VERSION, 92);
+    fn protocol_version_is_pinned_at_93() {
+        assert_eq!(PROTOCOL_VERSION, 93);
     }
 
     /// Discovery is a read-only relay with a fixed reply tag and only the fields needed to choose
@@ -6498,6 +6526,39 @@ mod tests {
                 message
             );
         }
+    }
+
+    /// `farhelm agent notify` must reach the user while the session's own change waits for an approval card, so it
+    /// never takes the session's change fence, and it asks nobody, so it gets no approval budget; its wire spelling is
+    /// what older and newer relays agree on. Specified: Notify is not mutating, does not wait for the user and launches
+    /// no environment; it encodes as `{"verb":"notify","reason":...}` and its reply as `{"reply":"notified"}`, and both
+    /// decode back.
+    #[farhelm_testtrace::test]
+    fn notify_takes_no_fence_asks_nobody_and_keeps_its_wire_tags() {
+        let verb = AgentVerb::Notify {
+            reason: "deploy: no credentials".into(),
+        };
+        assert!(!verb.is_mutating());
+        assert!(!verb.may_wait_for_user());
+        assert!(!verb.may_launch_environment());
+        assert_eq!(
+            serde_json::to_value(&verb).unwrap(),
+            serde_json::json!({ "verb": "notify", "reason": "deploy: no credentials" })
+        );
+        assert_eq!(
+            serde_json::from_value::<AgentVerb>(serde_json::to_value(&verb).unwrap()).unwrap(),
+            verb
+        );
+        let reply = AgentReply::Notified {};
+        assert_eq!(
+            serde_json::to_value(&reply).unwrap(),
+            serde_json::json!({ "reply": "notified" })
+        );
+        assert_eq!(
+            serde_json::from_value::<AgentReply>(serde_json::json!({ "reply": "notified" }))
+                .unwrap(),
+            reply
+        );
     }
 
     /// A browser wait must receive the approval budget without holding the session's change fence.

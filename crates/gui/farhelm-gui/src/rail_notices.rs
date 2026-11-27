@@ -657,11 +657,36 @@ impl Actions {
     }
 }
 
+/// An event notice that is a bold title and one line of host-written detail below it, greyed once resolved: a late
+/// Delete's cleanup details, or a blocked agent's reason.
+fn detail_entry(
+    notice: &Notice,
+    title: HostSentence,
+    detail: &str,
+    palette: &Palette,
+) -> gpui::Stateful<gpui::Div> {
+    entry_frame(
+        SharedString::from(format!("{ENTRY_ID_PREFIX}{}", notice.id)),
+        is_unread(notice),
+        palette,
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .when(notice.resolved, |content| {
+                content.text_color(theme::color(palette.fg_1))
+            })
+            .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
+            .child(host_text::element(&HostText::from_host(detail))),
+    )
+}
+
 /// Draw one record and the actions appropriate to its condition. A trash cleanup notice (`.rail-notice`) shows the host
 /// and what happened, the checkout's repository and last measured size, the reason in red (greyed with the rest once
 /// resolved), when it last failed (to the minute, in the viewer's local time), and for an unresolved notice the promise
 /// of a retry at the host's supervisor restart with Retry now beside Open Trash. A session-limit or desktop startup
-/// notice offers Send feedback. A late Delete carries the host’s cleanup details.
+/// notice offers Send feedback. A late Delete carries the host’s cleanup details, and an agent's blocked report
+/// (`farhelm agent notify`) names its session and host above the agent's reason.
 /// A host the registry does not list is named "Unknown host", as the old panel said;
 /// trash reports keep their original host name while the registry load is pending.
 #[allow(
@@ -705,27 +730,29 @@ fn entry(
         }
         NoticeContent::NewAnnouncement => return announcement_entry(notice, button, palette),
         NoticeContent::LateDelete { detail } => {
-            let id = notice.id;
-            let title = HostSentence::new(format!("{ENTRY_ID_PREFIX}{id}-title"))
+            let title = HostSentence::new(format!("{ENTRY_ID_PREFIX}{}-title", notice.id))
                 .text("Session deleted on ");
             let title = match &host {
                 Some(host) => title.host(host),
                 None => title.text("Unknown host"),
             };
-            return entry_frame(
-                SharedString::from(format!("{ENTRY_ID_PREFIX}{id}")),
-                is_unread(notice),
-                palette,
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    .when(notice.resolved, |content| {
-                        content.text_color(theme::color(palette.fg_1))
-                    })
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
-                    .child(host_text::element(&HostText::from_host(detail.as_str()))),
-            );
+            return detail_entry(notice, title, detail, palette);
+        }
+        // An agent's `farhelm agent notify`: the session's title and host, then its reason. The title and the reason
+        // are host-written text, isolated like the host's name. Marking the notice read resolves it.
+        NoticeContent::AgentBlocked {
+            session_title,
+            reason,
+            ..
+        } => {
+            let title = HostSentence::new(format!("{ENTRY_ID_PREFIX}{}-title", notice.id))
+                .host(&HostText::from_host(session_title.as_str()))
+                .text(" on ");
+            let title = match &host {
+                Some(host) => title.host(host),
+                None => title.text("Unknown host"),
+            };
+            return detail_entry(notice, title.text(" is blocked"), reason, palette);
         }
     };
     let actions = Actions::of(notice, checkout_id, trash_snapshot);

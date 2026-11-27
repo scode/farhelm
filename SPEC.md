@@ -2863,8 +2863,9 @@ save separate helm preferences (see Status). Each row has its own play button fo
 announcements** is on by default on macOS and Linux. Turning it off stops the helm from requesting the network
 announcement feed. The switch is searchable and shared by windows on this helm. **ntfy alerts** has an off-by-default
 **Enable ntfy alerts** switch, under which an **Agent is waiting for an answer** switch (on by default, including for
-settings saved before it existed) chooses the waiting alert. The form also has a server URL (default `https://ntfy.sh`),
-a topic, an optional access token, and a priority (Min, Low, Default, High, Urgent; default Default). The waiting switch
+settings saved before it existed) chooses the waiting alert, and an off-by-default **Agent is blocked** switch chooses
+the alert an agent sends with `farhelm agent notify`. The form also has a server URL (default `https://ntfy.sh`), a
+topic, an optional access token, and a priority (Min, Low, Default, High, Urgent; default Default). The waiting switch
 says which agents it covers, worded from what Farhelm can read on each built-in agent's screen: questions and approvals
 for some, only the folder-trust question for others, none for the rest. These ntfy settings are explicitly saved helm
 configuration, shared by every client, outside the preference row. Save refusals appear inline. The stored token is
@@ -3408,6 +3409,12 @@ a session already waiting then alerts only for its next wait. Unknown readings a
 Detection remains heuristic, with the same agent limits as the waiting sound. There are no alerts for Farhelm approval
 cards, finished turns or session-tracking notifications. Window focus does not suppress ntfy alerts.
 
+With the **Agent is blocked** switch on as well, the helm also sends an alert each time an agent says it is blocked
+(`farhelm agent notify`, below): "<title> on <host> is blocked: <reason>". It goes through the same queue, rate cap and
+character rules as the waiting alert. Whatever the switches say, the same report is a notice in the navigation rail's
+notices bell, naming the session and host with the agent's reason; one per session, a later report replacing it as a new
+unread notice, and marking it read resolves it.
+
 The alert contains the session's title and the host's display name, with control and other invisible or reordering
 characters removed and each capped at 200 characters: "<title> on <host> is waiting for you". A title generated from a
 directory is still sent as the title; no screen contents, prompts, command lines or other paths are added. Its ntfy
@@ -3500,6 +3507,10 @@ host keeps its last known notices.
 A late Delete notice, or the checkout notice of a Delete an agent asked for, names the host and shows its cleanup
 details, including the path and reason for any checkout left behind. Reading this notice marks it resolved so it can be
 cleared from the history.
+
+A blocked-agent notice (`farhelm agent notify`, see the ntfy alerts above) names the session by its title and its host,
+with the agent's reason below. Each session has at most one, a later report replacing it as a new unread notice, and a
+host keeps at most as many as its session listing can show. Reading it marks it resolved, as for a late Delete.
 
 Trash cleanup notices report trashed checkouts whose background cleanup failed. A notice names the host and checkout,
 shows how much space was last measured when known and a short reason, and explains that Farhelm tries again when that
@@ -4786,21 +4797,22 @@ refused with its state named. The new session appears in the window the way any 
 Every acting verb of `farhelm spawn` and `farhelm agent` asks the user first. `farhelm spawn` in every form,
 `farhelm agent create`, `clone`, `rename`, `stop`, `restart`, `delete`, `prompt` and `open-url`, and the template writes
 below are carried out only once the user approves them in the GUI, including when an agent acts on its own session. The
-read-only verbs (the hosts, sessions, agents and templates listings, and `farhelm agent instructions`) never ask, and
-neither does Farhelm's own plumbing that runs in a session, such as the hooks that report a conversation's identity,
-which is not an agent verb. Farhelm cannot tell an agent from a person typing in a session's shell and does not try:
-whoever runs the command in a session asks as that session. The helm decides, because the requesting host and its
-supervisor are not trusted to (see Local authority and trust between hosts), and it decides by the host connection the
-request arrived on, never by anything the request or its supervisor claims. A request from a host whose "run farhelm
-commands from this host without asking" setting is on (see Topology) is not asked about for commands. Opening links uses
-its own two permissions below; neither link permission grants command authority, and command authority grants neither
-link permission. Spawn is the exception that proves the rule: it is the one action the requesting host's own supervisor
-carries out, and the launch `--inherit-agent` reuses comes from that supervisor, so a compromised supervisor could carry
-out a spawn without asking, show a different launch on the card than the one it starts, or ignore the YOLO rule below.
-That is accepted, because spawn acts only on its own host, which the threat model already trusts. Waiting for the user
-holds nothing other operations wait on, apart from the asking session's own next change, which is refused while an
-earlier one is still waiting. A link request takes no session-change lock: it neither blocks another session command nor
-waits for one. While it is turned off, `prompt` is refused without asking.
+read-only verbs (the hosts, sessions, agents and templates listings, and `farhelm agent instructions`) never ask, nor
+does `farhelm agent notify`, which only tells the user something, and neither does Farhelm's own plumbing that runs in a
+session, such as the hooks that report a conversation's identity, which is not an agent verb. Farhelm cannot tell an
+agent from a person typing in a session's shell and does not try: whoever runs the command in a session asks as that
+session. The helm decides, because the requesting host and its supervisor are not trusted to (see Local authority and
+trust between hosts), and it decides by the host connection the request arrived on, never by anything the request or its
+supervisor claims. A request from a host whose "run farhelm commands from this host without asking" setting is on (see
+Topology) is not asked about for commands. Opening links uses its own two permissions below; neither link permission
+grants command authority, and command authority grants neither link permission. Spawn is the exception that proves the
+rule: it is the one action the requesting host's own supervisor carries out, and the launch `--inherit-agent` reuses
+comes from that supervisor, so a compromised supervisor could carry out a spawn without asking, show a different launch
+on the card than the one it starts, or ignore the YOLO rule below. That is accepted, because spawn acts only on its own
+host, which the threat model already trusts. Waiting for the user holds nothing other operations wait on, apart from the
+asking session's own next change, which is refused while an earlier one is still waiting. A link request takes no
+session-change lock: it neither blocks another session command nor waits for one. While it is turned off, `prompt` is
+refused without asking.
 
 **Manage sessions on this host without asking** is a narrower, independent permission on the requesting host. It waives
 the card for create (with or without an initial prompt), spawn, clone, rename, stop, restart and delete only when the
@@ -4815,6 +4827,14 @@ The host settings Permissions section places **Manage sessions on this host with
 sessions without asking** and **Run farhelm commands without asking**. Its help explains the covered session actions,
 the requests that still ask, and that the fleet-wide permission already covers these actions. Both switches always show
 and change their own stored values, even when fleet-wide authority makes the narrower grant redundant.
+
+`farhelm agent notify "<reason>"` tells the user that the asking session is blocked and cannot finish what it was asked,
+for an agent that would otherwise stop silently. It always concerns the asking session, so it names no target. The helm
+turns runs of whitespace into single spaces, removes characters that must not be shown as themselves, refuses an empty
+reason or one longer than 500 characters, records the notices-bell notice and sends the blocked ntfy alert when that is
+on (see Status), then the command prints one confirmation line and exits zero. It works the same on every kind of host,
+since it travels the same authenticated route as every agent verb; the session needs neither the ntfy settings nor
+network access of its own.
 
 `farhelm agent open-url -- <url>` asks to open an absolute HTTP or HTTPS URL with a host, at most 4096 bytes long. Raw
 whitespace and control characters are refused before parsing, matching terminal links; the full original URL is shown as

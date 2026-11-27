@@ -344,6 +344,7 @@ fn client() -> reqwest::Client {
 fn save(server: &str, token: Option<&str>, enabled: bool) -> SaveSettings {
     SaveSettings {
         notify_waiting: Some(true),
+        notify_blocked: Some(true),
         enabled,
         server_url: server.into(),
         topic: TOPIC.into(),
@@ -724,6 +725,57 @@ async fn connection_failure_is_secret_safe() {
         "the ntfy server could not be reached"
     );
     drop(socket);
+}
+
+/// A blocked alert is the agent's own request to reach the user, so it goes out only under its own switch, and says
+/// why. The sender handles the queue in order, so a waiting alert queued after an unsent blocked one is the next arrival
+/// whether or not the blocked one was dropped; the arrival count tells them apart. Specified: with the blocked switch
+/// off, a queued blocked alert is dropped and the waiting alert after it is the first and only arrival; with it on,
+/// the next blocked alert arrives with the body "<title> on this machine is blocked: <reason>".
+#[farhelm_testtrace::test]
+async fn blocked_alerts_follow_their_switch_and_carry_the_reason() {
+    let mut server = stand_in(Answer::Success).await;
+    let harness = helm().await;
+    let mut blocked_off = save(&server.server_url, Some(TOKEN), true);
+    blocked_off.notify_blocked = Some(false);
+    harness
+        .store
+        .save_ntfy_config(blocked_off)
+        .await
+        .ok()
+        .unwrap();
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    harness
+        .state
+        .ntfy
+        .enqueue_blocked(TITLE.into(), host, "deploy: no credentials".into());
+    harness.state.ntfy.enqueue(TITLE.into(), host);
+    server.arrived(1).await;
+    assert_eq!(
+        server
+            .received
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| request.body.clone())
+            .collect::<Vec<_>>(),
+        [format!("{TITLE} on this machine is waiting for you")]
+    );
+    harness
+        .store
+        .save_ntfy_config(save(&server.server_url, Some(TOKEN), true))
+        .await
+        .ok()
+        .unwrap();
+    harness
+        .state
+        .ntfy
+        .enqueue_blocked(TITLE.into(), host, "deploy: no credentials".into());
+    server.arrived(2).await;
+    assert_eq!(
+        server.received.lock().unwrap()[1].body,
+        format!("{TITLE} on this machine is blocked: deploy: no credentials")
+    );
 }
 
 /// A slow server cannot block enqueue or permit unbounded pending work. The

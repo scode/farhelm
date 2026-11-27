@@ -678,6 +678,7 @@ fn lost_reply(cause: &str, mutating: bool) -> anyhow::Error {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReplyKind {
     UrlOpened,
+    Notified,
     Hosts,
     Sessions,
     Agents,
@@ -703,6 +704,7 @@ impl ReplyKind {
             farhelm_proto::AgentVerb::Agents {} => ReplyKind::Agents,
             farhelm_proto::AgentVerb::Templates {} => ReplyKind::Templates,
             farhelm_proto::AgentVerb::OpenUrl { .. } => ReplyKind::UrlOpened,
+            farhelm_proto::AgentVerb::Notify { .. } => ReplyKind::Notified,
             farhelm_proto::AgentVerb::Rename { .. } => ReplyKind::Session,
             farhelm_proto::AgentVerb::Stop { .. } => ReplyKind::Stopped,
             farhelm_proto::AgentVerb::Prompt { .. } => ReplyKind::Prompted,
@@ -733,6 +735,7 @@ impl ReplyKind {
             AgentReply::Agents { .. } => ReplyKind::Agents,
             AgentReply::Templates { .. } => ReplyKind::Templates,
             AgentReply::UrlOpened {} => ReplyKind::UrlOpened,
+            AgentReply::Notified {} => ReplyKind::Notified,
             AgentReply::Session { .. } => ReplyKind::Session,
             AgentReply::Restarted { .. } => ReplyKind::Restarted,
             AgentReply::Stopped {} => ReplyKind::Stopped,
@@ -760,6 +763,7 @@ impl ReplyKind {
             ReplyKind::Agents => "agents listing",
             ReplyKind::Templates => "templates listing",
             ReplyKind::UrlOpened => "opened link confirmation",
+            ReplyKind::Notified => "notification confirmation",
             ReplyKind::Session => "session row",
             ReplyKind::Restarted => "restarted session row",
             ReplyKind::Stopped => "stop confirmation",

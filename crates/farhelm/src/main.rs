@@ -220,6 +220,11 @@ enum AgentCmd {
         /// Absolute http or https URL. Use -- before a URL beginning with a hyphen.
         url: String,
     },
+    /// Tell the user this session is blocked and cannot finish what they asked: Farhelm shows it in the app's Notifications bell and, if they turned blocked alerts on, sends them an ntfy alert.
+    Notify {
+        /// One short sentence: what is blocked and why, for example "deploy: the staging credentials are missing".
+        reason: String,
+    },
     /// List the hosts the helm knows, marking this session's own.
     Hosts {
         /// Print the versioned machine-readable discovery envelope.
@@ -693,6 +698,9 @@ impl AgentCmd {
             AgentCmd::OpenUrl { url } => {
                 Some(farhelm_proto::AgentVerb::OpenUrl { url: url.clone() })
             }
+            AgentCmd::Notify { reason } => Some(farhelm_proto::AgentVerb::Notify {
+                reason: reason.clone(),
+            }),
             // Refused in `run_agent` before this is asked; answering
             // `None` here would print the instructions instead.
             AgentCmd::Profiles { .. } => unreachable!("run_agent refuses agent profiles first"),
@@ -2578,6 +2586,15 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
                     "the helm answered open-url with something other than an opened link"
                 );
             };
+        }
+        // One line, so an agent's transcript shows the notification went out.
+        AgentCmd::Notify { .. } => {
+            let AgentReply::Notified {} = reply else {
+                anyhow::bail!(
+                    "the helm answered notify with something other than a notification confirmation"
+                );
+            };
+            println!("Notified the user.");
         }
         // The four lifecycle verbs print one confirmation line
         // rather than a table — there is exactly one row to

@@ -401,6 +401,14 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                 };
                 entries.push(switch(ntfy::Switch::Enabled));
                 entries.push(switch(ntfy::Switch::Waiting));
+                // The blocked switch's visible help names the command that sends its alert, so "notify" finds it.
+                let (id, label, help) = ntfy::Switch::Blocked.words();
+                entries.push(add(
+                    id,
+                    label,
+                    &[help, ntfy::BLOCKED_HELP, ntfy::INTRO],
+                    Target::NtfySwitch(ntfy::Switch::Blocked),
+                ));
                 for field in ntfy::Field::ALL {
                     let (id, label, help) = field.words();
                     let extra: &[&str] = match field {
