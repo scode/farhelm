@@ -104,3 +104,65 @@ The PR had one fresh-context Opus 5.5 review at high effort: no blocker, three s
   wait for the CLI has its own short limit, the arguments must match exactly, and wording); two are stated as
   limitations instead (the vendor's own wording for a failed hook, and the assumption about hand-made hooks).
 - These fixes were not reviewed again; runs `2f5740b4`, `ca311582` and `9bbe2e7c` ran after them.
+
+### Landing
+
+#### What landed with it
+
+Nothing reached main between the executor's last rebase of this plan and its landing, apart from the queue's own
+bookkeeping. It was the only plan in this round. The other drift plans that landed on 2026-11-27
+(drift-base-isolation-and-turns, drift-permission-footer, drift-conversation-rotation) were already on main when the
+executor last rebased it.
+
+An independent reviewer and I read the change and found nothing to fix. The plan moves some setup the drift categories
+shared into common helpers. The reviewer checked each moved piece against what it replaced in the existing base, capture
+timing and instructions delivery drift categories, and found them equivalent, so those categories behave as before. The
+real home directory stays untouched. The run outside Farhelm drops every Farhelm variable before the agent starts, and
+the test confirms that from the agent's own environment before typing anything. Without those variables Farhelm's hook
+has no supervisor to report to and writes nothing. The test process's own environment is never changed. The hook files
+the test expects come from the code Farhelm uses to install them, and the real supervisor writes them.
+
+Optional cleanups the review noted:
+
+- The conversation rotation category, landed on 2026-11-27, still spells out the ordinary launch by hand instead of
+  using the new shared helper.
+- The drift docs' section on hook setup in a private copy does not mention the new guard that requires every agent with
+  persistent hooks to have a case in this category.
+- The new test file's own description says the outside run has "none of Farhelm's environment". That is slightly too
+  strong: Farhelm's directory still comes first on the agent's `PATH`, which the hooks do not use.
+- On a machine with a systemd user manager, a regression that left the agent outside its session's scope would show as
+  COULD NOT RUN rather than FAILED. It would not pass silently, since COULD NOT RUN is reported as such.
+
+#### Fixes made while landing
+
+None.
+
+#### What the landing made untrue in the report
+
+Nothing.
+
+#### Checks
+
+Run once, on the plan's PR as it landed (main had not moved). The plan changes only the opt-in real-agent tests and the
+drift docs. The real-agent cases spend vendor turns, so they were built and listed, not run, and their ordinary tests
+ran instead. Everything ran locally:
+
+- `cargo clippy --all-targets`, without `-D warnings`, because one warning already on main since #5120 (an unused method
+  in the helm's ntfy settings code, outside this plan) would fail that flag. That was the only warning.
+- The command line's unit tests (`cargo nextest run -p farhelm --bins`), recorded run
+  22a26838-5af5-4960-99e5-ce13fe98144f: 155 passed, none failed.
+- The ordinary tests of the real-agent test code, without the opt-in cases
+  (`cargo nextest run -p farhelm --test e2e -E 'test(/real_agent_capture/)'`), recorded run
+  5f00c61d-fb87-463b-9bf8-85e2b63fdb52: 70 passed, none failed, and no test reported that it skipped for a missing
+  system service. Listing the opt-in real-agent cases
+  (`cargo nextest list -p farhelm --test e2e --run-ignored only -E 'test(/real_agent_capture/)'`) built them and found
+  81, 80 of them drift cases.
+- The drift runner's own tests (`python3 -B scripts/test-run-harness-drift.py`), recorded run
+  92265a40-9fc7-4874-ac94-1573c96ec4bd: 31 passed.
+- `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 scripts/check-agents-md.py` for the drift docs page, which the instruction files point to, and `dprint check`
+  on TODO.md and the drift docs page: passed.
+
+Reused: nothing. Not rerun: the plan's live runs against the real agents, described in its report; the landing ran none,
+since they spend vendor turns. Skipped: the rest of the Rust workspace's tests, since nothing else changed; the other
+opt-in tests; and any run on a Mac, since none was available to the landing.
