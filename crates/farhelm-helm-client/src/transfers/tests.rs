@@ -34,6 +34,14 @@ impl Received {
 /// How the server answers the one request it serves.
 enum Script {
     Answer(u16, &'static str),
+    /// Any bytes as the body, framed by `Content-Length`.
+    Bytes(u16, Vec<u8>),
+    /// A 200 with a chunked body, as the helm streams a relayed file (it promises no length, since the file may change
+    /// while it is read).
+    Chunked(Vec<u8>),
+    /// A chunked 200 that closes after these bytes without the terminating chunk: a host read that failed after the
+    /// helm sent its headers, which the helm can only signal by ending the body early.
+    CutShort(Vec<u8>),
     /// A valid stat answer padded with whitespace past the client's cap, so only the cap can refuse it.
     Oversized,
     /// Read the request whole, then close without a byte of answer: the helm process dying mid-transfer.
@@ -62,6 +70,16 @@ impl Stub {
                         .write_all(&answer(status, body.as_bytes()))
                         .await
                         .unwrap();
+                }
+                Script::Bytes(status, body) => {
+                    // A client that stops at its cap closes mid-body, so this write may fail.
+                    let _ = socket.write_all(&answer(status, &body)).await;
+                }
+                Script::Chunked(body) => {
+                    socket.write_all(&chunked(&body, true)).await.unwrap();
+                }
+                Script::CutShort(body) => {
+                    socket.write_all(&chunked(&body, false)).await.unwrap();
                 }
                 Script::Oversized => {
                     let mut body =
@@ -96,6 +114,22 @@ fn answer(status: u16, body: &[u8]) -> Vec<u8> {
     )
     .into_bytes();
     answer.extend_from_slice(body);
+    answer
+}
+
+/// A 200 answer carrying `body` chunked, in 16 KiB chunks, closing the connection after it; with `whole` false, it
+/// stops before the terminating chunk, so the body never ends properly.
+fn chunked(body: &[u8], whole: bool) -> Vec<u8> {
+    let mut answer =
+        b"HTTP/1.1 200 X\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n".to_vec();
+    for chunk in body.chunks(16 * 1024) {
+        answer.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+        answer.extend_from_slice(chunk);
+        answer.extend_from_slice(b"\r\n");
+    }
+    if whole {
+        answer.extend_from_slice(b"0\r\n\r\n");
+    }
     answer
 }
 
@@ -232,6 +266,152 @@ async fn download_asks_for_the_native_save_and_reports_the_open_outcome() {
                 format!(r#"{{"path":"a.md","save_to_downloads":true,"open":{open}}}"#)
             );
         }
+    })
+    .await;
+}
+
+/// Copying a file into the clipboard reads its contents without touching Downloads, so a download of bytes must ask
+/// the download route for neither a save nor an open (which is what makes the helm relay the file as the body), with
+/// the device credential, and must hand back the body exactly, across many chunks. The helm streams that body chunked
+/// with no length, which is the framing that matters; a `Content-Length` body reads the same. The request's bytes are
+/// pinned exactly, like stat's, because helms of other releases decode them. An empty file is an empty answer, not an
+/// error.
+#[tokio::test]
+async fn download_bytes_asks_for_a_relay_and_answers_the_body_exactly() {
+    bounded(async {
+        let full: Vec<u8> = (0..300_000).map(|i| (i % 251) as u8).collect();
+        for (contents, chunked) in [
+            (full.clone(), true),
+            (Vec::new(), true),
+            (full, false),
+            (Vec::new(), false),
+        ] {
+            let script = if chunked {
+                Script::Chunked(contents.clone())
+            } else {
+                Script::Bytes(200, contents.clone())
+            };
+            let stub = Stub::start(script).await;
+            let read = spawn(endpoint(stub.addr))
+                .download_bytes("s1", "a.md", 10_000_000)
+                .await
+                .unwrap();
+            assert!(read == contents, "the body arrived changed");
+            let request = stub.request().await;
+            assert!(
+                request
+                    .head
+                    .starts_with("POST /api/sessions/s1/files/download HTTP/1.1\r\n")
+            );
+            assert_eq!(
+                request.header("authorization"),
+                Some("Bearer device-secret")
+            );
+            assert_eq!(
+                String::from_utf8(request.body).unwrap(),
+                r#"{"path":"a.md","save_to_downloads":false,"open":false}"#
+            );
+        }
+    })
+    .await;
+}
+
+/// The cap is the caller's promise to the user ("up to 10 MB"), so it must hold exactly: a file of exactly the cap is
+/// read whole, and one byte more is refused as `TooLarge` naming the cap, never as a broken answer
+/// (`TransferError::BadReply`), which would tell the user something went wrong rather than that the file is too big.
+#[tokio::test]
+async fn download_bytes_reads_exactly_the_cap_and_refuses_one_byte_more() {
+    bounded(async {
+        const CAP: usize = 70_000;
+        let stub = Stub::start(Script::Bytes(200, vec![b'x'; CAP])).await;
+        let read = spawn(endpoint(stub.addr))
+            .download_bytes("s1", "a.txt", CAP)
+            .await
+            .unwrap();
+        assert_eq!(read.len(), CAP);
+        stub.request().await;
+
+        let stub = Stub::start(Script::Bytes(200, vec![b'x'; CAP + 1])).await;
+        let error = spawn(endpoint(stub.addr))
+            .download_bytes("s1", "a.txt", CAP)
+            .await
+            .unwrap_err();
+        assert_eq!(error, TransferError::TooLarge { max_bytes: CAP });
+        assert!(error.to_string().contains(&CAP.to_string()), "{error}");
+        stub.request().await;
+    })
+    .await;
+}
+
+/// A file far over the cap must not be read to its end before the refusal: the client stops at the cap and drops the
+/// connection, so the helm (and the host behind it) stops sending. Specified: the server's write of a 32 MiB body
+/// fails because the client closed mid-body, which a client that read everything and then refused would not cause.
+///
+/// NOTE: That oracle assumes default loopback socket buffers, far smaller than 32 MiB, as the mid-body upload drop test
+/// does. On a host that buffers it all, the write succeeds and this test fails; it cannot pass falsely.
+#[tokio::test]
+async fn download_bytes_stops_reading_at_the_cap() {
+    const SIZE: usize = 32 * 1024 * 1024;
+    bounded(async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            read_request(&mut socket).await;
+            socket.write_all(&answer(200, &vec![b'x'; SIZE])).await
+        });
+        let error = spawn(endpoint(addr))
+            .download_bytes("s1", "big.bin", 1024)
+            .await
+            .unwrap_err();
+        assert_eq!(error, TransferError::TooLarge { max_bytes: 1024 });
+        assert!(
+            server.await.unwrap().is_err(),
+            "the client read the whole body before refusing it"
+        );
+    })
+    .await;
+}
+
+/// The helm refuses a download of bytes the way it refuses every file route, and the GUI's copy status shows those
+/// words: a plain-text refusal arrives as its status and trimmed words, one with no words as an empty message (for
+/// the GUI's own fallback), and a refused credential as the fixed sentence rather than the 401's JSON. A chunked body
+/// whose connection closes before its terminating chunk, which is how the helm reports a host read failing after its
+/// headers, is a lost connection, never a short file passed off as the whole one.
+#[tokio::test]
+async fn download_bytes_reports_refusals_and_a_cut_short_body() {
+    bounded(async {
+        for (status, body, message) in [
+            (
+                404,
+                "no such session on this host entry\n",
+                "no such session on this host entry",
+            ),
+            (404, "", ""),
+            (401, r#"{"error":"unauthorized"}"#, CREDENTIAL_REFUSED),
+        ] {
+            let stub = Stub::start(Script::Answer(status, body)).await;
+            let error = spawn(endpoint(stub.addr))
+                .download_bytes("s1", "a.txt", 1024)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error,
+                TransferError::Refused {
+                    status,
+                    message: message.into()
+                }
+            );
+            stub.request().await;
+        }
+
+        let stub = Stub::start(Script::CutShort(b"partial".to_vec())).await;
+        let error = spawn(endpoint(stub.addr))
+            .download_bytes("s1", "a.txt", 1024)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, TransferError::Lost(_)), "{error:?}");
+        stub.request().await;
     })
     .await;
 }

@@ -17,9 +17,10 @@
 //!   their own whose every wait and attempt the terminal's outage card is told about
 //!   ([`terminal::ReconnectStatus`]).
 //! - `reconnect` holds the two reconnect policies: the UI channel's doubling backoff and the terminal ladder.
-//! - [`transfers`] is the plain-HTTP side: a file path's hover check, saving a file into Downloads, and attachment
-//!   uploads. The transfers stay off the UI channel so a large one never delays a command, and the hover check does
-//!   because a channel command cannot be cancelled on its own (see its module docs).
+//! - [`transfers`] is the plain-HTTP side: a file path's hover check, saving a file into Downloads, reading a small
+//!   file's contents for the clipboard, and attachment uploads. The transfers stay off the UI channel so a large one
+//!   never delays a command, and the hover check does because a channel command cannot be cancelled on its own (see
+//!   its module docs).
 //! - [`ApiPath`] (from `farhelm-proto`, where the helm decodes it too) is the only constructor of a command path.
 //! - `fake` stands in for the helm in GUI tests, in process and without a runtime: the UI channel, terminal streams
 //!   through `fake::terminal::FakeTerminal`, and file transfers through `fake::transfers::FakeTransfers`. It exists
