@@ -450,7 +450,9 @@ pub(super) struct Kept {
     /// no targets, so no gesture marks over it.
     projection: Option<Projection>,
     /// Whether the marked menu last opened was a right press's, which offers the lifecycle actions too: the list then
-    /// closes it when those change ([`SessionList::marks_projected`]).
+    /// closes it when those change ([`SessionList::marks_projected`]), and New group… chosen from it returns focus to
+    /// its opener rather than the bar's ⋯ ([`SessionList::apply_metadata`]). Never reset on close, so it still names
+    /// the menu an item was chosen from after that item has closed it.
     menu_lifecycle: bool,
 }
 
@@ -769,7 +771,8 @@ impl SessionList {
                 .on_click(move |_, window, cx| {
                     if let Some(drawn) = drawn.shown() {
                         let _ = list.update(cx, |list, cx| {
-                            list.bulk_lifecycle(action, drawn, window, cx)
+                            let returns_to = Some(list.bar_question_return(action));
+                            list.bulk_lifecycle(action, drawn, returns_to, window, cx)
                         });
                     }
                 })
@@ -933,9 +936,11 @@ impl SessionList {
     /// It is anchored to the row's ⋯ button, so it closes with that row, and it is recorded as that row's open menu,
     /// so the button shows it open, a click on the button closes it rather than stacking the row's own menu on it, and
     /// the next right press closes it as it closes any row menu. Closing it returns focus where it was before the press
-    /// or the key (SPEC.md, "Keyboard focus": a right press moves no focus, so that is usually the terminal). The bulk
-    /// question a lifecycle action asks still returns to the bar, as it does from the bar ([`super::bulk`]): it is the
-    /// bar's question about the marks, which the bar shows. Nothing opens for a row the last frame did not draw.
+    /// or the key (SPEC.md, "Keyboard focus": a right press moves no focus, so that is usually the terminal). So do the
+    /// dialogs its items open, the bulk Stop or Delete question and Move to group's New group…, however they close
+    /// without going ahead: the menu closes before they open, which puts focus back there, and they return to it,
+    /// where the same dialogs opened from the bar return to the bar's ⋯ ([`super::bulk`]). Nothing opens for a row the
+    /// last frame did not draw.
     pub(super) fn open_marked_context_menu(
         &mut self,
         key: &str,
@@ -1062,8 +1067,16 @@ impl SessionList {
             });
             let naming = groups::move_marked(keys, destination, None, cx);
             if matches!(destination, Destination::New) {
-                // Before dispatch, cancel returns to the toggle. After dispatch the bar goes away with the marks.
-                let returns_to = focus::ReturnTo::Control(self.marking.menu_focus.clone());
+                // Backing out returns focus where the menu that offered New group… sends it. A right press's menu
+                // (or Shift+F10's) has just put it back where it was before the menu opened, so the editor returns to
+                // its opener. The bar's menu sends it to the bar's ⋯, named rather than left to the opener: a save
+                // clears the marks and the ⋯ goes with the bar, and a named control the frame no longer draws falls
+                // straight to recovery, where an opener that went is only noticed a frame later.
+                let returns_to = if self.marking.menu_lifecycle {
+                    focus::ReturnTo::Opener
+                } else {
+                    focus::ReturnTo::Control(self.marking.menu_focus.clone())
+                };
                 if !naming.is_empty()
                     && let Some(layer) = super::rename::group(
                         None,
@@ -1270,8 +1283,10 @@ impl MarkedMenu {
             .on_click(move |_, window, cx| {
                 if let Some(captured) = captured.shown() {
                     let _ = list.update(cx, |list, cx| {
+                        // Closing the menu first puts focus back where it was before the menu opened, which the
+                        // question, naming no control, then returns to on every close.
                         list.close_marked_menu(window, cx);
-                        list.bulk_lifecycle(action, captured, window, cx);
+                        list.bulk_lifecycle(action, captured, None, window, cx);
                     });
                 }
             });

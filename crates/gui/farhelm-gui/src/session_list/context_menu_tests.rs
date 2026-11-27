@@ -11,13 +11,17 @@
 //! for a macOS Ctrl+click too (its platform layer turns one into the other before any element sees it), so the right
 //! press stands for both.
 
+use farhelm_helm_client::fake::FakeHelm;
 use gpui::{Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, point, px};
 
 use super::groups_tests::{group, grouped_snapshot};
-use super::marking::{MENU_DELETE_ID, MENU_ID, MENU_START_ID, MENU_STOP_ID, MENU_TOGGLE_ID};
+use super::marking::{
+    COUNT_ID, MENU_DELETE_ID, MENU_ID, MENU_START_ID, MENU_STOP_ID, MENU_TOGGLE_ID,
+};
 use super::marking_tests::{click_with, count, ctrl, open_list, requests};
 use super::menu_tests::{any_layer, drawn, ended, label_of, push, snapshot};
 use super::tests::{open_main, selected, session};
+use crate::focus;
 use crate::test_support::{self, focused_id, keys};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -434,6 +438,248 @@ fn a_right_press_on_a_marked_rows_button_while_it_asks_opens_nothing(cx: &mut Te
     right_press(cx, button);
     assert!(!drawn(cx, MENU_ID), "no marked menu opened");
     assert!(drawn(cx, "prompt-confirm"), "the question is still open");
+}
+
+// ---- Focus after the marked menu's dialogs ------------------------------------------------------------------------
+//
+// SPEC.md, "Keyboard focus": closing something returns focus to where it was before it opened, and a right press moves
+// no focus. A dialog a right press's marked menu opened (the bulk Stop or Delete question, Move to group's New group…)
+// is part of that gesture, so backing out of it must put focus back where the user was before the right press, usually
+// the terminal. Before the fix it went to the marked bar's ⋯, a control the user never touched, and the next keystroke
+// meant for the terminal landed on the bar. The same dialogs opened from the bar keep returning to the bar's ⋯. Every
+// test here runs under both platforms' click rules: on macOS a click focuses no control, so the menu items, the bar's
+// buttons and its ⋯ never hold focus themselves, and only the control a dialog names (or the restored opener) can put
+// focus anywhere.
+
+/// Sessions a (running, one terminal tab, so its Stop asks) and b (running, so its Delete asks), both marked, with
+/// Skip session confirmations off, under the click rule `click_focuses`, and focus on a's ⋯ button (its menu opened and
+/// closed with Escape, which hands focus to the button under either rule); returns the fake, the window, and that
+/// button's id.
+///
+/// Focus starts on a's ⋯ rather than wherever the window rested because the window rests on the open session's
+/// terminal, which is also where focus recovers when a control it should return to has gone: a test starting there
+/// could not tell "back where it was" from "recovered home", and would pass if the menu sent focus home.
+fn two_marked_asking(
+    cx: &mut TestAppContext,
+    click_focuses: bool,
+) -> (FakeHelm, &mut VisualTestContext, Option<String>) {
+    let (mut fake, _list, cx) =
+        open_list(cx, snapshot(&[(session("a"), 1), (session("b"), 0)], false));
+    requests(&mut fake);
+    let resting = focused_id(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(click_focuses, cx));
+    mark(cx, &["session-row-a", "session-row-b"]);
+    requests(&mut fake);
+    assert_eq!(count(cx).as_deref(), Some("2 marked"), "premise: two marks");
+    test_support::click(cx, "session-menu-a");
+    keys(cx, "escape");
+    let before = focused_id(cx);
+    assert_eq!(
+        before.as_deref(),
+        Some("session-menu-a"),
+        "premise: focus is on a's ⋯ button"
+    );
+    assert_ne!(
+        before, resting,
+        "premise: that is not where the window rests"
+    );
+    (fake, cx, before)
+}
+
+/// The bulk Stop and Delete questions a right press's marked menu asks return focus to where it was before the right
+/// press when the user backs out (SPEC.md, "Keyboard focus"), and Confirm still sends it to "N marked" (SPEC.md:
+/// "After confirmation closes the question, keyboard focus returns to the marked count"). Specified, under each click
+/// rule: with a and b marked and focus on a's ⋯ button, for Stop and then Delete, a right press on b, the marked menu's
+/// item, and Cancel (then, for the same item again, Escape) each leave no question open, send nothing, keep both marks
+/// and put focus back on a's ⋯ button, where it was before the press, not the bar's ⋯; a right press, Stop and Confirm
+/// then focus the marked count.
+fn right_press_bulk_questions_return_focus_where_it_was(
+    cx: &mut TestAppContext,
+    click_focuses: bool,
+) {
+    let (mut fake, cx, before) = two_marked_asking(cx, click_focuses);
+    for item in [MENU_STOP_ID, MENU_DELETE_ID] {
+        for dismissal in ["cancel", "escape"] {
+            let at = on_row(cx, "b");
+            right_press(cx, at);
+            test_support::click(cx, item);
+            test_support::settle(cx);
+            assert!(drawn(cx, "prompt"), "{item}: premise: the question asks");
+            match dismissal {
+                "cancel" => test_support::click(cx, "prompt-cancel"),
+                _ => keys(cx, "escape"),
+            }
+            test_support::settle(cx);
+            assert!(
+                !drawn(cx, "prompt"),
+                "{item} {dismissal}: the question closed"
+            );
+            assert_eq!(requests(&mut fake), [], "{item} {dismissal}: nothing sent");
+            assert_eq!(count(cx).as_deref(), Some("2 marked"), "{item} {dismissal}");
+            assert_eq!(
+                focused_id(cx),
+                before,
+                "{item} {dismissal}: focus is back where it was before the right press"
+            );
+        }
+    }
+
+    let at = on_row(cx, "b");
+    right_press(cx, at);
+    test_support::click(cx, MENU_STOP_ID);
+    test_support::settle(cx);
+    test_support::click(cx, "prompt-confirm");
+    test_support::settle(cx);
+    assert!(!drawn(cx, "prompt"));
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(COUNT_ID),
+        "Confirm focuses the marked count"
+    );
+}
+
+/// [`right_press_bulk_questions_return_focus_where_it_was`] where a click focuses the control it lands on (Linux).
+#[gpui::test]
+fn right_press_bulk_questions_return_focus_where_it_was_on_linux(cx: &mut TestAppContext) {
+    right_press_bulk_questions_return_focus_where_it_was(cx, true);
+}
+
+/// [`right_press_bulk_questions_return_focus_where_it_was`] under the macOS click rule, where a click focuses nothing.
+#[gpui::test]
+fn right_press_bulk_questions_return_focus_where_it_was_on_macos(cx: &mut TestAppContext) {
+    right_press_bulk_questions_return_focus_where_it_was(cx, false);
+}
+
+/// When what held focus before the right press goes while the bulk question is open, Cancel cannot return there and
+/// must not fall back to the bar's ⋯ either: focus recovers to the open session's terminal or the window's other
+/// resting place (SPEC.md, "Where focus rests"), as for any control that vanishes. Specified: with a open, a (one tab)
+/// and b marked and c listed, focus on c's ⋯ button (its menu opened and closed with Escape), a right press on b and
+/// the marked menu's Stop ask; once the helm stops listing c, Cancel leaves focus where the window rested before any
+/// of this, not on the bar's ⋯. Under each click rule.
+fn a_right_press_question_whose_opener_went_recovers_focus(
+    cx: &mut TestAppContext,
+    click_focuses: bool,
+) {
+    let (mut fake, _list, cx) = open_list(
+        cx,
+        snapshot(
+            &[(session("a"), 1), (session("b"), 0), (session("c"), 0)],
+            false,
+        ),
+    );
+    requests(&mut fake);
+    let resting = focused_id(cx);
+    assert!(
+        resting.is_some(),
+        "premise: the window rests on some control"
+    );
+    cx.update(|_, cx| focus::set_click_focuses_controls(click_focuses, cx));
+    mark(cx, &["session-row-a", "session-row-b"]);
+    requests(&mut fake);
+    assert_eq!(count(cx).as_deref(), Some("2 marked"), "premise: two marks");
+    test_support::click(cx, "session-menu-c");
+    keys(cx, "escape");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-c"),
+        "premise: focus is on c's ⋯ button"
+    );
+    assert_ne!(
+        resting.as_deref(),
+        Some("session-menu-c"),
+        "premise: the window rested elsewhere"
+    );
+
+    let at = on_row(cx, "b");
+    right_press(cx, at);
+    test_support::click(cx, MENU_STOP_ID);
+    test_support::settle(cx);
+    assert!(drawn(cx, "prompt"), "premise: the question asks");
+    push(
+        &mut fake,
+        &["a", "b"],
+        &[(session("a"), 1), (session("b"), 0)],
+        cx,
+    );
+    assert!(!drawn(cx, "session-menu-c"), "premise: c is gone");
+    assert!(drawn(cx, "prompt"), "premise: the question is still open");
+
+    test_support::click(cx, "prompt-cancel");
+    test_support::settle(cx);
+    assert!(!drawn(cx, "prompt"));
+    assert_eq!(
+        focused_id(cx),
+        resting,
+        "focus recovered to where the window rests"
+    );
+}
+
+/// [`a_right_press_question_whose_opener_went_recovers_focus`] where a click focuses the control it lands on (Linux).
+#[gpui::test]
+fn a_right_press_question_whose_opener_went_recovers_focus_on_linux(cx: &mut TestAppContext) {
+    a_right_press_question_whose_opener_went_recovers_focus(cx, true);
+}
+
+/// [`a_right_press_question_whose_opener_went_recovers_focus`] under the macOS click rule, where a click focuses
+/// nothing.
+#[gpui::test]
+fn a_right_press_question_whose_opener_went_recovers_focus_on_macos(cx: &mut TestAppContext) {
+    a_right_press_question_whose_opener_went_recovers_focus(cx, false);
+}
+
+/// Move to group's New group… returns focus, when the user backs out of it, to where the marked menu that offered it
+/// returns focus: where it was before the right press for a right press's menu, and the bar's ⋯ for the bar's own
+/// menu (whose click, on macOS, never focused the ⋯). Specified, under each click rule: with a and b marked and focus
+/// on a's ⋯ button, a right press on b, Move to group and New group… open the group name editor, and Escape closes it
+/// with both marks kept and focus back on a's ⋯ button, where it was before the press; the bar's ⋯, Move to group and
+/// New group… then open it again, and Escape puts focus on the bar's ⋯.
+fn new_group_returns_focus_where_its_menu_does(cx: &mut TestAppContext, click_focuses: bool) {
+    let (mut fake, cx, before) = two_marked_asking(cx, click_focuses);
+    let at = on_row(cx, "b");
+    right_press(cx, at);
+    assert!(drawn(cx, MENU_ID), "premise: the marked menu opened");
+    test_support::click(cx, "session-marked-menu-group");
+    test_support::click(cx, "session-marked-menu-group-new");
+    assert!(
+        drawn(cx, "rename-field"),
+        "premise: the group name editor opened"
+    );
+    keys(cx, "escape");
+    assert!(!drawn(cx, "rename-field"));
+    assert_eq!(count(cx).as_deref(), Some("2 marked"), "the marks stay");
+    assert_eq!(
+        focused_id(cx),
+        before,
+        "from a right press: back where focus was before the press"
+    );
+
+    test_support::click(cx, MENU_TOGGLE_ID);
+    test_support::click(cx, "session-marked-menu-group");
+    test_support::click(cx, "session-marked-menu-group-new");
+    assert!(
+        drawn(cx, "rename-field"),
+        "premise: the editor opened from the bar"
+    );
+    keys(cx, "escape");
+    assert!(!drawn(cx, "rename-field"));
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(MENU_TOGGLE_ID),
+        "from the bar's ⋯: back on the ⋯"
+    );
+    assert_eq!(requests(&mut fake), [], "backing out sent nothing");
+}
+
+/// [`new_group_returns_focus_where_its_menu_does`] where a click focuses the control it lands on (Linux).
+#[gpui::test]
+fn new_group_returns_focus_where_its_menu_does_on_linux(cx: &mut TestAppContext) {
+    new_group_returns_focus_where_its_menu_does(cx, true);
+}
+
+/// [`new_group_returns_focus_where_its_menu_does`] under the macOS click rule, where a click focuses nothing.
+#[gpui::test]
+fn new_group_returns_focus_where_its_menu_does_on_macos(cx: &mut TestAppContext) {
+    new_group_returns_focus_where_its_menu_does(cx, false);
 }
 
 /// SPEC.md: "Shift+F10 on a focused row or group header, or on a control inside it, opens its menu beside the row".

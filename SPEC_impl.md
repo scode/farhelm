@@ -1079,8 +1079,10 @@ does not move. It does nothing once the question has closed, and nothing while a
 attempt was handed the old value. An answer other than Cancel that arrives after a reword and before a frame showing the
 new words is on screen does nothing: SPEC.md's "An old answer cannot authorize a replacement question". Shown, not
 drawn, because GPUI draws a dirty window before it handles a key and shows that frame only at the next frame. The same
-question returns focus on every close to a control its asker names (the marked bar's menu, not the Stop or Delete that
-asked), and gives its text a keyboard scroll stop when its rows can run past the dialog.
+question returns focus on every close to a control its asker names when the bar's own Stop or Delete asked it (the
+marked bar's menu, not the button), and to what held focus before the marked menu opened when that menu (a right press's
+or Shift+F10's) asked it, since the menu closes and returns focus there before the question opens. It gives its text a
+keyboard scroll stop when its rows can run past the dialog.
 
 An answer whose action can fail keeps its question open, every answer frozen, until the action reports how it went:
 success closes the question as any answer does, and failure shows the reason inside it and arms the answers again

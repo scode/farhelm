@@ -28,13 +28,18 @@
 //!   until the new words are on screen every answer but Cancel does nothing. A listing that proves a target gone removes it, and one that only leaves it
 //!   out (filtered, cut, failed) does not. A question with no target left closes. Cancel, Close and Escape keep the
 //!   marks.
-//! - **Focus.** Every close of the question returns focus to the marked bar's ⋯, as the old question's Cancel did (to
-//!   the bar's pressed Stop or Delete while it draws no ⋯), and Confirm then sends it to "N marked", which stays while
-//!   the batch runs. A question that closes because every target is proven gone closes before the frame that drops
-//!   the bar, so focus goes to the ⋯ still on screen, and once the ⋯ goes the focus coordinator's recovery sends it to
-//!   the open session's terminal (SPEC.md, "Where focus rests"), whatever held focus when the question opened; the old
-//!   app focused the order's title. The question's text is a keyboard scroll stop named "Sessions affected", the old body's region,
-//!   so a keyboard user can bring every row into view before answering for it.
+//! - **Focus.** Every close of a question the bar's own Stop or Delete asked returns focus to the marked bar's ⋯, as
+//!   the old question's Cancel did (to the bar's pressed Stop or Delete while it draws no ⋯), and Confirm then sends it
+//!   to "N marked", which stays while the batch runs. A question that closes because every target is proven gone
+//!   closes before the frame that drops the bar, so focus goes to the ⋯ still on screen, and once the ⋯ goes the focus
+//!   coordinator's recovery sends it to the open session's terminal (SPEC.md, "Where focus rests"), whatever held
+//!   focus when the question opened; the old app focused the order's title. A question a marked menu opened by a
+//!   right press or Shift+F10 asked returns focus instead to what held it before that menu opened (usually the
+//!   terminal), as closing the menu itself does (SPEC.md: closing something returns focus to where it was before it
+//!   opened). The menu is closed before the question opens, which puts focus back there, so the question names no
+//!   control and returns to its opener; Confirm still goes to "N marked", and an opener that went while the question
+//!   was open recovers as above. The question's text is a keyboard scroll stop named "Sessions affected", the old
+//!   body's region, so a keyboard user can bring every row into view before answering for it.
 //! - **A batch paces itself per host.** Every target is admitted at acceptance: one whose commands are refused now
 //!   ([`super::menu::refused`]) gets its not-started line, and every other one is held in the operation store as its
 //!   Stop or Delete ([`crate::operations::Operations::hold`]), so the row shows that work pending and its own menu, the
@@ -125,7 +130,7 @@ use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::SessionRow;
 use farhelm_proto::{DeleteGuard, SessionStopRequest};
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Context, ElementId, EntityId, FontWeight,
+    AnyWindowHandle, App, AppContext as _, Context, ElementId, EntityId, FocusHandle, FontWeight,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
@@ -835,10 +840,16 @@ impl DrawnAction {
 impl SessionList {
     /// Use the presented bar's targets and consent to ask or run at once. An environment Delete always asks.
     /// A reset invalidates the press, and a second press queued behind a question leaves that question in charge.
+    ///
+    /// `returns_to` is where every close of the question returns focus: the bar's own press names
+    /// [`SessionList::bar_question_return`], and a marked menu a right press or Shift+F10 opened names nothing, so the
+    /// question returns focus to what held it when it opened, which closing that menu has just put back where it was
+    /// before the menu opened ([`ask_bulk`](SessionList::ask_bulk)).
     pub(super) fn bulk_lifecycle(
         &mut self,
         action: Lifecycle,
         drawn: &DrawnAction,
+        returns_to: Option<FocusHandle>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -878,7 +889,7 @@ impl SessionList {
             );
             return;
         }
-        self.ask_bulk(action, targets.into(), &mark, window, cx);
+        self.ask_bulk(action, targets.into(), returns_to, &mark, window, cx);
         // The question is a choice of its own: a batch accepted earlier must not clear the marks it asks about.
         let current = self.current.current(cx);
         if current.bulk.question.is_some() {
@@ -886,28 +897,41 @@ impl SessionList {
         }
     }
 
-    /// Ask the bulk question about `targets` under `mark`, the press of the bar's button. Every close returns focus to
-    /// the ⋯, as the old question's Cancel did. While the bar draws no ⋯ (every mark shown is a retired session, which
-    /// no metadata action takes), it returns to the bar's own button for `action` instead, where the old app fell back
-    /// to the order's title, which the bar here replaces and so is not drawn. A close whose ⋯ goes right after it (every
-    /// target proven gone) leaves focus to the coordinator's recovery, which sends it to the open session's terminal
-    /// (the module docs, "Focus").
+    /// Where the bulk question the bar's own Stop or Delete asks returns focus on every close: the ⋯, as the old
+    /// question's Cancel did. While the bar draws no ⋯ (every mark shown is a retired session, which no metadata action
+    /// takes), the bar's own button for `action` instead, where the old app fell back to the order's title, which the
+    /// bar here replaces and so is not drawn. Named rather than left to the question's opener because on macOS the
+    /// click on the bar's button leaves focus where it was (the terminal, say), which is not where the bar's question
+    /// sends it back.
+    pub(super) fn bar_question_return(&self, action: Lifecycle) -> FocusHandle {
+        self.marking
+            .menu_toggle_drawn()
+            .unwrap_or_else(|| self.marking.button_focus(action))
+            .clone()
+    }
+
+    /// Ask the bulk question about `targets` under `mark`, the press that chose the action, with every close returning
+    /// focus to `returns_to`, or to what held focus when the question opened when it is `None` (the module docs,
+    /// "Focus"). A close whose named control goes right after it (the ⋯ once every target is proven gone) leaves focus
+    /// to the coordinator's recovery, which sends it to the open session's terminal, and so does one whose opener went
+    /// while the question was open.
     fn ask_bulk(
         &mut self,
         action: Lifecycle,
         targets: Targets,
+        returns_to: Option<FocusHandle>,
         mark: &Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let returns_to = self
-            .marking
-            .menu_toggle_drawn()
-            .unwrap_or_else(|| self.marking.button_focus(action))
-            .clone();
+        let asked = question(action, targets.clone());
+        let asked = match returns_to {
+            Some(control) => asked.returns_to(control),
+            None => asked,
+        };
         let list = cx.weak_entity();
         let open = prompt::ask_rewordable(
-            question(action, targets.clone()).returns_to(returns_to),
+            asked,
             None,
             mark,
             move |targets, window, cx| {
