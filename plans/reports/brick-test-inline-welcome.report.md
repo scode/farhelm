@@ -91,3 +91,58 @@ my runbook wording ("no startup card to dismiss") overclaimed, because of the tw
 - one assertion was case-sensitive where it should not be.
 
 The fixes were not reviewed again. Run `7441d487` ran after them.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained the previous rounds' changes to the app, the helm, the supervisor
+and the command line. None of them touches the release brick test's instructions or the app's startup screens. In the
+same round, three more plans landed: remove-legacy-sandbox-sessions-api (an unused helm route removed),
+restart-startup-scope-cleanup (a supervisor start finishes a failed Restart's cleanup) and claude-drift-trust-copy-back
+(a drift test). None touches the brick test.
+
+An independent reviewer and I read the change and found nothing to fix.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** The round's four plans each removed their own TODO entry, next to each other, so stacking them
+  conflicted there. I removed all four entries; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing I found.
+
+#### Worth knowing
+
+- **The follow-up about other startup dialogs has to word around a new test.** The report suggests telling the tester to
+  dismiss Announcements or "What's new in Farhelm" if they appear on the candidate. Both close with **Got it**, and this
+  plan's new test forbids the words "Got it" in the candidate's start instructions, so such a follow-up has to name the
+  button another way or change that test.
+
+#### Checks
+
+Run once, on the round's four plans stacked on main as it stood when the landing started
+(remove-legacy-sandbox-sessions-api, restart-startup-scope-cleanup, brick-test-inline-welcome, then
+claude-drift-trust-copy-back), so each plan was tested together with the others and with the previous rounds' changes,
+which none of the executors' own runs included. The SSH test worker was still unreachable, so the slow suites ran on
+boat sandboxes (x86_64 Ubuntu 24.04 VMs), and clippy ran locally:
+
+- Locally, `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`: clean.
+- On three boats, every test of the protocol, helm, supervisor and command-line crates that runs by default, the
+  end-to-end suite included (`cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm`,
+  built once, split in three and run through the recorder), recorded runs 0aeec1d1-374d-4651-b817-c6196eba36e3,
+  79bc70f6-81f9-4677-98ac-5bc0782c1540 and 0e083ecd-f092-4996-ae93-b1866a1bddfd: 4,732 passed, none failed, and no test
+  that quietly passed for lack of systemd, Podman or SSH on the machine. That covers each executor's own selection and
+  more: the helm's Tensorlake launch tests, the Restart cleanup tests, the startup tests of terminal hosts left over
+  from earlier runs, and the drift tests' private-configuration tests.
+- Locally, the portable brick-test harness
+  (`python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`), recorded run
+  69a626cf-42a8-4fcc-8baa-85e5c53b0de6: 337 passed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format`, `dprint check` on the changed Markdown, and
+  `python3 scripts/check-agents-md.py` (the brick-test runbook is an instruction file): passed.
+
+Reused: nothing. Skipped: the desktop app's and GUI crate's tests, the screenshot comparison and the end-to-end smoke,
+since the only change to the app is two comments; the opt-in tests in those crates, among them the real-agent drift
+tests, which spend real Claude turns; and a live brick test, which needs the Mac test machine and a release candidate.
