@@ -28,7 +28,7 @@
 //! repository and no named conversation: the environment has no installation to verify and no folder to preview yet,
 //! and the helm takes the repository and naming intent until the new Farhelm connects (SPEC.md, "Managed checkouts": "A
 //! recipe-target environment launch is another exception"). It sends its own body to its own route
-//! ([`LaunchDraft::environment_body`]), never the ordinary create, which an older helm would run on its own machine.
+//! ([`LaunchDraft::environment_body`]), never the ordinary create, which would run it on an existing machine.
 //!
 //! A managed checkout launches only with a current preview of its folder in hand (SPEC.md, "Managed checkouts":
 //! "Before Launch becomes available, the composer shows the exact host and path"), which the view reads from the helm

@@ -79,7 +79,7 @@ pub(crate) use sandbox::ENVIRONMENT_DELETE_REPLY_DEADLINE;
 pub(crate) use sandbox::{
     EnvironmentUnasked, finish_seal_locked, retry_environment_delete, spawn_seal_finisher,
 };
-pub(crate) use sandbox::{create_environment_session, create_sandbox_session, stop_and_suspend};
+pub(crate) use sandbox::{create_environment_session, stop_and_suspend};
 
 /// Query parameters for `GET /api/sessions`: the filters and order. There is
 /// no cursor and no page size, by contract (SPEC.md's

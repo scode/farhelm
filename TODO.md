@@ -71,22 +71,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
   user when blocked through farhelm. Plan: `plans/queue/agent-blocked-notifications.md`.
 
-- **Investigate and remove the legacy `POST /api/sandbox-sessions` endpoint.** `POST /api/sandbox-sessions`
-  (`create_sandbox_session` in `crates/farhelm-helm/src/sessions/sandbox.rs`, mounted in
-  `crates/farhelm-helm/src/lib.rs`) is the pre-Podman Tensorlake-only spelling of `POST /api/environment-sessions`: it
-  takes `SandboxCreateRequest` (no `place` field), hardcodes `Place::TensorlakeAccount`, and calls
-  `admit_environment_session(..., require_confirmed_size: false)`. Nothing in the desktop app, CLI, or any production
-  client calls it anymore — only helm tests (`crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs`) still hit
-  it, and the helm only ever runs embedded inside the desktop app of the same build. Context from PR #4988
-  (`recipe-card-and-billed-size-fixes`): #4988 bound Tensorlake billing confirmation to `confirmed_size` on
-  `POST /api/environment-sessions` (`require_confirmed_size: true`), but left `POST /api/sandbox-sessions` accepting
-  `confirmed: true` without `confirmed_size` for "historical callers", and `SPEC_impl.md` still describes both that
-  flag-only fallback and a mixed-version older-helm refusal that cannot happen in practice. Verify why this legacy
-  endpoint is still around and whether anything external depends on it; if nothing does, remove the route,
-  `SandboxCreateRequest`, the `require_confirmed_size` parameter, and the stale `SPEC_impl.md` wording, and move any
-  remaining test coverage onto `POST /api/environment-sessions`. Plan:
-  `plans/queue/remove-legacy-sandbox-sessions-api.md`.
-
 - **Unblock supervisor startup Restart scope cleanup when the replacement's terminal host still answers.** Context from
   PR #5005 (`supervisor-stop-and-restart-cleanup-fixes`, landing review should-fix): on Linux, each agent launch runs in
   a transient systemd user scope (`crate::scope::unit_name(&id, generation)`). When Restart finds its session row

@@ -80,14 +80,12 @@ pub struct CreateSessionBody {
 /// (a sandbox or a container) that the helm makes from `recipe` at `place` for
 /// this launch alone (SPEC.md, "Sandbox sessions" and "Container sessions").
 ///
-/// A route of its own, not a target on [`CreateSessionBody`]: an older helm's
-/// ordinary create ignores fields it does not know and defaults an absent host
-/// to its own, so a recipe launch sent there would run on the wrong machine
-/// instead of being refused (SPEC_impl.md, "Tensorlake sandbox sessions").
-///
-/// Only for `POST /api/environment-sessions`: the legacy
-/// `POST /api/sandbox-sessions` takes no `place` and refuses unknown fields,
-/// so it refuses this body.
+/// A route of its own, not a target on [`CreateSessionBody`]: the ordinary
+/// create ignores fields it does not know and makes its session on an existing
+/// host (the helm's own when none is named), so a recipe launch sent there
+/// would run on the wrong machine instead of being refused (SPEC_impl.md,
+/// "Tensorlake sandbox sessions"). The ordinary body rides inside this one as
+/// [`EnvironmentCreateBody::request`].
 ///
 /// The helm answers 202 with the launch's `{host_id, run_id}` once it has
 /// admitted it, and the outcome arrives in the pushed host progress
@@ -106,9 +104,9 @@ pub struct EnvironmentCreateBody {
     /// (a billed sandbox), unless the Tensorlake setting "Create Tensorlake
     /// sandboxes without asking" is on.
     pub confirmed: bool,
-    /// Required with `confirmed`. This is the CPU, memory and disk shown by
-    /// the answered question. Unconfirmed launches omit the field so older
-    /// helms can still decode them.
+    /// Required with `confirmed`: the CPU, memory and disk the answered
+    /// question showed, which the helm compares with the recipe before
+    /// creating anything. Unconfirmed launches omit it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confirmed_size: Option<RecipeSize>,
     /// Whether a template's name is a base the managed checkout numbers or an

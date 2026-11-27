@@ -420,7 +420,7 @@ pub(super) enum Request {
     /// New or Clone into a new disposable environment (New container, New sandbox): a create like [`Request::Create`]
     /// under a fresh launch key, sent to the environment route (`POST /api/environment-sessions`), which answers 202
     /// once it has admitted the launch and lands the outcome on a run in the pushed host progress ([`RunWait`]). A
-    /// route of its own rather than a target on the ordinary create, which an older helm would run on its own machine
+    /// route of its own rather than a target on the ordinary create, which would run it on an existing machine
     /// (`EnvironmentCreateBody`'s docs).
     Environment(EnvironmentCreateBody),
     Replace {
