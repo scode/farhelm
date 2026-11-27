@@ -528,8 +528,8 @@ linux/terminal-cut-session-row--dark.png fed4db489569c17cf9361920fba894dd2e32a85
 linux/terminal-cut-session-row--light.png 9f0601f8f786f81e85615c9e6c8099dc51bb4879
 linux/terminal-delete-scrim--dark.png 003f83508000483997e7455343e31346be48de97
 linux/terminal-delete-scrim--light.png ce2e00db3c93831342dec1b7910dad3ff4aa65eb
-linux/terminal-file-disclosures--dark.png 0ddecde5c00c6fa7c0f4d3e0078b192e22e5ee82
-linux/terminal-file-disclosures--light.png 0ff31a596ff8c6869c378bb7bbc671502c3b61af
+linux/terminal-file-disclosures--dark.png 8c36a3e82e2f1aa1c18bfbcb1e80fa60caf809f7
+linux/terminal-file-disclosures--light.png 3fad0001a5c9535f629b136e99c5e633da005406
 linux/terminal-link-disclosures--dark.png 608212cfb8e4dbebc8f82756cc45097dd394d40b
 linux/terminal-link-disclosures--light.png dcfb1e0e826233c102bb57d686456760b62cf633
 linux/terminal-status--dark.png 53fabe736381d77ba1387de228c460d1f39d90e8

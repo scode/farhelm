@@ -359,11 +359,15 @@ fn format_size(bytes: u64) -> String {
 
 /// The action hints after a ready file's size: a click downloads; where the helm offers opening (only the desktop
 /// app's helm has an opener, and only for a type on the shared list), the platform's modifier-click opens; and where a
-/// copy could succeed, that modifier with Shift copies the contents.
+/// copy could succeed, that modifier with Shift copies the contents, while a file the copy would refuse for its size
+/// says it is too large to copy instead.
 ///
 /// A copy is offered for a file of known size within [`copy::COPY_MAX_BYTES`], except an image on Linux, which copies
 /// text only. It is not withheld from other binary files by extension: no list of such extensions is ever complete, and
-/// the copy itself reads the bytes and refuses what is neither text nor a supported image, saying so.
+/// the copy itself reads the bytes and refuses what is neither text nor a supported image, saying so. Over the cap the
+/// hint says "too large to copy contents", so that a user who knows the shortcut is not left wondering where it went;
+/// an image on Linux gets neither hint at any size, since size is not why it cannot be copied. A file of unknown size
+/// gets neither: the hover cannot promise it fits, and cannot say it does not.
 fn hints(stat: &FileStat, platform: Platform) -> String {
     let mut hints = String::from(" · click to download");
     if stat.can_open == Some(true) {
@@ -372,16 +376,15 @@ fn hints(stat: &FileStat, platform: Platform) -> String {
             Platform::Linux => " · Ctrl-click to open",
         });
     }
-    let copyable = stat
-        .info
-        .size
-        .is_some_and(|size| size <= copy::COPY_MAX_BYTES)
-        && !(platform == Platform::Linux && copy::is_image_path(&stat.info.path));
-    if copyable {
-        hints.push_str(match platform {
+    let linux_image = platform == Platform::Linux && copy::is_image_path(&stat.info.path);
+    match stat.info.size {
+        Some(_) if linux_image => {}
+        Some(size) if size <= copy::COPY_MAX_BYTES => hints.push_str(match platform {
             Platform::Mac => " · ⇧⌘-click to copy contents",
             Platform::Linux => " · Shift-Ctrl-click to copy contents",
-        });
+        }),
+        Some(_) => hints.push_str(" · too large to copy contents"),
+        None => {}
     }
     hints
 }
@@ -447,7 +450,9 @@ fn panel(
     disclosure::witnessed(panel, drawn).into_any_element()
 }
 
-/// The three size tiers for ready file disclosures, with the opening hint on the small file.
+/// The three size tiers for ready file disclosures, with the opening hint on the small file. The medium file is under
+/// the copy cap and the large one over it, so the scene shows both the copy hint and the too-large hint; keep them on
+/// either side of [`copy::COPY_MAX_BYTES`] when changing the sizes.
 #[cfg(test)]
 pub(crate) fn golden_displays(window: &Window, cx: &App) -> AnyElement {
     let answers = [

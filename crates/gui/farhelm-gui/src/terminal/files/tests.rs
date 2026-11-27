@@ -92,10 +92,16 @@ fn icons_distinguish_documents_pdfs_images_and_archives() {
 /// Ctrl elsewhere.
 #[test]
 fn hints_offer_opening_only_where_the_helm_does_with_the_platforms_modifier() {
-    // Over the copy cap, so that only the opening hint varies here; the copy hint has its own test below.
+    // Of unknown size, which gets no copy hint of either kind, so that only the opening hint varies here; the copy
+    // hints have their own test below.
     let stat = |can_open| FileStat {
         can_open,
-        ..ready("/work/notes.txt", 10_000_001)
+        info: DownloadFileInfo {
+            path: "/work/notes.txt".into(),
+            size: None,
+            status: DownloadFileStatus::Ready,
+        },
+        ..ready("/work/notes.txt", 0)
     };
     for (can_open, platform, hint) in [
         (
@@ -117,11 +123,13 @@ fn hints_offer_opening_only_where_the_helm_does_with_the_platforms_modifier() {
 
 /// The copy hint promises a copy that can work, so it must not appear where the click is refused before reading:
 /// over the 10 MB cap, or for an image on Linux, which copies text only. It must not be withheld from a file whose
-/// contents only the click can judge (a binary under the cap is refused then, loudly). The maintainer asked for the
-/// words "copy contents", not just "copy". Specified: a file of exactly the cap (10,000,000 bytes) gets the hint and
-/// one byte more does not; a file of unknown size does not, since the hover cannot promise it fits; on a Mac an image
-/// gets it and on Linux it does not, while text, an SVG and an unknown binary do on both; the modifier is ⇧⌘ on a Mac
-/// and Shift-Ctrl elsewhere, after the opening hint.
+/// contents only the click can judge (a binary under the cap is refused then, loudly). Over the cap the hover says
+/// "too large to copy contents" instead, so the shortcut does not just vanish without a reason; the maintainer asked
+/// for that, and earlier for the words "copy contents", not just "copy". Specified: a file of exactly the cap
+/// (10,000,000 bytes) gets the copy hint and one byte more gets the too-large hint, on both platforms and after the
+/// opening hint; a file of unknown size gets neither, since the hover cannot promise it fits or say it does not; on a
+/// Mac an image gets the copy hint, and on Linux it gets neither at any size, while text, an SVG and an unknown binary
+/// get the copy hint on both; the modifier is ⇧⌘ on a Mac and Shift-Ctrl elsewhere, after the opening hint.
 #[test]
 fn the_copy_hint_appears_only_where_a_copy_can_be_attempted() {
     let stat = |path: &str, size: Option<u64>| FileStat {
@@ -136,25 +144,35 @@ fn the_copy_hint_appears_only_where_a_copy_can_be_attempted() {
     let mac = " · click to download · ⇧⌘-click to copy contents";
     let linux = " · click to download · Shift-Ctrl-click to copy contents";
     let none = " · click to download";
+    let too_large = " · click to download · too large to copy contents";
     for (path, size, platform, hint) in [
         ("/w/a.txt", Some(10_000_000), Platform::Mac, mac),
-        ("/w/a.txt", Some(10_000_001), Platform::Mac, none),
+        ("/w/a.txt", Some(10_000_001), Platform::Mac, too_large),
+        ("/w/a.txt", Some(10_000_001), Platform::Linux, too_large),
+        ("/w/a.txt", Some(87_000_000), Platform::Linux, too_large),
         ("/w/a.txt", None, Platform::Mac, none),
+        ("/w/a.txt", None, Platform::Linux, none),
         ("/w/a.txt", Some(0), Platform::Linux, linux),
         ("/w/shot.PNG", Some(10), Platform::Mac, mac),
+        ("/w/shot.PNG", Some(10_000_001), Platform::Mac, too_large),
         ("/w/shot.PNG", Some(10), Platform::Linux, none),
+        ("/w/shot.PNG", Some(10_000_001), Platform::Linux, none),
         ("/w/logo.svg", Some(10), Platform::Linux, linux),
         ("/w/data.bin", Some(10), Platform::Linux, linux),
     ] {
         assert_eq!(hints(&stat(path, size), platform), hint, "{path} {size:?}");
     }
-    let open = FileStat {
+    let open = |size| FileStat {
         can_open: Some(true),
-        ..stat("/w/a.txt", Some(10))
+        ..stat("/w/a.txt", Some(size))
     };
     assert_eq!(
-        hints(&open, Platform::Mac),
+        hints(&open(10), Platform::Mac),
         " · click to download · ⌘-click to open · ⇧⌘-click to copy contents"
+    );
+    assert_eq!(
+        hints(&open(10_000_001), Platform::Linux),
+        " · click to download · Ctrl-click to open · too large to copy contents"
     );
 }
 

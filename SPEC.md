@@ -3961,13 +3961,14 @@ whatever the agent renders is what you see. There is no composer, no message abs
   line, and decimal size with the action hints on a third. A left stripe and size color show under 1 MB green, 1–10 MB
   blue stripe with neutral size, and 10–100 MB amber. A file with an unknown size uses a neutral stripe. Only an
   eligible desktop file has the opening hint. A file whose size the host reported as at most 10 MB has the copy hint
-  ("⇧⌘-click to copy contents", "Shift-Ctrl-click to copy contents" elsewhere), except an image on Linux. Any file the
-  session's account can read is in reach, within the existing shell authority; hover discloses the agent-provided target
-  before an explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly
-  limited to http and https. A hyperlink with any other scheme, `file://` included, is inert: it gets no pointer,
-  underline, hover, file check or click, and with mouse reporting on a press on it reaches the program as a press on
-  plain text does. Its cells stay the hyperlink's, so its text is not taken for a printed URL or path either. To offer a
-  file for download, a program prints its path.
+  ("⇧⌘-click to copy contents", "Shift-Ctrl-click to copy contents" elsewhere), and a larger one says "too large to copy
+  contents" in its place, both except an image on Linux; a file of unknown size has neither. Any file the session's
+  account can read is in reach, within the existing shell authority; hover discloses the agent-provided target before an
+  explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to
+  http and https. A hyperlink with any other scheme, `file://` included, is inert: it gets no pointer, underline, hover,
+  file check or click, and with mouse reporting on a press on it reaches the program as a press on plain text does. Its
+  cells stay the hyperlink's, so its text is not taken for a printed URL or path either. To offer a file for download, a
+  program prints its path.
 
 ## Attachments
 
