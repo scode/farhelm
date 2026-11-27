@@ -198,17 +198,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the local Mac's supervisor from being started detached by the desktop app to the same per-user launchd job, so every
   Mac uses one consistent mechanism. Related: "Let the Mac's supervisor outlive the desktop app" under Maybe later.
 
-- **Decide how terminal snapshots are supposed to work.** Every checkpoint of a terminal in a terminal host encodes the
-  whole terminal (screen, up to 12,000 lines of scrollback, modes) into one self-contained blob, even though most of the
-  scrollback has not changed since the previous snapshot. That repeated work is what makes typing pause during a
-  checkpoint and what makes the burst at an orderly supervisor stop expensive. The plans `faster-snapshot-encoder` and
-  `stop-checkpoint-burst` only make today's whole-terminal encode cheaper and rarer. The maintainer takes a position
-  first, in particular on whether snapshots should be maintained incrementally, and implementation follows. Two shapes
-  came up while planning those plans: incremental on the host (a base snapshot plus a chain of changes, which needs a
-  new snapshot format and a protocol change for hosts that outlive every release), or incremental in the supervisor
-  (cache the encoded bytes of history rows and re-encode only the screen and new rows, producing the same v1 blob as
-  today). The repository records no reason for the original choice of whole snapshots.
-
 - **Credentials for ordinary SSH hosts.** The Credentials section of Settings serves environments through their recipes.
   Extend it so ordinary SSH hosts can use the same named credentials.
 
@@ -665,6 +654,17 @@ problem a refactor targets (making drifted copies consistent, say) is allowed in
 are not.
 
 ## Maybe later
+
+- **Decide how terminal snapshots are supposed to work.** Every checkpoint of a terminal in a terminal host encodes the
+  whole terminal (screen, up to 12,000 lines of scrollback, modes) into one self-contained blob, even though most of the
+  scrollback has not changed since the previous snapshot. That repeated work is what makes typing pause during a
+  checkpoint and what makes the burst at an orderly supervisor stop expensive. The plans `faster-snapshot-encoder` and
+  `stop-checkpoint-burst` only make today's whole-terminal encode cheaper and rarer. The maintainer takes a position
+  first, in particular on whether snapshots should be maintained incrementally, and implementation follows. Two shapes
+  came up while planning those plans: incremental on the host (a base snapshot plus a chain of changes, which needs a
+  new snapshot format and a protocol change for hosts that outlive every release), or incremental in the supervisor
+  (cache the encoded bytes of history rows and re-encode only the screen and new rows, producing the same v1 blob as
+  today). The repository records no reason for the original choice of whole snapshots.
 
 - **Revisit the desktop app idle CPU findings.** `lore/2026-11-26-desktop-idle-cpu.md` records where the desktop app's
   idle CPU goes and how it grows with the number of running sessions, with fixes ranked by improvement per unit of added
