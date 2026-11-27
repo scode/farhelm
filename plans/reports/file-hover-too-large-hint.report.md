@@ -76,3 +76,65 @@ large files must stay on either side of the 10 MB limit so the scene keeps showi
 listed above. The last I left: one test spells out the file's path twice to give it an unknown size, which the reviewer
 itself called correct and in the style of the test beside it. The fixes were not reviewed again. Run `ed3a0e15` ran
 after them.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained one change: the desktop launcher's dead code for starting a fresh
+managed checkout through **Replace with** was removed (delete-dead-replace-checkout-ui, #5160). It touches only the
+launcher, not the terminal's file hover card. In the same round, after this plan, agent-hosts-tailscale-column landed
+(#5161: `farhelm agent hosts` gains a `TAILSCALE` column), which does not touch the desktop app.
+
+An independent reviewer and I read the change and found nothing to fix. The card says "too large to copy contents"
+exactly when a copy click would be refused for the file's size. Only the file hover screenshots changed. I looked at the
+new light one: the 87 MB card now ends "click to download · too large to copy contents", and the two smaller cards are
+unchanged.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** Both of this round's plans removed their own TODO entry, near each other, so stacking them
+  conflicted there. I removed both entries; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing.
+
+#### Worth knowing
+
+- **The changelog fragment is filed as Changed.** A hint users newly see may belong under Added; release curation can
+  settle that.
+
+#### Checks
+
+Run once, on the round's two plans stacked on main as it stood when the landing started (file-hover-too-large-hint, then
+agent-hosts-tailscale-column), so each was tested with the other and with the previous round's change. One plan changes
+the desktop app's file hover card and the other the command line's hosts table and the agent instructions. So the checks
+cover the desktop app's GUI crate and its screenshots, the command line's and test fixtures' unit tests, the agent
+command tests and the end-to-end agent listing tests, plus clippy over everything. All ran locally. The desktop smoke
+test has no step with a file hover card, so no boat was used.
+
+- `cargo clippy --all-targets`, and `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent`
+  (the build with the desktop app's test-automation hooks): each reported one warning and nothing else. That warning is
+  the unused ntfy settings method in the helm, which has been on main since #5120 and is outside this round, so these
+  were run without `-D warnings`, which that warning makes fail.
+  `cargo clippy -p farhelm-gui --all-targets -- -D warnings` (the GUI crate, which does not depend on the helm's code):
+  clean.
+- The GUI crate's whole default test suite (`cargo nextest run -p farhelm-gui`), recorded run
+  e5a9ca08-8299-42f4-a2f5-d67476b22f70: 3,589 passed, none failed, and it skipped its 4 opt-in tests, among them the
+  screenshot test the next item runs.
+- The full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run 92e47951-51a1-4894-8f97-59f7d14d70a4:
+  passed.
+- The command line's and the test fixtures' unit tests and the agent command tests
+  (`cargo nextest run -p farhelm -p farhelm-fixtures --bins --test agent_cli`), recorded run
+  0092d61b-56fa-4cb6-8cba-7d1c3aab253c: 218 passed, none failed. An earlier attempt, recorded run
+  4a11a467-f18b-428c-b603-f2c6493cb402, asked for library tests these binary crates do not have and ran nothing.
+- The end-to-end agent listing tests on a real helm and supervisor
+  (`cargo nextest run -p farhelm --test e2e -E 'test(/agent_listing_real_stack::/)'`), recorded run
+  21070767-c81a-4118-8114-eba263fe6c87: 8 passed, none failed, and no test reported that it skipped for a missing system
+  service.
+- `cargo fmt --all -- --check`, `python3 releasing/check-changelog.py format` and `dprint check` on the changed
+  Markdown: passed.
+
+Reused: nothing. Skipped: the rest of the Rust workspace's tests, since nothing else changed; the desktop smoke test, as
+above; the opt-in tests; and any run on a Mac, since none was available to the landing.
