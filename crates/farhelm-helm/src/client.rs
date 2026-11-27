@@ -1120,6 +1120,8 @@ struct UploadProgress {
 pub struct CreateExtras {
     /// Helm policy for this start. The supervisor keeps the accepted choice across retries of a pending create.
     pub setup_persistent_hooks: bool,
+    /// Instructions for the agent at this start (`ControlMsg::CreateSession::extra_instructions`).
+    pub extra_instructions: Option<String>,
     /// Literal one-time first message, excluded from reusable launch settings.
     pub prompt: Option<String>,
     /// A one-time command, never recorded in reusable session launch settings.
@@ -3229,6 +3231,7 @@ impl SupervisorClient {
                 req_id,
                 ControlMsg::CreateSession {
                     setup_persistent_hooks: extras.setup_persistent_hooks,
+                    extra_instructions: extras.extra_instructions,
                     named_start: extras.named_start,
                     req_id,
                     parent: extras.parent,
@@ -3747,11 +3750,14 @@ impl SupervisorClient {
             expected_launch,
             named_start,
             Default::default(),
+            None,
         )
         .await
     }
 
-    /// Send the helm's current hook setup choice alongside the resolved launch. The ordinary client helpers default off.
+    /// Send the helm's current hook setup choice and extra instructions alongside the resolved launch. The ordinary
+    /// client helpers default both off.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn restart_session_with_hook_setup(
         &self,
         id: &str,
@@ -3760,6 +3766,7 @@ impl SupervisorClient {
         expected_launch: Option<farhelm_proto::SessionLaunch>,
         named_start: Option<farhelm_proto::NamedConversationStart>,
         setup_persistent_hooks: farhelm_proto::PersistentHookOptIns,
+        extra_instructions: Option<String>,
     ) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
         match self
@@ -3767,6 +3774,7 @@ impl SupervisorClient {
                 req_id,
                 ControlMsg::RestartSession {
                     setup_persistent_hooks,
+                    extra_instructions,
                     named_start,
                     req_id,
                     session_id: id.to_string(),
@@ -7557,6 +7565,7 @@ mod tests {
             .request(
                 7,
                 ControlMsg::RestartSession {
+                    extra_instructions: None,
                     setup_persistent_hooks: Default::default(),
                     named_start: None,
                     req_id: 7,

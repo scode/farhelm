@@ -4526,7 +4526,8 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
     let (id, body) = save_ntfy(&mut helm, cx);
     let expected = json!({ "enabled": false, "server_url": "https://ntfy.example", "topic": "saved-more",
                                "priority": "high", "token": null, "notify_waiting": true,
-                               "notify_blocked": false });
+                               "notify_blocked": false,
+                           "custom_blocked_criteria": "" });
     assert_eq!(body, expected);
     assert_eq!(
         preference_work(cx),
@@ -4595,6 +4596,53 @@ fn the_line_beside_send_test_says_what_the_saved_settings_send(cx: &mut TestAppC
     assert!(!drawn(cx, "ntfy-saved-state"));
 }
 
+/// The user can say what counts as blocked, and must see Farhelm's own wording while they have not, without the box
+/// being filled with a copy of it that would stop following later changes. Specified: with no custom criteria stored,
+/// the criteria field is empty and Farhelm's default is shown under it; typing criteria hides the default and offers
+/// Reset to default; Save sends the typed text; once stored, Reset to default empties the field, shows the default
+/// again, and Save sends an empty string, which the helm reads as the default.
+#[gpui::test]
+fn the_blocked_criteria_field_shows_the_default_and_resets_to_it(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "alerts", "default", false),
+    );
+    let shown_default = |cx: &mut VisualTestContext| {
+        frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("ntfy-default-criteria"))
+            .and_then(|node| node.value.map(|value| value.to_string()))
+    };
+    assert_eq!(
+        shown_default(cx),
+        Some(format!(
+            "Farhelm's default: {}",
+            farhelm_proto::ntfy::DEFAULT_BLOCKED_CRITERIA
+        ))
+    );
+    assert!(!drawn(cx, "ntfy-criteria-reset"));
+    fill(cx, "ntfy-blocked-criteria", "the build is red");
+    assert!(!drawn(cx, "ntfy-default-criteria"));
+    assert!(drawn(cx, "ntfy-criteria-reset"));
+    let (id, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["custom_blocked_criteria"], json!("the build is red"));
+    let mut stored = ntfy("https://ntfy.sh", "alerts", "default", false);
+    stored["custom_blocked_criteria"] = json!("the build is red");
+    helm.reply(id, 200, Some(stored));
+    settle(cx);
+    assert!(
+        drawn(cx, "ntfy-criteria-reset") && shown_default(cx).is_none(),
+        "the premise: the stored criteria fill the field"
+    );
+    into_view(cx, "ntfy-criteria-reset");
+    click(cx, "ntfy-criteria-reset");
+    assert!(shown_default(cx).is_some());
+    let (_, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["custom_blocked_criteria"], json!(""));
+}
+
 /// The blocked switch decides whether an agent's `farhelm agent notify` reaches the user's phone, so the form must show
 /// what the helm stores and send what the user chose. Specified: with the helm storing blocked alerts on, the Agent is
 /// blocked switch shows on and the form has no unsaved changes; turning it off shows the unsaved line, and Save sends
@@ -4644,7 +4692,8 @@ fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext)
     let (id, body) = save_ntfy(&mut helm, cx);
     let mut form = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",
                            "priority": "high", "token": "browser-token", "notify_waiting": true,
-                           "notify_blocked": false });
+                           "notify_blocked": false,
+                           "custom_blocked_criteria": "" });
     assert_eq!(body, form);
     assert_eq!(label_of(cx, "ntfy-working").as_deref(), Some("Working…"));
     let stored = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",

@@ -32,7 +32,7 @@ pub(crate) fn inject_hooks(mut argv: Vec<String>, policy: &HookPolicy<'_>) -> Ho
     if policy.instructions.announces() {
         argv.extend([
             "--append-system-prompt".to_string(),
-            super::INSTRUCTIONS_POINTER.to_string(),
+            super::appended_instructions(policy),
         ]);
     }
     let controls = [format!("{}={exe}", crate::launch::PI_REPORTER_EXE_ENV_VAR)];

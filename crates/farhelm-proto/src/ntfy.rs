@@ -62,6 +62,59 @@ pub struct Settings {
     /// saved before it existed.
     #[serde(default)]
     pub notify_blocked: bool,
+    /// What counts as blocked, in the user's words, appended to the blocked-agent instruction; `None` uses
+    /// [`DEFAULT_BLOCKED_CRITERIA`]. Tracked as a choice rather than as text, so a configuration that never chose its
+    /// own criteria follows every later change to Farhelm's default wording instead of keeping a copy of an old one.
+    #[serde(default)]
+    pub custom_blocked_criteria: Option<String>,
+}
+
+/// The blocked-agent instruction's first part, always given while blocked alerts are on: what to run and the intent,
+/// which is not to make the agent try harder, only to keep it from stopping silently. The maintainer settled this
+/// wording in the plan `agent-blocked-notifications`; change it deliberately.
+pub const BLOCKED_INSTRUCTION_FRAMING: &str = "farhelm: If you are going to stop without completing what the user \
+     asked because you are blocked, do not stop silently \u{2014} run `farhelm agent notify \"<what is blocked \
+     (briefly)>: <why is it blocked (briefly)>\"` before ending your turn so the user is notified right away. Do not \
+     treat this as a request to try harder or work around blockers; only make sure you notify instead of stopping \
+     quietly. Keep the reason to one short sentence saying what blocked you and what you need.";
+
+/// Farhelm's own answer to what counts as blocked, used while the user has not written their own
+/// ([`Settings::custom_blocked_criteria`] is `None`). Settings shows it read-only beside the empty custom field.
+pub const DEFAULT_BLOCKED_CRITERIA: &str = "you cannot finish what the user asked because of missing credentials, \
+     permissions, tools, or access; a decision or clarification only the user can make; an external failure or \
+     environment problem you cannot resolve; or any case where you are leaving requested work unfinished or skipping \
+     part of the request.";
+
+/// The most characters custom criteria may have once normalized ([`normalize_blocked_criteria`]).
+pub const BLOCKED_CRITERIA_CAP: usize = 1000;
+
+/// The blocked-agent instruction for the agents Farhelm starts under `settings`, or `None` while blocked alerts are
+/// off: [`BLOCKED_INSTRUCTION_FRAMING`], then "What counts as blocked: " and the user's criteria or
+/// [`DEFAULT_BLOCKED_CRITERIA`]. The one source of the instruction the helm sends with each create and Restart; the
+/// desktop shows the same default criteria constant.
+pub fn blocked_instructions(settings: &Settings) -> Option<String> {
+    (settings.enabled && settings.notify_blocked).then(|| {
+        let criteria = settings
+            .custom_blocked_criteria
+            .as_deref()
+            .unwrap_or(DEFAULT_BLOCKED_CRITERIA);
+        format!("{BLOCKED_INSTRUCTION_FRAMING} What counts as blocked: {criteria}")
+    })
+}
+
+/// Custom criteria as they are stored: whitespace runs (line breaks included) one space, characters that must not be
+/// shown as themselves removed, trimmed; empty means Farhelm's default (`None`). Refused, with a reason a form can
+/// show, when longer than [`BLOCKED_CRITERIA_CAP`] characters. The helm applies it to every save.
+pub fn normalize_blocked_criteria(text: &str) -> Result<Option<String>, &'static str> {
+    let safe: String = text
+        .chars()
+        .filter(|c| c.is_whitespace() || !crate::text::is_presentation_unsafe(*c))
+        .collect();
+    let normalized = safe.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() > BLOCKED_CRITERIA_CAP {
+        return Err("what counts as blocked must be at most 1000 characters");
+    }
+    Ok((!normalized.is_empty()).then_some(normalized))
 }
 
 /// What an absent `notify_waiting` means: on, the only alert there used to be.
@@ -79,6 +132,7 @@ impl Default for Settings {
             token_set: false,
             notify_waiting: true,
             notify_blocked: false,
+            custom_blocked_criteria: None,
         }
     }
 }
@@ -118,6 +172,11 @@ pub struct SaveSettings {
     /// See [`Settings::notify_blocked`]; absent keeps the stored value, as for `notify_waiting`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notify_blocked: Option<bool>,
+    /// See [`Settings::custom_blocked_criteria`]. Absent keeps the stored choice, as for `notify_waiting`; text that
+    /// normalizes to nothing ([`normalize_blocked_criteria`]), the empty string included, goes back to Farhelm's
+    /// default; other text is the user's own criteria.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_blocked_criteria: Option<String>,
 }
 
 #[cfg(test)]
@@ -143,6 +202,86 @@ mod tests {
         assert_eq!(save.notify_waiting, None);
         assert_eq!(save.notify_blocked, None);
         assert!(Settings::default().notify_waiting);
+    }
+
+    /// The blocked-agent instruction is the maintainer's settled wording, and a configuration that never chose its
+    /// own criteria must follow Farhelm's default rather than keep a copy. Specified: off while either the master or
+    /// the blocked switch is off; on, the framing and "What counts as blocked: " followed by the default criteria when
+    /// none are chosen, or by the chosen text; the framing names `farhelm agent notify` and says not to try harder.
+    #[test]
+    fn the_blocked_instruction_is_the_framing_and_the_chosen_criteria() {
+        let on = Settings {
+            enabled: true,
+            notify_blocked: true,
+            ..Settings::default()
+        };
+        assert_eq!(
+            blocked_instructions(&on).as_deref(),
+            Some(
+                format!("{BLOCKED_INSTRUCTION_FRAMING} What counts as blocked: {DEFAULT_BLOCKED_CRITERIA}")
+                    .as_str()
+            )
+        );
+        let custom = Settings {
+            custom_blocked_criteria: Some("the build is red".into()),
+            ..on.clone()
+        };
+        assert!(
+            blocked_instructions(&custom)
+                .unwrap()
+                .ends_with(" What counts as blocked: the build is red")
+        );
+        for off in [
+            Settings {
+                enabled: false,
+                ..on.clone()
+            },
+            Settings {
+                notify_blocked: false,
+                ..on.clone()
+            },
+        ] {
+            assert_eq!(blocked_instructions(&off), None);
+        }
+        // The maintainer's settled wording (the plan `agent-blocked-notifications`), spelled out in full so an edit to
+        // either constant fails here rather than reaching agents unnoticed.
+        assert_eq!(
+            BLOCKED_INSTRUCTION_FRAMING,
+            "farhelm: If you are going to stop without completing what the user asked because you are blocked, do \
+             not stop silently \u{2014} run `farhelm agent notify \"<what is blocked (briefly)>: <why is it blocked \
+             (briefly)>\"` before ending your turn so the user is notified right away. Do not treat this as a \
+             request to try harder or work around blockers; only make sure you notify instead of stopping quietly. \
+             Keep the reason to one short sentence saying what blocked you and what you need."
+        );
+        assert_eq!(
+            DEFAULT_BLOCKED_CRITERIA,
+            "you cannot finish what the user asked because of missing credentials, permissions, tools, or access; a \
+             decision or clarification only the user can make; an external failure or environment problem you \
+             cannot resolve; or any case where you are leaving requested work unfinished or skipping part of the \
+             request."
+        );
+        assert!(!BLOCKED_INSTRUCTION_FRAMING.contains('\n'));
+    }
+
+    /// Custom criteria are stored the way they are sent to agents, and the empty choice must mean the default, never
+    /// an empty criteria line. Specified: whitespace runs (line breaks included) become one space and the ends are
+    /// trimmed; a presentation-unsafe character is removed; empty or whitespace-only text is the default (`None`);
+    /// text at the cap is kept and one character more is refused.
+    #[test]
+    fn custom_criteria_are_normalized_and_bounded() {
+        assert_eq!(
+            normalize_blocked_criteria("  red\n  build\t ")
+                .unwrap()
+                .as_deref(),
+            Some("red build")
+        );
+        assert_eq!(
+            normalize_blocked_criteria("a\u{202e}b").unwrap().as_deref(),
+            Some("ab")
+        );
+        assert_eq!(normalize_blocked_criteria(" \n ").unwrap(), None);
+        assert!(normalize_blocked_criteria(&"x".repeat(BLOCKED_CRITERIA_CAP)).is_ok());
+        assert!(normalize_blocked_criteria(&"x".repeat(BLOCKED_CRITERIA_CAP + 1)).is_err());
     }
 
     /// The waiting policy tracks spells only while alerts can actually go out. Specified: on only with the master

@@ -1509,6 +1509,11 @@ enum InternalCmd {
         /// on the injected command line is what pins it to the launch.
         #[arg(long)]
         announce: bool,
+        /// Instructions to print after the pointer, on their own line: the helm's for this launch (today the
+        /// blocked-agent instruction). Like `--announce`, set by the supervisor on the injected command, which is how
+        /// it survives a vendor that scrubs the hook's environment; ignored without `--announce`.
+        #[arg(long, allow_hyphen_values = true)]
+        extra_instructions: Option<String>,
         /// Which vendor adapter this hook invocation is: the report
         /// envelope's discriminator, sourced from the installed entry
         /// point rather than inferred from the payload. Required, so an
@@ -1743,7 +1748,7 @@ fn hold_own_version(command: &Cmd) -> anyhow::Result<()> {
                 command: InternalCmd::Hook { vendor, .. },
             } = command
             {
-                hook::write_response(&mut std::io::stdout(), vendor.report_vendor(), false);
+                hook::write_response(&mut std::io::stdout(), vendor.report_vendor(), false, None);
             }
             std::process::exit(0)
         }
@@ -2216,20 +2221,31 @@ fn main() -> anyhow::Result<()> {
                         farhelm_proto::ReportVendor::Goose,
                     );
                 }
+                // The pointer, and after it any extra instructions the launch
+                // carries, only when the launch asked for instructions at all.
                 let instructions =
                     (std::env::var_os(farhelm_supervisor::launch::GOOSE_INSTRUCTIONS_ENV_VAR)
                         .as_deref()
                         == Some(std::ffi::OsStr::new("1")))
-                    .then_some(hook::POINTER_LINE);
+                    .then(|| {
+                        // Empty is the launch saying it has none.
+                        let extra = std::env::var(
+                            farhelm_supervisor::launch::GOOSE_EXTRA_INSTRUCTIONS_ENV_VAR,
+                        )
+                        .ok()
+                        .filter(|extra| !extra.is_empty());
+                        hook::instructions_text(extra.as_deref())
+                    });
                 goose_hook::serve(
                     std::io::BufReader::new(std::io::stdin()),
                     std::io::stdout(),
-                    instructions,
+                    instructions.as_deref(),
                 );
                 Ok(())
             }
             InternalCmd::Hook {
                 announce,
+                extra_instructions,
                 vendor,
                 session_id,
                 supervisor_socket,
@@ -2277,7 +2293,12 @@ fn main() -> anyhow::Result<()> {
                 // costs a small write to a pipe the vendor is draining.
                 // Ordering it second means a stdout that somehow will not
                 // take the line cannot delay the report.
-                hook::write_response(&mut std::io::stdout(), vendor, announce);
+                hook::write_response(
+                    &mut std::io::stdout(),
+                    vendor,
+                    announce,
+                    extra_instructions.as_deref(),
+                );
 
                 // Exit rather than return, for the STATUS above all: 0 is
                 // decided right here, unconditionally, rather than by

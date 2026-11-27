@@ -434,7 +434,7 @@ pub(crate) fn inject_hooks(
             if policy.instructions.announces() && pointer {
                 argv.extend([
                     "--append-system-prompt".to_string(),
-                    super::INSTRUCTIONS_POINTER.to_string(),
+                    super::appended_instructions(policy),
                 ]);
             }
             let controls = [format!("{}={exe}", crate::launch::OMP_REPORTER_EXE_ENV_VAR)];

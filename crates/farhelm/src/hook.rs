@@ -247,7 +247,16 @@ pub const POINTER_LINE: &str = farhelm_supervisor::agent_kind::INSTRUCTIONS_POIN
 ///
 /// Takes the sink as a parameter so the bytes can be asserted in a unit
 /// test without a process and without touching the real stdout.
-pub fn write_response(out: &mut impl std::io::Write, vendor: ReportVendor, announce: bool) {
+///
+/// With `extra`, the announcing vendors print [`instructions_text`]: the pointer, then the launch's extra
+/// instructions on the next line. Still plain text: it starts with the pointer, so a vendor that parses a hook's
+/// stdout as JSON when it looks like a JSON object (Claude and Codex do) never sees one.
+pub fn write_response(
+    out: &mut impl std::io::Write,
+    vendor: ReportVendor,
+    announce: bool,
+    extra: Option<&str>,
+) {
     let response = match vendor {
         ReportVendor::Antigravity => "{}",
         ReportVendor::Custom => return,
@@ -261,10 +270,21 @@ pub fn write_response(out: &mut impl std::io::Write, vendor: ReportVendor, annou
             if !announce {
                 return;
             }
-            POINTER_LINE
+            let _ = writeln!(out, "{}", instructions_text(extra));
+            return;
         }
     };
     let _ = writeln!(out, "{response}");
+}
+
+/// What an announcing hook prints: [`POINTER_LINE`], then the launch's extra instructions on the next line when it
+/// has any. Shared by `farhelm internal hook` and Goose's reporter, so the hook-fed agents read the same text (Pi and
+/// OMP get theirs in their appended system prompt instead).
+pub fn instructions_text(extra: Option<&str>) -> String {
+    match extra {
+        Some(extra) => format!("{POINTER_LINE}\n{extra}"),
+        None => POINTER_LINE.to_string(),
+    }
 }
 
 /// Where a report goes, derived by the caller from a complete session
@@ -940,6 +960,36 @@ mod tests {
     use std::io::Cursor;
     use std::time::Instant;
 
+    /// The hook is how a start hook's agent reads the extra instructions, and Claude and Codex parse a start hook's
+    /// stdout as JSON when it looks like an object. Specified: with `--announce` and extra instructions, an announcing
+    /// vendor's response is the pointer line, then the instructions on their own line, starting with the pointer
+    /// (never `{`); without `--announce` it prints nothing, extra instructions or not; Antigravity still prints `{}`.
+    #[farhelm_testtrace::test]
+    fn an_announcing_hook_prints_extra_instructions_after_the_pointer() {
+        let respond = |vendor, announce, extra| {
+            let mut out = Vec::new();
+            write_response(&mut out, vendor, announce, extra);
+            String::from_utf8(out).unwrap()
+        };
+        for vendor in [
+            ReportVendor::Claude,
+            ReportVendor::Codex,
+            ReportVendor::Muse,
+        ] {
+            let text = respond(vendor, true, Some("tell the user when blocked"));
+            assert_eq!(
+                text,
+                format!("{POINTER_LINE}\ntell the user when blocked\n")
+            );
+            assert!(!text.starts_with('{'));
+            assert_eq!(
+                respond(vendor, false, Some("tell the user when blocked")),
+                ""
+            );
+        }
+        assert_eq!(respond(ReportVendor::Antigravity, true, Some("x")), "{}\n");
+    }
+
     /// Stop and submit callbacks can share a report slot and source. A successful write keeps the known event in
     /// its diagnostic so a later slot replacement cannot erase which callback arrived.
     #[farhelm_testtrace::test]
@@ -1364,7 +1414,7 @@ mod tests {
     fn antigravity_hook_response_ignores_announce() {
         for announce in [false, true] {
             let mut out = Vec::new();
-            write_response(&mut out, ReportVendor::Antigravity, announce);
+            write_response(&mut out, ReportVendor::Antigravity, announce, None);
             assert_eq!(out, b"{}\n");
         }
     }
@@ -2363,7 +2413,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn announce_writes_one_line_and_nothing_else() {
         let mut out = Vec::new();
-        write_response(&mut out, ReportVendor::Claude, true);
+        write_response(&mut out, ReportVendor::Claude, true, None);
         let text = String::from_utf8(out).expect("the pointer is ASCII");
         assert_eq!(text, format!("{POINTER_LINE}\n"));
         assert_eq!(text.lines().count(), 1);
@@ -2385,8 +2435,8 @@ mod tests {
                 Err(std::io::Error::other("simulated closed pipe"))
             }
         }
-        write_response(&mut AlwaysErrors, ReportVendor::Claude, true);
-        write_response(&mut AlwaysErrors, ReportVendor::Antigravity, false);
+        write_response(&mut AlwaysErrors, ReportVendor::Claude, true, None);
+        write_response(&mut AlwaysErrors, ReportVendor::Antigravity, false, None);
     }
 
     /// The pointer's SHAPE, which is what decides whether a vendor treats

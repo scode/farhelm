@@ -68,9 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
-  user when blocked through farhelm. Plan: `plans/queue/agent-blocked-notifications.md`.
-
 - **Decide whether Settings "Save changes before closing?" should dismiss an open custom-agent Delete confirmation (and
   align `SPEC.md`).** From PR #5075 (`custom-agent-delete-prompt`): suppose you edit a custom agent in Settings → Custom
   agents, click Delete (so the inline "Delete this custom agent?" confirmation opens in the footer without you clicking

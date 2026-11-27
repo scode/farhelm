@@ -345,6 +345,7 @@ fn save(server: &str, token: Option<&str>, enabled: bool) -> SaveSettings {
     SaveSettings {
         notify_waiting: Some(true),
         notify_blocked: Some(true),
+        custom_blocked_criteria: None,
         enabled,
         server_url: server.into(),
         topic: TOPIC.into(),
@@ -469,6 +470,81 @@ async fn the_waiting_cache_follows_saves_and_reopens() {
     drop(store);
     let reopened = HelmStore::open(&path).await.unwrap();
     assert!(reopened.waiting_alerts_enabled());
+}
+
+/// Custom criteria follow the same save rules as the switches, plus one of their own: emptying the field is how the
+/// user goes back to Farhelm's wording, and what is sent to agents is what is stored. Specified: a save with criteria
+/// text stores it normalized; a save without the field keeps it; a save with whitespace-only text goes back to the
+/// default (none stored); text over the cap is refused with the fixed message and changes nothing.
+#[farhelm_testtrace::test]
+async fn custom_criteria_save_keep_reset_and_refuse() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+    let with = |criteria: Option<&str>| SaveSettings {
+        custom_blocked_criteria: criteria.map(str::to_owned),
+        ..save("https://ntfy.sh", None, true)
+    };
+    let stored = store
+        .save_ntfy_config(with(Some("  the build\n is red ")))
+        .await
+        .ok()
+        .unwrap();
+    assert_eq!(
+        stored.custom_blocked_criteria.as_deref(),
+        Some("the build is red")
+    );
+    let kept = store.save_ntfy_config(with(None)).await.ok().unwrap();
+    assert_eq!(
+        kept.custom_blocked_criteria.as_deref(),
+        Some("the build is red")
+    );
+    let Err(SaveError::Invalid(reason)) = store
+        .save_ntfy_config(with(Some(
+            &"x".repeat(farhelm_proto::ntfy::BLOCKED_CRITERIA_CAP + 1),
+        )))
+        .await
+    else {
+        panic!("over-long criteria were saved");
+    };
+    assert!(reason.contains("1000 characters"), "{reason}");
+    let reset = store
+        .save_ntfy_config(with(Some(" \n ")))
+        .await
+        .ok()
+        .unwrap();
+    assert_eq!(reset.custom_blocked_criteria, None);
+}
+
+/// Each create and Restart sends the blocked-agent instruction the saved settings call for at that moment, so a save
+/// reaches the next session without touching running ones. Specified: on a helm with blocked alerts off, a launch
+/// sends no instructions; after saving them on with custom criteria, it sends `blocked_instructions` of the stored
+/// settings, ending with those criteria.
+#[farhelm_testtrace::test]
+async fn a_launch_sends_the_blocked_instruction_the_saved_settings_call_for() {
+    let harness = helm().await;
+    let mut off = save("https://ntfy.sh", None, true);
+    off.notify_blocked = Some(false);
+    harness.store.save_ntfy_config(off).await.ok().unwrap();
+    assert_eq!(
+        crate::sessions::launch_instructions(&harness.state).await,
+        None
+    );
+    let on = SaveSettings {
+        custom_blocked_criteria: Some("the build is red".into()),
+        ..save("https://ntfy.sh", None, true)
+    };
+    let stored = harness.store.save_ntfy_config(on).await.ok().unwrap();
+    let sent = crate::sessions::launch_instructions(&harness.state)
+        .await
+        .expect("instructions while blocked alerts are on");
+    assert_eq!(
+        Some(sent.clone()),
+        farhelm_proto::ntfy::blocked_instructions(&stored)
+    );
+    assert!(
+        sent.ends_with("What counts as blocked: the build is red"),
+        "{sent}"
+    );
 }
 
 /// Only the URL origin owns a retained token: path/topic edits and equivalent

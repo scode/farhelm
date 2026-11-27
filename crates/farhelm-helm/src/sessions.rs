@@ -2045,6 +2045,7 @@ async fn do_create_session_with_environment(
         .store
         .agent_hook_setup_enabled(mode.as_launch().agent_kind())
         .await?;
+    let extra_instructions = launch_instructions(state).await;
     let session = client
         .create_session_with_extras(
             supervisor_cwd,
@@ -2054,6 +2055,7 @@ async fn do_create_session_with_environment(
             rows,
             CreateExtras {
                 setup_persistent_hooks,
+                extra_instructions,
                 prompt,
                 named_start,
                 intent_key,
@@ -3574,6 +3576,7 @@ async fn do_restart_session_named(
         .is_some_and(|launch| crate::yolo_guard::create_is_yolo(launch.as_launch()));
     crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
     let setup_persistent_hooks = state.store.agent_hook_setup_opt_ins().await?;
+    let extra_instructions = launch_instructions(state).await;
     let session = client
         .restart_session_with_hook_setup(
             id,
@@ -3582,11 +3585,26 @@ async fn do_restart_session_named(
             expected_launch,
             named_start,
             setup_persistent_hooks,
+            extra_instructions,
         )
         .await?;
     // Cache publication is best effort; the supervisor's successful reply stands.
     record_session(state, claim, &session).await;
     Ok(session)
+}
+
+/// The extra instructions a create or Restart sends its agent now: the blocked-agent instruction while blocked alerts
+/// are on (`farhelm_proto::ntfy::blocked_instructions`), read at the moment of the launch, so a session started or
+/// restarted after a save gets the saved choice and earlier sessions keep what they started with. A settings read
+/// that fails sends none rather than failing the launch: the instruction is a nicety, the launch is not.
+pub(crate) async fn launch_instructions(state: &AppState) -> Option<String> {
+    match state.store.ntfy_config().await {
+        Ok(config) => farhelm_proto::ntfy::blocked_instructions(&config.settings),
+        Err(error) => {
+            tracing::warn!(%error, "could not read ntfy alert settings; starting the agent without blocked instructions");
+            None
+        }
+    }
 }
 
 /// The body of `POST /api/sessions/{id}/rename`: the verb-POST convention

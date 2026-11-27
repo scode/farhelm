@@ -30,7 +30,7 @@ pub(super) async fn persistent_hook_files(
             return Err(error).with_context(|| format!("checking {}", directory.display()));
         }
     }
-    let command = hook_command(exe, AgentInstructions::Off, ReportVendor::Antigravity);
+    let command = hook_command(exe, AgentInstructions::Off, None, ReportVendor::Antigravity);
     let callback = serde_json::json!([{ "type": "command", "command": command, "timeout": 60 }]);
     Ok([
         HookFile::json(

@@ -3886,6 +3886,8 @@ async fn spliced_replace_harness(
 /// The setting is applied to the new start, including when the source ran before opt-in. Test at the supervisor
 /// boundary so a reply that happens to look right cannot hide a missing request mark. New, desktop Clone, quick
 /// launch and desktop templates all send the ordinary resolved create body.
+/// Each of those requests also carries the blocked-agent instruction the saved ntfy settings call for (here on, with
+/// custom criteria), since the helm resolves it at every launch.
 #[farhelm_testtrace::test]
 async fn hook_setup_consent_reaches_creates_restarts_and_replacements() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3980,6 +3982,27 @@ async fn hook_setup_consent_reaches_creates_restarts_and_replacements() {
         };
         let (client, peer) = tokio::io::duplex(64 * 1024);
         let (h, local) = spliced_replace_harness(client, vec![source.clone()]).await;
+        // Blocked alerts on, so every launch must also carry the blocked-agent instruction the saved settings call for.
+        let stored_ntfy = h
+            .store
+            .save_ntfy_config(farhelm_proto::ntfy::SaveSettings {
+                enabled: true,
+                server_url: "https://ntfy.sh".into(),
+                topic: "alerts".into(),
+                priority: farhelm_proto::ntfy::Priority::Default,
+                token: None,
+                notify_waiting: None,
+                notify_blocked: Some(true),
+                custom_blocked_criteria: Some("the build is red".into()),
+            })
+            .await
+            .ok()
+            .unwrap();
+        let expected_extra = farhelm_proto::ntfy::blocked_instructions(&stored_ntfy);
+        assert!(
+            expected_extra.is_some(),
+            "the premise: blocked alerts are on"
+        );
         let fleet = h.fleet.clone();
         let exchange = tokio::spawn(async move {
             let (read, write) = tokio::io::split(peer);
@@ -3996,9 +4019,11 @@ async fn hook_setup_consent_reaches_creates_restarts_and_replacements() {
                     setup_persistent_hooks,
                     named_start,
                     session_id,
+                    extra_instructions,
                     ..
                 } if suffix == "restart" => {
                     assert_eq!(session_id, "source");
+                    assert_eq!(extra_instructions, expected_extra);
                     assert_eq!(with.is_some(), named_start.is_some());
                     (
                         req_id,
@@ -4012,8 +4037,12 @@ async fn hook_setup_consent_reaches_creates_restarts_and_replacements() {
                     launch: Some(launch),
                     setup_persistent_hooks,
                     named_start,
+                    extra_instructions,
                     ..
-                } if suffix != "restart" => (req_id, launch, setup_persistent_hooks, named_start),
+                } if suffix != "restart" => {
+                    assert_eq!(extra_instructions, expected_extra);
+                    (req_id, launch, setup_persistent_hooks, named_start)
+                }
                 other => panic!("{suffix} sent an unexpected request {other:?}"),
             };
             assert_eq!(launch.agent_kind(), kind);

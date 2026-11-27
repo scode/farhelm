@@ -993,6 +993,7 @@ mod tests {
         let refusal = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,

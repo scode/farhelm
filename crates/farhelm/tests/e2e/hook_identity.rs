@@ -2829,6 +2829,18 @@ fn run_hook(mut cmd: std::process::Command, payload: &[u8]) -> std::process::Out
 /// is what makes this a client of the SPAWNED process rather than of a
 /// `Supervisor` this test built itself.
 async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) -> bool {
+    claude_start_hook_command(supervisor, farhelm_helm::CreateExtras::default())
+        .await
+        .contains("--announce")
+}
+
+/// The SessionStart hook command a real, out-of-process supervisor injects
+/// for a fresh Claude-kind session created with `extras` (see
+/// [`claude_hook_command_carries_announce`] for how the session is made).
+async fn claude_start_hook_command(
+    supervisor: &SupervisorProcess,
+    extras: farhelm_helm::CreateExtras,
+) -> String {
     let bin = farhelm_teststate::tempdir().expect("bin dir");
     std::os::unix::fs::symlink(fixtures_bin(), bin.path().join("claude"))
         .expect("symlink claude onto the farhelm binary");
@@ -2859,7 +2871,7 @@ async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) ->
             None,
             WIDE_COLS,
             ROWS,
-            farhelm_helm::CreateExtras::default(),
+            extras,
         )
         .await
         .expect("create a claude-kind session against the real supervisor");
@@ -2871,7 +2883,48 @@ async fn claude_hook_command_carries_announce(supervisor: &SupervisorProcess) ->
     let argv = argv_marker(&seen);
     injected_settings(&argv)["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         .as_str()
-        .is_some_and(|command| command.contains("--announce"))
+        .expect("the injected SessionStart hook command")
+        .to_owned()
+}
+
+/// Spec (SPEC.md, `farhelm agent notify`'s instruction): with blocked alerts on, the helm sends the blocked-agent
+/// instruction with each create, and the agent reads it from its start hook. A real, out-of-process supervisor must
+/// put it on the injected Claude SessionStart command, and that command, run, must print it after the pointer, still
+/// as plain text Claude does not take for JSON. Specified: a Claude-kind session created with extra instructions gets
+/// a SessionStart command carrying `--extra-instructions`; running that command with no stdin and no session
+/// credential prints the pointer line and then the instructions, and exits zero.
+#[farhelm_testtrace::test]
+async fn extra_instructions_reach_the_injected_claude_start_hook_and_print_after_the_pointer() {
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let supervisor =
+        supervisor_process_with_env([("FARHELM_AGENT_HOOKS", std::ffi::OsString::from("all"))])
+            .await;
+    let extra = "farhelm: tell the user when you are blocked; it's fine to use \"quotes\" here.";
+    let command = claude_start_hook_command(
+        &supervisor,
+        farhelm_helm::CreateExtras {
+            extra_instructions: Some(extra.to_string()),
+            ..farhelm_helm::CreateExtras::default()
+        },
+    )
+    .await;
+    assert!(command.contains("--extra-instructions"), "{command}");
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&command)
+        .env_clear()
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run the injected hook command");
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).expect("utf-8 stdout");
+    assert_eq!(
+        stdout,
+        format!(
+            "{}\n{extra}\n",
+            farhelm_supervisor::agent_kind::INSTRUCTIONS_POINTER
+        )
+    );
 }
 
 /// Spec: `FARHELM_AGENT_INSTRUCTIONS=off` on the spawned `farhelm
