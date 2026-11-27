@@ -7,7 +7,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `shift-cmd-click-copy-file.md` — Add Shift-Cmd-click (Linux: Shift-Ctrl-click) on terminal file links to copy UTF-8 text or macOS image contents to the clipboard
 - [pending] `shift-cmd-v-paste-upload.md` — Add Shift-Cmd-V (Linux: Ctrl-Alt-V) to upload clipboard text via per-session attachments and paste the host path into the terminal
 - [pending] `codex-fork-and-vscode-resume.md` — Accept Codex `fork` SessionStart and `vscode` root transcript header sources in two stacked PRs so those sessions become resumable
-- [held] `claude-restart-before-first-turn.md` — Restart a Claude session that saved nothing yet by starting it fresh instead of failing to resume
+- [pending] `claude-restart-before-first-turn.md` — Restart a Claude session that saved nothing yet by starting it fresh instead of failing to resume
 - [held] `cli-effort-reject-flag-values.md` — Drop `allow_hyphen_values` on CLI `--effort` and `--model` so omitted values fail at parse time
 - [held] `remove-legacy-sandbox-sessions-api.md` — Remove the unused legacy `POST /api/sandbox-sessions` helm endpoint and migrate its tests to `/api/environment-sessions`
 - [held] `restart-startup-scope-cleanup.md` — Clean the scope and shut down an unheld answering replacement host during Linux supervisor startup pending-scope cleanup
