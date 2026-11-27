@@ -850,12 +850,14 @@ impl AddHostDialog {
         }
     }
 
-    /// Cancel, the header's close or Escape. An open recipe editor answers first: with unsaved changes it asks its leave
-    /// question before Add host closes (the Tensorlake sandbox's module docs). Otherwise, on an agent's add, answer Deny
-    /// and close once the helm took it (or the request was already gone), keeping the dialog with the helm's reason when
-    /// it refused; nothing happens while an answer is in flight or answers are paused, as for the card's own buttons.
-    /// A visible SSH question takes dismissal first so the user can cancel the SSH process and keep the draft.
-    /// After an accepted Allow, or for an ordinary add, closing is ordinary.
+    /// Cancel, the header's close or Escape. An open recipe editor answers first: while its save is out the dialog stays
+    /// and asks nothing, and the close is not remembered, so the done save returns to the form (SPEC.md, "Settings":
+    /// waiting for the helm's round trip is accepted); with unsaved changes it asks its leave question before Add host
+    /// closes (the Tensorlake sandbox's module docs). A visible SSH question takes dismissal next so the user can cancel
+    /// the SSH process and keep the draft. Otherwise, on an agent's add, answer Deny and close once the helm took it (or
+    /// the request was already gone), keeping the dialog with the helm's reason when it refused; nothing happens while an
+    /// answer is in flight or answers are paused, as for the card's own buttons. After an accepted Allow, or for an
+    /// ordinary add, closing is ordinary.
     fn dismissal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Dismissal {
         if let Some(editor) = self.recipe_editor(cx) {
             return editor.update(cx, |editor, cx| editor.dismissal(window, cx));

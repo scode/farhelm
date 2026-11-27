@@ -308,20 +308,20 @@ Tensorlake does not answer. Sandboxes not on this helm returns the discovery err
 leftover sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list
 then shows (see "Tensorlake account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same
 bound, counted from its handler's start, because every host-waiting route the GUI sends is bounded: `ssh-keygen` may run
-for up to its own 30 seconds, so a generation still running at the bound replies 504 that the creation carries on, and
-the settings read reports the key once it is written; a Create sent again meanwhile waits for that generation and
-answers its key. A recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within the same bound, counted from
-its handler's start: an unknown recipe, one a host uses and one already being deleted are refused at once from local
-state, before anything is cancelled; once its cleanup has started, a deletion still running at the bound replies that it
-carries on, and the recipe leaves the recipe list once it is deleted, or, if the cleanup fails, stays listed with the
-reason only in the helm's log until a second Delete runs the cleanup again and answers it. While the deletion runs, the
-recipe's save (`PUT`) and Build are refused with 409, so a save cannot be accepted and then lost with the row. An
-Update's confirmation (`POST /api/hosts/{id}/update` with its plan) needs no bound, because it does not wait: it takes
-the host's provisioning lock without waiting and is refused at once while another operation (such as a Tensorlake host's
-Suspend, Resume or removal, or a destination or alias change) holds it, saying to choose Update again once that
-finishes, as a sandbox's setup rerun is (see "Adding Tensorlake hosts"). The refusal comes before the run is claimed, so
-a failed earlier run and its Re-run stay as they were, and carries no busy marker, since its plan is already spent. The
-automatic update still waits for the lock.
+for up to its own 30 seconds, so a generation still running at the bound replies 504 that the creation carries on and to
+select Create SSH key again, which waits for that generation and answers its key. Settings reads the account once after
+such a refusal and does not poll for the key. A recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within
+the same bound, counted from its handler's start: an unknown recipe, one a host uses and one already being deleted are
+refused at once from local state, before anything is cancelled; once its cleanup has started, a deletion still running
+at the bound replies that it carries on, and the recipe leaves the recipe list once it is deleted, or, if the cleanup
+fails, stays listed with the reason only in the helm's log until a second Delete runs the cleanup again and answers it.
+While the deletion runs, the recipe's save (`PUT`) and Build are refused with 409, so a save cannot be accepted and then
+lost with the row. An Update's confirmation (`POST /api/hosts/{id}/update` with its plan) needs no bound, because it
+does not wait: it takes the host's provisioning lock without waiting and is refused at once while another operation
+(such as a Tensorlake host's Suspend, Resume or removal, or a destination or alias change) holds it, saying to choose
+Update again once that finishes, as a sandbox's setup rerun is (see "Adding Tensorlake hosts"). The refusal comes before
+the run is claimed, so a failed earlier run and its Re-run stay as they were, and carries no busy marker, since its plan
+is already spent. The automatic update still waits for the lock.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's

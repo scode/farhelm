@@ -96,7 +96,7 @@ use crate::components::{Button, HoverHelp, Tier, pulse_opacity};
 use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
-use crate::layers::{self, LayerId};
+use crate::layers;
 use crate::local_time::{self, Zone};
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
@@ -585,15 +585,12 @@ pub(super) struct Recipes {
     /// The window the section is drawn in, for moving focus when a reply closes the editor: a reply has no window at
     /// hand.
     window: AnyWindowHandle,
-    /// The hosting dialog's layer, which an editor's departure out of the dialog closes ([`Recipes::depart`]).
-    layer: Option<LayerId>,
 }
 
 impl Recipes {
-    /// The section, inside the dialog on `layer`, reading whether a key is saved from the opening's `account`, and
-    /// asking the helm to check every container host once.
+    /// The section, reading whether a key is saved from the opening's `account`, and asking the helm to check every
+    /// container host once.
     pub(super) fn new(
-        layer: Option<LayerId>,
         account: Entity<TensorlakeAccount>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -609,7 +606,6 @@ impl Recipes {
             editor: None,
             new_recipe: cx.focus_handle().tab_stop(true),
             window: window.window_handle(),
-            layer,
         };
         // Once per opening, as the old section did when Settings opened, check every host that can hold containers;
         // the outcomes reach the places through the push (the places module docs). A refusal changes nothing shown
@@ -659,9 +655,9 @@ impl Recipes {
         cx.notify();
     }
 
-    /// The editor `editor` (by its entity id) is leaving for `departure`: back to the list ([`Recipes::close_editor`]),
-    /// or out of the dialog, which closes it. Nothing if `editor` is no longer the open editor, so a late reply never
-    /// moves an editor opened since. `window` is as [`Recipes::close_editor`] takes it.
+    /// The editor `editor` (by its entity id) is leaving for `departure`: back to the list ([`Recipes::close_editor`]).
+    /// Nothing if `editor` is no longer the open editor, so a late reply never moves an editor opened since. `window` is
+    /// as [`Recipes::close_editor`] takes it.
     pub(super) fn depart(
         &mut self,
         editor: EntityId,
@@ -672,25 +668,9 @@ impl Recipes {
     ) {
         match departure {
             Departure::Back => self.close_editor(editor, mark, window, cx),
-            Departure::Close => {
-                if self.editor.as_ref().map(Entity::entity_id) != Some(editor) {
-                    return;
-                }
-                self.editor = None;
-                let Some(layer) = self.layer else {
-                    return;
-                };
-                // Closed outright, not dismissed: the editor has answered for itself, and the dismissal hook would ask
-                // it again.
-                match window {
-                    Some(window) => layers::close(layer, window, cx),
-                    None => {
-                        let _ = self
-                            .window
-                            .update(cx, |_, window, cx| layers::close(layer, window, cx));
-                    }
-                }
-            }
+            // Only Add host's dismissal hook asks the editor about a close ([`Editor::dismissal`]); Settings asks one
+            // question about every draft itself (`settings/editing.rs`), so no departure here leaves the dialog.
+            Departure::Close => {}
         }
     }
 

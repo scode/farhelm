@@ -573,6 +573,30 @@ fn leaving_with_unsaved_changes_asks_and_discard_goes_where_it_was_asked(cx: &mu
     assert!(helm.commands().is_empty(), "nothing was saved");
 }
 
+/// SPEC.md, "Settings": waiting for the helm's round trip is accepted, so a close of Add host while its embedded
+/// recipe editor's save is out neither asks over the draft being saved nor closes over it. Specified: with a typed name
+/// and Save out, Escape keeps Add host open with no question and sends nothing more; the done answer returns to the
+/// form with the new recipe chosen, Add host still open.
+#[gpui::test]
+fn a_close_while_the_recipe_save_is_out_stays_and_asks_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_new_recipe(cx, &[]);
+    type_text(cx, "newbox");
+    click(cx, "recipe-save");
+    let (save, _) = one_command(&mut helm, Method::Post, "/api/tensorlake/recipes");
+    keys(cx, "escape");
+    assert!(any_open(cx), "Add host stays while the save is out");
+    assert!(
+        !shows(cx, "Save these changes before leaving?"),
+        "and asks nothing"
+    );
+    assert!(helm.commands().is_empty(), "nothing more is sent");
+    push_catalog(&mut helm, &[recipe("newbox", "team/new")], &[]);
+    helm.reply(save, 200, Some(json!({})));
+    cx.run_until_parked();
+    assert!(any_open(cx), "the done save does not close Add host either");
+    assert_eq!(recipe_shown(cx).as_deref(), Some("newbox"));
+}
+
 // ---- Continue and the creation confirmation ------------------------------------------------------------------------
 
 /// The helm's Tensorlake creation plan as `POST /api/hosts/probe` answers it, with the one-use id `probe_id`.

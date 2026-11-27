@@ -499,8 +499,8 @@ pub(crate) async fn create_ssh_key(State(state): State<Arc<AppState>>) -> Respon
             get(State(state)).await
         },
         format!(
-            "Farhelm's SSH key was not ready within {} seconds; its creation carries on, and \
-             Settings shows the key once it exists",
+            "Farhelm's SSH key was not ready within {} seconds; its creation carries on. Select \
+             Create SSH key again in a few seconds to show the key",
             crate::sessions::HOST_REPLY_BOUND.as_secs()
         ),
     )
