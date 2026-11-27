@@ -105,6 +105,12 @@ Cmd-click to download without opening. The hover shows when opening is available
 was saved but could not be opened. See the
 [security model](/docs/how-it-works/security-model/) before opening agent-provided files.
 
+**Shift-Cmd-click** on your Mac (**Shift-Ctrl-click** on Linux) copies the file's contents into your clipboard instead,
+without saving anything to Downloads. It works for files up to 10 MB that are text, or, on a Mac, PNG, JPEG, WebP,
+GIF, BMP, TIFF or ICO images, which arrive in the clipboard as images. Anything else, such as a PDF, an archive or a file
+whose contents don't match its image extension, is refused, and the message at the top of the terminal says why. On
+Linux, only text can be copied for now. The hover shows the copy hint for files that fit.
+
 Paths can start with `/` or `~/`, contain a slash, or end in a file extension, such as `report.pdf`. A relative path uses
 the directory the session started in; it can miss after a shell changes directory. A path that a program breaks onto
 the next line near the terminal's right edge works from either half. A link a program prints under text of its own

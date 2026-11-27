@@ -3914,15 +3914,26 @@ whatever the agent renders is what you see. There is no composer, no message abs
   shared list, case-insensitively. The list defaults to .md, .txt, .json and the common image types .png, .jpg, .jpeg,
   .gif, .webp, .bmp and .avif, and the saved file must still have the same final extension as the path disclosed at
   hover. Other types are saved without opening; an opening failure leaves the save successful and says why it was not
-  opened. The hover uses a file icon and bright name, the host and full directory on a second line, and decimal size
-  with the action hints on a third. A left stripe and size color show under 1 MB green, 1–10 MB blue stripe with neutral
-  size, and 10–100 MB amber. A file with an unknown size uses a neutral stripe. Only an eligible desktop file has the
-  opening hint. Any file the session's account can read is in reach, within the existing shell authority; hover
-  discloses the agent-provided target before an explicit click. Only the helm can ask the supervisor for file reads. OSC
-  hyperlink schemes are explicitly limited to http and https. A hyperlink with any other scheme, `file://` included, is
-  inert: it gets no pointer, underline, hover, file check or click, and with mouse reporting on a press on it reaches
-  the program as a press on plain text does. Its cells stay the hyperlink's, so its text is not taken for a printed URL
-  or path either. To offer a file for download, a program prints its path.
+  opened. In the desktop app, Shift-Cmd-click on macOS (Shift-Ctrl-click elsewhere) instead copies the file's contents
+  into the clipboard, saving nothing in Downloads and opening nothing. A copy reads at most 10 MB (10,000,000 bytes),
+  and only an explicit list of contents reaches the clipboard: valid UTF-8 text with no NUL byte (SVG included), and on
+  macOS a .png, .jpg, .jpeg, .webp, .gif, .bmp, .tif, .tiff or .ico image whose contents begin with that format's
+  signature. A file named as one of those images whose contents are not that image is refused, never copied as text, and
+  anything else is refused with a reason. A file the hover measured over 10 MB is refused before anything is read, and
+  so is an image on Linux, which copies text only for now. A copy's status says "Copying…", then "Copied to clipboard",
+  which fades like a save's success, or "Copy failed:" with the reason, which stays until the next click. "Copied" means
+  Farhelm handed the contents to the system clipboard, which stays best-effort. A copy refused for a clipped or covered
+  disclosure says it cannot copy. The hover uses a file icon and bright name, the host and full directory on a second
+  line, and decimal size with the action hints on a third. A left stripe and size color show under 1 MB green, 1–10 MB
+  blue stripe with neutral size, and 10–100 MB amber. A file with an unknown size uses a neutral stripe. Only an
+  eligible desktop file has the opening hint. A file whose size the host reported as at most 10 MB has the copy hint
+  ("⇧⌘-click to copy contents", "Shift-Ctrl-click to copy contents" elsewhere), except an image on Linux. Any file the
+  session's account can read is in reach, within the existing shell authority; hover discloses the agent-provided target
+  before an explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly
+  limited to http and https. A hyperlink with any other scheme, `file://` included, is inert: it gets no pointer,
+  underline, hover, file check or click, and with mouse reporting on a press on it reaches the program as a press on
+  plain text does. Its cells stay the hyperlink's, so its text is not taken for a printed URL or path either. To offer a
+  file for download, a program prints its path.
 
 ## Attachments
 
@@ -5856,15 +5867,18 @@ builds) also opens the completed local save with the default app. The helm check
 ignoring ASCII case, against a shared user-chosen list that defaults to .md, .txt and .json (amended 2026-11-12 at the
 maintainer's request: the default also lists .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif). It also requires the saved
 file to retain the final extension disclosed at hover. An empty list opens nothing; any listed type can open, including
-HTML if the user adds it. A plain click only downloads. The desktop app deliberately does not set the macOS quarantine
-flag on downloaded files, so these saves do not carry the "downloaded from the internet" prompt a browser save would
-carry. The click authorizes this transfer across the host boundary, including for agent-controlled files. In the desktop
-settings dialog, listed types outside `md`, `txt`, `json`, `log` and (since that amendment) the default's image types
-get a prominent warning beside the field. For HTML-like types, it explains that an agent-written page can run scripts in
-the browser, open web addresses outside Farhelm's link permissions, and send cross-site requests to services on the
-user's machine, including localhost on other ports. Those requests may carry the service's cookies even though the page
-cannot read them directly. For other unrecognized types, it explains that Farhelm does not restrict the default app's
-handling of the file and that opening an agent-written file may run code.
+HTML if the user adds it. A plain click only downloads. A copy-contents click (Shift-Cmd-click, Shift-Ctrl-click
+elsewhere) is the same transfer across the host boundary with the bytes delivered to the local clipboard instead: it
+saves no file, opens nothing, and puts on the clipboard only text or, on macOS, an image of a listed raster format. The
+desktop app deliberately does not set the macOS quarantine flag on downloaded files, so files it saves do not carry the
+"downloaded from the internet" prompt a browser save would carry. The click authorizes this transfer across the host
+boundary, including for agent-controlled files. In the desktop settings dialog, listed types outside `md`, `txt`,
+`json`, `log` and (since that amendment) the default's image types get a prominent warning beside the field. For
+HTML-like types, it explains that an agent-written page can run scripts in the browser, open web addresses outside
+Farhelm's link permissions, and send cross-site requests to services on the user's machine, including localhost on other
+ports. Those requests may carry the service's cookies even though the page cannot read them directly. For other
+unrecognized types, it explains that Farhelm does not restrict the default app's handling of the file and that opening
+an agent-written file may run code.
 
 Opening a link is another bounded effect across the host boundary. Only an admitted HTTP(S) URL may reach the user's
 browser, after an Allow/Open click or under the requesting host's matching link permission. With **Open local-network

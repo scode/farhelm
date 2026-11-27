@@ -25,13 +25,16 @@
 //! web link's destination display, so it opens by the pointer, closes on a press, comes back after it and is judged
 //! fully visible exactly as that one is. The popover holds a snapshot of the ready check and a fresh paint witness.
 //!
-//! An admitted click saves the file into Downloads, and opens the save on the platform's modifier-click; the status
-//! line at the top of the terminal says how it went ([`download`]).
+//! An admitted click saves the file into Downloads, and opens the save on the platform's modifier-click
+//! ([`download`]); with Shift added to that modifier it copies the file's contents into the clipboard instead
+//! ([`copy`]). The status line at the top of the terminal says how either went.
 //!
 //! Checks go through the UI session's transfers (`UiSession::transfers`), which the terminal hands over as it is made;
 //! tests serve fake ones through the connection, the same path (`Connection::serve_transfers`).
 
+mod copy;
 mod download;
+pub(in crate::terminal) use download::ClickAction;
 pub(crate) use download::StatusShown;
 #[cfg(test)]
 mod tests;
@@ -57,7 +60,7 @@ use crate::host_text::{HostSentence, HostText};
 use crate::theme::{self, Palette, Token};
 
 #[cfg(test)]
-const FILE_REFUSAL: &str = Hidden::NotVisible.file_words();
+const FILE_REFUSAL: &str = Hidden::NotVisible.file_words(ClickAction::Download);
 
 /// The display's element id, which tests and the bridge find it by.
 const PANEL_ID: &str = "terminal-file-disclosure";
@@ -69,13 +72,16 @@ pub(crate) struct FileLinks {
     /// The UI session's transfers. A session with no helm client can only answer with a staged stat.
     transfers: Option<Transfers>,
     hover: Option<Hover>,
-    /// What the status line at the top of the terminal says about the latest download ([`download`]).
+    /// What the status line at the top of the terminal says about the latest download or copy ([`download`],
+    /// [`copy`]).
     status: Option<download::Status>,
     /// The saves in flight, by the number each was started under. Dropping one abandons it, and the helm then removes
     /// what it staged; each removes itself when its answer comes.
     downloads: HashMap<u64, Task<()>>,
     /// The number the next save is started under.
     next_download: u64,
+    /// The copy in flight, if any ([`copy`]). There is at most one: a new copy replaces it, which abandons its read.
+    copying: Option<Task<()>>,
 }
 
 /// One hover over a file link, with its check.
@@ -121,6 +127,7 @@ impl FileLinks {
             status: None,
             downloads: HashMap::new(),
             next_download: 0,
+            copying: None,
         }
     }
 
@@ -205,10 +212,12 @@ impl FileLinks {
         }
     }
 
-    /// A click on the same checked link saves the disclosed file, and with its opening modifier also opens the save
-    /// ([`download`]). The owner calls this only when the press and release refer to the same painted disclosure.
-    /// At release an observed cover still refuses the click, though a hidden panel is normal after a press closes it.
-    /// If the host check no longer applies to these cells and path, the click stays silent.
+    /// A click on the same checked link saves the disclosed file, with its opening modifier also opens the save
+    /// ([`download`]), and with Shift added copies its contents into the clipboard instead ([`copy`]); see
+    /// [`ClickAction`]. The owner calls this only when the press and release refer to the same painted disclosure.
+    /// At release an observed cover still refuses the click, though a hidden panel is normal after a press closes it,
+    /// and the refusal names what the click asked for. If the host check no longer applies to these cells and path,
+    /// the click stays silent.
     pub(super) fn clicked(
         &mut self,
         link: &TerminalLink,
@@ -220,35 +229,48 @@ impl FileLinks {
         if !self.ready_for(link) {
             return None;
         }
+        let hover = self.hover.as_ref()?;
+        let platform = hover.platform;
+        let action = ClickAction::of(modifiers, platform);
+        // A staged answer names a file on no host, so its click transfers nothing.
+        let file = match &hover.check {
+            Check::Ready(stat) if !hover.staged => Some((
+                stat.info.path.clone(),
+                stat.info.size,
+                stat.can_open == Some(true),
+            )),
+            _ => None,
+        };
         let refusal = match (pressed, released) {
             // The mouse-down frame remains authoritative even if pressing dismissed the cover.
             (Err(Hidden::Covered), _) | (Ok(()), Err(Hidden::Covered)) => Hidden::Covered,
             (Err(Hidden::NotVisible), Ok(())) => return None,
             (Err(hidden), Err(_)) => hidden,
             (Ok(()), _) => {
-                if let Some(hover) = &self.hover
-                    && !hover.staged
-                    && let Check::Ready(stat) = &hover.check
-                {
-                    let (path, can_open) = (stat.info.path.clone(), stat.can_open == Some(true));
-                    let requested = download::opening(modifiers, hover.platform);
-                    self.download(path, can_open, requested, cx);
+                if let Some((path, size, can_open)) = file {
+                    match action {
+                        ClickAction::Copy => self.copy(path, size, platform, cx),
+                        ClickAction::Download | ClickAction::Open => {
+                            self.download(path, can_open, action == ClickAction::Open, cx);
+                        }
+                    }
                 }
                 return None;
             }
         };
         self.clear_status(cx);
-        Some(refusal.file_words())
+        Some(refusal.file_words(action))
     }
 }
 
-/// The status line for a failed download. Use the helm's words when it sent a refusal message.
-fn failure(error: &TransferError) -> HostText {
+/// The status line's reason for a failed download or copy. Use the helm's words when it sent a refusal message, and
+/// `refused` (the operation's own "… refused") when it sent a refusal without any.
+fn failure(error: &TransferError, refused: &str) -> HostText {
     match error {
         TransferError::Refused { message, .. } if !message.is_empty() => {
             HostText::from_host(message.as_str())
         }
-        TransferError::Refused { .. } => HostText::from_host("Download refused"),
+        TransferError::Refused { .. } => HostText::from_host(refused),
         other => HostText::from_host(other.to_string()),
     }
 }
@@ -335,14 +357,30 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-/// The action hints after a ready file's size: a click downloads, and where the helm offers opening (only the desktop
-/// app's helm has an opener, and only for a type on the shared list), the platform's modifier-click opens.
+/// The action hints after a ready file's size: a click downloads; where the helm offers opening (only the desktop
+/// app's helm has an opener, and only for a type on the shared list), the platform's modifier-click opens; and where a
+/// copy could succeed, that modifier with Shift copies the contents.
+///
+/// A copy is offered for a file of known size within [`copy::COPY_MAX_BYTES`], except an image on Linux, which copies
+/// text only. It is not withheld from other binary files by extension: no list of such extensions is ever complete, and
+/// the copy itself reads the bytes and refuses what is neither text nor a supported image, saying so.
 fn hints(stat: &FileStat, platform: Platform) -> String {
     let mut hints = String::from(" · click to download");
     if stat.can_open == Some(true) {
         hints.push_str(match platform {
             Platform::Mac => " · ⌘-click to open",
             Platform::Linux => " · Ctrl-click to open",
+        });
+    }
+    let copyable = stat
+        .info
+        .size
+        .is_some_and(|size| size <= copy::COPY_MAX_BYTES)
+        && !(platform == Platform::Linux && copy::is_image_path(&stat.info.path));
+    if copyable {
+        hints.push_str(match platform {
+            Platform::Mac => " · ⇧⌘-click to copy contents",
+            Platform::Linux => " · Shift-Ctrl-click to copy contents",
         });
     }
     hints

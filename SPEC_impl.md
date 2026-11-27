@@ -3480,6 +3480,19 @@ Stat returns the host display name alongside the protocol's resolved path, size 
 independently and streams an octet body with an encoded basename attachment disposition. It promises no opening
 Content-Length: a file may change within the cap, and a later stream failure invalidates the whole body.
 
+The GPUI app's copy-contents click uses that octet body: it asks the download route for neither `save_to_downloads` nor
+`open`, so no helm, supervisor or protocol change was needed. The helm client (`Transfers::download_bytes`) reads the
+body into memory up to the caller's cap, 10,000,000 bytes for a copy, refusing the first chunk that would pass it before
+copying it and dropping the connection, so the host stops sending; a file over the cap is `TransferError::TooLarge`, and
+a body that ends early is a lost connection, never a short file. The GUI then decides what reaches the clipboard from
+the bytes and the resolved path's extension (`crates/gui/farhelm-gui/src/terminal/files/copy.rs`): a listed raster
+extension must carry its format's signature and becomes a GPUI clipboard image on macOS; anything else must be UTF-8
+with no NUL byte and becomes text. There is no sniffing: an image extension over other bytes is refused rather than
+copied as text, and nothing is decoded. Linux copies text only because GPUI's Linux clipboard writes text alone, and
+vendored GPUI is not patched for this. GPUI's `write_to_clipboard` reports nothing, so "Copy failed" covers only
+Farhelm's side (the read, the cap, the classification), and a dropped write (Wayland ignores one from an unfocused
+window, or of empty text) shows as copied.
+
 The desktop supplies its platform Downloads directory to the embedded helm. A download request with
 `save_to_downloads: true` stages privately on that filesystem and publishes only after successful EOF, returning the
 destination path as JSON. Atomic no-clobber publication uses `report.pdf`, `report (1).pdf`, and so on, preserving the

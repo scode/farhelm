@@ -3430,7 +3430,12 @@ impl Harness<'_> {
     }
 
     /// Drag with the primary button from `from` to `to`, with `modifiers` held, and release there.
-    fn drag(&mut self, from: Point<Pixels>, to: Point<Pixels>, modifiers: Modifiers) {
+    pub(in crate::terminal) fn drag(
+        &mut self,
+        from: Point<Pixels>,
+        to: Point<Pixels>,
+        modifiers: Modifiers,
+    ) {
         self.cx
             .simulate_mouse_down(from, MouseButton::Left, modifiers);
         settle(self.cx);
@@ -3442,7 +3447,7 @@ impl Harness<'_> {
     }
 
     /// The clipboard's text, if it holds text.
-    fn clipboard(&mut self) -> Option<String> {
+    pub(in crate::terminal) fn clipboard(&mut self) -> Option<String> {
         self.cx.read_from_clipboard().and_then(|item| item.text())
     }
 
@@ -3453,7 +3458,7 @@ impl Harness<'_> {
     }
 
     /// The shown screen's local selection, if any.
-    fn selection(&mut self) -> Option<Selection> {
+    pub(in crate::terminal) fn selection(&mut self) -> Option<Selection> {
         self.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).selection())
     }
 }

@@ -1,5 +1,6 @@
-//! What an admitted click on a file link does: save the file into the user's Downloads through the helm, open the
-//! completed save on the platform's modifier-click, and say how it went on the status line at the top of the terminal
+//! What an admitted click on a file link asks for ([`ClickAction`]), and what a plain or opening click does: save the
+//! file into the user's Downloads through the helm, open the completed save on the platform's modifier-click, and say
+//! how it went on the status line at the top of the terminal (a copy click is [`super::copy`]'s)
 //! (SPEC.md, "Terminal experience", the file-path bullet; the old app's `FileLinks.download` and `message` in
 //! terminal-files.js at the reference commit).
 //!
@@ -32,8 +33,9 @@ const SUCCESS_SHOWN: Duration = Duration::from_secs(5);
 /// the bridge read it by this.
 const LINE_ID: &str = "terminal-file-message-line";
 
-/// The id of the sentence inside the status line, which a host sentence needs.
-const SENTENCE_ID: &str = "terminal-file-message";
+/// The id of the sentence inside the status line, which a host sentence needs. A copy's line ([`super::copy`]) uses
+/// it too: the two share the one status line.
+pub(super) const SENTENCE_ID: &str = "terminal-file-message";
 
 /// What the status line says about the latest download, and how long it stays.
 pub(super) struct Status {
@@ -48,7 +50,7 @@ pub(super) struct Status {
 /// How a status line leaves: a save in progress when its outcome replaces it, a success after [`SUCCESS_SHOWN`], a
 /// failure at the next press or download.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Leaves {
+pub(super) enum Leaves {
     Replaced,
     Fading,
     AtPress,
@@ -60,18 +62,39 @@ pub(crate) struct StatusShown;
 
 impl EventEmitter<StatusShown> for FileLinks {}
 
-/// Whether `modifiers` hold the platform's opening modifier: Cmd on a Mac, Ctrl elsewhere, as the old app read
-/// `metaKey` or `ctrlKey`. Other modifiers held beside it do not matter, as they did not there.
-pub(super) fn opening(modifiers: Modifiers, platform: Platform) -> bool {
-    match platform {
-        Platform::Mac => modifiers.platform,
-        Platform::Linux => modifiers.control,
+/// What an admitted click on a file link asks for, by the modifiers held at its release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::terminal) enum ClickAction {
+    /// A plain click, or any chord that is neither of the others: save into Downloads.
+    Download,
+    /// The platform's opening modifier without Shift: save, and open the save where the hover offered it.
+    Open,
+    /// The opening modifier and Shift, and nothing else: copy the file's contents into the clipboard ([`super::copy`]).
+    Copy,
+}
+
+impl ClickAction {
+    /// Read `modifiers` on `platform`. The opening modifier is Cmd on a Mac and Ctrl elsewhere, as the old app read
+    /// `metaKey` or `ctrlKey`; for opening, other modifiers held beside it do not matter, as they did not there, except
+    /// Shift, which now asks for a copy. Copying takes exactly Shift and the opening modifier, so that a chord nobody
+    /// meant as a copy (Shift-Option-Cmd, say) never reads a file into the clipboard; such a chord downloads, as an
+    /// unmodified click does, which is the gesture a click on a file has always been.
+    pub(in crate::terminal) fn of(modifiers: Modifiers, platform: Platform) -> ClickAction {
+        let (opening, other) = match platform {
+            Platform::Mac => (modifiers.platform, modifiers.control),
+            Platform::Linux => (modifiers.control, modifiers.platform),
+        };
+        match (opening, modifiers.shift) {
+            (true, false) => ClickAction::Open,
+            (true, true) if !other && !modifiers.alt && !modifiers.function => ClickAction::Copy,
+            _ => ClickAction::Download,
+        }
     }
 }
 
 impl FileLinks {
     /// Save `path` (the host's resolved path, which the host reopens) into Downloads, asking the helm to open the save
-    /// as well when the click `requested` it (held the opening modifier, [`opening`]) and the check offered opening
+    /// as well when the click `requested` it ([`ClickAction::Open`]) and the check offered opening
     /// (`can_open`): a list that grew after the hover cannot add an opening the user was not offered, though the helm
     /// may still refuse one it was.
     pub(super) fn download(
@@ -136,7 +159,7 @@ impl FileLinks {
             Err(error) => {
                 let line = HostSentence::new(SENTENCE_ID)
                     .text("Download failed: ")
-                    .host(&failure(&error));
+                    .host(&failure(&error, "Download refused"));
                 self.show(line, Leaves::AtPress, cx);
             }
         }
@@ -144,7 +167,7 @@ impl FileLinks {
 
     /// Show `line` on the status line, replacing whatever it said (and cancelling that line's fade), until it `leaves`;
     /// the owner then puts a refusal away for it ([`StatusShown`]).
-    fn show(&mut self, line: HostSentence, leaves: Leaves, cx: &mut Context<Self>) {
+    pub(super) fn show(&mut self, line: HostSentence, leaves: Leaves, cx: &mut Context<Self>) {
         let fade = (leaves == Leaves::Fading).then(|| {
             let files = cx.weak_entity();
             ticker::after(SUCCESS_SHOWN, cx, move |cx| {
