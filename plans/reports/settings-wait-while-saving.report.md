@@ -156,3 +156,88 @@ when tests changed:
   the "act only once shown" rule had no test. It also found four low problems. All were fixed except two tests that
   cannot be set up from the UI. Round 2 found three low problems and two nits, all fixed except one optional test. Round
   3 found nothing.
+
+### Landing
+
+#### What landed with it
+
+This plan was the only one in the round. Since the executor last rebased its stack, main gained a TODO entry (about
+terminal tabs overflowing the New terminal button) and records in the review feedback queue. While the round's checks
+ran, main also gained a record of an investigation into the desktop app's idle CPU use and planning edits to TODO.md.
+None of it touches Settings, so nothing interacted. The report says main moved only in the review feedback queue; that
+missed the new TODO entry, which survives the landing next to the seven entries the stack removes.
+
+An independent reviewer and I read the stack against main. The reviewer found nothing that would be wrong on main:
+
+- every kind of work that makes a close wait eventually lets it go on, including a form that goes away mid-save and a
+  lost connection;
+- a switch's refusal is recorded before anything can let the close go on, so Settings never closes over it;
+- #5103 removed a check that ignored an answer from a credential editor that was no longer the open one. It is no longer
+  needed: Add is unavailable while an editor is open, and Back and Cancel are unavailable while its save or Delete is
+  out, so an answer always comes back to the editor that sent it. This is not the check the report says stays without a
+  direct test of its own;
+- the new tests fail on the old code;
+- nothing is left of the removed machinery: the "close again later" note and its screenshot, the close question that
+  reopened itself, the half-minute SSH key check, and the old way the page's Save and Discard acted on whichever page
+  was current when the click ended;
+- the TODO change removes exactly the seven entries the report names.
+
+#### Fixes made while landing
+
+- **SPEC_impl.md overstated how a waiting close goes on.** It said each operation Settings started lets the close go on
+  through its own completion, and that the app's list of operations in progress does so only for a preference saved from
+  outside Settings. For Settings' own switches, that list usually reports the save finished before the switch's own
+  signal does. Each switch records a refusal at once, so either signal is safe. The sentence now says so. No behavior
+  changed.
+- **The changelog draft for naming custom agent drafts undersold the change.** It now also says that a single custom
+  agent draft is named, where before the question said only "Custom agent". It also says that Settings now shows
+  Credentials behind the question when the unsaved forms are a Tensorlake API key typed there and an open credential
+  editor.
+
+#### What the landing made untrue in the report
+
+- **The suggested simplification would not behave the same.** The report says a design that only watches the app's list
+  of operations in progress would behave the same and drop the per-form tracking. It would not: Send test for
+  notifications and the Tensorlake key's Test never appear in that list, so a close waiting on a Test would never go on.
+  A simpler design would also have to hear from those two forms. Take this into account before asking for that
+  follow-up.
+
+#### Worth knowing
+
+- **Two problems from before this plan remain.** Both are already in the review feedback queue, but their entries cite
+  code this plan removed, so read them against the new behavior at triage:
+  - the close question's Save still closes Settings when it finishes, even if an inline Delete question for a leftover
+    Tensorlake sandbox or container is still unanswered, because those Deletes do not make a close wait and the Save
+    does not check whether the person moved on. A cheap fix would remember when Save was chosen and stay open if the
+    person did something else since;
+  - Discard in the close question still does nothing visible when a draft changed while the question was open.
+- **The waiting close's bookkeeping is about 250 lines.** The reviewer sketched a smaller design that also hears from
+  Send test and the Tensorlake key's Test, so it avoids the gap above. The plan's decision on the order in which a
+  form's updates and the close happen prescribes the current shape, so changing it is your call, and I have not added a
+  TODO entry.
+
+#### Checks
+
+Run once, on the stack rebased onto main as it stood when the landing started. The SSH test worker could not be reached
+this round, so after ten minutes the slow suites ran on a boat sandbox (an x86_64 Ubuntu 24.04 VM) instead, and clippy
+ran locally:
+
+- Locally, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and
+  `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent`, all with `-D warnings`: clean.
+- On a boat, the GUI crate's and the desktop app's tests and the helm's Tensorlake tests (a nextest archive of
+  `-p farhelm-gui -p farhelm-desktop -p farhelm-helm` filtered to those, run through the recorder in the mode that takes
+  an archive, which keeps passing tests' output in nextest's report), recorded run bb6cf954-7598-4683-b575-c28e9c61a3b1:
+  3,888 passed, none failed, and no runtime SKIPPED lines. The 1,812 tests nextest reported as skipped are the helm's
+  other tests, which the filter left out. This is the whole GUI crate, where the executor ran only the Settings, hosts
+  and trust band tests.
+- On a boat, the GPUI end-to-end smoke (`scripts/gui-e2e-smoke.py`, which opens and closes Settings), recorded run
+  71fc87bf-c54e-466c-9f13-e8bdf97ff3df: 49 steps passed, with the paste step skipped as on every Linux run.
+- Locally, the full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run
+  a11a4602-5afe-4956-9521-0aedc35de1a4, and the screenshot batch's scene list test, recorded run
+  f2a9f968-033b-43f1-8a4a-4766bad19130: passed, so the retired screenshot left no reference behind.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check, `python3 releasing/check-changelog.py format` and
+  `dprint check` on the changed Markdown: passed, and the changelog lint and `dprint check` again after the landing's
+  wording fixes.
+
+Reused: nothing. Skipped: the end-to-end suite and the other crates' tests, since the change is in the desktop app's
+Settings and Add host views and one helm reply text.
