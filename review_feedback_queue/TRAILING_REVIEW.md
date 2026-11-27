@@ -1,6 +1,6 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `f0c042c9efea4a46bc02e0ad880c1a30aae3c85f`
+Last reviewed commit: `dbb153ec94149a598a747af8ab306a3df0514641`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in `review_feedback_queue/.agents/trailing-review.md`, together with any resulting queue updates. A proposed
@@ -9,39 +9,40 @@ checkpoint reaches `main` only when its review-result PR is merged.
 This file holds only the checkpoint and the latest run's completion record. Earlier runs' records are in
 `review_feedback_queue/TRAILING_REVIEW_HISTORY.md`.
 
-## Review through f0c042c9
+## Review through dbb153ec
 
-The range starts after `953603f1a036eb5846ebf251d1564c5efd9c8e67` and includes
-`f0c042c9efea4a46bc02e0ad880c1a30aae3c85f`. Of the 247 commits inventoried, 105 have in-scope patches with 30,465
-additions and 6,649 deletions across individual commits, touching 317 unique paths: custom agents in the launcher,
-templates, Settings, the protocol, helm and supervisor; Settings close and save rules and the trust and hook switches;
-Claude workspace trust at launch, custom trust overrides, the hook warning after agent handoff and committed hook
-reports; Tailscale socket directories, master retirement and pinned uninstall, manual host actions after ssh sign-in and
-install locks; sandbox and container consent, Podman output bounds, Tensorlake setup reruns and repository cache sweeps;
-restart cleanup after deletion and refusals during deletion; the YOLO and hook questions across host wake; the
-launcher-style quick dialogs, rename, What's new and Welcome; terminal tab shortcuts and host dialogs; the golden render
-tooling, the drift and screen-fixture tooling, the brick-test and changelog tooling, the new records tool and the plan
-landing tooling; and `SPEC.md` and `SPEC_impl.md`. The other 142 commits contain only excluded material: plans and their
-reports, review queue and triage bookkeeping, TODO records, changelog fragments, agent instructions and prose
-documentation. Excluded paths inside in-scope commits were read only as context.
+The range starts after `f0c042c9efea4a46bc02e0ad880c1a30aae3c85f` and includes
+`dbb153ec94149a598a747af8ab306a3df0514641`. Of the 117 commits inventoried, 23 have in-scope patches with 10,807
+additions and 1,740 deletions across individual commits, touching 126 unique paths: Wayland text-field paste in the
+vendored GPUI; supervisor restart-with generation sync, reaping a child that outlived its killed host, tab close retry
+and Stop refused on an unconfirmed start; per-registration custom agent wrappers in the helm and launcher; the Settings
+custom agent Delete question and Tensorlake key-change leftovers; bulk restart/replace of marked sessions and restart
+progress on rows; the right-press session menu; Replace with keeping the source's folder; a launch's late wake failure;
+the Podman place proof, recipe admission failures and proxy-free recipe images; the agent Delete notice in the bell and
+the tagged resume outcome in the hosts list; the records tool's pushing host; the brick-test announcements quit and
+drift upgrades in a transient user scope; and `SPEC.md` and `SPEC_impl.md`. The other 94 commits contain only excluded
+material: plans and their reports, review queue and triage bookkeeping, TODO records, changelog fragments, agent
+instructions and prose documentation. Excluded paths inside in-scope commits (changelog fragments, TODO, agent
+instructions, docs pages, `vendor/README.md`, and the `vendor/patches/` mirror of the vendored source changes, which
+were reviewed directly) were read only as context.
 
-Each in-scope commit was reviewed as its own patch, one snapshot per file, with three lines of context: 62,826 mandatory
-lines (3.1 MB) in 757 snapshots, the largest (the records tool's tests) cut in two. Claude Code `claude -p`
-(`claude-opus-5-5` at high reasoning effort) reviewed 56 functional groups in 16 themes over 177 turns: an initial,
-synthesis and discovery turn per group, a second discovery pass for six groups and a third for one whose earlier pass
-found something new, and one reopening continuation for the group that received a lead from the independent drop check.
-That last turn ran outside the scheduler, which cannot reopen a completed identity; it used the same session, launch
-script and audit. Delivery audits matched every mandatory line in every group with no rejected, unfinished or
-unrecognized records. Every group ended with a discovery pass that found nothing new, and the run ended quiescent with
-no open leads.
+Each in-scope commit was reviewed as its own patch, one snapshot per file, with three lines of context: 19,055 mandatory
+lines (952 KiB) in 187 snapshots. Claude Code `claude -p` (`claude-opus-5-5` at high reasoning effort) reviewed 19
+functional groups over 60 turns: an initial, synthesis and discovery turn per group, a second discovery pass for the one
+group whose first discovery found something new, and one reopening continuation each for the two groups that received a
+lead from the independent drop check. Those two turns ran outside the scheduler, which cannot reopen a completed
+identity; they used the same sessions, launch scripts and audits, and each ended with a search that found nothing new.
+Delivery audits matched every mandatory line in every group with no rejected, unfinished or unrecognized records. Every
+group ended with a discovery pass that found nothing new, and the run ended quiescent with no open leads.
 
-The reviewers logged 39 findings and 417 set-aside candidates. Two findings were revised to candidates by their own
-reviewers. Consolidation produced 35 defect groups (29 verified, 6 retained as unverified after investigation) and 419
-excluded candidate groups; two findings were not queued because they fully match FILTER.md's first filter, and one was
-narrowed to its remainder for the same reason. Three pairs of findings were merged into single items. Two fresh-context
-Claude consultations judged an 11-entry independent drop register: they disagreed with all four spec-based drop
-proposals (so those findings are queued, one of them raised to `highest`) and agreed with the three filter drops, the
-two reviewer withdrawals, one set-aside candidate marked as possibly `highest`, and one narrowed consequence staying
-outside `highest`. One returned lead was settled by the owning reviewer from source. The queue adds 32 items (2
-`highest`, 2 `high`, 28 `other`) and extends none. The review inventory, delivery audits, findings logs, disposition
-log, drop register and verdicts are retained under run `70f0f28c-538d-461e-b80e-783ddaafaadb`.
+The reviewers logged 13 findings and 117 set-aside candidates. One finding was withdrawn by its reviewer, and one
+candidate was revised into a finding after the drop check's lead. Consolidation produced 9 verified defect groups and
+114 excluded candidate groups. Six cross-group duplicates were folded into their items, and two findings from different
+groups (the first-row and hidden-row routes of one bulk Replace window) were merged into one item. Two fresh-context
+Claude consultations judged a 6-entry independent drop register: they agreed with both spec-based drop proposals, one
+filter drop and the reviewer withdrawal; they agreed with a second filter drop only on its narrow question and with a
+set-aside possibly-`highest` candidate only for its after-reboot route. The returned remainder was settled by the two
+owning reviewers from source, which established the route behind the new `highest` item and withdrew that filter drop.
+One lead from a consultation concerned code outside the range and was not recorded. The queue adds 9 items (1 `highest`,
+0 `high`, 8 `other`) and extends none. The review inventory, delivery audits, findings logs, disposition log, drop
+register and verdicts are retained under run `d38277be-dafb-4108-84f3-71e16e489fa8`.

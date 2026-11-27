@@ -22,6 +22,11 @@ consequences.
   the helm refuses an agent trust save, a Space press in the moment before the reverted switch is drawn can turn
   workspace trust on against the state the user saw; be7cfc065c bound only the hook switch to its shown state.
 
+- [`trailing-bulk-replace-before-first-report-drained.md`](trailing-bulk-replace-before-first-report-drained.md) — A
+  marked-bar Restart/Replace pressed within about a second (up to two with the report watcher off) of an agent's first
+  report and exit, or reaching a queued row hidden from the list, starts over a session that could have resumed; bucket
+  uncertain, SPEC.md's sub-second rule may cover part.
+
 ## High priority: material UX degradation
 
 - [`trailing-recent-setup-wrapper-prefix-elided.md`](trailing-recent-setup-wrapper-prefix-elided.md) — Two Recent setups
@@ -144,3 +149,31 @@ consequences.
 - [`trailing-records-pattern-name-test-blind-to-sibling.md`](trailing-records-pattern-name-test-blind-to-sibling.md) —
   Test gap: the test for note names such as `[a]*.md` cannot detect a pattern matching a sibling note, and its `:` case
   is never leading.
+
+- [`trailing-wayland-submit-overtakes-field-paste.md`](trailing-wayland-submit-overtakes-field-paste.md) — On Wayland,
+  Enter right after a paste can submit a text field before the pasted text arrives; the SSH sign-in prompt then sends an
+  empty or partial password.
+
+- [`trailing-tab-reap-first-sweep-failure-no-backoff.md`](trailing-tab-reap-first-sweep-failure-no-backoff.md) — An
+  exited terminal tab whose first cleanup sweep keeps failing is retried every two seconds with no backoff.
+
+- [`trailing-kept-failed-close-tab-listed-live.md`](trailing-kept-failed-close-tab-listed-live.md) — A closed tab whose
+  host was ended by signal and whose sweep then failed stays in the tab strip looking live until a retry succeeds.
+
+- [`trailing-pointer-menu-does-not-follow-row.md`](trailing-pointer-menu-does-not-follow-row.md) — A session menu opened
+  with a right press stays where the press was when its row moves, unlike the ⋯ menu and SPEC.md.
+
+- [`trailing-marked-menu-close-test-no-stays-open-control.md`](trailing-marked-menu-close-test-no-stays-open-control.md)
+  — Test gap: the marked right-press menu's close test would pass if the menu closed on every helm update.
+
+- [`trailing-shift-f10-marked-row-opens-combined-menu.md`](trailing-shift-f10-marked-row-opens-combined-menu.md) —
+  Shift+F10 on a marked row opens the combined marked menu, while SPEC.md and the code's overview say it opens the row's
+  own menu.
+
+- [`trailing-marked-menu-metadata-steals-terminal-focus.md`](trailing-marked-menu-metadata-steals-terminal-focus.md) —
+  Pin, Mark read, Mute or Move to group from the right-press marked menu moves keyboard focus off the terminal to the
+  list's sort title.
+
+- [`trailing-existing-environment-checkout-note-dead.md`](trailing-existing-environment-checkout-note-dead.md) — Spec
+  and dead code: no launcher path can show the existing-environment checkout note any more, but SPEC.md still promises
+  it.
