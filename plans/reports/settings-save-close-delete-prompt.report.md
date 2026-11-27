@@ -93,3 +93,72 @@ fixed as well:
 - a sentence in the code's notes was reworded.
 
 The fixes were not reviewed again. Run `f68f823b` ran after them.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained the previous round's changes to the helm, the supervisor, two
+comments in the desktop app's launcher and two tests, none of which touches Settings. The Settings close-wait work
+(closing Settings waits for the helm's answer) was already in this plan's starting point, and its spec text agrees with
+this plan's. In the same round, agent-blocked-notifications changed the Notifications page of Settings,
+claude-restart-before-first-turn changed Restart for Claude, and shell-tab-first-close-sweep-backoff changed how an
+exited terminal tab is cleaned up. None touches the recipe or custom agent editors.
+
+An independent reviewer and I read the change and found nothing to fix.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** The round's four plans each removed their own TODO entry, next to each other, so stacking them
+  conflicted there. I removed all four entries; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing I found. The landing's checks were wider than the report's: the whole Rust test suite, the desktop app's
+end-to-end smoke and the full screenshot comparison ran.
+
+#### Worth knowing
+
+- **Two questions on screen at once can share button names.** When the recipe editor's "Save these changes before
+  leaving?" opens while its Delete question is still up, both are on screen with answers of the same internal names.
+  Settings' close question already did this before this plan. It causes no wrong answer that the reviewer or the tests
+  found; it only matters to tools that find buttons by those names, such as test automation and accessibility tools.
+
+#### Checks
+
+Run on the round's four plans stacked on main as it stood when the landing started (agent-blocked-notifications,
+claude-restart-before-first-turn, settings-save-close-delete-prompt, then shell-tab-first-close-sweep-backoff), after
+the landing's fix to claude-restart-before-first-turn's test. Because agent-blocked-notifications raises the protocol
+version and the four plans between them touch the helm, the supervisor's agent-specific code, the command line, the
+desktop app, its reference screenshots and the docs, the whole Rust test suite ran. The SSH test worker was still
+unreachable, so the slow suites ran on boat sandboxes (x86_64 Ubuntu 24.04 VMs), and clippy ran locally:
+
+- A first run failed at its first step: `cargo clippy --all-targets -- -D warnings` could not compile a new test of
+  claude-restart-before-first-turn, the problem described in that plan's notes. The other clippy checks passed and the
+  test build then failed on the same error, so no test ran. After the fix, every check below ran from the start.
+- Locally, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and
+  `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent` (the build with the desktop app's
+  test-automation hooks), all with `-D warnings`: clean.
+- On three boats, every test of the workspace and the desktop app that runs by default (`cargo nextest run --workspace`,
+  built once, split in three and run through the recorder), recorded runs d273d9bc-7896-4c1c-89a4-106d7f060a1d,
+  a74ca485-4be5-4e2f-bbf5-ff250895f815 and 3e5673f4-c3a7-461f-9d15-7c0c7956e6a1: 9,180 passed, one failed, and no test
+  that quietly passed for lack of systemd, Podman or SSH on the machine. The one failure is the test-trace macro's
+  compile check, which builds a scratch crate offline from the machine's own download cache; a boat has no such cache,
+  so that test always fails there, as `.agents/boat.md` records, and no plan in this round touches it. Run locally
+  (`cargo nextest run -p farhelm-testtrace-macros --test compile_contract`), recorded run
+  8fc4d4bc-523d-4650-856d-e560a8137b59, it passed.
+- On a fourth boat, the desktop app's end-to-end smoke test (`scripts/gui-e2e-smoke.py`), recorded run
+  693426e3-0300-4c24-8257-adc94ddb9901: 48 of its 49 steps passed, and the paste step was skipped, as on every Linux
+  run.
+- Locally, the full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run
+  fb93b279-02be-42ce-94f6-f269a97c0d79, the test of the screenshot tooling's list of screens, recorded run
+  653ebb0b-2dbc-432c-8da0-1f814940b0cb, and the workspace's documentation examples
+  (`cargo test --doc --workspace --exclude farhelm-desktop`), recorded run 5dfbb55e-5cbe-4bee-beb4-cac09ef01146: passed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format`, `dprint check` on the changed Markdown,
+  `python3 scripts/check-agents-md.py` (the drift-tests document is one the agent instructions name), and the docs
+  website build (`bun run build`, which checks every link): passed.
+
+Reused: nothing. Skipped: the opt-in tests, among them the real-agent drift tests, which spend vendor turns; the
+installer and provisioning suites, since no plan in this round touches them; and any run on a Mac, since none was
+available to the landing.
