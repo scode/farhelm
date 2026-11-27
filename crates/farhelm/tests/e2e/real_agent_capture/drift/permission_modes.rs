@@ -1,8 +1,16 @@
 //! Check the CLI choices the launcher exposes beyond the base category. The checks send no tool requests. A Custom
 //! launch for a tracked agent completes one text turn so the test can inspect the command Restart will use.
+//!
+//! Where the supervisor reads a harness's permission footer, the check also reads the live footer itself: a YOLO launch
+//! must show the bypass footer, read and latched into the session listing, and a Guarded launch of a harness whose
+//! reader recognizes a non-bypass footer must show that footer, read as definitely not bypass rather than unreadable. A
+//! vendor rewording or moving its footer then fails here instead of silently leaving every session's mode unknown.
 
 use super::*;
 use farhelm_proto::LaunchPermission;
+use farhelm_supervisor::agent_kind::{
+    StatusLineYoloSupport, status_line_yolo_for_test, status_line_yolo_support_for_test,
+};
 
 /// The literal words establish that the intended mode reached the CLI. Custom words also have to survive Restart.
 struct Mode {
@@ -10,10 +18,12 @@ struct Mode {
     words: &'static [&'static str],
 }
 
-/// Use the documented permission spellings, including modes that need no particular model or provider.
+/// Use the documented permission spellings, including modes that need no particular model or provider. A harness
+/// whose footer reader recognizes a non-bypass footer also gets a Guarded launch, with the launcher's own Guarded words
+/// ([`LaunchHarness::guarded_flags`]), so its non-bypass footer is checked against the reader too.
 #[warn(clippy::wildcard_enum_match_arm)]
 fn modes(harness: LaunchHarness) -> Vec<Mode> {
-    use LaunchPermission::{Approve, Chat, Custom, SmartApprove, Yolo};
+    use LaunchPermission::{Approve, Chat, Custom, Guarded, SmartApprove, Yolo};
     let choice = |permission, words: &'static [&'static str]| Mode { permission, words };
     let mut modes = match harness {
         LaunchHarness::Claude | LaunchHarness::Antigravity => {
@@ -37,6 +47,9 @@ fn modes(harness: LaunchHarness) -> Vec<Mode> {
         | LaunchHarness::Zsh
         | LaunchHarness::Custom => return Vec::new(),
     };
+    if reads_non_yolo_footer(harness) && harness.offers_permission(Guarded) {
+        modes.push(choice(Guarded, harness.guarded_flags()));
+    }
     if harness.offers_permission(Custom) {
         let custom = match harness {
             LaunchHarness::Antigravity => &["--mode", "auto", "--settings", "{}"][..],
@@ -112,12 +125,11 @@ async fn check_mode(profile: &Harness, harness: LaunchHarness, mode: &Mode) -> D
         )?;
         env.with_session(launch, farhelm_helm::CreateExtras::default(), async |id| {
             let mut terminal = Terminal::attach(env.sup, env.client, id, false).await?;
-            let observe_yolo = mode.permission == LaunchPermission::Yolo && reads_yolo(harness);
             terminal
                 .ready(profile, TrustPolicy::AutoAnswer, false)
                 .await?;
-            if observe_yolo {
-                wait_for_yolo(&mut terminal, id).await?;
+            if let Some(expected) = footer_reading(harness, mode.permission) {
+                wait_for_permission_footer(&mut terminal, id, harness, expected).await?;
             }
             if custom && let Some(witness) = profile.hook_witness {
                 check_custom_restart(&env, profile, mode, id, &mut terminal, witness).await?;
@@ -129,15 +141,40 @@ async fn check_mode(profile: &Harness, harness: LaunchHarness, mode: &Mode) -> D
     .await
 }
 
-/// These integrations classify a rendered permission footer into the supervisor's shared session listing. The list
-/// mirrors the supervisor's permission footer readers (`status_line_yolo`), which this test cannot call; a harness
-/// gaining a reader there has to be moved to `true` here so the case checks it.
+/// The footer reading a launch in `permission` must show, if the supervisor reads `harness`'s footer for that mode:
+/// `Some(true)` (bypass) for a YOLO launch of any harness with a reader, `Some(false)` (a recognized non-bypass footer)
+/// for a Guarded launch of a harness whose reader recognizes one, and `None`, nothing to check, otherwise. Which
+/// harnesses have which readers comes from the supervisor ([`status_line_yolo_support_for_test`]), so a reader added
+/// there is checked here without a second list to update.
 #[warn(clippy::wildcard_enum_match_arm)]
-fn reads_yolo(harness: LaunchHarness) -> bool {
-    use LaunchHarness::*;
-    match harness {
-        Claude | Grok | Muse | Cursor => true,
-        Codex | Goose | Pi | Omp | Antigravity | OpenCode | Bash | Zsh | Custom => false,
+fn footer_reading(harness: LaunchHarness, permission: LaunchPermission) -> Option<bool> {
+    match permission {
+        LaunchPermission::Yolo => reads_yolo_footer(harness).then_some(true),
+        LaunchPermission::Guarded => reads_non_yolo_footer(harness).then_some(false),
+        LaunchPermission::Approve
+        | LaunchPermission::SmartApprove
+        | LaunchPermission::Chat
+        | LaunchPermission::Custom => None,
+    }
+}
+
+/// Whether the supervisor reads `harness`'s bypass (YOLO) footer. Matched exhaustively so a new kind of support has to
+/// be placed here deliberately rather than falling on either side of a comparison.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn reads_yolo_footer(harness: LaunchHarness) -> bool {
+    match status_line_yolo_support_for_test(harness) {
+        StatusLineYoloSupport::YoloOnly | StatusLineYoloSupport::YoloAndNonYolo => true,
+        StatusLineYoloSupport::None => false,
+    }
+}
+
+/// Whether the supervisor recognizes a non-bypass footer for `harness`, so a Guarded launch's footer can be checked
+/// to read as definitely not YOLO. Exhaustive for the same reason as [`reads_yolo_footer`].
+#[warn(clippy::wildcard_enum_match_arm)]
+fn reads_non_yolo_footer(harness: LaunchHarness) -> bool {
+    match status_line_yolo_support_for_test(harness) {
+        StatusLineYoloSupport::YoloAndNonYolo => true,
+        StatusLineYoloSupport::YoloOnly | StatusLineYoloSupport::None => false,
     }
 }
 
@@ -164,28 +201,57 @@ fn delimited_custom(harness: LaunchHarness) -> Option<DelimitedCustom> {
     }
 }
 
-/// Check what Farhelm read from the live screen. The permission choice in the session row alone proves nothing.
-async fn wait_for_yolo(terminal: &mut Terminal<'_>, id: &str) -> DriftResult {
+/// Check what Farhelm reads from the live screen's permission footer. The permission choice in the session row alone
+/// proves nothing.
+///
+/// Polls the live screen until the footer reads `expected` the way the supervisor's sampler reads it
+/// ([`status_line_yolo_for_test`]): `Some(true)` for a bypass footer, `Some(false)` for a recognized non-bypass one, so
+/// an unreadable footer (`None`, the reader no longer recognizing the vendor's wording) fails rather than passing as
+/// "not YOLO". For a bypass footer it also waits for the session listing to report `screen_yolo`, which the sampler
+/// latches on its next pass; a bypass reading seen once counts, since the sampler latches it too, and a footer that a
+/// dialog covers by the time the listing catches up must not fail a launch Farhelm handled correctly. For a non-bypass
+/// footer the listing is read once, as a sanity check that nothing latched bypass: the listing's `false` is also what
+/// an unreadable footer leaves, so it is no evidence on its own, and the sampler's never latching `false` is already
+/// pinned by the supervisor's own tests, so there is no reason to watch the listing for a while. Gives up after 15
+/// seconds, naming the last reading, whether a bypass reading was ever seen, and the listing's value.
+async fn wait_for_permission_footer(
+    terminal: &mut Terminal<'_>,
+    id: &str,
+    harness: LaunchHarness,
+    expected: bool,
+) -> DriftResult {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let mut seen_bypass = false;
     loop {
-        terminal
-            .check(
-                &terminal.host.screen_tail(SCREEN_BYTES).to_lowercase(),
-                false,
-            )
-            .await?;
+        let screen = terminal.host.screen_tail(SCREEN_BYTES);
+        terminal.check(&screen.to_lowercase(), false).await?;
+        let reading = status_line_yolo_for_test(harness, &screen);
+        seen_bypass |= reading == Some(true);
         let listing = terminal.client.list_sessions().await?;
         let session = listing
             .sessions
             .iter()
             .find(|session| session.id == id)
             .ok_or_else(|| anyhow::anyhow!("the permission test session vanished"))?;
-        if session.screen_yolo {
+        if expected && seen_bypass && session.screen_yolo {
+            return Ok(());
+        }
+        if !expected && reading == Some(false) {
+            if session.screen_yolo {
+                return Err(anyhow::anyhow!(
+                    "the footer reads not YOLO, but the session listing reports YOLO\n{}",
+                    terminal.diagnostics()
+                )
+                .into());
+            }
             return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {
+            let wanted = if expected { "YOLO" } else { "non-YOLO" };
             return Err(anyhow::anyhow!(
-                "Farhelm did not recognize the YOLO footer\n{}",
+                "Farhelm did not recognize the {wanted} footer: last reading {reading:?}, bypass seen {seen_bypass}, \
+                 listing screen_yolo {}\n{}",
+                session.screen_yolo,
                 terminal.diagnostics()
             )
             .into());
@@ -332,6 +398,46 @@ fn permission_modes_cover_agents_with_permission_choices() {
             harness.offers_permission(LaunchPermission::Custom)
         );
     }
+}
+
+/// Every footer the supervisor reads must be checked against a live launch, or a vendor's rewording would pass the
+/// drift run unnoticed: a harness with a reader needs a YOLO launch (the bypass footer), and a harness whose reader
+/// recognizes a non-bypass footer also needs a Guarded launch, with the launcher's Guarded words, where it offers
+/// Guarded. Specified: every harness the supervisor reads a footer for has a case in this category, whose modes hold a
+/// YOLO launch, and a Guarded launch with exactly `guarded_flags()` when the reader recognizes a non-bypass footer and
+/// the harness offers Guarded, and no Guarded launch otherwise.
+#[farhelm_testtrace::test]
+fn permission_modes_check_every_footer_the_supervisor_reads() {
+    let mut checked = Vec::new();
+    for harness in LaunchHarness::ALL.iter().copied() {
+        if !reads_yolo_footer(harness) {
+            continue;
+        }
+        checked.push(harness);
+        let modes = modes(harness);
+        assert!(
+            HARNESSES.contains(&harness),
+            "no permission case for {harness:?}, whose footer the supervisor reads"
+        );
+        assert!(
+            modes
+                .iter()
+                .any(|mode| mode.permission == LaunchPermission::Yolo),
+            "{harness:?}'s bypass footer is never checked"
+        );
+        let guarded = modes
+            .iter()
+            .find(|mode| mode.permission == LaunchPermission::Guarded);
+        if reads_non_yolo_footer(harness) && harness.offers_permission(LaunchPermission::Guarded) {
+            let guarded = guarded
+                .unwrap_or_else(|| panic!("{harness:?}'s non-bypass footer is never checked"));
+            assert_eq!(guarded.words, harness.guarded_flags(), "{harness:?}");
+        } else {
+            assert!(guarded.is_none(), "{harness:?} has no non-bypass reader");
+        }
+    }
+    // The premise that the loop reached the readers at all.
+    assert!(!checked.is_empty(), "the supervisor reads no footer");
 }
 
 /// Antigravity may insert the selector between the retained settings and the boundary. Moving either option after

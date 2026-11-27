@@ -235,10 +235,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   in-conversation `Waiting` approval/question dialogs and `Unknown` overlays (such as model pickers) on Claude and
   Codex.
 
-- **Drift tests: permission-mode status-line footer detection.** Verify Farhelm's live screen-footer classifier reports
-  YOLO vs non-YOLO accurately on both YOLO and Guarded launches for Claude, Grok, and Muse, and YOLO on `--force`
-  launches for Cursor, catching vendor footer wording or layout drift. Plan: `plans/queue/drift-permission-footer.md`.
-
 - **Drift tests: running-agent prompt delivery via bracketed paste.** Verify live Claude and Codex TUIs enable terminal
   bracketed paste mode, and that Farhelm's bracketed-paste plus Enter (Claude) or Tab (Codex) submits cleanly at idle,
   preserves multiline prompts without premature submission, and queues cleanly while busy.

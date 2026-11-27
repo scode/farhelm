@@ -59,9 +59,15 @@ enabled effort per harness also completes a real turn. Goose shows no effort, so
 passes the effort to Goose and that Goose reaches its prompt and answers; a pass does not confirm the effort the
 provider applied. Goose, Pi and OMP need `OPENROUTER_API_KEY` for the whole case and report COULD NOT RUN without it.
 
-The `permission_modes` category opens the CLI with the launcher's approval choices and checks Farhelm's live YOLO
-indicator where the integration reads one. Tracked agents complete one text turn with Custom permission flags. The test
-checks that Restart keeps those arguments in order and that the new process reaches its composer.
+The `permission_modes` category opens the CLI with the launcher's approval choices and checks the live permission footer
+wherever Farhelm reads one (Claude, Grok, Muse and Cursor). A YOLO launch must show a footer Farhelm reads as bypass,
+and the session listing must then report YOLO. Claude, Grok and Muse also get a Guarded launch, whose footer must read
+as a recognized non-YOLO footer: a footer Farhelm cannot read at all fails, rather than passing as not YOLO, so a vendor
+rewording or moving its footer is caught on both kinds of launch. Cursor shows no definite non-YOLO footer and is
+checked on YOLO (`--force`) only. Which agents have which footer readers comes from the supervisor itself, so a reader
+added there is checked here for any agent that already has a case in this category. Tracked agents complete one text
+turn with Custom permission flags. The test checks that Restart keeps those arguments in order and that the new process
+reaches its composer.
 
 The `named_conversation` category seeds a conversation from each test workspace, kept in the vendor's own store like any
 other, and checks that a launch with an explicit ID or file recalls the seed. Pi and OMP exercise both absolute and
