@@ -1,5 +1,6 @@
 //! Plain-HTTP file transfers to the helm: the hover check of a file path a session printed (stat), saving that file
-//! into the user's Downloads (download), and attaching a local file or pasted bytes to a session (upload).
+//! into the user's Downloads (download), reading a small file's contents into memory for the clipboard (download
+//! bytes), and attaching a local file or pasted bytes to a session (upload).
 //!
 //! NOTE: None of this travels on the UI channel. Downloads and uploads are bulk data, which SPEC_impl.md, "Bulk data
 //! stays separate", keeps off it: each transfer is its own HTTP request, so a large upload never delays a click, and a
@@ -11,8 +12,10 @@
 //! Every request goes to the loopback [`HelmEndpoint`] the UI channel uses, with the device credential as a bearer
 //! token. Saving and opening happen in the helm: the desktop app hands its embedded helm the Downloads directory and a
 //! file opener, so a download here only asks for the save and reports where the file went, and none of its bytes pass
-//! through this process. An upload's bytes do. The file is read from disk and streamed on this crate's runtime,
-//! because the GUI may neither block nor start threads.
+//! through this process. Two kinds of transfer do carry bytes here. A download of bytes asks the same route to relay
+//! the file instead of saving it, and stops reading at the caller's cap, so that copying a file into the clipboard
+//! never touches Downloads. An upload's file is read from disk and streamed on this crate's runtime, because the GUI
+//! may neither block nor start threads.
 //!
 //! [`Transfers`] is the GUI's handle. Each call returns a [`Transfer`], a future any executor can poll. Dropping it
 //! abandons the request and closes its connection, and the helm then ends the transfer on its side: an unfinished
@@ -104,6 +107,11 @@ pub enum TransferError {
     /// The helm answered success with a body that is not the route's answer.
     #[error("the helm's answer could not be read: {0}")]
     BadReply(String),
+    /// A download of bytes ([`Transfers::download_bytes`]) found the file longer than the caller's cap, and stopped
+    /// reading there. Kept apart from [`TransferError::BadReply`] because nothing is broken: the file is simply too
+    /// big for what the caller wants it for, and the GUI says so in those words.
+    #[error("the file is larger than {max_bytes} bytes")]
+    TooLarge { max_bytes: usize },
     /// An upload's local file could not be opened or read, or changed size while it was read. Its bytes never all
     /// reached the helm.
     #[error("the file could not be read: {0}")]
@@ -131,15 +139,19 @@ impl TransferError {
     /// as [`TransferError::Lost`] instead of the 4xx, depending on timing. The helm answers and closes with the body
     /// unread, and hyper may report the failed send rather than the answer. That reads as unknown: truthful, but
     /// without the helm's words.
+    ///
+    /// [`TransferError::TooLarge`] belongs to downloads of bytes and no upload ends with it. It reads as unknown, the
+    /// reading that never promises more than is known.
     pub fn upload_outcome(&self) -> UploadOutcome {
         match self {
             TransferError::NotSent(_) | TransferError::File(_) => UploadOutcome::NotPublished,
             TransferError::Refused { status, .. } if (400..500).contains(status) => {
                 UploadOutcome::NotPublished
             }
-            TransferError::Refused { .. } | TransferError::Lost(_) | TransferError::BadReply(_) => {
-                UploadOutcome::Unknown
-            }
+            TransferError::Refused { .. }
+            | TransferError::Lost(_)
+            | TransferError::BadReply(_)
+            | TransferError::TooLarge { .. } => UploadOutcome::Unknown,
         }
     }
 }
@@ -174,6 +186,24 @@ impl Transfers {
             session: session.to_owned(),
             path: path.to_owned(),
             open,
+            reply,
+        })
+    }
+
+    /// Read `path` from `session`'s host into memory, as long as it is at most `max_bytes` long, for a caller that
+    /// wants the contents themselves (copying a file into the clipboard) rather than a file in Downloads.
+    ///
+    /// It is the download route asked to relay instead of save, so the host reopens and checks the file as it does
+    /// for a save, and its own download limit still applies. The cap is enforced on the stream as it arrives: reading
+    /// stops, and the connection is dropped, at the first chunk that would pass `max_bytes`, which ends the transfer
+    /// with [`TransferError::TooLarge`] having held no more than `max_bytes` here. The helm promises no length up front
+    /// (the file may change while it is read), so the cap cannot be checked before reading. A host read that fails
+    /// after the helm sent its headers ends the body early and comes back as [`TransferError::Lost`].
+    pub fn download_bytes(&self, session: &str, path: &str, max_bytes: usize) -> Transfer<Vec<u8>> {
+        self.send(|reply| Request::DownloadBytes {
+            session: session.to_owned(),
+            path: path.to_owned(),
+            max_bytes,
             reply,
         })
     }
@@ -270,6 +300,12 @@ pub(crate) enum Request {
         open: bool,
         reply: Reply<SavedDownload>,
     },
+    DownloadBytes {
+        session: String,
+        path: String,
+        max_bytes: usize,
+        reply: Reply<Vec<u8>>,
+    },
     Upload {
         session: String,
         source: UploadSource,
@@ -349,6 +385,29 @@ async fn run(
             })
             .await;
         }
+        Request::DownloadBytes {
+            session,
+            path,
+            max_bytes,
+            reply,
+        } => {
+            // No save and no open: the helm then relays the file's bytes as the answer's body.
+            let body = FileRequest {
+                path,
+                save_to_downloads: false,
+                open: false,
+            };
+            let segments = ["sessions", session.as_str(), "files", "download"];
+            finish(reply, async {
+                let response = post_file_request(&client?, &endpoint, &segments, &body).await?;
+                let response = check_status(response).await?;
+                read_capped(response, max_bytes, || TransferError::TooLarge {
+                    max_bytes,
+                })
+                .await
+            })
+            .await;
+        }
         Request::Upload {
             session,
             source,
@@ -417,56 +476,87 @@ fn send_failed(error: reqwest::Error) -> TransferError {
     }
 }
 
-/// POST `body` as JSON to the route named by `segments`, and decode its answer.
+/// POST `body` as JSON to the file route named by `segments`, and decode its answer.
 async fn post_json<T: DeserializeOwned>(
     client: &reqwest::Client,
     endpoint: &HelmEndpoint,
     segments: &[&str],
     body: &FileRequest,
 ) -> Result<T, TransferError> {
+    read_answer(post_file_request(client, endpoint, segments, body).await?).await
+}
+
+/// POST `body` as JSON to the file route named by `segments`, with the device credential, and hand back the response
+/// whatever its status. Stat, download and download of bytes all send this one request shape.
+async fn post_file_request(
+    client: &reqwest::Client,
+    endpoint: &HelmEndpoint,
+    segments: &[&str],
+    body: &FileRequest,
+) -> Result<reqwest::Response, TransferError> {
     let path = ApiPath::api(segments).map_err(invalid_path)?;
-    let response = client
+    client
         .post(url(endpoint, &path))
         .bearer_auth(endpoint.secret())
         .json(body)
         .send()
         .await
-        .map_err(send_failed)?;
-    read_answer(response).await
+        .map_err(send_failed)
 }
 
 /// Decode a response: an error status is the helm's refusal, anything else must be the route's JSON answer.
 async fn read_answer<T: DeserializeOwned>(response: reqwest::Response) -> Result<T, TransferError> {
-    let status = response.status();
-    if !status.is_success() {
-        // The status alone is the refusal; a body lost or oversized after it only costs the helm's words.
-        let message = if status == reqwest::StatusCode::UNAUTHORIZED {
-            CREDENTIAL_REFUSED.to_owned()
-        } else {
-            let body = read_capped(response).await.unwrap_or_default();
-            String::from_utf8_lossy(&body).trim().to_owned()
-        };
-        return Err(TransferError::Refused {
-            status: status.as_u16(),
-            message,
-        });
-    }
-    let body = read_capped(response).await?;
+    let body = read_capped(check_status(response).await?, ANSWER_MAX_BYTES, || {
+        TransferError::BadReply(format!(
+            "the helm's answer is over {ANSWER_MAX_BYTES} bytes"
+        ))
+    })
+    .await?;
     serde_json::from_slice(&body).map_err(|error| TransferError::BadReply(error.to_string()))
 }
 
-/// Read a whole answer body, up to [`ANSWER_MAX_BYTES`].
-async fn read_capped(mut response: reqwest::Response) -> Result<Vec<u8>, TransferError> {
+/// Pass a success response on; turn any other status into the helm's refusal, with its words. The helm writes a
+/// refusal as a line of plain text, except a 401's, which is JSON for code and is replaced by [`CREDENTIAL_REFUSED`].
+async fn check_status(response: reqwest::Response) -> Result<reqwest::Response, TransferError> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    // The status alone is the refusal; a body lost or oversized after it only costs the helm's words.
+    let message = if status == reqwest::StatusCode::UNAUTHORIZED {
+        CREDENTIAL_REFUSED.to_owned()
+    } else {
+        // Any failure to read the words, the cap included, leaves the message empty, so the error the cap would
+        // raise is never seen and only has to satisfy the signature.
+        let body = read_capped(response, ANSWER_MAX_BYTES, || {
+            TransferError::BadReply(String::new())
+        })
+        .await
+        .unwrap_or_default();
+        String::from_utf8_lossy(&body).trim().to_owned()
+    };
+    Err(TransferError::Refused {
+        status: status.as_u16(),
+        message,
+    })
+}
+
+/// Read a whole body, up to `max_bytes`, failing with `over_cap()` at the first chunk that would pass it. Nothing past
+/// the cap is kept: the chunk that crosses it is refused before it is copied, and dropping the response on that error
+/// closes the connection, which stops the helm sending the rest.
+async fn read_capped(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+    over_cap: impl FnOnce() -> TransferError,
+) -> Result<Vec<u8>, TransferError> {
     let mut body = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
         .map_err(|error| TransferError::Lost(error.to_string()))?
     {
-        if body.len() + chunk.len() > ANSWER_MAX_BYTES {
-            return Err(TransferError::BadReply(format!(
-                "the helm's answer is over {ANSWER_MAX_BYTES} bytes"
-            )));
+        if body.len() + chunk.len() > max_bytes {
+            return Err(over_cap());
         }
         body.extend_from_slice(&chunk);
     }

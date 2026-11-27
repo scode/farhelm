@@ -1,5 +1,5 @@
-//! A stand-in for the helm's file transfers in GUI tests: the test receives each stat, download and upload the GUI
-//! asked for and answers it when it chooses.
+//! A stand-in for the helm's file transfers in GUI tests: the test receives each stat, download, download of bytes and
+//! upload the GUI asked for and answers it when it chooses.
 //!
 //! The GUI is written against [`Transfers`]; [`FakeTransfers::new`] hands out the same type, so the GUI's file-link
 //! and attachment code runs unchanged with no socket, runtime or timer. Each transfer the GUI starts shows up in
@@ -37,6 +37,15 @@ pub enum FakeTransfer {
         path: String,
         open: bool,
         answer: FakeAnswer<SavedDownload>,
+    },
+    /// A read of a file's contents into memory ([`Transfers::download_bytes`]). The fake enforces no cap: the test
+    /// answers with whatever bytes or [`TransferError::TooLarge`] its case needs.
+    DownloadBytes {
+        session: String,
+        path: String,
+        /// The cap the GUI asked the real client to enforce.
+        max_bytes: usize,
+        answer: FakeAnswer<Vec<u8>>,
     },
     Upload {
         session: String,
@@ -98,6 +107,17 @@ impl FakeTransfers {
                     open,
                     answer: FakeAnswer(reply),
                 },
+                Request::DownloadBytes {
+                    session,
+                    path,
+                    max_bytes,
+                    reply,
+                } => FakeTransfer::DownloadBytes {
+                    session,
+                    path,
+                    max_bytes,
+                    answer: FakeAnswer(reply),
+                },
                 Request::Upload {
                     session,
                     source,
@@ -132,6 +152,7 @@ mod tests {
         let (mut fake, transfers) = FakeTransfers::new();
         let mut stat = transfers.stat("s1", "notes/a.md");
         let mut download = transfers.download("s1", "/tmp/b.pdf", true);
+        let mut contents = transfers.download_bytes("s1", "notes/c.txt", 10);
         let mut upload = transfers.upload("s2", PathBuf::from("/local/shot.png"), "shot.png");
         let pasted = transfers.upload_bytes("s2", vec![1, 2, 3], "pasted-1.png");
         let abandoned = transfers.stat("s1", "gone.txt");
@@ -157,6 +178,19 @@ mod tests {
             panic!("the download came second");
         };
         assert_eq!((path.as_str(), open), ("/tmp/b.pdf", true));
+        let Some(FakeTransfer::DownloadBytes {
+            session,
+            path,
+            max_bytes,
+            answer: contents_answer,
+        }) = taken.next()
+        else {
+            panic!("the download of bytes came third");
+        };
+        assert_eq!(
+            (session.as_str(), path.as_str(), max_bytes),
+            ("s1", "notes/c.txt", 10)
+        );
         let Some(FakeTransfer::Upload {
             session,
             source,
@@ -164,7 +198,7 @@ mod tests {
             answer: upload_answer,
         }) = taken.next()
         else {
-            panic!("the upload came third");
+            panic!("the upload came fourth");
         };
         assert_eq!(
             (session.as_str(), source, filename.as_str()),
@@ -181,7 +215,7 @@ mod tests {
             ..
         }) = taken.next()
         else {
-            panic!("the upload from memory came fourth");
+            panic!("the upload from memory came fifth");
         };
         assert_eq!(
             (source, filename.as_str()),
@@ -197,6 +231,7 @@ mod tests {
         // Held: nothing resolves until the test answers.
         assert!((&mut stat).now_or_never().is_none());
         assert!((&mut download).now_or_never().is_none());
+        assert!((&mut contents).now_or_never().is_none());
         assert!((&mut upload).now_or_never().is_none());
         assert!(!stat_answer.abandoned());
 
@@ -218,6 +253,9 @@ mod tests {
         };
         download_answer.answer(Err(refusal.clone()));
         assert_eq!(download.now_or_never(), Some(Err(refusal)));
+
+        contents_answer.answer(Ok(b"hello".to_vec()));
+        assert_eq!(contents.now_or_never(), Some(Ok(b"hello".to_vec())));
 
         upload_answer.answer(Err(TransferError::Lost("connection reset".into())));
         let lost = upload.now_or_never().unwrap().unwrap_err();
