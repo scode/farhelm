@@ -13,4 +13,12 @@ active" age shown on a session that is still working can lag by up to about two 
 goes idle, starts waiting or ends shows its time at once. This needs the host updated, which an ordinary upgrade does.
 
 A host whose connection to the app is too busy to take a "something changed" notice right away now keeps it and sends
-it a moment later, instead of dropping it and leaving the change to the app's next periodic check.
+it a moment later, instead of dropping it and leaving the change to the app's next periodic check. With notices no
+longer lost, that periodic check of each host's session list now runs every thirty seconds instead of every three; the
+waiting-session ntfy alert still goes out three seconds after a session starts waiting. Caveats: a host that stays
+connected but stops answering now takes up to about a minute instead of about half a minute to show as unreachable, and
+a passing failure to read a host's session list, with no change waiting behind it, can show for up to thirty seconds
+instead of three.
+
+For the curator: the last part bumps the protocol version to 95 (hosts update as part of an ordinary upgrade; per the
+editorial guidance this needs no public remote-hosts entry, but it should be tested at release).

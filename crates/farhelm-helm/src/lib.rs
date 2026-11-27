@@ -372,9 +372,9 @@ pub struct HelmArgs {
     /// learns about promptly can only have arrived as a supervisor's change
     /// hint.
     ///
-    /// No production launch sets it: the poll is the backstop for every
-    /// change a hint misses, and a helm that polled rarely would show such a
-    /// change that much later.
+    /// No production launch sets it: the poll is the backstop for a change
+    /// no hint covers, and a helm that polled more rarely still would show
+    /// such a change that much later.
     pub backstop_refresh_secs: Option<u64>,
 }
 

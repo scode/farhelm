@@ -8,8 +8,9 @@
 //! listed row is derived as the reply is built (tabs, status, the restart
 //! offer), so every such field would need its own detector and snapshot, and
 //! a missed one would leave the helm wrong with nothing to correct it. The
-//! helm still polls as a backstop, but a hint is how it hears about a change
-//! promptly, so hints are not lost: see "Where hints go".
+//! helm still polls as a backstop, but only every thirty seconds since
+//! protocol 95: a hint is how it hears about a change promptly, so hints are
+//! not lost (see "Where hints go").
 //!
 //! # Who marks, and who sends
 //!
@@ -75,8 +76,8 @@ use tokio::time::Instant;
 ///
 /// Two seconds, the maintainer's choice (2026-11-26): long enough that a
 /// queue teetering at its limit cannot turn every change into a refresh at
-/// the hint gap's pace, short enough that an owed hint still lands promptly
-/// next to the helm's backstop poll.
+/// the hint gap's pace, short enough that an owed hint still lands well
+/// inside the helm's thirty-second backstop poll.
 pub(crate) const OWED_HINT_RETRY: Duration = Duration::from_secs(2);
 
 /// The pending-hint flag the whole supervisor shares: marked by any path

@@ -166,11 +166,14 @@ use tracing::{debug, error, warn};
 
 /// How often the supervisor's periodic task fires in production.
 ///
-/// Chosen against the helm's own 3-second `ListSessions` drain rather than
-/// independently: a ticker SLOWER than the drain would leave drains
-/// answering from samples nothing had refreshed since the previous one,
-/// while a much faster one would spend subprocesses producing samples no
-/// reader ever gets to see.
+/// Chosen against the helm's 3-second `ListSessions` drain of the time
+/// rather than independently: a ticker SLOWER than the drain would leave
+/// drains answering from samples nothing had refreshed since the previous
+/// one, while a much faster one would spend work producing samples no
+/// reader ever gets to see. The helm's backstop poll has since become
+/// thirty seconds (protocol 95), and what a sample finds now reaches it
+/// through the change hint the sample itself sends, so two seconds is
+/// simply how promptly a status transition is noticed.
 ///
 /// ## What this interval is, and is not, a bound on
 ///

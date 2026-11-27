@@ -89,6 +89,121 @@ fn settle_flicker_and_reentry() {
     );
 }
 
+/// The deadline the host loop schedules a refresh for is the earliest pending
+/// spell's settling time, and there is none before the baseline, once every
+/// spell has alerted, once waiting ends, or while waiting alerts are off. Why
+/// it matters: with the backstop poll at thirty seconds, this deadline is what
+/// keeps the alert at SPEC.md's three seconds; a deadline that stayed after its
+/// spell was handled, or with alerts off, would make the loop refresh for
+/// nothing.
+#[farhelm_testtrace::test]
+fn next_deadline_is_the_earliest_pending_spell_settling_time() {
+    let now = Instant::now();
+    let mut policy = Policy::default();
+    assert_eq!(policy.next_deadline(), None, "nothing observed yet");
+    let baseline = [observation("old", SessionStatus::Waiting)];
+    assert!(policy.observe(&baseline, now, true).is_empty());
+    assert_eq!(
+        policy.next_deadline(),
+        None,
+        "a baseline spell is already handled"
+    );
+
+    let waiting = |id: &str| observation(id, SessionStatus::Waiting);
+    assert!(policy.observe(&[waiting("first")], now, true).is_empty());
+    let later = now + SETTLE / 3;
+    assert!(
+        policy
+            .observe(&[waiting("first"), waiting("second")], later, true)
+            .is_empty()
+    );
+    assert_eq!(
+        policy.next_deadline(),
+        Some(now + SETTLE),
+        "the earliest spell"
+    );
+
+    assert_eq!(
+        policy.observe(&[waiting("first"), waiting("second")], now + SETTLE, true),
+        vec!["title first"]
+    );
+    assert_eq!(
+        policy.next_deadline(),
+        Some(later + SETTLE),
+        "the next spell"
+    );
+
+    let resolved = [
+        waiting("first"),
+        observation("second", SessionStatus::Running),
+    ];
+    assert!(
+        policy
+            .observe(&resolved, now + SETTLE + Duration::from_secs(1), true)
+            .is_empty()
+    );
+    assert_eq!(
+        policy.next_deadline(),
+        None,
+        "a spell that ended has no deadline"
+    );
+
+    // With waiting alerts off the policy keeps no spells, so no deadline
+    // wakes the host for an alert that would not be sent.
+    let fresh = now + SETTLE * 4;
+    assert!(
+        policy
+            .observe(&[waiting("first"), waiting("third")], fresh, true)
+            .is_empty()
+    );
+    assert!(policy.next_deadline().is_some(), "premise: a pending spell");
+    assert!(policy.observe(&[waiting("third")], fresh, false).is_empty());
+    assert_eq!(policy.next_deadline(), None, "alerts off: no deadline");
+}
+
+/// The host loop arms its wake on the earliest deadline after the refresh it
+/// just ran. A spell whose session went on to read Unknown stays pending past
+/// its deadline (Unknown adds no evidence), and if that overdue deadline were
+/// taken as the minimum and then discarded, a second session's fresh spell
+/// would get no wake and its alert would slip to the thirty-second poll.
+#[farhelm_testtrace::test]
+fn an_overdue_spell_does_not_hide_a_later_deadline() {
+    let now = Instant::now();
+    let mut policy = Policy::default();
+    assert!(policy.observe(&[], now, true).is_empty(), "empty baseline");
+    let stuck_since = now + Duration::from_secs(1);
+    assert!(
+        policy
+            .observe(
+                &[observation("stuck", SessionStatus::Waiting)],
+                stuck_since,
+                true
+            )
+            .is_empty()
+    );
+    let refreshed = stuck_since + SETTLE + Duration::from_secs(5);
+    let fleet = [
+        observation("stuck", SessionStatus::Unknown),
+        observation("fresh", SessionStatus::Waiting),
+    ];
+    assert!(policy.observe(&fleet, refreshed, true).is_empty());
+    assert_eq!(
+        policy.next_deadline(),
+        Some(stuck_since + SETTLE),
+        "premise: the Unknown session's spell is still pending and overdue"
+    );
+    assert_eq!(
+        policy.next_deadline_after(refreshed),
+        Some(refreshed + SETTLE),
+        "the fresh spell's deadline is armed despite the overdue one"
+    );
+    assert_eq!(
+        policy.next_deadline_after(refreshed + SETTLE),
+        None,
+        "a deadline at the bound itself is not after it"
+    );
+}
+
 /// Unknown is absence of new evidence, including at the settle boundary; exited
 /// and removed sessions cancel pending spells rather than leaving delayed work.
 #[farhelm_testtrace::test]
@@ -908,6 +1023,144 @@ async fn stalled_sender_queue_bound_and_timeout() {
             .expect("complete trace evidence")
             .is_empty()
     );
+}
+
+/// A session that becomes waiting and stays waiting gets its alert once its
+/// settling time is up, with nothing else refreshing the host: no further
+/// hint, no explicit refresh, and the harness's backstop poll an hour away. Why
+/// it matters: this is SPEC.md's "remains so for 3 seconds" promise, which
+/// since the poll became thirty seconds only the refresh the host loop
+/// schedules at the spell's deadline keeps; a test that only counted
+/// refreshes could not tell an alert from a refresh that came too early to
+/// settle the spell.
+#[farhelm_testtrace::test]
+async fn a_waiting_session_is_alerted_at_its_deadline_without_another_refresh() {
+    let mut server = stand_in(Answer::Success).await;
+    let harness = FleetBuilder::new()
+        .await
+        .ntfy_client(client())
+        .local(HostScript {
+            identity: Some("deadline-host".to_string()),
+            sessions: vec![session("one", 1)],
+            ..HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let host = harness.store.list_hosts().await.unwrap()[0].id;
+    harness.await_refreshed(host).await;
+    harness
+        .store
+        .save_ntfy_config(save(&server.server_url, None, true))
+        .await
+        .ok()
+        .unwrap();
+    // The first listing after alerts come on is the waiting baseline; take it
+    // while the session is not waiting, so the wait below is a fresh spell.
+    harness.refresh_to_completion(host).await;
+    let status = |status: SessionStatus| {
+        harness.fleet.edit(host, |script| {
+            script.sessions[0].status = status;
+        })
+    };
+    // Read before the spell can start, so the premise check below errs on
+    // the safe side: the spell starts on the real clock, and the jump is only
+    // meaningful while its deadline is still ahead.
+    let before_spell = std::time::Instant::now();
+    status(SessionStatus::Waiting);
+    harness.refresh_to_completion(host).await;
+    // The helper proves a refresh completed by starting its successor, whose
+    // reply is already drained. Were that reply Waiting, it could settle the
+    // spell itself during the clock jump below, and the test would pass
+    // without the deadline's wake; make it Unknown, which keeps the spell
+    // pending without settling it.
+    status(SessionStatus::Unknown);
+    harness.refresh_to_completion(host).await;
+    assert!(
+        server.received.lock().unwrap().is_empty(),
+        "the premise: nothing is sent when the spell begins"
+    );
+    // Only a listing drained after this edit carries the title, so the
+    // alert's text proves which refresh settled the spell.
+    harness.fleet.edit(host, |script| {
+        script.sessions[0].status = SessionStatus::Waiting;
+        script.sessions[0].title = "deadline waiting".into();
+    });
+
+    assert!(
+        before_spell.elapsed() < SETTLE,
+        "the premise: the spell's deadline is still ahead on the real clock \
+         before the jump (this run was too slow to test the deadline)"
+    );
+    // Only the deadline can refresh the host now (the harness polls hourly):
+    // jump past the settling time and let the actor run.
+    tokio::time::pause();
+    tokio::time::advance(SETTLE + Duration::from_millis(100)).await;
+    tokio::time::resume();
+    server.arrived(1).await;
+    assert_eq!(
+        server.received.lock().unwrap()[0].body,
+        "deadline waiting on this machine is waiting for you"
+    );
+}
+
+/// A save that turns waiting alerts on refreshes every serving host at once,
+/// with no hint and the harness's backstop poll an hour away. Why it matters:
+/// the first listing after alerts come on is each host's waiting baseline, so
+/// a session that starts waiting before that listing is baselined and never
+/// alerts for that wait; with the poll at thirty seconds that window would be
+/// up to half a minute instead of one round trip.
+#[farhelm_testtrace::test]
+async fn turning_waiting_alerts_on_refreshes_every_host_at_once() {
+    let server = stand_in(Answer::Success).await;
+    let (builder, remote) = FleetBuilder::new()
+        .await
+        .ntfy_client(client())
+        .local(HostScript {
+            identity: Some("baseline-local".to_string()),
+            sessions: vec![session("one", 1)],
+            ..HostScript::default()
+        })
+        .await
+        .ssh(
+            "baseline-remote.example",
+            HostScript {
+                identity: Some("baseline-remote".to_string()),
+                sessions: vec![session("two", 2)],
+                ..HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    let local = crate::rest_harness::local_id(&harness.store).await;
+    for host in [local, remote] {
+        harness.await_refreshed(host).await;
+    }
+    assert!(
+        !harness.store.waiting_alerts_enabled(),
+        "the premise: waiting alerts start off"
+    );
+
+    let before = [local, remote].map(|host| harness.fleet.host_requests(host));
+    let body = serde_json::to_value(save(&server.server_url, None, true)).unwrap();
+    let response = harness
+        .router()
+        .oneshot(request("PUT", "/api/ntfy-alerts", body))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        harness.store.waiting_alerts_enabled(),
+        "the premise: the save turned them on"
+    );
+    for (host, before) in [local, remote].into_iter().zip(before) {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            harness.fleet.await_host_requests(host, before + 1),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("the save refreshes host {host} without waiting for the poll"));
+    }
 }
 
 /// A real host actor feeds accepted lists to the policy for both durable and

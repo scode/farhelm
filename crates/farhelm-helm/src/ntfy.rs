@@ -20,9 +20,10 @@ use std::{
 };
 use tokio::{sync::mpsc, time::Instant};
 
-/// How long a session must read Waiting before its alert goes out. With the host refresh every 3 seconds, a single
-/// Waiting reading still sends nothing, while two polls in a row do. The plan `agent-blocked-notifications` shortened it from
-/// 10 seconds.
+/// How long a session must read Waiting before its alert goes out. The listing that first reads Waiting starts the
+/// spell and sends nothing; the host loop then refreshes again when this is up ([`Policy::next_deadline_after`]), and
+/// that listing sends the alert if the session still reads Waiting. The plan `agent-blocked-notifications` shortened it
+/// from 10 seconds, when the backstop poll still ran every 3 seconds and supplied the second reading.
 pub(crate) const SETTLE: Duration = Duration::from_secs(3);
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const QUEUE_CAPACITY: usize = 32;
@@ -199,6 +200,43 @@ impl Policy {
         }
         self.initialized = true;
         alerts
+    }
+
+    /// When the earliest pending waiting spell becomes due to alert, or
+    /// `None` with nothing pending.
+    ///
+    /// The policy decides only when a listing is observed, and a session that
+    /// stays waiting sends no further change hint, so without a refresh at
+    /// this moment the alert would wait for the next backstop poll, which is
+    /// thirty seconds apart (`manager::REFRESH_INTERVAL`) and would break
+    /// SPEC.md's three seconds. The host loop sleeps until this deadline and
+    /// then refreshes like the poll does; the refresh's observation is still
+    /// what sends the alert.
+    pub(crate) fn next_deadline(&self) -> Option<Instant> {
+        self.pending_deadlines().min()
+    }
+
+    /// The earliest pending deadline strictly after `after`, skipping overdue
+    /// ones.
+    ///
+    /// This is what the host loop arms its wake on, with `after` the start of
+    /// the refresh it just ran. An overdue deadline cannot be armed (it would
+    /// fire at once and spin a failing host), and it must not hide a later
+    /// one either: a spell whose session went on to read `Unknown` stays
+    /// pending past its deadline, because `Unknown` adds no evidence, and
+    /// taking the minimum before skipping it would leave every other
+    /// session's alert waiting for the backstop poll.
+    pub(crate) fn next_deadline_after(&self, after: Instant) -> Option<Instant> {
+        self.pending_deadlines()
+            .filter(|deadline| *deadline > after)
+            .min()
+    }
+
+    fn pending_deadlines(&self) -> impl Iterator<Item = Instant> + '_ {
+        self.spells.values().filter_map(|spell| match spell {
+            Spell::Pending(since) => Some(*since + SETTLE),
+            Spell::Handled => None,
+        })
     }
 }
 
@@ -506,8 +544,17 @@ pub(crate) async fn put(
     let Ok(axum::Json(save)) = body else {
         return (StatusCode::BAD_REQUEST, "invalid ntfy alert settings").into_response();
     };
-    match state.store.save_ntfy_config(save).await {
-        Ok(settings) => axum::Json(settings).into_response(),
+    match state.store.save_ntfy_config_noting_switch_on(save).await {
+        Ok((settings, switched_on)) => {
+            // The first listing after waiting alerts come on is each host's
+            // fresh baseline, so take it now rather than at the next backstop
+            // poll: a session that started waiting in between would be
+            // baselined and miss its alert.
+            if switched_on {
+                state.manager.refresh_all_now();
+            }
+            axum::Json(settings).into_response()
+        }
         Err(SaveError::Invalid(reason)) => (StatusCode::BAD_REQUEST, reason).into_response(),
         Err(SaveError::Storage) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -592,6 +639,21 @@ impl HelmStore {
     /// database call, so two saves racing each other leave it agreeing with
     /// whichever row the database kept.
     pub(crate) async fn save_ntfy_config(&self, save: SaveSettings) -> Result<Settings, SaveError> {
+        self.save_ntfy_config_noting_switch_on(save)
+            .await
+            .map(|(settings, _)| settings)
+    }
+
+    /// [`Self::save_ntfy_config`], also saying whether this save is the one
+    /// that turned waiting alerts on. The answer comes from swapping the cache
+    /// inside the database call, where saves are serialized, so of two racing
+    /// saves exactly the one the database applied last over an "off" sees the
+    /// switch; a read of the cache before the save could miss an off-then-on
+    /// pair and skip the refresh that takes the new baseline.
+    pub(crate) async fn save_ntfy_config_noting_switch_on(
+        &self,
+        save: SaveSettings,
+    ) -> Result<(Settings, bool), SaveError> {
         let waiting = self.ntfy_waiting_cache();
         let result = self
             .conn()
@@ -609,11 +671,9 @@ impl HelmStore {
                     "UPDATE ntfy_alerts SET config = ?1 WHERE singleton = 1",
                     [serde_json::to_string(&config)?],
                 )?;
-                waiting.store(
-                    config.settings.sends_waiting_alerts(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                Ok(Ok(config.settings))
+                let now_on = config.settings.sends_waiting_alerts();
+                let was_on = waiting.swap(now_on, std::sync::atomic::Ordering::Relaxed);
+                Ok(Ok((config.settings, now_on && !was_on)))
             })
             .await
             .map_err(|_| SaveError::Storage)?;

@@ -84,9 +84,10 @@ async fn await_fleet_connected(client: &reqwest::Client, base: &str) -> serde_js
 
 /// Wait until the merged list contains every id in `ids`, and return it.
 ///
-/// The list trails a create by up to one refresh interval BY DESIGN — the
-/// helm serves it from its cache and never by asking hosts — so polling is
-/// the correct shape here rather than a concession to flakiness.
+/// The list can trail a create BY DESIGN — the helm serves it from its
+/// cache, which the create's seed and the host's change hint update, and
+/// never by asking hosts — so polling is the correct shape here rather than
+/// a concession to flakiness.
 /// A stalled HTTP response shares that deadline with the polling loop.
 async fn await_listed(client: &reqwest::Client, base: &str, ids: &[&str]) -> serde_json::Value {
     let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
