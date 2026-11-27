@@ -96,3 +96,72 @@ cannot identify. Its findings were:
 
 The four fixes were made, and a verification pass by the same reviewer confirmed them; its remaining wording nit was
 fixed too.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained the previous rounds' changes: copying a file's contents and
+pasting clipboard text as a file in the terminal, agents asking for a Tailscale host (protocol version 92), more Codex
+sessions becoming restartable, and stricter `--model` and `--effort` parsing. The Codex change is in the same supervisor
+but only in its Codex-specific code; none of the others touch Restart or the supervisor's start. In the same round,
+around this plan, three more landed: remove-legacy-sandbox-sessions-api (an unused helm route removed),
+brick-test-inline-welcome (release test instructions) and claude-drift-trust-copy-back (a drift test). None touches this
+code.
+
+An independent reviewer and I read the change, looking hardest at whether a supervisor start can now end something it
+should not. It ends a leftover terminal only when all of these hold: the Restart that started it can no longer still be
+starting it (it belonged to an earlier supervisor run), the terminal identifies itself as exactly that session's agent
+at the recorded launch, and no current session is using that terminal. The other startup step that ends leftover
+terminals still stays away from every terminal an owed Restart cleanup names, so the two never act on the same one. A
+Restart that fails and finds its replacement still running still reports the Restart as uncertain, as before. Nothing to
+fix.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** The round's four plans each removed their own TODO entry, next to each other, so stacking them
+  conflicted there. I removed all four entries; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing I found. The landing's checks were wider than the report's: every supervisor and end-to-end test ran, together
+with the other plans and the previous rounds' changes.
+
+#### Worth knowing
+
+- **The narrow window the report describes stays, and the follow-up to close it is small.** Ending the terminal before
+  cleaning up the agent's processes, rather than after, would close it, and nothing else would change, since the owed
+  cleanup is already retired only once both steps are confirmed. I would leave it unless such a leftover agent is ever
+  seen.
+- **One new test could pass without checking what it is meant to.** The test of a leftover terminal tagged for another
+  launch checks that the cleanup connected to the test's fake terminal, not that the fake answered the identity
+  question. Today it does answer, and the test fails if the tag check is removed, so it works. If the fake ever stopped
+  answering, the test would pass without reaching that check; a small optional follow-up would assert that the identity
+  question arrived.
+
+#### Checks
+
+Run once, on the round's four plans stacked on main as it stood when the landing started
+(remove-legacy-sandbox-sessions-api, restart-startup-scope-cleanup, brick-test-inline-welcome, then
+claude-drift-trust-copy-back), so each plan was tested together with the others and with the previous rounds' changes,
+which none of the executors' own runs included. The SSH test worker was still unreachable, so the slow suites ran on
+boat sandboxes (x86_64 Ubuntu 24.04 VMs), and clippy ran locally:
+
+- Locally, `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`: clean.
+- On three boats, every test of the protocol, helm, supervisor and command-line crates that runs by default, the
+  end-to-end suite included (`cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm`,
+  built once, split in three and run through the recorder), recorded runs 0aeec1d1-374d-4651-b817-c6196eba36e3,
+  79bc70f6-81f9-4677-98ac-5bc0782c1540 and 0e083ecd-f092-4996-ae93-b1866a1bddfd: 4,732 passed, none failed, and no test
+  that quietly passed for lack of systemd, Podman or SSH on the machine. That covers each executor's own selection and
+  more: the helm's Tensorlake launch tests, the Restart cleanup tests, the startup tests of terminal hosts left over
+  from earlier runs, and the drift tests' private-configuration tests.
+- Locally, the portable brick-test harness
+  (`python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`), recorded run
+  69a626cf-42a8-4fcc-8baa-85e5c53b0de6: 337 passed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format`, `dprint check` on the changed Markdown, and
+  `python3 scripts/check-agents-md.py` (the brick-test runbook is an instruction file): passed.
+
+Reused: nothing. Skipped: the desktop app's and GUI crate's tests, the screenshot comparison and the end-to-end smoke,
+since the only change to the app is two comments; the opt-in tests in those crates, among them the real-agent drift
+tests, which spend real Claude turns; and a live brick test, which needs the Mac test machine and a release candidate.
