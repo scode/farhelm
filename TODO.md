@@ -92,6 +92,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Cmd+W in a terminal tab closes only the tab.** Cmd+W when in a terminal tab should just close the tab, not the
   entire session.
 
+- **Overflowing terminal tabs go invisible.** When there are more terminal tabs than fit visually, they just go
+  invisible beneath the buttons to the right. You can still create new terminals, you can still switch between them
+  using the keyboard, but they're just awkwardly invisible, and you can't see the current terminal that's selected, and
+  we need to fix that.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
