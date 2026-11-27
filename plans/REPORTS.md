@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`brick-test-reopen-and-retry-fixes`](reports/brick-test-reopen-and-retry-fixes.report.md) landed 2026-11-26 in #5023, #5025: Keep the brick test's installer pair retryable after an unavailable P0 check and bind reopen samples to a witnessed app relaunch
 - [`triage-security-and-agent-boundaries`](reports/triage-security-and-agent-boundaries.report.md) landed 2026-11-26 in #5030, #5032, #5035: Execute 5 triage outcomes for agent-request security boundaries, container host pinning, log escaping, and repository-suggestion isolation
 - [`triage-gui-hosts-menus-and-terminal`](reports/triage-gui-hosts-menus-and-terminal.report.md) landed 2026-11-26 in #5033, #5036, #5039: Execute 8 triage outcomes for host refusal remove snapshot, mid-probe skip preferences, Templates footer binding, exited-shell menu Stop and suspend wording, terminal file-link holdback clicks, and reposted notices
 - [`triage-provisioning-podman-and-runtime`](reports/triage-provisioning-podman-and-runtime.report.md) landed 2026-11-26 in #5027, #5031, #5034, #5038: Execute 11 triage outcomes for Uninstall newline safety, Update identity planning, installer lock permissions, Podman output caps, recipe title checks, UI channel drain, upload cancel, and runtime test gaps
