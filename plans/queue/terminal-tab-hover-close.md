@@ -255,3 +255,49 @@ validation, satisfies the acceptance criteria above (including `TODO.md` entry r
 
 Terminal tab close buttons now appear on the left on hover. Previously there was a close button to the right (always
 visible), which was easy to accidentally click instead of the + button used to open a new terminal tab.
+
+## Blocked
+
+Blocked while landing on 2026-11-27 (claim c5fb4b).
+
+### Blocked at landing: a second New terminal press now lands on the new tab's close button
+
+**The feature and the original problem.** In an open session's top row, each shell tab ("Terminal 1", "Terminal 2", ...)
+had a × on its right, and the last tab's × sat right next to `+` (New terminal). You kept closing a terminal tab by
+accident when you meant to open a new one.
+
+**What you decided.** A Ghostty-style tab: each shell tab gets a fixed slot on its left that shows a terminal icon at
+rest and turns into the × when the pointer is over the tab, keyboard focus is on the tab or its ×, its close question is
+open, or its close is under way, with nothing in the row moving when it does. Closing otherwise behaves as before.
+
+**What the plan built.** Exactly that, and it is reviewed and its checks pass (PR #5096, not yet merged).
+
+**What the landing found.** `+` still sits right after the last tab, so pressing it adds a tab where `+` was and moves
+`+` one tab to the right. The new tab's left slot, and so its ×, lands within a pixel of where `+` was (measured in the
+running app). Because the pointer is over that tab, the × also shows, in red. So pressing `+` twice without moving the
+pointer, a natural way to open two terminals, presses the new tab's × the second time. With confirmations on, the new
+tab's close question ("Close Terminal 2?" when Terminal 1 was already open) opens with Confirm close focused, so a
+reflexive Enter ends the shell it just opened. With Skip session confirmations on, that shell ends at once. Before this
+change, the same second press landed on the new tab's name, which was already showing, so it did nothing. This is the
+accident the plan set out to remove, in a new form. Your decision that nothing moves was about hovering; it does not say
+where `+` goes once a tab is added, so this needs a choice.
+
+**The question: how should the second press be kept off the new tab's close button?**
+
+- **(a) Pin `+` at the far right of the tab area.** `+` stays at the right edge of the space the tabs can use, just left
+  of the desktop tunnel pill, so adding a tab never moves it. New tabs fill in from the left, and a new tab's × is never
+  under the pointer. With few tabs open, `+` sits well away from them, with empty space between, so it is a longer reach
+  and has the tunnel pill as a new neighbor. This matches Ghostty. It changes the header's layout and two or three
+  reference screenshots.
+- **(b) Put `+` to the left of the shell tabs**, between the Agent tab and Terminal 1. It stays fixed and close to the
+  tabs, and new tabs appear away from the pointer. But it puts `+` right beside the first shell tab's × slot, a tab's
+  padding away: the same neighbors as the accident you first reported, only with the × hidden until hover. Not what
+  Ghostty does.
+- **(c) Disarm a new tab's × until the pointer leaves it.** Keep the layout; a newly opened tab does not show or accept
+  presses on its × until the pointer has left that tab once, so a second press does nothing, as before. A smaller
+  change, but a hidden rule that applies only right after opening a tab, and the × still ends up under the pointer.
+- **(d) Land as is** and live with the double press. Not recommended: it brings back the accident in a new form.
+
+**Recommendation: (a).** It removes the cause instead of guarding against it, keeps one simple rule (`+` never moves),
+keeps `+` away from every ×, and is what the Ghostty reference does. If you choose (a), the plan goes back to an
+executor to pin `+` in the same PR, keeping the rest of the work as built.
