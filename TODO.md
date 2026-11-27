@@ -106,6 +106,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the question tool is used. It should have generated both. Fix that, and overall talk about related tweaks during
   planning.
 
+- **Control ntfy urgency by schedule.** Allow controlling ntfy urgency by schedule.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
