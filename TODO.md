@@ -113,45 +113,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Control ntfy urgency by schedule.** Allow controlling ntfy urgency by schedule. Plan:
   `plans/queue/ntfy-quiet-hours-urgency.md`.
 
-### Must run attended
-
-- **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
-  started with `cursor-agent -- "$prompt"`, where the prompt starts with `--` and includes a newline. Run
-  `python3 -B scripts/run-harness-drift.py --no-upgrade --category initial_prompt --harness cursor` with an existing
-  Cursor login. Verify the fresh turn and the named turn on the chat that the case now allocates and seeds.
-
-- **Verify launch prompts when reopening OpenCode conversations.** OpenCode 1.19.6 answered the fresh launch prompt.
-  `opencode --session "$id" "--prompt=$prompt"` reopened that conversation and showed the earlier reply and an empty
-  composer. It never showed the recall prompt or its reply. Reproduce with
-  `python3 -B scripts/run-harness-drift.py --no-upgrade --category initial_prompt --harness opencode`. The tested
-  release's TUI opens the named session without passing along the startup prompt. Check a release that includes the
-  upstream fix.
-  [OpenCode 1.19.6 startup code](https://github.com/anomalyco/opencode/blob/v1.19.6/packages/tui/src/app.tsx#L449-L469)
-
-- **Verify OpenRouter reasoning effort with credentials.** The new reasoning effort checks for Goose 1.60.2, Pi 1.6.0
-  and OMP 19.1.1 stopped before launch because `OPENROUTER_API_KEY` was missing. Run
-  `python3 -B scripts/run-harness-drift.py --no-upgrade --category reasoning_effort` with the key to exercise Goose's
-  `GOOSE_THINKING_EFFORT` and the two `--thinking` flags. Confirm that Pi and OMP display each requested effort and that
-  at least one enabled effort per CLI completes a turn. Goose 1.60.2 shows the chosen provider and model in its startup
-  banner and status, so its terminal can confirm the launch and reply. Verifying the effective provider effort for Goose
-  needs other evidence.
-
-- **Finish live Cursor model and permission verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log
-  in...” with both `--model auto` and `--model composer-2.5`. Reproduce with
-  `python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection --harness cursor`. Run with an
-  existing Cursor login and identify the active model field. The older authenticated screen fixture displays a bare
-  label such as `GPT-5.6 Luna 272K Low` beside the composer. With the same login, run
-  `python3 -B scripts/run-harness-drift.py --no-upgrade --category permission_modes --harness cursor` to confirm YOLO
-  and Custom launches. Both of those starts also reached the login screen. The `named_conversation` category's Cursor
-  case, which seeds a chat from `cursor-agent create-chat` and reopens it by ID, also stopped at the login screen and
-  still needs a run with the same login.
-
-- **Finish OpenRouter and saved-default model verification.** Goose 1.60.2, Pi 1.6.0 and OMP 19.1.1 opened with an
-  active model when started without `--provider` or `--model`. Compare the active choice with the saved provider and
-  model to catch silent fallbacks. Run the named cases with `OPENROUTER_API_KEY` and verify both fields for
-  `--provider openrouter --model <id>`. Pi 1.6.0 can omit the provider in its footer, including on an OpenRouter-only
-  setup, so that case may need a provider-bearing readout.
-
 ## Plan follow-ups
 
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
@@ -276,18 +237,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `--no-daemon` keeps hooks and commands inside the session's process tree and still launches cleanly when hooks are
   disabled, verify Cursor's default launch without a permission flag ("Agent's own setting"), and send a real prompt to
   Cursor and OpenCode to confirm interactive turns work under Farhelm's terminal host (today both stop at the initial
-  TUI or trust screen).
+  TUI or trust screen). Plan: `plans/queue/drift-base-isolation-and-turns.md`.
 
 - **Drift tests: opt-in persistent hook installation for Grok and Antigravity.** Using isolated config directories so
   the real user home stays untouched, verify that the exact hook files Farhelm installs for Grok (`hooks/farhelm.json`)
   and Antigravity (`plugins/farhelm/{plugin.json,hooks.json}`) are discovered and invoked by the real CLIs inside
-  Farhelm to capture conversations, and exit cleanly and silently when the CLIs run outside Farhelm.
+  Farhelm to capture conversations, and exit cleanly and silently when the CLIs run outside Farhelm. Plan:
+  `plans/queue/drift-persistent-hooks.md`.
 
 - **Drift tests: in-session conversation rotation.** Wire the existing standalone Claude `/clear`, Codex `/new`, and
   Codex `/clear` checks into the drift runner (running Codex `/clear` end-to-end through Farhelm's own hook so pending
   withdrawal and `Stop` confirmation are tested), and add live rotation coverage for Muse (`/clear`, `/new`), Pi
   (`/new`, `/fork`, `/resume`), OMP (`/new`, `/fork`, `/resume`), Grok (`/new`), and Antigravity, proving Restart
-  resumes the rotated conversation.
+  resumes the rotated conversation. Plan: `plans/queue/drift-conversation-rotation.md`.
 
 - **Drift tests: subagent and nested-agent report rejection.** Wire Claude's standalone shelled-out `claude -p` test
   into the drift runner and add live coverage for both native subagents and shelled-out nested agents across all six
@@ -302,7 +264,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Drift tests: permission-mode status-line footer detection.** Verify Farhelm's live screen-footer classifier reports
   YOLO vs non-YOLO accurately on both YOLO and Guarded launches for Claude, Grok, and Muse, and YOLO on `--force`
-  launches for Cursor, catching vendor footer wording or layout drift.
+  launches for Cursor, catching vendor footer wording or layout drift. Plan: `plans/queue/drift-permission-footer.md`.
 
 - **Drift tests: running-agent prompt delivery via bracketed paste.** Verify live Claude and Codex TUIs enable terminal
   bracketed paste mode, and that Farhelm's bracketed-paste plus Enter (Claude) or Tab (Codex) submits cleanly at idle,
