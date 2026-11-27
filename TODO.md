@@ -77,24 +77,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Let agents enable Tailscale when adding a host.** Make it possible for agents to support directly enabling tailscale
   when adding a host. Also audit for any other gaps between GUI and agent capabilities when adding or removing hosts.
-
-- **Let an agent that adds a host start YOLO sessions on it.** We need to make it practical for an agent that adds a
-  host to be granted permissions to then start YOLO sessions on it. Details TBD. Circumstances that prompted this: an
-  agent was asked to add four new worker hosts and start a Claude Code session in YOLO mode, with a fresh checkout of
-  the Farhelm repository, on each. It added the first host (Farhelm accepted it through the host-add dialog, installed
-  it, and the agent waited for it to connect), then tried to create the session. Farhelm refused the YOLO launch and
-  started nothing: the new host "asks before YOLO launches, so an agent may not start a YOLO launch … To let agents do
-  this, turn on 'Start YOLO sessions without asking' in [the host]'s settings". The agent noted this is a per-host
-  setting it cannot override, so it had to stop and ask the user to turn the setting on for that host and then tell it
-  to retry, and to do the same for each of the other three hosts once added, or it would hit the same refusal on each.
-  Its only other option was guarded mode (Claude's auto mode), which it can start without the setting, but the user had
-  asked for YOLO and the existing executors run that way, so it waited.
+  Plan: `plans/queue/agent-host-tailscale-parity.md`.
 
 - **Shift-cmd-click a file to copy it to the clipboard.** Add a "click to copy into clipboard" for files on hover. So
-  today we have click to download, cmd-click to open; add a shift-cmd-click to copy to clipboard.
+  today we have click to download, cmd-click to open; add a shift-cmd-click to copy to clipboard. Plan:
+  `plans/queue/shift-cmd-click-copy-file.md`.
 
 - **Shift-cmd-v to paste via file upload.** Shift-cmd-v to "paste via file upload" so text can be pasted but instead of
   directly pasted, upload a file to a securely allocated temporary file and paste the path to it into the terminal.
+  Plan: `plans/queue/shift-cmd-v-paste-upload.md`.
 
 - **Make forked and app-server Codex conversations resumable.** Two gaps keep Restart unavailable for Codex sessions.
   First, Farhelm refuses Codex's `fork` SessionStart source. Codex's "This conversation is open in another app" screen
@@ -103,7 +94,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through an app-server (the shared daemon, and probably the desktop app). Those conversations can never become
   resumable in Farhelm, even once nothing else holds them. Accept both. Do the `fork` fix first, and the `vscode` fix as
   its own change because it widens which conversations Farhelm captures. The upstream research and the incident's
-  evidence are in `lore/2026-11-26-codex-fork-and-vscode-session-sources.md`.
+  evidence are in `lore/2026-11-26-codex-fork-and-vscode-session-sources.md`. Plan:
+  `plans/queue/codex-fork-and-vscode-resume.md`.
 
 - **Keep the new-terminal button reachable when terminal tabs overflow.** Opening more terminals next to an agent than
   will "fit" just seems to overflow "under" the buttons to the right and you can't access the + button anymore to add
@@ -264,6 +256,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   without showing the accepted removal.
 
 ## Near term
+
+- **Let an agent that adds a host start YOLO sessions on it.** We need to make it practical for an agent that adds a
+  host to be granted permissions to then start YOLO sessions on it. Details TBD. Circumstances that prompted this: an
+  agent was asked to add four new worker hosts and start a Claude Code session in YOLO mode, with a fresh checkout of
+  the Farhelm repository, on each. It added the first host (Farhelm accepted it through the host-add dialog, installed
+  it, and the agent waited for it to connect), then tried to create the session. Farhelm refused the YOLO launch and
+  started nothing: the new host "asks before YOLO launches, so an agent may not start a YOLO launch … To let agents do
+  this, turn on 'Start YOLO sessions without asking' in [the host]'s settings". The agent noted this is a per-host
+  setting it cannot override, so it had to stop and ask the user to turn the setting on for that host and then tell it
+  to retry, and to do the same for each of the other three hosts once added, or it would hit the same refusal on each.
+  Its only other option was guarded mode (Claude's auto mode), which it can start without the setting, but the user had
+  asked for YOLO and the existing executors run that way, so it waited.
 
 - **Run plan executors and the landing monitor on other hosts.** Phase 1 of the design in
   https://snippets.scode.org/s/farhelm-records-on-artifacts-sketch/ is done: the agents' records live in the
