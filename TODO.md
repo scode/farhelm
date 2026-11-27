@@ -187,15 +187,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Its only other option was guarded mode (Claude's auto mode), which it can start without the setting, but the user had
   asked for YOLO and the existing executors run that way, so it waited.
 
-- **Restarting a Claude session before its first turn fails.** Claude reports its conversation id when it starts, so
-  Restart is offered a few seconds after launch, but Claude 2.1.332 saves nothing until the first prompt is submitted.
-  Restart then runs `claude --resume <id>`, which exits with "No conversation found with session ID", leaving an empty
-  terminal. Reproduced on 2026-11-26 on two Linux hosts, one of them a remote worker, right after a Replace. Fix it by
-  checking, at Restart, the conversation file Claude's report names: resume it when it exists, and start the session
-  fresh when it does not, since there is nothing to lose. Restart stays available from launch, with no watching for the
-  file. The file appeared about a second after the first prompt was submitted, long before the turn finished, so Restart
-  resumes from then on. Plan: `plans/queue/claude-restart-before-first-turn.md`.
-
 - **Run plan executors and the landing monitor on other hosts.** Phase 1 of the design in
   https://snippets.scode.org/s/farhelm-records-on-artifacts-sketch/ is done: the agents' records live in the
   `agent-records` Artifacts repo behind `cargo xtask records` (`.agents/agent-records.md`). What remains is phase 2:

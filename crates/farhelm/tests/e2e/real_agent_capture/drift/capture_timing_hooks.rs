@@ -55,11 +55,14 @@ async fn early_capture(
 }
 
 /// A pre-prompt capture needs both a resumable row and acknowledgment of that identity before any input is sent.
+/// `previous` is an identity that does not count, for a session that keeps an earlier capture across a Restart: the
+/// new agent must report a conversation of its own, under another runtime id.
 async fn startup_capture(
     env: &DriftEnv<'_>,
     term: &mut Terminal<'_>,
     id: &str,
     log: &Path,
+    previous: Option<&str>,
 ) -> Result<String, DriftError> {
     let deadline = tokio::time::Instant::now() + START_LIMIT;
     loop {
@@ -70,8 +73,15 @@ async fn startup_capture(
                 anyhow::anyhow!("the session vanished before its startup capture")
             })?;
         let log = std::fs::read_to_string(log).unwrap_or_default();
+        let last = (
+            snapshot.captured_conversation.clone(),
+            snapshot.restart_offer,
+        );
         if snapshot.restart_offer == RestartOffer::Resume
             && let Some(identity) = snapshot.captured_conversation
+            && previous.is_none_or(|previous| {
+                reported_runtime_identity(previous) != reported_runtime_identity(&identity)
+            })
             && acknowledged_reports(&log).any(|candidate| {
                 candidate.identity().is_some_and(|id| {
                     hook_log_names_identity(id, &reported_runtime_identity(&identity))
@@ -81,8 +91,14 @@ async fn startup_capture(
             return Ok(identity);
         }
         if tokio::time::Instant::now() >= deadline {
+            // Say which part was missing: the capture (still the earlier one, when `previous` is set), the Resume
+            // offer, or an acknowledgment of the captured id in the hook log.
+            let tail: Vec<_> = log.lines().rev().take(8).collect();
             return Err(anyhow::anyhow!(
-                "no accepted resumable conversation arrived before input\n{}",
+                "no accepted resumable conversation arrived before input (last capture {:?}, offer {:?}, \
+                 earlier capture {previous:?}, recent hook log {tail:?})\n{}",
+                last.0,
+                last.1,
                 term.diagnostics()
             )
             .into());
@@ -123,6 +139,10 @@ struct HarnessChecks {
     /// The hooks-off session goes on to Restart onto a conversation captured with hooks on, which Restart must keep,
     /// with the reporter still off and no hook report written.
     hooks_off_resume: bool,
+    /// The agent reports its conversation as it starts but saves nothing until the first prompt, so the case presses
+    /// Restart at the idle composer, before any prompt, and requires the new agent to come up fresh (SPEC.md,
+    /// Restart). It spends no turn: the first turn then runs on the restarted agent.
+    restart_before_prompt: bool,
 }
 
 /// Each harness states its extra checks, so a newly added one has to decide them rather than skip them by default.
@@ -134,6 +154,7 @@ fn checks(harness: LaunchHarness) -> HarnessChecks {
         title_slot_prelude: false,
         hooks_off_child_words: &[],
         hooks_off_resume: false,
+        restart_before_prompt: false,
     };
     match harness {
         // Antigravity's hook answers on stdout with `{}`, which the CLI must consume without rendering.
@@ -155,7 +176,13 @@ fn checks(harness: LaunchHarness) -> HarnessChecks {
             hooks_off_resume: true,
             ..none
         },
-        Claude | Muse | Grok | Pi | Cursor | OpenCode | Bash | Zsh | Custom => none,
+        // Claude reports its id at start but writes the transcript only once a prompt is submitted (observed with
+        // Claude Code 2.1.332 on 2026-11-26).
+        Claude => HarnessChecks {
+            restart_before_prompt: true,
+            ..none
+        },
+        Muse | Grok | Pi | Cursor | OpenCode | Bash | Zsh | Custom => none,
     }
 }
 
@@ -373,6 +400,74 @@ async fn check_turn_reports(
     }
 }
 
+/// Restart at the idle composer before any prompt and require a fresh agent. The capture must name a transcript that
+/// does not exist yet (the premise that makes this the case under test); the Restart must start a new generation whose
+/// agent reaches its composer without printing Claude's failed-resume error, and that agent must report its own
+/// conversation before input as the first one did, under a new id (the session keeps the old capture across the
+/// Restart, so the old report must not count). Returns the new generation's terminal.
+async fn restart_before_prompt<'a>(
+    env: &DriftEnv<'a>,
+    profile: &Harness,
+    id: &str,
+    log: &Path,
+) -> Result<Terminal<'a>, DriftError> {
+    let before = env
+        .sup
+        .session_snapshot(id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("the session vanished before the pre-prompt Restart"))?;
+    let stored = before
+        .captured_conversation
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("no capture before the pre-prompt Restart"))?;
+    let transcript = parse_locator(LocatorVendor::Claude, stored)
+        .map_err(|error| {
+            anyhow::anyhow!("the capture carries no reported transcript ({error}): {stored}")
+        })?
+        .session_file
+        .ok_or_else(|| anyhow::anyhow!("the capture's locator names no transcript: {stored}"))?;
+    if Path::new(&transcript).exists() {
+        return Err(anyhow::anyhow!(
+            "the premise failed: Claude saved {transcript} before any prompt, so this Restart would resume"
+        )
+        .into());
+    }
+    env.client.restart_session(id, true).await?;
+    let after = env
+        .sup
+        .session_snapshot(id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("the pre-prompt Restart lost the session"))?;
+    if after.generation <= before.generation {
+        return Err(
+            anyhow::anyhow!("the pre-prompt Restart did not start a new generation").into(),
+        );
+    }
+    // No turn has run yet, so a sign-in screen here is a missing prerequisite, not a failure.
+    let mut term = Terminal::attach(env.sup, env.client, id, false).await?;
+    // A Restart that resumed instead would show Claude's failed-resume error, and Claude exits on it before its
+    // composer appears, so the error is named where readiness fails.
+    if let Err(error) = term.ready(profile, TrustPolicy::AutoAnswer, false).await {
+        if term
+            .diagnostics()
+            .to_lowercase()
+            .contains("no conversation found")
+        {
+            return Err(anyhow::anyhow!(
+                "the restarted Claude tried to resume a conversation it never saved\n{}",
+                term.diagnostics()
+            )
+            .into());
+        }
+        return Err(error);
+    }
+    // The restarted process must be the start command. 2.1.332 exits on `--resume` of an unknown id, which `ready`
+    // catches, but a later Claude that started a new conversation there instead would pass every other check here.
+    check_child_lacks_words(&term, &["--resume", &reported_runtime_identity(stored)])?;
+    startup_capture(env, &mut term, id, log, Some(stored)).await?;
+    Ok(term)
+}
+
 /// Exercise the expected pre-input boundary, then the first real turn under the active reporter.
 async fn enabled(
     harness: LaunchHarness,
@@ -398,13 +493,25 @@ async fn enabled(
                 let log = env.state.join("hook-log").join(format!("{id}.log"));
                 let premature = match readiness {
                     RestartReadiness::AtStart | RestartReadiness::ShortlyAfterStart => {
-                        startup_capture(&env, &mut term, id, &log).await?;
+                        startup_capture(&env, &mut term, id, &log, None).await?;
                         println!("captured before the first prompt");
+                        if checks(harness).restart_before_prompt {
+                            term = restart_before_prompt(&env, profile, id, &log).await?;
+                            println!("restarted before the first prompt; the new agent started fresh");
+                        }
                         None
                     }
                     RestartReadiness::FirstPrompt
                     | RestartReadiness::FirstPromptWithHooks(_)
                     | RestartReadiness::FirstReply => {
+                        // The pre-prompt Restart needs a capture before the prompt; a harness that stops reporting
+                        // at start must not silently skip it.
+                        if checks(harness).restart_before_prompt {
+                            return Err(anyhow::anyhow!(
+                                "the pre-prompt Restart check is set, but this harness reports only after input"
+                            )
+                            .into());
+                        }
                         let early = early_capture(&env, &mut term, id, false, false).await?;
                         if let Some(screen) = &early {
                             let reports = std::fs::read_to_string(&log).unwrap_or_default();
@@ -477,9 +584,9 @@ async fn wait_for_disabled_reply(
     }
 }
 
-/// The host revalidates the child against its pinned kernel start identity. Check adjacent argument words and keep
-/// the actual command and environment private even when the check fails.
-fn check_child_words(term: &Terminal<'_>, file: &str, words: &[&str]) -> anyhow::Result<()> {
+/// Read `/proc/<child>/<file>` of the owned CLI child, refusing the read if the host's pinned child (checked against
+/// its kernel start identity) changed while it ran, so the bytes always belong to the process the host tracks.
+fn read_child_proc(term: &Terminal<'_>, file: &str) -> anyhow::Result<Vec<u8>> {
     let child = term
         .host
         .child_root()
@@ -489,6 +596,13 @@ fn check_child_words(term: &Terminal<'_>, file: &str, words: &[&str]) -> anyhow:
         term.host.child_root() == Some(child),
         "the CLI child changed during the process read"
     );
+    Ok(bytes)
+}
+
+/// The host revalidates the child against its pinned kernel start identity. Check adjacent argument words and keep
+/// the actual command and environment private even when the check fails.
+fn check_child_words(term: &Terminal<'_>, file: &str, words: &[&str]) -> anyhow::Result<()> {
+    let bytes = read_child_proc(term, file)?;
     let entries: Vec<_> = bytes.split(|byte| *byte == 0).collect();
     anyhow::ensure!(
         entries.windows(words.len()).any(|window| {
@@ -499,6 +613,21 @@ fn check_child_words(term: &Terminal<'_>, file: &str, words: &[&str]) -> anyhow:
         }),
         "the owned CLI child did not receive the expected {file} words"
     );
+    Ok(())
+}
+
+/// The owned CLI child's command line holds none of `words` as a whole argument. Like [`check_child_words`], the
+/// child is revalidated around the read and the command line stays out of the error.
+fn check_child_lacks_words(term: &Terminal<'_>, words: &[&str]) -> anyhow::Result<()> {
+    let bytes = read_child_proc(term, "cmdline")?;
+    for word in words {
+        anyhow::ensure!(
+            !bytes
+                .split(|byte| *byte == 0)
+                .any(|entry| entry == word.as_bytes()),
+            "the restarted CLI child was given {word:?}: it resumed rather than starting fresh"
+        );
+    }
     Ok(())
 }
 
@@ -680,6 +809,25 @@ fn capture_timing_covers_every_tracked_builtin_agent() {
         assert!(
             HARNESSES.contains(&harness),
             "missing capture case for {harness:?}"
+        );
+    }
+}
+
+/// The pre-prompt Restart needs a capture before any input, so its flag is only meaningful for a harness that reports
+/// at or shortly after start; set elsewhere, the live case fails at run time, which this catches without a vendor CLI.
+/// Specified: every built-in harness with the flag set reports at or shortly after start.
+#[farhelm_testtrace::test]
+fn the_pre_prompt_restart_is_set_only_where_capture_comes_before_input() {
+    for harness in LaunchHarness::BUILT_INS.iter().copied() {
+        if !checks(harness).restart_before_prompt {
+            continue;
+        }
+        assert!(
+            matches!(
+                harness.agent_kind().restart_readiness(),
+                Some(RestartReadiness::AtStart | RestartReadiness::ShortlyAfterStart)
+            ),
+            "{harness:?} sets the pre-prompt Restart but does not report before input"
         );
     }
 }
