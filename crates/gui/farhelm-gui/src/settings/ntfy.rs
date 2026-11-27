@@ -1,5 +1,12 @@
-//! Settings → Notifications, its ntfy alerts: whether the helm sends an alert when a session waits for the user, and the
-//! ntfy server, topic, access token and priority it sends with.
+//! Settings → Notifications, its two helm-configured cards: **Blocked agents** (whether the agents Farhelm starts are
+//! asked to run `farhelm agent notify` when they are blocked, and what counts as blocked) and **ntfy alerts** (whether
+//! the helm sends an alert when a session waits for the user or says it is blocked, and the ntfy server, topic, access
+//! token and priority it sends with).
+//!
+//! Both cards are one form over one helm configuration: the instruction choice is stored with the ntfy settings
+//! (`farhelm_proto::ntfy::Settings::ask_agents_when_blocked`), so it shares their read, their one Save and their
+//! routes, and needs no second form or stored row. It is drawn as a card of its own because it works with or without
+//! ntfy: a blocked agent's session shows as waiting in the session list whether or not any alert goes out.
 //!
 //! SPEC.md, "Session list" (the Notifications sentences) and "Status" (Ntfy alerts); SPEC_impl.md, "Ntfy waiting
 //! alerts". Ported from the old app's `NtfySettings` (`ntfy_settings.rs`) with its words and its look from the
@@ -95,6 +102,10 @@ struct Form {
     enabled: bool,
     notify_waiting: bool,
     notify_blocked: bool,
+    /// Whether agents are asked to notify when blocked, as the form shows it: the stored choice, or, for a
+    /// configuration saved before the choice existed, what that configuration did
+    /// ([`Settings::asks_agents_when_blocked`]).
+    ask_agents: bool,
     /// What counts as blocked, as typed; empty means Farhelm's default ([`DEFAULT_BLOCKED_CRITERIA`]).
     criteria: String,
     server_url: String,
@@ -111,6 +122,7 @@ impl Form {
             enabled: stored.enabled,
             notify_waiting: stored.notify_waiting,
             notify_blocked: stored.notify_blocked,
+            ask_agents: stored.asks_agents_when_blocked(),
             criteria: stored.custom_blocked_criteria.clone().unwrap_or_default(),
             server_url: stored.server_url.clone(),
             topic: stored.topic.clone(),
@@ -139,6 +151,9 @@ impl Form {
             // Always sent, so emptying the field is how Save goes back to the default: the helm reads text that
             // normalizes to nothing as "use Farhelm's".
             custom_blocked_criteria: Some(self.criteria.clone()),
+            // Always sent too, so the first save from this form turns an upgraded configuration's implied choice
+            // into a stored one, and later changes to the ntfy switches no longer move it.
+            ask_agents_when_blocked: Some(self.ask_agents),
         }
     }
 
@@ -220,16 +235,23 @@ fn and_list(names: &[&str]) -> String {
     }
 }
 
-/// What the blocked switch covers, shown under it: the alert an agent asks for with `farhelm agent notify`, while the
-/// session list shows that session as waiting whatever the switch says.
-pub(super) const BLOCKED_HELP: &str = "Sent when an agent runs farhelm agent notify. The session list shows that \
-     session as waiting whether or not this is on.";
+/// What the ntfy blocked switch covers, shown under it: the alert an agent asks for with `farhelm agent notify`,
+/// while the session list shows that session as waiting whatever the switch says. It points at the Blocked agents
+/// card, since this switch alone no longer asks Farhelm's agents to run the command.
+pub(super) const BLOCKED_HELP: &str = "Sent when an agent runs farhelm agent notify. Ask agents to notify when \
+     blocked, above, decides whether Farhelm asks its agents to. The session list shows that session as waiting \
+     whether or not this is on.";
+
+/// The Blocked agents card's note, under its heading: what a blocked agent's report does in the app, which is the same
+/// with or without ntfy.
+pub(super) const BLOCKED_INTRO: &str = "When an agent says it is blocked, its session shows as waiting until you \
+     switch to it or type into it.";
 
 /// The criteria field's help: what it is for and what leaving it empty does.
 pub(super) const CRITERIA_HELP: &str = "Your own description of when an agent should tell you it is blocked; leave it \
      empty to use Farhelm's, shown below";
 
-/// What the blocked switch asks of the agents Farhelm starts, worded from each built-in agent's
+/// What "Ask agents to notify when blocked" asks of the agents Farhelm starts, worded from each built-in agent's
 /// `AgentKind::supports_instruction_injection` (pinned by the supervisor against what each launch actually carries), so
 /// the list cannot drift from the agents that really get the instruction.
 pub(super) fn blocked_agents() -> String {
@@ -239,8 +261,8 @@ pub(super) fn blocked_agents() -> String {
         .map(|harness| harness.display_name())
         .collect();
     format!(
-        "Farhelm asks {} to run it when they are blocked, in sessions started or restarted after you save. Other \
-         agents only do so if you tell them to.",
+        "Farhelm asks {} to run farhelm agent notify when they are blocked, in sessions started or restarted after \
+         you save. Other agents only do so if you tell them to.",
         and_list(&named)
     )
 }
@@ -252,8 +274,10 @@ pub(super) const UNSAVED_LINE: &str =
     "Unsaved changes: alerts and Send test use the saved settings until you Save.";
 /// [`UNSAVED_LINE`]'s counterpart for saved settings with the master switch off.
 pub(super) const OFF_LINE: &str = "ntfy alerts are off, so none are sent. Send test still sends one: a test arriving does not mean alerts are on.";
-/// [`UNSAVED_LINE`]'s counterpart for saved settings with the waiting switch off.
-pub(super) const WAITING_OFF_LINE: &str = "Waiting-for-answer alerts are off. Send test still sends one, but nothing is sent when a session waits.";
+/// [`UNSAVED_LINE`]'s counterpart for saved settings with both event switches off, the waiting one and the blocked one:
+/// then no session sends an alert, whatever the master switch says.
+pub(super) const EVENTS_OFF_LINE: &str = "Waiting and blocked alerts are both off. Send test still sends one, but no \
+     session sends an alert.";
 
 /// The form's text fields, each bound to its part of the [`Form`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -261,13 +285,14 @@ pub(super) enum Field {
     Server,
     Topic,
     Token,
-    /// What counts as blocked, drawn under the blocked switch rather than with the connection fields.
+    /// What counts as blocked, drawn in the Blocked agents card under its switch rather than with the connection
+    /// fields.
     Criteria,
 }
 
 impl Field {
-    /// In drawing order, which Settings search lists its results in: the criteria field sits under the blocked
-    /// switch, above the connection fields.
+    /// In drawing order: the criteria field, in the Blocked agents card above the ntfy alerts card, then the connection
+    /// fields. Settings search lists the criteria with its card's switch.
     pub(super) const ALL: [Field; 4] = [Field::Criteria, Field::Server, Field::Topic, Field::Token];
 
     /// The text input drawn for this field.
@@ -324,6 +349,9 @@ pub(super) enum Switch {
     /// Alerts when an agent says it is blocked (`farhelm agent notify`), under the master switch.
     Blocked,
     ClearToken,
+    /// Whether the agents Farhelm starts are asked to notify when blocked, in the Blocked agents card: independent of
+    /// the master switch.
+    AskAgents,
 }
 
 impl Switch {
@@ -350,6 +378,12 @@ impl Switch {
                 "Clear saved token",
                 "Remove the saved access token when you Save",
             ),
+            Self::AskAgents => (
+                "blocked-ask-agents",
+                "Ask agents to notify when blocked",
+                "Ask the agents Farhelm starts to run farhelm agent notify instead of stopping silently; Save \
+                 applies it",
+            ),
         }
     }
 }
@@ -362,6 +396,7 @@ pub(super) struct NtfyAlerts {
     waiting_focus: gpui::FocusHandle,
     blocked_focus: gpui::FocusHandle,
     clear_focus: gpui::FocusHandle,
+    ask_focus: gpui::FocusHandle,
     /// What the helm last said it stores: the read's answer, then each done save's. `None` until the read answers.
     stored: Option<Settings>,
     /// Why the last read failed, until a read answers.
@@ -401,6 +436,7 @@ impl NtfyAlerts {
             waiting_focus: cx.focus_handle().tab_stop(true),
             blocked_focus: cx.focus_handle().tab_stop(true),
             clear_focus: cx.focus_handle().tab_stop(true),
+            ask_focus: cx.focus_handle().tab_stop(true),
             stored: None,
             unreadable: None,
             form: Draft::load(Form::over(&Settings::default())),
@@ -504,6 +540,7 @@ impl NtfyAlerts {
             Switch::Waiting => &self.waiting_focus,
             Switch::Blocked => &self.blocked_focus,
             Switch::ClearToken => &self.clear_focus,
+            Switch::AskAgents => &self.ask_focus,
         }
     }
 
@@ -586,8 +623,9 @@ impl NtfyAlerts {
             Some(UNSAVED_LINE)
         } else if !stored.enabled {
             Some(OFF_LINE)
-        } else if !stored.notify_waiting {
-            Some(WAITING_OFF_LINE)
+        } else if !stored.notify_waiting && !stored.notify_blocked {
+            // Either switch alone still lets its alerts go out, so only both off means nothing is sent.
+            Some(EVENTS_OFF_LINE)
         } else {
             None
         }
@@ -828,6 +866,7 @@ impl NtfyAlerts {
             Switch::Waiting => on != stored.notify_waiting,
             Switch::Blocked => on != stored.notify_blocked,
             Switch::ClearToken => on,
+            Switch::AskAgents => on != stored.asks_agents_when_blocked(),
         });
         let caption = super::editing::caption(label, edited.then(|| theme::palette(cx)));
         let copy = match switch {
@@ -838,8 +877,9 @@ impl NtfyAlerts {
                 waiting_agents(),
                 cx,
             )),
-            Switch::Blocked => card::switch_copy(caption, BLOCKED_HELP, cx).child(card::help(
-                "ntfy-blocked-agents",
+            Switch::Blocked => card::switch_copy(caption, BLOCKED_HELP, cx),
+            Switch::AskAgents => card::switch_copy(caption, "", cx).child(card::help(
+                "blocked-agents-named",
                 blocked_agents(),
                 cx,
             )),
@@ -1064,7 +1104,35 @@ impl Render for NtfyAlerts {
             }))
             .children(saved)
             .children(tested);
-        div()
+        // The Blocked agents card: what the agents Farhelm starts are told, which holds with or without ntfy.
+        let blocked_agents = div()
+            .id("blocked-agents")
+            .role(Role::Region)
+            .aria_label("Blocked agents")
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .w_full()
+            .min_w_0()
+            .child(
+                card::heading("Blocked agents", Some(BLOCKED_INTRO), None, cx)
+                    .id("blocked-agents-heading")
+                    .role(Role::Heading)
+                    .aria_label("Blocked agents"),
+            )
+            .child(card::rows(
+                [
+                    self.switch(
+                        Switch::AskAgents,
+                        form.ask_agents,
+                        |form, on| form.ask_agents = on,
+                        cx,
+                    ),
+                    self.criteria_row(palette, cx),
+                ],
+                cx,
+            ));
+        let ntfy_alerts = div()
             .id("ntfy-alerts")
             .role(Role::Region)
             .aria_label("ntfy alerts")
@@ -1099,7 +1167,6 @@ impl Render for NtfyAlerts {
                         |form, on| form.notify_blocked = on,
                         cx,
                     ),
-                    self.criteria_row(palette, cx),
                     fields,
                     self.switch(
                         Switch::ClearToken,
@@ -1110,7 +1177,16 @@ impl Render for NtfyAlerts {
                     test,
                 ],
                 cx,
-            ))
+            ));
+        // Two cards, spaced as the section spaces its other groups, though one view draws both.
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(super::SECTION_GAP))
+            .w_full()
+            .min_w_0()
+            .child(blocked_agents)
+            .child(ntfy_alerts)
     }
 }
 

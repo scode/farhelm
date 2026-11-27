@@ -44,9 +44,11 @@ localhost links.
 ## Notifications
 
 [Sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and
-[ntfy alerts](/docs/using/session-list/#ntfy-alerts). Use the play button beside any sound to hear it once. **Check for
-announcements** lets Farhelm look for announcements from the project when it starts and every 12 hours; new ones show up
-in the bell. Turn it off to stop those checks. Announcements you have already seen stay under **?** → **Announcements**.
+[ntfy alerts](/docs/using/session-list/#ntfy-alerts). **Blocked agents** decides whether the agents Farhelm starts are
+asked to tell you when they are blocked, with or without ntfy. Use the play button beside any sound to hear it once.
+**Check for announcements** lets Farhelm look for announcements from the project when it starts and every 12 hours; new
+ones show up in the bell. Turn it off to stop those checks. Announcements you have already seen stay under **?** →
+**Announcements**.
 
 ## Credentials
 

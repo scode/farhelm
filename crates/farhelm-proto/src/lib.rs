@@ -1751,9 +1751,9 @@ impl AgentKind {
     }
 
     /// Whether Farhelm delivers launch-time instructions to this agent (the `farhelm agent instructions` pointer and,
-    /// with blocked alerts on, the blocked-agent instruction). The supervisor's test
+    /// while agents are asked to notify when blocked, the blocked-agent instruction). The supervisor's test
     /// `instruction_delivery_follows_the_start_expansion` pins this against what each integration's start expansion
-    /// actually carries, and Settings words the blocked switch's supported agents from it.
+    /// actually carries, and Settings names the agents under "Ask agents to notify when blocked" from it.
     #[warn(clippy::wildcard_enum_match_arm)]
     pub const fn supports_instruction_injection(self) -> bool {
         match self {
@@ -3494,9 +3494,9 @@ pub enum ControlMsg {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         setup_persistent_hooks: bool,
         /// Instructions the helm wants the agent given at this start, beside the `farhelm agent instructions` pointer
-        /// (today the blocked-agent instruction, while blocked alerts are on). This launch's only: never stored with
-        /// the session and never part of the idempotency fingerprint, so a later Restart gets the helm's current
-        /// choice. Delivered only to agents whose integration carries instructions, and not when
+        /// (today the blocked-agent instruction, while agents are asked to notify when blocked). This launch's only:
+        /// never stored with the session and never part of the idempotency fingerprint, so a later Restart gets the
+        /// helm's current choice. Delivered only to agents whose integration carries instructions, and not when
         /// `FARHELM_AGENT_INSTRUCTIONS` turns them off.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         extra_instructions: Option<String>,

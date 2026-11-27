@@ -4132,7 +4132,7 @@ fn close_save_stops_at_the_first_failure_and_shows_that_page(cx: &mut TestAppCon
         label_of(cx, "prompt").as_deref(),
         Some("Save changes before closing?")
     );
-    assert!(painted(cx).contains("Unsaved: ntfy alerts, Checkout settings"));
+    assert!(painted(cx).contains("Unsaved: Blocked agents and ntfy alerts, Checkout settings"));
     click(cx, "prompt-confirm");
     let (alerts, _) = one_put(&mut helm, "/api/ntfy-alerts");
     helm.reply(alerts, 400, Some(json!("fixture: cannot save alerts")));
@@ -4506,6 +4506,7 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
 ) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     let read = show_notifications(&mut helm, cx);
+    into_view(cx, "ntfy-enabled");
     click(cx, "ntfy-enabled");
     assert_eq!(sent(&mut helm), [], "a form not read yet takes no edit");
     assert_eq!(available(cx, "ntfy-enabled"), Some(false));
@@ -4527,7 +4528,7 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
     let expected = json!({ "enabled": false, "server_url": "https://ntfy.example", "topic": "saved-more",
                                "priority": "high", "token": null, "notify_waiting": true,
                                "notify_blocked": false,
-                           "custom_blocked_criteria": "" });
+                           "custom_blocked_criteria": "", "ask_agents_when_blocked": false });
     assert_eq!(body, expected);
     assert_eq!(
         preference_work(cx),
@@ -4546,8 +4547,9 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
 /// are on. So the form says what the saved settings do beside Send test, and the waiting alert has its own switch.
 /// Specified: with alerts saved off, the line beside Send test reads [`ntfy::OFF_LINE`] and the waiting switch is on;
 /// turning the master switch on changes the line to [`ntfy::UNSAVED_LINE`]; turning the waiting switch off and saving
-/// sends `"enabled": true` and `"notify_waiting": false`; once the helm answers with those, the line reads
-/// [`ntfy::WAITING_OFF_LINE`]; once it answers a save with both on, no line shows.
+/// sends `"enabled": true` and `"notify_waiting": false`; once the helm answers with those (blocked alerts off too),
+/// the line reads [`ntfy::EVENTS_OFF_LINE`]; with blocked alerts on and waiting off, no line shows, since blocked
+/// alerts still go out; once it answers a save with waiting on, no line shows.
 #[gpui::test]
 fn the_line_beside_send_test_says_what_the_saved_settings_send(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -4562,6 +4564,7 @@ fn the_line_beside_send_test_says_what_the_saved_settings_send(cx: &mut TestAppC
     );
     assert_eq!(switch_on(cx, "ntfy-waiting"), Some(true));
 
+    into_view(cx, "ntfy-enabled");
     click(cx, "ntfy-enabled");
     assert_eq!(
         label_of(cx, "ntfy-saved-state").as_deref(),
@@ -4582,7 +4585,19 @@ fn the_line_beside_send_test_says_what_the_saved_settings_send(cx: &mut TestAppC
     settle(cx);
     assert_eq!(
         label_of(cx, "ntfy-saved-state").as_deref(),
-        Some(ntfy::WAITING_OFF_LINE)
+        Some(ntfy::EVENTS_OFF_LINE)
+    );
+    reach(cx, "ntfy-blocked");
+    keys(cx, "space");
+    let (id, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["notify_blocked"], json!(true));
+    stored["notify_blocked"] = json!(true);
+    helm.reply(id, 200, Some(stored.clone()));
+    settle(cx);
+    assert!(drawn(cx, "ntfy-saved"), "the premise: the save is done");
+    assert!(
+        !drawn(cx, "ntfy-saved-state"),
+        "blocked alerts alone still send, so nothing is off"
     );
 
     reach(cx, "ntfy-waiting");
@@ -4643,6 +4658,77 @@ fn the_blocked_criteria_field_shows_the_default_and_resets_to_it(cx: &mut TestAp
     assert_eq!(body["custom_blocked_criteria"], json!(""));
 }
 
+/// "Ask agents to notify when blocked" must work with or without ntfy, and an upgraded configuration that never stored
+/// the choice must show what it did before: asking exactly while ntfy alerts and their blocked switch were both on.
+/// Specified: with ntfy and blocked alerts stored on and no choice stored, the Ask agents switch, in the Blocked agents
+/// card, shows on and nothing is unsaved; turning the ntfy master switch off and saving sends
+/// `"ask_agents_when_blocked": true` with `"enabled": false`; once the helm answers with that, the switch still shows
+/// on.
+#[gpui::test]
+fn asking_agents_when_blocked_upgrades_and_saves_independently_of_ntfy(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let mut stored = ntfy("https://ntfy.sh", "alerts", "default", false);
+    stored["enabled"] = json!(true);
+    stored["notify_blocked"] = json!(true);
+    show_ntfy(&mut helm, cx, stored);
+    assert!(
+        drawn(cx, "blocked-agents") && drawn(cx, "ntfy-alerts"),
+        "two cards"
+    );
+    assert!(
+        bounds(cx, "blocked-ask-agents").bottom() < bounds(cx, "ntfy-enabled").top(),
+        "the Blocked agents card, with its switch, comes before the ntfy alerts card"
+    );
+    assert_eq!(switch_on(cx, "blocked-ask-agents"), Some(true));
+    assert!(!drawn(cx, "ntfy-saved-state"), "nothing unsaved or off");
+
+    into_view(cx, "ntfy-enabled");
+    click(cx, "ntfy-enabled");
+    let (id, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(
+        (
+            body["enabled"].clone(),
+            body["ask_agents_when_blocked"].clone()
+        ),
+        (json!(false), json!(true))
+    );
+    let mut saved = ntfy("https://ntfy.sh", "alerts", "default", false);
+    saved["notify_blocked"] = json!(true);
+    saved["ask_agents_when_blocked"] = json!(true);
+    helm.reply(id, 200, Some(saved));
+    settle(cx);
+    assert_eq!(
+        switch_on(cx, "blocked-ask-agents"),
+        Some(true),
+        "the stored choice outlives the ntfy switch"
+    );
+}
+
+/// The Ask agents switch alone, on a configuration that never asked, must save the choice without turning ntfy on.
+/// Specified: over settings stored off with no choice, the switch shows off; turning it on and saving sends
+/// `"ask_agents_when_blocked": true` with `"enabled": false` and `"notify_blocked": false`.
+#[gpui::test]
+fn asking_agents_when_blocked_turns_on_without_ntfy(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "alerts", "default", false),
+    );
+    assert_eq!(switch_on(cx, "blocked-ask-agents"), Some(false));
+    into_view(cx, "blocked-ask-agents");
+    click(cx, "blocked-ask-agents");
+    let (_, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(
+        (
+            body["ask_agents_when_blocked"].clone(),
+            body["enabled"].clone(),
+            body["notify_blocked"].clone()
+        ),
+        (json!(true), json!(false), json!(false))
+    );
+}
+
 /// The blocked switch decides whether an agent's `farhelm agent notify` reaches the user's phone, so the form must show
 /// what the helm stores and send what the user chose. Specified: with the helm storing blocked alerts on, the Agent is
 /// blocked switch shows on and the form has no unsaved changes; turning it off shows the unsaved line, and Save sends
@@ -4676,6 +4762,7 @@ fn the_blocked_switch_shows_and_saves_the_stored_choice(cx: &mut TestAppContext)
 fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     show_ntfy(&mut helm, cx, ntfy("https://ntfy.sh", "", "default", false));
+    into_view(cx, "ntfy-enabled");
     click(cx, "ntfy-enabled");
     fill(cx, "ntfy-server", "http://127.0.0.1:9");
     fill(cx, "ntfy-topic", "browser-alerts");
@@ -4693,7 +4780,7 @@ fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext)
     let mut form = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",
                            "priority": "high", "token": "browser-token", "notify_waiting": true,
                            "notify_blocked": false,
-                           "custom_blocked_criteria": "" });
+                           "custom_blocked_criteria": "", "ask_agents_when_blocked": false });
     assert_eq!(body, form);
     assert_eq!(label_of(cx, "ntfy-working").as_deref(), Some("Working…"));
     let stored = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",

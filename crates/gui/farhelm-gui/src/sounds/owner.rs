@@ -132,7 +132,15 @@ impl StatusSounds {
         let mut statuses = std::collections::BTreeMap::new();
         let mut muted = std::collections::HashSet::new();
         for row in collections.ordered::<SessionRow>() {
-            statuses.insert(row.info.id.clone(), Status::from(&row.info.status));
+            // A blocked session is a wait for the sounds as for every other surface, so it rings the waiting chime
+            // when it becomes blocked, under the same switch and quiet-session rules; the rules themselves see only
+            // the reduced status.
+            let status = if row.effectively_waiting() {
+                Status::Waiting
+            } else {
+                Status::from(&row.info.status)
+            };
+            statuses.insert(row.info.id.clone(), status);
             if crate::session_list::status::muted(row) {
                 muted.insert(row.info.id.clone());
             }

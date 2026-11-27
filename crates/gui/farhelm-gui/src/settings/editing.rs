@@ -261,7 +261,8 @@ impl Edit {
     fn name(&self) -> &'static str {
         match self {
             Self::FileTypes(_) => "File types",
-            Self::Alerts(_) => "ntfy alerts",
+            // One form draws both cards, so a change to either one is this form's.
+            Self::Alerts(_) => "Blocked agents and ntfy alerts",
             Self::Checkout(_) => "Checkout settings",
             Self::Key(Place::Tensorlake, _) => "Tensorlake API key",
             Self::Key(Place::Credentials, _) => "Tensorlake API key in Credentials",

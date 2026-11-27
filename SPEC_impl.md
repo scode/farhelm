@@ -6307,6 +6307,17 @@ installation it is on, so it follows an open session the sidebar's filter hides
   records nothing yet. The 104→105 step creates the table and deletes the `agent_blocked` notices that the mark
   replaced, without rebuilding `notices`, whose constraint still admits the retired kind; notice reads skip it.
 
+  The desktop app reads the mark through the same `SessionRow::effectively_waiting` and nowhere else: the row's live
+  mark (`session_list/status.rs::live`, which every surface that draws a status asks, the collapsed group's mark
+  included), a mute's bell after the title (`mute.rs::after_title`), the local status filter (`filters.rs`'s
+  `Status::shows`, which must agree with the helm's), and the status the sounds' owner hands the rules
+  (`sounds/owner.rs`; the rules themselves are unchanged). Lifecycle guards (Restart's question, Replace, Delete,
+  Suspend) keep reading the raw status. The `switch` signal is sent only from the user's own switch
+  (`selection::switch_to`: a row's click or keyboard press, a quick switcher pick), never from an automatic choice or a
+  launch or Replace opening its new session, only while `ticker::is_active` says the window is active, and only for a
+  row that reads as waiting, so ordinary switching sends nothing. It travels the UI channel's unordered lane as an
+  ordinary router command (no typed command API), best effort like the seen mark.
+
 - Shared pins live in `session_pins`, keyed by `(host_id, session_id)` since helm schema 63, with a NOT NULL signed
   `position` since schema 74. The 73→74 step rebuilds the presence-only table using the same DDL as fresh creation,
   seeding positions from oldest positive creation time recorded in the cache, then unknown times, with
@@ -6432,6 +6443,15 @@ empty or over-long one), then, for the asking session alone and without an appro
 try-sends a blocked alert, which the sender drops unless the master switch, the blocked switch and a topic are all set.
 The reason goes only into the alert. Until helm schema 105 the report was an `agent_blocked` notice in the rail's bell
 instead (schema 104 widened the notices kinds for it).
+
+Whether agents are asked to send it is a separate choice stored in the same singleton:
+`Settings::ask_agents_when_blocked`, an optional bool, read through `asks_agents_when_blocked`, which treats an absent
+value as `enabled && notify_blocked`, what the instruction followed before the choice existed, so an upgrade changes
+nothing. A save that omits it keeps the stored value, as for the other switches; the desktop form always sends it, so
+its first save turns the implied choice into a stored one. `blocked_instructions`, and so every create and Restart,
+follows it alone, independently of ntfy. The desktop draws the choice and the criteria as a **Blocked agents** card
+above the **ntfy alerts** card, from the one `NtfyAlerts` form, its one read and its one Save, so there is no second
+form, route or stored row.
 
 Protected GET/PUT `/api/ntfy-alerts` read/save an independent schema-47 singleton, not the queued shared preferences.
 The JSON stored in helm.db includes the token; the response contains only `token_set`. Saves atomically preserve an

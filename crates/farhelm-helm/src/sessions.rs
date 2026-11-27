@@ -3589,10 +3589,11 @@ async fn do_restart_session_named(
     Ok(session)
 }
 
-/// The extra instructions a create or Restart sends its agent now: the blocked-agent instruction while blocked alerts
-/// are on (`farhelm_proto::ntfy::blocked_instructions`), read at the moment of the launch, so a session started or
-/// restarted after a save gets the saved choice and earlier sessions keep what they started with. A settings read
-/// that fails sends none rather than failing the launch: the instruction is a nicety, the launch is not.
+/// The extra instructions a create or Restart sends its agent now: the blocked-agent instruction while Settings asks
+/// agents to notify when blocked (`farhelm_proto::ntfy::blocked_instructions`), with or without ntfy, read at the
+/// moment of the launch, so a session started or restarted after a save gets the saved choice and earlier sessions keep
+/// what they started with. A settings read that fails sends none rather than failing the launch: the instruction is a
+/// nicety, the launch is not.
 pub(crate) async fn launch_instructions(state: &AppState) -> Option<String> {
     match state.store.ntfy_config().await {
         Ok(config) => farhelm_proto::ntfy::blocked_instructions(&config.settings),

@@ -98,6 +98,11 @@ impl Config {
                     None => previous.settings.custom_blocked_criteria,
                     Some(text) => farhelm_proto::ntfy::normalize_blocked_criteria(&text)?,
                 },
+                // An older client's save omits it too, keeping the stored choice, or its absence, which keeps reading
+                // as the ntfy switches did before the choice existed.
+                ask_agents_when_blocked: save
+                    .ask_agents_when_blocked
+                    .or(previous.settings.ask_agents_when_blocked),
             },
             token,
         })

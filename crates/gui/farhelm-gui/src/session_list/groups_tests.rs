@@ -304,3 +304,34 @@ fn marked_new_group_sends_one_request_and_clears_marks_at_dispatch(cx: &mut Test
         "Tab can reach a drawn control after the editor closes"
     );
 }
+
+/// A collapsed group's mark is how a user sees that something inside it needs them, so a member whose agent said it is
+/// blocked must raise it to the waiting mark, past a mute, as a detected question does. Specified: in a collapsed group
+/// holding a running member and a muted, blocked, running member, the header's attention mark names the blocked member
+/// and reads Waiting.
+#[gpui::test]
+fn a_blocked_member_raises_its_collapsed_groups_mark_to_waiting(cx: &mut TestAppContext) {
+    let state = grouped_snapshot(
+        &[
+            session("run").title("Running member").grouped(10),
+            session("stuck")
+                .title("Blocked member")
+                .muted(None)
+                .blocked()
+                .grouped(10),
+            session("loose"),
+        ],
+        vec![group(10, "Project", 2, true)],
+    );
+    let (_fake, cx) = open_main(cx, state);
+    assert_eq!(
+        row_order(&frame(cx)),
+        ["loose"],
+        "premise: the group is collapsed"
+    );
+    let attention = label_of(cx, "session-group-10-attention").expect("one attention mark");
+    assert!(
+        attention.contains("Blocked member") && attention.ends_with("Waiting"),
+        "{attention}"
+    );
+}

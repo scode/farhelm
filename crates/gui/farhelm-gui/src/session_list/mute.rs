@@ -117,9 +117,10 @@ fn command(key: &str, request: SessionMuteRequest) -> Result<Command, PathError>
     ))
 }
 
-/// A real, connected wait gets its red dot and a bell after its title.
+/// A real, connected wait gets its red dot and a bell after its title. A blocked session is a wait like a detected
+/// question ([`SessionRow::effectively_waiting`]), so it breaks through a mute the same way.
 pub(super) fn after_title(row: &SessionRow) -> bool {
-    status::muted(row) && !row.stale && row.info.status == SessionStatus::Waiting
+    status::muted(row) && !row.stale && row.effectively_waiting()
 }
 
 /// Give other muted rows the bell in the dot slot, including an unclassified

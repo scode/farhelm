@@ -461,6 +461,7 @@ fn save(server: &str, token: Option<&str>, enabled: bool) -> SaveSettings {
         notify_waiting: Some(true),
         notify_blocked: Some(true),
         custom_blocked_criteria: None,
+        ask_agents_when_blocked: None,
         enabled,
         server_url: server.into(),
         topic: TOPIC.into(),
@@ -659,6 +660,70 @@ async fn a_launch_sends_the_blocked_instruction_the_saved_settings_call_for() {
     assert!(
         sent.ends_with("What counts as blocked: the build is red"),
         "{sent}"
+    );
+}
+
+/// "Ask agents to notify when blocked" works with or without ntfy, and an upgraded configuration keeps asking exactly
+/// when it did before the choice had its own switch. Specified: a configuration saved with ntfy and its blocked switch
+/// on but no choice of its own sends the instruction; a save that leaves the choice out keeps it; asking on with ntfy
+/// alerts off still sends it; asking off with ntfy's blocked alerts on sends none.
+#[farhelm_testtrace::test]
+async fn asking_agents_when_blocked_is_independent_of_ntfy() {
+    let harness = helm().await;
+    let instructions = || crate::sessions::launch_instructions(&harness.state);
+    let stored = harness
+        .store
+        .save_ntfy_config(save("https://ntfy.sh", None, true))
+        .await
+        .ok()
+        .unwrap();
+    assert_eq!(
+        stored.ask_agents_when_blocked, None,
+        "the premise: no choice of its own"
+    );
+    assert!(
+        instructions().await.is_some(),
+        "an upgraded configuration keeps asking"
+    );
+
+    let ask_without_ntfy = SaveSettings {
+        notify_blocked: Some(false),
+        ask_agents_when_blocked: Some(true),
+        ..save("https://ntfy.sh", None, false)
+    };
+    harness
+        .store
+        .save_ntfy_config(ask_without_ntfy)
+        .await
+        .ok()
+        .unwrap();
+    assert!(instructions().await.is_some(), "asking does not need ntfy");
+    let kept = harness
+        .store
+        .save_ntfy_config(save("https://ntfy.sh", None, false))
+        .await
+        .ok()
+        .unwrap();
+    assert_eq!(
+        kept.ask_agents_when_blocked,
+        Some(true),
+        "a save without the choice keeps it"
+    );
+
+    let alert_without_asking = SaveSettings {
+        ask_agents_when_blocked: Some(false),
+        ..save("https://ntfy.sh", None, true)
+    };
+    harness
+        .store
+        .save_ntfy_config(alert_without_asking)
+        .await
+        .ok()
+        .unwrap();
+    assert_eq!(
+        instructions().await,
+        None,
+        "blocked alerts alone do not ask"
     );
 }
 
