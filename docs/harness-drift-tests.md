@@ -35,8 +35,15 @@ The resumed agent must recall the code word in a second reply. Farhelm must also
 the original resume arguments intact. The Codex, Antigravity and Grok checks require a committed report for the resumed
 generation and its conversation ID. Cursor's and OpenCode's base cases launch with their YOLO flags, answer a workspace
 trust question if one appears, send one short prompt and wait for its reply on screen, which shows that an interactive
-turn works under Farhelm's terminal host. Every category has up to 720 seconds per harness, including startup, checks
-and cleanup.
+turn works under Farhelm's terminal host. Codex's base case also starts a second session with YOLO, checks that the
+Codex process carries `--no-daemon`, runs a small script that records its own process ancestry through Codex's shell
+mode (`!`, no model turn), and requires the session's Codex process among the recorded ancestors, reached through no
+process that leads its own session: a command handed to Codex's shared background server would run outside the session,
+where Stop and Delete cannot reach it. Codex's hook reports are already known to come from inside the session, because
+the supervisor refuses one whose ancestry does not reach the session's terminal, and the `capture_timing_hooks` category
+checks that Codex starts with `--no-daemon` when hooks are off. The check uses Farhelm's default launch, whose hook
+flags also keep Codex off the shared server, so it does not show that `--no-daemon` alone does; only the argument's
+presence is checked for that. Every category has up to 720 seconds per harness, including startup, checks and cleanup.
 
 The `model_selection` category launches the current catalog models and checks which model the agent shows as active.
 Goose, Pi and OMP also start without provider or model flags and check that the agent shows an active model. Their
