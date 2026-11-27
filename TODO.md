@@ -96,6 +96,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Shift-cmd-v to paste via file upload.** Shift-cmd-v to "paste via file upload" so text can be pasted but instead of
   directly pasted, upload a file to a securely allocated temporary file and paste the path to it into the terminal.
 
+- **Make forked and app-server Codex conversations resumable.** Two gaps keep Restart unavailable for Codex sessions.
+  First, Farhelm refuses Codex's `fork` SessionStart source. Codex's "This conversation is open in another app" screen
+  offers fork as the way out, so a session that resumed a conversation held elsewhere and forked it never gets Restart.
+  Second, Farhelm refuses transcripts whose header source is `vscode`, the source Codex stamps on conversations created
+  through an app-server (the shared daemon, and probably the desktop app). Those conversations can never become
+  resumable in Farhelm, even once nothing else holds them. Accept both. Do the `fork` fix first, and the `vscode` fix as
+  its own change because it widens which conversations Farhelm captures. The upstream research and the incident's
+  evidence are in `lore/2026-11-26-codex-fork-and-vscode-session-sources.md`.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
