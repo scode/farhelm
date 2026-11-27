@@ -2923,6 +2923,18 @@ pub(crate) fn activity_stamp(at: i64) -> Arc<std::sync::atomic::AtomicI64> {
     Arc::new(std::sync::atomic::AtomicI64::new(at))
 }
 
+/// A fresh, empty [`SessionCells::held_activity_at`] cell.
+///
+/// Session-wide like [`activity_stamp`]'s, with the same rule: only a
+/// session's first entry mints one, and a rename or relaunch clones the
+/// `Arc`. Starts empty (`0`) even on a reload, because a held advance is
+/// never persisted: a supervisor that stops before publishing one reloads a
+/// stamp up to about one quantum older than it would have, which
+/// `ticker::flush_held_activity`'s docs accept.
+pub(crate) fn held_activity_cell() -> Arc<std::sync::atomic::AtomicI64> {
+    Arc::new(std::sync::atomic::AtomicI64::new(0))
+}
+
 /// A [`RunCells::hooked`] / [`RunCells::hook_warned`] cell holding
 /// `raised`.
 ///
@@ -4584,6 +4596,28 @@ pub(crate) struct SessionCells {
     /// Cross-process and clock-step monotonicity stay the store's job
     /// (`SessionStore::record_activity`).
     pub(crate) last_activity_at: Arc<std::sync::atomic::AtomicI64>,
+    /// An activity advance the sampler observed but has not PUBLISHED yet,
+    /// in unix seconds, or `0` for none: the steady drift of a session that
+    /// keeps working, held for the ticker's fleet-wide flush.
+    ///
+    /// Exists because every listing reads [`Self::last_activity_at`]
+    /// directly, so moving that cell is itself what makes the helm see a
+    /// change, hint or no hint. A fleet of continuously working sessions used
+    /// to move one of those cells on almost every sample, and each move cost
+    /// the helm a full refresh and re-read of every collection, about once a
+    /// second at 500 sessions (`lore/2026-11-26-desktop-idle-cpu.md`).
+    /// Holding the advance here and publishing all held advances together
+    /// once per activity quantum turns that into one refresh a minute, while
+    /// a sample that already hints for its session (a status transition, a
+    /// work start, a permission change) publishes this session's held value
+    /// at once, because that costs no extra refresh
+    /// (`ticker::hold_activity`, `ticker::flush_held_activity`).
+    ///
+    /// Always the latest observed sample time, never the flush time, so a
+    /// published age stays honest. Written only by the ticker, like the cell
+    /// it feeds; session-scoped for the same reasons, so a relaunch shares
+    /// it. Never persisted (see [`held_activity_cell`]).
+    pub(crate) held_activity_at: Arc<std::sync::atomic::AtomicI64>,
     /// Session-scoped recent-work key, in allocator-produced milliseconds.
     ///
     /// Rename and restart share this cell because neither operation proves
@@ -5120,6 +5154,16 @@ pub struct Supervisor {
     /// Automatic tab reaps run on their own tasks and add at most
     /// [`Self::tab_reap_inflight`]'s permits on top.
     pub(crate) sampling_admission: Arc<tokio::sync::Semaphore>,
+    /// When the ticker last published held activity advances
+    /// ([`SessionCells::held_activity_at`]), on tokio's monotonic clock, or
+    /// `None` before the first flush.
+    ///
+    /// Gates `ticker::flush_held_activity` to once per activity quantum. A
+    /// monotonic instant rather than the wall clock the stamps themselves
+    /// use, so a clock step can neither stall the flush nor fire it early.
+    /// Written only at the end of a sample pass, under the sampling permit,
+    /// so the ticker stays the single writer of activity it already is.
+    pub(crate) activity_flushed_at: std::sync::Mutex<Option<tokio::time::Instant>>,
     /// Caps automatic tab closes running at once across the whole host.
     ///
     /// Each sample pass may start [`REAP_BUDGET_PER_TICK`] closes and does
@@ -6370,6 +6414,7 @@ impl Supervisor {
                 DIRECTORY_BROWSE_WORKER_PERMITS,
             )),
             sampling_admission: Arc::new(tokio::sync::Semaphore::new(SAMPLING_ADMISSION_PERMITS)),
+            activity_flushed_at: std::sync::Mutex::new(None),
             tab_reap_inflight: Arc::new(tokio::sync::Semaphore::new(REAP_BUDGET_PER_TICK)),
             timeouts,
             seams,
@@ -7386,6 +7431,7 @@ impl Supervisor {
                         last_activity_at: activity_stamp(row.last_activity_at),
                         last_work_started_at: activity_stamp(row.last_work_started_at),
                         notifications: notification_cell(),
+                        held_activity_at: held_activity_cell(),
                         host_tabs: host_tab_cell(host_tabs),
                     },
                     snapshot,
@@ -10681,6 +10727,7 @@ impl Supervisor {
                     last_activity_at: activity_stamp(info.last_activity_at),
                     last_work_started_at: activity_stamp(info.last_work_started_at),
                     notifications: notification_cell(),
+                    held_activity_at: held_activity_cell(),
                     host_tabs: host_tab_cell(Vec::new()),
                 },
                 snapshot: snapshot.clone(),
@@ -12090,6 +12137,7 @@ impl Supervisor {
                     last_activity_at: activity_stamp(info.last_activity_at),
                     last_work_started_at: activity_stamp(info.last_work_started_at),
                     notifications: notification_cell(),
+                    held_activity_at: held_activity_cell(),
                     host_tabs: host_tab_cell(Vec::new()),
                 },
                 snapshot,
@@ -15417,6 +15465,7 @@ impl Supervisor {
                     last_activity_at: activity_stamp(row.last_activity_at),
                     last_work_started_at: activity_stamp(row.last_work_started_at),
                     notifications: notification_cell(),
+                    held_activity_at: held_activity_cell(),
                     host_tabs: host_tab_cell(Vec::new()),
                 },
                 snapshot,
@@ -19798,6 +19847,7 @@ pub(crate) mod tests {
                 last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
                 last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
                 notifications: notification_cell(),
+                held_activity_at: held_activity_cell(),
                 host_tabs: host_tab_cell(Vec::new()),
             },
             snapshot: IntegrationSnapshot {
