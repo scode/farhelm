@@ -7,3 +7,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`agent-hosts-tailscale-column`](reports/agent-hosts-tailscale-column.report.md) landed 2026-11-27 in #5161: Add a TAILSCALE column to plain `farhelm agent hosts` table output
 - [`cli-flag-parsing-audit`](reports/cli-flag-parsing-audit.report.md) landed 2026-11-27 in #5163, #5165: Stop free-text CLI options and positionals from swallowing flags and clean up clap parsing quirks
 - [`drift-base-isolation-and-turns`](reports/drift-base-isolation-and-turns.report.md) landed 2026-11-27 in #5167, #5168: Add Codex process-tree isolation and Cursor/OpenCode interactive turns to the base drift category
+- [`drift-permission-footer`](reports/drift-permission-footer.report.md) landed 2026-11-27 in #5169: Extend permission_modes drift checks with Guarded launches and tri-state permission-footer verification

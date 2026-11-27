@@ -106,3 +106,80 @@ merging the footer reader with the statement of which agents it reads, so the tw
 
 It agreed that the Claude reader and Cursor's trust answering stay out of this PR, and confirmed Cursor's trust dialog
 predates it.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained the command line's parsing changes (cli-flag-parsing-audit, #5163
+and #5165), which the drift tests do not meet: the only `farhelm` command their sessions run is the hook command the
+agents call, whose free-text option still accepts a value that starts with a dash. In the same round, before this plan,
+terminal-tab-shortcuts landed (#5164, #5166, desktop app only) and drift-base-isolation-and-turns (#5167, #5168), which
+changes the drift tests' shared trust answering (below).
+
+An independent reviewer and I read the change and found nothing to fix. The supervisor's new statement of which agents
+have a footer reader is built only into tests, never into Farhelm itself, and answers each agent explicitly with no
+catch-all. The reading the drift tests take from a live screen is the one the supervisor's own sampler takes. The
+rewritten test of the captured footer screens still checks every screen, and fails when an agent with a reader has no
+screens, lacks either kind it needs, or has screens but no reader.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** The round's plans each removed their own TODO entries, and one added a follow-up entry, so
+  stacking them conflicted there. I kept main's TODO.md with each plan's own TODO change applied; no code changed.
+
+#### What the landing made untrue in the report
+
+- **Cursor's trust dialog may no longer stop the Cursor case.** The report says the live Cursor case stopped at Cursor's
+  "Workspace Trust Required" dialog, because the shared trust answering does not recognize its ▶ selection marker. The
+  other drift plan landed in this round taught the shared trust answering exactly that: Cursor's boxed trust dialog with
+  its ▶ marker, and the answered box left on screen. So the report's second follow-up may already be done. The two
+  changes have not run live together, so Cursor's footer check is still unverified against the real agent. In the other
+  plan's live runs Cursor got past the dialog and then refused the turn for lack of usage on the account.
+
+#### Worth knowing
+
+- **The Claude case will fail until the supervisor learns Claude's new footer.** As the report says, Claude Code 2.1.332
+  started Guarded draws "⏵⏵ auto mode on", which Farhelm cannot read yet. There is no TODO entry for it; the report's
+  first follow-up asks whether you want one.
+
+#### Checks
+
+Run once, on the round's three plans stacked on main as it stood when the landing started (terminal-tab-shortcuts, then
+drift-base-isolation-and-turns, then drift-permission-footer), so each was tested with the others and with the earlier
+changes above. The desktop plan got the desktop app's tests, screenshots and end-to-end smoke test. The drift plans'
+real-agent cases are opt-in and spend vendor turns, so they were built and listed, not run, and the ordinary tests of
+the drift code and of the supervisor's footer reading ran instead. The SSH test worker was unreachable, so the smoke ran
+on a boat sandbox (an x86_64 Ubuntu 24.04 VM), and the rest ran locally:
+
+- `cargo clippy --all-targets`, and `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent`
+  (the build with the desktop app's test-automation hooks): each reported one warning and nothing else. That warning is
+  the unused ntfy settings method in the helm, on main since #5120 and outside this round, which makes `-D warnings`
+  fail, so these ran without it. `cargo clippy -p farhelm-gui --all-targets -- -D warnings` (the desktop app's GUI
+  crate, which does not depend on the helm's code): clean.
+- The GUI crate's whole default test suite (`cargo nextest run -p farhelm-gui`), recorded run
+  790d4ebc-9b6a-46d4-b81b-12cdbc9a08f6: 3,603 passed, none failed, and it skipped its 4 opt-in tests, among them the
+  screenshot test the next item runs.
+- The full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run 9be720dc-7a79-40ae-b77a-eec843eafb24:
+  passed.
+- On a boat, the desktop app's end-to-end smoke test (`scripts/gui-e2e-smoke.py`), recorded run
+  94e567ef-c5b4-4bbd-9a83-c0bac7dd24de: 48 of its 49 steps passed, and the paste step was skipped, as on every Linux
+  run. Its steps include Delete from a session's menu; none presses Cmd+T or Cmd+W.
+- The supervisor's per-agent tests, the footer reader and its captured screens among them
+  (`cargo nextest run -p farhelm-supervisor --lib -E 'test(/agent_kind::/)'`), recorded run
+  7c2a5d10-f11a-46a9-a5d5-7ff23f798176: 112 passed, none failed.
+- The ordinary tests of the real-agent test code, without the opt-in cases
+  (`cargo nextest run -p farhelm --test e2e -E 'test(/real_agent_capture/)'`), recorded run
+  56b688c2-75da-476f-baad-df4c39ca17a7: 50 passed, none failed, and no test reported that it skipped for a missing
+  system service. Listing the opt-in drift cases
+  (`cargo nextest list -p farhelm --test e2e --run-ignored only -E 'test(/real_agent_capture::drift::/)'`) built them
+  and found 71.
+- The docs website build (`bun run build` in `website/`): built. `python3 scripts/check-agents-md.py` for the drift
+  tests' docs page, which the instruction files point to: passed.
+- `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format` and `dprint check` on the changed Markdown: passed.
+
+Reused: nothing. Not rerun: the drift plans' live runs against the real agents, described in their reports; the landing
+ran none, since they spend vendor turns, so the drift plans have not run live together. Skipped: the rest of the Rust
+workspace's tests, since nothing else changed; the other opt-in tests; and any run on a Mac, since none was available to
+the landing. No Mac ran Cmd+T or Cmd+W: the Mac's rule is covered only by the tests that pass the platform in.
