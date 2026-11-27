@@ -187,6 +187,19 @@ impl CodexLocator {
 
 /// Root metadata only. An internal thread can share the process and runtime ID,
 /// so process ancestry alone cannot authorize its persistent record.
+///
+/// The header's `source` names who started the conversation, and only a root
+/// one is accepted: `cli` (the terminal UI), `exec`, and `vscode`, the source
+/// a Codex app-server stamps by default, whatever the `originator`. That
+/// covers the shared daemon a terminal Codex attaches to; which source the
+/// desktop app's own server stamps was not checked. Resume appends to the
+/// existing transcript, so a conversation keeps its first source for good;
+/// without `vscode` such a conversation could never become resumable in
+/// Farhelm. `mcp` (an app-server told to use it) and `unknown` stay refused,
+/// since no incident has shown them and they were not examined, as do the
+/// object-valued sources (`subagent`, `internal`, `custom`), which are the
+/// threads this check exists to keep out
+/// (`lore/2026-11-26-codex-fork-and-vscode-session-sources.md`).
 pub(super) fn parse_record(
     text: &str,
 ) -> anyhow::Result<Option<(super::RecordCorrelators, Option<String>)>> {
@@ -209,7 +222,7 @@ pub(super) fn parse_record(
     ensure!(
         matches!(
             metadata.get("source").and_then(Value::as_str),
-            Some("cli" | "exec")
+            Some("cli" | "exec" | "vscode")
         ),
         "Codex record is not an attributable root conversation"
     );
@@ -344,15 +357,31 @@ mod tests {
     /// deliberately independent from the thread id: Codex reports the former
     /// to identify this running process, but `codex resume` requires the latter.
     fn root_record(runtime: &str, thread: &str) -> String {
+        sourced_record(json!("cli"), None, runtime, thread)
+    }
+
+    /// [`root_record`] with the header's `source` and `originator` chosen by the
+    /// test, the two fields that say who started a conversation; `None` leaves
+    /// `originator` out, so a test can show the decision never needs it.
+    fn sourced_record(
+        source: Value,
+        originator: Option<&str>,
+        runtime: &str,
+        thread: &str,
+    ) -> String {
+        let mut payload = json!({
+            "source": source,
+            "id": thread,
+            "session_id": runtime,
+            "cwd": "/work"
+        });
+        if let Some(originator) = originator {
+            payload["originator"] = json!(originator);
+        }
         json!({
             "timestamp": "2026-09-19T12:00:05Z",
             "type": "session_meta",
-            "payload": {
-                "source": "cli",
-                "id": thread,
-                "session_id": runtime,
-                "cwd": "/work"
-            }
+            "payload": payload
         })
         .to_string()
             + "\n"
@@ -502,6 +531,46 @@ mod tests {
             RestartOffer::NotCaptured
         );
         assert_eq!(snapshot.filled_resume_argv("historical-thread"), None);
+    }
+
+    /// A conversation started through a Codex app-server (the shared daemon, the
+    /// desktop app, the VS Code extension) carries source `vscode` for good, so
+    /// refusing it made such a conversation impossible to resume in Farhelm.
+    /// Accepting it must not open the door the root-only rule keeps shut: the
+    /// decision is by source alone, never by `originator`, which the maintainer
+    /// settled when planning. Specified: `cli`, `exec` and `vscode` headers parse
+    /// as root records with their thread and runtime ids, whether `originator`
+    /// is `codex-tui`, another client's name or absent; `mcp`, `unknown` and the
+    /// object sources `subagent`, `internal` and `custom` are refused with any of
+    /// those originators.
+    #[farhelm_testtrace::test]
+    fn root_sources_including_app_server_parse_and_others_never_do() {
+        let originators = [Some("codex-tui"), Some("codex_vscode"), None];
+        for source in ["cli", "exec", "vscode"] {
+            for originator in originators {
+                let record = sourced_record(json!(source), originator, "runtime-42", "thread-17");
+                let (correlators, runtime) = parse_record(&record)
+                    .unwrap_or_else(|error| panic!("{source} {originator:?}: {error:#}"))
+                    .expect("root metadata is present");
+                assert_eq!(correlators.conversation, "thread-17", "{source}");
+                assert_eq!(runtime.as_deref(), Some("runtime-42"), "{source}");
+            }
+        }
+        for source in [
+            json!("mcp"),
+            json!("unknown"),
+            json!({ "subagent": { "thread_spawn": {} } }),
+            json!({ "internal": "memory" }),
+            json!({ "custom": "app" }),
+        ] {
+            for originator in originators {
+                let record = sourced_record(source.clone(), originator, "runtime-42", "thread-17");
+                assert!(
+                    parse_record(&record).is_err(),
+                    "{source} {originator:?} must not be a root record"
+                );
+            }
+        }
     }
 
     /// Object-valued internal-source metadata must not become a root record,

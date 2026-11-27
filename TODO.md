@@ -71,16 +71,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
   user when blocked through farhelm. Plan: `plans/queue/agent-blocked-notifications.md`.
 
-- **Make forked and app-server Codex conversations resumable.** Two gaps keep Restart unavailable for Codex sessions.
-  First, Farhelm refuses Codex's `fork` SessionStart source. Codex's "This conversation is open in another app" screen
-  offers fork as the way out, so a session that resumed a conversation held elsewhere and forked it never gets Restart.
-  Second, Farhelm refuses transcripts whose header source is `vscode`, the source Codex stamps on conversations created
-  through an app-server (the shared daemon, and probably the desktop app). Those conversations can never become
-  resumable in Farhelm, even once nothing else holds them. Accept both. Do the `fork` fix first, and the `vscode` fix as
-  its own change because it widens which conversations Farhelm captures. The upstream research and the incident's
-  evidence are in `lore/2026-11-26-codex-fork-and-vscode-session-sources.md`. Plan:
-  `plans/queue/codex-fork-and-vscode-resume.md`.
-
 - **Reject flag-like values for CLI `--effort`.** PR #4954 (`agent-catalog-cli-and-drift-cleanups`) added
   `allow_hyphen_values = true` to `--effort` on `LaunchFlags` (`crates/farhelm/src/main.rs`) so hyphen-prefixed custom
   effort values like `--effort -fast` work as a separate argument without `--effort=-fast`. The side effect is that a

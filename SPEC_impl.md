@@ -4432,10 +4432,12 @@ no path values are stored in the notice.
 
   Process evidence is necessary but not sufficient: threads may share a process. A versioned `codex:` locator binds the
   reported runtime session ID to an absolute transcript path and a separately verified persistent thread ID. The bounded
-  no-follow regular-file reader requires the first complete record to be root `session_meta`, with source `cli` or
-  `exec` rather than a subagent source. Runtime metadata must match the report; once bound, a different persistent
-  thread cannot replace the file's identity. Resume substitutes the persistent thread ID. No directory scan or home
-  inference participates, so a configured custom home works without becoming a second source of truth.
+  no-follow regular-file reader requires the first complete record to be root `session_meta`, with source `cli`, `exec`
+  or `vscode` (the source a Codex app-server stamps by default, whatever the conversation's `originator`) rather than
+  `mcp`, `unknown` or an object-valued subagent, internal or custom source. Runtime metadata must match the report; once
+  bound, a different persistent thread cannot replace the file's identity. Resume substitutes the persistent thread ID.
+  No directory scan or home inference participates, so a configured custom home works without becoming a second source
+  of truth.
 
   An attributed `SessionStart` with a recognized source selects the conversation. A foreground `clear` may install a
   pending locator before the exact file is available, withdrawing the discarded conversation immediately. A source-less
