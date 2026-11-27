@@ -76,14 +76,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   to refuse requests that try to change the folder or switch to a managed checkout so the API, CLI (if any), desktop
   launcher, and `SPEC.md` are consistent. Plan: `plans/queue/helm-replace-refuse-destination-change.md`.
 
-- **Back off automatic retries when a finished shell tab's first close sweep fails.** From PR #5087
-  (`supervisor-tab-close-retry`): when a user closes a shell tab and cleanup fails, Farhelm now retries automatically
-  with backoff (from ~1-2 s up to ~1 min). One pre-existing case is still missing backoff: when a tab's shell exits on
-  its own and Farhelm's first automatic cleanup of that exited tab fails during its initial process sweep (before ending
-  the tab's terminal host), Farhelm retries it on every cleanup pass (~every 2 seconds) without backing off. Mark that
-  failure path for backed-off retry in the same function and add a regression test. Plan:
-  `plans/queue/shell-tab-first-close-sweep-backoff.md`.
-
 - **Align `SPEC.md` and code on which agent-requested Delete warnings go to the notices bell.** From PR #5088
   (`agent-delete-late-notice`): when an agent deletes a session via `farhelm agent delete` and cleanup produces a
   warning (for example, a managed checkout folder could not be archived safely, or stopping a container session's

@@ -63,7 +63,10 @@
 //! record and marks it ([`HostTab::end_failed`]), and the reap closes it
 //! again, since its stopped runtime will announce nothing: a second after
 //! the failure, then doubling to at most a minute between tries, a retry
-//! whose own sweep fails moving the next try on as well. The mark lives in
+//! whose own sweep fails moving the next try on as well. The reap's first
+//! close of a tab whose shell exited is marked the same way when its sweep
+//! before the end fails; a user's close of a live tab is not, so a failed
+//! Close does not hand a tab whose shell still runs to the reap. The mark lives in
 //! memory only: a supervisor restarted before a retry succeeds leaves the
 //! rest to the session's Delete (SPEC.md, "Session view"). The
 //! automatic reap is driven by the host's exit event:
@@ -161,6 +164,13 @@ pub(crate) struct HostTab {
     /// survives SIGKILL, a process table that cannot be read) would
     /// otherwise hold the session's lifecycle claim and a reap permit on
     /// every pass. A retry whose own sweep fails moves that time on too.
+    /// The reap's first close of a tab whose shell exited marks it as well
+    /// when its sweep before the end fails, for the same reason; its retries
+    /// then sweep by marker and scope only, which loses nothing, since a
+    /// finished tab's runtime offers no live child to root at, so its own
+    /// sweep took no root either. A user's close of a live tab whose first
+    /// sweep fails stays unmarked, so a failed Close does not hand a tab
+    /// whose shell still runs to the reap.
     pub(crate) end_failed: bool,
     /// How many closes of this tab could not confirm its host ended or a
     /// sweep reaped, counting retries.
@@ -197,7 +207,8 @@ impl HostTab {
     /// Whether the reap is to close this tab now: it is
     /// [finished](Self::finished) and no close of it has failed, or an
     /// earlier close could not confirm its host ended or its sweeps
-    /// ([`Self::end_failed`]) and its retry time has come.
+    /// ([`Self::end_failed`], which covers a failed first sweep of the
+    /// reap's own close of a finished tab) and its retry time has come.
     pub(crate) fn reap_due(&self) -> bool {
         if self.end_failed {
             return self
@@ -317,7 +328,9 @@ fn retry_delay(failures: u32) -> std::time::Duration {
 /// Mark the tab whose runtime is `host` as one whose close could not
 /// confirm its host ended or its sweeps ([`HostTab::end_failed`]), and set
 /// when the reap may try again ([`HostTab::retry_at`]), one backoff step
-/// later than the previous failure's.
+/// later than the previous failure's. Never for a user's close of a live tab
+/// whose first sweep failed: the mark lets the reap close a tab whatever its
+/// shell is doing.
 fn mark_end_failed(cell: &HostTabs, host: &HostTerminal) {
     let now = tokio::time::Instant::now();
     for tab in cell
@@ -926,7 +939,9 @@ impl Supervisor {
     ///   host judged gone from its socket alone is confirmed by its adopted
     ///   process first. A host not confirmed ended, or a sweep after the end
     ///   that failed, keeps both, and the tab is marked
-    ///   ([`HostTab::end_failed`]) so that the reap closes it again.
+    ///   ([`HostTab::end_failed`]) so that the reap closes it again. The
+    ///   reap's own close of a finished tab is marked the same way when its
+    ///   sweep before the end fails.
     /// - **The attachment** is detached unconditionally, before the host is
     ///   ended (see the body).
     pub(super) async fn close_host_tab_under_claim(
@@ -953,7 +968,9 @@ impl Supervisor {
             Some(_) | None => {}
         }
         // A runtime stopped by an earlier close that could not confirm the
-        // end can read as anything; that close is what is being finished.
+        // end can read as anything; that close is what is being finished. So
+        // can a tab whose shell had already exited when the reap's close of it
+        // failed at its first sweep: what its shell did is known.
         if let Liveness::Unavailable { reason, .. } = tab.host.liveness()
             && !tab.end_failed
         {
@@ -1022,12 +1039,18 @@ impl Supervisor {
         self.notify_podman_cleanup(entry, Reaped::from_result(&reaped))
             .await;
         if let Err(e) = reaped {
-            // A close finishing an earlier failed one is the reap's retry:
-            // its next attempt waits for the backoff to advance, or the reap
-            // would try it again on every tick for as long as the sweep keeps
-            // failing. A first close keeps its tab unmarked, so a retry still
-            // roots at the live child.
-            if tab.end_failed {
+            // A failed sweep here must not leave the reap free to close the
+            // tab again on the very next tick for as long as the sweep keeps
+            // failing, so two kinds of close mark the tab and its next try
+            // waits for the backoff. One finishes an earlier failed close (the
+            // reap's retry). The other is the reap's first close of a tab
+            // whose shell already exited (`only_if_dead`): its runtime offers no
+            // live child to root at, so this sweep took no root either and the
+            // marker-only retries a mark brings lose nothing. A user's
+            // close of a live tab stays unmarked: a mark would let the reap
+            // close a tab whose shell still runs, and a later close must
+            // still root at the live child.
+            if tab.end_failed || only_if_dead {
                 mark_end_failed(&entry.session.host_tabs, &tab.host);
             }
             return Err(RequestError::new(
