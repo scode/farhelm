@@ -92,9 +92,10 @@ fn icons_distinguish_documents_pdfs_images_and_archives() {
 /// Ctrl elsewhere.
 #[test]
 fn hints_offer_opening_only_where_the_helm_does_with_the_platforms_modifier() {
+    // Over the copy cap, so that only the opening hint varies here; the copy hint has its own test below.
     let stat = |can_open| FileStat {
         can_open,
-        ..ready("/work/notes.txt", 4800)
+        ..ready("/work/notes.txt", 10_000_001)
     };
     for (can_open, platform, hint) in [
         (
@@ -114,7 +115,206 @@ fn hints_offer_opening_only_where_the_helm_does_with_the_platforms_modifier() {
     }
 }
 
+/// The copy hint promises a copy that can work, so it must not appear where the click is refused before reading:
+/// over the 10 MB cap, or for an image on Linux, which copies text only. It must not be withheld from a file whose
+/// contents only the click can judge (a binary under the cap is refused then, loudly). The maintainer asked for the
+/// words "copy contents", not just "copy". Specified: a file of exactly the cap (10,000,000 bytes) gets the hint and
+/// one byte more does not; a file of unknown size does not, since the hover cannot promise it fits; on a Mac an image
+/// gets it and on Linux it does not, while text, an SVG and an unknown binary do on both; the modifier is ⇧⌘ on a Mac
+/// and Shift-Ctrl elsewhere, after the opening hint.
+#[test]
+fn the_copy_hint_appears_only_where_a_copy_can_be_attempted() {
+    let stat = |path: &str, size: Option<u64>| FileStat {
+        can_open: Some(false),
+        info: DownloadFileInfo {
+            path: path.into(),
+            size,
+            status: DownloadFileStatus::Ready,
+        },
+        ..ready(path, 0)
+    };
+    let mac = " · click to download · ⇧⌘-click to copy contents";
+    let linux = " · click to download · Shift-Ctrl-click to copy contents";
+    let none = " · click to download";
+    for (path, size, platform, hint) in [
+        ("/w/a.txt", Some(10_000_000), Platform::Mac, mac),
+        ("/w/a.txt", Some(10_000_001), Platform::Mac, none),
+        ("/w/a.txt", None, Platform::Mac, none),
+        ("/w/a.txt", Some(0), Platform::Linux, linux),
+        ("/w/shot.PNG", Some(10), Platform::Mac, mac),
+        ("/w/shot.PNG", Some(10), Platform::Linux, none),
+        ("/w/logo.svg", Some(10), Platform::Linux, linux),
+        ("/w/data.bin", Some(10), Platform::Linux, linux),
+    ] {
+        assert_eq!(hints(&stat(path, size), platform), hint, "{path} {size:?}");
+    }
+    let open = FileStat {
+        can_open: Some(true),
+        ..stat("/w/a.txt", Some(10))
+    };
+    assert_eq!(
+        hints(&open, Platform::Mac),
+        " · click to download · ⌘-click to open · ⇧⌘-click to copy contents"
+    );
+}
+
+/// A click on a file has three outcomes, and each chord must mean one of them and nothing else: copying reads a file
+/// into the clipboard, so it takes exactly Shift and the opening modifier, while opening keeps ignoring other modifiers
+/// as the old app did, except Shift, which now means a copy. Specified: on each platform a plain click and Shift alone
+/// download; the opening modifier (Cmd on a Mac, Ctrl elsewhere), alone or with Option/Alt, opens; that modifier with
+/// Shift copies; with Shift and anything more (the other platform's modifier, Option/Alt, Fn) it downloads; and the
+/// other platform's opening modifier with Shift does not copy.
+#[test]
+fn each_click_chord_names_exactly_one_action() {
+    use ClickAction::{Copy, Download, Open};
+    let none = Modifiers::none();
+    let shift = Modifiers {
+        shift: true,
+        ..none
+    };
+    let alt = Modifiers { alt: true, ..none };
+    let function = Modifiers {
+        function: true,
+        ..none
+    };
+    for platform in [Platform::Mac, Platform::Linux] {
+        // `opening` adds this platform's opening modifier to a chord, and `other` the other platform's.
+        let opening = |chord: Modifiers| match platform {
+            Platform::Mac => Modifiers {
+                platform: true,
+                ..chord
+            },
+            Platform::Linux => Modifiers {
+                control: true,
+                ..chord
+            },
+        };
+        let other = |chord: Modifiers| match platform {
+            Platform::Mac => Modifiers {
+                control: true,
+                ..chord
+            },
+            Platform::Linux => Modifiers {
+                platform: true,
+                ..chord
+            },
+        };
+        let with = |a: Modifiers, b: Modifiers| Modifiers {
+            alt: a.alt || b.alt,
+            function: a.function || b.function,
+            ..a
+        };
+        for (modifiers, action) in [
+            (none, Download),
+            (shift, Download),
+            (opening(none), Open),
+            (opening(alt), Open),
+            (opening(shift), Copy),
+            (opening(with(shift, alt)), Download),
+            (opening(with(shift, function)), Download),
+            (other(opening(shift)), Download),
+            (other(shift), Download),
+        ] {
+            assert_eq!(
+                ClickAction::of(modifiers, platform),
+                action,
+                "{platform:?} {modifiers:?}"
+            );
+        }
+    }
+}
+
+/// What reaches the clipboard is the maintainer's explicit list, so the classifier must take exactly it and refuse
+/// the rest loudly, never guessing: an image extension decides the kind, so a mislabelled image is refused rather than
+/// copied as text, and nothing but valid UTF-8 without NUL is text. Specified: text, text with escape sequences and an
+/// SVG copy as text on both platforms, an empty file as empty text; each listed raster extension (any case) holding its
+/// format's signature copies as that image on a Mac, and as nothing on Linux; a PNG name over text, an AVIF and a PDF
+/// (binary) are refused, as are invalid UTF-8 and text holding a NUL byte.
+#[test]
+fn only_text_and_listed_images_reach_the_clipboard() {
+    use copy::{Clip, classify};
+    use gpui::{Image, ImageFormat};
+    for platform in [Platform::Mac, Platform::Linux] {
+        for (path, bytes) in [
+            ("/w/notes.md", b"# notes\n".to_vec()),
+            ("/w/build.log", b"\x1b[31merror\x1b[0m\n".to_vec()),
+            (
+                "/w/logo.svg",
+                b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec(),
+            ),
+            ("/w/empty.txt", Vec::new()),
+            ("/w/caf\u{e9}.txt", "caf\u{e9}\n".as_bytes().to_vec()),
+        ] {
+            let text = String::from_utf8(bytes.clone()).unwrap();
+            assert_eq!(
+                classify(path, bytes, platform),
+                Ok(Clip::Text(text)),
+                "{path}"
+            );
+        }
+        for (path, bytes) in [
+            ("/w/shot.png", b"not a png at all".to_vec()),
+            ("/w/photo.avif", b"\0\0\0\x1cftypavif".to_vec()),
+            ("/w/doc.pdf", b"%PDF-1.7\n\xe2\xe3\xcf\xd3\n".to_vec()),
+            ("/w/bad.txt", vec![0xff, 0xfe, b'a']),
+            ("/w/nul.txt", b"a\0b".to_vec()),
+        ] {
+            assert!(
+                classify(path, bytes, platform).is_err(),
+                "{path} on {platform:?}"
+            );
+        }
+    }
+    let webp = [b"RIFF".as_slice(), b"\x10\0\0\0", b"WEBPVP8 "].concat();
+    for (path, format, bytes) in [
+        (
+            "/w/a.png",
+            ImageFormat::Png,
+            b"\x89PNG\r\n\x1a\n....".to_vec(),
+        ),
+        ("/w/a.JPG", ImageFormat::Jpeg, b"\xff\xd8\xff\xe0".to_vec()),
+        ("/w/a.jpeg", ImageFormat::Jpeg, b"\xff\xd8\xff\xdb".to_vec()),
+        ("/w/a.webp", ImageFormat::Webp, webp),
+        ("/w/a.gif", ImageFormat::Gif, b"GIF89a..".to_vec()),
+        ("/w/a.bmp", ImageFormat::Bmp, b"BM......".to_vec()),
+        ("/w/a.tif", ImageFormat::Tiff, b"II*\0....".to_vec()),
+        ("/w/a.tiff", ImageFormat::Tiff, b"MM\0*....".to_vec()),
+        ("/w/a.ico", ImageFormat::Ico, b"\0\0\x01\0..".to_vec()),
+    ] {
+        assert_eq!(
+            classify(path, bytes.clone(), Platform::Mac),
+            Ok(Clip::Image(Image::from_bytes(format, bytes.clone()))),
+            "{path}"
+        );
+        assert!(
+            classify(path, bytes, Platform::Linux).is_err(),
+            "{path} on Linux"
+        );
+    }
+    // A JPEG's bytes under a PNG's name are refused: the extension, not a sniff, says what the file must be.
+    assert!(classify("/w/a.png", b"\xff\xd8\xff\xe0".to_vec(), Platform::Mac).is_err());
+}
+
+/// A copy that cannot succeed must fail at once with words, before any bytes cross from the host. Specified: on Linux
+/// an image is refused before reading; a file the hover measured over 10,000,000 bytes is refused, naming 10 MB; a
+/// file of exactly the cap, and one of unknown size (whose read still enforces the cap), may be read.
+#[test]
+fn hopeless_copies_are_refused_before_reading() {
+    use copy::refused_before_reading as refused;
+    assert!(refused("/w/a.png", Some(10), Platform::Linux).is_some());
+    assert_eq!(refused("/w/a.png", Some(10), Platform::Mac), None);
+    assert_eq!(
+        refused("/w/a.txt", Some(10_000_001), Platform::Mac).as_deref(),
+        Some("the file is larger than 10 MB")
+    );
+    assert_eq!(refused("/w/a.txt", Some(10_000_000), Platform::Linux), None);
+    assert_eq!(refused("/w/a.txt", None, Platform::Mac), None);
+}
+
 // ---- Harness ---------------------------------------------------------------------------------------------------------
+
+/// One copy's read as the terminal asked for it: the path, the cap, and the answer it waits on until a test gives it.
+type CopyRead = (String, usize, Option<FakeAnswer<Vec<u8>>>);
 
 /// The terminal's own test harness ([`attached::tests::harness`]: an attached owner of session `s1` in a window, its
 /// stream and its UI session's transfers the helm client's fakes), with the saves the terminal has asked for so far.
@@ -124,6 +324,9 @@ struct Files<'a> {
     /// Every save the terminal asked for so far, in order: the path, whether it asked to open the save, and the answer
     /// the save waits on (taken by [`Files::save`]).
     downloads: Vec<(String, bool, Option<FakeAnswer<SavedDownload>>)>,
+    /// Every copy's read the terminal asked for so far, in order: the path, the cap it asked the client to hold, and
+    /// the answer the read waits on (taken by [`Files::read_back`]).
+    copies: Vec<CopyRead>,
 }
 
 impl<'a> Deref for Files<'a> {
@@ -145,6 +348,7 @@ fn harness(cx: &mut TestAppContext) -> Files<'_> {
     Files {
         h: attached::tests::harness(cx),
         downloads: Vec::new(),
+        copies: Vec::new(),
     }
 }
 
@@ -222,7 +426,7 @@ impl Files<'_> {
     }
 
     /// The checks the terminal started since the last call, by the path each asked about, all for session `s1`. Saves
-    /// it started meanwhile are kept in [`Files::downloads`].
+    /// and copies it started meanwhile are kept in [`Files::downloads`] and [`Files::copies`].
     fn checks(&mut self) -> Vec<(String, FakeAnswer<FileStat>)> {
         let mut checks = Vec::new();
         for transfer in self.transfers.take() {
@@ -247,7 +451,16 @@ impl Files<'_> {
                     assert_eq!(session, "s1", "a save asks the terminal's own session");
                     self.downloads.push((path, open, Some(answer)));
                 }
-                other => panic!("a file link starts checks and saves only: {other:?}"),
+                FakeTransfer::DownloadBytes {
+                    session,
+                    path,
+                    max_bytes,
+                    answer,
+                } => {
+                    assert_eq!(session, "s1", "a copy asks the terminal's own session");
+                    self.copies.push((path, max_bytes, Some(answer)));
+                }
+                other => panic!("a file link starts checks, saves and copies only: {other:?}"),
             }
         }
         checks
@@ -1190,6 +1403,309 @@ fn the_modifier_click_opens_only_what_the_helm_offered(cx: &mut TestAppContext) 
     assert!(!h.last_save().1, "Ctrl does not");
 }
 
+// ---- Copying the contents --------------------------------------------------------------------------------------------
+
+/// Shift and the platform's opening modifier: the copy chord on `platform`.
+fn copy_chord(platform: Platform) -> Modifiers {
+    match platform {
+        Platform::Mac => Modifiers {
+            platform: true,
+            shift: true,
+            ..Modifiers::none()
+        },
+        Platform::Linux => Modifiers {
+            control: true,
+            shift: true,
+            ..Modifiers::none()
+        },
+    }
+}
+
+impl Files<'_> {
+    /// Make the terminal `platform`'s, before any hover takes its platform.
+    fn on(&mut self, platform: Platform) {
+        let owner = self.owner.clone();
+        self.cx
+            .update(|_, cx| owner.update(cx, |owner, _| owner.set_platform(platform)));
+    }
+
+    /// Every copy's read the terminal asked for so far: the path and the cap it asked for.
+    fn copied(&mut self) -> Vec<(String, usize)> {
+        assert!(
+            self.checks().is_empty(),
+            "the premise: no check is in flight"
+        );
+        self.copies
+            .iter()
+            .map(|(path, cap, _)| (path.clone(), *cap))
+            .collect()
+    }
+
+    /// Answer the latest copy's read, which must not have been answered yet, and draw the outcome.
+    fn read_back(&mut self, result: Result<Vec<u8>, TransferError>) {
+        assert!(
+            self.checks().is_empty(),
+            "the premise: no check is in flight"
+        );
+        let answer = self
+            .copies
+            .last_mut()
+            .and_then(|(_, _, answer)| answer.take())
+            .expect("the premise: a copy waits for its read");
+        answer.answer(result);
+        settle(self.cx);
+        redraw(self.cx);
+    }
+
+    /// The image on the clipboard, if it holds one.
+    fn clipboard_image(&mut self) -> Option<gpui::Image> {
+        let item = self.cx.read_from_clipboard()?;
+        item.entries().iter().find_map(|entry| match entry {
+            gpui::ClipboardEntry::Image(image) => Some(image.clone()),
+            _ => None,
+        })
+    }
+}
+
+/// The copy chord exists to put a file's contents on the clipboard without a trip through Downloads, so it must read
+/// the very file the hover disclosed, capped at 10 MB, save nothing, and say how it went in the status line the way a
+/// save does (the maintainer's words: "Copying…", "Copied to clipboard", "Copy failed: …"). Specified: on a Mac,
+/// Shift-Cmd-click on a checked path asks the host for the resolved path's bytes with a 10,000,000-byte cap and asks
+/// for no save; the line says "Copying…"; once the bytes arrive the clipboard holds them as text and the line says
+/// "Copied to clipboard", gone at five seconds as a save's success is; a refusal without words reads "Copy failed: Copy
+/// refused", and stays past that; one with words shows them; a file found over the cap reads "the file is larger than
+/// 10 MB"; and bytes that are neither text nor a listed image are refused with words, leaving the clipboard as it was.
+#[gpui::test]
+fn a_copy_click_puts_the_contents_on_the_clipboard_without_saving(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on(Platform::Mac);
+    h.show(vec![row(0, "notes.txt", false)], None);
+    let on = h.at_cell(2, 0);
+    h.checked(on, "notes.txt", 10);
+    h.click_with(on, copy_chord(Platform::Mac));
+    assert_eq!(
+        h.copied(),
+        [("/work/notes.txt".to_owned(), 10_000_000)],
+        "the disclosed file, capped"
+    );
+    assert_eq!(h.admitted(), Vec::<String>::new(), "nothing is saved");
+    assert_eq!(h.status().as_deref(), Some("Copying…"));
+    h.read_back(Ok(b"hello\n".to_vec()));
+    assert_eq!(h.clipboard().as_deref(), Some("hello\n"));
+    assert_eq!(h.status().as_deref(), Some("Copied to clipboard"));
+    advance(h.cx, Duration::from_secs(5));
+    assert_eq!(h.status(), None, "the success fades as a save's does");
+
+    for (error, line) in [
+        (
+            TransferError::Refused {
+                status: 404,
+                message: String::new(),
+            },
+            "Copy failed: Copy refused",
+        ),
+        (
+            TransferError::Refused {
+                status: 404,
+                message: "the file is no longer readable".into(),
+            },
+            "Copy failed: the file is no longer readable",
+        ),
+        (
+            TransferError::TooLarge {
+                max_bytes: 10_000_000,
+            },
+            "Copy failed: the file is larger than 10 MB",
+        ),
+    ] {
+        h.click_with(on, copy_chord(Platform::Mac));
+        h.read_back(Err(error));
+        advance(h.cx, Duration::from_secs(10));
+        assert_eq!(h.status().as_deref(), Some(line), "a failure stays");
+    }
+
+    h.click_with(on, copy_chord(Platform::Mac));
+    h.read_back(Ok(b"\x7fELF\x02\x01\x01\0".to_vec()));
+    assert_eq!(
+        h.status().as_deref(),
+        Some("Copy failed: the file is not text or a supported image")
+    );
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("hello\n"),
+        "a refused copy leaves the clipboard alone"
+    );
+}
+
+/// Images copy as images on a Mac, where GPUI's clipboard takes them, and are refused at once on Linux, where it takes
+/// text only, so no bytes cross for a copy that cannot land; the chord is Shift-Ctrl there, and Shift-Cmd is not.
+/// Specified: on a Mac a checked `shot.png` holding a PNG copies as a PNG image; on Linux Shift-Ctrl on it reads
+/// nothing and says only text can be copied, while Shift-Ctrl on a text file copies it, and Shift-Cmd on that file
+/// copies nothing.
+#[gpui::test]
+fn images_copy_on_a_mac_and_are_refused_before_reading_on_linux(cx: &mut TestAppContext) {
+    let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    let mut h = harness(cx);
+    h.on(Platform::Mac);
+    h.show(
+        vec![row(0, "shot.png", false), row(1, "notes.txt", false)],
+        None,
+    );
+    let (image, text) = (h.at_cell(2, 0), h.at_cell(2, 1));
+    h.checked(image, "shot.png", 16);
+    h.click_with(image, copy_chord(Platform::Mac));
+    h.read_back(Ok(png.clone()));
+    assert_eq!(
+        h.clipboard_image(),
+        Some(gpui::Image::from_bytes(gpui::ImageFormat::Png, png))
+    );
+    assert_eq!(h.status().as_deref(), Some("Copied to clipboard"));
+
+    // On Linux. The hover takes the platform when its display next changes, so the pointer leaves and comes back.
+    h.on(Platform::Linux);
+    let away = h.at_cell(40, 5);
+    h.rest_on(away);
+    h.checked(image, "shot.png", 16);
+    h.click_with(image, copy_chord(Platform::Linux));
+    assert_eq!(h.copied().len(), 1, "no new read for the image");
+    assert_eq!(
+        h.status().as_deref(),
+        Some("Copy failed: only text can be copied here; images can be copied on macOS")
+    );
+    h.checked(text, "notes.txt", 6);
+    h.click_with(text, copy_chord(Platform::Mac));
+    assert_eq!(h.copied().len(), 1, "Shift-Cmd does not copy on Linux");
+    assert_eq!(
+        h.last_save(),
+        ("/work/notes.txt".to_owned(), false),
+        "it is a plain download there"
+    );
+    h.click_with(text, copy_chord(Platform::Linux));
+    assert_eq!(
+        h.copied().last().map(|(path, _)| path.as_str()),
+        Some("/work/notes.txt")
+    );
+    h.read_back(Ok(b"notes\n".to_vec()));
+    assert_eq!(h.clipboard().as_deref(), Some("notes\n"));
+}
+
+/// The clipboard must end up holding the file the user copied last, even when an earlier, larger file's read is still
+/// on its way. Specified: two copies started one after the other (premise: both reads went out) leave the first read
+/// abandoned; the second's bytes reach the clipboard; and the first, answered afterwards, changes nothing.
+#[gpui::test]
+fn only_the_latest_copy_reaches_the_clipboard(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on(Platform::Mac);
+    h.show(
+        vec![row(0, "big.log", false), row(1, "notes.txt", false)],
+        None,
+    );
+    let (big, small) = (h.at_cell(2, 0), h.at_cell(2, 1));
+    h.checked(big, "big.log", 9_000_000);
+    h.click_with(big, copy_chord(Platform::Mac));
+    h.checked(small, "notes.txt", 6);
+    h.click_with(small, copy_chord(Platform::Mac));
+    assert_eq!(h.copied().len(), 2, "the premise: both reads went out");
+    let first = h.copies[0].2.take().expect("the first read is unanswered");
+    assert!(first.abandoned(), "the second copy abandoned the first");
+    h.read_back(Ok(b"notes\n".to_vec()));
+    assert_eq!(h.clipboard().as_deref(), Some("notes\n"));
+    first.answer(Ok(b"big\n".to_vec()));
+    settle(h.cx);
+    redraw(h.cx);
+    assert_eq!(h.clipboard().as_deref(), Some("notes\n"));
+    assert_eq!(h.status().as_deref(), Some("Copied to clipboard"));
+}
+
+/// A file the hover already measured over the cap cannot be copied, so the click says so at once instead of moving up
+/// to 10 MB to find out. Specified: a checked file of 10,000,001 bytes copied with the chord reads nothing and the line
+/// says "Copy failed: the file is larger than 10 MB".
+#[gpui::test]
+fn a_file_the_hover_measured_over_the_cap_is_refused_before_reading(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on(Platform::Mac);
+    h.show(vec![row(0, "big.log", false)], None);
+    let on = h.at_cell(2, 0);
+    h.checked(on, "big.log", 10_000_001);
+    h.click_with(on, copy_chord(Platform::Mac));
+    assert_eq!(h.copied(), Vec::<(String, usize)>::new());
+    assert_eq!(
+        h.status().as_deref(),
+        Some("Copy failed: the file is larger than 10 MB")
+    );
+}
+
+/// Shift extends a selection, and a click on a link counts only with nothing selected, so without care an earlier
+/// selection would grow to the path and silently swallow the copy. Specified: with text selected elsewhere on the
+/// screen (premise: the selection is there once the path's check answered), the copy chord on the checked path clears
+/// the selection and reads the file.
+#[gpui::test]
+fn an_earlier_selection_never_swallows_a_copy_click(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on(Platform::Mac);
+    h.show(
+        vec![row(0, "notes.txt", false), row(1, "some other text", false)],
+        None,
+    );
+    let (from, to) = (h.at_cell(0, 1), h.at_cell(8, 1));
+    h.drag(from, to, Modifiers::none());
+    let on = h.at_cell(2, 0);
+    h.checked(on, "notes.txt", 10);
+    assert!(
+        h.selection().is_some_and(|selection| !selection.is_empty()),
+        "the premise: text is selected"
+    );
+    h.click_with(on, copy_chord(Platform::Mac));
+    assert_eq!(h.selection(), None, "the copy cleared the selection");
+    assert_eq!(h.copied(), [("/work/notes.txt".to_owned(), 10_000_000)]);
+}
+
+/// The wording a copy refused for file details not fully visible gets.
+const COPY_REFUSAL: &str =
+    "cannot copy: full file details are not visible; enlarge the window and hover again";
+
+/// A copy refused because the file details were not fully visible must say "cannot copy", not "cannot download": the
+/// user asked for a copy, and the refusal's words are the only feedback. This is the file check's refusal, for a display
+/// that ran past the window's edge; the next test is the terminal's own, for a display held back over the pointer.
+/// Specified: with a ready check whose display ran off the window, the copy chord reads nothing and the top of the
+/// terminal says the copy wording.
+#[gpui::test]
+fn a_copy_refused_for_a_clipped_display_says_it_could_not_copy(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on(Platform::Mac);
+    h.show(vec![row(0, "/work/report.pdf", false)], None);
+    let on = h.at_cell(3, 0);
+    h.checked(on, "/work/report.pdf", 2000);
+    h.stage_off_window();
+    h.click_with(on, copy_chord(Platform::Mac));
+    assert_eq!(h.copied(), Vec::<(String, usize)>::new());
+    assert_eq!(h.refusal().as_deref(), Some(COPY_REFUSAL));
+}
+
+/// The terminal's own refusal, for a file display held back over its pointer, names the copy too (see the previous
+/// test for why). Specified: with a display held back over its pointer, the copy chord reads nothing and the top of the
+/// terminal says the copy wording.
+#[gpui::test]
+fn a_copy_refused_for_a_held_back_display_says_it_could_not_copy(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on(Platform::Mac);
+    h.cx.simulate_resize(gpui::size(px(520.), px(300.)));
+    h.show(vec![row(0, "/work/report.pdf", false)], None);
+    let on = h.at_cell(3, 0);
+    h.rest_on(on);
+    let answer = h.check("/work/report.pdf");
+    let resolved = format!("/work/{}report.pdf", "deep/".repeat(420));
+    h.answer(answer, ready(&resolved, 2000));
+    let owner = h.owner.clone();
+    assert!(
+        h.cx.update(|_, cx| owner.read(cx).file_disclosure_held_back("/work/report.pdf")),
+        "the premise: the panel painted over the pointer and was held back"
+    );
+    h.click_with(on, copy_chord(Platform::Mac));
+    assert_eq!(h.copied(), Vec::<(String, usize)>::new());
+    assert_eq!(h.refusal().as_deref(), Some(COPY_REFUSAL));
+}
+
 /// The status line sits over the top of the terminal, and the program must never be resized for it: a resize would
 /// redraw the program's screen on every download. Specified (SPEC.md: the status "appears at the top of that
 /// terminal"; the old message was positioned over the grid): showing the status line, and then a failure that stays,
@@ -1336,7 +1852,7 @@ fn a_save_outlives_the_hover_but_not_the_terminal(cx: &mut TestAppContext) {
 
     // The terminal leaves its window, which stays open, and the test's own handle goes too.
     h.close_terminal();
-    let Files { h, downloads } = h;
+    let Files { h, downloads, .. } = h;
     let Harness { cx, owner, .. } = h;
     drop(owner);
     redraw(cx);

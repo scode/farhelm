@@ -270,7 +270,7 @@ use gpui::{
 
 use super::attachments::{self, Attachments, Offered, Paste, Uploaded};
 use super::disclosure::{self, Hidden};
-use super::files::{FileDisclosureView, FileLinks, StatusShown};
+use super::files::{ClickAction, FileDisclosureView, FileLinks, StatusShown};
 use super::tunnels::{self, TunnelPill, Tunnels};
 use super::{CellMetrics, CursorPhase, SelectionModifier, TerminalView, style};
 use crate::actions::{self, KeyOwner};
@@ -2825,7 +2825,8 @@ impl AttachedTerminal {
         if press.link.file_path().is_some() {
             let refusal = if press.file_held_back {
                 self.files.update(cx, |files, cx| files.clear_status(cx));
-                Some(Hidden::NotVisible.file_words())
+                let action = ClickAction::of(event.modifiers, self.platform);
+                Some(Hidden::NotVisible.file_words(action))
             } else {
                 // A normal press closes the layer but keeps its disclosure record until release. Replacing the hover
                 // replaces that record, even if the same printed path comes back before mouse-up.
@@ -4142,6 +4143,21 @@ impl AttachedTerminal {
             at: event.position,
             visibility,
         });
+        // A copy click on a file link whose check answered (its painted disclosure vouched for the press, or a panel
+        // held back over it can explain a refusal) is about the file, not the text. A click only counts with nothing
+        // selected ([`AttachedTerminal::link_released`]), and Shift is the selection's extending modifier (and Linux's
+        // forcing one), so without this an earlier selection would grow to the link and swallow the copy. So the
+        // selection goes, and the press starts none. The copy gesture is read with the terminal's own platform, as the
+        // click's action is, so tests of either platform behave alike on any machine.
+        let copy_press = event.button == MouseButton::Left
+            && ClickAction::of(event.modifiers, self.platform) == ClickAction::Copy
+            && self.link_press.as_ref().is_some_and(|press| {
+                press.link.file_path().is_some()
+                    && (press.file_disclosure.is_some() || press.file_held_back)
+            });
+        if copy_press {
+            view.update(cx, |view, cx| view.set_selection(None, cx));
+        }
         if tracking && !forced {
             // A press on a web link Farhelm opens is withheld from the program, in intercept mode, with its drag and
             // release: it is never reported, so its release is not either. It clears the selection, as the old app's
@@ -4161,7 +4177,7 @@ impl AttachedTerminal {
             self.report_press(event, cx);
             return;
         }
-        if event.button != MouseButton::Left {
+        if event.button != MouseButton::Left || copy_press {
             return;
         }
         let mac = actions::THIS_PLATFORM == Platform::Mac;

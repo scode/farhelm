@@ -32,6 +32,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
+use super::files::ClickAction;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::theme::{self, Palette, metrics};
 
@@ -97,14 +98,21 @@ impl Hidden {
         }
     }
 
-    /// The same refusal with the old app's download wording.
-    pub(super) const fn file_words(self) -> &'static str {
-        match self {
-            Self::NotVisible => {
+    /// The same refusal for a file link, naming what the click asked for: the old app's download wording for a save
+    /// (an opening click saves first), and the same sentence saying "copy" for a copy of the contents.
+    pub(super) const fn file_words(self, action: ClickAction) -> &'static str {
+        match (self, action) {
+            (Self::NotVisible, ClickAction::Download | ClickAction::Open) => {
                 "cannot download: full file details are not visible; enlarge the window and hover again"
             }
-            Self::Covered => {
+            (Self::Covered, ClickAction::Download | ClickAction::Open) => {
                 "cannot download: full file details are covered by another Farhelm surface; move the pointer and hover again"
+            }
+            (Self::NotVisible, ClickAction::Copy) => {
+                "cannot copy: full file details are not visible; enlarge the window and hover again"
+            }
+            (Self::Covered, ClickAction::Copy) => {
+                "cannot copy: full file details are covered by another Farhelm surface; move the pointer and hover again"
             }
         }
     }
