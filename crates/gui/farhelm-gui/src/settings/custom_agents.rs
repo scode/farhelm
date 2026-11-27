@@ -6,8 +6,9 @@
 //! sends, with the display name it had when asked. Escape on the question cancels it and keeps Settings open; focus
 //! then returns to Delete, whose focus handle the editor keeps across the frames the question replaces it in. An
 //! accepted "Save changes before closing?" takes an unanswered Delete question away and saves the draft, rather than
-//! refusing the save while it is open: the newer question's answer wins, as the recipe editor's own leave question
-//! takes its Delete question away (`leaving.rs`, `ask_leave`).
+//! refusing the save while it is open: the newer question's answer wins (SPEC.md, "Opening and closing"). Keep editing
+//! leaves the Delete question open. A recipe's Delete question follows the same rule, both for Settings' close and for
+//! the recipe editor's own leave question (`leaving.rs`, and `Editor::started` in `settings/recipes/editor.rs`).
 
 use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::ui_channel::{ApiPath, Availability, Collection, Method};

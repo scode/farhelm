@@ -14,7 +14,10 @@
 //!   dismissal hook calls [`Editor::dismissal`] for a close; Settings no longer does. Where a departure goes is the
 //!   host's ([`super::Host`]): the section's ([`super::super::Recipes::depart`]), or Add host's.
 //! - **Leaving opens over the host dialog.** Keep editing, Discard and Save stay visible even during a long edit.
-//!   The delete confirmation stays in the footer. Asking about leaving dismisses any inline delete confirmation.
+//!   An unanswered inline Delete confirmation stays in the footer behind the question, and Keep editing returns to it.
+//!   Only Save takes it away, once the save starts ([`Editor::started`]), because the newer answer wins (SPEC.md,
+//!   "Opening and closing"). Settings' own close question and a custom agent's Delete follow the same rule. Discard
+//!   leaves the editor, and the confirmation goes with it.
 //! - **Save finishes the leave.** Save in the question saves as Save does, and the done answer completes the departure
 //!   it was asked for; a refused save keeps the editor open with the helm's words, as any refused save does. Discard
 //!   leaves at once. The question goes when it is answered, so a refused save shows the ordinary answers again under
@@ -169,7 +172,9 @@ impl Editor {
             },
         );
         let save = cx.weak_entity();
-        let layer = prompt::ask(
+        // An open inline Delete confirmation stays in the footer behind the question: Keep editing returns to it, and
+        // only a Save that starts takes it away, in `Editor::started` (the module docs).
+        prompt::ask(
             question,
             None,
             &mark,
@@ -184,11 +189,6 @@ impl Editor {
             window,
             cx,
         );
-        // Asking about leaving dismisses an inline delete confirmation (the module docs).
-        if layer.is_some() {
-            self.delete_question = None;
-            cx.notify();
-        }
     }
 
     /// Delete: ask the inline confirmation in the answers' place. Nothing for a recipe not

@@ -595,8 +595,8 @@ impl Editor {
     }
 
     /// After a Save was asked: a started one locks the form, drops the last error and takes an unanswered inline Delete
-    /// confirmation away, since the newer answer (a Save from Settings' close question, say) wins over it; a busy key
-    /// says so ([`Refused`]).
+    /// confirmation away, since the newer answer (a Save from Settings' close question or from the editor's own leave
+    /// question, say) wins over it (SPEC.md, "Opening and closing"); a busy key says so ([`Refused`]).
     fn started(&mut self, started: Result<(), NotStarted>, cx: &mut Context<Self>) {
         self.refused.record(SAVE, &started);
         match started {
