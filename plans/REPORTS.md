@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`hooks-restart-and-antigravity-fixes`](reports/hooks-restart-and-antigravity-fixes.report.md) landed 2026-11-26 in #5021, #5024, #5028: Place Antigravity Restart options before Custom `--`, isolate hook setup errors in Restart and recovery UI, and delay the missing-hook warning clock until agent handoff
 - [`brick-test-reopen-and-retry-fixes`](reports/brick-test-reopen-and-retry-fixes.report.md) landed 2026-11-26 in #5023, #5025: Keep the brick test's installer pair retryable after an unavailable P0 check and bind reopen samples to a witnessed app relaunch
 - [`triage-security-and-agent-boundaries`](reports/triage-security-and-agent-boundaries.report.md) landed 2026-11-26 in #5030, #5032, #5035: Execute 5 triage outcomes for agent-request security boundaries, container host pinning, log escaping, and repository-suggestion isolation
 - [`triage-gui-hosts-menus-and-terminal`](reports/triage-gui-hosts-menus-and-terminal.report.md) landed 2026-11-26 in #5033, #5036, #5039: Execute 8 triage outcomes for host refusal remove snapshot, mid-probe skip preferences, Templates footer binding, exited-shell menu Stop and suspend wording, terminal file-link holdback clicks, and reposted notices
