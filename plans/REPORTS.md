@@ -10,3 +10,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`remove-legacy-sandbox-sessions-api`](reports/remove-legacy-sandbox-sessions-api.report.md) landed 2026-11-27 in #5130: Remove the unused legacy `POST /api/sandbox-sessions` helm endpoint and migrate its tests to `/api/environment-sessions`
 - [`restart-startup-scope-cleanup`](reports/restart-startup-scope-cleanup.report.md) landed 2026-11-27 in #5133: Clean the scope and shut down an unheld answering replacement host during Linux supervisor startup pending-scope cleanup
 - [`brick-test-inline-welcome`](reports/brick-test-inline-welcome.report.md) landed 2026-11-27 in #5132: Update macOS release brick-test instructions and unit tests for the inline Welcome view
+- [`claude-drift-trust-copy-back`](reports/claude-drift-trust-copy-back.report.md) landed 2026-11-27 in #5134: Add an atomic-rename regression test proving Claude drift copy-back never overwrites real ancestor trust
