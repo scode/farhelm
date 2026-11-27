@@ -232,8 +232,9 @@ impl Action {
 }
 
 /// The hover help of `action` on `row`, as listed and drawn now, with Skip session confirmations as `skipped`. Delete
-/// names the platform's Delete shortcut, and drops "after you confirm" when the question is skipped; Restart's says
-/// whether the conversation can be resumed and why not ([`restart::hover_help`]).
+/// names the platform's Delete shortcut, and drops "after you confirm" only when the question is skipped: a session
+/// with open terminal tabs asks even then ([`delete::asks_despite_skipping`]). Restart's says whether the conversation
+/// can be resumed and why not ([`restart::hover_help`]).
 fn hover_help(action: Action, row: &SessionRow, skipped: bool) -> HoverHelp {
     let words = match action {
         Action::Stop => format!(
@@ -245,7 +246,7 @@ fn hover_help(action: Action, row: &SessionRow, skipped: bool) -> HoverHelp {
         }
         Action::Replace => replace::menu_help(row).to_owned(),
         Action::Clone => menu::CLONE_HELP.to_owned(),
-        Action::Delete if skipped => {
+        Action::Delete if skipped && !delete::asks_despite_skipping(row) => {
             format!("Delete: remove this session and its state ({DELETE_SESSION_SHORTCUT_NAME})")
         }
         Action::Delete => format!(

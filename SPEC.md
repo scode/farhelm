@@ -2361,24 +2361,29 @@ submission and focus-return behavior.
   still created first, with no liveness check before it, and the user gets Replace's both-sessions-exist error.
 - **Delete** removes the session and its stored state, in any state, terminating the agent or shell and its tabs if
   running. The confirmation names the main program or open tabs when present, unless session confirmations are skipped
-  (below). Deletion may make partial progress before failing, including removing attachment files while retaining the
-  session row for retry. There is no rollback guarantee. Report the failure visibly and allow a later Delete to finish
-  cleanup; a retained row does not mean previously removed state has been restored. Stopping a live agent or shell can
-  take a few seconds, since it gets its own chance to exit first, and a session's row stays until the supervisor
-  confirms the whole process tree is gone. From the moment a delete is committed until that answer arrives, the client
-  that started the delete shows it prominently, as an expected wait rather than an error: the row shows a spinner and
-  what is happening in place of its title (stopping the agent or shell, stopping its terminal tabs when only those are
-  alive, or deleting if both have ended), the open session's header shows the same in place of its actions, and a scrim
-  over its terminal says it again. The terminal's own "Detached" notice, which the delete itself causes, is held back
-  meanwhile; if the delete fails, the row and header come back with the refusal shown, and a held notice appears.
+  (below). A session with an open terminal tab is always asked about, whether its Delete comes from the row menu, the
+  header or the Delete shortcut, even with session confirmations skipped (judged from the row as drawn, like any
+  consent); a bulk Delete of marked sessions still follows the switch. Deletion may make partial progress before
+  failing, including removing attachment files while retaining the session row for retry. There is no rollback
+  guarantee. Report the failure visibly and allow a later Delete to finish cleanup; a retained row does not mean
+  previously removed state has been restored. Stopping a live agent or shell can take a few seconds, since it gets its
+  own chance to exit first, and a session's row stays until the supervisor confirms the whole process tree is gone. From
+  the moment a delete is committed until that answer arrives, the client that started the delete shows it prominently,
+  as an expected wait rather than an error: the row shows a spinner and what is happening in place of its title
+  (stopping the agent or shell, stopping its terminal tabs when only those are alive, or deleting if both have ended),
+  the open session's header shows the same in place of its actions, and a scrim over its terminal says it again. The
+  terminal's own "Detached" notice, which the delete itself causes, is held back meanwhile; if the delete fails, the row
+  and header come back with the refusal shown, and a held notice appears.
 
 The off-by-default **Skip session confirmations** switch in Settings skips session row, header and bulk Stop, session
 row and bulk Delete, row Replace, header Restart, Replace and Delete, interrupted-card Replace, terminal-tab Close, and
 the running-program check of bulk Restart/Replace's Replace (see [Session list](#session-list)). Each runs on the first
 click through the ordinary action path, with consent from the state shown by that render. It does not skip an
 environment session's Delete in either form, including bulk Delete: neither the Delete that asks the environment's
-Farhelm and may remove the environment with its last session, nor the whole-resource Delete. Nor does it skip YOLO, host
-or trash questions, or the Restart with or Replace with launcher. Host setup and removal retain their separate choices.
+Farhelm and may remove the environment with its last session, nor the whole-resource Delete. It does not skip a single
+session's Delete (row, header or shortcut) while that session has an open terminal tab either, so that a keystroke meant
+for a tab cannot end the session and every tab; bulk Delete still follows the switch. Nor does it skip YOLO, host or
+trash questions, or the Restart with or Replace with launcher. Host setup and removal retain their separate choices.
 Environment Suspend and Stop and suspend keep the host-wide activity confirmation described under Sandbox sessions and
 Container sessions.
 

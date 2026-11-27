@@ -8,7 +8,7 @@
 //! - **Ask only when something is alive.** A session whose agent has ended and that lists no terminal tab is deleted at
 //!   once, with [`DeleteGuard::NothingAlive`], so the supervisor refuses if the row was stale and something runs after
 //!   all. Anything alive asks, unless the helm-wide **Skip session confirmations** preference is on, and then the click
-//!   goes ahead with the guard of what the row showed.
+//!   goes ahead with the guard of what the row showed. Open terminal tabs ask even then ([`asks_despite_skipping`]).
 //! - **The answer authorizes only what the question said.** The guard is chosen from the same row the question was
 //!   drawn from and frozen into the question with it ([`Frozen`]); confirming sends that guard, never one recomputed at
 //!   the click from a row that may have moved on (SPEC.md, "Confirmed 2026-10-01").
@@ -205,9 +205,10 @@ pub(super) const MANAGED_CHECKOUT: &str = "The managed checkout stays while anot
 // ---- Starting a Delete -----------------------------------------------------------------------------------------------
 
 impl SessionList {
-    /// Delete `target`'s row at `mark`: delete it at once when nothing shows alive or
-    /// confirmations are skipped, and otherwise ask, beside the row's menu button while the row is in the list's view
-    /// and centered when it is not (scrolled away). A session in a disposable environment is always asked ([`begin`]).
+    /// Delete `target`'s row at `mark`: delete it at once when nothing shows alive or confirmations are skipped (unless
+    /// the row lists an open terminal tab, [`asks_despite_skipping`]), and otherwise ask, beside the row's menu button
+    /// while the row is in the list's view and centered when it is not (scrolled away). A session in a disposable
+    /// environment is always asked ([`begin`]).
     /// Called after checking that the live session accepts a new action. The screenshot goldens ask without a click.
     pub(crate) fn delete(
         &mut self,
@@ -255,11 +256,26 @@ impl SessionList {
 
 /// Whether the drawn Delete requires confirmation, before anything is sent. The header and its shortcut ask even
 /// when the row shows nothing alive, unless the preference skips questions. The row menu can also skip on that
-/// premise. Both always ask for an environment Delete, in either lane.
+/// premise. Both always ask for an environment Delete, in either lane, and for a session with open terminal tabs
+/// ([`asks_despite_skipping`]).
 pub(super) fn asks(target: &menu::Actionable, ask_when_nothing_alive: bool) -> bool {
     target.environment_delete.is_some()
+        || asks_despite_skipping(&target.row)
         || (!target.skips_questions
             && (ask_when_nothing_alive || !shows_nothing_alive(&target.row)))
+}
+
+/// Whether a single-session Delete of `row` asks even while **Skip session confirmations** is on: whenever the row
+/// lists an open terminal tab. The maintainer asked for this: macOS's Delete shortcut, ⌘W, is the chord a terminal
+/// emulator closes a tab with, so skipping the question would let one keystroke meant for a tab end the session and
+/// every tab with it. It applies to every single-session entry point (header, its shortcut, row menu) so that they keep
+/// agreeing; a bulk Delete of marked sessions still follows the preference (`super::bulk`). The header's hover help
+/// reads it too, so that it does not promise a Delete without a question.
+///
+/// NOTE: It judges the row as drawn, like every Delete's consent. A tab opened elsewhere between that frame and the
+/// press is ended without a question, since a skipped Delete of a running session sends no guard that tabs could fail.
+pub(crate) fn asks_despite_skipping(row: &SessionRow) -> bool {
+    !row.info.tabs.is_empty()
 }
 
 /// Start a Delete from the activated control's snapshot. If it [`asks`], defer the request and return the question

@@ -1407,14 +1407,50 @@ fn a_question_stays_open_and_answers_across_a_failed_listing(cx: &mut TestAppCon
 
 /// SPEC.md: with **Skip session confirmations** on, a row Delete "runs on the first click through the ordinary action
 /// path, with consent from the state shown by that render". Specified: with the preference on, Delete on a running
-/// session with a tab opens no question and sends the Delete with no flag.
+/// session with no terminal tab opens no question and sends the Delete with no flag.
 #[gpui::test]
 fn skipped_confirmations_delete_on_the_click_with_the_rows_guard(cx: &mut TestAppContext) {
-    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 1)], true));
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0)], true));
     deletes(&mut fake);
     choose_delete(cx, "session-menu-a");
     assert!(!any_layer(cx));
     assert_eq!(paths(&deletes(&mut fake)), ["/api/sessions/a"]);
+}
+
+/// Why this matters: a session's open terminal tabs are work a single Delete ends with no undo, and the maintainer
+/// wants that asked about even with **Skip session confirmations** on (SPEC.md, "Lifecycle operations": "A session
+/// with an open terminal tab is always asked about"). Specified: with the preference on, the row menu's Delete on a
+/// running session with one tab opens the Delete question naming the tab and sends nothing; Confirm then sends the
+/// Delete with no flag, the guard of the running row the question was drawn from.
+#[gpui::test]
+fn skipped_confirmations_still_ask_before_deleting_a_session_with_open_tabs(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 1)], true));
+    deletes(&mut fake);
+    assert!(
+        cx.update(|_, cx| {
+            let store = crate::session::current_store(cx).unwrap();
+            super::menu::skips_questions(store.read(cx).collections())
+        }),
+        "the premise: Skip session confirmations is on"
+    );
+    choose_delete(cx, "session-menu-a");
+    assert!(drawn(cx, "prompt"), "open tabs ask despite the preference");
+    let painted: Vec<String> = texts_within(&frame(cx), "prompt")
+        .into_iter()
+        .map(|text| text.text.to_string())
+        .collect();
+    assert!(
+        painted
+            .iter()
+            .any(|text| text.starts_with("1 terminal tab is still open")),
+        "the question names the open tab: {painted:?}"
+    );
+    assert_eq!(deletes(&mut fake), [], "nothing was sent before the answer");
+    test_support::click(cx, "prompt-confirm");
+    assert_eq!(paths(&deletes(&mut fake)), ["/api/sessions/a"]);
+    assert!(!any_layer(cx));
 }
 
 /// An unseen restart cannot widen a skipped Delete's consent. The request uses the guard of the ended,
