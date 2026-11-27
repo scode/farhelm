@@ -10,7 +10,7 @@
 use farhelm_helm_client::Method;
 use farhelm_proto::credentials::{Credential, CredentialKind, check_secret};
 use gpui::{
-    AnyElement, App, Context, Entity, EntityId, FocusHandle, FontWeight, InteractiveElement as _,
+    AnyElement, App, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _,
     IntoElement, ParentElement as _, PathPromptOptions, Render, Role,
     StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity, Window, div, px,
 };
@@ -77,7 +77,10 @@ impl ChosenLogin {
 }
 
 /// One credential's editor (see the parent module's docs). A view of its own, dropped by Back, Cancel, a done save or
-/// delete, or the dialog closing; a save or delete it started goes on in the operation store without it.
+/// delete, or the dialog closing. Back and Cancel are unavailable while a save or the Delete is out (SPEC.md,
+/// "Settings": waiting for the helm's round trip is expected), so while the dialog stays open the editor that sent a
+/// request is still the open one when the reply comes; only closing the dialog leaves that request to finish in the
+/// operation store without it.
 pub(in crate::settings) struct Editor {
     pub(in crate::settings) save_receipt: crate::settings::editing::SaveReceipt,
     parent: WeakEntity<Credentials>,
@@ -232,7 +235,8 @@ impl Editor {
         self.existing.is_some()
     }
 
-    /// Whether Save, Delete, the agent choice and Choose file take no press: while a save or the Delete is out.
+    /// Whether Save, Delete, Back, Cancel, the agent choice and Choose file take no press: while a save or the Delete is
+    /// out.
     fn busy(&self) -> bool {
         self.secret.draft().is_saving() || self.deleting
     }
@@ -328,9 +332,8 @@ impl Editor {
                 match &settled.outcome {
                     Outcome::Done(body) => {
                         let undelivered = delivery_failures(replacing, body.clone());
-                        let id = cx.entity_id();
                         let _ = editor.parent.update(cx, |parent, cx| {
-                            parent.close_editor(id, group, undelivered, &mark, None, cx)
+                            parent.close_editor(group, undelivered, &mark, None, cx)
                         });
                     }
                     Outcome::Refused(refusal) => editor.fail(refusal.words.clone()),
@@ -370,15 +373,13 @@ impl Editor {
         let mark = Mark::take(cx);
         let group = self.group;
         let editor = cx.weak_entity();
-        // The reply may come after Back and another editor's opening; only this editor may be closed by it.
-        let id = cx.entity_id();
         let parent = self.parent.clone();
         let started = operations.update(cx, |operations, cx| {
             operations.start(&key, command, cx, move |settled, cx| {
                 match settled.outcome.clone() {
                     Outcome::Done(_) => {
                         let _ = parent.update(cx, |parent, cx| {
-                            parent.close_editor(id, group, Vec::new(), &mark, None, cx)
+                            parent.close_editor(group, Vec::new(), &mark, None, cx)
                         });
                     }
                     Outcome::Refused(refusal) => {
@@ -475,18 +476,18 @@ impl Editor {
         cx.notify();
     }
 
-    /// Back and Cancel: drop the editor `id` and its text, with focus back on its list's Add button; the overview's
-    /// delivery-failure lines go and the catalog is read again, as the old editor's `on_done(Vec::new())` did.
-    fn leave(
-        parent: &WeakEntity<Credentials>,
-        id: EntityId,
-        group: Group,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
+    /// Back and Cancel: drop the editor and its text, with focus back on its list's Add button; the overview's
+    /// delivery-failure lines go and the catalog is read again, as the old editor's `on_done(Vec::new())` did. Nothing
+    /// while a save or the Delete is out: the editor waits for the helm's answer, whose done reply closes it with that
+    /// save's delivery failures and whose refusal keeps the draft with the helm's words.
+    fn leave(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy() {
+            return;
+        }
         let mark = Mark::take(cx);
-        let _ = parent.update(cx, |parent, cx| {
-            parent.close_editor(id, group, Vec::new(), &mark, Some(window), cx)
+        let group = self.group;
+        let _ = self.parent.update(cx, |parent, cx| {
+            parent.close_editor(group, Vec::new(), &mark, Some(window), cx)
         });
     }
 
@@ -520,7 +521,7 @@ impl Editor {
             })
         });
         let cancel = {
-            let (parent, id, group) = (this.parent.clone(), editor.entity_id(), this.group);
+            let weak = weak.clone();
             Button::new(
                 "credential-cancel",
                 "Cancel",
@@ -528,7 +529,10 @@ impl Editor {
                 Role::Button,
             )
             .tier(Tier::Ghost)
-            .on_click(move |_, window, cx| Self::leave(&parent, id, group, window, cx))
+            .disabled(busy)
+            .on_click(move |_, window, cx| {
+                let _ = weak.update(cx, |editor, cx| editor.leave(window, cx));
+            })
         };
         let save = Button::new(
             "credential-save",
@@ -621,7 +625,7 @@ impl Render for Editor {
             .is_some_and(|existing| !existing.used_by.is_empty());
 
         let back = {
-            let (parent, id, group) = (self.parent.clone(), cx.entity_id(), self.group);
+            let weak = weak.clone();
             Button::new(
                 "credential-back",
                 "‹ Credentials",
@@ -630,7 +634,10 @@ impl Render for Editor {
             )
             .tier(Tier::Neutral)
             .compact()
-            .on_click(move |_, window, cx| Self::leave(&parent, id, group, window, cx))
+            .disabled(busy)
+            .on_click(move |_, window, cx| {
+                let _ = weak.update(cx, |editor, cx| editor.leave(window, cx));
+            })
         };
         // The agent choice, only for a new agent login: a saved one's kind is fixed.
         let agent = (Group::of(self.kind) == Group::AGENT_LOGINS).then(|| {

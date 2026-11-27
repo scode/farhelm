@@ -6396,10 +6396,12 @@ older timeout replacing a newer result. Warning changes invalidate the host feed
 color and attention grouping independently of connection phase. No timer or separate retry worker is added.
 
 The Settings dialog owns one Tensorlake account context above both mounted panels. Key editors share only acknowledged
-metadata, key/test discovery revisions and serialization of key requests. Their secret drafts and outcomes stay local.
-Accepted API saves survive editor dismissal, with mounted fences preventing late responses from touching retired
-signals. A native file selection stages the Codex draft outside the text input. The editor presents the file's basename
-and the shared credential check's result. Save submits the staged text. Clear, an agent change or submission cancels an
+metadata, key/test discovery revisions and serialization of key requests. Their secret drafts and outcomes stay local. A
+credential editor waits for its accepted save or Delete: Back and Cancel are unavailable until the helm answers, so the
+reply always reaches the editor that sent it. A Delete still out when Settings closes (the close question lists only
+unsaved drafts) finishes without its view, with mounted fences preventing late responses from touching retired signals.
+A native file selection stages the Codex draft outside the text input. The editor presents the file's basename and the
+shared credential check's result. Save submits the staged text. Clear, an agent change or submission cancels an
 outstanding read, and an edit to the paste box takes precedence over the read. The metadata-only catalog reader also
 populates endpoint pickers in Settings and Add host, independently of whether Credentials is mounted. Failed refreshes
 keep the last good list. Feed updates refresh an open credential editor's use metadata without replacing its secret

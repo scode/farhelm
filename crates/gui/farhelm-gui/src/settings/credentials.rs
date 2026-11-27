@@ -18,15 +18,17 @@
 //! - **One editor in place.** Add or Edit replaces the overview with an [`Editor`] (Back, Name, the secret, Delete,
 //!   Cancel and Save). A name and a kind are fixed once created: replacing sends only the new secret, and a blank one
 //!   keeps the saved value (SPEC.md: "An empty replacement keeps the saved value"). The secret is never returned, so the
-//!   editor of a saved credential starts empty. Back, Cancel and closing Settings drop the editor and its text without a
-//!   question. The editor checks the name's grammar and the secret's shape before sending, as the old one did, and says
-//!   why it sent nothing; the helm checks both again.
+//!   editor of a saved credential starts empty. Back and Cancel drop the editor and its text without a question, and
+//!   are unavailable while a save or the Delete is out; closing Settings asks about an unsaved draft with the dialog's
+//!   other drafts. The editor checks the name's grammar and the secret's shape before sending, as the old one did, and
+//!   says why it sent nothing; the helm checks both again.
 //! - **Saves are the operation store's work** under [`OpKey::credential`], the key of the credential they act on (the
 //!   key names the resource saved, as a host's or a template's does). The secret is a [`DraftInput`]: a refused save
 //!   keeps it with the helm's words for correction (SPEC.md: "a failed save keeps the draft and shows its reason"). A
-//!   done save closes the editor and reads the catalog again; Delete does the same. A save outlives the editor: Back
-//!   during one drops the editor, and the reply then reaches nobody, its delivery failures included. A Delete's reply
-//!   closes only the editor that sent it, never one opened since.
+//!   done save closes the editor and reads the catalog again; Delete does the same. The editor waits for the reply
+//!   rather than letting the user leave first (SPEC.md, "Settings": waiting for the helm's round trip is expected), so
+//!   while the dialog stays open the reply always finds the editor that sent it, and a replacement's delivery failures
+//!   always reach the overview.
 //! - **Delivery failures after a save.** A replacement the helm committed but could not deliver everywhere still closes
 //!   the editor (the value is saved; SPEC.md), and the overview then lists each host it did not reach with the helm's
 //!   reason, until the next editor closes (Back and Cancel clear them, as the old app's did).
@@ -45,7 +47,7 @@ use farhelm_proto::credentials::{
     SavedCredential, check_secret,
 };
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Div, ElementId, Entity, EntityId,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Div, ElementId, Entity,
     FocusHandle, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     Role, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
@@ -307,6 +309,15 @@ impl Credentials {
         cx.notify();
     }
 
+    /// A failed save of `editor`, the open credential editor, brings it back in front of the key form a failed key
+    /// save revealed, so the error the save left under the editor is on screen. Nothing for any other editor.
+    pub(super) fn reveal_editor(&mut self, editor: &Entity<Editor>, cx: &mut Context<Self>) {
+        if self.editor.as_ref() == Some(editor) && self.key_revealed {
+            self.key_revealed = false;
+            cx.notify();
+        }
+    }
+
     /// Start the agent login editor for its golden, with the agent choices visible from the first frame.
     #[cfg(test)]
     pub(super) fn open_agent_editor_for_golden(
@@ -378,17 +389,17 @@ impl Credentials {
         cx.notify();
     }
 
-    /// The editor `editor` (by its entity id) is done: a press of Back or Cancel, or the done answer of a save or a
-    /// Delete it sent. If it is still the open editor it closes, with focus on its list's (`group`'s) Add button unless
-    /// the user moved on since `mark`, the press that closed it or that started the save; if another editor has opened
-    /// since (Back while a Delete was out, then Add), that one stays open with its text. Either way `undelivered`
-    /// replaces the overview's delivery-failure lines and the catalog is read again, so a deleted or created entry shows
-    /// as it is now; Back and Cancel pass none, clearing the lines, as the old app's did. `window` is the window when
-    /// the press itself closes the editor; a reply has none at hand, and then the window the section is drawn in is
-    /// updated for the move.
+    /// The open editor is done: a press of Back or Cancel, or the done answer of a save or a Delete it sent. It closes,
+    /// with focus on its list's (`group`'s) Add button unless the user moved on since `mark`, the press that closed it
+    /// or that started the save. `undelivered` replaces the overview's delivery-failure lines and the catalog is read
+    /// again, so a deleted or created entry shows as it is now; Back and Cancel pass none, clearing the lines, as the
+    /// old app's did. `window` is the window when the press itself closes the editor; a reply has none at hand, and then
+    /// the window the section is drawn in is updated for the move.
+    ///
+    /// The editor that calls this is always the open one: Back and Cancel are unavailable while its save or Delete is
+    /// out, and Add is unavailable while an editor is open, so no other editor can open before the reply.
     fn close_editor(
         &mut self,
-        editor: EntityId,
         group: Group,
         undelivered: Vec<DeliveryFailure>,
         mark: &Mark,
@@ -397,10 +408,6 @@ impl Credentials {
     ) {
         self.undelivered = undelivered;
         self.read(cx);
-        if self.editor.as_ref().map(Entity::entity_id) != Some(editor) {
-            cx.notify();
-            return;
-        }
         self.editor = None;
         self.key_revealed = false;
         focus::focus_after_editor_close(&self.add[group.0], mark, window, self.window, cx);

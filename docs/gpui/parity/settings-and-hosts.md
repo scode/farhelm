@@ -422,8 +422,8 @@ in `crates/gui/farhelm-gui/src/settings/credential_tests.rs` unless named otherw
   `credentials_reads_its_catalog_whenever_shown_and_lists_each_entry_in_its_kinds_list`; the editor's own checks and a
   refusal kept for correction, `the_editor_checks_the_name_and_the_secret_before_sending` and
   `a_refused_save_keeps_the_draft_with_the_helms_words`; a failed read with Retry,
-  `a_failed_catalog_read_shows_its_reason_and_retry_reads_again`; a Delete answered after Back leaving a newer editor
-  and its text, `a_delete_answered_after_back_leaves_a_newer_editor_open`; switching agents emptying the secret,
+  `a_failed_catalog_read_shows_its_reason_and_retry_reads_again`; Back and Cancel waiting for a save or a Delete,
+  `back_and_cancel_wait_for_a_save_or_delete`; switching agents emptying the secret,
   `switching_agents_empties_the_secret`; a cancelled file dialog freeing Choose file…,
   `a_cancelled_file_dialog_frees_choose_file`. The look (the warning's danger edge and fill, the key form, the three
   empty lists): the golden `settings-credentials`. The draft kept across a section switch is the dialog's rule, tested
@@ -1801,9 +1801,12 @@ Where the port does not match the old app, and why. Each stays until the work na
   and Delete's availability without touching its unsaved secret. A change an agent or the command line makes while the
   section stays shown waits for the next of those reads, and a Delete it made stale is refused by the helm with its own
   words.
-- **Back during a save loses that save's delivery failures.** The save goes on, and the catalog read Back starts lists
-  its result, but the hosts a replacement did not reach are reported to the editor that sent it, which Back closed, so
-  the overview does not show them. The old editor dropped the reply the same way, after its own Back.
+- **Back and Cancel wait for a save or a Delete.** The old editor's Back stayed available while a save was out and
+  dropped its reply, delivery failures included. Here both are unavailable until the helm answers (SPEC.md, "Settings":
+  waiting for the helm's round trip is accepted), so a replacement's delivery failures always reach the overview
+  (`back_and_cancel_wait_for_a_save_or_delete`). A credential editor's refused save during Save and Close also brings
+  the editor back in front of the key form a refused key save revealed
+  (`a_refused_editor_save_comes_back_in_front_of_the_key_form`).
 - **Focus moves to a field, not the editor's title.** The old editor put focus on its title (a heading made focusable)
   and Back returned it to the section's heading; headings are not controls here. Opening puts focus on Name for a new
   credential and on the secret for a saved one, and closing puts it on the list's Add button.

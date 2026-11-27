@@ -334,7 +334,8 @@ pub(super) struct Batch {
     generation: u64,
     close: bool,
     check_keys: bool,
-    /// The receipt lives in the view. Hold it even if the user leaves its credential editor during the write.
+    /// The edits this batch sent and has not seen settle. Each is still loaded while it saves (an editor cannot be left
+    /// during its own save), so [`SettingsDialog::edits`] lists it without help from here.
     active: Vec<Edit>,
     remaining: VecDeque<ApprovedEdit>,
     /// After the first of two matching keys has gone, the second must still agree with the key that was sent.
@@ -378,13 +379,6 @@ impl SettingsDialog {
             });
             Edit::CustomAgent(section, editor.clone())
         }));
-        if let Some(batch) = &self.batch {
-            for edit in &batch.active {
-                if !edits.iter().any(|current| current.id() == edit.id()) {
-                    edits.push(edit.clone());
-                }
-            }
-        }
         edits.retain(|edit| edit.state(cx) != EditState::Clean);
         edits
     }
@@ -705,10 +699,18 @@ impl SettingsDialog {
         }
     }
 
-    /// A failed key write can belong to the Credentials overview even while its separate editor is open.
+    /// A failed key write can belong to the Credentials overview even while its separate editor is open, and a failed
+    /// credential editor save brings that editor back in front of the overview, so the shown page always carries the
+    /// error of the save that failed.
     fn reveal_edit_failure(&mut self, edit: &Edit, window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(edit, Edit::Key(Place::Credentials, _)) {
-            self.show_credential_key(cx);
+        match edit {
+            Edit::Key(Place::Credentials, _) => self.show_credential_key(cx),
+            Edit::Credential(editor) => {
+                if let Some(credentials) = &self.credentials {
+                    credentials.update(cx, |credentials, cx| credentials.reveal_editor(editor, cx));
+                }
+            }
+            _ => {}
         }
         self.reveal_save_failure(edit.section(), window, cx);
     }
