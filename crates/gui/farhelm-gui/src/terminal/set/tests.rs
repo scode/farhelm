@@ -66,6 +66,9 @@ type Opened = Rc<RefCell<Vec<(FakeTerminal, TerminalAttach)>>>;
 struct Window<'a> {
     cx: &'a mut VisualTestContext,
     helm: FakeHelm,
+    /// The main view, for the tests that drive its Delete shortcut on another platform than the build's
+    /// ([`MainView::delete_or_close_tab`]).
+    main: Entity<MainView>,
     pane: Entity<SessionPane>,
     opened: Opened,
 }
@@ -118,6 +121,7 @@ fn open_with_transfers(
     Window {
         cx,
         helm,
+        main,
         pane,
         opened,
     }
@@ -2951,5 +2955,458 @@ fn a_restart_does_not_hold_a_tabs_reconnect_card(cx: &mut TestAppContext) {
     assert!(
         window.cx.debug_bounds("terminal-reconnect-card").is_some(),
         "the tab's own outage shows its card"
+    );
+}
+
+// ---- New terminal tab and Close terminal tab shortcuts -------------------------------------------------------------
+
+/// The close chord of this build: Ctrl+Shift+W on Linux, and on a Mac Cmd+W, the Delete chord, which closes the shown
+/// shell tab (SPEC.md, "Session view"). Either way the chord closes a shown shell tab, which is what the tests that
+/// press it check; what the Mac's Cmd+W does on the main terminal is checked through the main view's own entry point.
+fn close_chord() -> &'static str {
+    if cfg!(target_os = "macos") {
+        crate::actions::DELETE_SESSION_CHORD
+    } else {
+        crate::actions::CLOSE_TERMINAL_TAB_LINUX
+    }
+}
+
+/// SPEC.md, "Session view": Cmd+T on a Mac and Ctrl+Shift+T on Linux open a terminal tab like a terminal emulator's,
+/// from wherever focus is, the terminal included, and the chord never reaches the program (a shell would read a stray
+/// Ctrl+T as transpose). It is New terminal's press, so the tab it opens is chosen and takes the keyboard when the user
+/// waited. Specified: with a's agent terminal live and focused (the premise), the chord sends one
+/// `POST /api/sessions/a/tabs` and types nothing into the agent; once the reply names t1 and the row lists it, t1 is
+/// shown and a typed key reaches its stream.
+#[gpui::test]
+fn the_new_terminal_tab_chord_opens_a_tab_from_a_focused_terminal(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&[]));
+    let agent = window.stream_of(None);
+    window.go_live(agent, "agent");
+    let set = window.set();
+    assert!(
+        window
+            .cx
+            .update(|w, cx| set.read(cx).agent().read(cx).focus_handle().is_focused(w)),
+        "the premise: the agent terminal has focus"
+    );
+    tab_requests(&mut window.helm);
+
+    keys(window.cx, crate::actions::NEW_TERMINAL_TAB_CHORD);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(
+        sent.iter()
+            .map(|(_, method, path)| (*method, path.as_str()))
+            .collect::<Vec<_>>(),
+        [(farhelm_helm_client::Method::Post, "/api/sessions/a/tabs")]
+    );
+    assert!(
+        !window.typed_into(agent),
+        "the chord never reached the agent"
+    );
+    window
+        .helm
+        .reply(sent[0].0, 200, Some(json!({ "tab": { "id": "t1" } })));
+    window.push_tabs(&["t1"]);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    let t1 = window.stream_of(Some("t1"));
+    window.go_live(t1, "shell");
+    keys(window.cx, "x");
+    assert!(window.typed_into(t1), "the new tab has focus");
+}
+
+/// The chord is New terminal's press, so it is refused where the button is (SPEC.md, "Lifecycle operations": an open
+/// lifecycle confirmation or a pending request refuses New terminal on that session), and silently, since a chord has
+/// no hover help to say why. A chord that slipped past would open a shell beside a Stop the user is about to confirm.
+/// Specified: with the header's Stop question open, the chord sends nothing and leaves the question open; with Skip
+/// session confirmations on and the header's Stop sent and unanswered (the premise), the chord sends nothing. The
+/// operation store refuses a second request on the session's key by itself, so the second half holds even without the
+/// shortcut's own check, which keeps the chord in step with the button's disabled state (a mutation run that removed
+/// the check still passed).
+#[gpui::test]
+fn the_new_terminal_tab_chord_is_refused_where_new_terminal_is(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    tab_requests(&mut window.helm);
+    click(window.cx, "session-header-stop");
+    assert!(
+        window.cx.debug_bounds("prompt").is_some(),
+        "the premise: Stop asks"
+    );
+    keys(window.cx, crate::actions::NEW_TERMINAL_TAB_CHORD);
+    assert_eq!(tab_requests(&mut window.helm), []);
+    assert!(
+        window.cx.debug_bounds("prompt").is_some(),
+        "the question stays open"
+    );
+
+    let mut app = cx.new_app();
+    let mut window = open(&mut app, skipping(&["t1"]));
+    tab_requests(&mut window.helm);
+    click(window.cx, "session-header-stop");
+    let stops = window
+        .helm
+        .commands()
+        .into_iter()
+        .filter(|command| command.path == "/api/sessions/a/stop")
+        .count();
+    assert_eq!(stops, 1, "the premise: the Stop is out, unanswered");
+    keys(window.cx, crate::actions::NEW_TERMINAL_TAB_CHORD);
+    assert_eq!(tab_requests(&mut window.helm), []);
+    app.quit();
+}
+
+/// SPEC.md, "Session view": the close chord closes only the shown shell tab, through the ×'s own close, so it asks
+/// first under that × unless session confirmations are skipped, and never reaches the shell. A chord that asked
+/// somewhere else, or closed a tab other than the one on screen, would kill the wrong shell. Specified: with t1 and t2
+/// listed, t2 shown and its terminal live and focused, the chord opens one question, "Close Terminal 2?", hung under
+/// Terminal 2's × with focus on its confirm, sends nothing and types nothing into t2; Enter then sends exactly one
+/// `DELETE /api/sessions/a/tabs/t2`.
+#[gpui::test]
+fn the_close_chord_asks_under_the_shown_tabs_close_and_enter_closes_it(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1", "t2"]));
+    let t2 = window.stream_of(Some("t2"));
+    click(window.cx, T2_TAB);
+    window.go_live(t2, "second");
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t2"),
+        "the premise: t2 is shown"
+    );
+    let set = window.set();
+    assert!(
+        window.cx.update(|w, cx| {
+            let set = set.read(cx);
+            set.shown()
+                .is_some_and(|shown| shown.read(cx).focus_handle().is_focused(w))
+        }),
+        "the premise: t2's terminal has focus"
+    );
+    window.received(t2);
+    tab_requests(&mut window.helm);
+
+    keys(window.cx, close_chord());
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 2?".to_owned()), 1)
+    );
+    assert_eq!(
+        test_support::bounds(window.cx, "prompt").left(),
+        test_support::bounds(window.cx, "session-terminal-close-t2").left(),
+        "the question hangs under Terminal 2's ×"
+    );
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some("prompt-confirm")
+    );
+    assert_eq!(tab_requests(&mut window.helm), []);
+    assert!(!window.typed_into(t2), "the chord never reached the shell");
+    keys(window.cx, "enter");
+    assert_eq!(deleted(&mut window.helm), ["t2"]);
+}
+
+/// With Skip session confirmations on, a × closes its tab at once (SPEC.md: the switch skips "terminal-tab Close"), and
+/// the chord is that ×'s press, so it does too. Specified: with the switch on and t1 shown, the chord sends one
+/// `DELETE /api/sessions/a/tabs/t1` and draws no question.
+#[gpui::test]
+fn the_close_chord_closes_at_once_with_questions_skipped(cx: &mut TestAppContext) {
+    let mut window = open(cx, skipping(&["t1"]));
+    click(window.cx, T1_TAB);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t1"),
+        "the premise: t1 is shown"
+    );
+    tab_requests(&mut window.helm);
+    keys(window.cx, close_chord());
+    assert!(window.cx.debug_bounds("prompt").is_none(), "no question");
+    assert_eq!(deleted(&mut window.helm), ["t1"]);
+}
+
+/// A tab scrolled out of the strip can still be the shown one (the wheel moved the strip after it was chosen), and its
+/// close question must hang from its × on screen rather than from a place the user cannot see, so the chord scrolls the
+/// × into view before it asks. Specified: with 35 tabs, Terminal 35 chosen, and the strip then wheeled back to its start
+/// so Terminal 35's × is out of view (the premise), the chord draws Terminal 35's question, its × drawn whole in the
+/// strip and the question aligned with that ×'s left edge.
+#[gpui::test]
+fn the_close_chord_scrolls_an_off_screen_tab_into_view_before_asking(cx: &mut TestAppContext) {
+    let ids: Vec<String> = (1..=35).map(|n| format!("t{n}")).collect();
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut window = open(cx, snapshot(&refs));
+    let set = window.set();
+    window.cx.update(|w, cx| {
+        let mark = Mark::take(cx);
+        set.update(cx, |set, cx| {
+            set.choose(Some("t35".to_owned()), &mark, w, cx)
+        });
+    });
+    test_support::redraw(window.cx);
+    let strip = window
+        .cx
+        .debug_bounds(STRIP_ID)
+        .expect("the strip is drawn");
+    window.cx.simulate_event(gpui::ScrollEvent {
+        position: strip.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(20000.), gpui::px(0.))),
+        ..Default::default()
+    });
+    test_support::redraw(window.cx);
+    let close_whole = |window: &mut Window| {
+        test_support::frame(window.cx)
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some("session-terminal-close-t35"))
+            .is_some_and(|node| {
+                node.visible_bounds == node.bounds && node.bounds.size.width > gpui::px(0.)
+            })
+    };
+    assert_eq!(window.chosen().as_deref(), Some("t35"));
+    assert!(
+        !close_whole(&mut window),
+        "the premise: Terminal 35's × is out of view"
+    );
+    tab_requests(&mut window.helm);
+
+    keys(window.cx, close_chord());
+    assert_eq!(
+        window.questions(),
+        (Some("Close Terminal 35?".to_owned()), 1)
+    );
+    assert!(close_whole(&mut window), "the × was scrolled into view");
+    assert_eq!(
+        test_support::bounds(window.cx, "prompt").left(),
+        test_support::bounds(window.cx, "session-terminal-close-t35").left(),
+        "the question hangs under Terminal 35's ×"
+    );
+    assert_eq!(tab_requests(&mut window.helm), []);
+}
+
+/// On the main terminal there is no shell tab to close, and the close action must do nothing rather than reach for
+/// some other tab or the session (SPEC.md, "Session view": Ctrl+Shift+W is a no-op on the main tab). Dispatched as the
+/// action rather than typed, so the Linux rule is checked whichever build runs it. Specified: with t1 listed and the
+/// agent terminal shown, Close terminal tab draws no question and sends no request.
+#[gpui::test]
+fn close_terminal_tab_on_the_main_terminal_does_nothing(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    assert_eq!(
+        window.chosen(),
+        None,
+        "the premise: the agent terminal shows"
+    );
+    window.helm.commands();
+    window.cx.dispatch_action(crate::actions::CloseTerminalTab);
+    settle(window.cx);
+    assert!(window.cx.debug_bounds("prompt").is_none(), "no question");
+    assert!(window.helm.commands().is_empty(), "nothing sent");
+}
+
+/// The Delete shortcut per platform (SPEC.md, "Session view" and "Desktop window chrome"): on a Mac, Cmd+W closes the
+/// shown shell tab as a terminal emulator's does, and deletes the session only from its main terminal; on Linux the
+/// Delete chord is Ctrl+Shift+Backspace, which deletes whatever is shown, since Ctrl+Shift+W closes tabs there. Driven
+/// through the main view's own entry point with each platform named, so a Linux run checks the Mac's rule too.
+/// Specified: with t1 shown, the Mac's Delete asks "Close Terminal 1?" and sends nothing, and Escape closes it; the
+/// Linux Delete with t1 still shown asks the Delete question; with the agent terminal shown, the Mac's Delete asks the
+/// Delete question too.
+#[gpui::test]
+fn the_delete_shortcut_closes_the_shown_tab_on_a_mac_and_deletes_elsewhere(
+    cx: &mut TestAppContext,
+) {
+    use farhelm_input_mapping::Platform;
+    let mut window = open(cx, snapshot(&["t1"]));
+    click(window.cx, T1_TAB);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t1"),
+        "the premise: t1 is shown"
+    );
+    tab_requests(&mut window.helm);
+    let delete = |window: &mut Window, platform: Platform| {
+        let main = window.main.clone();
+        window
+            .cx
+            .update(|w, cx| main.update(cx, |main, cx| main.delete_or_close_tab(platform, w, cx)));
+        settle(window.cx);
+        window.questions().0
+    };
+
+    assert_eq!(
+        delete(&mut window, Platform::Mac).as_deref(),
+        Some("Close Terminal 1?")
+    );
+    assert_eq!(tab_requests(&mut window.helm), []);
+    keys(window.cx, "escape");
+
+    let asked = delete(&mut window, Platform::Linux);
+    assert!(
+        asked
+            .as_deref()
+            .is_some_and(|title| title.starts_with("Delete")),
+        "the Linux chord deletes from a shell tab too: {asked:?}"
+    );
+    keys(window.cx, "escape");
+
+    click(window.cx, AGENT_TAB_ID);
+    assert_eq!(
+        window.chosen(),
+        None,
+        "the premise: the agent terminal shows"
+    );
+    let asked = delete(&mut window, Platform::Mac);
+    assert!(
+        asked
+            .as_deref()
+            .is_some_and(|title| title.starts_with("Delete")),
+        "the Mac's Cmd+W deletes from the main terminal: {asked:?}"
+    );
+}
+
+/// New terminal names its shortcut in its hover help, as the header's Delete does, so a mouse user learns the chord
+/// without opening the Keyboard shortcuts dialog (SPEC.md, "Session view": "its tooltip names the chord"). Specified:
+/// New terminal's help ends with this build's New terminal tab shortcut in parentheses.
+#[gpui::test]
+fn new_terminal_names_its_shortcut(cx: &mut TestAppContext) {
+    let window = open(cx, snapshot(&[]));
+    let at = test_support::center(window.cx, super::ADD_ID);
+    window.cx.simulate_mouse_move(at, None, Modifiers::none());
+    test_support::advance(window.cx, crate::layers::HOVER_DELAY);
+    let help = window
+        .cx
+        .update(|w, cx| crate::layers::shown_tooltip(w, cx))
+        .map(|shown| shown.text.to_string());
+    assert_eq!(
+        help,
+        Some(format!(
+            "New terminal: open a shell tab in the session's folder ({})",
+            crate::actions::NEW_TERMINAL_TAB_SHORTCUT_NAME
+        ))
+    );
+}
+
+/// A double tap of a Mac's Cmd+W on a shell tab must not reach the session: with session confirmations skipped the
+/// first press closes the tab at once, and if the second fell through to Delete it would end the session too (SPEC.md,
+/// "Session view": with a shell tab shown whose close is already in flight, Cmd+W does nothing). Specified: with the
+/// switch on and t1 shown, the Mac's Delete shortcut sends `DELETE /api/sessions/a/tabs/t1` and is left unanswered; a
+/// second press then sends nothing and draws no question.
+#[gpui::test]
+fn a_second_cmd_w_while_the_tabs_close_is_in_flight_does_nothing(cx: &mut TestAppContext) {
+    use farhelm_input_mapping::Platform;
+    let mut window = open(cx, skipping(&["t1"]));
+    click(window.cx, T1_TAB);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t1"),
+        "the premise: t1 is shown"
+    );
+    window.helm.commands();
+    let press = |window: &mut Window| {
+        let main = window.main.clone();
+        window.cx.update(|w, cx| {
+            main.update(cx, |main, cx| {
+                main.delete_or_close_tab(Platform::Mac, w, cx)
+            })
+        });
+        settle(window.cx);
+    };
+    press(&mut window);
+    let first: Vec<String> = window
+        .helm
+        .commands()
+        .into_iter()
+        .map(|command| command.path)
+        .collect();
+    assert_eq!(
+        first,
+        ["/api/sessions/a/tabs/t1"],
+        "the first press closes t1"
+    );
+    press(&mut window);
+    assert!(window.cx.debug_bounds("prompt").is_none(), "no question");
+    assert!(
+        window.helm.commands().is_empty(),
+        "the second press sends nothing"
+    );
+}
+
+/// A held chord auto-repeats, and New terminal tab is a once-per-press shortcut (`actions.rs`, `ONCE_PER_PRESS`): a
+/// held Cmd+T that opened a tab per repeat would fill the strip. The first tab's request has to be answered before the
+/// repeats arrive, or the operation store's own refusal of a second request on the session would hide a repeat that
+/// got through. Specified: with a's agent terminal live and focused, a press of the chord sends one
+/// `POST /api/sessions/a/tabs`, answered with t1 and listed; two held repeats and the release then send nothing more;
+/// a fresh press after the release sends a second POST.
+#[gpui::test]
+fn a_held_new_terminal_tab_chord_opens_one_tab(cx: &mut TestAppContext) {
+    let chord = crate::actions::NEW_TERMINAL_TAB_CHORD;
+    let mut window = open(cx, snapshot(&[]));
+    let agent = window.stream_of(None);
+    window.go_live(agent, "agent");
+    let set = window.set();
+    assert!(
+        window
+            .cx
+            .update(|w, cx| set.read(cx).agent().read(cx).focus_handle().is_focused(w)),
+        "the premise: the agent terminal has focus"
+    );
+    tab_requests(&mut window.helm);
+    test_support::press(window.cx, chord, false);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1, "the press opens one tab");
+    window
+        .helm
+        .reply(sent[0].0, 200, Some(json!({ "tab": { "id": "t1" } })));
+    window.push_tabs(&["t1"]);
+    test_support::press(window.cx, chord, true);
+    test_support::press(window.cx, chord, true);
+    test_support::release(window.cx, chord);
+    assert_eq!(
+        tab_requests(&mut window.helm),
+        [],
+        "the repeats open nothing"
+    );
+    test_support::press(window.cx, chord, false);
+    test_support::release(window.cx, chord);
+    assert_eq!(
+        tab_requests(&mut window.helm).len(),
+        1,
+        "a fresh press opens another"
+    );
+}
+
+/// While a card covers the terminals the strip is inert and takes no presses (SPEC.md: a terminal "keeps its last
+/// screen and tab strip dimmed and inert beneath the card"), so its shortcuts must not act on it either: the new-tab
+/// chord does nothing, and a Mac's Cmd+W, with no tab it could close, deletes as it does from the main terminal.
+/// Specified: with t1 shown and the set made inert, as the unavailable card makes it, the new-tab chord sends nothing,
+/// and the Mac's Delete shortcut asks the Delete question rather than "Close Terminal 1?".
+#[gpui::test]
+fn the_tab_shortcuts_leave_an_inert_strip_alone(cx: &mut TestAppContext) {
+    use farhelm_input_mapping::Platform;
+    let mut window = open(cx, snapshot(&["t1"]));
+    click(window.cx, T1_TAB);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t1"),
+        "the premise: t1 is shown"
+    );
+    let set = window.set();
+    window
+        .cx
+        .update(|_, cx| set.update(cx, |set, cx| set.set_inert(true, cx)));
+    settle(window.cx);
+    assert!(
+        window.cx.update(|_, cx| set.read(cx).is_inert()),
+        "the premise: the set is inert"
+    );
+    tab_requests(&mut window.helm);
+    keys(window.cx, crate::actions::NEW_TERMINAL_TAB_CHORD);
+    assert_eq!(tab_requests(&mut window.helm), [], "no tab opened");
+    let main = window.main.clone();
+    window.cx.update(|w, cx| {
+        main.update(cx, |main, cx| {
+            main.delete_or_close_tab(Platform::Mac, w, cx)
+        })
+    });
+    settle(window.cx);
+    let asked = window.questions().0;
+    assert!(
+        asked
+            .as_deref()
+            .is_some_and(|title| title.starts_with("Delete")),
+        "Cmd+W over an inert strip deletes: {asked:?}"
     );
 }

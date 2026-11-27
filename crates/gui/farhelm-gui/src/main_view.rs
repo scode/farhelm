@@ -51,6 +51,7 @@
 //! band strip of their own above their content, and puts a strip of the band above any notice banner.
 
 use farhelm_helm_client::ChannelState;
+use farhelm_input_mapping::Platform;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
@@ -61,7 +62,10 @@ use crate::actions::{
     BeginSequence, NextTerminalTab, PreviousTerminalTab, QuickLaunch, ShowKeyboardShortcuts,
     TemplateNumberKey,
 };
-use crate::actions::{DeleteSession, NewSession, QuickSwitcher, RenameSession, TemplateList};
+use crate::actions::{
+    CloseTerminalTab, DeleteSession, NewSession, NewTerminalTab, QuickSwitcher, RenameSession,
+    TemplateList,
+};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::components::{scroll_from_controls, scroll_handle};
 use crate::desktop::linux_title_bar;
@@ -169,6 +173,36 @@ impl MainView {
         &self.session_list
     }
 
+    /// Whether a session shortcut must leave the key alone: a dialog, menu or question holds the keyboard (SPEC.md: "A
+    /// visible modal keeps keyboard ownership"), or the shown terminal has marked text from an input method, which
+    /// GPUI's key-down does not flag (`actions.rs`, "Shortcuts that act once per press"). The overlay is drawn inside
+    /// the ground, so a key pressed in a layer reaches these handlers too, and this is what refuses it there.
+    fn keyboard_held_elsewhere(&self, window: &Window, cx: &App) -> bool {
+        layers::focus_layer_open(window, cx)
+            || self.session_pane.read(cx).terminal_is_composing(window, cx)
+    }
+
+    /// The Delete shortcut on `platform`: on a Mac, Cmd+W closes the open session's shown shell tab when one is shown,
+    /// as a terminal emulator's Cmd+W closes a tab, and deletes the session only from its main terminal or while a card
+    /// covers the terminals (SPEC.md, "Session view"); on Linux, Ctrl+Shift+Backspace always deletes, since closing a tab has its own chord there
+    /// ([`CloseTerminalTab`]). Deleting goes through the header's Delete, with its question and busy rules. The platform
+    /// is a parameter, not the build's, so the tests, which run on Linux, can drive the Mac's path.
+    pub(crate) fn delete_or_close_tab(
+        &mut self,
+        platform: Platform,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let pane = self.session_pane.clone();
+        if platform == Platform::Mac && SessionPane::close_shown_terminal_tab(&pane, window, cx) {
+            return;
+        }
+        let mark = Mark::take(cx);
+        pane.update(cx, |pane, cx| {
+            pane.header_action(header::Action::Delete, &mark, window, cx)
+        });
+    }
+
     /// The physical-key interceptor consumes the chord before dispatch. Leave keyboard layers and marked terminal
     /// text alone even when the action reaches the ground behind them.
     fn step_terminal_tab(
@@ -177,9 +211,7 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if layers::focus_layer_open(window, cx)
-            || self.session_pane.read(cx).terminal_is_composing(window, cx)
-        {
+        if self.keyboard_held_elsewhere(window, cx) {
             return;
         }
         let mark = Mark::take(cx);
@@ -291,16 +323,26 @@ impl Render for MainView {
             // dialog, menu or question keeps the keyboard (a popover that never takes focus, such as a terminal link's
             // destination display, does not). Taken whatever the header does with it, as a once-per-press
             // shortcut's handler must be (`actions.rs`).
+            //
+            // On a Mac the chord is Cmd+W, which closes the shown shell tab instead when one is shown
+            // ([`MainView::delete_or_close_tab`]).
             .on_action(cx.listener(|main, _: &DeleteSession, window, cx| {
-                if layers::focus_layer_open(window, cx)
-                    || main.session_pane.read(cx).terminal_is_composing(window, cx)
-                {
+                if main.keyboard_held_elsewhere(window, cx) {
                     return;
                 }
-                let mark = Mark::take(cx);
-                main.session_pane.update(cx, |pane, cx| {
-                    pane.header_action(header::Action::Delete, &mark, window, cx)
-                });
+                main.delete_or_close_tab(crate::actions::THIS_PLATFORM, window, cx);
+            }))
+            // New terminal tab and the Linux Close terminal tab, refused the way Delete is, and taken whatever the
+            // terminals do with them, as a once-per-press shortcut's handler must be (`actions.rs`).
+            .on_action(cx.listener(|main, _: &NewTerminalTab, window, cx| {
+                if !main.keyboard_held_elsewhere(window, cx) {
+                    SessionPane::new_terminal_tab(&main.session_pane, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|main, _: &CloseTerminalTab, window, cx| {
+                if !main.keyboard_held_elsewhere(window, cx) {
+                    SessionPane::close_shown_terminal_tab(&main.session_pane, window, cx);
+                }
             }))
             // Taken whatever the editor does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
             .on_action(cx.listener(|main, _: &RenameSession, window, cx| {

@@ -150,8 +150,8 @@ linux/inline-prompt--dark.png 1a272bb71daabee284fe8f66933d4908bd663747
 linux/inline-prompt--light.png 77a1cb7c484bf3d8a4c2f638c60f1b27a4f3016b
 linux/interrupted-upload-notices--dark.png f2f0f1b6719b29c27b7e31d6d0d4c723987b9b09
 linux/interrupted-upload-notices--light.png 666104b24c546cabea36dcf0d862268b51b100b4
-linux/keyboard-shortcuts-dialog--dark.png a2ed85572c5b0d73ff5e2cbd57853b04c3cb4b37
-linux/keyboard-shortcuts-dialog--light.png 1624aca25dabfb6330dfd34e587885415321d9fa
+linux/keyboard-shortcuts-dialog--dark.png d7edbab9d86b84fd702f15c12b101428b9c4faa4
+linux/keyboard-shortcuts-dialog--light.png 4096fceecda350d5fb5a5383b55eced5121d434e
 linux/launcher-agent-registration-deleted--dark.png 1f1f04d117e1becd56143d7e2abc7f78454075ec
 linux/launcher-agent-registration-deleted--light.png 5639c49034d3e47135b945fcadea872375f30bfb
 linux/launcher-agent-registration-loading--dark.png b2810052845081ea378beb175d8fc2033e741ac1

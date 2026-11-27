@@ -570,6 +570,34 @@ impl SessionPane {
         }
     }
 
+    /// The open session's terminal set, if one is mounted: none while no session is open or no terminal can show.
+    fn mounted_set(&self, cx: &App) -> Option<Entity<TerminalSet>> {
+        self.mounted
+            .read(cx)
+            .and_then(Option::as_ref)
+            .and_then(|mounted| mounted.set.clone())
+    }
+
+    /// New terminal tab's shortcut: open a shell tab in the open session as its New terminal button would
+    /// ([`TerminalSet::open_from_shortcut`]). Nothing with no session open or no terminal mounted.
+    pub(crate) fn new_terminal_tab(pane: &Entity<SessionPane>, window: &Window, cx: &mut App) {
+        if let Some(set) = pane.read(cx).mounted_set(cx) {
+            TerminalSet::open_from_shortcut(&set, window, cx);
+        }
+    }
+
+    /// Close terminal tab's shortcut: close the open session's shown shell tab as its × would
+    /// ([`TerminalSet::close_shown`]). Returns whether a shell tab is shown; `false` with no session open or no
+    /// terminal mounted, as on the main terminal.
+    pub(crate) fn close_shown_terminal_tab(
+        pane: &Entity<SessionPane>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        let set = pane.read(cx).mounted_set(cx);
+        set.is_some_and(|set| TerminalSet::close_shown(&set, window, cx))
+    }
+
     /// The open session's terminals under the current UI session, for tests.
     #[cfg(test)]
     pub(crate) fn terminal_set(&mut self, cx: &App) -> Option<Entity<TerminalSet>> {

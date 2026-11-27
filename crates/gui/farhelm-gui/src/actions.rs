@@ -160,6 +160,38 @@ pub(crate) const DELETE_SESSION_SHORTCUT_NAME: &str = if cfg!(target_os = "macos
     "Ctrl+Shift+Backspace"
 };
 
+/// New terminal tab's chords (SPEC.md, "Session view"): Cmd+T on a Mac, Ctrl+Shift+T on Linux, the chord terminal
+/// emulators open a tab with. Spelled once here, for its binding, its row in [`TERMINAL_KEYS`] and the tests.
+const NEW_TERMINAL_TAB_MAC: &str = "cmd-t";
+const NEW_TERMINAL_TAB_LINUX: &str = "ctrl-shift-t";
+
+/// New terminal tab's chord on this platform.
+pub(crate) const NEW_TERMINAL_TAB_CHORD: &str = if cfg!(target_os = "macos") {
+    NEW_TERMINAL_TAB_MAC
+} else {
+    NEW_TERMINAL_TAB_LINUX
+};
+
+/// New terminal tab's display name, for New terminal's tooltip; the shortcut table tests check it against the
+/// Keyboard shortcuts dialog's row.
+pub(crate) const NEW_TERMINAL_TAB_SHORTCUT_NAME: &str = if cfg!(target_os = "macos") {
+    "⌘T"
+} else {
+    "Ctrl+Shift+T"
+};
+
+/// Close terminal tab's chord in the Linux app (SPEC.md, "Session view"). A Mac has no chord of its own for it: there
+/// the Delete shortcut, Cmd+W, closes the shown shell tab instead of deleting the session ([`DeleteSession`]), as a
+/// terminal emulator's Cmd+W closes a tab. On Linux the Delete chord is Ctrl+Shift+Backspace, which deletes as before,
+/// so closing a tab takes a chord of its own. Spelled once here, for its binding and its row in [`TERMINAL_KEYS`].
+pub(crate) const CLOSE_TERMINAL_TAB_LINUX: &str = "ctrl-shift-w";
+
+/// Close terminal tab's binding (Ctrl+Shift+W to [`CloseTerminalTab`] in [`CONTEXT`]), which [`install`] binds on Linux
+/// only. A function, as [`new_session_binding`] is, so the tests can check it whatever platform they run on.
+pub(crate) fn close_terminal_tab_binding() -> KeyBinding {
+    KeyBinding::new(CLOSE_TERMINAL_TAB_LINUX, CloseTerminalTab, Some(CONTEXT))
+}
+
 /// The Rename shortcut's chords (SPEC.md, "Desktop window chrome"): Cmd+L on a Mac, Ctrl+Shift+L on Linux. Spelled
 /// once here, for its binding, its row in [`TERMINAL_KEYS`] and the tests.
 const RENAME_SESSION_MAC: &str = "cmd-l";
@@ -298,8 +330,18 @@ actions!(
         /// Put focus in the search field in Settings.
         SearchSettings,
         /// Delete the open session through its header Delete action, with that action's confirmation and busy rules
-        /// (SPEC.md: Cmd+W on a Mac, Ctrl+Shift+Backspace on Linux). Runs once per press (`ONCE_PER_PRESS`).
+        /// (SPEC.md: Cmd+W on a Mac, Ctrl+Shift+Backspace on Linux). On a Mac, while a shell tab is shown (and no card
+        /// covers the terminals), it closes that tab instead, as [`CloseTerminalTab`] does on Linux. Runs once per press
+        /// (`ONCE_PER_PRESS`).
         DeleteSession,
+        /// Open a new shell tab in the open session, as its New terminal button does (SPEC.md, "Session view": Cmd+T on
+        /// a Mac, Ctrl+Shift+T on Linux, also from a focused terminal). Runs once per press (`ONCE_PER_PRESS`): a
+        /// held chord would otherwise open a tab on every repeat.
+        NewTerminalTab,
+        /// Close the open session's shown shell tab, as its × does, asking unless session confirmations are skipped
+        /// (SPEC.md, "Session view": Ctrl+Shift+W on Linux; on a Mac, Cmd+W through [`DeleteSession`]). Does nothing
+        /// while the session's main terminal is shown. Runs once per press (`ONCE_PER_PRESS`).
+        CloseTerminalTab,
         /// Open Rename for the open session (SPEC.md: Cmd+L on a Mac, Ctrl+Shift+L on Linux). Runs once per press
         /// (`ONCE_PER_PRESS`).
         RenameSession,
@@ -463,6 +505,9 @@ pub fn install(cx: &mut App) {
         // terminal because its `TERMINAL_KEYS` row is an app shortcut, and a text field keeps the Linux chord
         // (`TEXT_FIELD_KEYS`).
         KeyBinding::new(DELETE_SESSION_CHORD, DeleteSession, Some(CONTEXT)),
+        // SPEC.md, "Session view". The main view hands it to the open session's terminals, as New terminal's press;
+        // it works from a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
+        KeyBinding::new(NEW_TERMINAL_TAB_CHORD, NewTerminalTab, Some(CONTEXT)),
         // SPEC.md, "Desktop window chrome". The main view hands it to the session list's Rename editor for the open
         // session; it works from a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
         KeyBinding::new(RENAME_SESSION_CHORD, RenameSession, Some(CONTEXT)),
@@ -487,6 +532,11 @@ pub fn install(cx: &mut App) {
         cx.bind_keys([new_session_binding()]);
         // Before the desktop module installs the Mac menu, which shows each item's chord only if it is bound by then.
         cx.bind_keys(MAC_MENU_CHORDS.iter().map(|(chord, bind)| bind(chord)));
+    } else {
+        // SPEC.md, "Session view": Ctrl+Shift+W closes the shown shell tab in the Linux app; a Mac closes it with Cmd+W,
+        // the Delete chord. The main view hands it to the open session's terminals; it works from a focused terminal
+        // because its `TERMINAL_KEYS` row is an app shortcut.
+        cx.bind_keys([close_terminal_tab_binding()]);
     }
     cx.bind_keys(
         TEXT_FIELD_KEYS
@@ -742,6 +792,9 @@ const ONCE_PER_PRESS: &[&dyn Action] = &[
     // of the lists areas append to); this comment is also what keeps rustfmt from joining the entries.
     &DeleteSession,
     &RenameSession,
+    // A held Cmd+T or Ctrl+Shift+T opens one tab, and a held close chord closes one, rather than one per repeat.
+    &NewTerminalTab,
+    &CloseTerminalTab,
     &TemplateNumberKey { digit: 0 },
     &ShowKeyboardShortcuts,
     // SPEC.md does not name this one: its "ignore repeat" ("Desktop window chrome") covers the two session shortcuts.
@@ -895,7 +948,24 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         what: "open New",
         bind: None,
     },
-    app("cmd-w", "ctrl-shift-backspace", "delete the open session"),
+    app(
+        "cmd-w",
+        "ctrl-shift-backspace",
+        "delete the open session (on a Mac, close its shown shell tab instead)",
+    ),
+    app(
+        NEW_TERMINAL_TAB_MAC,
+        NEW_TERMINAL_TAB_LINUX,
+        "open a new terminal tab in the open session",
+    ),
+    TerminalKey {
+        // A Mac closes the shown shell tab with Cmd+W, Delete's row.
+        mac: None,
+        linux: Some(CLOSE_TERMINAL_TAB_LINUX),
+        owner: KeyOwner::App,
+        what: "close the open session's shown shell tab",
+        bind: None,
+    },
     app(
         RENAME_SESSION_MAC,
         RENAME_SESSION_LINUX,
