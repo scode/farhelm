@@ -9,7 +9,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `terminal-tab-shortcuts.md` — Add Cmd+T/Cmd+W terminal-tab shortcuts and always confirm Delete when shell tabs are open
 - [pending] `terminal-tab-overflow-ux.md` — Pin the main Agent tab and add auto-scroll, edge fades, arrows, and an all-tabs menu for overflowing tabs
 - [pending] `blocked-notify-attention-and-debounce.md` — Move blocked-agent alerts to the red waiting indicator and sound with an ntfy awareness grace period
-- [held] `ntfy-quiet-hours-urgency.md` — Add local-time quiet hours and quiet-hours priority/off setting for ntfy alerts
+- [pending] `ntfy-quiet-hours-urgency.md` — Add local-time quiet hours and quiet-hours priority/off setting for ntfy alerts
 - [held] `drift-base-isolation-and-turns.md` — Add Codex process-tree isolation and Cursor/OpenCode interactive turns to the base drift category
 - [held] `drift-persistent-hooks.md` — Add persistent_hooks drift category verifying Grok and Antigravity hooks inside and outside Farhelm (after `drift-base-isolation-and-turns.md`)
 - [held] `drift-conversation-rotation.md` — Add conversation_rotation drift category replacing standalone rotation tests and covering seven tracked harnesses
