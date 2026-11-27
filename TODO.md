@@ -87,6 +87,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Replace code for starting a fresh managed checkout inside an existing sandbox or container session (and clean up the
   stale `replace-checkout-lifetime.md` changelog draft if still unreleased).
 
+- **Cmd+T to create a new terminal tab.** Cmd+T to create a new terminal tab.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
