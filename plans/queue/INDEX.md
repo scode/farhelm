@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [held] `file-hover-too-large-hint.md` — Show "too large to copy contents" on terminal file hover cards over the 10 MB copy cap
+- [pending] `file-hover-too-large-hint.md` — Show "too large to copy contents" on terminal file hover cards over the 10 MB copy cap
 - [held] `cli-flag-parsing-audit.md` — Stop free-text CLI options and positionals from swallowing flags and clean up clap parsing quirks
 - [held] `agent-hosts-tailscale-column.md` — Add a TAILSCALE column to plain `farhelm agent hosts` table output
 - [held] `delete-dead-replace-checkout-ui.md` — Delete dead fresh-checkout Replace UI remnants and close matching review finding
@@ -14,4 +14,3 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [held] `drift-persistent-hooks.md` — Add persistent_hooks drift category verifying Grok and Antigravity hooks inside and outside Farhelm (after `drift-base-isolation-and-turns.md`)
 - [held] `drift-conversation-rotation.md` — Add conversation_rotation drift category replacing standalone rotation tests and covering seven tracked harnesses
 - [held] `drift-permission-footer.md` — Extend permission_modes drift checks with Guarded launches and tri-state permission-footer verification
-
