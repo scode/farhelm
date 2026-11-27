@@ -12,3 +12,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`brick-test-inline-welcome`](reports/brick-test-inline-welcome.report.md) landed 2026-11-27 in #5132: Update macOS release brick-test instructions and unit tests for the inline Welcome view
 - [`claude-drift-trust-copy-back`](reports/claude-drift-trust-copy-back.report.md) landed 2026-11-27 in #5134: Add an atomic-rename regression test proving Claude drift copy-back never overwrites real ancestor trust
 - [`shell-tab-first-close-sweep-backoff`](reports/shell-tab-first-close-sweep-backoff.report.md) landed 2026-11-27 in #5139: Apply the existing 1 s to 60 s retry backoff when an exited shell tab's first automatic close sweep fails
+- [`agent-blocked-notifications`](reports/agent-blocked-notifications.report.md) landed 2026-11-27 in #5118, #5125, #5135: Fix ntfy waiting alerts and add blocked-agent notifications with instruction injection

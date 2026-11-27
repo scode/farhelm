@@ -156,3 +156,98 @@ fixes; every gate passed.
 - #5135: the first review found that Pi and OMP sessions created by an older Farhelm got the
   `farhelm agent instructions` line on Restart but not the blocked instruction, and documentation and test gaps,
   including a missing check that the helm actually sends the instruction. All fixed and verified.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained the rest of the round that was landing then and all of the next:
+Codex forks and Codex app-server conversations became restartable, `farhelm agent`'s `--model` and `--effort` stopped
+taking the next option as their value, an unused helm route for creating Tensorlake sandbox sessions was removed, a
+supervisor start now finishes the cleanup a failed Restart left behind, the release brick test no longer looks for a
+Welcome card, and a drift test was added. Only the `--model` and `--effort` change touches agent commands, and it does
+not affect `farhelm agent notify` or the agent instructions. In the same round, after this plan, three more landed:
+claude-restart-before-first-turn (Restart before Claude's first prompt starts Claude fresh),
+settings-save-close-delete-prompt (a recipe's Delete question stays open on Keep editing) and
+shell-tab-first-close-sweep-backoff (an exited tab's failed first cleanup backs off). The Claude plan passes the
+session's launch instructions through Restart, and was written before this plan added the blocked instruction to them;
+its test needed the fix described in its own notes, and its fresh start passes the instruction on, as a resume does (by
+reading the code; that plan's notes record that no test checks it). This plan is the only one that raised the protocol
+version, to 93 and then 94; every place that names the number agrees.
+
+An independent reviewer and I read the change. I looked at the refreshed Settings → Notifications pictures: the **Enable
+ntfy alerts** switch, the per-kind switches with the agents each one covers, Farhelm's own wording shown under **What
+counts as blocked**, and the line beside **Send test** saying the form has unsaved changes. The reviewer found no place
+where the ntfy topic reaches a log, an agent or a reply, and found nothing untrue in the report.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** The round's four plans each removed their own TODO entry, next to each other, so stacking them
+  conflicted there. I removed all four entries; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing I found. The landing's checks were wider than the report's: the whole Rust test suite and the desktop app's
+end-to-end smoke ran, together with the round's other plans.
+
+#### Worth knowing
+
+- **One agent can use up the alert limit for everyone.** All ntfy alerts share the limit of five a minute, so an agent
+  calling `farhelm agent notify` in a loop can crowd out other sessions' waiting alerts for as long as it keeps going.
+  Possible follow-up: a separate limit per session for blocked alerts.
+- **With the master switch off, the switches under it still look on.** In the reference picture, **Enable ntfy alerts**
+  is off while **Agent is waiting for an answer** below it shows on, though nothing is sent. Possible follow-up: show
+  the switches under it as inactive while the master switch is off.
+- **Turning Agent is blocked off does not stop the bell notices** from sessions that already got the instruction: those
+  agents may still run `farhelm agent notify`, which still records its notice; only the ntfy alert follows the switch.
+  Those sessions keep the instruction until they are replaced. Possible follow-up: say so in the switch's help.
+- **The text an agent sends reaches your phone as written**, up to 500 characters with control characters removed. So an
+  agent, or text injected into one, can send an alert from Farhelm that looks official, a link included. That is
+  inherent to the feature; the reviewer suggests one line in the switch's help or on the docs page saying alerts carry
+  the agent's own words. Possible follow-up.
+- **`farhelm agent notify` refuses a reason that starts with `-`** as a usage error, and its help does not say to put
+  `--` first. The risk is low, since the instruction asks for "<what is blocked>: <why>".
+- **Two small gaps in the tests and the code map.** No test checks that an agent's start-up hook carrying the blocked
+  instruction still passes the check Farhelm makes on who reported a conversation; reading the code, it does, but if it
+  ever did not, Claude Code, Codex and Muse Code sessions would stop being restartable while blocked alerts are on. And
+  the overview at the top of the supervisor's per-agent code does not yet name the two new per-agent capabilities this
+  plan added, though they are built the way the repository's rules ask. Possible follow-ups for both.
+
+#### Checks
+
+Run on the round's four plans stacked on main as it stood when the landing started (agent-blocked-notifications,
+claude-restart-before-first-turn, settings-save-close-delete-prompt, then shell-tab-first-close-sweep-backoff), after
+the landing's fix to claude-restart-before-first-turn's test. Because agent-blocked-notifications raises the protocol
+version and the four plans between them touch the helm, the supervisor's agent-specific code, the command line, the
+desktop app, its reference screenshots and the docs, the whole Rust test suite ran. The SSH test worker was still
+unreachable, so the slow suites ran on boat sandboxes (x86_64 Ubuntu 24.04 VMs), and clippy ran locally:
+
+- A first run failed at its first step: `cargo clippy --all-targets -- -D warnings` could not compile a new test of
+  claude-restart-before-first-turn, the problem described in that plan's notes. The other clippy checks passed and the
+  test build then failed on the same error, so no test ran. After the fix, every check below ran from the start.
+- Locally, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and
+  `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent` (the build with the desktop app's
+  test-automation hooks), all with `-D warnings`: clean.
+- On three boats, every test of the workspace and the desktop app that runs by default (`cargo nextest run --workspace`,
+  built once, split in three and run through the recorder), recorded runs d273d9bc-7896-4c1c-89a4-106d7f060a1d,
+  a74ca485-4be5-4e2f-bbf5-ff250895f815 and 3e5673f4-c3a7-461f-9d15-7c0c7956e6a1: 9,180 passed, one failed, and no test
+  that quietly passed for lack of systemd, Podman or SSH on the machine. The one failure is the test-trace macro's
+  compile check, which builds a scratch crate offline from the machine's own download cache; a boat has no such cache,
+  so that test always fails there, as `.agents/boat.md` records, and no plan in this round touches it. Run locally
+  (`cargo nextest run -p farhelm-testtrace-macros --test compile_contract`), recorded run
+  8fc4d4bc-523d-4650-856d-e560a8137b59, it passed.
+- On a fourth boat, the desktop app's end-to-end smoke test (`scripts/gui-e2e-smoke.py`), recorded run
+  693426e3-0300-4c24-8257-adc94ddb9901: 48 of its 49 steps passed, and the paste step was skipped, as on every Linux
+  run.
+- Locally, the full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run
+  fb93b279-02be-42ce-94f6-f269a97c0d79, the test of the screenshot tooling's list of screens, recorded run
+  653ebb0b-2dbc-432c-8da0-1f814940b0cb, and the workspace's documentation examples
+  (`cargo test --doc --workspace --exclude farhelm-desktop`), recorded run 5dfbb55e-5cbe-4bee-beb4-cac09ef01146: passed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format`, `dprint check` on the changed Markdown,
+  `python3 scripts/check-agents-md.py` (the drift-tests document is one the agent instructions name), and the docs
+  website build (`bun run build`, which checks every link): passed.
+
+Reused: nothing. Skipped: the opt-in tests, among them the real-agent drift tests, which spend vendor turns; the
+installer and provisioning suites, since no plan in this round touches them; and any run on a Mac, since none was
+available to the landing.
