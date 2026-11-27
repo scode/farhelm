@@ -71,3 +71,6 @@ with in place.
 - Remote hosts need to match the desktop app's protocol as part of an ordinary upgrade. Report a protocol change to the
   maintainer for release testing and omit the standard remote-hosts entry from public notes. (Stated by the maintainer
   during the v0.40.0 curation, 2026-11-17.)
+- Omit Linux desktop behavior from the public notes while the Linux desktop app is unsupported. The v0.46.0 notes keep
+  the Mac shortcuts for copying a file from the terminal, pasting text via file upload, and switching terminal tabs.
+  (Stated by the maintainer during the v0.46.0 curation, 2026-11-27.)
