@@ -154,6 +154,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `checkpoint_contract.py` where the card still exists), and update the brick-test unit tests under
   `releasing/mac-vm-test/` as needed.
 
+- **Verify and guard Claude drift trust copy-back against clearing real parent-directory trust.** PR #5047
+  (`triage-drift-and-brick-tooling`) clears `hasTrustDialogAccepted` for the scratch workspace and all its ancestor
+  directories in Claude's private drift mirror (`crates/farhelm/tests/e2e/real_agent_capture/drift/private_config.rs`)
+  so inherited trust cannot cause a vacuous pass. Landing review flagged an unverified risk: if Claude rewrites the file
+  holding those trust entries during a live drift run and `copy_back` copies that rewritten file back into the real
+  configuration (because the real file did not change during the run), the cleared parent-directory trust approvals
+  would be written back to the machine's real Claude config. Check whether `copy_back` can actually copy back the
+  stripped Claude trust file (checking `self.copied` vs `self.links` and whether current Claude rewrites it) and, if it
+  can, ensure stripped ancestor trust entries are never copied back to the real config (and add a regression test).
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
