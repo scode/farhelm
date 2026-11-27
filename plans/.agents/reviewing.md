@@ -31,19 +31,30 @@ any flags `queue status` raises.
 By default, review the landed plans on one page using the `interactive-artifact` skill; load and follow it by name. Do
 not publish the page as a snippet or anywhere else unless the maintainer asks.
 
+Assume every report and Landing section was written by whatever agent or model ran the work and is likely opaque,
+compressed, or full of internal mumbo jumbo. The agent running the review flow is presumed to be strong at speaking to
+humans. Do not echo or lightly paraphrase unclear report text: investigate what the report is actually talking about
+(read the plan file, the linked PR diffs, `SPEC.md`, or the touched code whenever a summary, leftover, or decision point
+is unclear) until you genuinely understand it, then restate it as clearly as possible (`AGENTS.md`, "Talking to the
+user"). Start from user-facing, high-level terms — what someone using Farhelm sees, does, or risks, and what real choice
+is on the table — and introduce technical details only as needed to make the concrete consequence or tradeoff clear.
+This applies to both the review page and the one-at-a-time walkthrough.
+
 The page holds every report in `REPORTS.md`, oldest first, cut down to what the maintainer can act on; they made this
 concise form the default on 2026-10-23. Each report gets, in this order: its PRs and summary line; one or two sentences
-on what was done, in product terms; then only the plausible leftover bugs and follow-ups that matter: real gaps, known
-wrong behavior, risky untested paths with a concrete consequence, and decisions the report or its Landing section says
-are still needed, each of those marked "Decision needed:". One short sentence per item, and a plan with nothing left
-says so. Leave out checks that ran, a database schema version bump on its own, changelog and release bookkeeping,
-documentation polish, stale comments, test hygiene, screenshot refreshes, what the landing already fixed, flakes already
-recorded, caveats that are design choices the maintainer already made, and notes that something was not tried on a real
-Mac or in the real desktop app, unless the untried case is particular or risky. A leftover that a later commit
-verifiably resolved may say so beside it. Then the full report, collapsed; then a picker with an "approve" choice and a
-free-text field. Use the plan's slug as its stable picker id. The summary and the leftovers are the session's own
-reading of the report and its Landing section, never new claims. The skill's Submit and wait mechanism collects the
-choices, comments and suggestions.
+on what was done, in plain product terms; then only the plausible leftover bugs and follow-ups that matter: real gaps,
+known wrong behavior, risky untested paths with a concrete consequence, and decisions the report or its Landing section
+says are still needed, each of those marked "Decision needed:". Keep each item concise — one or two clear sentences when
+that is enough, or as much concrete user-facing context as a decision needs so the maintainer can actually understand
+and act on it without opening the report — and a plan with nothing left says so. Leave out checks that ran, a database
+schema version bump on its own, changelog and release bookkeeping, documentation polish, stale comments, test hygiene,
+screenshot refreshes, what the landing already fixed, flakes already recorded, caveats that are design choices the
+maintainer already made, and notes that something was not tried on a real Mac or in the real desktop app, unless the
+untried case is particular or risky. A leftover that a later commit verifiably resolved may say so beside it. Then the
+full report, collapsed; then a picker with an "approve" choice and a free-text field. Use the plan's slug as its stable
+picker id. The summary and the leftovers are the session's own clarified restatement of what the report and its Landing
+section raise (verified against the code or diffs whenever the report is unclear), never unrelated new review findings.
+The skill's Submit and wait mechanism collects the choices, comments and suggestions.
 
 Write the body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent scratch
 space"). `scripts/plans-landing/landing.py review-page` builds it from your summaries, written as JSON
