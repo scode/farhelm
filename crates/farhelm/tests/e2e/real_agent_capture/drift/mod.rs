@@ -1275,6 +1275,7 @@ macro_rules! drift_cases {
 
 mod base;
 mod capture_timing_hooks;
+mod conversation_rotation;
 mod initial_prompt;
 mod instructions_delivery;
 mod model_selection;
