@@ -12,5 +12,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `ntfy-quiet-hours-urgency.md` — Add local-time quiet hours and quiet-hours priority/off setting for ntfy alerts
 - [pending] `drift-base-isolation-and-turns.md` — Add Codex process-tree isolation and Cursor/OpenCode interactive turns to the base drift category
 - [pending] `drift-persistent-hooks.md` — Add persistent_hooks drift category verifying Grok and Antigravity hooks inside and outside Farhelm (after `drift-base-isolation-and-turns.md`)
-- [held] `drift-conversation-rotation.md` — Add conversation_rotation drift category replacing standalone rotation tests and covering seven tracked harnesses
+- [pending] `drift-conversation-rotation.md` — Add conversation_rotation drift category replacing standalone rotation tests and covering seven tracked harnesses
 - [held] `drift-permission-footer.md` — Extend permission_modes drift checks with Guarded launches and tri-state permission-footer verification
