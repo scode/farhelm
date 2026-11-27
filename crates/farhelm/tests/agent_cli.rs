@@ -2805,8 +2805,10 @@ fn create_refuses_retired_and_malformed_launch_flags() {
     }
 }
 
-/// Spec: every hyphen-leading VALUE a create can carry reaches the wire
-/// verbatim rather than being read as an unrecognized flag.
+/// Spec: every hyphen-leading VALUE a create can carry as a separate
+/// argument reaches the wire verbatim rather than being read as an
+/// unrecognized flag. `--model` and `--effort` are the exception: they take
+/// such a value only joined with `=` (the CLI's own parse tests cover them).
 ///
 /// The same hazard `a_rename_title_starting_with_a_hyphen_is_not_misparsed_
 /// as_a_flag` covers for titles, applied to the whole creating surface.

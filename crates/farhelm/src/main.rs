@@ -204,7 +204,10 @@ enum CustomAgentCmd {
 /// into "this CLI would not even carry your name". The cost is the usual
 /// one and is accepted knowingly: a caller who forgets a value gets the
 /// NEXT flag consumed as that value, and a refusal from the far end rather
-/// than a usage error here.
+/// than a usage error here. The launch flags `--model` and `--effort` are
+/// the exception: for a custom agent a swallowed flag there is not refused
+/// downstream but launches as its model or effort, so they take a
+/// hyphen-leading value only in the `--effort=-fast` form ([`LaunchFlags`]).
 ///
 /// Each variant's `///` doc comment is AGENT-FACING PROSE, not only help
 /// text: [`agent_instructions`] walks this enum's clap definition and
@@ -1061,11 +1064,19 @@ struct LaunchFlags {
     #[arg(long, value_name = "TYPE", value_parser = parse_agent_type)]
     agent: Option<AgentTypeChoice>,
     /// Model for an agent launch, as the agent type names it; `default`
-    /// leaves it to the agent type.
-    #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+    /// leaves it to the agent type. A custom agent's value starting with -
+    /// must be joined with =, as in --model=-fast.
+    // Unlike the free-text options around them, `--model` and `--effort` do
+    // not take a separate value starting with `-`. With that allowance a
+    // forgotten value swallowed the next flag, and for a custom agent nothing
+    // downstream refused it: `--effort --yolo` launched one with `--yolo` as
+    // its effort. Without it clap reports the missing value, and the `=` form
+    // still carries a custom agent's hyphen-leading identifier.
+    #[arg(long, value_name = "ID")]
     model: Option<String>,
-    /// Reasoning effort for an agent launch, or `default`.
-    #[arg(long, value_name = "LEVEL", allow_hyphen_values = true, value_parser = parse_effort)]
+    /// Reasoning effort for an agent launch, or `default`. A custom agent's
+    /// value starting with - must be joined with =, as in --effort=-fast.
+    #[arg(long, value_name = "LEVEL", value_parser = parse_effort)]
     effort: Option<Choice<farhelm_proto::LaunchEffortValue>>,
     /// Permission mode for an agent launch (guarded, yolo, approve,
     /// smart_approve, chat), where supported. `default` remains an alias for
@@ -3776,20 +3787,69 @@ mod tests {
         assert_eq!(conversation.as_deref(), Some("conv-1"));
     }
 
-    /// Clap used to reject `-fast` as an unknown option unless joined to `--effort` with `=`. The separate value
-    /// must now reach the create request verbatim, with any following option still parsed on its own.
+    /// Spec: `--effort` and `--model` refuse a separate value that starts with `-` as a usage error, on every verb that
+    /// shares the launch flags (`agent create`, `spawn`, and a template write once its name is given). A following
+    /// flag such as `--yolo` leaves the option without a value; `-fast` is read as the unknown short option `-f`.
+    ///
+    /// Why: when these options took any separate value, a caller who forgot the value got the next flag consumed as
+    /// it, and for a custom agent nothing downstream refused that: `--effort --yolo` launched it with `--yolo` as its
+    /// effort and without the YOLO assertion the caller meant. A parse error naming the option (or `-f`), rather than a
+    /// parse that put the next token in the edits, is what shows it was not swallowed; pinning the kind and the named
+    /// argument keeps an unrelated parse failure from passing for it.
     #[farhelm_testtrace::test]
-    fn custom_create_accepts_a_separate_hyphen_leading_effort() {
+    fn effort_and_model_refuse_a_separate_hyphen_leading_value() {
+        use clap::error::{ContextKind, ErrorKind};
+        for verb in [
+            ["agent", "create"].as_slice(),
+            ["spawn"].as_slice(),
+            ["agent", "template", "create", "t"].as_slice(),
+        ] {
+            for (flag, value, kind, named) in [
+                (
+                    "--effort",
+                    "--yolo",
+                    ErrorKind::InvalidValue,
+                    "--effort <LEVEL>",
+                ),
+                ("--effort", "-fast", ErrorKind::UnknownArgument, "-f"),
+                ("--model", "--yolo", ErrorKind::InvalidValue, "--model <ID>"),
+                ("--model", "-fast", ErrorKind::UnknownArgument, "-f"),
+            ] {
+                let mut args = vec!["farhelm"];
+                args.extend_from_slice(verb);
+                args.extend(["--agent", "acme-code", flag, value]);
+                let error = match Cli::try_parse_from(args.iter().copied()) {
+                    Ok(_) => panic!("{args:?} parsed; {value} was taken as the {flag} value"),
+                    Err(error) => error,
+                };
+                assert_eq!(error.kind(), kind, "{args:?}: {error}");
+                assert_eq!(
+                    error
+                        .get(ContextKind::InvalidArg)
+                        .map(|arg| arg.to_string())
+                        .as_deref(),
+                    Some(named),
+                    "{args:?}: {error}"
+                );
+            }
+        }
+    }
+
+    /// Spec: a custom agent's model or effort that starts with `-` still reaches the create request verbatim when
+    /// joined to its option with `=`.
+    ///
+    /// Why: custom agents may use hyphen-leading identifiers, and the `=` form is the one way left to pass them once
+    /// a separate hyphen-leading value is refused.
+    #[farhelm_testtrace::test]
+    fn custom_create_accepts_a_hyphen_leading_effort_and_model_joined_with_equals() {
         let Cmd::Agent { command } = Cli::try_parse_from([
             "farhelm",
             "agent",
             "create",
             "--agent",
             "acme-code",
-            "--effort",
-            "-fast",
-            "--model",
-            "local",
+            "--effort=-fast",
+            "--model=-local",
         ])
         .unwrap()
         .command
@@ -3806,7 +3866,7 @@ mod tests {
                 "-fast".into()
             )))
         );
-        assert_eq!(edits.model, Some(Some("local".into())));
+        assert_eq!(edits.model, Some(Some("-local".into())));
     }
 
     /// Guarded is explicit intent, while the old default spelling remains
