@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`launcher-style-quick-dialogs`](reports/launcher-style-quick-dialogs.report.md) landed 2026-11-25 in #4975, #4985, #4991, #4997, #5001: Give the quick switcher (Cmd+K), the template list (Cmd+J) and Rename (Cmd+L) the session launcher's look, with its pieces shared as components
 - [`host-provisioning-action-fixes`](reports/host-provisioning-action-fixes.report.md) landed 2026-11-25 in #4996, #5002, #5009: Pin a confirmed Tailscale Uninstall to the verified peer and give explicit host actions priority over automatic SSH sign-in
 - [`launcher-style-whats-new`](reports/launcher-style-whats-new.report.md) landed 2026-11-26 in #5004, #5008: Give What's new the session launcher's look, every entry in full, with release curation marking each highlight's headline
 - [`supervisor-stop-and-restart-cleanup-fixes`](reports/supervisor-stop-and-restart-cleanup-fixes.report.md) landed 2026-11-26 in #5005: Settle unconfirmed agent starts before Stop reports success and keep failed Restart cleanup retryable after session deletion
