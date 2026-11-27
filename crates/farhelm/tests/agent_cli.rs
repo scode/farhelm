@@ -1816,17 +1816,17 @@ fn rename_without_consequential_selectors_is_refused_before_sending() {
         "the refusal must name the condition: {stderr}"
     );
 }
-/// Spec: a rename title starting with a hyphen is sent verbatim as the
-/// title, not misparsed as an unrecognized flag.
+/// Spec: a rename title starting with a hyphen, given after `--`, and an
+/// expected title starting with one, joined with `=`, are sent verbatim.
 ///
-/// `title` is a positional argument, and without clap's `allow_hyphen_values`
-/// a leading-hyphen value is indistinguishable to the parser from a flag it
-/// does not recognize — even though the supervisor itself places no such
-/// restriction on a title (SPEC.md's only rename refusal is a control
-/// character). Without the attribute this test's own title would make the
-/// CLI exit before ever opening a socket, and `mock_supervisor`'s
-/// "the agent CLI did not connect" timeout would be the failure, not a
-/// clean assertion on the request actually sent.
+/// `title` is a positional argument, and clap reads a separate
+/// leading-hyphen word as a flag, even though the supervisor itself places no
+/// such restriction on a title (SPEC.md's only rename refusal is a control
+/// character). `--` and `=` are the spellings that carry such a title, so
+/// this pins that they still reach the wire unchanged. Had either been
+/// refused, the CLI would exit before ever opening a socket, and
+/// `mock_supervisor`'s "the agent CLI did not connect" timeout would be the
+/// failure, not a clean assertion on the request actually sent.
 #[farhelm_testtrace::test]
 fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
     let temp = farhelm_teststate::tempdir().unwrap();
@@ -1872,10 +1872,11 @@ fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
         &socket,
         &[
             "rename",
-            "-not-a-flag",
             "--session",
             "session-1",
             "--expected-title=-old-title",
+            "--",
+            "-not-a-flag",
         ],
     ));
     finish_server(done, thread);
@@ -2569,7 +2570,8 @@ fn clone_without_source_is_refused_before_sending() {
 }
 
 /// Spec: `farhelm agent clone` puts every option it was given on the wire
-/// — including a `--idempotency-key` beginning with a hyphen — and its
+/// — including a `--idempotency-key` beginning with a hyphen, joined with
+/// `=` — and its
 /// confirmation on stderr escapes every control character in the fields
 /// the helm sent back.
 ///
@@ -2579,9 +2581,9 @@ fn clone_without_source_is_refused_before_sending() {
 /// could be dropped or transposed without failing any test that only drove
 /// `create`; and the key is the field that makes an ambiguous retry safe,
 /// so a key silently swallowed by clap as an unrecognized option is the
-/// worst possible one to lose. The hyphen-leading key is the shape that
-/// needs `allow_hyphen_values`: the downstream contract allows it, so the
-/// CLI must carry it rather than refuse it locally.
+/// worst possible one to lose. The hyphen-leading key matters because the
+/// downstream contract allows it, so the CLI must carry it in its `=` form
+/// rather than refuse it locally.
 ///
 /// The escaping matters here more than on the lifecycle confirmations, and
 /// for a reason specific to this verb: three of the four fields printed
@@ -2644,8 +2646,7 @@ fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation
             "/srv/elsewhere",
             "--title",
             "the copy",
-            "--idempotency-key",
-            "-leading-hyphen-key",
+            "--idempotency-key=-leading-hyphen-key",
         ],
     ));
     finish_server(done, thread);
@@ -2808,18 +2809,17 @@ fn create_refuses_retired_and_malformed_launch_flags() {
     }
 }
 
-/// Spec: every hyphen-leading VALUE a create can carry as a separate
-/// argument reaches the wire verbatim rather than being read as an
-/// unrecognized flag. `--model` and `--effort` are the exception: they take
-/// such a value only joined with `=` (the CLI's own parse tests cover them).
+/// Spec: every hyphen-leading value a create carries, joined to its option
+/// with `=`, reaches the wire verbatim. A separate hyphen-leading word is
+/// read as a flag instead (the CLI's own parse tests cover that refusal).
 ///
 /// The same hazard `a_rename_title_starting_with_a_hyphen_is_not_misparsed_
 /// as_a_flag` covers for titles, applied to the whole creating surface.
 /// Every one of these values is judged DOWNSTREAM — a host name by the
 /// helm's registry, an idempotency key by its reservation table, a
 /// directory by the target's filesystem — and every one of them may
-/// legally begin with `-`, so a local refusal here is this CLI declining to
-/// carry a value the far end would have accepted or explained.
+/// legally begin with `-`, so the `=` form must still carry what the far
+/// end would accept or explain.
 ///
 /// The fixture's `--command` is deliberately option-shaped
 /// (`--weird-program`) rather than a realistic wrapper: what is under test
@@ -2881,17 +2881,12 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
         &socket,
         &[
             "create",
-            "--cwd",
-            "-odd-dir",
-            "--host",
-            "-odd-host",
-            "--command",
-            "--weird-program --flag",
+            "--cwd=-odd-dir",
+            "--host=-odd-host",
+            "--command=--weird-program --flag",
             "--no-yolo",
-            "--title",
-            "-odd-title",
-            "--idempotency-key",
-            "-odd-key",
+            "--title=-odd-title",
+            "--idempotency-key=-odd-key",
         ],
     ));
     finish_server(done, thread);
