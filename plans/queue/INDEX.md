@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [pending] `file-hover-too-large-hint.md` — Show "too large to copy contents" on terminal file hover cards over the 10 MB copy cap
 - [pending] `cli-flag-parsing-audit.md` — Stop free-text CLI options and positionals from swallowing flags and clean up clap parsing quirks
-- [held] `agent-hosts-tailscale-column.md` — Add a TAILSCALE column to plain `farhelm agent hosts` table output
+- [pending] `agent-hosts-tailscale-column.md` — Add a TAILSCALE column to plain `farhelm agent hosts` table output
 - [held] `delete-dead-replace-checkout-ui.md` — Delete dead fresh-checkout Replace UI remnants and close matching review finding
 - [held] `terminal-tab-shortcuts.md` — Add Cmd+T/Cmd+W terminal-tab shortcuts and always confirm Delete when shell tabs are open
 - [held] `terminal-tab-overflow-ux.md` — Pin the main Agent tab and add auto-scroll, edge fades, arrows, and an all-tabs menu for overflowing tabs
