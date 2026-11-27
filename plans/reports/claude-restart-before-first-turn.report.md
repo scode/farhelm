@@ -127,3 +127,82 @@ Each PR had fresh-context Opus 5.5 reviews at high effort with the plan's charte
   the new one. Now it requires a new conversation id. It also found one low and two nits, all fixed. Round 2 found two
   lows: the case now checks the restarted process's own command line rather than relying on Claude exiting on a bad
   resume, and its timeout names what was missing. It also found two nits, all fixed. Round 3 found two nits, both fixed.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained the previous round's changes: a supervisor start now finishes the
+cleanup a failed Restart left behind, an unused helm route was removed, and a release test and a drift test changed. The
+startup cleanup has no path this plan's change reaches. In the same round, just before this plan,
+agent-blocked-notifications landed: agents can now tell you they are blocked, and when you turn that on, sessions get an
+extra instruction at every start and Restart. That met this plan, as the fix below says. After this plan,
+settings-save-close-delete-prompt and shell-tab-first-close-sweep-backoff landed, which touch neither Claude nor
+Restart.
+
+An independent reviewer and I read the change. The new per-agent behavior is built the way the repository's rules for
+agent-specific code ask, and the reviewer found nothing untrue in the report.
+
+#### Fixes made while landing
+
+- **A new test did not compile on top of agent-blocked-notifications.** This plan's test of a Restart that starts Claude
+  fresh was written before agent-blocked-notifications added an instruction to every start and Restart, and so passed
+  one value too few in two places. Stacking the plans applied cleanly but left the supervisor's tests unable to build. I
+  added the missing "no extra instruction" value in both places in the PR that adds the test (#5137); no product code
+  changed.
+- **A TODO.md conflict.** The round's four plans each removed their own TODO entry, next to each other, so stacking them
+  conflicted there. I removed all four entries; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing untrue, but the report's evidence, its real-Claude Restart run included, came from a tree without
+agent-blocked-notifications under it, which adds the blocked instruction to every Restart. The landing re-ran the whole
+Rust test suite on the combined tree; the real-Claude case, which is opt-in and spends vendor turns, was not run again.
+
+#### Worth knowing
+
+- **Nothing tests that a fresh start keeps the blocked instruction.** When you turn on alerts for blocked agents, a
+  restarted session should get the instruction whether Restart resumes or starts fresh. The code passes it either way,
+  but no test checks the fresh start. The reviewer suggested adding it alongside the compile fix; I kept the landing's
+  change to the compile fix alone, since an assertion here needs the test's setup to pass an instruction through and
+  inspect the launch. Possible follow-up: pass an instruction through one of this plan's fresh-start tests and check
+  that the launch carries it.
+
+#### Checks
+
+Run on the round's four plans stacked on main as it stood when the landing started (agent-blocked-notifications,
+claude-restart-before-first-turn, settings-save-close-delete-prompt, then shell-tab-first-close-sweep-backoff), after
+the landing's fix to claude-restart-before-first-turn's test. Because agent-blocked-notifications raises the protocol
+version and the four plans between them touch the helm, the supervisor's agent-specific code, the command line, the
+desktop app, its reference screenshots and the docs, the whole Rust test suite ran. The SSH test worker was still
+unreachable, so the slow suites ran on boat sandboxes (x86_64 Ubuntu 24.04 VMs), and clippy ran locally:
+
+- A first run failed at its first step: `cargo clippy --all-targets -- -D warnings` could not compile a new test of
+  claude-restart-before-first-turn, the problem described in that plan's notes. The other clippy checks passed and the
+  test build then failed on the same error, so no test ran. After the fix, every check below ran from the start.
+- Locally, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and
+  `cargo clippy -p farhelm-desktop --all-targets` without and with `--features agent` (the build with the desktop app's
+  test-automation hooks), all with `-D warnings`: clean.
+- On three boats, every test of the workspace and the desktop app that runs by default (`cargo nextest run --workspace`,
+  built once, split in three and run through the recorder), recorded runs d273d9bc-7896-4c1c-89a4-106d7f060a1d,
+  a74ca485-4be5-4e2f-bbf5-ff250895f815 and 3e5673f4-c3a7-461f-9d15-7c0c7956e6a1: 9,180 passed, one failed, and no test
+  that quietly passed for lack of systemd, Podman or SSH on the machine. The one failure is the test-trace macro's
+  compile check, which builds a scratch crate offline from the machine's own download cache; a boat has no such cache,
+  so that test always fails there, as `.agents/boat.md` records, and no plan in this round touches it. Run locally
+  (`cargo nextest run -p farhelm-testtrace-macros --test compile_contract`), recorded run
+  8fc4d4bc-523d-4650-856d-e560a8137b59, it passed.
+- On a fourth boat, the desktop app's end-to-end smoke test (`scripts/gui-e2e-smoke.py`), recorded run
+  693426e3-0300-4c24-8257-adc94ddb9901: 48 of its 49 steps passed, and the paste step was skipped, as on every Linux
+  run.
+- Locally, the full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run
+  fb93b279-02be-42ce-94f6-f269a97c0d79, the test of the screenshot tooling's list of screens, recorded run
+  653ebb0b-2dbc-432c-8da0-1f814940b0cb, and the workspace's documentation examples
+  (`cargo test --doc --workspace --exclude farhelm-desktop`), recorded run 5dfbb55e-5cbe-4bee-beb4-cac09ef01146: passed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format`, `dprint check` on the changed Markdown,
+  `python3 scripts/check-agents-md.py` (the drift-tests document is one the agent instructions name), and the docs
+  website build (`bun run build`, which checks every link): passed.
+
+Reused: nothing. Skipped: the opt-in tests, among them the real-agent drift tests, which spend vendor turns; the
+installer and provisioning suites, since no plan in this round touches them; and any run on a Mac, since none was
+available to the landing.
