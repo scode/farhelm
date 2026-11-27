@@ -16,6 +16,7 @@ python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection
 python3 -B scripts/run-harness-drift.py --no-upgrade --category named_conversation
 python3 -B scripts/run-harness-drift.py --no-upgrade --category instructions_delivery
 python3 -B scripts/run-harness-drift.py --no-upgrade --category conversation_rotation --harness pi
+python3 -B scripts/run-harness-drift.py --no-upgrade --category persistent_hooks
 python3 -B scripts/run-harness-drift.py --upgrade-only
 ```
 
@@ -121,6 +122,24 @@ recall after Restart asks for the newest word, which only the fork knows. On Pi 
 fork picker and empties the composer, which Pi refills with that message. A case spends one turn on the first seed, then
 a seed and a recall per command, except that `/resume` spends only its recall: three turns for Claude, Grok and
 Antigravity, five for Codex and Muse, six for Pi and OMP.
+
+The `persistent_hooks` category covers the hook files Farhelm leaves in Grok's and Antigravity's own configuration,
+which every later run of that agent executes, inside Farhelm or not. Each case works on one private copy of the vendor's
+configuration (see below). First a consented launch has to install exactly the files Farhelm's setup plans there, and
+one short turn has to bring an accepted conversation report, which shows that the real CLI found and ran them. Then the
+same CLI starts outside Farhelm on the same copy: a plain command session whose command removes every `FARHELM_*`
+variable, sets the copy's variable again and replaces itself with the CLI, started with its usual model and effort
+flags. Before any key is sent, the case checks that the session's process is the CLI with exactly those arguments, that
+it runs in the session's launch scope (without one, which means no systemd user manager, the case reports COULD NOT RUN,
+since nothing else would let Delete find what such a CLI leaves behind), and that it has no `FARHELM_*` variable and
+does have the copy's variable. The CLI then has to finish two short turns, the second showing that the first turn's Stop
+hook let it carry on, and stay running for a few seconds after them, with no hook output on screen. The hooks write
+nothing when they run outside Farhelm, so that second part shows they stay silent and harmless, but cannot show that
+they ran; the first part, on the same files, is the evidence that the CLI reads them. Only Farhelm's own hook output and
+Antigravity's `{}` reply are recognized on screen, not a vendor's own wording for a failed hook. Grok's outside run
+passes `--no-leader`, so the case covers Grok's private backend running the hooks and not its default shared leader,
+which runs them in whatever environment it started with: the copy links Grok's real directory, so without the flag the
+test could reach a leader you run.
 
 An agent may save a trust choice for the temporary directory. Claude, the Muse launcher and OMP can update themselves
 during startup, so these cases disable their updaters for the test invocations using an environment variable for Claude

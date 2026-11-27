@@ -212,12 +212,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Drift test feature coverage
 
-- **Drift tests: opt-in persistent hook installation for Grok and Antigravity.** Using isolated config directories so
-  the real user home stays untouched, verify that the exact hook files Farhelm installs for Grok (`hooks/farhelm.json`)
-  and Antigravity (`plugins/farhelm/{plugin.json,hooks.json}`) are discovered and invoked by the real CLIs inside
-  Farhelm to capture conversations, and exit cleanly and silently when the CLIs run outside Farhelm. Plan:
-  `plans/queue/drift-persistent-hooks.md`.
-
 - **Drift tests: subagent and nested-agent report rejection.** Wire Claude's standalone shelled-out `claude -p` test
   into the drift runner and add live coverage for both native subagents and shelled-out nested agents across all six
   foreground-ownership harnesses (Claude, Codex, Muse, OMP, Grok, Antigravity), proving child invocations cannot replace
