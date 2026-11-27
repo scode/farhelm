@@ -192,22 +192,29 @@ enum CustomAgentCmd {
 /// IS their stdout — those act on a session the caller already named, so
 /// there is no new identifier to hand back.
 ///
-/// Free-text options on the CREATING verbs carry
-/// `allow_hyphen_values`, and that is a rule about where the values are
-/// judged rather than a per-flag convenience. A host name, a directory, an
-/// invocation, a title and an idempotency key are all plain strings that
-/// something DOWNSTREAM decides the legality of — the helm's registry, the
-/// target supervisor's filesystem,
-/// and the relay's own byte caps. Every one of them may legally begin with `-`, and
-/// without the allowance clap refuses such a value here as an unrecognized
-/// option, which turns "the target will tell you why that name is wrong"
-/// into "this CLI would not even carry your name". The cost is the usual
-/// one and is accepted knowingly: a caller who forgets a value gets the
-/// NEXT flag consumed as that value, and a refusal from the far end rather
-/// than a usage error here. The launch flags `--model` and `--effort` are
-/// the exception: for a custom agent a swallowed flag there is not refused
-/// downstream but launches as its model or effort, so they take a
-/// hyphen-leading value only in the `--effort=-fast` form ([`LaunchFlags`]).
+/// Free-text options and positionals here (session ids, titles, host names,
+/// directories, template names, idempotency keys, shell text) take a value
+/// starting with `-` only when it is joined with `=` (`--title=-draft`) or,
+/// for a positional, placed after `--`. A host name, a directory or a title
+/// may legally begin with `-`, because something DOWNSTREAM decides the
+/// legality of these strings (the helm's registry, the target supervisor's
+/// filesystem, the relay's byte caps), and both spellings still carry such a
+/// value there unchanged. What clap no longer does is take a separate
+/// hyphen-leading word as a value: with that allowance a forgotten value
+/// silently swallowed the next flag (`host add dev --alias --tailscale`
+/// asked for a host aliased `--tailscale`), and only some of those reached a
+/// refusal at the far end. Without it the omission is a usage error here.
+///
+/// The exception is `--prompt` (here and on [`LaunchFlags`]): a message is
+/// prose that often starts with a Markdown bullet or `---`, and clap's
+/// refusal of one is a cryptic "unexpected argument '- '", so it still takes
+/// a separate hyphen-leading value. Its cost is the old one: `--prompt` with
+/// its text forgotten takes the next flag as the message.
+///
+/// On a verb with a positional, clap's refusal of an option's hyphen-leading
+/// value adds the tip "use '-- -x'", which is the wrong fix for an option:
+/// after `--` everything is positional. Those verbs say the right spelling in
+/// their help ([`HYPHEN_VALUE_HELP`]).
 ///
 /// Each variant's `///` doc comment is AGENT-FACING PROSE, not only help
 /// text: [`agent_instructions`] walks this enum's clap definition and
@@ -259,6 +266,7 @@ enum AgentCmd {
         json: bool,
     },
     /// Rename an explicitly named session if its title is unchanged.
+    #[command(after_help = HYPHEN_VALUE_HELP)]
     Rename {
         /// The new title, forwarded to the helm verbatim.
         ///
@@ -267,25 +275,21 @@ enum AgentCmd {
         /// rule, and the 64 KiB field cap (`CREATE_FIELD_CAP`) the relay's
         /// own `validate_agent_verb` applies at the first hop. Anything
         /// else — leading hyphens, punctuation, the empty string — is a
-        /// legal title.
-        ///
-        /// `allow_hyphen_values` exists because of the first of those:
-        /// since a leading hyphen is legal in a title, clap would otherwise
-        /// misparse one as an unrecognized flag before it ever reached the
-        /// wire.
-        #[arg(allow_hyphen_values = true)]
+        /// legal title. A title starting with `-` goes after `--`
+        /// (`rename --session ID --expected-title OLD -- -draft`), since a
+        /// separate hyphen-leading word is read as a flag.
         title: String,
         /// Exact session id from `farhelm agent sessions`.
-        #[arg(long = "session", allow_hyphen_values = true)]
+        #[arg(long = "session")]
         session: String,
         /// Exact title observed in the discovery result, including empty.
-        #[arg(long = "expected-title", allow_hyphen_values = true)]
+        #[arg(long = "expected-title")]
         expected_title: String,
     },
     /// Stop a named session's agent and close its terminal tabs.
     Stop {
         /// Exact session id from `farhelm agent sessions`.
-        #[arg(long = "session", allow_hyphen_values = true)]
+        #[arg(long = "session")]
         session: String,
     },
     // Hidden while the helm refuses agent prompts (`AGENT_PROMPTS_ENABLED` in
@@ -300,7 +304,7 @@ enum AgentCmd {
     #[command(group(clap::ArgGroup::new("prompt_source").required(true).args(["prompt", "prompt_file"])))]
     Prompt {
         /// Exact target id from `farhelm agent sessions`; never this session.
-        #[arg(long = "session", allow_hyphen_values = true)]
+        #[arg(long = "session")]
         session: String,
         /// Message to submit, queued after the current turn if the agent is busy.
         /// Must contain non-whitespace text. Newlines and tabs are allowed;
@@ -309,13 +313,13 @@ enum AgentCmd {
         prompt: Option<String>,
         /// Read the message from a UTF-8 file, or - for stdin (64 KiB cap).
         /// Cannot be combined with --prompt; takes contents, not a target-host path.
-        #[arg(long, value_name = "PATH", allow_hyphen_values = true, value_parser = read_agent_prompt)]
+        #[arg(long, value_name = "PATH", value_parser = read_agent_prompt)]
         prompt_file: Option<String>,
     },
     /// Delete an explicitly named session and its stored state; never this session.
     Delete {
         /// Exact session id from `farhelm agent sessions`.
-        #[arg(long = "session", allow_hyphen_values = true)]
+        #[arg(long = "session")]
         session: String,
         /// Permit stopping the target's agent and terminal tabs before deletion.
         #[arg(long)]
@@ -324,7 +328,7 @@ enum AgentCmd {
     /// Restart an explicitly named session, resuming its own conversation.
     Restart {
         /// Exact session id from `farhelm agent sessions`.
-        #[arg(long = "session", allow_hyphen_values = true)]
+        #[arg(long = "session")]
         session: String,
         /// Removed: every restart resumes the session's own conversation.
         /// Kept, hidden, only so an agent still following older
@@ -361,7 +365,7 @@ enum AgentCmd {
         /// THIS process's current directory — which is what `farhelm
         /// spawn` correctly does for its own same-host create — would
         /// invent a path that means nothing over there.
-        #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+        #[arg(long, value_name = "DIR")]
         cwd: Option<String>,
         /// Create a fresh managed checkout of this GitHub repository on the target host.
         #[arg(long, alias = "github", value_name = "REPO", conflicts_with = "cwd", value_parser = parse_checkout_repo)]
@@ -373,7 +377,7 @@ enum AgentCmd {
         /// Required for a fleet host unless a template names it. Omit it
         /// for a recipe launch, including through a template. An agent in
         /// a sandbox or container can omit it to create there.
-        #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+        #[arg(long, value_name = "NAME")]
         host: Option<String>,
         /// Create the session in a new sandbox or container built from this
         /// recipe, behind a card that always asks; a Tensorlake sandbox unless
@@ -381,7 +385,6 @@ enum AgentCmd {
         #[arg(
             long,
             value_name = "NAME",
-            allow_hyphen_values = true,
             conflicts_with_all = ["host", "idempotency_key"]
         )]
         recipe: Option<String>,
@@ -390,7 +393,6 @@ enum AgentCmd {
         #[arg(
             long,
             value_name = "NAME",
-            allow_hyphen_values = true,
             requires = "recipe",
             conflicts_with = "host"
         )]
@@ -429,11 +431,11 @@ enum AgentCmd {
         #[command(flatten)]
         launch: LaunchFlags,
         /// Display title; omitted derives one from the directory.
-        #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
+        #[arg(long, value_name = "TITLE")]
         title: Option<String>,
         /// Retry key for creating the session only once. Fleet creates need
         /// an explicit `--host`. Recipe launches do not accept retry keys.
-        #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
+        #[arg(long, value_name = "KEY")]
         idempotency_key: Option<String>,
         /// Removed: an agent cannot override the YOLO confirmation (SPEC.md,
         /// Agent-spawned sessions). Its parser refuses every use, under both
@@ -452,22 +454,22 @@ enum AgentCmd {
     /// Copy an explicitly named session onto any host; prints the new id.
     Clone {
         /// Exact source id from `farhelm agent sessions`.
-        #[arg(long = "source-session", allow_hyphen_values = true)]
+        #[arg(long = "source-session")]
         source_session: String,
         /// Host to create on, by the name `farhelm agent hosts` shows.
         /// Omit it for a sandbox or container session: its copy is a new
         /// sandbox or container from the same recipe, behind a card that
         /// always asks.
-        #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+        #[arg(long, value_name = "NAME")]
         host: Option<String>,
         /// Working directory; omitted copies this session's.
-        #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+        #[arg(long, value_name = "DIR")]
         cwd: Option<String>,
         /// Display title; omitted copies this session's.
-        #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
+        #[arg(long, value_name = "TITLE")]
         title: Option<String>,
         /// Retry key: the same key creates the session only once.
-        #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
+        #[arg(long, value_name = "KEY")]
         idempotency_key: Option<String>,
         /// Removed: an agent cannot override the YOLO confirmation (SPEC.md,
         /// Agent-spawned sessions). Its parser refuses every use, under both
@@ -495,6 +497,12 @@ enum AgentCmd {
     Help,
 }
 
+/// The help line that gives the right spelling of a hyphen-leading value on
+/// the verbs that also take a positional, where clap's own refusal suggests
+/// `--` for an option's value too (see [`AgentCmd`]).
+const HYPHEN_VALUE_HELP: &str = "A value starting with - is joined to its option with =, as in \
+     --option=-value. A positional one goes last, after --.";
+
 /// `farhelm agent template`'s verbs: an agent's template writes, each shown to
 /// the user on an approval card with the whole resulting template, command
 /// text included (SPEC.md, Agent-spawned sessions).
@@ -505,6 +513,7 @@ enum AgentCmd {
 #[derive(Subcommand)]
 enum TemplateCmd {
     /// Create a launch template; refused if the name is taken.
+    #[command(after_help = HYPHEN_VALUE_HELP)]
     // `--template` is refused on both writes (`TemplateFieldFlags::fields`)
     // but comes with the flattened launch flags; hiding it keeps `--help`
     // and the instructions' usage lines from teaching a spelling that only
@@ -512,7 +521,6 @@ enum TemplateCmd {
     #[command(mut_arg("templates", |arg| arg.hide(true)))]
     Create {
         /// The new template's name.
-        #[arg(allow_hyphen_values = true)]
         name: String,
         #[command(flatten)]
         fields: TemplateFieldFlags,
@@ -524,10 +532,10 @@ enum TemplateCmd {
         key: Option<String>,
     },
     /// Set the given fields on an existing template; others stay as they are.
+    #[command(after_help = HYPHEN_VALUE_HELP)]
     #[command(mut_arg("templates", |arg| arg.hide(true)))]
     Edit {
         /// The template to change.
-        #[arg(allow_hyphen_values = true)]
         name: String,
         #[command(flatten)]
         fields: TemplateFieldFlags,
@@ -547,7 +555,6 @@ enum TemplateCmd {
     /// Delete a launch template.
     Delete {
         /// The template to delete.
-        #[arg(allow_hyphen_values = true)]
         name: String,
     },
 }
@@ -566,12 +573,13 @@ enum HostCmd {
     /// Ask to add a host. Accepted means approved, not installed: adding may
     /// fail, need setup, or be cancelled. Check `farhelm agent hosts` and its
     /// state before relying on the host.
+    #[command(after_help = HYPHEN_VALUE_HELP)]
     Add {
         /// SSH destination the helm can reach.
-        #[arg(value_name = "DEST", allow_hyphen_values = true)]
+        #[arg(value_name = "DEST")]
         destination: String,
         /// Optional name shown instead of the destination.
-        #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+        #[arg(long, value_name = "NAME")]
         alias: Option<String>,
         /// Ask for the dialog's Tailscale host option; DEST must then be a node
         /// name, DNS name or IP address, optionally login@.
@@ -579,17 +587,13 @@ enum HostCmd {
         tailscale: bool,
     },
     /// Change a host's alias, icon or color; the card shows each old and new value.
+    #[command(after_help = HYPHEN_VALUE_HELP)]
     Edit {
         /// Host to change, by the name `farhelm agent hosts` shows.
-        #[arg(value_name = "HOST", allow_hyphen_values = true)]
+        #[arg(value_name = "HOST")]
         host: String,
         /// New alias, which becomes the host's name in listings and --host.
-        #[arg(
-            long,
-            value_name = "NAME",
-            allow_hyphen_values = true,
-            conflicts_with = "no_alias"
-        )]
+        #[arg(long, value_name = "NAME", conflicts_with = "no_alias")]
         alias: Option<String>,
         /// Remove the alias, so the host is named by its destination again.
         #[arg(long, conflicts_with = "alias")]
@@ -604,7 +608,7 @@ enum HostCmd {
     /// Remove a host as the Farhelm UI does; never this machine or this session's host.
     Remove {
         /// Host to remove, by the name `farhelm agent hosts` shows.
-        #[arg(value_name = "HOST", allow_hyphen_values = true)]
+        #[arg(value_name = "HOST")]
         host: String,
     },
 }
@@ -638,19 +642,19 @@ fn host_color_parser()
 #[derive(clap::Args)]
 struct TemplateFieldFlags {
     /// Folder sessions launched from the template start in, on their host.
-    #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
+    #[arg(long, value_name = "DIR")]
     cwd: Option<String>,
     /// Create a fresh managed checkout of this GitHub repository when applying the template.
     #[arg(long, alias = "github", value_name = "REPO", conflicts_with = "cwd", value_parser = parse_checkout_repo)]
     gh: Option<String>,
     /// Session name sessions launched from the template get.
-    #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
+    #[arg(long, value_name = "TITLE")]
     title: Option<String>,
     /// Reusable base name or exact fixed name; an edit without this keeps its kind.
     #[arg(long, value_name = "base|fixed", value_parser = parse_template_title_kind)]
     title_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
     /// Host the template launches on, by the name `farhelm agent hosts` shows.
-    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    #[arg(long, value_name = "NAME")]
     host: Option<String>,
     #[command(flatten)]
     launch: LaunchFlags,
@@ -1061,11 +1065,11 @@ struct LaunchFlags {
     prompt: Option<String>,
     /// Read the first message from a UTF-8 file, or - for stdin (64 KiB
     /// launch budget). Cannot be combined with --prompt.
-    #[arg(long, value_name = "PATH", allow_hyphen_values = true, conflicts_with = "prompt", value_parser = read_initial_prompt)]
+    #[arg(long, value_name = "PATH", conflicts_with = "prompt", value_parser = read_initial_prompt)]
     prompt_file: Option<String>,
     /// Apply a launch template by its exact name; repeat to apply several,
     /// in order. `farhelm agent templates` lists them.
-    #[arg(long = "template", value_name = "NAME", allow_hyphen_values = true)]
+    #[arg(long = "template", value_name = "NAME")]
     templates: Vec<String>,
     /// Built-in agent type, such as claude or codex, or a registered custom agent ID.
     /// With --command, declares its agent type. The command needs {farhelm_args}.
@@ -1074,11 +1078,12 @@ struct LaunchFlags {
     /// Model for an agent launch, as the agent type names it; `default`
     /// leaves it to the agent type. A custom agent's value starting with -
     /// must be joined with =, as in --model=-fast.
-    // Unlike the free-text options around them, `--model` and `--effort` do
-    // not take a separate value starting with `-`. With that allowance a
-    // forgotten value swallowed the next flag, and for a custom agent nothing
-    // downstream refused it: `--effort --yolo` launched one with `--yolo` as
-    // its effort. Without it clap reports the missing value, and the `=` form
+    // Like every free-text option here but `--prompt` ([`AgentCmd`]),
+    // `--model` and `--effort` do not take a separate value starting with
+    // `-`. They were the first to lose that allowance, because for them a
+    // forgotten value was worst: nothing downstream refused the swallowed
+    // flag, and `--effort --yolo` launched a custom agent with `--yolo` as its
+    // effort. Without it clap reports the missing value, and the `=` form
     // still carries a custom agent's hyphen-leading identifier.
     #[arg(long, value_name = "ID")]
     model: Option<String>,
@@ -1094,12 +1099,12 @@ struct LaunchFlags {
     permissions: Option<Choice<farhelm_proto::LaunchPermission>>,
     /// Bash text placed before Farhelm's composed agent command.
     /// Quotes and escapes keep their shell meaning; no Farhelm placeholders.
-    #[arg(long, value_name = "COMMAND", allow_hyphen_values = true, value_parser = parse_wrapper_prefix)]
+    #[arg(long, value_name = "COMMAND", value_parser = parse_wrapper_prefix)]
     wrapper: Option<WrapperPrefix>,
     /// Make this a command launch interpreted by non-interactive Bash.
     /// Shell expansion and operators apply. A custom agent declaration counts as YOLO.
     /// When writing a template, pair --command with --yolo or --no-yolo.
-    #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
+    #[arg(long, value_name = "CMD")]
     command: Option<String>,
     /// The command bypasses its approval/classifier/sandbox safety checks. Farhelm believes this
     /// and never reads the command to check it.
@@ -1110,7 +1115,7 @@ struct LaunchFlags {
     no_yolo: bool,
     /// Command that resumes a conversation, with {conversation} and
     /// {farhelm_args}; needs --agent. Without it, no Restart.
-    #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
+    #[arg(long, value_name = "CMD")]
     resume_command: Option<String>,
     /// Drop a resume command a template set, so the session cannot be
     /// restarted.
@@ -1259,9 +1264,7 @@ enum CheckoutConfigCmd {
     /// Set the working-copy root: an absolute path, `~`, or `~/...`,
     /// stored UNEXPANDED (only the target supervisor expands it).
     SetRoot {
-        /// The root path. Hyphen-leading values (a leading-slash path is
-        /// fine, but so is a command-like start) are taken verbatim.
-        #[arg(allow_hyphen_values = true)]
+        /// The root path, taken verbatim.
         path: String,
         /// Registered host id to set that host's override; omit for the
         /// global setting.
@@ -1285,9 +1288,9 @@ enum CheckoutConfigCmd {
     /// Set the post-clone shell command. An EMPTY command on a host is an
     /// explicit disable that overrides a global hook.
     SetPostClone {
-        /// The command. Allowed to start with `-` — it is shell text, not
-        /// a flag.
-        #[arg(allow_hyphen_values = true)]
+        /// The command, as shell text. It may start with `-`, but then goes
+        /// after `--` (`set-post-clone -- -x`), since a separate
+        /// hyphen-leading word is read as a flag.
         command: String,
         /// Registered host id to set that host's override; omit for the
         /// global setting.
@@ -3459,10 +3462,14 @@ mod tests {
     }
 
     /// Every checkout-config verb accepts `--host` and `--state-dir`, and
-    /// the two value-taking verbs take their value POSITIONALLY with
-    /// hyphen-leading values intact — a post-clone command is shell text
-    /// that may start with `-`, and the grammar must never mistake it for
-    /// a flag.
+    /// the two value-taking verbs take their value POSITIONALLY, a
+    /// hyphen-leading one intact after `--`, while a separate hyphen-leading
+    /// word is refused as an unknown flag.
+    ///
+    /// Why: a post-clone command is shell text that may start with `-`, so
+    /// `--` must carry it verbatim; but taking any hyphen-leading word as the
+    /// value would also take a mistyped flag as the command to run after
+    /// every clone.
     #[farhelm_testtrace::test]
     fn checkout_config_cli_parses_all_verbs_with_hyphen_leading_values() {
         let cli = Cli::try_parse_from([
@@ -3513,6 +3520,9 @@ mod tests {
             "helm",
             "checkout-config",
             "set-post-clone",
+            "--host",
+            "3",
+            "--",
             "-rm -rf /tmp/x",
         ])
         .unwrap();
@@ -3522,10 +3532,22 @@ mod tests {
         else {
             panic!("expected the checkout-config subcommand");
         };
-        let CheckoutConfigCmd::SetPostClone { command, .. } = command else {
+        let CheckoutConfigCmd::SetPostClone { command, host, .. } = command else {
             panic!("expected set-post-clone");
         };
         assert_eq!(command, "-rm -rf /tmp/x");
+        assert_eq!(host, Some(3));
+
+        for verb in ["set-root", "set-post-clone"] {
+            let error = Cli::try_parse_from(["farhelm", "helm", "checkout-config", verb, "-x"])
+                .err()
+                .unwrap_or_else(|| panic!("{verb} took a separate hyphen-leading word"));
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::UnknownArgument,
+                "{verb}: {error}"
+            );
+        }
     }
 
     /// Spec: `--confirm-yolo`, and its older name
@@ -3870,6 +3892,205 @@ mod tests {
                     "{args:?}: {error}"
                 );
             }
+        }
+    }
+
+    /// Spec: every free-text option but `--prompt` refuses an omitted value as a usage error, whether a following flag
+    /// leaves it without one (`host add dev --alias --tailscale`) or a separate hyphen-leading word stands where its
+    /// value would be (read as the unknown short option `-q`). The options covered are the session, title, host,
+    /// directory, recipe, template, prompt-file, idempotency-key and shell-text options of `farhelm agent`'s verbs, a
+    /// template write's fields, and the launch flags on `agent create`, `spawn` and a template write. Each of them
+    /// still takes a hyphen-leading value joined with `=` (`--alias=-v`).
+    ///
+    /// Why: while these options took any separate value, a forgotten value took the next flag as the value: an alias
+    /// named `--tailscale` with the Tailscale option silently dropped, a title of `--yolo` on a launch that then
+    /// lacked the YOLO assertion. Pinning the kind and the argument the error names keeps an unrelated parse failure
+    /// (a missing required argument, say) from passing for the refusal.
+    #[farhelm_testtrace::test]
+    fn free_text_options_refuse_an_omitted_value_instead_of_taking_the_next_flag() {
+        use clap::error::{ContextKind, ErrorKind};
+        const CREATE: &[&str] = &["agent", "create"];
+        const CLONE: &[&str] = &["agent", "clone"];
+        const TEMPLATE: &[&str] = &["agent", "template", "create", "t"];
+        const SPAWN: &[&str] = &["spawn"];
+        // (verb, option, a real flag of that verb that may follow it)
+        let mut cases: Vec<(&[&str], &str, &str)> = vec![
+            (&["agent", "rename", "t"], "--session", "--expected-title"),
+            (&["agent", "rename", "t"], "--expected-title", "--session"),
+            (&["agent", "stop"], "--session", "--session"),
+            (&["agent", "prompt"], "--session", "--prompt"),
+            (&["agent", "prompt"], "--prompt-file", "--session"),
+            (&["agent", "delete"], "--session", "--stop-if-running"),
+            (&["agent", "restart"], "--session", "--stop-if-running"),
+            (CREATE, "--cwd", "--yolo"),
+            (CREATE, "--host", "--yolo"),
+            (CREATE, "--recipe", "--yolo"),
+            (CREATE, "--container-host", "--yolo"),
+            (CREATE, "--title", "--yolo"),
+            (CREATE, "--idempotency-key", "--yolo"),
+            (CLONE, "--source-session", "--title"),
+            (CLONE, "--host", "--title"),
+            (CLONE, "--cwd", "--title"),
+            (CLONE, "--title", "--cwd"),
+            (CLONE, "--idempotency-key", "--title"),
+            (&["agent", "host", "add", "dev"], "--alias", "--tailscale"),
+            (&["agent", "host", "edit", "dev"], "--alias", "--color"),
+            (TEMPLATE, "--cwd", "--quick-launch"),
+            (TEMPLATE, "--title", "--quick-launch"),
+            (TEMPLATE, "--host", "--quick-launch"),
+        ];
+        for verb in [CREATE, SPAWN, TEMPLATE] {
+            for flag in [
+                "--template",
+                "--prompt-file",
+                "--wrapper",
+                "--command",
+                "--resume-command",
+            ] {
+                cases.push((verb, flag, "--yolo"));
+            }
+        }
+        for (verb, flag, next) in cases {
+            for (value, kind, named) in [
+                (next, ErrorKind::InvalidValue, flag),
+                ("-q", ErrorKind::UnknownArgument, "-q"),
+            ] {
+                let mut args = vec!["farhelm"];
+                args.extend_from_slice(verb);
+                args.extend([flag, value]);
+                let error = match Cli::try_parse_from(args.iter().copied()) {
+                    Ok(_) => panic!("{args:?} parsed; {value} was taken as the {flag} value"),
+                    Err(error) => error,
+                };
+                assert_eq!(error.kind(), kind, "{args:?}: {error}");
+                let invalid = error
+                    .get(ContextKind::InvalidArg)
+                    .map(|arg| arg.to_string())
+                    .unwrap_or_default();
+                // An option's name comes with its value name (`--alias <NAME>`).
+                assert!(
+                    invalid == named || invalid.starts_with(&format!("{named} ")),
+                    "{args:?} named {invalid:?}, not {named}: {error}"
+                );
+            }
+            // The `=` form carries the value. A verb may still fail for a
+            // reason of its own (a required argument these argv leave out, a
+            // `--prompt-file` that names no file); what must not happen is
+            // `-v` read as a flag or the option left without a value.
+            let joined = format!("{flag}=-v");
+            let mut args = vec!["farhelm"];
+            args.extend_from_slice(verb);
+            args.push(&joined);
+            if let Err(error) = Cli::try_parse_from(args.iter().copied()) {
+                assert!(
+                    !matches!(
+                        error.kind(),
+                        ErrorKind::UnknownArgument | ErrorKind::InvalidValue
+                    ),
+                    "{args:?} refused the joined value: {error}"
+                );
+            }
+        }
+    }
+
+    /// Spec: in the whole CLI, only `--prompt` (on `agent prompt` and with the launch flags wherever they appear),
+    /// `internal install --expect` and `internal hook --extra-instructions` take a separate value starting with `-`.
+    ///
+    /// Why: that allowance is what let a forgotten value take the next flag. The behavioral tests above cover the
+    /// options that lost it; this one walks the command tree, so an option added later with the allowance fails here
+    /// unless it is added to this list on purpose.
+    #[farhelm_testtrace::test]
+    fn only_the_listed_arguments_take_a_separate_hyphen_leading_value() {
+        use clap::CommandFactory as _;
+        fn walk(command: &clap::Command, path: &str, found: &mut Vec<String>) {
+            for arg in command.get_arguments() {
+                if arg.is_allow_hyphen_values_set() {
+                    found.push(format!("{path} {}", arg.get_id()));
+                }
+            }
+            for sub in command.get_subcommands() {
+                walk(sub, &format!("{path} {}", sub.get_name()), found);
+            }
+        }
+        let mut found = Vec::new();
+        walk(&Cli::command(), "farhelm", &mut found);
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                "farhelm agent create prompt",
+                "farhelm agent prompt prompt",
+                "farhelm agent template create prompt",
+                "farhelm agent template edit prompt",
+                "farhelm internal hook extra_instructions",
+                "farhelm internal install expect",
+                "farhelm spawn prompt",
+            ]
+        );
+    }
+
+    /// Spec: the free-text positionals (a rename's title, a template write's or delete's name, a host add's
+    /// destination, a host edit's or remove's host) read a separate hyphen-leading word as an unknown flag, and take a
+    /// hyphen-leading value verbatim after `--`.
+    ///
+    /// Why: these positionals used to take any word, so a mistyped flag in their place (`host remove --alias`) became
+    /// the name the request acted on. `--` is the one spelling left for a name that really starts with `-`, so it must
+    /// still carry one through to the parsed command.
+    #[farhelm_testtrace::test]
+    fn free_text_positionals_read_a_hyphen_word_as_a_flag_and_take_one_after_double_dash() {
+        use clap::error::{ContextKind, ErrorKind};
+        let verbs: [&[&str]; 7] = [
+            &["agent", "rename", "--session", "s", "--expected-title", "o"],
+            &["agent", "template", "create"],
+            &["agent", "template", "edit"],
+            &["agent", "template", "delete"],
+            &["agent", "host", "add"],
+            &["agent", "host", "edit"],
+            &["agent", "host", "remove"],
+        ];
+        for verb in verbs {
+            let mut refused = vec!["farhelm"];
+            refused.extend_from_slice(verb);
+            refused.push("-q");
+            let error = match Cli::try_parse_from(refused.iter().copied()) {
+                Ok(_) => panic!("{refused:?} took -q as its positional"),
+                Err(error) => error,
+            };
+            assert_eq!(
+                error.kind(),
+                ErrorKind::UnknownArgument,
+                "{refused:?}: {error}"
+            );
+            assert_eq!(
+                error
+                    .get(ContextKind::InvalidArg)
+                    .map(|arg| arg.to_string())
+                    .as_deref(),
+                Some("-q"),
+                "{refused:?}: {error}"
+            );
+
+            let mut taken = vec!["farhelm"];
+            taken.extend_from_slice(verb);
+            taken.extend(["--", "-draft"]);
+            let Cmd::Agent { command } = Cli::try_parse_from(taken.iter().copied())
+                .unwrap_or_else(|error| panic!("{taken:?}: {error}"))
+                .command
+            else {
+                panic!("{taken:?} is an agent verb");
+            };
+            let value = match command {
+                AgentCmd::Rename { title, .. } => title,
+                AgentCmd::Template(
+                    TemplateCmd::Create { name, .. }
+                    | TemplateCmd::Edit { name, .. }
+                    | TemplateCmd::Delete { name },
+                ) => name,
+                AgentCmd::Host(HostCmd::Add { destination, .. }) => destination,
+                AgentCmd::Host(HostCmd::Edit { host, .. } | HostCmd::Remove { host }) => host,
+                _ => panic!("{taken:?} parsed as another verb"),
+            };
+            assert_eq!(value, "-draft", "{taken:?}");
         }
     }
 
