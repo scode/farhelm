@@ -139,3 +139,85 @@ Each PR had a fresh-context Opus 5.5 review at high effort, with the plan's char
   - the debug-only check, now a release check;
   - a stale installer comment. Six nits were fixed too, among them a new test that runs `farhelm` with a stdin that
     stays open, proving a mistyped flag no longer waits on it.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained three changes. `farhelm agent hosts` gained a `TAILSCALE` column
+(agent-hosts-tailscale-column, #5161). The desktop app's file hover card now says "too large to copy contents" over 10
+MB (file-hover-too-large-hint, #5162). And dead launcher code for **Replace with** was removed
+(delete-dead-replace-checkout-ui, #5160). The Tailscale change edits five of the files this plan edits: the instructions
+Farhelm gives agents, the agent command tests, SPEC.md, SPEC_impl.md and TODO.md. Only TODO.md conflicted (below). In
+the others the edits sit in different places, and the agent instructions read as one text together. Nothing in the
+Tailscale change parses arguments, and `farhelm agent host add dev --alias --tailscale`, the example in this plan's TODO
+entry, is now refused as a usage error, as a test pins. The other two touch only the desktop app. This was the only plan
+in the round.
+
+An independent reviewer and I read the change against those three and against everything in the repository that runs
+`farhelm` with arguments: the helm, the supervisor, the desktop app, the installer, scripts, test fixtures, the docs
+site and the specs. Nothing passes a separate value starting with `-`, so no existing caller breaks. The desktop app and
+the supervisor run none of the commands whose parsing changed. Of those, the helm runs only the internal remote-host
+cleanup command, whose path must now be absolute, and always passes an absolute one. The installer runs only two
+internal commands (install and version-lock), whose arguments are unchanged. We found nothing to fix. Every behavior
+change is one the plan's decisions asked for. The one extra the report does not mention is wording: the internal
+remote-host cleanup command's refusal of a relative path is shorter, and nothing reads that wording.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** This plan removes its own TODO entry, next to the Tailscale column's entry that main had
+  already removed, so the stack conflicted there. I kept main's TODO.md without this plan's entry; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing. The report's reused end-to-end and installer results now have fresh runs on the landed code (below), and they
+passed.
+
+#### Worth knowing
+
+- **One desktop smoke step failed once and then passed.** In the first smoke run, the step that removes fake hosts from
+  the Hosts panel's menus timed out waiting for the Remove question to open. That step only clicks through the desktop
+  app's own panel, and nothing in it runs the command line. A rerun on the same boat with the same build passed that
+  step and every other one that runs on Linux. One observation is not enough to call it a flake, so it is not recorded
+  as one; the failed run is kept.
+- **SPEC_impl.md lists `--template` among the options that take a value joined with `=`**, while template create and
+  edit now refuse `--template` outright. A later edit could say which verbs it means.
+- **Main's clippy failure is still there.** As the report says and the previous rounds' landing notes recommend fixing,
+  `cargo clippy -- -D warnings` fails on main because of an unused ntfy settings method in the helm (since #5120).
+
+#### Checks
+
+Run once, on the plan's two PRs rebased onto main as it stood when the landing started, so with the Tailscale column
+change and the other two changes above. The plan changes how most commands an agent or a script runs parse their
+arguments, and the helm, the supervisor, the installer and the desktop app all run `farhelm` commands. So the whole Rust
+test suite ran, to confirm that no caller broke, with the desktop app's end-to-end smoke test, the installer's test and
+the docs website build. The SSH test worker was unreachable, so the slow suites ran on boat sandboxes (x86_64 Ubuntu
+24.04 VMs), and the rest ran locally:
+
+- `cargo clippy --all-targets`, `cargo clippy -p farhelm --bins`, and `cargo clippy -p farhelm-desktop --all-targets`
+  without and with `--features agent` (the build with the desktop app's test-automation hooks): each reported one
+  warning and nothing else. That warning is the unused ntfy settings method in the helm, on main since #5120 and outside
+  this plan, which makes `-D warnings` fail, so these ran without it.
+- On three boats, every test of the workspace that runs by default
+  (`cargo nextest run --workspace --exclude farhelm-desktop`, built once, split in three and run through the recorder),
+  recorded runs ca249445-3c18-4d76-878f-00d05da8c115, c5904ab4-12e1-4485-914b-818646d38589 and
+  9abee1c9-33c9-4a63-9fa8-f134cbd7422b: 9,029 passed, one failed, and no test that quietly passed for lack of systemd,
+  Podman or SSH on the machine. The one failure is the test-trace macro's compile check, which builds a scratch crate
+  offline from the machine's own download cache; a boat has no such cache, so that test always fails there. Run locally
+  (`cargo nextest run -p farhelm-testtrace-macros --test compile_contract`), recorded run
+  646c3868-436f-4aba-9e54-52b3ba7e7ef6, it passed.
+- On a fourth boat, the desktop app's end-to-end smoke test (`scripts/gui-e2e-smoke.py`): the first run, recorded run
+  49a4874c-96bc-40d2-bca5-5fe1ea291d5a, failed one step, the Hosts panel's Remove (see "Worth knowing"). A rerun of the
+  same build, recorded run 47836a10-a9ca-48d9-8a15-0418e75e342d, passed 48 of its 49 steps, and the paste step was
+  skipped, as on every Linux run.
+- Locally, the macOS installer and forwarder test under its Linux shims
+  (`bash scripts/test-install-sh.sh --farhelm target/debug/farhelm`), recorded run e6015400-9ee3-4a62-9b7a-7e8f7fd81b6f:
+  557 checks, none failed. `sh -n` and `shellcheck` on the installer scripts: clean.
+- Locally, the docs website build (`bun run build` in `website/`): built.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format` and `dprint check` on the changed Markdown: passed.
+
+Reused: nothing. Skipped: the desktop app's own process tests (`farhelm-desktop`), since the plan does not change that
+crate and the desktop app runs none of the commands whose parsing changed (the smoke test above runs the app end to
+end); the opt-in tests; and any run on a Mac, since none was available to the landing. The Mac forwarder's change is
+covered only by the installer test's Linux shims.
