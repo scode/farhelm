@@ -99,7 +99,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   mistyped command missing its value (for example `--effort --yolo`) now consumes `--yolo` as the literal effort string
   instead of failing to parse; built-in agents reject unknown efforts in the helm, but custom agents silently launch
   with `--yolo` as their effort. Reject flag-like values for `--effort`, update `SPEC_impl.md` and CLI parse tests, and
-  check whether `--model` should follow the same rule.
+  check whether `--model` should follow the same rule. Plan: `plans/queue/cli-effort-reject-flag-values.md`.
 
 - **Investigate and remove the legacy `POST /api/sandbox-sessions` endpoint.** `POST /api/sandbox-sessions`
   (`create_sandbox_session` in `crates/farhelm-helm/src/sessions/sandbox.rs`, mounted in
@@ -114,7 +114,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   flag-only fallback and a mixed-version older-helm refusal that cannot happen in practice. Verify why this legacy
   endpoint is still around and whether anything external depends on it; if nothing does, remove the route,
   `SandboxCreateRequest`, the `require_confirmed_size` parameter, and the stale `SPEC_impl.md` wording, and move any
-  remaining test coverage onto `POST /api/environment-sessions`.
+  remaining test coverage onto `POST /api/environment-sessions`. Plan:
+  `plans/queue/remove-legacy-sandbox-sessions-api.md`.
 
 - **Unblock supervisor startup Restart scope cleanup when the replacement's terminal host still answers.** Context from
   PR #5005 (`supervisor-stop-and-restart-cleanup-fixes`, landing review should-fix): on Linux, each agent launch runs in
@@ -140,7 +141,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `retry_pending_scope_cleanups` should also attempt to end the answering host so the record and pending obligation can
   eventually retire, or leave the host record and obligation in place while cleaning the scope). Update `SPEC_impl.md`
   if needed and add a regression test for a failed Restart whose replacement host still answers across supervisor
-  restart.
+  restart. Plan: `plans/queue/restart-startup-scope-cleanup.md`.
 
 - **Update release brick-test instructions for the removed startup Welcome card.** PRs #5012 and #5018
   (`welcome-empty-state`) replaced the startup Welcome modal card (dismissed with "Got it") with an inline Welcome view
@@ -152,7 +153,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   which can trip the next brick test. Remove the unconditional Welcome dismissal from candidate `app-start` and update
   `BRICK-TEST.md` (keeping conditional handling only for older previous-release baselines such as `old-fixture` and
   `checkpoint_contract.py` where the card still exists), and update the brick-test unit tests under
-  `releasing/mac-vm-test/` as needed.
+  `releasing/mac-vm-test/` as needed. Plan: `plans/queue/brick-test-inline-welcome.md`.
 
 - **Verify and guard Claude drift trust copy-back against clearing real parent-directory trust.** PR #5047
   (`triage-drift-and-brick-tooling`) clears `hasTrustDialogAccepted` for the scratch workspace and all its ancestor
@@ -163,6 +164,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   would be written back to the machine's real Claude config. Check whether `copy_back` can actually copy back the
   stripped Claude trust file (checking `self.copied` vs `self.links` and whether current Claude rewrites it) and, if it
   can, ensure stripped ancestor trust entries are never copied back to the real config (and add a regression test).
+  Plan: `plans/queue/claude-drift-trust-copy-back.md`.
 
 - **Decide whether Settings "Save changes before closing?" should dismiss an open custom-agent Delete confirmation (and
   align `SPEC.md`).** From PR #5075 (`custom-agent-delete-prompt`): suppose you edit a custom agent in Settings → Custom
@@ -172,7 +174,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   That matches the planning decision for #5075, but `SPEC.md` has a general UI rule saying no action may close a
   confirmation prompt that it did not open, with no exception for Settings' Save-and-Close. Decide whether to keep this
   behavior and add an explicit exception to `SPEC.md` (recommended), or change it back so Save-and-Close keeps the
-  Delete confirmation open.
+  Delete confirmation open. Plan: `plans/queue/settings-save-close-delete-prompt.md`.
 
 - **Make the helm Replace API refuse destination changes to match the desktop launcher and `SPEC.md`.** From PR #5081
   (`launcher-visible-consent`): the desktop app's **Replace with** dialog now keeps the session's original folder and
@@ -180,26 +182,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   keeping the destination. However, the helm's Replace API still accepts requests that name a different folder or a
   fresh managed checkout (the `farhelm` CLI does not have a replace command today). Update the helm's Replace endpoint
   to refuse requests that try to change the folder or switch to a managed checkout so the API, CLI (if any), desktop
-  launcher, and `SPEC.md` are consistent.
-
-- **Decide whether leftover container cleanup should hold its host identity across a refused check and retry.** From PR
-  #5084 (`podman-host-verification`): Farhelm records which machine and Unix account a container host is (its claim) so
-  re-pointing an SSH alias in `~/.ssh/config` while Farhelm runs won't silently send container commands to the wrong
-  machine. In Settings → Containers, listing or deleting leftover containers now checks against that stored claim for a
-  single operation and refuses if the host moved. However, if that refused check ran against a container host that
-  currently has no tracked containers, images, or recipe build helpers, the host check can overwrite the stored claim
-  with the newly reached machine; retrying Delete after that binds to the new claim and could act on the moved machine
-  (only if a container with the exact same 64-character ID exists there). Decide among: (a) keeping the cleanup claim
-  across a refused operation and its retry, (b) refusing to overwrite a stored claim while the host disagrees (requiring
-  Remove and re-add if the user moved the host on purpose), or (c) leaving it as-is under the `SPEC.md` policy that
-  re-pointing `~/.ssh/config` while Farhelm runs is undefined behavior.
+  launcher, and `SPEC.md` are consistent. Plan: `plans/queue/helm-replace-refuse-destination-change.md`.
 
 - **Back off automatic retries when a finished shell tab's first close sweep fails.** From PR #5087
   (`supervisor-tab-close-retry`): when a user closes a shell tab and cleanup fails, Farhelm now retries automatically
   with backoff (from ~1-2 s up to ~1 min). One pre-existing case is still missing backoff: when a tab's shell exits on
   its own and Farhelm's first automatic cleanup of that exited tab fails during its initial process sweep (before ending
   the tab's terminal host), Farhelm retries it on every cleanup pass (~every 2 seconds) without backing off. Mark that
-  failure path for backed-off retry in the same function and add a regression test.
+  failure path for backed-off retry in the same function and add a regression test. Plan:
+  `plans/queue/shell-tab-first-close-sweep-backoff.md`.
 
 - **Align `SPEC.md` and code on which agent-requested Delete warnings go to the notices bell.** From PR #5088
   (`agent-delete-late-notice`): when an agent deletes a session via `farhelm agent delete` and cleanup produces a
@@ -209,7 +200,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the code posts every notice Delete produces (including container-stop warnings that have no checkout path), whereas
   `SPEC.md`'s agent-Delete rule says only leftover-checkout notices go to the bell. Decide whether to keep posting all
   agent-Delete notices and widen `SPEC.md` from "checkout notice" to "Delete notice" (or narrow the code to checkout
-  notices only).
+  notices only). Plan: `plans/queue/agent-delete-notices-bell-alignment.md`.
 
 - **Return keyboard focus to the pre-right-click target when cancelling a Stop or Delete confirmation from a marked
   right-click menu.** From PR #5090 (`session-right-click-menu`): right-clicking one of several marked sessions opens
@@ -217,7 +208,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pick Stop or Delete from that right-click menu and then press Cancel on its confirmation prompt, focus currently jumps
   to the marked-sessions bar's menu button instead of returning to where focus was before the right-click (usually the
   terminal). Change Cancel on bulk confirmations opened from a marked right-click menu to return focus to the
-  pre-right-click target (usually the terminal).
+  pre-right-click target (usually the terminal). Plan: `plans/queue/marked-right-click-cancel-focus.md`.
 
 - **Decide whether Stop should keep refusing sessions after an ambiguous failed Restart or post-terminal failed create
   (and review refusal wording and tab closing).** From PR #5091 (`supervisor-stop-pending-launch`): #5091 made every
@@ -229,7 +220,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   stop") is inaccurate (after a failed Restart, the workaround to keep the session is Restart again and then Stop; after
   a failed create, only Delete works). Decide whether to keep the uniform refusal (and optionally reword the refusal
   message to fit these two cases) or let Stop act in these cases (ending the launch's processes and tabs and closing the
-  unsettled start record).
+  unsettled start record). Plan: `plans/queue/stop-ambiguous-failed-restart-create.md`.
 
 ### Must run attended
 
