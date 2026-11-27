@@ -1,0 +1,115 @@
+### What this was about
+
+When an agent asked to add a remote host (`farhelm agent host add`), it could only ask for an ordinary SSH host. A host
+you reach over Tailscale needed you to notice that and tick **Tailscale host** in the Add host dialog yourself, and the
+agent had no way to see afterwards which of its hosts use Tailscale. You asked for agents to be able to request
+Tailscale directly, and for an audit of other gaps between what the app and agents can do when adding or removing hosts.
+During planning you settled the audit: add Tailscale to the agent's host add and show each host's Tailscale setting in
+the agent's host listing; deliberately keep the safety boundaries closed (agents still cannot take over a host another
+helm manages, uninstall Farhelm from a host, delete a Tensorlake sandbox or Podman container host, or change an existing
+host's destination, Tailscale setting or permissions); and leave two other gaps out of scope (an agent adding a
+standalone Tensorlake host, and agent access to the recovery actions after a failed add). You also asked that the user's
+final choice reach the agent through the existing approval reply, with no new "wait for the dialog to finish" mechanism,
+and that a destination Tailscale cannot use be refused before any card appears.
+
+What was built: exactly that.
+
+- `farhelm agent host add <destination> --tailscale` asks for the Tailscale host option.
+- A destination Tailscale mode cannot use (an `ssh://` address, or one with a port) is refused at once, with the same
+  guidance the Add host dialog gives, and no card appears.
+- The approval card shows a Tailscale host line when the agent asked for it and says nothing about Tailscale otherwise,
+  as it does for an optional alias.
+- **Open add dialog** opens Add host with **Tailscale host** checked if the agent asked for it. You can still change it,
+  and the list above the fields of what Add will approve now has a "Tailscale host" line (Yes or No) that follows the
+  checkbox.
+- The agent's confirmation names the destination you approved and adds "with Tailscale" exactly when you approved it as
+  a Tailscale host, which may differ from what it asked.
+- `farhelm agent hosts --json` shows each host's Tailscale setting. The plain table is unchanged.
+- SPEC.md, SPEC_impl.md, the agent instructions and the "Approve what agents do" docs page describe it. The TODO entry
+  is removed.
+
+### Things you should know
+
+The first two were decided during execution, the plan having left them open; you may want to revisit either. The rest
+are for your information.
+
+- **Your edit in the dialog is checked again.** If, in the dialog, you pair Tailscale with a destination it cannot use,
+  the helm refuses that Add and the request keeps waiting, rather than trusting the app to have checked. Your Add host
+  dialog's own check would normally catch it first. The alternative was to leave that check to the later reachability
+  test only.
+- **The plain hosts table has no Tailscale column.** The setting is in `--json` only, as planned for the listing. The
+  alternative was a new column in the table.
+- **The reply reports the approved add only.** If setup is then refused and you change the reopened dialog and press Add
+  again, that is an ordinary add the agent is not told about. A changed destination already worked this way. The agent
+  instructions tell agents to check the host listing before relying on a host, and the listing shows the Tailscale
+  setting.
+- **Protocol version bump.** Without it, an older helm would quietly add a Tailscale request as a plain SSH host, so
+  every host's supervisor and the app update together, as with any protocol bump. The agent-blocked-notifications plan
+  (waiting alerts and agent notifications), still being built, also bumps the protocol version; whichever lands second
+  takes the next number when it is rebased.
+- **The command list in `farhelm agent instructions` is laid out a little differently.** With the new option, the
+  `host add` line no longer fits the width the short commands line up to, so their descriptions now start a little
+  further left.
+- **The release note.** The plan said no release note is needed, but repository rules require a changelog entry for a
+  new feature, so the PR adds one that tells whoever writes the release notes they may drop it.
+
+### Open questions and possible follow-ups
+
+- Possible follow-up: the two gaps you left out of scope remain gaps between the app and agents: an agent cannot add a
+  standalone Tensorlake host, and cannot use the recovery actions after a failed add. Plan them if you want them.
+
+### The PRs
+
+- #5126 `feat: let agents ask for a tailscale host on host add`: the whole change (request, checks, card and dialog,
+  reply, listing flag, protocol bump, specs, docs, tests, reference screenshot, changelog entry, TODO removal).
+
+### Checks
+
+Run now, on the final change:
+
+- `cargo clippy` on the protocol, helm and CLI crates (`-D warnings`): clean.
+- Through the recorder (run a8179d17-3bf2-468a-8fb5-fd53b01cbcf6, 675 passed): the protocol crate's unit tests, the
+  helm's agent request and approval tests, and the CLI's own tests and its agent command tests.
+- The docs website build, which checks every link: clean.
+- A full update of the test reference screenshots, which showed that only the agent's Add host dialog (light and dark)
+  changed. It was inspected in both appearances, and its new reference picture was uploaded to the screenshot store the
+  PR points at. That screenshot now shows the box checked and the "Tailscale host: Yes" line.
+- After the change's last edit, a comment's line wrapping, nothing was re-run: it changes no code.
+
+Earlier, before the review's fixes. Those fixes touched only comments, specs, the docs page, one help line, one
+assertion removed from the helm's test of the Tailscale check (re-run above), and the screenshot reference above; none
+touched the app's or the supervisor's code, so these runs still cover them:
+
+- clippy on every crate the change touches: clean.
+- Through the recorder, the targeted tests of each part:
+  - b62f826f-fc7e-4468-b6a8-bf3c5f79174c: the protocol crate, 299 passed.
+  - 028c14c4-47ca-4d7c-af82-a3e9830af6d6: the supervisor's agent request checks, 6 passed.
+  - 6ae61d6b-d217-485f-9e31-8d943189c5ec: the helm's agent requests and approvals, 181 passed.
+  - 16e73f28-200f-42e0-96c7-38b342266dd6: the CLI, 195 passed. Run c7ed64da-471f-4f0f-83fb-bf2a1f48d51a before it had
+    one failure, caused by this change: the agent instructions layout test pinned the old alignment. The test was
+    updated, so this was not a flaky test.
+  - a55e0d2f-c5ff-47c4-b328-2d15d68d3d17: the app's approval card and Add host dialog tests, 140 passed.
+- `cargo fmt`, the test-sleep check (no unannotated delays), `dprint check` on the changed Markdown, and the changelog
+  format check.
+
+Skipped:
+
+- The workspace-wide Rust run and the end-to-end suites. The change adds one field along one request path, and every
+  part of that path's own tests ran. Two end-to-end test files changed only to set the new field, and clippy compiles
+  them.
+- The desktop app's end-to-end smoke test, whose steps do not include an agent adding a host.
+
+### Review gate
+
+Reviewed by a fresh-context Opus 5.5 agent at high effort. It found no bugs in the code. It agreed with the two
+execution-time decisions and with the rest of the design. Its findings were:
+
+- the reference screenshot still had to be updated;
+- two descriptions claimed the reply reported more than it does (the reopened-dialog case above);
+- the option's help text left out the optional `login@`;
+- the docs page did not mention the option;
+- a comment's line wrapping;
+- one test assertion that proved little, now removed.
+
+All were fixed, and a verification pass by the same reviewer confirmed them, apart from one comment line it found still
+split, which was then fixed.
