@@ -1,5 +1,7 @@
-//! The Keyboard shortcuts overview: a dialog listing every app-wide shortcut and the keys inside a quick-launch
-//! sequence, each in the one form this client handles, with the current ⚡ template and the assigned number keys.
+//! The Keyboard shortcuts overview: a dialog listing every app-wide shortcut, the terminal's Paste via file upload, and
+//! the keys inside a quick-launch sequence, each in the one form this client handles, with the current ⚡ template and
+//! the assigned number keys. The terminal's other keys (Paste, Copy, Select All, Shift+PageUp and Shift+PageDown) are
+//! not listed.
 //!
 //! SPEC.md, "Desktop window chrome" (the Keyboard shortcuts paragraph), and "Feedback" for its place in the `?` menu.
 //! Ported from the old app's `keyboard_shortcuts.rs` (its rows, groups and per-platform forms), the chord labels of its
@@ -72,20 +74,26 @@ const HEADER_GAP: f32 = 14.;
 
 /// One chord as a chip shows it: its exact modifiers on one platform, and its key's label (the old `key_label`: `/`
 /// for Slash, `+` for Equal, `−` for Minus, a letter in capitals, or a placeholder such as `0–9` for a family of keys).
+///
+/// `alt` is kept beside [`ChordModifiers`] rather than in it: the keymap's type leaves Option and Alt out on purpose,
+/// because a physical-key row never holds them, and the one chord here that does (Linux's Paste via file upload,
+/// Ctrl+Alt+V) is an ordinary key binding, which has no such limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Chord {
     modifiers: ChordModifiers,
+    alt: bool,
     key: &'static str,
 }
 
 impl Chord {
     /// The chip's text, spelled as the old app's `modifier_label` spelled it: Command alone is a bare `⌘` before the
-    /// key (`⌘K`), and any other set joins its names with `+` in the order ⌘, Ctrl, Shift and ends in one
-    /// (`⌘+Shift+−`, `Ctrl+Shift+K`). Every chord in the table holds at least one modifier.
+    /// key (`⌘K`), and any other set joins its names with `+` in the order ⌘, Ctrl, Alt, Shift and ends in one
+    /// (`⌘+Shift+−`, `Ctrl+Shift+K`, `Ctrl+Alt+V`). Every chord in the table holds at least one modifier.
     fn label(self) -> String {
         let parts: Vec<&str> = [
             self.modifiers.command.then_some("⌘"),
             self.modifiers.control.then_some("Ctrl"),
+            self.alt.then_some("Alt"),
             self.modifiers.shift.then_some("Shift"),
         ]
         .into_iter()
@@ -163,6 +171,8 @@ struct Section {
 /// Mac app only (SPEC.md: "the Linux app has no such shortcut"; decided for the overview by the migration's
 /// orchestrator on 2026-11-13); Delete is Cmd+W on a Mac and Ctrl+Shift+Backspace on Linux, the one shortcut whose key
 /// differs; and terminal text size takes Shift on a Mac too, where unshifted Command was the old web page's own zoom.
+/// Paste via file upload is not an app shortcut but the terminal's own, the one terminal key listed (SPEC.md,
+/// "Attachments"): Command+Shift+V on a Mac and Ctrl+Alt+V on Linux, whose Ctrl+Shift+V is ordinary Paste.
 ///
 /// The number keys get one generic row whatever is assigned ("Launch a numbered template", since an unassigned key
 /// still opens Templates with a binding hint), then one row per assigned key in the keys' own order, 1 to 9 then 0.
@@ -175,7 +185,11 @@ fn sections(platform: Platform, bindings: &Bindings) -> Vec<Section> {
             control: !mac,
             shift: !mac,
         };
-        Keys::Chord(Chord { modifiers, key })
+        Keys::Chord(Chord {
+            modifiers,
+            alt: false,
+            key,
+        })
     };
     let row = |name: Name, keys: Keys| Row { name, keys };
     let words = |words: &'static str, keys: Keys| row(Name::Words(words), keys);
@@ -229,13 +243,29 @@ fn sections(platform: Platform, bindings: &Bindings) -> Vec<Section> {
             control: !mac,
             shift: true,
         };
-        Keys::Chord(Chord { modifiers, key })
+        Keys::Chord(Chord {
+            modifiers,
+            alt: false,
+            key,
+        })
     };
+    // Paste via file upload is the one row a focused terminal alone answers (SPEC.md lists it in the dialog although
+    // the dialog's other rows are app-wide). Its Linux chord is Ctrl+Alt+V, since Ctrl+Shift+V is Linux's Paste.
+    let paste_via_file_upload = Keys::Chord(Chord {
+        modifiers: ChordModifiers {
+            command: mac,
+            control: !mac,
+            shift: mac,
+        },
+        alt: !mac,
+        key: "V",
+    });
     let terminal = vec![
         words("Smaller terminal text", shifted_terminal("−")),
         words("Larger terminal text", shifted_terminal("+")),
         words("Previous terminal tab", shifted_terminal("[")),
         words("Next terminal tab", shifted_terminal("]")),
+        words("Paste via file upload", paste_via_file_upload),
     ];
 
     vec![

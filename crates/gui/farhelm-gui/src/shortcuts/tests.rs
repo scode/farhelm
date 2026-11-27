@@ -24,8 +24,9 @@ use super::{Chord, KeyboardShortcuts, Keys, Name, Row, sections, wording};
 use crate::actions::{
     self, BeginSequence, CONTEXT, DecreaseTerminalTextSize, DeleteSession,
     IncreaseTerminalTextSize, KeyOwner, NewSession, NextTerminalTab, PHYSICAL_KEYS,
-    PreviousTerminalTab, QuickLaunch, QuickSwitcher, RenameSession, ShowKeyboardShortcuts,
-    TERMINAL_KEYS, THIS_PLATFORM, TemplateList, TemplateNumberKey,
+    PasteViaFileUpload, PreviousTerminalTab, QuickLaunch, QuickSwitcher, RenameSession,
+    ShowKeyboardShortcuts, TERMINAL_CONTEXT, TERMINAL_KEYS, THIS_PLATFORM, TemplateList,
+    TemplateNumberKey,
 };
 use crate::layers;
 use crate::session_list::tests::{listing, preferences_state, session};
@@ -132,7 +133,9 @@ fn owned(rows: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
 /// overview's rows and spellings are the spec for the rest (`keyboard_shortcuts.rs` and its browser test at reference
 /// commit `24bc0580`). Specified, with nothing marked and no number key assigned: Linux's table row for row in
 /// Ctrl+Shift forms (Delete on Backspace, text size on − and +, no New), and the Mac's the same rows in Command forms
-/// with New first under Sessions and Command+Shift for text size.
+/// with New first under Sessions and Command+Shift for text size. The Terminal group ends with Paste via file upload
+/// (SPEC.md, "Attachments"), the one chord that differs in more than its modifier family: Ctrl+Alt+V on Linux, whose
+/// Ctrl+Shift+V is Paste, and Command+Shift+V on a Mac.
 #[test]
 fn each_platform_shows_only_its_own_forms_with_new_on_the_mac_alone() {
     let none = Bindings::default();
@@ -179,6 +182,7 @@ fn each_platform_shows_only_its_own_forms_with_new_on_the_mac_alone() {
         ("Terminal", "Larger terminal text", "Ctrl+Shift++"),
         ("Terminal", "Previous terminal tab", "Ctrl+Shift+["),
         ("Terminal", "Next terminal tab", "Ctrl+Shift+]"),
+        ("Terminal", "Paste via file upload", "Ctrl+Alt+V"),
     ]));
     assert_eq!(table(Platform::Linux, &none), linux);
 
@@ -207,6 +211,7 @@ fn each_platform_shows_only_its_own_forms_with_new_on_the_mac_alone() {
         ("Terminal", "Larger terminal text", "⌘+Shift++"),
         ("Terminal", "Previous terminal tab", "⌘+Shift+["),
         ("Terminal", "Next terminal tab", "⌘+Shift+]"),
+        ("Terminal", "Paste via file upload", "⌘+Shift+V"),
     ]));
     assert_eq!(table(Platform::Mac, &none), mac);
 }
@@ -255,6 +260,10 @@ fn the_template_rows_name_the_marked_template_and_each_assigned_key_in_order() {
 enum Runs {
     /// This action, through a binding in [`CONTEXT`] or a row of [`PHYSICAL_KEYS`].
     Action(Box<dyn Action>),
+    /// This terminal action, through a binding in [`TERMINAL_CONTEXT`] (a row of [`TERMINAL_KEYS`] the terminal owns),
+    /// which works only while a terminal holds focus. Kept apart from [`Runs::Action`] so that the app-wide rows stay
+    /// checked in Farhelm's root context alone: an app shortcut bound only inside a terminal would fail there.
+    TerminalAction(Box<dyn Action>),
     /// Every template number key, one row of [`PHYSICAL_KEYS`] per digit (the generic "0–9" row).
     NumberKeys,
 }
@@ -273,6 +282,9 @@ fn runs(name: &Name) -> Runs {
         Name::Words("Larger terminal text") => action(&IncreaseTerminalTextSize),
         Name::Words("Previous terminal tab") => action(&PreviousTerminalTab),
         Name::Words("Next terminal tab") => action(&NextTerminalTab),
+        Name::Words("Paste via file upload") => {
+            Runs::TerminalAction(PasteViaFileUpload.boxed_clone())
+        }
         // The armed sequence recognizes the same physical number chords as direct launch.
         Name::Words(
             "Launch a numbered template"
@@ -302,6 +314,7 @@ fn keystroke(chord: Chord) -> Keystroke {
     let modifiers = [
         (chord.modifiers.command, "cmd-"),
         (chord.modifiers.control, "ctrl-"),
+        (chord.alt, "alt-"),
         (chord.modifiers.shift, "shift-"),
     ];
     let prefix: String = modifiers
@@ -321,9 +334,18 @@ fn same(typed: &Keystroke, bound: &'static str) -> bool {
 
 /// The name of the action the installed keymap runs for `typed` in Farhelm's root context, if any.
 fn bound(typed: &Keystroke, cx: &gpui::App) -> Option<&'static str> {
+    bound_in(typed, &[CONTEXT], cx)
+}
+
+/// The name of the action the installed keymap runs for `typed` with `contexts` on the focus path (outermost first),
+/// if any.
+fn bound_in(typed: &Keystroke, contexts: &[&str], cx: &gpui::App) -> Option<&'static str> {
     let keymap = cx.key_bindings();
     let keymap = keymap.borrow();
-    let context = [KeyContext::parse(CONTEXT).unwrap()];
+    let context: Vec<KeyContext> = contexts
+        .iter()
+        .map(|context| KeyContext::parse(context).unwrap())
+        .collect();
     let (bindings, _) = keymap.bindings_for_input(std::slice::from_ref(typed), &context);
     bindings.first().map(|binding| binding.action().name())
 }
@@ -344,9 +366,10 @@ fn check_chord(platform: Platform, chord: Chord, runs: Runs, what: &str, cx: &gp
                 .iter()
                 .find(|row| row.action.partial_eq(action.as_ref()))
             {
+                // A physical-key row never holds Option or Alt, so a chip showing Alt for one is wrong.
                 assert_eq!(
-                    (row.key.us, row.modifiers(platform)),
-                    (typed.key.as_str(), chord.modifiers),
+                    (row.key.us, row.modifiers(platform), false),
+                    (typed.key.as_str(), chord.modifiers, chord.alt),
                     "{what} on {platform:?}: the physical-key row of {} differs",
                     action.name()
                 );
@@ -385,6 +408,37 @@ fn check_chord(platform: Platform, chord: Chord, runs: Runs, what: &str, cx: &gp
                 }
             }
         }
+        Runs::TerminalAction(action) => {
+            // Both platforms through the terminal table, which spells each platform's chord: the terminal's own row
+            // with this chord must bind it to the action. This platform's installed keymap must agree, in a focused
+            // terminal's contexts.
+            let typed = keystroke(chord);
+            let (row, chord_here) = TERMINAL_KEYS
+                .iter()
+                .find_map(|row| {
+                    let bound = row.chord(platform)?;
+                    (row.owner == KeyOwner::Terminal && same(&typed, bound)).then_some((row, bound))
+                })
+                .unwrap_or_else(|| {
+                    panic!("{what} on {platform:?}: no terminal row has this chord")
+                });
+            let bind = row.bind.unwrap_or_else(|| {
+                panic!("{what} on {platform:?}: its terminal row binds nothing")
+            });
+            assert_eq!(
+                bind(chord_here).action().name(),
+                action.name(),
+                "{what} on {platform:?}: its terminal row binds another action"
+            );
+            if platform == THIS_PLATFORM {
+                assert_eq!(
+                    bound_in(&typed, &[CONTEXT, TERMINAL_CONTEXT], cx),
+                    Some(action.name()),
+                    "{what} on {platform:?}: a focused terminal does not run {}",
+                    action.name()
+                );
+            }
+        }
         Runs::NumberKeys => {
             let digits: Vec<_> = PHYSICAL_KEYS
                 .iter()
@@ -396,6 +450,10 @@ fn check_chord(platform: Platform, chord: Chord, runs: Runs, what: &str, cx: &gp
                 })
                 .collect();
             assert_eq!(digits.len(), 10, "ten number keys");
+            assert!(
+                !chord.alt,
+                "{what} on {platform:?}: a number key never holds Alt"
+            );
             for row in digits {
                 assert_eq!(
                     row.modifiers(platform),
@@ -415,7 +473,9 @@ fn check_chord(platform: Platform, chord: Chord, runs: Runs, what: &str, cx: &gp
 /// the action its row names. A shortcut matched by position agrees with its physical-key row (key and exact
 /// modifiers). Any other shortcut is bound to its action by this platform's installed keymap in Farhelm's context, and,
 /// for the other platform, its chord is that action's app-shortcut row in the terminal key table (New, the Mac's alone,
-/// through its binding function). Quick launch is checked as bound to its action alone and inside a sequence.
+/// through its binding function). Paste via file upload, which only a focused terminal answers, is checked against the
+/// terminal's own row of the terminal key table on both platforms, and this platform's keymap must run it with a
+/// terminal focused. Quick launch is checked as bound to its action alone and inside a sequence.
 /// The menu hints on this platform must spell the same chords as the dialog rows.
 #[gpui::test]
 fn every_chord_the_table_shows_runs_the_action_its_row_names(cx: &mut TestAppContext) {

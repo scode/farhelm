@@ -6,7 +6,8 @@
 //!
 //! - One winning flavor per paste ([`Flavor`]): file references, then image data, then plain text. A clipboard holding
 //!   a file and the text of its path (a Finder copy does) attaches the file and types nothing else; text that merely
-//!   looks like a path is text. There is no path heuristic anywhere to get wrong.
+//!   looks like a path is text. There is no path heuristic anywhere to get wrong. Paste via file upload follows the
+//!   same rule and differs only for text, which it uploads as `pasted-<n>.txt` ([`Offered::Text`]) instead of typing.
 //! - A directory is refused visibly ([`DIRECTORY_TEXT`]); nothing of it is uploaded.
 //! - Uploads run one at a time, in the order pasted (the old `send`). The bytes move on the helm client's runtime and
 //!   this side only awaits the answer, so typing goes on meanwhile.
@@ -16,8 +17,8 @@
 //!   grid, and says whether the upload was definitely not attached or its outcome cannot be told
 //!   ([`TransferError::upload_outcome`]). A failure stays until the next paste or drop this module acts on, never on a
 //!   timer, and outlives its terminal ([`Carried`]).
-//! - Files or an image offered to a terminal that is not live are refused ([`DETACHED_TEXT`]), and the refusal goes
-//!   once the terminal is live again.
+//! - Files or an image offered to a terminal that is not live, or text pasted via file upload there, are refused
+//!   ([`DETACHED_TEXT`]), and the refusal goes once the terminal is live again.
 //! - A terminal that goes away with uploads running or waiting preserves each outcome ([`Attachments::hand_over`]).
 //!   The next terminal can report them while the session stays open. Leaving the session puts them in the notice
 //!   center so the user learns about the interruption even after the session is gone.
@@ -60,12 +61,14 @@ use crate::theme;
 
 // ---- The rules ---------------------------------------------------------------------------------------------------------
 
-/// The prefix of the name a pasted image is uploaded under: `pasted-<n>.<ext>`, the old app's shape.
+/// The prefix of the name a pasted image, or text pasted via file upload, is uploaded under: `pasted-<n>.<ext>`, the
+/// old app's shape, with `txt` for text.
 ///
 /// GPUI hands a pasted image over as bytes and a format, with no file name behind it, so every pasted image gets a
-/// generated name. The old app's test of whether a browser-made `image.png` was really a fresh screenshot does not come
-/// back: there is no name to judge. Uniqueness is not this name's job: the counter is per terminal, so two terminals can
-/// both paste `pasted-1.png`, and the supervisor publishes the second under another name.
+/// generated name, and so does text, which never had one. The old app's test of whether a browser-made `image.png` was
+/// really a fresh screenshot does not come back: there is no name to judge. Uniqueness is not this name's job: the
+/// counter is per terminal, so two terminals can both paste `pasted-1.png`, and the supervisor publishes the second
+/// under another name.
 const GENERATED_NAME_PREFIX: &str = "pasted-";
 
 /// What is typed after each host path: one space, so a second attachment's path never fuses onto the first's, and the
@@ -146,6 +149,10 @@ pub(crate) enum Offered {
     File(PathBuf),
     /// Image bytes, in the format GPUI read them in.
     Image(Image),
+    /// Clipboard text that Paste via file upload ([`crate::actions::PasteViaFileUpload`]) uploads as a file instead of
+    /// typing: uploaded verbatim as its UTF-8 bytes under a generated `pasted-<n>.txt`, numbered with the pasted
+    /// images. [`classify`] never makes one; only the terminal's owner turns a text paste into this.
+    Text(String),
 }
 
 /// Classify the clipboard `item` a paste read: its files when it holds any, otherwise its images, otherwise its text
@@ -243,7 +250,7 @@ const NO_PATH_TEXT: &str = "The upload reply carried no usable path";
 /// none, which the app never makes; tests that serve no transfers do.
 const NO_HELM_CLIENT: &str = "this window has no helm client to attach files through";
 
-/// Files or an image offered to a disconnected terminal: refused before anything is uploaded, since
+/// Files, an image or text to upload offered to a disconnected terminal: refused before anything is uploaded, since
 /// no path could be typed (the old `DETACHED_TEXT`). It goes once the terminal is live again ([`Attachments::live`]).
 pub(crate) const DETACHED_TEXT: &str =
     "This terminal is not connected, so nothing was attached — reconnect and try again";
@@ -580,9 +587,9 @@ impl Attachments {
         attachments
     }
 
-    /// Attach what a paste or a drop offered, in order, behind any upload still waiting. The lines before it go: a
-    /// line stays on screen until the user does something that supersedes it, and offering files is that (the old
-    /// `accept`). A generated image name is taken now, so names follow the order offered.
+    /// Attach what a paste or a drop offered, in order, behind any upload still waiting. The lines before it go: a line
+    /// stays on screen until the user does something that supersedes it, and offering files is that (the old `accept`).
+    /// A generated name (an image's, or text's pasted via file upload) is taken now, so names follow the order offered.
     pub(crate) fn attach(&mut self, offered: Vec<Offered>, cx: &mut Context<Self>) {
         if self.retired {
             return;
@@ -628,6 +635,18 @@ impl Attachments {
                         source: Source::Bytes(image.bytes),
                     }
                 }
+                Offered::Text(text) => {
+                    // The same counter as images, so a terminal never offers two generated names with one number,
+                    // whichever kind came first.
+                    self.pasted += 1;
+                    let filename = format!("{GENERATED_NAME_PREFIX}{}.txt", self.pasted);
+                    Queued {
+                        name: HostText::from_host(filename.clone()),
+                        title: title.clone(),
+                        filename,
+                        source: Source::Bytes(text.into_bytes()),
+                    }
+                }
             };
             self.queue.push_back(queued);
         }
@@ -635,8 +654,8 @@ impl Attachments {
         self.next(cx);
     }
 
-    /// Files or an image were offered to a terminal that could not take their path: say so instead, replacing the
-    /// lines before it, as the old app's refusal did. Nothing is uploaded.
+    /// Files, an image or text to upload were offered to a terminal that could not take their path: say so instead,
+    /// replacing the lines before it, as the old app's refusal did. Nothing is uploaded.
     pub(crate) fn refuse(&mut self, inert: bool, cx: &mut Context<Self>) {
         let reason = if inert { INERT_TEXT } else { DETACHED_TEXT };
         self.lines.clear();

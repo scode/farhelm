@@ -75,10 +75,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   when adding a host. Also audit for any other gaps between GUI and agent capabilities when adding or removing hosts.
   Plan: `plans/queue/agent-host-tailscale-parity.md`.
 
-- **Shift-cmd-v to paste via file upload.** Shift-cmd-v to "paste via file upload" so text can be pasted but instead of
-  directly pasted, upload a file to a securely allocated temporary file and paste the path to it into the terminal.
-  Plan: `plans/queue/shift-cmd-v-paste-upload.md`.
-
 - **Make forked and app-server Codex conversations resumable.** Two gaps keep Restart unavailable for Codex sessions.
   First, Farhelm refuses Codex's `fork` SessionStart source. Codex's "This conversation is open in another app" screen
   offers fork as the way out, so a session that resumed a conversation held elsewhere and forked it never gets Restart.

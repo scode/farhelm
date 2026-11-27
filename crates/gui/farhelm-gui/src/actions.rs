@@ -329,6 +329,14 @@ actions!(
         /// too, which reaches a focused terminal the same way, and a focused text field handles it as its own paste
         /// (`components::EditCommand`); no key of a text field is bound to it.
         Paste,
+        /// Paste the clipboard into the focused terminal as an upload: its text becomes a file on the session's host,
+        /// whose path is typed instead of the text itself, so a giant block of text never lands in an agent's input as
+        /// typing (SPEC.md, "Attachments": Shift+Cmd+V on a Mac, Ctrl+Alt+V on Linux, since Ctrl+Shift+V is Linux's
+        /// ordinary Paste). Files and an image upload exactly as Paste uploads them. The terminal handles it; its keys
+        /// are its rows of [`TERMINAL_KEYS`], and the Mac Edit menu's Paste via File Upload dispatches it too. No text
+        /// field handles it, so that item is disabled over one. Runs once per press (`ONCE_PER_PRESS`): each repeat of
+        /// a held chord would otherwise start another upload.
+        PasteViaFileUpload,
         /// Scroll the focused terminal back through its history by a page less a line (SPEC.md, "Reaching everything
         /// by keyboard": Shift+PageUp; the old app's step). The terminal handles it; its key is its row of
         /// [`TERMINAL_KEYS`], so the program never gets the key. Acts on every repeat of a held key, as the old app
@@ -412,6 +420,13 @@ pub(crate) const MAC_MENU_CHORDS: &[(&str, BindChord)] = &[
 const PASTE_MAC: &str = "cmd-v";
 const PASTE_LINUX: &str = "ctrl-shift-v";
 const PASTE_LINUX_INSERT: &str = "shift-insert";
+
+/// Paste via file upload's chords (SPEC.md, "Attachments"): Paste's with Shift added on a Mac, and on Linux Ctrl+Alt+V,
+/// because Paste already holds Ctrl+Shift+V there. The Linux chord carries Alt, which [`ChordModifiers`] leaves out on
+/// purpose (a physical-key row never holds Option or Fn); a key binding has no such limit, and the Keyboard shortcuts
+/// dialog spells the Alt itself (`shortcuts::Chord`).
+const PASTE_VIA_FILE_UPLOAD_MAC: &str = "cmd-shift-v";
+const PASTE_VIA_FILE_UPLOAD_LINUX: &str = "ctrl-alt-v";
 
 /// Start the template that holds number key `digit` (SPEC.md, "Template number shortcuts": Cmd+digit on a Mac,
 /// Ctrl+Shift+digit on Linux, by the physical digit key; ten rows in [`PHYSICAL_KEYS`]). One action carries the digit,
@@ -744,6 +759,9 @@ const ONCE_PER_PRESS: &[&dyn Action] = &[
     &BeginSequence,
     // SPEC.md, "Quick launch": "A held chord starts only once".
     &QuickLaunch,
+    // SPEC.md, "Attachments": a held chord uploads once. Paste itself is not listed: a held Cmd+V pastes again on each
+    // repeat, as any terminal does, but each repeat of this chord would start another upload and type another path.
+    &PasteViaFileUpload,
     // The Mac app menu's chords (`MAC_MENU_CHORDS`): a GPUI binding runs on every repeat of a held key, so without
     // these a held Ctrl+Cmd+F would flip full screen on and off, and a held Cmd+M, Cmd+H or Cmd+Q act again on each
     // repeat, which none of them can usefully do.
@@ -773,9 +791,9 @@ impl Global for KeyInterceptor {}
 /// for the same chord wins, as it does in GPUI's dispatch, and a `NoAction` row hides the bindings it suppresses.
 ///
 /// Matches the key alone, as GPUI does when no chord is pending. The listed shortcuts are single keys bound in
-/// [`CONTEXT`], which holds no chord prefix (SPEC_impl.md forbids one in any context that contains a terminal), so
-/// there the press settles any pending chord before its repeats arrive. A deeper context that started a chord with one
-/// of them would have its repeats judged as if the chord were not there.
+/// [`CONTEXT`] or [`TERMINAL_CONTEXT`], neither of which holds a chord prefix (SPEC_impl.md forbids one in any context
+/// that contains a terminal), so there the press settles any pending chord before its repeats arrive. A deeper context
+/// that started a chord with one of them would have its repeats judged as if the chord were not there.
 fn runs_once_per_press(keystroke: &Keystroke, context_stack: &[KeyContext], cx: &App) -> bool {
     let keymap = cx.key_bindings();
     let keymap = keymap.borrow();
@@ -839,8 +857,9 @@ impl TerminalKey {
 /// The app shortcuts are the ones SPEC.md says work from a focused terminal or never reach its program, with the old
 /// app's modifiers at the reference commit: Command on a Mac, Ctrl+Shift on Linux. The terminal's own keys are the old
 /// grid terminal's (Shift+PageUp/PageDown, and Cmd+A on a Mac), plus the Mac's Cmd+C and Cmd+V, which were WebKit's
-/// copy and paste in the old app's terminal, and Linux's paste chords (the paste rows below). Linux has no copy chord:
-/// neither SPEC.md nor the old app's terminal settles one, and every completed selection is copied as it is made.
+/// copy and paste in the old app's terminal, Linux's paste chords (the paste rows below), and Paste via file upload's
+/// chords (SPEC.md, "Attachments"). Linux has no copy chord: neither SPEC.md nor the old app's terminal settles one,
+/// and every completed selection is copied as it is made.
 ///
 /// NOTE: Not in this table, because a key binding cannot express them: the number keys (Cmd or Ctrl+Shift with 0-9),
 /// the Keyboard shortcuts dialog (with `/`) and terminal text size (with `=` and `-`), which SPEC.md matches by the
@@ -933,6 +952,14 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         what: "paste into the terminal (Shift+Insert, which the program no longer gets)",
         bind: Some(bind_paste),
     },
+    // The Mac Edit menu's Paste via File Upload shows this row's Mac chord, its action's only Mac binding.
+    TerminalKey {
+        mac: Some(PASTE_VIA_FILE_UPLOAD_MAC),
+        linux: Some(PASTE_VIA_FILE_UPLOAD_LINUX),
+        owner: KeyOwner::Terminal,
+        what: "paste into the terminal as an uploaded file, typing its host path",
+        bind: Some(bind_paste_via_file_upload),
+    },
     // Keys the program gets that something outside the terminal binds.
     both(
         "tab",
@@ -979,6 +1006,11 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
 /// Paste's binding, for its rows of [`TERMINAL_KEYS`].
 fn bind_paste(chord: &'static str) -> KeyBinding {
     KeyBinding::new(chord, Paste, Some(TERMINAL_CONTEXT))
+}
+
+/// Paste via file upload's binding, for its row of [`TERMINAL_KEYS`].
+fn bind_paste_via_file_upload(chord: &'static str) -> KeyBinding {
+    KeyBinding::new(chord, PasteViaFileUpload, Some(TERMINAL_CONTEXT))
 }
 
 /// Shift+PageUp's binding, for its row of [`TERMINAL_KEYS`].
