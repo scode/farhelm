@@ -70,9 +70,12 @@ named recall on that chat.
 
 The `capture_timing_hooks` category checks whether Restart becomes available before or after the first text turn. It
 looks for the installed vendor's turn callbacks in the hook log and checks that they stay off the screen. A harness that
-reports at first prompt must show its matching prompt or start report before its first matching Stop. Each harness also
-gets a fresh supervisor with hooks disabled. Codex still needs its daemon-ownership option, and Goose's Restart must
-keep its reporter disabled even when the session already has a saved conversation.
+reports at first prompt must show its matching prompt or start report before its first matching Stop. Claude, which
+reports its conversation as it starts but saves it only once a prompt is submitted, is also restarted at the idle
+composer before that prompt: the new Claude must start fresh instead of failing to resume, and report a conversation of
+its own before the first turn runs on it. That costs no extra turn. Each harness also gets a fresh supervisor with hooks
+disabled. Codex still needs its daemon-ownership option, and Goose's Restart must keep its reporter disabled even when
+the session already has a saved conversation.
 
 The `workspace_trust` category launches each agent that offers a trust choice in a fresh directory with that choice and
 never answers a trust question: a trusted launch has to reach the composer on its own. Codex and Pi also get an explicit
