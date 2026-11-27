@@ -135,6 +135,22 @@ pub(crate) struct HelmLink {
     /// the whole protocol's "0 means uncorrelated" convention (see
     /// `ControlMsg::Error`) uniform costs nothing.
     next_req: AtomicU64,
+    /// Whether a change hint is OWED to this connection, and if so when the
+    /// last attempt to queue one failed: `Some(at)` after a hint found the
+    /// writer queue full, `None` once one is queued.
+    ///
+    /// A hint is not dropped on a full queue: the helm relies on hints to
+    /// hear about a change promptly, and a lost one would leave its window
+    /// stale until its backstop poll. One
+    /// flag, not a queue, so any number of failed sends and new marks
+    /// collapse into the single hint they all mean. The instant is the
+    /// debounce ([`super::hints::OWED_HINT_RETRY`]): a link that owes is
+    /// tried at most that often, fresh marks included, so a queue that keeps
+    /// filling and draining costs the helm one refresh per retry period,
+    /// not one per hint gap. Lives on the link so it goes away with it.
+    /// Touched only by the hint sender task; a plain mutex because it is held
+    /// across no await.
+    pub(crate) hint_owed: std::sync::Mutex<Option<tokio::time::Instant>>,
 }
 
 /// In-flight upcalls plus the link-is-dead flag under one mutex, for the
@@ -619,6 +635,7 @@ impl Supervisor {
             // keeping the whole protocol's "0 means uncorrelated" convention
             // (see `ControlMsg::Error`) uniform costs nothing.
             next_req: AtomicU64::new(1),
+            hint_owed: std::sync::Mutex::new(None),
         })
     }
 
@@ -761,6 +778,7 @@ mod tests {
                 shutdown,
                 pending: Mutex::new(Pending::default()),
                 next_req: AtomicU64::new(1),
+                hint_owed: std::sync::Mutex::new(None),
             }),
             rx,
         )

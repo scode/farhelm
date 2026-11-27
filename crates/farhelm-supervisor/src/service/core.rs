@@ -4751,7 +4751,9 @@ pub(crate) fn notification_cell()
 ///   lifecycle claim (delete's teardown aborts the session's uploads), and
 ///   is never held alongside `attachments` or `sessions`.
 /// - `helm_links`: taken with nothing else held, and released before any
-///   other lock is taken.
+///   other lock is taken, except each link's `HelmLink::hint_owed`.
+/// - `HelmLink::hint_owed`: a leaf. Only the hint sender takes it, under
+///   `helm_links`, and nothing is taken under it or held across an await.
 /// - `list_admission`: taken at the top of a list build with nothing else
 ///   held, and kept while the build takes `sessions` and reads the
 ///   checkout registry, then released before the reply is sent. Never held

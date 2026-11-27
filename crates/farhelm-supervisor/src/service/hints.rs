@@ -7,9 +7,9 @@
 //! see did. The alternative, pushing rows or deltas, was rejected: much of a
 //! listed row is derived as the reply is built (tabs, status, the restart
 //! offer), so every such field would need its own detector and snapshot, and
-//! a missed one would leave the helm wrong with nothing to correct it. A
-//! missed hint costs one poll interval, because the helm keeps polling as
-//! the backstop.
+//! a missed one would leave the helm wrong with nothing to correct it. The
+//! helm still polls as a backstop, but a hint is how it hears about a change
+//! promptly, so hints are not lost: see "Where hints go".
 //!
 //! # Who marks, and who sends
 //!
@@ -45,14 +45,39 @@
 //! any other full-authority client and hinted all of them.
 //!
 //! Each hint is `try_send` on the connection's ordinary writer queue, behind
-//! whatever terminal output is already queued. A full queue DROPS the hint:
-//! a hint must never block the supervisor, and a helm too far behind to take
-//! one is served by its backstop poll.
+//! whatever terminal output is already queued. A hint must never block the
+//! supervisor, so nothing ever waits for room in that queue. Instead a hint
+//! that finds it full is OWED to that connection
+//! ([`super::agent_relay::HelmLink::hint_owed`]) and the sender tries again
+//! [`OWED_HINT_RETRY`] later, by its own timer, until one is queued. A full
+//! queue used to drop the hint and leave the change to the helm's backstop
+//! poll; keeping it owed is what lets the helm rely on hints and poll
+//! rarely.
+//!
+//! The retry period is also the debounce for a connection whose queue keeps
+//! filling and draining (a busy terminal over a slow link): while it owes a
+//! hint, it gets at most one attempt per period, fresh changes included, so
+//! it costs the helm one session-list refresh per period rather than one per
+//! [`SESSIONS_CHANGED_MIN_GAP`], at a moment its link is already behind. A
+//! healthy connection keeps the gap's pace, and one slow connection never
+//! holds back another, since each owes on its own and nothing waits.
 
 use super::core::Supervisor;
 use farhelm_proto::{ControlMsg, Frame, SESSIONS_CHANGED_MIN_GAP};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Notify;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::time::Instant;
+
+/// How long a connection that owes a hint waits between attempts to queue
+/// it; see the module docs, "Where hints go".
+///
+/// Two seconds, the maintainer's choice (2026-11-26): long enough that a
+/// queue teetering at its limit cannot turn every change into a refresh at
+/// the hint gap's pace, short enough that an owed hint still lands promptly
+/// next to the helm's backstop poll.
+pub(crate) const OWED_HINT_RETRY: Duration = Duration::from_secs(2);
 
 /// The pending-hint flag the whole supervisor shares: marked by any path
 /// that changed something user-visible, drained by the sender task.
@@ -114,16 +139,43 @@ impl Supervisor {
         }
     }
 
-    /// Send one `SessionsChanged` to every registered helm
-    /// connection, dropping it on any whose writer queue is full.
-    async fn send_sessions_changed(&self) {
+    /// Try to queue one `SessionsChanged` on the helm connections that need
+    /// one, and return when the earliest connection still owing one should
+    /// be tried again (`None` when none owes).
+    ///
+    /// `fresh` is whether something new was marked. A fresh mark is for every
+    /// connection; a timer wake with nothing new is only for the ones that
+    /// still owe, since the others already have the hint that change asked
+    /// for. Either way a connection that owes is skipped until
+    /// [`OWED_HINT_RETRY`] has passed since its last failed attempt; it stays
+    /// owed, so the skipped mark is not lost, only folded into the hint it
+    /// already owes. A full queue makes a connection owe; a closed one is a
+    /// connection on its way out, and owes nothing.
+    async fn send_sessions_changed(&self, fresh: bool) -> Option<Instant> {
         let frame = Frame::control(&ControlMsg::SessionsChanged);
-        for link in self.helm_links.lock().await.iter() {
-            // Dropped on a full or closed queue alike: the backstop poll
-            // covers the first, and the second is a connection on its way
-            // out.
-            let _ = link.notify.try_send(frame.clone());
+        let links = self.helm_links.lock().await;
+        // Read after the lock: admission can hold it across store I/O, and a
+        // stale instant would shorten the retry period it is compared with.
+        let now = Instant::now();
+        let mut retry_at: Option<Instant> = None;
+        for link in links.iter() {
+            let mut owed = link.hint_owed.lock().expect("owed hint mutex poisoned");
+            let due = match *owed {
+                Some(failed_at) => now.saturating_duration_since(failed_at) >= OWED_HINT_RETRY,
+                None => fresh,
+            };
+            if due {
+                *owed = match link.notify.try_send(frame.clone()) {
+                    Err(TrySendError::Full(_)) => Some(now),
+                    Ok(()) | Err(TrySendError::Closed(_)) => None,
+                };
+            }
+            if let Some(failed_at) = *owed {
+                let at = failed_at + OWED_HINT_RETRY;
+                retry_at = Some(retry_at.map_or(at, |earliest| earliest.min(at)));
+            }
         }
+        retry_at
     }
 }
 
@@ -142,18 +194,39 @@ impl Drop for HintSender {
 
 /// Start the task that turns marks into hints; see this module's docs.
 ///
-/// Holds the supervisor only weakly between hints, so the task never keeps a
-/// supervisor alive that everything else has let go of.
+/// Wakes on a mark, or, while some connection owes a hint, at the earliest
+/// moment one is due to be tried again. Holds the supervisor only weakly
+/// between hints, so the task never keeps a supervisor alive that everything
+/// else has let go of.
 pub(crate) fn start_hint_sender(sup: &Arc<Supervisor>) -> HintSender {
     let hints = Arc::clone(&sup.change_hints);
     let sup = Arc::downgrade(sup);
     let task = tokio::spawn(async move {
+        let mut retry_at: Option<Instant> = None;
         loop {
-            hints.pending.notified().await;
+            // A mark is consumed only when this arm wins; a retry wake leaves
+            // a mark that arrives meanwhile in the `Notify` permit for the
+            // next turn, so nothing marked is ever lost.
+            let fresh = match retry_at {
+                // Biased toward a mark: when a mark and a due retry are both
+                // ready, the fresh pass serves both (a due owing connection
+                // is tried on any pass). Taking the timer first would send
+                // the owing connection its hint now and again on the mark's
+                // pass, and delay the healthy connections' hint by a gap.
+                Some(at) => tokio::select! {
+                    biased;
+                    () = hints.pending.notified() => true,
+                    () = tokio::time::sleep_until(at) => false,
+                },
+                None => {
+                    hints.pending.notified().await;
+                    true
+                }
+            };
             let Some(sup) = sup.upgrade() else {
                 return;
             };
-            sup.send_sessions_changed().await;
+            retry_at = sup.send_sessions_changed(fresh).await;
             drop(sup);
             // sleep-ok: the minimum gap between hints, which is what coalesces a burst
             tokio::time::sleep(SESSIONS_CHANGED_MIN_GAP).await;
@@ -312,36 +385,254 @@ mod tests {
         );
     }
 
-    /// Spec: a hint is dropped, never waited for, on a connection whose
-    /// writer queue is full, and the other connections still get theirs.
+    /// A filler frame that is not a hint, to occupy a writer queue's slots.
+    fn filler() -> Frame {
+        Frame::control(&ControlMsg::Detach { channel: 1 })
+    }
+
+    /// Spec: a hint that finds a connection's writer queue full is never
+    /// waited for and never dropped: the other connections get theirs at
+    /// once, and the full one is owed it and gets it at the next retry,
+    /// [`OWED_HINT_RETRY`] later, once its queue has room. A retry wake sends
+    /// nothing to a connection that owes nothing, and a delivered hint is
+    /// owed no more.
     ///
-    /// Why: marks come from paths holding supervisor state, and a hint that
-    /// waited on one slow helm would stall them; the backstop poll covers
-    /// the dropped hint.
+    /// Why: marks come from paths holding supervisor state, so a hint must
+    /// not wait on one slow helm; but the helm relies on hints to hear about
+    /// a change promptly, so a dropped hint would leave its window stale until
+    /// its backstop poll.
     #[farhelm_testtrace::test]
-    async fn a_full_writer_queue_drops_the_hint_without_blocking() {
+    async fn a_full_writer_queue_owes_the_hint_and_gets_it_at_the_retry() {
         let state = farhelm_teststate::tempdir().expect("state dir");
         let sup = Supervisor::new(state.path()).await.expect("supervisor");
         let (full_notify, mut full) = tokio::sync::mpsc::channel(1);
-        full_notify
-            .try_send(Frame::control(&ControlMsg::Detach { channel: 1 }))
-            .expect("fill the one slot");
+        full_notify.try_send(filler()).expect("fill the one slot");
         let (shutdown, _) = tokio::sync::watch::channel(false);
-        let _ = sup.register_helm_link(full_notify, shutdown).await;
+        let full_link = sup.register_helm_link(full_notify, shutdown).await;
         let mut healthy = link(&sup, 8).await;
         let _sender = start_hint_sender(&sup);
+        // Paused only now, as in the coalescing test above.
+        tokio::time::pause();
 
         sup.hint_sessions_changed();
-        let frame = tokio::time::timeout(Duration::from_secs(5), healthy.recv())
-            .await
-            .expect("the healthy connection gets its hint")
-            .expect("the queue is open");
+        settle().await;
+        let frame = healthy
+            .try_recv()
+            .expect("the healthy connection gets its hint at once");
         assert!(is_hint(&frame));
-        let queued = full.recv().await.expect("the filler frame is still there");
+        let queued = full.try_recv().expect("the filler frame is still there");
         assert!(
             !is_hint(&queued),
             "the full queue kept only what it already held"
         );
-        assert!(full.try_recv().is_err(), "the hint was dropped, not queued");
+        assert!(
+            full.try_recv().is_err(),
+            "the hint did not fit, so nothing else is queued"
+        );
+        assert!(
+            full_link.hint_owed.lock().unwrap().is_some(),
+            "the full connection owes it"
+        );
+
+        // Room now, but the retry is the sender's own timer, not the queue
+        // draining: nothing arrives until the retry period has passed.
+        tokio::time::advance(OWED_HINT_RETRY - Duration::from_millis(10)).await;
+        settle().await;
+        assert!(full.try_recv().is_err(), "not before the retry period");
+        tokio::time::advance(Duration::from_millis(20)).await;
+        settle().await;
+        let owed = full
+            .try_recv()
+            .expect("the owed hint is delivered at the retry");
+        assert!(is_hint(&owed));
+        assert!(
+            full_link.hint_owed.lock().unwrap().is_none(),
+            "and is owed no more"
+        );
+        assert!(
+            healthy.try_recv().is_err(),
+            "a retry wake sends nothing to a connection that owed nothing"
+        );
+
+        tokio::time::advance(OWED_HINT_RETRY * 3).await;
+        settle().await;
+        assert!(full.try_recv().is_err(), "a delivered hint is owed no more");
+    }
+
+    /// Spec: while a connection owes a hint it gets at most one attempt per
+    /// [`OWED_HINT_RETRY`], however often changes are marked and however
+    /// often its queue empties in between; the attempt at the end of the
+    /// period carries all of them, and once delivered the connection is back
+    /// to the ordinary pace, a fresh mark hinted at once.
+    ///
+    /// Why: the maintainer's requirement that a queue teetering at its limit
+    /// must not turn into a spam of refreshes (each hint costs the helm a
+    /// whole session-list round trip, on a link already behind), while the
+    /// last change still arrives.
+    #[farhelm_testtrace::test]
+    async fn an_owing_connection_is_tried_once_per_retry_period_whatever_is_marked() {
+        let state = farhelm_teststate::tempdir().expect("state dir");
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let (notify, mut queue) = tokio::sync::mpsc::channel(1);
+        let filler_sender = notify.clone();
+        let (shutdown, _) = tokio::sync::watch::channel(false);
+        let owing = sup.register_helm_link(notify, shutdown).await;
+        let _sender = start_hint_sender(&sup);
+        tokio::time::pause();
+
+        // The premise: the queue is full when the first mark is tried, so
+        // the connection starts owing.
+        filler_sender.try_send(filler()).expect("fill the one slot");
+        sup.hint_sessions_changed();
+        settle().await;
+        assert!(
+            owing.hint_owed.lock().unwrap().is_some(),
+            "the premise: it owes"
+        );
+        assert!(
+            !is_hint(&queue.try_recv().expect("the filler")),
+            "only the filler was queued"
+        );
+
+        // Marks every 200 ms (the ordinary hint gap) for most of the retry
+        // period, with the queue empty each time: a healthy connection would
+        // have been hinted on every one of them.
+        let step = SESSIONS_CHANGED_MIN_GAP;
+        let mut elapsed = Duration::ZERO;
+        while elapsed + step < OWED_HINT_RETRY {
+            tokio::time::advance(step).await;
+            elapsed += step;
+            sup.hint_sessions_changed();
+            settle().await;
+            assert!(
+                queue.try_recv().is_err(),
+                "no attempt inside the retry period, {elapsed:?} in"
+            );
+        }
+
+        tokio::time::advance(OWED_HINT_RETRY - elapsed).await;
+        settle().await;
+        assert!(is_hint(&queue.try_recv().expect("one hint at the retry")));
+        tokio::time::advance(SESSIONS_CHANGED_MIN_GAP * 3).await;
+        settle().await;
+        assert!(
+            queue.try_recv().is_err(),
+            "and only one, for all those marks"
+        );
+
+        sup.hint_sessions_changed();
+        settle().await;
+        assert!(
+            is_hint(&queue.try_recv().expect("back to the ordinary pace")),
+            "a fresh mark on a connection that owes nothing is hinted at once"
+        );
+    }
+
+    /// Spec: a connection whose queue is closed owes nothing: a mark that
+    /// finds it closed leaves its flag clear, so the sender never wakes to
+    /// retry it.
+    ///
+    /// Why: a closed queue is a connection on its way out; treating it like a
+    /// full one would have the sender wake every retry period for it until it
+    /// is unregistered.
+    #[farhelm_testtrace::test]
+    async fn a_closed_connection_owes_nothing() {
+        let state = farhelm_teststate::tempdir().expect("state dir");
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let (notify, receiver) = tokio::sync::mpsc::channel(1);
+        let (shutdown, _) = tokio::sync::watch::channel(false);
+        let closing = sup.register_helm_link(notify, shutdown).await;
+        drop(receiver);
+        let _sender = start_hint_sender(&sup);
+        tokio::time::pause();
+
+        sup.hint_sessions_changed();
+        settle().await;
+        assert!(
+            closing.hint_owed.lock().unwrap().is_none(),
+            "a closed queue owes nothing"
+        );
+    }
+
+    /// Spec: when a mark arrives while the sender sleeps its gap and the
+    /// gap ends after an owing connection's retry fell due, one pass serves
+    /// both: the healthy connection gets its hint then, and the owing one
+    /// gets exactly one, not one for the retry and another for the mark.
+    ///
+    /// Why: the sender's wait prefers a mark over the retry timer when both
+    /// are ready (`biased`); taking the timer first would delay the healthy
+    /// connection by a gap because of the slow one, and send the slow one a
+    /// redundant hint, a refresh it cannot afford while it is behind.
+    #[farhelm_testtrace::test]
+    async fn a_mark_and_a_due_retry_ready_together_are_one_pass() {
+        let state = farhelm_teststate::tempdir().expect("state dir");
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let (owing_notify, mut owing_queue) = tokio::sync::mpsc::channel(1);
+        owing_notify.try_send(filler()).expect("fill the one slot");
+        let (shutdown, _) = tokio::sync::watch::channel(false);
+        let owing = sup.register_helm_link(owing_notify, shutdown).await;
+        let mut healthy = link(&sup, 8).await;
+        let _sender = start_hint_sender(&sup);
+        tokio::time::pause();
+
+        sup.hint_sessions_changed();
+        settle().await;
+        assert!(is_hint(
+            &healthy
+                .try_recv()
+                .expect("the healthy connection's first hint")
+        ));
+        assert!(
+            owing.hint_owed.lock().unwrap().is_some(),
+            "the premise: the other owes"
+        );
+        assert!(
+            !is_hint(&owing_queue.try_recv().expect("the filler")),
+            "now it has room"
+        );
+
+        // A mark just before the retry falls due: the owing connection is
+        // not yet due, the healthy one is hinted, and the sender starts its
+        // gap, which will end after the retry deadline.
+        tokio::time::advance(OWED_HINT_RETRY - Duration::from_millis(100)).await;
+        settle().await;
+        sup.hint_sessions_changed();
+        settle().await;
+        assert!(is_hint(
+            &healthy
+                .try_recv()
+                .expect("the healthy connection's second hint")
+        ));
+        assert!(owing_queue.try_recv().is_err(), "not yet due");
+
+        // Inside that gap the retry falls due, and another mark arrives.
+        tokio::time::advance(Duration::from_millis(150)).await;
+        settle().await;
+        sup.hint_sessions_changed();
+        settle().await;
+        tokio::time::advance(SESSIONS_CHANGED_MIN_GAP).await;
+        settle().await;
+        assert!(
+            is_hint(
+                &healthy
+                    .try_recv()
+                    .expect("the mark's pass reaches the healthy connection")
+            ),
+            "the healthy connection is not held back by the slow one"
+        );
+        assert!(is_hint(
+            &owing_queue.try_recv().expect("the owing connection's hint")
+        ));
+
+        tokio::time::advance(OWED_HINT_RETRY * 2).await;
+        settle().await;
+        assert!(
+            owing_queue.try_recv().is_err(),
+            "exactly one hint for the owing connection"
+        );
+        assert!(
+            healthy.try_recv().is_err(),
+            "and nothing more for the healthy one"
+        );
     }
 }
