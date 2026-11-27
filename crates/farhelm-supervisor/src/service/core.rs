@@ -14364,9 +14364,8 @@ impl Supervisor {
                      is no longer confirmed dead"
                 ),
                 Err(e) => warn!(session = %session_id, tab = %tab_id, error = %e.message,
-                    "reaping an exited tab failed; if its window survives the next tick \
-                     retries, otherwise only the close's scope and marker sweeps remain \
-                     to catch leftover processes"
+                    "reaping an exited tab failed; a tab the close kept is retried with \
+                     backoff, a second at first and at most a minute apart"
                 ),
             }
         });
