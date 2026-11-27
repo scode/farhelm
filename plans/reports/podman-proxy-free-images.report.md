@@ -87,3 +87,79 @@ It raised two medium findings and four low ones, and all six were fixed:
 - The new-session test could not fail on its image premise. It now starts from an old software image that has the file.
   The second mutation run above shows it now fails when the preparer's removal is missing.
 - The low findings covered three inaccurate comments and the changelog draft's wording.
+
+### Landing
+
+#### What landed with it
+
+This round landed podman-recipe-admission first (when a container recipe's host check fails, the failure is now shown
+without leaving an empty recipe record behind), then this plan. Both change the helm's container recipe builds, in the
+same files, so an independent reviewer and I read them together. Their behaviors do not conflict, but stacked they left
+one variable unused (below). Since this plan was built, main had gained app, supervisor and launcher changes; none
+touches recipe builds or proxy settings.
+
+The reviewer confirmed what the report says: the file removed before each capture is the same one a session writes, the
+removal runs against the container host Farhelm has just re-checked, before the build container is stopped and saved, in
+both the software build and the preparer, and the image is not saved if the removal fails. Existing sessions are
+untouched. The real Podman scenario on the test worker captured a real recipe image after the new removal and passed
+(see Checks). Because a failed removal refuses the save, this shows the removal works in a real container's user
+session. I did not check whether the worker has a proxy configured, so the in-memory proxy handoff to the installer may
+not have been exercised.
+
+#### Fixes made while landing
+
+- **A build failure from stacking the two plans.** podman-recipe-admission added a step that keeps the checked host's
+  settings for later use, and this plan removed the only later use, so with both applied the helm failed its lint check
+  with an unused variable. The value is no longer kept; the check now only runs. No behavior changed.
+- **SPEC.md overstated the cleanup.** Its new sentence said only an image an earlier release built keeps the old proxy
+  settings until a Rebuild. An image prepared on top of such an image since the upgrade shares its layers and keeps them
+  too, as the report, the implementation spec and the changelog draft already say. SPEC.md now says so; the report's
+  quotation of the SPEC.md sentence is the version before this fix.
+
+#### Worth knowing
+
+- **A removed proxy may still be used while preparing an image on an old software image.** When the preparer starts a
+  container from a software image an earlier release built, that container's user session reads the old proxy file at
+  boot. The reviewer believes, but did not verify, that the current settings Farhelm then hands to the session cannot
+  clear what came from the file. If so, Farhelm's installer could try a proxy the host has since removed, and
+  preparation could fail or route through it. Saved images and new sessions are not affected, and a Rebuild ends it.
+  Possible follow-up: verify this, and if it holds, remove the file before the preparer's container starts its session.
+- **Two tests check less than they appear to.** In the test that builds write no boot proxy file and remove it before
+  each capture, the part that checks a saved image has no proxy file cannot fail, because the test's stand-in for Podman
+  never records a container as holding the file; the test's check of the commands the build sends is what catches a
+  missing removal. The new-session test relies on a separate test for what the session's proxy file contains rather than
+  reading it back. Neither gap hides a known bug. Possible follow-up: make the stand-in track the file.
+- The report's open question stands: whether to flag software images built before this release as needing a Rebuild.
+
+#### Checks
+
+Run once for the whole round, on podman-recipe-admission and podman-proxy-free-images stacked in that order on main as
+it stood when the landing started; what reached main after each plan was built is in each plan's notes. The test worker
+is an aarch64 Linux machine with rootless Podman and a systemd user manager:
+
+- On the test worker, `cargo clippy --all-targets -- -D warnings` failed on the stacked tree with an unused variable,
+  which the landing of podman-proxy-free-images fixed. After the fix, both it and
+  `cargo clippy -p farhelm --bins -- -D warnings` were clean.
+- On the test worker, `cargo nextest run -p farhelm-helm -p farhelm-supervisor`, recorded run
+  247588ce-13dc-4361-ae76-c7976490acd4: 3,616 passed, 12 skipped (tests marked ignored). That is every helm and
+  supervisor test on the stacked tree, which neither executor ran with both plans together. After the landing fix, the
+  helm's Podman provider tests again (`cargo nextest run -p farhelm-helm` filtered to the Podman provider, recipe
+  builds, recipe places and launch failures), recorded run cf3a17cc-3a34-4e82-9cbf-38b1876cddfa: 130 passed.
+- On the test worker, the end-to-end tests that use a stand-in for Podman and every one whose name mentions Podman,
+  recipes or containers, apart from the real scenario below (`cargo nextest run -p farhelm --test e2e` filtered to
+  them), recorded run edfb4e85-0d09-4d75-bce9-ad0b35147956: 9 passed. For two of them the worker's systemd user manager
+  could not be used this time, so they ran only their fallback path, and the variant where the container is stopped
+  inside its own systemd scope went untested. Both check the warning shown when stopping a container fails, on Stop and
+  on tab close, which neither plan changes.
+- On the test worker, the real Podman environment scenario
+  (`cargo nextest run -p farhelm --test e2e -E 'test(/^podman_environments::/)'`), recorded run
+  07049c94-e3e1-4467-8d5e-21ecab2af868: passed, and it did not skip. It builds a real recipe image with the production
+  Podman provider on a real host, so it ran the fresh Podman check that now starts every build, and captured an image
+  after the new step that strips the host's proxy settings from it. Neither executor ran it.
+- Locally, `cargo fmt --all -- --check` (again after the fix), the test-sleep check,
+  `python3 releasing/check-changelog.py format` and `dprint check` on the changed Markdown: passed, and `dprint check`
+  on SPEC.md again after the landing's wording fix there (in podman-proxy-free-images).
+
+Reused: nothing. Skipped: the rest of the end-to-end suite and the other crates' tests, since both plans change only the
+helm's container recipe builds; and the desktop app's tests, the screenshot comparison and the end-to-end smoke test,
+since nothing in the app changed.
