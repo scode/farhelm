@@ -28,7 +28,7 @@ use gpui::{
 use serde_json::{Value, json};
 
 use super::choices::Choice;
-use super::{Section, TrustAgent};
+use super::{Section, TrustAgent, ntfy};
 use crate::components::{Button, HoverHelp, Role};
 use crate::desktop::updates::fake::{Feed, Seen, fake_host};
 use crate::focus::{self, Mark};
@@ -4525,7 +4525,7 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
     fill(cx, "ntfy-topic", "saved-more");
     let (id, body) = save_ntfy(&mut helm, cx);
     let expected = json!({ "enabled": false, "server_url": "https://ntfy.example", "topic": "saved-more",
-                               "priority": "high", "token": null });
+                               "priority": "high", "token": null, "notify_waiting": true });
     assert_eq!(body, expected);
     assert_eq!(
         preference_work(cx),
@@ -4538,6 +4538,60 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
     click(cx, section_button(Section::Sessions));
     click(cx, section_button(Section::Notifications));
     assert_eq!(sent(&mut helm), [], "read once per opening");
+}
+
+/// A maintainer's Send test arrived while no real alert ever did: a test proves the server and topic, not that alerts
+/// are on. So the form says what the saved settings do beside Send test, and the waiting alert has its own switch.
+/// Specified: with alerts saved off, the line beside Send test reads [`ntfy::OFF_LINE`] and the waiting switch is on;
+/// turning the master switch on changes the line to [`ntfy::UNSAVED_LINE`]; turning the waiting switch off and saving
+/// sends `"enabled": true` and `"notify_waiting": false`; once the helm answers with those, the line reads
+/// [`ntfy::WAITING_OFF_LINE`]; once it answers a save with both on, no line shows.
+#[gpui::test]
+fn the_line_beside_send_test_says_what_the_saved_settings_send(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "alerts", "default", false),
+    );
+    assert_eq!(
+        label_of(cx, "ntfy-saved-state").as_deref(),
+        Some(ntfy::OFF_LINE)
+    );
+    assert_eq!(switch_on(cx, "ntfy-waiting"), Some(true));
+
+    click(cx, "ntfy-enabled");
+    assert_eq!(
+        label_of(cx, "ntfy-saved-state").as_deref(),
+        Some(ntfy::UNSAVED_LINE)
+    );
+    reach(cx, "ntfy-waiting");
+    keys(cx, "space");
+    assert_eq!(switch_on(cx, "ntfy-waiting"), Some(false));
+    let (id, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(
+        (body["enabled"].clone(), body["notify_waiting"].clone()),
+        (json!(true), json!(false))
+    );
+    let mut stored = ntfy("https://ntfy.sh", "alerts", "default", false);
+    stored["enabled"] = json!(true);
+    stored["notify_waiting"] = json!(false);
+    helm.reply(id, 200, Some(stored.clone()));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "ntfy-saved-state").as_deref(),
+        Some(ntfy::WAITING_OFF_LINE)
+    );
+
+    reach(cx, "ntfy-waiting");
+    keys(cx, "space");
+    let (id, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["notify_waiting"], json!(true));
+    stored["notify_waiting"] = json!(true);
+    helm.reply(id, 200, Some(stored));
+    settle(cx);
+    assert!(drawn(cx, "ntfy-saved"), "the premise: the save is done");
+    assert!(!drawn(cx, "ntfy-saved-state"));
 }
 
 /// SPEC.md: the settings "are explicitly saved helm configuration", and "The stored token is never returned": the form
@@ -4564,7 +4618,7 @@ fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext)
 
     let (id, body) = save_ntfy(&mut helm, cx);
     let mut form = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",
-                           "priority": "high", "token": "browser-token" });
+                           "priority": "high", "token": "browser-token", "notify_waiting": true });
     assert_eq!(body, form);
     assert_eq!(label_of(cx, "ntfy-working").as_deref(), Some("Working…"));
     let stored = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",

@@ -2646,6 +2646,10 @@ pub struct HelmStore {
         )
     )]
     schema_version: i64,
+    /// Whether the stored ntfy configuration sends waiting alerts, seeded when the store opens and updated inside each
+    /// save's database call (`save_ntfy_config`). It exists so a host's refresh can ask without awaiting the
+    /// database: `SPEC_impl.md`, "Ntfy waiting alerts", keeps database and network waits off that path.
+    ntfy_waiting: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Bring the database up to [`SCHEMA_VERSION`], creating it from scratch
@@ -5774,6 +5778,17 @@ impl HelmStore {
         Self::open_inner(path, Some("0.0.0-unreleased")).await
     }
 
+    /// Whether waiting-for-answer alerts go out under the stored ntfy configuration ([`Self::save_ntfy_config`] keeps
+    /// it current). Cheap and synchronous, for the host refresh path.
+    pub(crate) fn waiting_alerts_enabled(&self) -> bool {
+        self.ntfy_waiting.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The cache [`Self::waiting_alerts_enabled`] reads, for the save that updates it.
+    pub(crate) fn ntfy_waiting_cache(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.ntfy_waiting.clone()
+    }
+
     /// Crate-internal access to the shared connection for sibling modules
     /// that own their own tables' SQL — `checkout_config` writes its config
     /// tables beside the methods here without this file having to grow a
@@ -5834,8 +5849,8 @@ impl HelmStore {
 
     async fn open_existing_inner(path: &Path, read_only: bool) -> anyhow::Result<HelmStore> {
         let path = path.to_path_buf();
-        let (conn, schema_version) =
-            tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64)> {
+        let (conn, schema_version, waiting) =
+            tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64, bool)> {
                 // The precheck only sharpens the diagnostic for the common
                 // mistyped-path case; the missing CREATE flag below is what
                 // actually guarantees nothing is ever created.
@@ -5869,13 +5884,15 @@ impl HelmStore {
                         path.display()
                     );
                 }
-                Ok((conn, version))
+                let waiting = crate::ntfy::seed_waiting_alerts(&conn);
+                Ok((conn, version, waiting))
             })
             .await
             .context("helm store open task panicked")??;
         Ok(HelmStore {
             conn: farhelm_supervisor::db::Db::new(conn, "helm db"),
             schema_version,
+            ntfy_waiting: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(waiting)),
         })
     }
 
@@ -5885,7 +5902,7 @@ impl HelmStore {
         creation_build: Option<&'static str>,
     ) -> anyhow::Result<HelmStore> {
         let path = path.to_path_buf();
-        let (conn, schema_version) = tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64)> {
+        let (conn, schema_version, waiting) = tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64, bool)> {
             // Explicit flags rather than `Connection::open`'s defaults —
             // see the supervisor store's identical `open` for why
             // `SQLITE_OPEN_URI` is deliberately left out (a state-dir path
@@ -5920,13 +5937,15 @@ impl HelmStore {
                 }
                 version
             };
-            Ok((conn, schema_version))
+            let waiting = crate::ntfy::seed_waiting_alerts(&conn);
+            Ok((conn, schema_version, waiting))
         })
         .await
         .context("helm store open task panicked")??;
         Ok(HelmStore {
             conn: farhelm_supervisor::db::Db::new(conn, "helm db"),
             schema_version,
+            ntfy_waiting: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(waiting)),
         })
     }
 

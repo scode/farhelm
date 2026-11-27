@@ -1680,6 +1680,22 @@ crate::enum_with_all! {
     }
 }
 
+/// Which of an agent's waits Farhelm can see on its screen, and so can send a waiting-for-answer alert for
+/// ([`AgentKind::waiting_alert_support`]).
+///
+/// A waiting alert follows a session's Waiting status, which only an agent-specific screen reader can produce; a kind
+/// read by change counting alone never reads Waiting, so it never alerts. Settings words its waiting switch's
+/// supported agents from this, so the list cannot drift from what the readers do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitingAlertSupport {
+    /// Questions, permission requests and other approvals the agent asks on its screen.
+    QuestionsAndApprovals,
+    /// Only the agent's startup workspace-trust question.
+    WorkspaceTrustOnly,
+    /// No waits at all: the session never reads Waiting.
+    None,
+}
+
 impl AgentKind {
     /// Whether the agent discovers Farhelm's conversation hooks from a dedicated file in its own configuration.
     /// The setting and launch prompt use this same answer for agent and declared command launches.
@@ -1699,6 +1715,20 @@ impl AgentKind {
             | Self::Muse
             | Self::Custom
             | Self::Generic => false,
+        }
+    }
+
+    /// Which waits of this agent the supervisor's screen reader reports as Waiting, and so which waiting-for-answer
+    /// alerts it can get. The supervisor's captured-screen tests pin this against its readers
+    /// (`agent_kind::screen_fixtures`), so a reader that learns a new kind of question fails until this says so.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub const fn waiting_alert_support(self) -> WaitingAlertSupport {
+        match self {
+            Self::Claude | Self::Codex => WaitingAlertSupport::QuestionsAndApprovals,
+            Self::Muse | Self::Antigravity => WaitingAlertSupport::WorkspaceTrustOnly,
+            Self::Goose | Self::Pi | Self::Omp | Self::Grok | Self::Custom | Self::Generic => {
+                WaitingAlertSupport::None
+            }
         }
     }
 

@@ -42,6 +42,7 @@
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ntfy::{Priority, SaveSettings, Settings};
+use farhelm_proto::{LaunchHarness, WaitingAlertSupport};
 use gpui::{
     AnyWindowHandle, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
@@ -92,6 +93,7 @@ pub(super) const PRIORITIES: [Priority; 5] = [
 #[derive(Clone, PartialEq)]
 struct Form {
     enabled: bool,
+    notify_waiting: bool,
     server_url: String,
     topic: String,
     priority: Priority,
@@ -104,6 +106,7 @@ impl Form {
     fn over(stored: &Settings) -> Form {
         Form {
             enabled: stored.enabled,
+            notify_waiting: stored.notify_waiting,
             server_url: stored.server_url.clone(),
             topic: stored.topic.clone(),
             priority: stored.priority,
@@ -126,6 +129,7 @@ impl Form {
             topic: self.topic.clone(),
             priority: self.priority,
             token,
+            notify_waiting: Some(self.notify_waiting),
         }
     }
 
@@ -166,6 +170,56 @@ fn server_changed(saved: &str, draft: &str) -> bool {
         _ => false,
     }
 }
+
+/// What the waiting switch covers, worded from each built-in agent's [`WaitingAlertSupport`]: an alert follows a
+/// session's Waiting status, which only an agent's own screen reader produces, so the wording comes from the same answer
+/// the supervisor's readers are pinned to rather than from a list kept here (the plan `agent-blocked-notifications`
+/// asked for exactly that, so a new agent cannot be left out or wrongly promised alerts).
+pub(super) fn waiting_agents() -> String {
+    let named = |support: WaitingAlertSupport| -> Vec<&'static str> {
+        LaunchHarness::BUILT_INS
+            .iter()
+            .filter(|harness| harness.agent_kind().waiting_alert_support() == support)
+            .map(|harness| harness.display_name())
+            .collect()
+    };
+    let mut words = Vec::new();
+    let questions = named(WaitingAlertSupport::QuestionsAndApprovals);
+    if !questions.is_empty() {
+        words.push(format!(
+            "Covers questions and approvals in {}.",
+            and_list(&questions)
+        ));
+    }
+    let trust = named(WaitingAlertSupport::WorkspaceTrustOnly);
+    if !trust.is_empty() {
+        words.push(format!(
+            "In {}, only the question about trusting a folder.",
+            and_list(&trust)
+        ));
+    }
+    words.push("Other agents never show as waiting.".to_owned());
+    words.join(" ")
+}
+
+/// `names` as English joins them: "A", "A and B", "A, B and C".
+fn and_list(names: &[&str]) -> String {
+    match names.split_last() {
+        None => String::new(),
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The line beside Send test when the saved settings would make a test mislead: one that arrives proves the server and
+/// topic, not that alerts are on. A maintainer's test passed while no real alert ever came (the plan
+/// `agent-blocked-notifications`), so the form now says what the saved settings do.
+pub(super) const UNSAVED_LINE: &str =
+    "Unsaved changes: alerts and Send test use the saved settings until you Save.";
+/// [`UNSAVED_LINE`]'s counterpart for saved settings with the master switch off.
+pub(super) const OFF_LINE: &str = "ntfy alerts are off, so none are sent. Send test still sends one: a test arriving does not mean alerts are on.";
+/// [`UNSAVED_LINE`]'s counterpart for saved settings with the waiting switch off.
+pub(super) const WAITING_OFF_LINE: &str = "Waiting-for-answer alerts are off. Send test still sends one, but nothing is sent when a session waits.";
 
 /// The form's three text fields, each bound to its part of the [`Form`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -215,10 +269,13 @@ impl Field {
     }
 }
 
-/// The two ntfy switches need handles outside their paint pass when a search result opens the form.
+/// The ntfy switches need handles outside their paint pass when a search result opens the form.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Switch {
+    /// The master switch: nothing is sent while it is off.
     Enabled,
+    /// Alerts when an agent waits for an answer, under the master switch.
+    Waiting,
     ClearToken,
 }
 
@@ -228,8 +285,13 @@ impl Switch {
         match self {
             Self::Enabled => (
                 "ntfy-enabled",
-                "Send ntfy alerts",
-                "Send alerts when a session waits for you; Save applies it to this helm",
+                "Enable ntfy alerts",
+                "Send ntfy alerts from this helm, for the events switched on below; Save applies it",
+            ),
+            Self::Waiting => (
+                "ntfy-waiting",
+                "Agent is waiting for an answer",
+                "Alert when a session waits for your answer; Save applies it",
             ),
             Self::ClearToken => (
                 "ntfy-clear-token",
@@ -245,6 +307,7 @@ impl Switch {
 pub(super) struct NtfyAlerts {
     pub(super) save_receipt: super::editing::SaveReceipt,
     enabled_focus: gpui::FocusHandle,
+    waiting_focus: gpui::FocusHandle,
     clear_focus: gpui::FocusHandle,
     /// What the helm last said it stores: the read's answer, then each done save's. `None` until the read answers.
     stored: Option<Settings>,
@@ -279,6 +342,7 @@ impl NtfyAlerts {
         let mut alerts = NtfyAlerts {
             save_receipt: super::editing::SaveReceipt::default(),
             enabled_focus: cx.focus_handle().tab_stop(true),
+            waiting_focus: cx.focus_handle().tab_stop(true),
             clear_focus: cx.focus_handle().tab_stop(true),
             stored: None,
             unreadable: None,
@@ -379,6 +443,7 @@ impl NtfyAlerts {
     fn switch_handle(&self, switch: Switch) -> &gpui::FocusHandle {
         match switch {
             Switch::Enabled => &self.enabled_focus,
+            Switch::Waiting => &self.waiting_focus,
             Switch::ClearToken => &self.clear_focus,
         }
     }
@@ -453,16 +518,34 @@ impl NtfyAlerts {
         self.token_saved() && (form.clear || (self.server_changed() && form.token.is_empty()))
     }
 
-    /// Compare the full form with the last read, including typed credentials and the explicit clear answer.
+    /// The line beside Send test, if the saved settings or unsaved edits would make a test mislead (see
+    /// [`UNSAVED_LINE`]). Unsaved edits come first: until they are saved, the other lines would describe settings the
+    /// form no longer shows. Nothing until the read answers.
+    fn saved_state(&self) -> Option<&'static str> {
+        let stored = self.stored.as_ref()?;
+        if self.has_unsaved_edits() {
+            Some(UNSAVED_LINE)
+        } else if !stored.enabled {
+            Some(OFF_LINE)
+        } else if !stored.notify_waiting {
+            Some(WAITING_OFF_LINE)
+        } else {
+            None
+        }
+    }
+
+    /// Whether the form differs from the last read, including typed credentials and the explicit clear answer.
+    fn has_unsaved_edits(&self) -> bool {
+        self.form.is_touched()
+            && self
+                .stored
+                .as_ref()
+                .is_some_and(|stored| Form::over(stored) != *self.form.value())
+    }
+
+    /// The form's edit state for Settings' footer and close: saving, or [`Self::has_unsaved_edits`].
     pub(super) fn edit_state(&self) -> super::editing::EditState {
-        super::editing::EditState::of(
-            self.form.is_saving(),
-            self.form.is_touched()
-                && self
-                    .stored
-                    .as_ref()
-                    .is_some_and(|stored| Form::over(stored) != *self.form.value()),
-        )
+        super::editing::EditState::of(self.form.is_saving(), self.has_unsaved_edits())
     }
 
     /// Include whether this draft would clear the saved token, which also depends on the last loaded settings.
@@ -633,20 +716,23 @@ impl NtfyAlerts {
         let weak = cx.weak_entity();
         let edited = self.stored.as_ref().is_some_and(|stored| match switch {
             Switch::Enabled => on != stored.enabled,
+            Switch::Waiting => on != stored.notify_waiting,
             Switch::ClearToken => on,
         });
+        let caption = super::editing::caption(label, edited.then(|| theme::palette(cx)));
+        let copy = match switch {
+            Switch::ClearToken => card::switch_copy(caption, help, cx),
+            Switch::Enabled => card::switch_copy(caption, "", cx),
+            Switch::Waiting => card::switch_copy(caption, "", cx).child(card::help(
+                "ntfy-waiting-agents",
+                waiting_agents(),
+                cx,
+            )),
+        };
         div().child(
             Checkbox::new(id, label, HoverHelp::tooltip(help), Role::Switch)
                 .switch()
-                .content(card::switch_copy(
-                    super::editing::caption(label, edited.then(|| theme::palette(cx))),
-                    if switch == Switch::ClearToken {
-                        help
-                    } else {
-                        ""
-                    },
-                    cx,
-                ))
+                .content(copy)
                 .focus(self.switch_handle(switch))
                 .checked(on)
                 .disabled(self.locked())
@@ -826,16 +912,26 @@ impl Render for NtfyAlerts {
                     .map(|reason| failure("ntfy-load-error".into(), reason)),
             )
             .children(retry);
+        let saved_state = self.saved_state().map(|line| {
+            choices::outcome_line("ntfy-saved-state", Role::Status, theme::color(palette.warn))
+                .aria_label(line)
+                .child(line)
+        });
         let test = div()
             .flex()
             .flex_col()
             .gap(px(6.))
+            .children(saved_state)
             .child(
-                div().flex().items_center().justify_between().gap(px(FIELD_GAP))
-                    .child(choices::help(
-                        "Save before testing. Send test uses the saved settings, not this form's unsaved changes.",
-                        cx,
-                    ).min_w_0())
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(FIELD_GAP))
+                    .child(
+                        choices::help("Send test sends one alert using the saved settings.", cx)
+                            .min_w_0(),
+                    )
                     .child(div().flex_none().child(send_test)),
             )
             .children((saving || self.testing).then(|| {
@@ -843,11 +939,14 @@ impl Render for NtfyAlerts {
                     .aria_label("Working…")
                     .child("Working…")
             }))
-            .children(self.form.refusal().map(|reason| failure("ntfy-error".into(), reason)))
             .children(
-                self.refused
-                    .line(REFUSED, |id, text| failure(id.into(), &HostText::from_host(text))),
+                self.form
+                    .refusal()
+                    .map(|reason| failure("ntfy-error".into(), reason)),
             )
+            .children(self.refused.line(REFUSED, |id, text| {
+                failure(id.into(), &HostText::from_host(text))
+            }))
             .children(saved)
             .children(tested);
         div()
@@ -871,6 +970,12 @@ impl Render for NtfyAlerts {
                         Switch::Enabled,
                         form.enabled,
                         |form, on| form.enabled = on,
+                        cx,
+                    ),
+                    self.switch(
+                        Switch::Waiting,
+                        form.notify_waiting,
+                        |form, on| form.notify_waiting = on,
                         cx,
                     ),
                     fields,
@@ -902,6 +1007,46 @@ mod tests {
         assert_eq!(form.save().token.as_deref(), Some("replacement"));
         form.clear = true;
         assert_eq!(form.save().token.as_deref(), Some(""));
+    }
+
+    /// The waiting switch's wording must name exactly the agents whose waits Farhelm can see, from the same answer the
+    /// supervisor's readers are pinned to, and must not promise alerts for an agent read by change counting alone.
+    /// Specified: Claude Code and Codex are named for questions and approvals, Muse Code and Antigravity for the
+    /// folder-trust question only, and Goose, Pi, Cursor and the shells are not named.
+    #[test]
+    fn the_waiting_switch_names_the_agents_whose_waits_are_read() {
+        let words = waiting_agents();
+        assert!(
+            words.starts_with("Covers questions and approvals in ")
+                && words.contains("Claude Code")
+                && words.contains("Codex"),
+            "{words}"
+        );
+        assert!(
+            words.contains(
+                "In Muse Code and Antigravity, only the question about trusting a folder."
+            ) || words.contains(
+                "In Antigravity and Muse Code, only the question about trusting a folder."
+            ),
+            "{words}"
+        );
+        let named: Vec<&str> = words
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .collect();
+        for absent in [
+            "Goose", "Pi", "Cursor", "Bash", "Zsh", "OMP", "Grok", "OpenCode",
+        ] {
+            assert!(!named.contains(&absent), "{absent} in {words}");
+        }
+    }
+
+    /// English lists read "A", "A and B", "A, B and C".
+    #[test]
+    fn names_join_as_an_english_list() {
+        assert_eq!(and_list(&["A"]), "A");
+        assert_eq!(and_list(&["A", "B"]), "A and B");
+        assert_eq!(and_list(&["A", "B", "C"]), "A, B and C");
     }
 
     /// The warning that Save clears the token must follow the helm's own rule, which compares servers, not spellings:

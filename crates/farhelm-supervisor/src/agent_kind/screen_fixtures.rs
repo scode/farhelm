@@ -794,3 +794,36 @@ fn screen_fixtures_read_the_same_from_the_emulator() {
         failures.join("\n\n")
     );
 }
+
+/// Settings names the agents a waiting-for-answer alert covers from `AgentKind::waiting_alert_support`, and an alert
+/// follows only what the screen readers report as Waiting. This pins that answer to the captured screens the readers
+/// are tested against, so the Settings wording cannot promise alerts the readers never produce, or omit ones they do.
+/// Whether a Waiting screen is the trust question is the kind's own reader's verdict (`trust_prompt`), not the fixture's
+/// file name. A kind with no captured screens counts as none: a reader that learned to read Waiting before any screen
+/// of it was captured would pass here unnoticed until its first capture.
+/// Specified: for every agent kind, a captured Waiting screen its reader does not take for the trust question means
+/// questions and approvals; Waiting screens that are all the trust question mean workspace trust only; no captured
+/// Waiting screen means none; and that is what `waiting_alert_support` answers.
+#[test]
+fn waiting_alert_support_matches_the_captured_waiting_screens() {
+    use farhelm_proto::WaitingAlertSupport;
+    let fixtures = load_fixtures();
+    for &kind in AgentKind::ALL {
+        let waiting: Vec<&ScreenFixture> = fixtures
+            .iter()
+            .filter(|fixture| agent_kind(&fixture.harness) == kind && fixture.expected == "waiting")
+            .collect();
+        // The tail the sampler hands the reader, as the other fixture tests read it.
+        let trust = |fixture: &&ScreenFixture| {
+            reader_for(kind).trust_prompt(trim_screen_tail(&fixture.screen, SAMPLE_TAIL_BYTES))
+        };
+        let captured = if waiting.iter().any(|fixture| !trust(fixture)) {
+            WaitingAlertSupport::QuestionsAndApprovals
+        } else if waiting.is_empty() {
+            WaitingAlertSupport::None
+        } else {
+            WaitingAlertSupport::WorkspaceTrustOnly
+        };
+        assert_eq!(kind.waiting_alert_support(), captured, "{kind:?}");
+    }
+}

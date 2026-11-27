@@ -2862,34 +2862,39 @@ current helm policy unchanged and shows the reason inline. Under **Notifications
 save separate helm preferences (see Status). Each row has its own play button for hearing that sound once. **Check for
 announcements** is on by default on macOS and Linux. Turning it off stops the helm from requesting the network
 announcement feed. The switch is searchable and shared by windows on this helm. **ntfy alerts** has an off-by-default
-switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High,
-Urgent; default Default). These ntfy settings are explicitly saved helm configuration, shared by every client, outside
-the preference row. Save refusals appear inline. The stored token is never returned: the form shows whether one exists
-and allows replacing or clearing it. Changing to another server clears a saved token unless a new one is entered, and
-the form says so before saving. **Send test** uses the saved configuration, even while disabled, and reports success or
-failure inline. The **Checkouts** section holds the explicitly saved **Default checkout folder** and, below it, a
-monospace multi-line post-clone command field and the default-on **Keep a checkout ready for faster launches** switch
-(see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository
-and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create
-or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
-first-use folder creation, and that the default applies to hosts without their own folder, set in each host's settings.
-The command's help explains that it runs in each new checkout on its host, after cloning and before the agent starts,
-that changes affect future checkouts only, and that command-line host overrides keep their command. When the updater is
-active, the desktop app's dialog also has an **App** section. It shows the running version and a **Check for updates**
-button above the switch for installing updates automatically (see
-[Installation and updates](#installation-and-updates)). Automatic updates are a setting of that app installation. On an
-installed stable Mac release, App also offers **Show what's new after updates**, on by default. The helm shares that
-choice and the last shown or skipped release with the window. The two host confirmation choices apply to every host and
-client of this helm; existing controls with a natural place in the main UI stay there. No client keeps its own copy: the
-helm pushes its preferences to the window when it connects and whenever they change, and the window writes one on
-change, so a window opens in the same order and on the same session after a reconnect as before it. Per-client
-persistence — a desktop state file, anything that lets two clients remember different answers — is not wanted for these
-shared preferences, including Announcements and upgrade highlights dismissals and the host rail's expansion. The sound
-switches are among these shared preferences: the maintainer decided on 2026-11-13 that they are helm preferences rather
-than per-device ones (see Status). A client that asks the helm for no particular order gets creation time. No mandatory
-hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
-implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
-`farhelm agent create` and `clone` need not record the asking session.
+**Enable ntfy alerts** switch, under which an **Agent is waiting for an answer** switch (on by default, including for
+settings saved before it existed) chooses the waiting alert. The form also has a server URL (default `https://ntfy.sh`),
+a topic, an optional access token, and a priority (Min, Low, Default, High, Urgent; default Default). The waiting switch
+says which agents it covers, worded from what Farhelm can read on each built-in agent's screen: questions and approvals
+for some, only the folder-trust question for others, none for the rest. These ntfy settings are explicitly saved helm
+configuration, shared by every client, outside the preference row. Save refusals appear inline. The stored token is
+never returned: the form shows whether one exists and allows replacing or clearing it. Changing to another server clears
+a saved token unless a new one is entered, and the form says so before saving. **Send test** uses the saved
+configuration, even while disabled, and reports success or failure inline. Because a test that arrives proves only the
+server and topic, a line beside it says when the form has unsaved changes (alerts and the test still use the saved
+settings), when the saved master switch is off, or when the saved waiting switch is off. The **Checkouts** section holds
+the explicitly saved **Default checkout folder** and, below it, a monospace multi-line post-clone command field and the
+default-on **Keep a checkout ready for faster launches** switch (see [Managed checkouts](#managed-checkouts)). The
+switch's help explains one extra checkout's disk space per repository and host, promptless login-shell preparation,
+earlier file times and Git hooks/filters, and discard on the next create or after 30 days unused; it links the full
+earlier-clone caveats. The folder's help explains expansion on each host, first-use folder creation, and that the
+default applies to hosts without their own folder, set in each host's settings. The command's help explains that it runs
+in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts only,
+and that command-line host overrides keep their command. When the updater is active, the desktop app's dialog also has
+an **App** section. It shows the running version and a **Check for updates** button above the switch for installing
+updates automatically (see [Installation and updates](#installation-and-updates)). Automatic updates are a setting of
+that app installation. On an installed stable Mac release, App also offers **Show what's new after updates**, on by
+default. The helm shares that choice and the last shown or skipped release with the window. The two host confirmation
+choices apply to every host and client of this helm; existing controls with a natural place in the main UI stay there.
+No client keeps its own copy: the helm pushes its preferences to the window when it connects and whenever they change,
+and the window writes one on change, so a window opens in the same order and on the same session after a reconnect as
+before it. Per-client persistence — a desktop state file, anything that lets two clients remember different answers — is
+not wanted for these shared preferences, including Announcements and upgrade highlights dismissals and the host rail's
+expansion. The sound switches are among these shared preferences: the maintainer decided on 2026-11-13 that they are
+helm preferences rather than per-device ones (see Status). A client that asks the helm for no particular order gets
+creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
+does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -3394,12 +3399,14 @@ classification, never waiting — a settled scope decision, not a reader waiting
 Status also determines whether Suspend asks about activity. A mistaken reading can skip or add that question. Suspend
 still preserves the frozen processes.
 
-**Ntfy alerts** optionally reach the user away from the screen. Once enabled and configured in settings, the helm sends
-one alert when a session becomes waiting and remains so for 10 seconds, once per waiting spell. Leaving and re-entering
-waiting starts another spell. A host's first successful observation after helm start or reconnect is a quiet baseline;
-new sessions first observed waiting afterwards count. Unknown readings add no evidence and do not send. Detection
-remains heuristic, with the same agent limits as the waiting sound. There are no alerts for Farhelm approval cards,
-finished turns or session-tracking notifications. Window focus does not suppress ntfy alerts.
+**Ntfy alerts** optionally reach the user away from the screen. Once enabled and configured in settings, with the
+waiting switch on, the helm sends one alert when a session becomes waiting and remains so for 3 seconds, once per
+waiting spell. Leaving and re-entering waiting starts another spell. A host's first successful observation after helm
+start or reconnect is a quiet baseline; new sessions first observed waiting afterwards count. While waiting alerts are
+off the helm keeps no waiting evidence, and its first observation after they are saved on is likewise a quiet baseline:
+a session already waiting then alerts only for its next wait. Unknown readings add no evidence and do not send.
+Detection remains heuristic, with the same agent limits as the waiting sound. There are no alerts for Farhelm approval
+cards, finished turns or session-tracking notifications. Window focus does not suppress ntfy alerts.
 
 The alert contains the session's title and the host's display name, with control and other invisible or reordering
 characters removed and each capped at 200 characters: "<title> on <host> is waiting for you". A title generated from a

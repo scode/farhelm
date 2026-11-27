@@ -5726,7 +5726,11 @@ impl HostActor {
                     .is_some_and(|current| Arc::ptr_eq(current, &client))
                     && let Some(observations) = alert_observations
                 {
-                    for title in alert_policy.observe(&observations, tokio::time::Instant::now()) {
+                    for title in alert_policy.observe(
+                        &observations,
+                        tokio::time::Instant::now(),
+                        self.store.waiting_alerts_enabled(),
+                    ) {
                         self.ntfy.enqueue(title, self.id);
                     }
                 }

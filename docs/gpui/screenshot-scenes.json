@@ -2298,7 +2298,7 @@
       "start": ["--sessions", "1", "--scripted-hosts"],
       "steps": [
         ["click", "id:settings-section-notifications"],
-        ["wait", "--text", "Send ntfy alerts"],
+        ["wait", "--text", "Enable ntfy alerts"],
         ["wait", "500"],
         ["hover", "id:settings-heading"]
       ]
