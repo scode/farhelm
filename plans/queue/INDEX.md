@@ -5,7 +5,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `file-hover-too-large-hint.md` — Show "too large to copy contents" on terminal file hover cards over the 10 MB copy cap
 - [in-flight fa6242] `cli-flag-parsing-audit.md` — Stop free-text CLI options and positionals from swallowing flags and clean up clap parsing quirks
 - [complete] `agent-hosts-tailscale-column.md` — Add a TAILSCALE column to plain `farhelm agent hosts` table output
-- [complete] `delete-dead-replace-checkout-ui.md` — Delete dead fresh-checkout Replace UI remnants and close matching review finding
+- [landing 0937ba] `delete-dead-replace-checkout-ui.md` — Delete dead fresh-checkout Replace UI remnants and close matching review finding
 - [in-flight 871c57] `terminal-tab-shortcuts.md` — Add Cmd+T/Cmd+W terminal-tab shortcuts and always confirm Delete when shell tabs are open
 - [pending] `terminal-tab-overflow-ux.md` — Pin the main Agent tab and add auto-scroll, edge fades, arrows, and an all-tabs menu for overflowing tabs
 - [in-flight 9c521b] `blocked-notify-attention-and-debounce.md` — Move blocked-agent alerts to the red waiting indicator and sound with an ntfy awareness grace period
