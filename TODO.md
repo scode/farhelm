@@ -218,12 +218,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Farhelm to capture conversations, and exit cleanly and silently when the CLIs run outside Farhelm. Plan:
   `plans/queue/drift-persistent-hooks.md`.
 
-- **Drift tests: in-session conversation rotation.** Wire the existing standalone Claude `/clear`, Codex `/new`, and
-  Codex `/clear` checks into the drift runner (running Codex `/clear` end-to-end through Farhelm's own hook so pending
-  withdrawal and `Stop` confirmation are tested), and add live rotation coverage for Muse (`/clear`, `/new`), Pi
-  (`/new`, `/fork`, `/resume`), OMP (`/new`, `/fork`, `/resume`), Grok (`/new`), and Antigravity, proving Restart
-  resumes the rotated conversation. Plan: `plans/queue/drift-conversation-rotation.md`.
-
 - **Drift tests: subagent and nested-agent report rejection.** Wire Claude's standalone shelled-out `claude -p` test
   into the drift runner and add live coverage for both native subagents and shelled-out nested agents across all six
   foreground-ownership harnesses (Claude, Codex, Muse, OMP, Grok, Antigravity), proving child invocations cannot replace

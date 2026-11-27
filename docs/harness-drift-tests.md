@@ -15,6 +15,7 @@ python3 -B scripts/run-harness-drift.py --no-upgrade --harness grok
 python3 -B scripts/run-harness-drift.py --no-upgrade --category model_selection
 python3 -B scripts/run-harness-drift.py --no-upgrade --category named_conversation
 python3 -B scripts/run-harness-drift.py --no-upgrade --category instructions_delivery
+python3 -B scripts/run-harness-drift.py --no-upgrade --category conversation_rotation --harness pi
 python3 -B scripts/run-harness-drift.py --upgrade-only
 ```
 
@@ -101,6 +102,25 @@ configuration, which the case reads from a private copy (see below).
 The `instructions_delivery` category asks an agent in two fresh sessions which command its startup context gives for
 `$farhelm`. The enabled run must name the command, and the disabled run must answer that it received no command. Both
 sessions must report a conversation Farhelm can reopen.
+
+The `conversation_rotation` category changes the conversation inside a running agent, with the agent's own commands, and
+checks that Farhelm follows: there is no new launch for Farhelm to notice, so only the agent's report tells it. Each
+case seeds a code word, runs the command, seeds a new word in the new conversation, and requires an accepted report that
+moves the Restart target to it. It then stops the session, uses Restart, and the resumed agent must recall the new
+conversation's word. A harness with several commands runs them in order in one session, each starting from the
+conversation the previous Restart resumed. Claude covers `/clear`. It must report its first conversation as it starts,
+before the first prompt, and the new one on the command itself, before any prompt. Codex covers `/new` and `/clear`.
+After `/new` the old conversation must stay the Restart target in the seconds after the command. Codex 0.172.0 reports a
+`/clear` with the next prompt, already resumable, so the pending path SPEC.md describes is left to the supervisor's own
+tests. Muse covers `/clear` and `/new`, Grok `/new`, and Antigravity `/clear` (which its menu also offers as `/new`). Pi
+and OMP cover `/new`, `/resume` and `/fork`. The `/resume` runs after `/new`, with the session in its second
+conversation, and selects the first one by typing its code word into the agent's session picker. The capture must return
+to the first conversation before any prompt, and Restart must recall the first word. A fork starts with a copy of the
+parent's history, so the case waits for the agent's notice that the fork exists, seeds a new word in the fork, and the
+recall after Restart asks for the newest word, which only the fork knows. On Pi the case takes the latest message in the
+fork picker and empties the composer, which Pi refills with that message. A case spends one turn on the first seed, then
+a seed and a recall per command, except that `/resume` spends only its recall: three turns for Claude, Grok and
+Antigravity, five for Codex and Muse, six for Pi and OMP.
 
 An agent may save a trust choice for the temporary directory. Claude, the Muse launcher and OMP can update themselves
 during startup, so these cases disable their updaters for the test invocations using an environment variable for Claude
