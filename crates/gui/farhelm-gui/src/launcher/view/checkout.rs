@@ -81,12 +81,12 @@ const MAX_CHOICES: usize = 100;
 /// The suggestions list's element id (`.launch-composer-repository-options`), which tests find it by.
 const REPOSITORY_LIST: &str = "launcher-repository-list";
 
-/// Host checkouts and checkouts inside disposable environments have different Delete behavior.
+/// Host checkouts and checkouts inside disposable environments have different Delete behavior. A checkout inside an
+/// existing environment has no note: no launch starts one there (`Launcher::checkout_lifetime_note`).
 const HOST_CHECKOUT_LIFETIME: &str =
     "New folder named after the session; it moves to the trash when its last session is deleted.";
 const ENVIRONMENT_CHECKOUT_LIFETIME: &str = "New folder named after the session, inside the new environment; \
                                             deleting its last session removes it permanently.";
-const EXISTING_ENVIRONMENT_CHECKOUT_LIFETIME: &str = "New folder inside this environment, named after the session. Deleting the checkout's last session removes the folder permanently.";
 /// The supervisor's words refusing a checkout name that is taken (its `NameError::Occupied`), found anywhere in the
 /// refusal since the helm passes them on whole.
 const OCCUPIED: &str = "a directory with that checkout name already exists";
@@ -859,10 +859,8 @@ impl Launcher {
         cx: &App,
     ) -> Option<Div> {
         let collections = self.store.read(cx).collections();
+        // Replace with holds its destination, so the draft never has a checkout of its own here.
         let (row, checkout) = self.replacement_checkout_source(collections)?;
-        if self.draft.checkout.is_some() {
-            return None;
-        }
         let recorded = row.info.canonical_cwd.as_deref();
         let expected = recorded.unwrap_or(&row.info.cwd);
         let same_directory = match self.current_folder_check(cx) {
@@ -1111,18 +1109,17 @@ impl Launcher {
         )
     }
 
-    /// Describe future Delete of the new checkout. Only New and Clone start one: Replace with keeps the source's
-    /// folder.
-    pub(super) fn checkout_lifetime_note(&self, palette: &theme::Palette, cx: &App) -> AnyElement {
-        use crate::session_list::environment::Environment;
+    /// Describe future Delete of the new checkout: permanent inside the new environment the launch creates, the trash
+    /// on an ordinary host.
+    ///
+    /// Only New and Clone start a checkout, and neither starts one inside an existing sandbox or container: they never
+    /// put a launch on a session-owned host (their seeding, the host picker, search and templates all skip such hosts),
+    /// and Replace with keeps the source's folder (the helm refuses a Replace that would start a fresh checkout). So a
+    /// draft with no target is on an ordinary host. A future path that starts a checkout inside an existing
+    /// environment needs its own note here, since that folder is removed permanently, not moved to the trash.
+    pub(super) fn checkout_lifetime_note(&self, palette: &theme::Palette) -> AnyElement {
         let words = if self.draft.target.is_some() {
             ENVIRONMENT_CHECKOUT_LIFETIME
-        } else if self
-            .chosen_host(cx)
-            .and_then(Environment::of_host)
-            .is_some()
-        {
-            EXISTING_ENVIRONMENT_CHECKOUT_LIFETIME
         } else {
             HOST_CHECKOUT_LIFETIME
         };

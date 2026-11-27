@@ -83,12 +83,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   table output of `farhelm agent hosts`, matching the `tailscale` field added to `farhelm agent hosts --json` (#5126).
   Plan: `plans/queue/agent-hosts-tailscale-column.md`.
 
-- **Delete dead fresh-checkout Replace code in the desktop app.** After #5142 made the helm Replace API refuse
-  destination folder changes and fresh managed checkouts, remove the now-unreachable desktop launcher wording and
-  Replace code for starting a fresh managed checkout inside an existing sandbox or container session (and clean up the
-  stale `replace-checkout-lifetime.md` changelog draft if still unreleased). Plan:
-  `plans/queue/delete-dead-replace-checkout-ui.md`.
-
 - **Cmd+T to create a new terminal tab.** Cmd+T to create a new terminal tab. Plan:
   `plans/queue/terminal-tab-shortcuts.md`.
 

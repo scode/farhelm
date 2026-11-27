@@ -438,11 +438,13 @@ pub(super) enum Request {
 impl Request {
     /// The directory a connected managed checkout is about to use. The preview key alone does not identify this
     /// directory because an unnamed checkout may get a different number on its next preview.
+    ///
+    /// Only an ordinary create starts a connected checkout. A new environment's checkout is previewed only once the
+    /// environment connects, and Replace with and Restart with keep the source's folder (the helm refuses a Replace
+    /// whose create would start a fresh checkout).
     pub(super) fn checkout_path(&self) -> Option<&str> {
-        let create = match self {
-            Self::Create(body) => body,
-            Self::Replace { body, .. } => body.with.as_ref()?,
-            Self::Environment(_) | Self::Restart { .. } => return None,
+        let Self::Create(create) = self else {
+            return None;
         };
         create.github_checkout.as_ref()?;
         Some(&create.cwd)
