@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`agent-drift-and-screen-capture-tooling`](reports/agent-drift-and-screen-capture-tooling.report.md) landed 2026-11-26 in #5017, #5022: Stop agent updater process groups before drift cases, publish captured agent screens as recoverable pairs, and require a committed hook report after Restart in drift checks
 - [`triage-settings-nov24`](reports/triage-settings-nov24.report.md) landed 2026-11-26 in #4960, #4963, #4966, #4968, #4973, #4976, #4979, #4982, #4986, #4987, #4990, #4995, #5000, #5006, #5007, #5010, #5013, #5015, #5016, #5019, #5026: execute the 2026-11-24 triage outcomes for the Settings dialog, in grouped PRs
 - [`hooks-restart-and-antigravity-fixes`](reports/hooks-restart-and-antigravity-fixes.report.md) landed 2026-11-26 in #5021, #5024, #5028: Place Antigravity Restart options before Custom `--`, isolate hook setup errors in Restart and recovery UI, and delay the missing-hook warning clock until agent handoff
 - [`brick-test-reopen-and-retry-fixes`](reports/brick-test-reopen-and-retry-fixes.report.md) landed 2026-11-26 in #5023, #5025: Keep the brick test's installer pair retryable after an unavailable P0 check and bind reopen samples to a witnessed app relaunch
