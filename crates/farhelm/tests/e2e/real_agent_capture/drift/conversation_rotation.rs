@@ -11,16 +11,28 @@
 //! starts from the conversation the previous Restart resumed, which keeps the case inside the runner's per-harness
 //! budget.
 //!
+//! Pi and OMP also switch conversations through two commands that do not start empty, so each gets its own oracle:
+//!
+//! - A fork copies the current conversation, so the fork knows the old word too. The driver waits for the vendor's
+//!   notice that the fork exists, seeds a new word in the fork, and the recall after Restart asks for the newest word:
+//!   only the fork knows it, so the answer proves Restart resumed the fork and not its parent.
+//! - A resume switches back to an existing conversation, so it needs two. It follows a `/new`, which leaves the session
+//!   in the second conversation while the first still exists, and selects the first in the vendor's picker by its code
+//!   word. The capture must return to the first conversation's resume target before any prompt (the vendor reports the
+//!   switch as it happens, with the file already saved), and Restart must recall the first word. No seed turn runs.
+//!
 //! Per-harness knowledge lives only in [`rotation_spec`]: which commands to run, the vendor's menu line that shows a
-//! command matched, and the checks between the command and the next prompt. Those checks are limited to what the
-//! standalone audits this category replaced pinned (Claude's report on `/clear` itself, Codex's `/new` lag until the
-//! next prompt, and the `source` each of those reports carries) plus what SPEC.md states. For every other rotation the
-//! contract is only that the next prompt's turn commits the new conversation and Restart resumes it.
+//! command matched, how to drive a command's picker, and the checks between the command and the next prompt. Those
+//! checks are limited to what the standalone audits this category replaced pinned (Claude's report on `/clear` itself,
+//! Codex's `/new` lag until the next prompt, and the `source` each of those reports carries) plus what SPEC.md states.
+//! For every other rotation the contract is only that the next prompt's turn commits the new conversation and Restart
+//! resumes it.
 //!
 //! NOTE: The checks that compare a hook runtime ID ([`Capture::holds`], and [`committed_report`] as the startup,
 //! [`BeforePrompt::NewCapture`] and `source` checks call it) go through `reported_runtime_identity`, which extracts
 //! the ID only from Codex, Grok and Claude locators. A Pi or OMP locator comes back whole, so for those two harnesses
-//! these checks could not match. No Pi or OMP rotation uses them today; one that does needs that parser extended first.
+//! these checks could not match. No Pi or OMP rotation uses them today (a resume's return check compares the resume
+//! target instead); one that does needs that parser extended first.
 
 use super::*;
 use farhelm_helm::CreateExtras;
@@ -52,6 +64,72 @@ struct Rotation {
     /// The `source` the vendor's hook gives the accepted report of the new conversation, where a replaced audit pinned
     /// it. Farhelm ignores the field; a change here is vendor drift worth seeing, not a Farhelm failure mode.
     source: Option<&'static str>,
+    /// What kind of conversation the command leaves the session in, which decides the oracle.
+    operation: Operation,
+}
+
+/// The three ways a command can change the conversation, each with its own proof that Restart follows it.
+#[derive(Clone, Copy, Debug)]
+enum Operation {
+    /// A new, empty conversation (`/clear`, `/new`): seed a new word, recall it.
+    Fresh,
+    /// A copy of the current conversation: seed a new word, recall the newest word.
+    Fork(Fork),
+    /// The session's first conversation again, chosen in the vendor's picker: no seed, recall the first word.
+    Resume(ResumePicker),
+}
+
+/// How a vendor's fork command makes the fork and says it did.
+#[derive(Clone, Copy, Debug)]
+struct Fork {
+    /// The message picker the command opens first, where the vendor has one.
+    picker: Option<ForkPicker>,
+    /// Lowercase notice the vendor shows once the fork exists and the session is in it. The seed waits for it: a
+    /// seed typed while the switch is still running could land in the parent, which the fork would then copy, and the
+    /// recall of the newest word would no longer tell the fork from its parent.
+    notice: &'static str,
+}
+
+/// A fork command's message picker. The driver takes the row the picker opens on (Pi 1.6.1 opens on the latest user
+/// message) and never filters: any row gives a conversation that does not know the word seeded next.
+#[derive(Clone, Copy, Debug)]
+struct ForkPicker {
+    /// Lowercase heading shown only while the picker is open.
+    title: &'static str,
+    /// Keys that empty the composer after the fork. Pi puts the chosen message back into the composer, and a seed
+    /// typed after it would be submitted as one message with it.
+    clear: &'static [u8],
+}
+
+/// A resume command's session picker, driven by typing the first conversation's code word into its search box.
+#[derive(Clone, Copy, Debug)]
+struct ResumePicker {
+    /// Lowercase heading shown only while the picker is open.
+    title: &'static str,
+    /// What the highlighted row shows before its title; any one of them marks the row Enter will open.
+    highlight: &'static [&'static str],
+    /// How the search box matches what is typed into it.
+    search: Search,
+}
+
+/// The search syntax a resume picker gives a code word. A fuzzy search can also list a row whose text merely contains
+/// the word's characters in order, which is why the driver checks the highlighted row rather than the row count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Search {
+    /// The word in double quotes matches it exactly (Pi 1.6.1's `"phrase"` syntax).
+    Phrase,
+    /// The bare word, matched fuzzily (OMP 19.2.1).
+    Fuzzy,
+}
+
+impl Search {
+    /// The text typed into the search box to find the conversation seeded with `word`.
+    fn query(self, word: &str) -> String {
+        match self {
+            Search::Phrase => format!("\"{word}\""),
+            Search::Fuzzy => word.to_owned(),
+        }
+    }
 }
 
 /// The pre-prompt rotation timing a harness is held to. Each non-default variant comes from a vendor fact the replaced
@@ -94,12 +172,26 @@ const fn fresh(command: &'static str, menu: &'static str) -> Rotation {
         menu,
         before_prompt: BeforePrompt::Unspecified,
         source: None,
+        operation: Operation::Fresh,
+    }
+}
+
+/// A rotation that switches to a fork or back to an earlier conversation. Neither has a pinned pre-prompt timing of
+/// the kind [`BeforePrompt`] names; a resume's own return check lives with its [`Operation`].
+const fn switch(command: &'static str, menu: &'static str, operation: Operation) -> Rotation {
+    Rotation {
+        command,
+        menu,
+        before_prompt: BeforePrompt::Unspecified,
+        source: None,
+        operation,
     }
 }
 
 /// Each harness that tracks conversations decides its rotation coverage here, so a new one is a compile error until
 /// it does. The menu lines were read from the installed CLIs at a 115-column terminal on 2026-11-27: Claude Code
-/// 2.1.332, Codex 0.172.0, Muse Code 1.4.25, Pi 1.6.1, OMP 19.2.1, Grok Build 1.0.92 and Antigravity CLI 1.5.18.
+/// 2.1.332, Codex 0.172.0, Muse Code 1.4.25, Pi 1.6.1, OMP 19.2.1, Grok Build 1.0.92 and Antigravity CLI 1.5.18. Pi's
+/// and OMP's picker text was read the same day with `scripts/agent-tui.py`.
 #[warn(clippy::wildcard_enum_match_arm)]
 fn rotation_spec(harness: LaunchHarness) -> Option<RotationSpec> {
     use BeforePrompt::*;
@@ -124,6 +216,7 @@ fn rotation_spec(harness: LaunchHarness) -> Option<RotationSpec> {
                     menu: "start a new session with empty context",
                     before_prompt: NewCapture,
                     source: Some("clear"),
+                    operation: Operation::Fresh,
                 }]
             },
         },
@@ -140,6 +233,7 @@ fn rotation_spec(harness: LaunchHarness) -> Option<RotationSpec> {
                         menu: "start a new chat during a conversation",
                         before_prompt: OldCaptureStays,
                         source: Some("startup"),
+                        operation: Operation::Fresh,
                     },
                     // SPEC.md handles a `clear` report that names a transcript not yet on disk (old conversation
                     // withdrawn, new one pending until a `Stop` confirms it), but it does not promise when Codex
@@ -152,6 +246,7 @@ fn rotation_spec(harness: LaunchHarness) -> Option<RotationSpec> {
                         menu: "clear the terminal and start a new chat",
                         before_prompt: Unspecified,
                         source: Some("clear"),
+                        operation: Operation::Fresh,
                     },
                 ]
             },
@@ -170,8 +265,68 @@ fn rotation_spec(harness: LaunchHarness) -> Option<RotationSpec> {
                 ]
             },
         },
-        // `/fork` and `/resume` need the vendor's interactive pickers; this category does not drive those yet.
-        Pi | Omp => plain(const { &[fresh("/new", "start a new session")] }),
+        // `/resume` follows `/new` and comes before `/fork`: it needs a second conversation to switch away from, and a
+        // fork made earlier would list a row with the first conversation's own opening message beside it (OMP's
+        // picker titles a session by its first message). Pi's fork picker lists the user messages to fork at; its
+        // resume picker renders below the conversation, whose lines carry no `›`, so that marker only means the
+        // highlighted row.
+        Pi => plain(
+            const {
+                &[
+                    fresh("/new", "start a new session"),
+                    switch(
+                        "/resume",
+                        "resume another session",
+                        Operation::Resume(ResumePicker {
+                            title: "resume session (current folder)",
+                            highlight: &["› "],
+                            search: Search::Phrase,
+                        }),
+                    ),
+                    switch(
+                        "/fork",
+                        "create a new fork from a previous user message",
+                        Operation::Fork(Fork {
+                            picker: Some(ForkPicker {
+                                title: "fork from message",
+                                // Ctrl-U deletes to the start of the line, which empties the one-line message Pi
+                                // copied.
+                                clear: b"\x15",
+                            }),
+                            notice: "forked to new session",
+                        }),
+                    ),
+                ]
+            },
+        ),
+        // OMP forks the whole conversation at once, with no picker, leaves the composer empty, and then shows "Session
+        // forked · return to original: omp --resume <id> or /resume" (read with `scripts/agent-tui.py` on
+        // 2026-11-27). Its resume picker is a full-screen box whose highlighted row starts with a Nerd Font chevron
+        // (U+F054).
+        Omp => plain(
+            const {
+                &[
+                    fresh("/new", "start a new session"),
+                    switch(
+                        "/resume",
+                        "resume a different session",
+                        Operation::Resume(ResumePicker {
+                            title: "resume session (current folder)",
+                            highlight: &["\u{f054} "],
+                            search: Search::Fuzzy,
+                        }),
+                    ),
+                    switch(
+                        "/fork",
+                        "fork this session, or open it in a multiplexer pane or window",
+                        Operation::Fork(Fork {
+                            picker: None,
+                            notice: "session forked",
+                        }),
+                    ),
+                ]
+            },
+        ),
         // Grok offers no `/fork` (its docs page says so).
         Grok => plain(const { &[fresh("/new", "start a new session")] }),
         // `/new` is an alias that the menu resolves to `/clear (new)`; the canonical command is typed.
@@ -242,6 +397,107 @@ fn typing_step(screen: &str, rotation: &Rotation, overlay: &[&str], baseline: &B
     }
 }
 
+/// What to do next while a resume command's session picker is up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Picking {
+    /// The picker has not rendered yet, or its list is still settling; look again.
+    Wait,
+    /// The search box does not show the query; (re)type it.
+    Search,
+    /// The target row is listed but another row is highlighted; move down.
+    Down,
+    /// The highlighted row is the one to open; press Enter.
+    Select,
+    /// The picker has closed after Enter.
+    Closed,
+}
+
+/// A row the search should find: the query typed into the search box and the code word the row shows. [`pick`] takes
+/// them as typed; [`picking_step`] compares their lowercased forms with the lowercased screen.
+#[derive(Clone, Copy, Debug)]
+struct PickTarget<'a> {
+    query: &'a str,
+    word: &'a str,
+}
+
+/// Decide the next picker action from one lowercased screen sample, with `target` lowercased too. Enter waits until
+/// the highlighted row shows the target's word: a fuzzy search can list a near match above it, and Enter on that would
+/// open the wrong conversation. The search box's own echo also contains the word, so that line never counts as a row.
+fn picking_step(
+    screen: &str,
+    title: &str,
+    highlight: &[&str],
+    target: PickTarget<'_>,
+    entered: bool,
+) -> Picking {
+    if !screen.contains(title) {
+        return if entered {
+            Picking::Closed
+        } else {
+            Picking::Wait
+        };
+    }
+    let echo = format!("> {}", target.query);
+    if !screen.contains(&echo) {
+        return Picking::Search;
+    }
+    let mut listed = false;
+    for line in screen.lines() {
+        if !line.contains(target.word) || line.contains(&echo) {
+            continue;
+        }
+        let highlighted = highlight.iter().any(|marker| {
+            line.find(marker)
+                .is_some_and(|at| line[at..].contains(target.word))
+        });
+        if highlighted {
+            return Picking::Select;
+        }
+        listed = true;
+    }
+    if listed { Picking::Down } else { Picking::Wait }
+}
+
+/// What to do next while emptying a composer that a fork picker refilled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Clearing {
+    /// The copied message has not shown yet; look again.
+    Wait,
+    /// The copy is (or was) there and has not gone; send the clear keys when due.
+    Clear,
+    /// The copy's count fell below the most seen after a clear was sent: the composer no longer holds it.
+    Cleared,
+}
+
+/// Follows how often the copied message shows across samples. The copy must be seen before a clear counts, so a refill
+/// that lands after an early clear cannot be missed, and the count must fall below the most seen rather than reach zero,
+/// because the fork's own history can hold the same text.
+#[derive(Clone, Copy, Debug, Default)]
+struct CopyWatch {
+    most: usize,
+    sent: bool,
+}
+
+impl CopyWatch {
+    /// Decide from the copy's count on one lowercased screen sample.
+    fn observe(&mut self, count: usize) -> Clearing {
+        if self.sent && count < self.most {
+            return Clearing::Cleared;
+        }
+        self.most = self.most.max(count);
+        if self.most > 0 {
+            Clearing::Clear
+        } else {
+            Clearing::Wait
+        }
+    }
+
+    /// Record that the clear keys went out, after which a fall in the count is their effect.
+    fn sent(&mut self) {
+        self.sent = true;
+    }
+}
+
 /// One sample of the session row, reduced to what the rotation checks compare.
 #[derive(Clone, Copy, Debug)]
 struct Capture<'a> {
@@ -271,6 +527,14 @@ impl<'a> Capture<'a> {
         let conversation = self.conversation?;
         let selector = self.selector?;
         (self.offer == RestartOffer::Resume && previous != Some(selector)).then_some(conversation)
+    }
+
+    /// Whether Restart would resume the conversation whose resume target is `target`. A resume returns to a target
+    /// the session already had, so unlike [`Capture::rotated_from`] the target must match rather than move. The row
+    /// targets another conversation when the resume command runs, and a row moves only through a committed report, so
+    /// a match is itself the evidence that the vendor reported the switch.
+    fn returned_to(&self, target: &str) -> bool {
+        self.offer == RestartOffer::Resume && self.selector == Some(target)
     }
 
     /// Whether the row still offers to resume the conversation whose hook runtime ID is `runtime`.
@@ -318,6 +582,20 @@ fn seed_prompt(code_word: &str) -> String {
 /// witness. The base category's spelled-out prefix (`R E C A L L`) was answered literally as `R-E-C-A-L-L-…` by Claude
 /// Haiku on 2026-11-27, after a correct resume; the named-conversation category's wording avoids that.
 const ROTATION_RECALL_PROMPT: &str = "Reply RECALL- then my test label. No spaces or tools.";
+
+/// A fork holds the parent's label as well as its own, so the recall names which one. Only the fork was told the newest
+/// label; a resumed parent could only answer with the old one.
+const FORK_RECALL_PROMPT: &str = "Reply RECALL- then my newest test label. No spaces or tools.";
+
+impl Operation {
+    /// The recall prompt after Restart.
+    fn recall_prompt(self) -> &'static str {
+        match self {
+            Operation::Fresh | Operation::Resume(_) => ROTATION_RECALL_PROMPT,
+            Operation::Fork(_) => FORK_RECALL_PROMPT,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The shared driver
@@ -579,7 +857,231 @@ async fn run_command(
     }
 }
 
-/// Run the command and its pinned pre-prompt check.
+/// Drive a resume command's session picker until Enter closes it: type the target's query, move the highlight to the
+/// row showing its word, and press Enter. Keys repeat only after [`KEY_RETRY`], for the same reason as
+/// [`run_command`]'s. A repeated Enter that lands after the picker closed reaches the composer a resume leaves empty,
+/// unlike a fork picker's (see [`FORK_ENTER_RETRY`]).
+async fn pick(
+    term: &mut Terminal<'_>,
+    command: &str,
+    picker: &ResumePicker,
+    target: PickTarget<'_>,
+) -> DriftResult {
+    let (query, word) = (target.query.to_lowercase(), target.word.to_lowercase());
+    let lowered = PickTarget {
+        query: &query,
+        word: &word,
+    };
+    let deadline = tokio::time::Instant::now() + COMMAND_LIMIT;
+    let mut sent: Option<tokio::time::Instant> = None;
+    let mut entered = false;
+    // Whether the title ever showed, so a timeout can tell a picker that never opened from one that never closed.
+    let mut opened = false;
+    loop {
+        let screen = term.host.screen_tail(SCREEN_BYTES).to_lowercase();
+        term.check(&screen, true).await?;
+        opened |= screen.contains(picker.title);
+        let due = sent.is_none_or(|at| at.elapsed() >= KEY_RETRY);
+        let keys: Option<&[u8]> =
+            match picking_step(&screen, picker.title, picker.highlight, lowered, entered) {
+                Picking::Closed => {
+                    println!("{command}: the picker closed on the chosen row");
+                    return Ok(());
+                }
+                Picking::Search if due => Some(target.query.as_bytes()),
+                Picking::Down if due => Some(b"\x1b[B"),
+                Picking::Select if due => {
+                    entered = true;
+                    Some(b"\r")
+                }
+                Picking::Wait | Picking::Search | Picking::Down | Picking::Select => None,
+            };
+        if let Some(keys) = keys {
+            term.client.send_keys(term.channel, keys.to_vec()).await;
+            sent = Some(tokio::time::Instant::now());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let state = match (opened, entered) {
+                (false, _) => "the picker never opened",
+                (true, false) => "Enter not pressed",
+                (true, true) => "Enter pressed",
+            };
+            return Err(anyhow::anyhow!(
+                "the {command} picker {:?} never closed on the {} row ({state})\n{}",
+                picker.title,
+                target.word,
+                term.diagnostics()
+            )
+            .into());
+        }
+        pace().await;
+    }
+}
+
+/// How long a fork picker waits after Enter before it presses Enter again. Longer than [`KEY_RETRY`] because a late
+/// Enter is not harmless here: once Pi's picker closes, the composer holds the copied message, and an Enter landing
+/// then would submit it as an unplanned turn in the fork. A picker closes locally, without a model turn, so a picker
+/// still open this long after Enter means the key was lost.
+const FORK_ENTER_RETRY: Duration = Duration::from_secs(6);
+
+/// After a fork command: take the row its picker opened on (where it has one), wait for the vendor's notice that the
+/// fork exists, and empty the composer if the picker refilled it. `notices_before` counts the notice on the screen
+/// sampled before the command, so vendor text from an earlier fork cannot stand in for this one. `copied` is the
+/// latest prompt of the conversation being forked, which Pi's picker opens on and puts back into the composer.
+async fn settle_fork(
+    term: &mut Terminal<'_>,
+    command: &str,
+    fork: &Fork,
+    notices_before: usize,
+    copied: &str,
+) -> DriftResult {
+    let deadline = tokio::time::Instant::now() + COMMAND_LIMIT;
+    let mut entered: Option<tokio::time::Instant> = None;
+    let mut opened = false;
+    loop {
+        let screen = term.host.screen_tail(SCREEN_BYTES).to_lowercase();
+        term.check(&screen, true).await?;
+        // The notice, not the picker's title going away, ends this phase: it is the vendor saying the session is in
+        // the fork, which is what the seed needs, and it also stops the Enter retry below at the earliest evidence.
+        if screen.matches(fork.notice).count() > notices_before {
+            println!("{command}: the vendor reported the fork");
+            break;
+        }
+        if let Some(picker) = fork.picker
+            && screen.contains(picker.title)
+        {
+            opened = true;
+            if entered.is_none_or(|at| at.elapsed() >= FORK_ENTER_RETRY) {
+                term.client.send_keys(term.channel, b"\r".to_vec()).await;
+                entered = Some(tokio::time::Instant::now());
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let state = match (fork.picker, opened, entered) {
+                (None, ..) => "",
+                (Some(_), false, _) => " (the fork picker never opened)",
+                (Some(_), true, None) => " (Enter not pressed in the fork picker)",
+                (Some(_), true, Some(_)) => " (Enter pressed in the fork picker)",
+            };
+            return Err(anyhow::anyhow!(
+                "the fork notice {:?} never appeared after {command}{state}\n{}",
+                fork.notice,
+                term.diagnostics()
+            )
+            .into());
+        }
+        pace().await;
+    }
+    match fork.picker {
+        Some(picker) => clear_copied(term, command, &picker, copied).await,
+        None => Ok(()),
+    }
+}
+
+/// Empty the composer a fork picker refilled with `copied`, and show that it is empty: a seed typed after the copied
+/// message would be submitted as one message with it. [`CopyWatch`] decides from the screen; the clear repeats at
+/// [`KEY_RETRY`] until it reports the copy gone, since a lost keystroke would otherwise leave the copy in place.
+async fn clear_copied(
+    term: &mut Terminal<'_>,
+    command: &str,
+    picker: &ForkPicker,
+    copied: &str,
+) -> DriftResult {
+    let copied = copied.to_lowercase();
+    let deadline = tokio::time::Instant::now() + COMMAND_LIMIT;
+    let mut watch = CopyWatch::default();
+    let mut sent: Option<tokio::time::Instant> = None;
+    loop {
+        let screen = term.host.screen_tail(SCREEN_BYTES).to_lowercase();
+        term.check(&screen, true).await?;
+        match watch.observe(screen.matches(copied.as_str()).count()) {
+            Clearing::Cleared => {
+                println!("{command}: the composer no longer holds the copied message");
+                return Ok(());
+            }
+            Clearing::Clear if sent.is_none_or(|at| at.elapsed() >= KEY_RETRY) => {
+                term.client
+                    .send_keys(term.channel, picker.clear.to_vec())
+                    .await;
+                watch.sent();
+                sent = Some(tokio::time::Instant::now());
+            }
+            Clearing::Clear | Clearing::Wait => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let reason = if sent.is_none() {
+                "the fork never put the copied message back in the composer (if the vendor stopped doing that, its \
+                 descriptor's clear step is obsolete)"
+            } else {
+                "the composer still holds the copied message after the clear keys"
+            };
+            return Err(anyhow::anyhow!("{reason} after {command}\n{}", term.diagnostics()).into());
+        }
+        pace().await;
+    }
+}
+
+/// After a resume, wait until Restart would resume the first conversation again. Pi and OMP report the switch as it
+/// happens, with the file already saved, so no prompt is needed. `previous` is the resume target before the command,
+/// which a timeout compares against to say whether the row stayed, moved elsewhere, or lost its target.
+async fn wait_for_return(
+    term: &mut Terminal<'_>,
+    env: &DriftEnv<'_>,
+    id: &str,
+    log: &Path,
+    origin: &Origin,
+    previous: &str,
+) -> Result<SessionSnapshot, DriftError> {
+    let deadline = tokio::time::Instant::now() + START_LIMIT;
+    loop {
+        term.check(&term.host.screen_tail(SCREEN_BYTES).to_lowercase(), true)
+            .await?;
+        let snapshot = sample(env, id).await?;
+        let capture = Capture::of(&snapshot);
+        if capture.returned_to(&origin.selector) {
+            return Ok(snapshot);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let target = match capture.selector {
+                Some(selector) if selector == previous => "still the conversation the resume left",
+                Some(selector) if selector == origin.selector => {
+                    "the first conversation, but not resumable"
+                }
+                Some(_) => "a conversation other than the first",
+                None => "absent",
+            };
+            return Err(anyhow::anyhow!(
+                "the capture never returned to the first conversation (offer {:?}, resume target {target})\n{}\n\
+                 hook log tail:\n{}",
+                capture.offer,
+                term.diagnostics(),
+                log_tail(log)
+            )
+            .into());
+        }
+        pace().await;
+    }
+}
+
+/// The conversation the session's first seed turn created, which a resume selects: its code word, which also finds
+/// it in the picker, and the resume target the row showed for it.
+struct Origin {
+    word: String,
+    selector: String,
+}
+
+/// What the chained rotations carry from one to the next.
+struct Chain {
+    /// The session's first conversation, for a resume.
+    origin: Origin,
+    /// The row the previous step left: the first seed turn's, or the last Restart's recall turn's.
+    current: SessionSnapshot,
+    /// The last prompt submitted in the current conversation. Pi's fork picker opens on it and copies it back into
+    /// the composer, so emptying the composer means watching for this text.
+    latest_prompt: String,
+}
+
+/// Run the command, its picker or fork notice, and its pinned pre-prompt check.
 async fn rotate(
     term: &mut Terminal<'_>,
     env: &DriftEnv<'_>,
@@ -587,10 +1089,10 @@ async fn rotate(
     log: &Path,
     spec: &RotationSpec,
     rotation: &Rotation,
-    current: &SessionSnapshot,
+    chain: &Chain,
 ) -> DriftResult {
     let command = rotation.command;
-    let before = Capture::of(current);
+    let before = Capture::of(&chain.current);
     let (Some(conversation), Some(previous)) = (before.conversation, before.selector) else {
         return Err(anyhow::anyhow!(
             "no resumable conversation to rotate away from with {command}"
@@ -599,12 +1101,37 @@ async fn rotate(
     };
     let previous_runtime = reported_runtime_identity(conversation);
     wait_until_at_rest(term, env, id, spec).await?;
+    // Only a fork reads this baseline, but it has to be sampled before the command runs.
+    let notices_before = match rotation.operation {
+        Operation::Fork(fork) => term
+            .host
+            .screen_tail(SCREEN_BYTES)
+            .to_lowercase()
+            .matches(fork.notice)
+            .count(),
+        Operation::Fresh | Operation::Resume(_) => 0,
+    };
     run_command(term, spec, rotation).await?;
+    match rotation.operation {
+        Operation::Fresh => {}
+        Operation::Fork(fork) => {
+            settle_fork(term, command, &fork, notices_before, &chain.latest_prompt).await?;
+        }
+        Operation::Resume(picker) => {
+            let query = picker.search.query(&chain.origin.word);
+            let target = PickTarget {
+                query: &query,
+                word: &chain.origin.word,
+            };
+            pick(term, command, &picker, target).await?;
+        }
+    }
     match rotation.before_prompt {
-        // No readiness wait follows the command here, and that is deliberate. Nothing observable says these vendors
-        // have finished switching: their reports wait for the next prompt, and the at-rest check above reads a status
-        // and running-turn markers that no turn changes during a slash command, so repeating it would prove nothing
-        // about the switch. A prompt typed into a vendor still switching cannot pass falsely: a redraw that wipes its
+        // A fork and a resume waited above for the vendor's own evidence that it switched. After a fresh rotation no
+        // readiness wait follows the command, and that is deliberate. Nothing observable says these vendors have
+        // finished switching: their reports wait for the next prompt, and the at-rest check above reads a status and
+        // running-turn markers that no turn changes during a slash command, so repeating it would prove nothing about
+        // the switch. A prompt typed into a vendor still switching cannot pass falsely: a redraw that wipes its
         // echo fails `type_text`, and a prompt that lands in the old conversation leaves the resume target unchanged,
         // which `wait_for_capture` reports. Either failure after a rotation command can be this race rather than drift.
         BeforePrompt::Unspecified => Ok(()),
@@ -684,16 +1211,23 @@ fn confirm(rotation: &Rotation, rotated: &SessionSnapshot, text: &str) -> DriftR
     Ok(())
 }
 
-/// Stop, drain the reports, Restart, and require the resumed agent to recall `code_word` under the rotated resume
-/// arguments, with a fresh accepted report on the new generation. Returns the resumed terminal and row, the starting
-/// point of the next rotation.
+/// What the resumed agent is asked after Restart, and the code word its answer must carry.
+#[derive(Clone, Copy, Debug)]
+struct Recall<'w> {
+    word: &'w str,
+    prompt: &'static str,
+}
+
+/// Stop, drain the reports, Restart, and require the resumed agent to answer the recall prompt with its code word
+/// under the rotated resume arguments, with a fresh accepted report on the new generation. Returns the resumed
+/// terminal and row, the starting point of the next rotation.
 async fn restart_and_recall<'a>(
     env: &DriftEnv<'a>,
     profile: &Harness,
     id: &str,
     log: &Path,
     rotated: &SessionSnapshot,
-    code_word: &str,
+    recall: Recall<'_>,
     hook_witness: HookWitness,
 ) -> Result<(Terminal<'a>, SessionSnapshot), DriftError> {
     // Listing observes the stopped row but does not apply reports. Drain them before taking the baseline so Restart
@@ -721,7 +1255,7 @@ async fn restart_and_recall<'a>(
     }
     let mut term = Terminal::attach(env.sup, env.client, id, true).await?;
     term.ready(profile, TrustPolicy::AutoAnswer, true).await?;
-    let reply = format!("RECALL-{code_word}");
+    let reply = format!("RECALL-{}", recall.word);
     let expected = TurnExpectation {
         reply: &reply,
         acked_before,
@@ -744,14 +1278,15 @@ async fn restart_and_recall<'a>(
         )
         .into());
     }
-    term.type_text(ROTATION_RECALL_PROMPT, true).await?;
+    term.type_text(recall.prompt, true).await?;
     term.client.send_keys(term.channel, b"\r".to_vec()).await;
     let recalled = wait_for_turn(&mut term, env.sup, id, log, &expected).await?;
     Ok((term, recalled))
 }
 
 /// The whole lifecycle in one session: an optional startup capture, a seed turn, then each rotation with its pinned
-/// checks, a seed in the new conversation, and Restart with recall.
+/// checks, the new conversation's proof (a seed turn, or a resume's return to the first conversation), and Restart
+/// with recall.
 async fn rotate_session<'a>(
     env: &DriftEnv<'a>,
     profile: &Harness,
@@ -766,45 +1301,74 @@ async fn rotate_session<'a>(
         startup_capture(&mut term, env, id, &log, source).await?;
         println!("captured a `{source}` report before the first prompt");
     }
-    let mut current = seed(
+    let first_word = code_word();
+    let first = seed(
         &mut term,
         env,
         id,
         &log,
-        &code_word(),
+        &first_word,
         hook_witness,
         None,
         false,
     )
     .await?;
+    let mut chain = Chain {
+        origin: Origin {
+            selector: Capture::of(&first)
+                .selector
+                .expect("an accepted seed turn has a resume target")
+                .to_owned(),
+            word: first_word.clone(),
+        },
+        current: first,
+        latest_prompt: seed_prompt(&first_word),
+    };
     for rotation in spec.rotations {
         let command = rotation.command;
-        rotate(&mut term, env, id, &log, spec, rotation, &current).await?;
-        let word = code_word();
-        let previous = Capture::of(&current).selector;
-        let rotated = seed(
-            &mut term,
-            env,
-            id,
-            &log,
-            &word,
-            hook_witness,
-            previous,
-            true,
-        )
-        .await?;
-        println!("{command}: the next turn committed a different conversation");
+        rotate(&mut term, env, id, &log, spec, rotation, &chain).await?;
+        let previous = Capture::of(&chain.current).selector;
+        let (rotated, word) = match rotation.operation {
+            Operation::Fresh | Operation::Fork(_) => {
+                let word = code_word();
+                let rotated = seed(
+                    &mut term,
+                    env,
+                    id,
+                    &log,
+                    &word,
+                    hook_witness,
+                    previous,
+                    true,
+                )
+                .await?;
+                println!("{command}: the next turn committed a different conversation");
+                (rotated, word)
+            }
+            Operation::Resume(_) => {
+                let previous = previous.expect("`rotate` refused a row without a resume target");
+                let returned =
+                    wait_for_return(&mut term, env, id, &log, &chain.origin, previous).await?;
+                println!("{command}: the first conversation was captured again before any prompt");
+                (returned, chain.origin.word.clone())
+            }
+        };
         // The `source` check runs after Restart on purpose: a relabelled `source` is vendor drift Farhelm does not act
         // on, so it must not hide whether the user-visible contract (Restart resumes the rotated conversation) still
         // holds. It judges the log as it stands right after that turn, though, so the resumed launch's own reports
         // cannot supply the source the rotation's report lacked.
         let rotated_log = read_log(&log);
+        let recall = Recall {
+            word: &word,
+            prompt: rotation.operation.recall_prompt(),
+        };
         let (resumed_term, resumed) =
-            restart_and_recall(env, profile, id, &log, &rotated, &word, hook_witness).await?;
+            restart_and_recall(env, profile, id, &log, &rotated, recall, hook_witness).await?;
         println!("{command}: Restart resumed the rotated conversation and recalled its word");
         confirm(rotation, &rotated, &rotated_log)?;
         term = resumed_term;
-        current = resumed;
+        chain.current = resumed;
+        chain.latest_prompt = recall.prompt.to_owned();
     }
     Ok(())
 }
@@ -917,6 +1481,169 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A resume proves something only when it leaves a conversation for an earlier one, and it finds that one by the
+    /// first conversation's word, which a fork also carries in its opening message. A reordered chain would either
+    /// resume the conversation the session is already in or face two rows with the same text. Specified: Pi and OMP
+    /// each cover `/new`, `/resume` and `/fork`; in every spec a resume comes after a fresh rotation and before any
+    /// fork; and every picker string the driver matches against the lowercased screen is lowercase.
+    #[farhelm_testtrace::test]
+    fn a_resume_follows_a_new_conversation_and_precedes_any_fork() {
+        for harness in LaunchHarness::ALL.iter().copied() {
+            let Some(spec) = rotation_spec(harness) else {
+                continue;
+            };
+            let mut fresh_seen = false;
+            let mut fork_seen = false;
+            for rotation in spec.rotations {
+                match rotation.operation {
+                    Operation::Fresh => fresh_seen = true,
+                    Operation::Fork(fork) => {
+                        fork_seen = true;
+                        assert_eq!(fork.notice, fork.notice.to_lowercase(), "{harness:?}");
+                        if let Some(picker) = fork.picker {
+                            assert_eq!(picker.title, picker.title.to_lowercase());
+                        }
+                    }
+                    Operation::Resume(picker) => {
+                        assert!(fresh_seen && !fork_seen, "{harness:?} {rotation:?}");
+                        assert_eq!(picker.title, picker.title.to_lowercase());
+                        for marker in picker.highlight {
+                            assert_eq!(*marker, marker.to_lowercase());
+                        }
+                    }
+                }
+            }
+        }
+        for harness in [LaunchHarness::Pi, LaunchHarness::Omp] {
+            let commands: Vec<_> = rotation_spec(harness)
+                .unwrap()
+                .rotations
+                .iter()
+                .map(|rotation| rotation.command)
+                .collect();
+            assert_eq!(commands, ["/new", "/resume", "/fork"], "{harness:?}");
+        }
+    }
+
+    /// Enter in a session picker opens whatever row is highlighted, so a fuzzy near match above the target would
+    /// silently resume the wrong conversation; and the search box echoes the word, so it must not read as a row.
+    /// Specified, on screens shaped like Pi 1.6.1's and OMP 19.2.1's: no title means wait, or closed once Enter was
+    /// pressed; an open picker without the query echoed asks for the query; a highlighted target row selects; a listed
+    /// target under another highlighted row moves down; and an echo alone or an empty list waits.
+    #[farhelm_testtrace::test]
+    fn a_session_picker_opens_only_the_highlighted_target_row() {
+        let title = "resume session (current folder)";
+        let pi = &["› "][..];
+        let omp = &["\u{f054} "][..];
+        let phrase = PickTarget {
+            query: "\"fhaaaa1111\"",
+            word: "fhaaaa1111",
+        };
+        let fuzzy = PickTarget {
+            query: "fhaaaa1111",
+            word: "fhaaaa1111",
+        };
+
+        let history =
+            "remember test label fhbbbb2222. reply with only that label. no tools.\n fhbbbb2222\n";
+        assert_eq!(
+            picking_step(history, title, pi, phrase, false),
+            Picking::Wait
+        );
+        assert_eq!(
+            picking_step(history, title, pi, phrase, true),
+            Picking::Closed
+        );
+
+        let open = format!(
+            "{history}resume session (current folder)   ◉ current folder | ○ all\n\
+             tab scope · re:<pattern> regex · \"phrase\" exact\n>\n\
+             › remember test label fhbbbb2222. reply with only that label. no tools.   3 now\n"
+        );
+        assert_eq!(
+            picking_step(&open, title, pi, phrase, false),
+            Picking::Search
+        );
+        let found = format!(
+            "{history}resume session (current folder)\n> \"fhaaaa1111\"\n\
+             › remember test label fhaaaa1111. reply with only that label. no tools.   3 1m\n"
+        );
+        assert_eq!(
+            picking_step(&found, title, pi, phrase, false),
+            Picking::Select
+        );
+        let filtering = format!("{history}resume session (current folder)\n> \"fhaaaa1111\"\n");
+        assert_eq!(
+            picking_step(&filtering, title, pi, phrase, false),
+            Picking::Wait
+        );
+
+        let near_match = "╭─ resume session (current folder) ─╮\n│ > fhaaaa1111\n\
+             │ \u{f054} remember test label fh0a1a2a3a. reply with only that label. no tools.\n\
+             │   just now  ·  4.2kb  ·  current\n\
+             │   remember test label fhaaaa1111. reply with only that label. no tools.\n\
+             │   just now  ·  4.1kb\n";
+        assert_eq!(
+            picking_step(near_match, title, omp, fuzzy, false),
+            Picking::Down
+        );
+        let moved = "╭─ resume session (current folder) ─╮\n│ > fhaaaa1111\n\
+             │   remember test label fh0a1a2a3a. reply with only that label. no tools.\n\
+             │ \u{f054} remember test label fhaaaa1111. reply with only that label. no tools.\n";
+        assert_eq!(
+            picking_step(moved, title, omp, fuzzy, true),
+            Picking::Select
+        );
+        let none = "╭─ resume session (current folder) ─╮\n│ > fhaaaa1111\n\
+             │ no sessions in current folder. press tab to view all.\n";
+        assert_eq!(picking_step(none, title, omp, fuzzy, false), Picking::Wait);
+    }
+
+    /// A resume must leave Restart opening the first conversation again; a row still on the second one, or on any
+    /// other, means the switch was not reported. Specified: a resumable row targeting the first conversation has
+    /// returned; another target or a withdrawn offer has not.
+    #[farhelm_testtrace::test]
+    fn a_resume_returns_only_to_a_resumable_first_target() {
+        assert!(
+            capture(Some("pi:1"), RestartOffer::Resume, Some("/s/1.jsonl"))
+                .returned_to("/s/1.jsonl")
+        );
+        assert!(
+            !capture(Some("pi:2"), RestartOffer::Resume, Some("/s/2.jsonl"))
+                .returned_to("/s/1.jsonl")
+        );
+        assert!(!capture(Some("pi:1"), RestartOffer::NotCaptured, None).returned_to("/s/1.jsonl"));
+    }
+
+    /// Pi refills the composer with the message it forked at, and a seed typed beside it would be sent as one message
+    /// with it, while a clear sent before the refill would leave the refill in place. Specified: no copy seen waits;
+    /// a copy seen asks for the clear; a fall in the count before any clear was sent is not taken as cleared; after a
+    /// clear, a count rising past what was seen (a late refill beside the same text in history) keeps clearing, and a
+    /// count falling below the most seen is cleared.
+    #[farhelm_testtrace::test]
+    fn a_refilled_composer_counts_as_empty_only_after_its_copy_is_seen_and_falls() {
+        let mut watch = CopyWatch::default();
+        assert_eq!(watch.observe(0), Clearing::Wait);
+        assert_eq!(watch.observe(1), Clearing::Clear);
+        assert_eq!(
+            watch.observe(0),
+            Clearing::Clear,
+            "no clear was sent yet, so this fall is not its effect"
+        );
+        watch.sent();
+        assert_eq!(watch.observe(1), Clearing::Clear);
+        assert_eq!(watch.observe(2), Clearing::Clear, "a late refill");
+        assert_eq!(watch.observe(1), Clearing::Cleared);
+
+        let mut empty = CopyWatch::default();
+        empty.sent();
+        assert_eq!(
+            empty.observe(0),
+            Clearing::Wait,
+            "a clear sent before any copy proves nothing"
+        );
     }
 
     fn clear() -> Rotation {
@@ -1081,13 +1808,14 @@ mod tests {
     }
 
     /// Each witness must come from the model, never from text the test typed or an earlier turn showed. Specified:
-    /// the echoed seed and recall prompts contain no line that reads as either reply, while the replies themselves do.
+    /// the echoed seed and both recall prompts contain no line that reads as either reply, while the replies
+    /// themselves do.
     #[farhelm_testtrace::test]
     fn the_prompt_echoes_cannot_supply_their_own_replies() {
         let word = "FH1A2B3C4D";
         let recall = format!("RECALL-{word}");
         let echo = format!(
-            "❯ {}\n› {ROTATION_RECALL_PROMPT}\n{ROTATION_RECALL_PROMPT}\n",
+            "❯ {}\n› {ROTATION_RECALL_PROMPT}\n{ROTATION_RECALL_PROMPT}\n{FORK_RECALL_PROMPT}\n› {FORK_RECALL_PROMPT}\n",
             seed_prompt(word)
         );
         assert!(!reply_on_screen(&echo, word));
