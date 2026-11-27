@@ -7,7 +7,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing e7101e] `remove-legacy-sandbox-sessions-api.md` — Remove the unused legacy `POST /api/sandbox-sessions` helm endpoint and migrate its tests to `/api/environment-sessions`
 - [landing 0d53fd] `restart-startup-scope-cleanup.md` — Clean the scope and shut down an unheld answering replacement host during Linux supervisor startup pending-scope cleanup
 - [landing 085162] `brick-test-inline-welcome.md` — Update macOS release brick-test instructions and unit tests for the inline Welcome view
-- [complete] `claude-drift-trust-copy-back.md` — Add an atomic-rename regression test proving Claude drift copy-back never overwrites real ancestor trust
+- [landing ba53b3] `claude-drift-trust-copy-back.md` — Add an atomic-rename regression test proving Claude drift copy-back never overwrites real ancestor trust
 - [complete] `settings-save-close-delete-prompt.md` — Document Settings Save-and-Close dismissing unanswered inline Delete confirmations and align Recipes' Back/Cancel leave prompt
 - [in-flight 3d1b8e] `helm-replace-refuse-destination-change.md` — Make the helm Replace API refuse destination folder changes and fresh managed checkouts
 - [complete] `shell-tab-first-close-sweep-backoff.md` — Apply the existing 1 s to 60 s retry backoff when an exited shell tab's first automatic close sweep fails
