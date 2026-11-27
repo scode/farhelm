@@ -477,9 +477,10 @@ async fn initial_prompt_create_relay_preserves_literal_message() {
     );
 }
 
-/// Delete reaches the owning helm with its explicit target and consent,
-/// and its checkout notice survives both relay hops. A self-delete is refused
-/// locally before the helm is asked, avoiding its own retained request fence.
+/// Delete reaches the owning helm with its explicit target and consent, and its
+/// Delete notice (a leftover checkout here) survives both relay hops. A
+/// self-delete is refused locally before the helm is asked, avoiding its own
+/// retained request fence.
 #[farhelm_testtrace::test]
 async fn agent_delete_relay_preserves_consent_and_refuses_self() {
     let h = harness().await;

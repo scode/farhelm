@@ -3068,18 +3068,20 @@ async fn agent_delete(
                 .await
         }
     }?;
-    // A checkout the Delete left on disk is the user's to deal with, not only
-    // the asking agent's: the agent's reply can arrive after its supervisor
-    // stopped waiting, and the agent may say nothing. So the warning always
-    // reaches the notices bell as well, the way a client Delete's does once its
-    // reply deadline passes. A failure to record it does not undo the Delete.
+    // Whatever the Delete warns about (a checkout it left on disk, a Podman
+    // container whose stop it could not confirm) is the user's to deal with,
+    // not only the asking agent's: the agent's reply can arrive after its
+    // supervisor stopped waiting, and the agent may say nothing. So every such
+    // warning reaches the notices bell as well, the way a client Delete's does
+    // once its reply deadline passes. A failure to record it does not undo the
+    // Delete.
     if let Some(detail) = outcome.notice.clone()
         && let Err(error) = state
             .store
             .record_late_delete(target.clone(), detail, Arc::clone(state.manager.events()))
             .await
     {
-        tracing::warn!(%error, "could not record the agent Delete's checkout notice");
+        tracing::warn!(%error, "could not record the agent Delete's notice");
     }
     Ok(AgentReply::Deleted { outcome })
 }
@@ -8363,9 +8365,10 @@ mod tests {
         );
     }
 
-    /// The notices bell holds `detail` as a Delete's leftover-checkout notice
-    /// for `host`: the agent's reply is not the only place it lands, since the
-    /// asking agent may never pass it on to the user.
+    /// The notices bell holds `detail` as a Delete's cleanup notice for `host`
+    /// (a leftover checkout or an unconfirmed container stop): the agent's reply
+    /// is not the only place it lands, since the asking agent may never pass it
+    /// on to the user.
     async fn assert_late_delete_notice(h: &Harness, host: HostId, detail: &str) {
         let notices = h.store.notices().await.unwrap().notices;
         assert!(
