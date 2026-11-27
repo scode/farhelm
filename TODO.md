@@ -101,6 +101,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the main agent, the current default behavior is to kill the entire session. Let's give a warning to the user, even if
   they otherwise have disabled the confirmation dialog, if there are other Terminal tabs, then we still give a warning.
 
+- **Blocked notify should also go red-active and ring the bell.** When an agent reported being blocked with
+  `farhelm agent notify`, it generated the ntfy notifications, but did NOT generate a "red active" and bell like when
+  the question tool is used. It should have generated both. Fix that, and overall talk about related tweaks during
+  planning.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
