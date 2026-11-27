@@ -209,7 +209,9 @@ impl Supervisor {
     /// otherwise. The other arguments are
     /// `relaunch_into_terminal`'s:
     /// the selected launch and its snapshot, the claimed generation and its
-    /// scope, the resume argv, the verified working directory, and the tab
+    /// scope, the argv and which of the launch's commands it is (the resume
+    /// command, or the start command when Claude saved no conversation), the
+    /// verified working directory, and the tab
     /// strip read before anything happened, which a new agent host leaves
     /// as it was. `seed` is `old`'s history and size, read before the
     /// generation was claimed ([`Self::restart_seed`]); without one the new
@@ -227,6 +229,7 @@ impl Supervisor {
         generation: i64,
         scope: Option<String>,
         argv: Vec<String>,
+        phase: crate::agent_kind::LaunchPhase,
         launch_cwd: String,
         tabs: Vec<TabInfo>,
         seed: Option<RestartSeed>,
@@ -264,11 +267,14 @@ impl Supervisor {
                 &session_token,
                 generation,
                 argv,
-                ShellSource::of(launch, crate::agent_kind::LaunchPhase::Resume),
+                // The phase picks a command launch's shell source to match
+                // `argv`: its resume command text, or its start command text
+                // for a restart that starts fresh.
+                ShellSource::of(launch, phase),
                 // The session's own snapshot: the kind the session was
                 // created with decides the hook flags.
                 snapshot,
-                FarhelmArgsMode::of(launch, crate::agent_kind::LaunchPhase::Resume),
+                FarhelmArgsMode::of(launch, phase),
                 &launch_cwd,
                 cols,
                 rows,
@@ -1461,6 +1467,7 @@ mod tests {
                     setup_persistent_hooks: false,
                     clear_capture: false,
                     argv: vec!["sh".into(), "-c".into(), "exit 0".into()],
+                    phase: crate::agent_kind::LaunchPhase::Resume,
                     launch_cwd: state.path().to_string_lossy().into_owned(),
                     restart_with: None,
                     seed: None,

@@ -478,7 +478,7 @@ async fn nested_report(
 /// a repeated callback's markers can be found before it ran. A test that
 /// repeats a callback for one id therefore also waits on the hook log, which
 /// gains one line per run.
-async fn write_hook_report_client(
+pub(crate) async fn write_hook_report_client(
     client: &SupervisorClient,
     chan: u32,
     rx: &mut TermStream,

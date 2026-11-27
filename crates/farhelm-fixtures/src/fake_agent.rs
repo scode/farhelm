@@ -1058,8 +1058,13 @@ fn record_agent(
             // starting with `report ` as ordinary prompt text — those
             // fixtures' contract with their tests must not shift because a
             // sibling script grew a command.
+            (line, _) if hook_reports && line.starts_with(REPORT_TRANSCRIPT_COMMAND) => {
+                let id = line[REPORT_TRANSCRIPT_COMMAND.len()..].trim();
+                let transcript = record_path(shape, &home, &cwd, id);
+                hook_report(shape, id, Some(&transcript), &mut out)?;
+            }
             (line, _) if hook_reports && line.starts_with(REPORT_COMMAND) => {
-                hook_report(shape, line[REPORT_COMMAND.len()..].trim(), &mut out)?;
+                hook_report(shape, line[REPORT_COMMAND.len()..].trim(), None, &mut out)?;
             }
             (line, _) if hook_reports && line.starts_with(STOP_REPORT_COMMAND) => {
                 stop_hook_report(shape, line[STOP_REPORT_COMMAND.len()..].trim(), &mut out)?;
@@ -1096,6 +1101,12 @@ fn record_agent(
 /// `tests/e2e/hook_identity.rs` too, where it shows up as a fixture that
 /// never answers rather than as a compile error.
 const REPORT_COMMAND: &str = "report ";
+
+/// [`REPORT_COMMAND`] with the vendor's `transcript_path` added to the SessionStart payload, as real Claude sends it:
+/// the path this fixture's own record for `<id>` has or would have, whether or not that record exists yet (Claude
+/// names its transcript before it writes it). Only Claude's shape sends it. Spelled again in
+/// `tests/e2e/restart_with_resume.rs`.
+const REPORT_TRANSCRIPT_COMMAND: &str = "report-transcript ";
 
 /// A current-conversation Claude Stop callback, distinct from SessionStart so
 /// tests exercise the injected command and the event's source-free payload.
@@ -1220,7 +1231,7 @@ fn report_once(shape: RecordShape, conversation: &str) -> anyhow::Result<()> {
         "NESTED-PARENT:{}",
         String::from_utf8_lossy(&name.stdout).trim()
     )?;
-    hook_report(shape, conversation, &mut out)?;
+    hook_report(shape, conversation, None, &mut out)?;
     out.flush()?;
     Ok(())
 }
@@ -1318,7 +1329,7 @@ fn product_farhelm() -> anyhow::Result<std::path::PathBuf> {
 /// The markers [`run_report_hook`] prints land above the script's own output.
 pub fn report_conversation_at_start(conversation: &str) -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
-    hook_report(RecordShape::Claude, conversation, &mut out)?;
+    hook_report(RecordShape::Claude, conversation, None, &mut out)?;
     out.flush()?;
     Ok(())
 }
@@ -1335,7 +1346,15 @@ pub fn report_conversation_at_start(conversation: &str) -> anyhow::Result<()> {
 /// The payload names the current conversation and callback. `source` belongs
 /// to SessionStart; [`stop_hook_report`] deliberately omits it for Stop.
 /// Muse includes its observed null transcript rather than inventing a file.
-fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
+///
+/// `transcript` adds Claude's `transcript_path` to the payload (see [`REPORT_TRANSCRIPT_COMMAND`]); `None` sends the
+/// payload without one, as every earlier test's reports do, so their captures stay bare ids.
+fn hook_report(
+    shape: RecordShape,
+    conversation: &str,
+    transcript: Option<&std::path::Path>,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
     if shape == RecordShape::Muse {
         let injected = injected_report_command(shape, "SessionStart")?;
         let mut command = std::process::Command::new("sh");
@@ -1363,16 +1382,15 @@ fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> 
     };
     let mut command = std::process::Command::new(&exe);
     command.args(["internal", "hook", "--vendor", vendor]);
-    run_report_hook(
-        command,
-        serde_json::json!({
-            "session_id": conversation,
-            "hook_event_name": "SessionStart",
-            "source": "startup",
-        }),
-        conversation,
-        out,
-    )
+    let mut payload = serde_json::json!({
+        "session_id": conversation,
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+    });
+    if let Some(transcript) = transcript.filter(|_| shape == RecordShape::Claude) {
+        payload["transcript_path"] = serde_json::json!(transcript);
+    }
+    run_report_hook(command, payload, conversation, out)
 }
 
 /// Run the Stop callback the supervisor actually supplied to this launch.

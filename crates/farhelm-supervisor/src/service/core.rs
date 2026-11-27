@@ -808,6 +808,13 @@ fault_hooks! {
     deleted_session_cleanup_gate: DeletedSessionCleanupGate,
     /// See [`RestartWindowGate`]. `None` in production.
     restart_window_gate: RestartWindowGate,
+    /// Called once a Restart has stopped or reaped the old agent and before it
+    /// checks whether Claude saved the conversation
+    /// (`Supervisor::restart_session_named`). Tests write the transcript from
+    /// here, which places a save after any check the Restart could have made
+    /// before the stop; the old agent's own stop handling cannot be relied on
+    /// to do it, since the sweep may end it with SIGKILL. `None` in production.
+    restart_stopped: Arc<dyn Fn() + Send + Sync>,
     /// See [`HostStartInterrupt`]. `None` in production.
     host_start_interrupt: HostStartInterrupt,
     /// Called once when a retried create's evidence finds the recorded
@@ -3729,12 +3736,16 @@ fn refuse_unconsented_stop(
 /// not [`RestartOffer::Resume`] (`ControlMsg::RestartSession`'s staleness
 /// contract).
 ///
-/// SPEC.md: Restart always preserves the conversation, and when Farhelm
-/// knows it cannot resume, Restart is unavailable "rather than starting
-/// fresh or running some other command". So there is exactly one argv this
-/// can return. The refusal is a `Conflict` naming the offer's reason,
-/// because the client's next move is to refresh and show that reason
-/// rather than to retry.
+/// SPEC.md: Restart preserves the conversation, and when Farhelm knows it
+/// cannot resume, Restart is unavailable "rather than starting fresh or running
+/// some other command". So the one argv this function returns is the resume
+/// command. Its one exception is decided elsewhere and later: a Claude session
+/// whose reported transcript does not exist once the old agent has stopped runs
+/// its start command instead (`Supervisor::restart_session_named`,
+/// `Supervisor::fresh_restart_argv`); this function still returns the resume
+/// command for it. The refusal is a `Conflict` naming the offer's reason,
+/// because the client's next move is to refresh and show that reason rather
+/// than to retry.
 ///
 /// One function for both halves deliberately: the offer and the argv are
 /// two statements of the same fact, and computing them apart is how a build
@@ -4152,6 +4163,11 @@ struct RelaunchPlan {
     /// Withdraw old capture only for a named start without subsequent reports.
     clear_capture: bool,
     argv: Vec<String>,
+    /// Which of the launch's commands `argv` is: the resume command, or the
+    /// start command when Claude saved no conversation to resume (see
+    /// `Supervisor::restart_session_named`). It selects a command launch's
+    /// shell source and the `{farhelm_args}` expansion to match.
+    phase: crate::agent_kind::LaunchPhase,
     launch_cwd: String,
     restart_with: Option<RestartWithBundle>,
     /// The new host's history seed, read from the old host before the
@@ -9047,6 +9063,33 @@ impl Supervisor {
         .await
     }
 
+    /// The start command a Restart runs instead of resuming when Claude saved
+    /// no conversation: `launch`'s start argv (Restart with's replacement, when
+    /// there is one), put through the checks a create gives it and a resume
+    /// gets before anything is stopped: custom program expansion, a command
+    /// launch's placeholder check of its command text, and the executable-argv
+    /// rule. Built before the stop, so that the start path never runs a
+    /// command nothing checked; a start command this build would refuse is
+    /// dropped there (the caller resumes as Restart did before the check
+    /// existed) rather than refusing a Restart whose conversation may be
+    /// saved.
+    fn fresh_restart_argv(&self, launch: &SessionLaunch) -> anyhow::Result<Vec<String>> {
+        let argv = launch
+            .start_argv()
+            .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        self.expand_custom_program(launch.agent_selection(), &argv)?;
+        if let SessionLaunch::Command(command) = launch {
+            farhelm_proto::command_shell::validate_command_placeholders(
+                "command",
+                &command.command,
+            )
+            .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        }
+        crate::agent_kind::ensure_executable_argv("this session's start command", &argv)
+            .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        Ok(argv)
+    }
+
     /// Admission checks this expansion before allocation or stop. Spawn applies
     /// it to the literal executable slot after the raw shell prefix.
     fn expand_custom_program(
@@ -12290,15 +12333,19 @@ impl Supervisor {
     ///    guarantee BEFORE the new launch, never alongside it (SPEC.md:
     ///    "Restart reaps leftover descendants within the containment limits
     ///    below before relaunching").
-    /// 2. Hands off to [`Supervisor::relaunch`] for everything destructive,
+    /// 2. Chooses what to run, now that nothing of the old run can still
+    ///    write: the resume command, or, for a Claude capture whose reported
+    ///    transcript does not exist, the start command prepared before the
+    ///    stop (`agent_kind::unsaved_conversation_check`).
+    /// 3. Hands off to [`Supervisor::relaunch`] for everything destructive,
     ///    on a supervisor-owned task: from the generation claim through
     ///    republication, the span must not be cancellable by the connection
     ///    that asked for it (see that method's docs).
     ///
-    /// Restart only ever resumes: a session whose CURRENT offer is not
-    /// `Resume` is refused before anything is stopped (see
-    /// [`relaunch_argv`]). The captured conversation identity is RETAINED
-    /// across the relaunch; [`SessionStore::begin_relaunch`] says why.
+    /// Restart resumes, except when Claude saved nothing (step 2): a session
+    /// whose CURRENT offer is not `Resume` is refused before anything is
+    /// stopped (see [`relaunch_argv`]). The captured conversation identity is
+    /// RETAINED across the relaunch; [`SessionStore::begin_relaunch`] says why.
     ///
     /// A replacement launch makes this Restart with. It is validated as a
     /// create would validate it, and checked against the session's stored
@@ -12583,6 +12630,39 @@ impl Supervisor {
             farhelm_proto::command_shell::validate_command_placeholders("resume command", source)
                 .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
         }
+        // Claude saves its conversation only once a prompt is submitted, so a
+        // Restart before that has nothing to resume. When its capture names
+        // the transcript Claude reported, the start command is prepared too,
+        // through the same checks, before anything is stopped; which of the
+        // two runs is decided after the stop, below. A named start runs the
+        // conversation the user chose and is never checked.
+        let unsaved_check = named_start
+            .is_none()
+            .then(|| {
+                crate::agent_kind::unsaved_conversation_check(
+                    snapshot.kind,
+                    snapshot.captured_conversation.as_deref(),
+                )
+            })
+            .flatten();
+        // A start command that fails its checks only loses the fresh option:
+        // the check may add a fresh start where resuming would fail, but must
+        // never refuse a Restart that resumed before it existed.
+        // The transcript to check, with the start command to run if it is missing.
+        let fresh_start = match unsaved_check {
+            Some(transcript) => match self.fresh_restart_argv(executable_launch) {
+                Ok(fresh) => Some((transcript, fresh)),
+                Err(error) => {
+                    warn!(
+                        session = %session_id, error = %format!("{error:#}"),
+                        "this session's start command fails its checks, so this Restart resumes \
+                         without checking whether the agent saved its conversation"
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
         // A saved transcript can live in the working directory. Refuse a
         // directory the host cannot enter before a transcript read could
         // mistake that refusal for a stale resume locator.
@@ -12723,6 +12803,28 @@ impl Supervisor {
         }
         host_restart::retire_gone_launch_records(outstanding.gone_current_records).await;
 
+        if let Some(stopped) = self.seams.faults.restart_stopped() {
+            stopped();
+        }
+        // Decided only now that the old agent's process tree is gone: nothing
+        // can create the transcript any more, so the answer is final, and a
+        // prompt Claude saved at the last moment is resumed. Never a refusal,
+        // so the rule that refusals come before the stop still holds. Only a
+        // missing file starts fresh, with no notice beyond this log line
+        // (SPEC.md, Restart).
+        let (argv, phase) = match fresh_start {
+            Some((transcript, fresh))
+                if !crate::agent_kind::conversation_saved(&transcript).await =>
+            {
+                info!(
+                    session = %session_id,
+                    "restarting with the start command: the agent saved no conversation to resume"
+                );
+                (fresh, crate::agent_kind::LaunchPhase::Start)
+            }
+            _ => (argv, crate::agent_kind::LaunchPhase::Resume),
+        };
+
         // A new host starts from the previous terminal's history, read here,
         // after the stop and before the generation is claimed, so that a
         // crash or an orderly stop while it is read leaves the session as it
@@ -12787,6 +12889,7 @@ impl Supervisor {
                     extra_instructions,
                     clear_capture,
                     argv,
+                    phase,
                     launch_cwd,
                     restart_with,
                     seed,
@@ -12857,6 +12960,7 @@ impl Supervisor {
             extra_instructions,
             clear_capture,
             argv,
+            phase,
             launch_cwd,
             restart_with,
             seed,
@@ -13012,6 +13116,7 @@ impl Supervisor {
                 claim.generation,
                 launch_scope_unit(&id, claim.generation, claim.scoped),
                 argv,
+                phase,
                 launch_cwd,
                 seed,
                 setup_persistent_hooks,
@@ -13255,6 +13360,7 @@ impl Supervisor {
         generation: i64,
         scope: Option<String>,
         argv: Vec<String>,
+        phase: crate::agent_kind::LaunchPhase,
         launch_cwd: String,
         seed: Option<host_restart::RestartSeed>,
         setup_persistent_hooks: bool,
@@ -13273,6 +13379,7 @@ impl Supervisor {
             generation,
             scope,
             argv,
+            phase,
             launch_cwd,
             tabs,
             seed,
@@ -16678,6 +16785,7 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 #[cfg(test)]
 pub(crate) mod tests {
     mod claude_pin;
+    mod claude_restart;
     pub(crate) mod host_terminals;
     mod persistent_hooks;
 
@@ -38547,6 +38655,7 @@ exit 1
                     setup_persistent_hooks: false,
                     clear_capture: false,
                     argv: vec!["sh".into(), "-c".into(), "exit 0".into()],
+                    phase: crate::agent_kind::LaunchPhase::Resume,
                     launch_cwd: "/tmp".into(),
                     restart_with: None,
                     seed: None,

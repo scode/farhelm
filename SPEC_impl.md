@@ -4558,22 +4558,22 @@ no path values are stored in the notice.
   each one; unknown versions preserve their data but refuse Resume and promotion. The deliberate Codex exception keeps
   valid `codex:` v1 tokens admitted before the column existed resumable at 0 through the existing exact-record verifier
   — bare IDs stay excluded, nothing is backfilled, and file existence or a valid header can never upgrade a version.
-  Relaunch always resumes (see "Restart only resumes"), so it preserves the capture and its provenance together; the
-  restart claim compares the version alongside the identity, so a provenance change under an unchanged conversation
-  still invalidates a stale claim. Protocol 28 introduced the required closed-enum report discriminator that the doorway
-  gates on; protocol 29 adds Grok to that closed enum together with its agent-kind and launch-harness variants. Protocol
-  65 adds Muse's agent kind and report discriminator; its launch harness already existed. Protocol 80 adds Antigravity
-  to all three vocabularies. Senders predating a required variant fail closed at decode and at the missing CLI flag
-  alike. Migration 21 adds `omp_reporter_asset` (nullable `TEXT`, identical in fresh DDL and `ALTER`): the gated
-  reporter asset's file name as installed by the session's current launch, written pre-spawn — after the launch spec
-  publishes, before its terminal host can start anything — from the one place that decides injection and fenced on the
-  launch generation, so no report of the generation can arrive ahead of its provenance. Migration 22 adds
-  `omp_launch_program` the same way: the program that launch's argv started, retained beside the marker so admission
-  classifies the current launch rather than the resume template (a future resume's command). OMP admission requires the
-  marker to name the current binary's asset with the file's bytes re-verified, so changing the asset breaks reporting
-  for every OMP session already running (see "What running sessions hold across versions"); pre-21 rows adopt `NULL` and
-  fail closed. OMP takes no Codex-style exception: every older OMP row has Restart unavailable (`not_captured`) until
-  its first proven report.
+  Relaunch keeps the capture whether it resumes or, for a Claude session that saved nothing, starts fresh (see "Restart
+  only resumes"), so it preserves the capture and its provenance together; the restart claim compares the version
+  alongside the identity, so a provenance change under an unchanged conversation still invalidates a stale claim.
+  Protocol 28 introduced the required closed-enum report discriminator that the doorway gates on; protocol 29 adds Grok
+  to that closed enum together with its agent-kind and launch-harness variants. Protocol 65 adds Muse's agent kind and
+  report discriminator; its launch harness already existed. Protocol 80 adds Antigravity to all three vocabularies.
+  Senders predating a required variant fail closed at decode and at the missing CLI flag alike. Migration 21 adds
+  `omp_reporter_asset` (nullable `TEXT`, identical in fresh DDL and `ALTER`): the gated reporter asset's file name as
+  installed by the session's current launch, written pre-spawn — after the launch spec publishes, before its terminal
+  host can start anything — from the one place that decides injection and fenced on the launch generation, so no report
+  of the generation can arrive ahead of its provenance. Migration 22 adds `omp_launch_program` the same way: the program
+  that launch's argv started, retained beside the marker so admission classifies the current launch rather than the
+  resume template (a future resume's command). OMP admission requires the marker to name the current binary's asset with
+  the file's bytes re-verified, so changing the asset breaks reporting for every OMP session already running (see "What
+  running sessions hold across versions"); pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception:
+  every older OMP row has Restart unavailable (`not_captured`) until its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
   Attribution checks apply to Claude, Codex, Muse, Grok, OMP, Antigravity and custom agents. Goose and Pi retain their
@@ -4628,6 +4628,26 @@ no path values are stored in the notice.
   Claude, which keeps it out of the Pi/OMP pre-resume verification, and `verifies_resume_target` stays false. Captures
   stored as bare IDs by older builds stay resumable unchanged. A capture that moves from a bare ID to a locator for the
   same conversation posts no notification; only the supervisor's log notes that the stored value changed.
+
+  **Restart when Claude saved nothing.** A Restart whose Claude capture names a transcript
+  (`agent_kind::unsaved_conversation_check`) prepares both commands before anything is stopped: the resume command as
+  always, and the executing launch's start command (Restart with's replacement when there is one), each through the same
+  pre-stop checks (custom program expansion, a command launch's placeholder check, the executable-argv rule). A start
+  command that fails those checks only loses the fresh option: the Restart resumes unchecked, with a warning in the
+  supervisor log, as it did before the check existed. The choice is made after the old agent's process tree has been
+  stopped or reaped, and before the restart seed is read: once nothing of the old run is left, nothing can create the
+  file, so the answer is final, and a prompt saved at the last moment is resumed. Because the check never refuses, the
+  rule that refusals come before the stop still holds. The check opens the file without following a symlink or blocking
+  on a FIFO and never reads it; only "not found" starts fresh, and any other answer resumes as before, so the check
+  cannot make a Restart that worked before start over. The relaunch carries which command it runs (`LaunchPhase`), so a
+  command launch's start text and the start expansion of `{farhelm_args}` go with the start argv; nothing re-sends an
+  initial prompt, which is never stored. The old capture is kept: the next Restart checks the same missing file and
+  starts fresh again, so the stale ID is harmless, while clearing it would leave Restart unavailable whenever the new
+  run cannot report. The new Claude reports its own conversation through the ordinary path. Named restarts and bare-ID
+  captures skip the check. The check assumes the supervisor sees Claude's filesystem: a wrapper that gives Claude a
+  different view of its home while keeping its process ancestry visible would make every Restart of a saved conversation
+  start fresh. A transcript Claude's own retention cleanup removed now starts fresh too, where Claude would have printed
+  an error.
 
   **Muse positional ownership.** Muse shares Claude's positional corridor and pinned plain-ID admission, including the
   capture claim, authoritative kind/generation reload, complete-binding-plus-pin CAS, preserved original ancestors,
@@ -9210,19 +9230,20 @@ re-added entry. A card waiting during the update may get no answer.
 ### Restart only resumes
 
 SPEC.md makes plain Restart mean resuming the session's own conversation. Named Restart with is the explicit exception
-described below; the agent relay still has no selector for a different conversation. `RestartOffer` is `resume` when the
-supervisor can fill the session's resume command with a captured conversation it accepts, and otherwise names why it
-cannot: `not_captured` for an agent type that reports conversations but has no usable identity (nothing reported yet, an
-identity from before ownership proofs, a Pi or OMP file that no longer matches), `no_conversation_reporting` for a
-session with no integration at all, and `no_resume_command` (protocol 39) for a launch with no stored resume command: a
-command launch that declared an agent type without opting into Resume, or an older agent launch from before resume
-commands were stored. `resume` kept its spelling because agents in running sessions read it; the reasons replaced
-`fresh_only` and `fallback_template`. Protocol 37 removed the `mode` field from `RestartSession` and from the agent
-relay's `Restart` verb, with `RestartMode` itself: a restart whose current offer is not `resume` is refused with a
-`Conflict` naming the reason, before anything is stopped, and the fresh relaunch of the stored invocation and the
-verbatim run of a placeholder-free resume command are gone. Since launch kinds (protocol 39) a resume command must
-contain `{conversation}`, so no new session can carry one; a legacy session that stored one keeps it, but it is never
-run.
+described below, and a Claude Restart whose reported transcript does not exist runs the start command instead (see
+"Restart when Claude saved nothing"); the agent relay still has no selector for a different conversation. `RestartOffer`
+is `resume` when the supervisor can fill the session's resume command with a captured conversation it accepts, and
+otherwise names why it cannot: `not_captured` for an agent type that reports conversations but has no usable identity
+(nothing reported yet, an identity from before ownership proofs, a Pi or OMP file that no longer matches),
+`no_conversation_reporting` for a session with no integration at all, and `no_resume_command` (protocol 39) for a launch
+with no stored resume command: a command launch that declared an agent type without opting into Resume, or an older
+agent launch from before resume commands were stored. `resume` kept its spelling because agents in running sessions read
+it; the reasons replaced `fresh_only` and `fallback_template`. Protocol 37 removed the `mode` field from
+`RestartSession` and from the agent relay's `Restart` verb, with `RestartMode` itself: a restart whose current offer is
+not `resume` is refused with a `Conflict` naming the reason, before anything is stopped, and the fresh relaunch of the
+stored invocation and the verbatim run of a placeholder-free resume command are gone. Since launch kinds (protocol 39) a
+resume command must contain `{conversation}`, so no new session can carry one; a legacy session that stored one keeps
+it, but it is never run.
 
 Ordinary restarts keep the captured identity, its source, and its ownership version; only the OMP launch-provenance
 columns clear, as they describe the launch rather than the conversation. The helm caches each host's last listing, so

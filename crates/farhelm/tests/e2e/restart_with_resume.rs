@@ -9,7 +9,7 @@ use crate::boot_id_durable_outcome::listed;
 use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::hook_identity::{
     ServeTask, attach_ready, hook_log, hook_log_at, report as report_conversation, report_client,
-    wait_for_hook_log_words,
+    wait_for_hook_log_words, write_hook_report_client,
 };
 use crate::structured_launches::{
     FakeHarness, fake_agent_launch, fake_harness, fake_harness_with_script, observed_argv,
@@ -340,6 +340,114 @@ async fn captured_claude_conversation(h: &Harness, session: &SessionInfo) -> Str
     );
     assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
     conversation.to_string()
+}
+
+/// The user-visible bug this guards: Claude reports its conversation as it starts but saves it only once a prompt is
+/// submitted, so a Restart before that ran `claude --resume` for a conversation that did not exist, which failed and
+/// left an empty terminal. Specified, end to end through the injected hook with a `transcript_path` as real Claude
+/// sends it: a reported conversation whose transcript does not exist is stored with its transcript, and Restart runs
+/// the session's start command (no `--resume` in the relaunched argv); once the new Claude has written its record and
+/// reported it the same way, the next Restart resumes exactly that conversation.
+#[farhelm_testtrace::test]
+async fn a_claude_restart_starts_fresh_until_claude_saves_then_resumes() {
+    let (h, fixture, _accepting) = restart_with_harness().await;
+    let session = structured_claude_session(&h, &fixture).await;
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    write_hook_report_client(
+        &h.client,
+        chan,
+        &mut rx,
+        &mut seen,
+        "report-transcript",
+        "never-saved",
+    )
+    .await;
+    h.sup.reconcile_for_test().await;
+    let snapshot = snapshot_of(&h, &session.id).await;
+    let stored = snapshot
+        .captured_conversation
+        .clone()
+        .expect("the report was captured");
+    let transcript = |stored: &str| {
+        farhelm_supervisor::agent_kind::parse_locator(
+            farhelm_supervisor::agent_kind::LocatorVendor::Claude,
+            stored,
+        )
+        .ok()
+        .and_then(|locator| locator.session_file)
+        .map(std::path::PathBuf::from)
+    };
+    let unsaved = transcript(&stored).unwrap_or_else(|| {
+        panic!(
+            "the premise: the capture carries the reported transcript: {stored}; {}",
+            hook_log(&h, &session.id)
+        )
+    });
+    assert!(
+        !unsaved.exists(),
+        "the premise: nothing was saved at {}",
+        unsaved.display()
+    );
+    assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
+
+    h.client
+        .restart_session(&session.id, true)
+        .await
+        .expect("restart before the first prompt");
+    let fresh = shell_words::split(&observed_argv(&h, &session.id, 2).await).expect("fresh argv");
+    assert!(
+        !fresh.iter().any(|word| word == "--resume"),
+        "nothing was saved, so the start command runs: {fresh:?}"
+    );
+
+    // The new Claude writes its record on its first input and is then reported with its transcript. That input was
+    // already typed: `observed_argv`'s liveness exchange above sends this generation a token, which the fixture takes
+    // as its first prompt. The marker is read from this attachment's replay, where it last appears (grid text redraws
+    // whole rows); this generation is the only one that received input, so only it can have written a record.
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
+    let written = String::from_utf8_lossy(&seen).into_owned();
+    let saved: String = written
+        .rsplit("RECORD-WRITTEN:")
+        .next()
+        .expect("the first prompt wrote the fixture's record")
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect();
+    assert!(!saved.is_empty(), "the record's id: {written}");
+    write_hook_report_client(
+        &h.client,
+        chan,
+        &mut rx,
+        &mut seen,
+        "report-transcript",
+        &saved,
+    )
+    .await;
+    h.sup.reconcile_for_test().await;
+    let stored = snapshot_of(&h, &session.id)
+        .await
+        .captured_conversation
+        .expect("the second report was captured");
+    let saved_at =
+        transcript(&stored).unwrap_or_else(|| panic!("the second capture's transcript: {stored}"));
+    assert!(
+        stored.contains(&saved) && saved_at.is_file(),
+        "the premise: the new conversation is captured with the record it wrote: {stored}"
+    );
+
+    h.client
+        .restart_session(&session.id, true)
+        .await
+        .expect("restart after the first prompt");
+    let resumed =
+        shell_words::split(&observed_argv(&h, &session.id, 3).await).expect("resumed argv");
+    assert!(
+        resumed
+            .windows(2)
+            .any(|pair| pair == ["--resume", saved.as_str()]),
+        "the saved conversation resumes: {resumed:?}"
+    );
 }
 
 /// A refused override cannot change the launch settings used by later restarts.

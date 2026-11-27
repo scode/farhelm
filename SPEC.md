@@ -2248,38 +2248,44 @@ submission and focus-return behavior.
   launch of an agent type with conversation reporting, or a command launch that declared such an agent type and opted
   into Resume. When Farhelm knows it cannot resume, Restart is unavailable rather than starting fresh or running some
   other command, and Replace or Replace with is how such a session starts over: a Restart that silently loses the
-  conversation is a bug, not a fallback. This is the only relaunch mechanism: the resume offered when opening an
-  interrupted session is this same operation, not a separate feature. There is no fresh-restart variant — for a clean
-  conversation, use Replace, or create a new session in the same directory. Restart on a session whose agent is working
-  (its status reads working) confirms, stops the agent, then relaunches; a live agent that is idle, waiting for input,
-  or whose status is unknown is stopped and relaunched without asking, because a prompt shown on every live agent gets
-  clicked through unread. Harnesses with weak activity detection may therefore restart a busy agent unasked; that cost
-  is accepted. The supervisor applies the same rule from its own reading at the moment of the restart, so an agent that
-  started working after the user clicked is refused rather than stopped unconfirmed, and the next attempt asks unless
-  session confirmations are skipped (below). Replace keeps its confirmation whatever the agent is doing unless session
-  confirmations are skipped (below); the marked bar's Restart/Replace replaces a session without asking only when it
-  shows nothing that may still be running, or when session confirmations are skipped (see
-  [Session list](#session-list)). Restart keeps whatever scrollback the session's agent terminal retained: the terminal
-  is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in default
-  modes. What is carried over is the scrollback's text with color references, styles and links, up to the new terminal's
-  limits, the oldest lines left out first (the terminal then says that some earlier output could not be recovered). The
-  new terminal starts with its default palette, so a program's palette changes can leave its old lines looking different
-  after Restart. If the new terminal does not start and Farhelm confirms that the failed start has ended, the session
-  keeps its previous terminal, its agent stopped, and Restart can be tried again; when Farhelm cannot confirm that, the
-  session is left with no terminal and its next Restart starts an empty one. The new terminal starts empty instead, with
-  a log entry, when the old one's scrollback cannot be read or copied. When the terminal no longer exists (the process
-  that kept it ended, or the host rebooted), Restart starts with an empty one. Restart does NOT preserve the previous
-  run's last visible screen: the terminal is blank until the new agent draws, and a full-screen program's final frame
-  (which was never in scrollback to begin with) is gone. Losing it is accepted. Farhelm must never capture a terminal's
-  screen and paint it back into a relaunched terminal ahead of the new process — a frame with no process behind it looks
-  live, accepts typing, and is overwritten when the real program draws, which is worse than blank. Restart touches the
-  agent terminal only: the session's open terminal tabs keep running in their own terminals until they are closed.
-  Restart may carry changed launch settings (Restart with, below); the launch kind, agent type, host, and working
-  directory remain fixed. If a harness rejects a changed model or other setting while resuming, that is an ordinary
-  launch failure; restart again with settings the harness accepts. After a Restart request has waited about two seconds,
-  the sidebar row, session header and interrupted-session card share a spinner, the host and elapsed seconds, updated
-  about once a second until the reply arrives. Restart makes no promise that a second press is harmless. Bash and Zsh
-  have no conversation to resume. Their Restart actions are unavailable, and Replace starts a fresh shell.
+  conversation is a bug, not a fallback. Amended 2026-11-26, the maintainer's decision: when Claude never saved the
+  conversation it reported (the transcript file its report named does not exist once the old agent has stopped, as
+  before its first prompt), there is nothing to preserve, and Restart runs the session's start command instead of
+  failing to resume; Restart with runs the replacement launch's start command. A missing file after real turns is
+  treated the same, because Farhelm cannot tell "never saved" from "removed later" and the conversation is gone either
+  way. Nothing tells the user it started fresh. This is the only case in which Restart starts fresh. Restart is the only
+  relaunch mechanism: the resume offered when opening an interrupted session is this same operation, not a separate
+  feature. There is no fresh-restart variant to choose — for a clean conversation, use Replace, or create a new session
+  in the same directory. Restart on a session whose agent is working (its status reads working) confirms, stops the
+  agent, then relaunches; a live agent that is idle, waiting for input, or whose status is unknown is stopped and
+  relaunched without asking, because a prompt shown on every live agent gets clicked through unread. Harnesses with weak
+  activity detection may therefore restart a busy agent unasked; that cost is accepted. The supervisor applies the same
+  rule from its own reading at the moment of the restart, so an agent that started working after the user clicked is
+  refused rather than stopped unconfirmed, and the next attempt asks unless session confirmations are skipped (below).
+  Replace keeps its confirmation whatever the agent is doing unless session confirmations are skipped (below); the
+  marked bar's Restart/Replace replaces a session without asking only when it shows nothing that may still be running,
+  or when session confirmations are skipped (see [Session list](#session-list)). Restart keeps whatever scrollback the
+  session's agent terminal retained: the terminal is replaced by a new one for each run, which starts with the old one's
+  scrollback above a blank screen in default modes. What is carried over is the scrollback's text with color references,
+  styles and links, up to the new terminal's limits, the oldest lines left out first (the terminal then says that some
+  earlier output could not be recovered). The new terminal starts with its default palette, so a program's palette
+  changes can leave its old lines looking different after Restart. If the new terminal does not start and Farhelm
+  confirms that the failed start has ended, the session keeps its previous terminal, its agent stopped, and Restart can
+  be tried again; when Farhelm cannot confirm that, the session is left with no terminal and its next Restart starts an
+  empty one. The new terminal starts empty instead, with a log entry, when the old one's scrollback cannot be read or
+  copied. When the terminal no longer exists (the process that kept it ended, or the host rebooted), Restart starts with
+  an empty one. Restart does NOT preserve the previous run's last visible screen: the terminal is blank until the new
+  agent draws, and a full-screen program's final frame (which was never in scrollback to begin with) is gone. Losing it
+  is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched terminal ahead of the
+  new process — a frame with no process behind it looks live, accepts typing, and is overwritten when the real program
+  draws, which is worse than blank. Restart touches the agent terminal only: the session's open terminal tabs keep
+  running in their own terminals until they are closed. Restart may carry changed launch settings (Restart with, below);
+  the launch kind, agent type, host, and working directory remain fixed. If a harness rejects a changed model or other
+  setting while resuming, that is an ordinary launch failure; restart again with settings the harness accepts. After a
+  Restart request has waited about two seconds, the sidebar row, session header and interrupted-session card share a
+  spinner, the host and elapsed seconds, updated about once a second until the reply arrives. Restart makes no promise
+  that a second press is harmless. Bash and Zsh have no conversation to resume. Their Restart actions are unavailable,
+  and Replace starts a fresh shell.
 
 - **Restart with** opens the session launcher in restart mode before resuming the session's own or a user-named
   conversation. It edits model, effort, permissions, wrapper prefix and conversation for an agent launch, or command,
@@ -4370,45 +4376,46 @@ presume the original OS process survived the reboot.
 
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.
-`claude --resume <conversation-id>`) — even when several sessions share a working directory. Claude Code, Codex, Goose,
-Pi, Muse, Grok and Antigravity integrations at this level are required, subject to the exceptions below. Confirmed
-2026-10-01: Farhelm identifies an agent's conversation only from the harness's own explicit report, through a hook,
-plugin, extension, or whatever reporting mechanism that harness needs. A selector entered in New, Clone, Replace with or
-Restart with is a one-time start argument, never a captured identity. Claude, Codex, Grok, Pi, Muse, OMP and Antigravity
-can report the resulting conversation through the ordinary path. A named Restart with keeps the old capture until that
-report replaces it; Codex, Muse and Antigravity report at the first prompt, so plain Restart before then still enters
-the old conversation. Goose can report a named start when the selected conversation carries the reporter Farhelm saved
-when it started that conversation. A Goose conversation started outside Farhelm has no such capture path. A named Goose
-Restart with clears the old capture in the relaunch transaction, so plain Restart becomes available only when Farhelm
-accepts the selected conversation's report. A definitive pre-spawn abort restores the old capture. An ambiguous failure
-leaves it cleared. The same clearing applies when Farhelm's conversation hooks are turned off for the agent
-(`FARHELM_AGENT_HOOKS`) or when the conversation reporter's extension cannot be prepared, since no report can then
-replace the old capture. For Grok and Antigravity the switch controls setup at launch. Either agent can still report
-through hooks already on disk. Cursor and OpenCode named starts do not gain later plain Restart from this choice.
-Heuristics that cannot be relied upon, such as correlating the vendor's files on disk with a launch, are not supported,
-because a wrong match resumes, and appends to, a conversation that is not the session's own. Checking the exact file a
-report names is verification of that report, not identification. A launch whose harness cannot report, or whose report
-never arrived, has no captured identity and cannot be restarted: Restart says why, and Replace starts the session over.
-For Grok and Antigravity the Restart explanation follows the reported setup result for that launch. It directs a session
-without setup to the agent's Settings page and a new start, gives the reason for a failed setup, or says that an
-installed hook normally reports after the first prompt while the agent is still running. Capture uses the agent's record
-directories read-only. Farhelm may change an agent's configuration only for the opt-in Claude trust edit and the opt-in
-Grok and Antigravity hook files. The Claude trust edit is independent of capture. A hook passed on the command line for
-one launch is allowed because it writes nothing the vendor owns — no configuration file, no conversation record, no
-trust state — and cannot outlive the launch that carried it. It is not invisible in the absolute: the report it delivers
-is written to a file in farhelm's own state directory and from there lands in farhelm's own database, and every run
-leaves a line in farhelm's own hook log. Vendor-owned state is the boundary these limits protect. Grok's
-`hooks/farhelm.json` under `$GROK_HOME` (normally `~/.grok`) and Antigravity's Farhelm plugin folder belong to Farhelm.
-Opt-in hook setup may replace the whole Grok file, and the Antigravity removal instructions may tell the user to delete
-the whole folder. Existing manual hooks elsewhere still work. Every integrated agent type identifies conversations only
-through accepted reports; Farhelm never selects a conversation by scanning vendor state. Historical stored identities
-remain usable under the same per-type Resume rules, regardless of their source. A reporting credential alone does not
-establish which Codex conversation is in the foreground. Goose persists a credential-free named MCP reporter with the
-conversation and reuses it on resume; Pi loads a private static extension from Farhelm's state directory on every
-launch. A Pi report without a session file withdraws the old resume target. Before a Pi resume, Farhelm reads the
-bounded first record of that exact file without following symlinks and requires its session ID to match. A failed check
-withdraws the durable resume offer, which makes Restart unavailable, and rejects the stale Resume request so the user
-can refresh; it never silently launches fresh under that request.
+`claude --resume <conversation-id>`) — even when several sessions share a working directory. The one exception is a
+Claude session whose reported transcript does not exist, which has nothing to resume and starts fresh (see Restart).
+Claude Code, Codex, Goose, Pi, Muse, Grok and Antigravity integrations at this level are required, subject to the
+exceptions below. Confirmed 2026-10-01: Farhelm identifies an agent's conversation only from the harness's own explicit
+report, through a hook, plugin, extension, or whatever reporting mechanism that harness needs. A selector entered in
+New, Clone, Replace with or Restart with is a one-time start argument, never a captured identity. Claude, Codex, Grok,
+Pi, Muse, OMP and Antigravity can report the resulting conversation through the ordinary path. A named Restart with
+keeps the old capture until that report replaces it; Codex, Muse and Antigravity report at the first prompt, so plain
+Restart before then still enters the old conversation. Goose can report a named start when the selected conversation
+carries the reporter Farhelm saved when it started that conversation. A Goose conversation started outside Farhelm has
+no such capture path. A named Goose Restart with clears the old capture in the relaunch transaction, so plain Restart
+becomes available only when Farhelm accepts the selected conversation's report. A definitive pre-spawn abort restores
+the old capture. An ambiguous failure leaves it cleared. The same clearing applies when Farhelm's conversation hooks are
+turned off for the agent (`FARHELM_AGENT_HOOKS`) or when the conversation reporter's extension cannot be prepared, since
+no report can then replace the old capture. For Grok and Antigravity the switch controls setup at launch. Either agent
+can still report through hooks already on disk. Cursor and OpenCode named starts do not gain later plain Restart from
+this choice. Heuristics that cannot be relied upon, such as correlating the vendor's files on disk with a launch, are
+not supported, because a wrong match resumes, and appends to, a conversation that is not the session's own. Checking the
+exact file a report names is verification of that report, not identification. A launch whose harness cannot report, or
+whose report never arrived, has no captured identity and cannot be restarted: Restart says why, and Replace starts the
+session over. For Grok and Antigravity the Restart explanation follows the reported setup result for that launch. It
+directs a session without setup to the agent's Settings page and a new start, gives the reason for a failed setup, or
+says that an installed hook normally reports after the first prompt while the agent is still running. Capture uses the
+agent's record directories read-only. Farhelm may change an agent's configuration only for the opt-in Claude trust edit
+and the opt-in Grok and Antigravity hook files. The Claude trust edit is independent of capture. A hook passed on the
+command line for one launch is allowed because it writes nothing the vendor owns — no configuration file, no
+conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
+absolute: the report it delivers is written to a file in farhelm's own state directory and from there lands in farhelm's
+own database, and every run leaves a line in farhelm's own hook log. Vendor-owned state is the boundary these limits
+protect. Grok's `hooks/farhelm.json` under `$GROK_HOME` (normally `~/.grok`) and Antigravity's Farhelm plugin folder
+belong to Farhelm. Opt-in hook setup may replace the whole Grok file, and the Antigravity removal instructions may tell
+the user to delete the whole folder. Existing manual hooks elsewhere still work. Every integrated agent type identifies
+conversations only through accepted reports; Farhelm never selects a conversation by scanning vendor state. Historical
+stored identities remain usable under the same per-type Resume rules, regardless of their source. A reporting credential
+alone does not establish which Codex conversation is in the foreground. Goose persists a credential-free named MCP
+reporter with the conversation and reuses it on resume; Pi loads a private static extension from Farhelm's state
+directory on every launch. A Pi report without a session file withdraws the old resume target. Before a Pi resume,
+Farhelm reads the bounded first record of that exact file without following symlinks and requires its session ID to
+match. A failed check withdraws the durable resume offer, which makes Restart unavailable, and rejects the stale Resume
+request so the user can refresh; it never silently launches fresh under that request.
 
 Custom agents report their conversation explicitly through `farhelm custom-agent report-conversation --id <ID>`. The
 reporter stays silent and exits successfully even if it cannot write a report. Valid reports can be recorded while the
@@ -4448,7 +4455,10 @@ Antigravity, admission reads only the first record of the transcript named by th
 session lists and info, and replayed creates do not inspect admitted Codex transcripts or Grok record pairs. Arbitrary
 later file changes are noticed at Restart rather than through defensive polling. A missing file withdraws Resume and
 records its notification then; a different conversation withdraws silently. An I/O read failure refuses that Restart
-with a retry message and preserves Resume. None of these refusals launches an agent.
+with a retry message and preserves Resume. None of these refusals launches an agent. Claude's transcript is the
+exception: its only check is whether the file exists, it never refuses or withdraws anything, and it posts no
+notification. A missing Claude transcript makes Restart run the start command (see Restart), and one that cannot be read
+resumes as usual.
 
 Claude and Muse attribution is positional: the first process above the hook's narrow shell trampolines is its emitter,
 at any depth below the session's agent terminal's root process. Farhelm does not recognize either agent by executable,
@@ -4468,8 +4478,11 @@ Sessions running across the upgrade start unpinned, so their first selecting rep
 an ancestor reports. Running launches retain their old command line without `Stop` until relaunch; no upgrade machinery
 compensates for that gap. Farhelm subscribes to Claude's `SessionStart` and `Stop`, not `SubagentStop`. In the observed
 Claude Code 2.1.310, a native sub-agent completed through `SubagentStop`, while `Stop` carried the parent's
-conversation. The hook refuses a report carrying a child marker its adapter recognizes. Claude requires no transcript
-check and takes no versioned ownership proof, so its existing captures stay resumable across the change.
+conversation. The hook refuses a report carrying a child marker its adapter recognizes. Claude takes no versioned
+ownership proof and its transcript proves nothing about ownership, so its existing captures stay resumable across the
+change. Farhelm keeps the transcript path Claude reported beside its conversation ID only to check, when a Restart runs
+and after the old agent has stopped, whether that file exists; it is never read, and nothing watches for it. Captures
+stored as bare IDs by older builds stay resumable unchecked.
 
 Muse uses the same process pin, ancestor correction, dead-pin release and relaunch rules, with a Muse notification once
 per launch when a recorded ancestor corrects the followed conversation. Its `SessionStart` and `Stop` both select the
@@ -4576,7 +4589,8 @@ Farhelm composes an agent launch's resume command from the same choices as its s
 never derives one from its start command: it fills in `{conversation}`, `{cwd}`, and `{farhelm_args}` as single-quoted
 words and hands the rest unchanged to `bash -c`. For Pi and OMP, `{conversation}` means the verified file path, not
 Farhelm's internal durable locator; for Codex it means the verified persistent thread ID, not the runtime session ID or
-encoded locator; for Grok it means the verified UUID, not the `grok:` locator or either evidence path.
+encoded locator; for Grok it means the verified UUID, not the `grok:` locator or either evidence path; for Claude it
+means the reported session ID, not the `claude:` locator or its transcript path.
 
 Anything farhelm attaches to a launch — an agent launch, or a command launch that declares an agent type — must be
 invisible from inside the session when it works AND when it fails: no output on the agent's terminal, no non-zero exit,
