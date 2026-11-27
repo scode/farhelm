@@ -77,3 +77,61 @@ share a request body, but the current one carries the ordinary body inside it) a
 the older-helm reason; all now give the reason above. Its two small points (check the missing-size refusal's wording,
 and use the new test helper in one more test) were fixed too. The fixes were not reviewed again; run `a33fddfa` ran
 after them.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained the previous round's changes: agents can ask for a Tailscale host
+when adding a host (which raised the protocol version to 92), more Codex sessions can be restarted, and `--model` and
+`--effort` no longer take the next option as their value. None of them calls or describes the removed route, and nothing
+else on main does either, apart from two old review-feedback records that are kept as history. In the same round, after
+this plan, three more landed: restart-startup-scope-cleanup (a supervisor start now finishes the cleanup a failed
+Restart left behind), brick-test-inline-welcome (the release brick test no longer looks for a Welcome card) and
+claude-drift-trust-copy-back (a test for the drift tests' handling of Claude's trust settings). None touches the helm's
+session routes.
+
+An independent reviewer and I read the change and found nothing to fix. It does not change the protocol version.
+
+#### Fixes made while landing
+
+- **A TODO.md conflict.** The round's four plans each removed their own TODO entry, next to each other, so stacking them
+  conflicted there. I removed all four entries; no code changed.
+
+#### What the landing made untrue in the report
+
+Nothing changed by the landing itself, but the landing's review found one statement of the report that was wrong from
+the start:
+
+- **No test was removed.** The report says two tests that existed only for the old route are gone. No test was removed.
+  The shared launch helper that most of the helm's sandbox launch tests use, and the last step of the test that refuses
+  a stale size, went through the old route; both now use the current one. The one old-route-only case, a confirmed
+  launch with no size, went with the route. The reviewer found no test that ever checked the old route refusing a
+  request naming a place. Nothing is missing because of this; only the report's description is off.
+
+#### Checks
+
+Run once, on the round's four plans stacked on main as it stood when the landing started
+(remove-legacy-sandbox-sessions-api, restart-startup-scope-cleanup, brick-test-inline-welcome, then
+claude-drift-trust-copy-back), so each plan was tested together with the others and with the previous rounds' changes,
+which none of the executors' own runs included. The SSH test worker was still unreachable, so the slow suites ran on
+boat sandboxes (x86_64 Ubuntu 24.04 VMs), and clippy ran locally:
+
+- Locally, `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`: clean.
+- On three boats, every test of the protocol, helm, supervisor and command-line crates that runs by default, the
+  end-to-end suite included (`cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm`,
+  built once, split in three and run through the recorder), recorded runs 0aeec1d1-374d-4651-b817-c6196eba36e3,
+  79bc70f6-81f9-4677-98ac-5bc0782c1540 and 0e083ecd-f092-4996-ae93-b1866a1bddfd: 4,732 passed, none failed, and no test
+  that quietly passed for lack of systemd, Podman or SSH on the machine. That covers each executor's own selection and
+  more: the helm's Tensorlake launch tests, the Restart cleanup tests, the startup tests of terminal hosts left over
+  from earlier runs, and the drift tests' private-configuration tests.
+- Locally, the portable brick-test harness
+  (`python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`), recorded run
+  69a626cf-42a8-4fcc-8baa-85e5c53b0de6: 337 passed.
+- Locally, `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 releasing/check-changelog.py format`, `dprint check` on the changed Markdown, and
+  `python3 scripts/check-agents-md.py` (the brick-test runbook is an instruction file): passed.
+
+Reused: nothing. Skipped: the desktop app's and GUI crate's tests, the screenshot comparison and the end-to-end smoke,
+since the only change to the app is two comments; the opt-in tests in those crates, among them the real-agent drift
+tests, which spend real Claude turns; and a live brick test, which needs the Mac test machine and a release candidate.
