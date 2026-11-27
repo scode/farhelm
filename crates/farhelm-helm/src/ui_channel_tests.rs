@@ -68,7 +68,7 @@ fn empty_sent() -> Sent {
 fn the_diff_sends_added_and_replaced_entries_whole_and_names_removed_ones() {
     let (first, sent) = diff(
         Collection::Approvals,
-        &empty_sent(),
+        empty_sent(),
         Ok(projected(vec![entry("a", "one"), entry("b", "two")])),
     );
     let first = first.expect("a first read is a change");
@@ -77,7 +77,7 @@ fn the_diff_sends_added_and_replaced_entries_whole_and_names_removed_ones() {
 
     let (second, sent) = diff(
         Collection::Approvals,
-        &sent,
+        sent,
         Ok(projected(vec![
             entry("b", "two, renamed"),
             entry("c", "three"),
@@ -93,7 +93,7 @@ fn the_diff_sends_added_and_replaced_entries_whole_and_names_removed_ones() {
 
     let (third, _) = diff(
         Collection::Approvals,
-        &sent,
+        sent,
         Ok(projected(vec![
             entry("b", "two, renamed"),
             entry("c", "three"),
@@ -111,11 +111,11 @@ fn the_diff_sends_added_and_replaced_entries_whole_and_names_removed_ones() {
 fn a_failed_read_marks_the_collection_unavailable_without_removing_anything() {
     let (_, sent) = diff(
         Collection::Approvals,
-        &empty_sent(),
+        empty_sent(),
         Ok(projected(vec![entry("a", "one"), entry("b", "two")])),
     );
 
-    let (failed, during) = diff(Collection::Approvals, &sent, Err("boom".to_string()));
+    let (failed, during) = diff(Collection::Approvals, sent, Err("boom".to_string()));
     let failed = failed.expect("losing availability is a change");
     assert!(failed.upsert.is_empty() && failed.remove.is_empty());
     assert_eq!(
@@ -127,9 +127,16 @@ fn a_failed_read_marks_the_collection_unavailable_without_removing_anything() {
     assert_eq!(failed.meta.order, ["a", "b"], "the last order stays");
     assert_eq!(during.entries.len(), 2, "the held entries stay");
 
+    // A failure that repeats on every feed bump must not push again; a new
+    // error text is news and must.
+    let (repeated, during) = diff(Collection::Approvals, during, Err("boom".to_string()));
+    assert_eq!(repeated, None, "the same failure again sends nothing");
+    let (other, during) = diff(Collection::Approvals, during, Err("other".to_string()));
+    assert!(other.is_some(), "a different failure is sent");
+
     let (recovered, _) = diff(
         Collection::Approvals,
-        &during,
+        during,
         Ok(projected(vec![entry("b", "two")])),
     );
     let recovered = recovered.expect("recovering is a change");
@@ -164,7 +171,7 @@ fn an_empty_selected_key_selects_nothing() {
 fn the_diff_keeps_the_entry_carried_outside_the_query_out_of_the_order() {
     let mut carried = projected(vec![entry("a", "one"), entry("open", "two")]);
     carried.selected_outside_query = Some("open".into());
-    let (first, sent) = diff(Collection::Sessions, &empty_sent(), Ok(carried));
+    let (first, sent) = diff(Collection::Sessions, empty_sent(), Ok(carried));
     let first = first.expect("a first read is a change");
     assert_eq!(first.meta.order, ["a"]);
     assert_eq!(first.meta.selected_outside_query.as_deref(), Some("open"));
@@ -176,7 +183,7 @@ fn the_diff_keeps_the_entry_carried_outside_the_query_out_of_the_order() {
 
     let (listed, _) = diff(
         Collection::Sessions,
-        &sent,
+        sent,
         Ok(projected(vec![entry("a", "one"), entry("open", "two")])),
     );
     let listed = listed.expect("the mark moving is a change");

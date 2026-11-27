@@ -5765,19 +5765,21 @@ installation it is on, so it follows an open session the sidebar's filter hides
   the user was retargeting a row describes the old endpoint, and committing its identity under the new configuration
   would durably attribute one machine's identity to another. Tearing down in-flight attempts on an edit narrows that
   window; checking the dialed configuration inside the write's own transaction closes it.
-- Each host's session cache is replaced wholesale on every successful list refresh — delete then insert in one
-  transaction, never a partial mix — so a session dropped from a host's live list is dropped from its cache too, and
-  ordering never depends on parsing every cached row's JSON (created_at and session id are extracted as columns at write
-  time). Removing a host cascades its cache rows (SPEC.md's disposal rule). Adopting a new identity at a known
-  destination purges that host's cache in the same transaction as the identity write: the old identity's cached sessions
-  describe a dead install, and carrying them forward under the new identity would misattribute one install's history to
-  another. A cache write also carries the identity it was produced under, checked against the stored value in the same
-  transaction: this closes the window where a refresh already in flight when a user adopts a new identity could land
-  after the adoption's purge and repopulate the cache with the dead install's sessions by a side door. Reads of the two
-  tables disagree on purpose: a cache row that no longer decodes is dropped from the read with a warning naming the host
-  and session rather than failing the read (it is last-known display data, not authority) — dropped from the counts too,
-  so the served list never describes a row nobody can render — while a corrupt registry row still fails `list_hosts`
-  loudly (the registry is authority for which hosts exist at all).
+- Each host's session cache is replaced wholesale on every successful list refresh, so a session dropped from a host's
+  live list is dropped from its cache too. Wholesale in meaning, not in writes: one transaction, never a partial mix,
+  compares each fresh row with the stored one and writes only what differs (an insert for a new id, an update for a
+  changed row, a delete for a departed one), so a refresh that finds nothing new writes nothing. Rewriting every row on
+  every refresh cost work that grew with the fleet for no change (`lore/2026-11-26-desktop-idle-cpu.md`). Removing a
+  host cascades its cache rows (SPEC.md's disposal rule). Adopting a new identity at a known destination purges that
+  host's cache in the same transaction as the identity write: the old identity's cached sessions describe a dead
+  install, and carrying them forward under the new identity would misattribute one install's history to another. A cache
+  write also carries the identity it was produced under, checked against the stored value in the same transaction: this
+  closes the window where a refresh already in flight when a user adopts a new identity could land after the adoption's
+  purge and repopulate the cache with the dead install's sessions by a side door. Reads of the two tables disagree on
+  purpose: a cache row that no longer decodes is dropped from the read with a warning naming the host and session rather
+  than failing the read (it is last-known display data, not authority) — dropped from the counts too, so the served list
+  never describes a row nobody can render — while a corrupt registry row still fails `list_hosts` loudly (the registry
+  is authority for which hosts exist at all).
 - One connection actor per registry row, the local row included (PLAN_M6.md item 4), each owning its transport
   connection, its reconnect state machine, and its slice of the session cache. A row's connection is always in exactly
   one of the connection states below, with additional provider states for environment hosts. The refusal states exist
