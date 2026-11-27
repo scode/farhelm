@@ -151,13 +151,14 @@ conversation; either can be the first report Farhelm accepts. A `Stop` from anot
 Farhelm already follows is acknowledged without changing the conversation or logging a refusal warning. Muse uses the
 same rules: `SessionStart` and `Stop` both report the current conversation, and a nested Muse's `Stop` cannot replace
 its parent's conversation. Its session-start report arrives at the first prompt, with `startup` or `resume` as its
-source; its end-of-turn report has no source. Codex requires `SessionStart` with source `startup`, `resume`, `clear`, or
-`compact` to select a conversation; its source-less `Stop` can confirm that same conversation after a pending `/clear`,
-or correct an earlier conversation reported by a Codex process it started. Both Codex callbacks require process
-attribution and exact-record validation. Grok requires `SessionStart`, `UserPromptSubmit`, or `Stop`; its selecting
-event also carries source `new` or `load` and a timestamp used to reject delayed replacement reports. Antigravity's
-`SessionStart` and `Stop` each report a complete conversation ID and receive an empty JSON response. The hook still
-replies if the report fails or runs outside Farhelm.
+source; its end-of-turn report has no source. Codex requires `SessionStart` with source `startup`, `resume`, `clear`,
+`compact`, or `fork` to select a conversation (`fork` is a fork you make, including the one Codex offers when the
+conversation is open in another app); its source-less `Stop` can confirm that same conversation after a pending
+`/clear`, or correct an earlier conversation reported by a Codex process it started. Both Codex callbacks require
+process attribution and exact-record validation. Grok requires `SessionStart`, `UserPromptSubmit`, or `Stop`; its
+selecting event also carries source `new` or `load` and a timestamp used to reject delayed replacement reports.
+Antigravity's `SessionStart` and `Stop` each report a complete conversation ID and receive an empty JSON response. The
+hook still replies if the report fails or runs outside Farhelm.
 
 The hook does not talk to the supervisor. It saves the report as a small file under `hook-reports/<session id>/` in the
 supervisor's state directory, together with a record of which processes it was started by, and exits 0 — always,
