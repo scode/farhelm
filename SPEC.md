@@ -3419,9 +3419,10 @@ waiting switch on, the helm sends one alert when a session becomes waiting and r
 waiting spell. Leaving and re-entering waiting starts another spell. A host's first successful observation after helm
 start or reconnect is a quiet baseline; new sessions first observed waiting afterwards count. While waiting alerts are
 off the helm keeps no waiting evidence, and its first observation after they are saved on is likewise a quiet baseline:
-a session already waiting then alerts only for its next wait. Unknown readings add no evidence and do not send.
-Detection remains heuristic, with the same agent limits as the waiting sound. There are no alerts for Farhelm approval
-cards, finished turns or session-tracking notifications. Window focus does not suppress ntfy alerts.
+a session already waiting then alerts only for its next wait. Turning ntfy alerts on is deliberately not expected to
+affect existing agents already waiting (confirmed by the maintainer on 2026-11-27). Unknown readings add no evidence and
+do not send. Detection remains heuristic, with the same agent limits as the waiting sound. There are no alerts for
+Farhelm approval cards, finished turns or session-tracking notifications. Window focus does not suppress ntfy alerts.
 
 With the **Agent is blocked** switch on as well, the helm also sends an alert each time an agent says it is blocked
 (`farhelm agent notify`, below): "<title> on <host> is blocked: <reason>". It goes through the same queue, rate cap and
@@ -4631,9 +4632,11 @@ stop without finishing what the user asked because it is blocked, it should not 
 `farhelm agent notify` first. It is not a request to try harder. "What counts as blocked" follows, either Farhelm's own
 wording or, if the user wrote their own in Settings, theirs; the stored choice is "Farhelm's" or "mine", so a
 configuration that never chose follows later changes to Farhelm's wording. `FARHELM_AGENT_INSTRUCTIONS=off` withholds it
-with the pointer. Running sessions keep what they started with until their next Restart, and the instruction is never
-stored with a session. One start goes without it: a GitHub checkout create that Farhelm finishes after an interruption,
-from what it recorded before. Settings shows Farhelm's wording read-only under the empty criteria field, with Reset to
+with the pointer. Turning **Agent is blocked** on does not affect existing sessions (whether they are waiting or not) —
+it applies only to sessions started or restarted after the setting is turned on (confirmed by the maintainer on
+2026-11-27). Running sessions keep what they started with until their next Restart, and the instruction is never stored
+with a session. One start goes without it: a GitHub checkout create that Farhelm finishes after an interruption, from
+what it recorded before. Settings shows Farhelm's wording read-only under the empty criteria field, with Reset to
 default once the user has typed their own.
 
 Muse's `SessionStart` hook receives that pointer as developer context; its `Stop` hook omits the announcement. The
