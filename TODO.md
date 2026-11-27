@@ -771,6 +771,11 @@ are not.
 
 ## Maybe later
 
+- **Revisit the desktop app idle CPU findings.** `lore/2026-11-26-desktop-idle-cpu.md` records where the desktop app's
+  idle CPU goes and how it grows with the number of running sessions, with fixes ranked by improvement per unit of added
+  complexity. The first two were taken up at once; revisit the rest (pausing GPUI's display link when nothing needs
+  drawing, fewer or cheaper frames in front, and the ones not recommended then) and whether the numbers still hold.
+
 - **Reconsider terminal-native as a style for the app.** Direction 8 in
   [the dialog directions mockup](https://snippets.scode.org/s/farhelm-dialog-directions/) (everything in the terminal
   font, a prompt and block caret, fzf-style counts, dashed rules) was well liked, but the launcher's look won for the
