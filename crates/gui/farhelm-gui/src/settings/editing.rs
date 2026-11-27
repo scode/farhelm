@@ -1,6 +1,21 @@
-//! Settings sequences explicit saves while each form owns its draft, command and outcome text.
+//! Settings sequences explicit saves while each form owns its draft, command and outcome text, and holds a close until
+//! the work out settles.
+//!
+//! SPEC.md, "Settings": the helm is a presumed low-latency, ordinarily reliable remote, so nothing here lets someone
+//! move on before a helm round trip settles. Here's the TLDR of the mechanics:
+//!
+//! - **One save loop** ([`SaveLoop`]): a page Save or the close question's Save sends the drafts it approved one at a
+//!   time, each after the one before it is saved, and stops at the first refusal with that page shown.
+//! - **A close waits** ([`PendingClose`]): Close or Escape while anything that holds a close is out
+//!   ([`SettingsDialog::close_busy`]) asks nothing yet. Each Settings-owned operation's own completion resumes it,
+//!   through a one-shot continuation on the form ([`SaveReceipt`]) or from the dialog's own switch completions, after
+//!   the form's follow-up updates; only a preference save no Settings form owns is left to the operation store's
+//!   notification. The resumed close shows a refused page, or the Credentials overview after a missed delivery, or
+//!   asks its question.
 
+use std::cell::Cell;
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 use farhelm_proto::{credentials::CredentialKind, custom_agents::CustomAgent};
 use gpui::{
@@ -16,10 +31,11 @@ use super::{
     tensorlake_key::{Place, TensorlakeKey},
 };
 use crate::components::{Button, HoverHelp, Tier};
-use crate::focus::Mark;
-use crate::layers::{self, Dismissal, LayerId};
-use crate::operations::Outcome;
+use crate::focus::{self, Mark};
+use crate::layers::{self, Dismissal};
+use crate::operations::{OpKey, Outcome};
 use crate::prompt::{self, Answer, Question};
+use crate::session;
 use crate::theme;
 
 /// An unsaved marker uses inverse ink inside the selected row and accent ink anywhere else.
@@ -102,33 +118,33 @@ pub(crate) fn stage_ntfy_refusal(window: &mut Window, cx: &mut App) -> Option<()
     Some(())
 }
 
-/// Show the held-close result after the staged Notifications draft arrives. The interaction test drives Send test.
-#[cfg(test)]
-pub(crate) fn stage_held_close(cx: &mut App) -> Option<()> {
-    let dialog = layers::last_opened::<SettingsDialog>(cx)?;
-    dialog.update(cx, |dialog, cx| {
-        let edit = dialog
-            .edits(cx)
-            .into_iter()
-            .find(|edit| matches!(edit, Edit::Alerts(_)))?;
-        dialog.close_save_held = Some(edit.approval(cx));
-        cx.notify();
-        Some(())
-    })
-}
-
 type OnSaveSettled = Box<dyn FnOnce(bool, &mut App)>;
 
-/// The dialog can join an explicit Save that a form already sent, or wait on one it just started. The continuation
-/// runs after the entity update and the original completion's deferred field updates, so it may read the form and
-/// advance the batch without reentering the form's update.
+/// The dialog's two one-shot hooks on a form's work. The save continuation lets the save loop join an explicit Save
+/// that a form already sent, or wait on one it just started. The close continuation lets a close that is waiting
+/// ([`PendingClose`]) resume when the form's save, Test, Clear or Delete settles, and hears whether it was refused.
+/// Both run after the entity update and the original completion's deferred field updates, so they may read the form
+/// and go on without reentering the form's update.
 #[derive(Default)]
-pub(super) struct SaveReceipt(Option<OnSaveSettled>);
+pub(super) struct SaveReceipt {
+    then: Option<OnSaveSettled>,
+    close: Option<OnSaveSettled>,
+}
 
 impl SaveReceipt {
-    /// Only the latest close or footer action owns the continuation for a save that is still in flight.
+    /// Only the latest loop owns the continuation for a save that is still in flight.
     pub(super) fn wait(&mut self, then: impl FnOnce(bool, &mut App) + 'static) {
-        self.0 = Some(Box::new(then));
+        self.then = Some(Box::new(then));
+    }
+
+    /// Arm the close continuation, which hears `true` when the work it waits on was refused.
+    pub(super) fn wait_close(&mut self, then: impl FnOnce(bool, &mut App) + 'static) {
+        self.close = Some(Box::new(then));
+    }
+
+    /// Whether a waiting close already armed this form.
+    pub(super) fn close_armed(&self) -> bool {
+        self.close.is_some()
     }
 
     /// A queued action advances only after the helm confirms a save. Refusals and unexpected deferred outcomes leave
@@ -137,10 +153,20 @@ impl SaveReceipt {
         self.finish(matches!(outcome, Outcome::Done(_)), cx);
     }
 
-    /// Editors that also run outside Settings retain their own definition of an acknowledged save.
+    /// A save settled, `saved` or not. Editors that also run outside Settings retain their own definition of an
+    /// acknowledged save.
     pub(super) fn finish(&mut self, saved: bool, cx: &mut App) {
-        if let Some(then) = self.0.take() {
+        if let Some(then) = self.then.take() {
             cx.defer(move |cx| then(saved, cx));
+        }
+        self.settled_other(!saved, cx);
+    }
+
+    /// Work other than a save (a Test, a Clear, a Delete, or a switch's own save) settled, `refused` or not: only a
+    /// waiting close hears of it. Call it last in the completion, after the form's own deferred updates are queued.
+    pub(super) fn settled_other(&mut self, refused: bool, cx: &mut App) {
+        if let Some(then) = self.close.take() {
+            cx.defer(move |cx| then(refused, cx));
         }
     }
 }
@@ -159,12 +185,11 @@ enum Edit {
 }
 
 /// What one Save or Discard authorized. Keep identities independent of values so closing a question does not keep
-/// a detached editor alive. A save that was already running can only be observed, never reissued.
+/// a detached editor alive.
 #[derive(Clone)]
 pub(super) struct ApprovedEdit {
     id: EntityId,
     version: EditVersion,
-    was_saving: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -190,7 +215,6 @@ impl Edit {
         ApprovedEdit {
             id: self.id(),
             version: self.version(cx),
-            was_saving: self.state(cx) == EditState::Saving,
         }
     }
 
@@ -267,6 +291,45 @@ impl Edit {
         }
     }
 
+    /// Whether this form's work holds a close ([`SettingsDialog::close_busy`]): a save out, a Test or Clear, or an
+    /// editor's Delete. A recipe's Delete carries on without the dialog, so it does not.
+    fn holds_close(&self, cx: &App) -> bool {
+        self.state(cx) == EditState::Saving
+            || self.holds_save(cx)
+            || match self {
+                Self::Credential(view) => view.read(cx).deleting(),
+                Self::CustomAgent(_, view) => view.read(cx).deleting(),
+                _ => false,
+            }
+    }
+
+    fn close_armed(&self, cx: &App) -> bool {
+        match self {
+            Self::FileTypes(view) => view.read(cx).save_receipt.close_armed(),
+            Self::Alerts(view) => view.read(cx).save_receipt.close_armed(),
+            Self::Checkout(view) => view.read(cx).save_receipt.close_armed(),
+            Self::Key(_, view) => view.read(cx).save_receipt.close_armed(),
+            Self::Recipe(view) => view.read(cx).save_receipt.close_armed(),
+            Self::Credential(view) => view.read(cx).save_receipt.close_armed(),
+            Self::CustomAgent(_, view) => view.read(cx).save_receipt.close_armed(),
+        }
+    }
+
+    /// Arm this form's close continuation ([`SaveReceipt::wait_close`]).
+    fn wait_close(&self, then: impl FnOnce(bool, &mut App) + 'static, cx: &mut App) {
+        match self {
+            Self::FileTypes(view) => view.update(cx, |form, _| form.save_receipt.wait_close(then)),
+            Self::Alerts(view) => view.update(cx, |form, _| form.save_receipt.wait_close(then)),
+            Self::Checkout(view) => view.update(cx, |form, _| form.save_receipt.wait_close(then)),
+            Self::Key(_, view) => view.update(cx, |form, _| form.save_receipt.wait_close(then)),
+            Self::Recipe(view) => view.update(cx, |form, _| form.save_receipt.wait_close(then)),
+            Self::Credential(view) => view.update(cx, |form, _| form.save_receipt.wait_close(then)),
+            Self::CustomAgent(_, view) => {
+                view.update(cx, |form, _| form.save_receipt.wait_close(then))
+            }
+        }
+    }
+
     fn is_form(&self) -> bool {
         !matches!(
             self,
@@ -327,33 +390,93 @@ impl Edit {
     }
 }
 
-/// One Save button press, scoped to a page or to closing Settings. Existing saves may already be out on different
-/// keys. Observe all of them before dispatching new work, then wait after each new save so the shared preference key
-/// is available to the next form.
-pub(super) struct Batch {
-    generation: u64,
-    close: bool,
-    check_keys: bool,
-    /// The edits this batch sent and has not seen settle. Each is still loaded while it saves (an editor cannot be left
-    /// during its own save), so [`SettingsDialog::edits`] lists it without help from here.
-    active: Vec<Edit>,
+/// One Save press, scoped to a page or to closing Settings: the approved drafts still to send, one at a time. SPEC.md,
+/// "Settings": the helm is a presumed low-latency remote, so the loop simply waits for each save before sending the
+/// next, and a close waits for the whole loop. There is no follow-up batch and no watch over saves already out; a
+/// close asked during the loop waits for it ([`PendingClose`]).
+pub(super) struct SaveLoop {
     remaining: VecDeque<ApprovedEdit>,
-    /// After the first of two matching keys has gone, the second must still agree with the key that was sent.
-    paired_key: Option<String>,
-    after: AfterBatch,
+    /// Whether the loop came from the close question's Save, and closes Settings once every listed draft is saved.
+    close: bool,
+    /// Whether a credential replacement this loop sent was saved but not delivered everywhere. Settings then stays
+    /// open on the Credentials overview, where those hosts are listed, rather than closing over them.
+    has_delivery_warnings: bool,
 }
 
-/// A close asked during an authorized page Save does not take the save's receipt away.
-enum AfterBatch {
-    None,
-    Question(LayerId),
-    SaveAndClose(Vec<ApprovedEdit>),
+/// A Close or Escape that found Settings busy ([`SettingsDialog::close_busy`]) and waits for the work to settle before
+/// asking its question or closing. Each Settings-owned operation's own completion resumes it
+/// ([`SettingsDialog::close_settled`]), after that completion's deferred state updates, so the resumed close never
+/// sees a form between its reply and its own follow-up (a saved key's field not yet emptied, say).
+pub(super) struct PendingClose {
+    /// The press that asked to close. Any later input means the person moved on, and the resumed close does nothing.
+    mark: Mark,
+    /// The Credentials overview's delivery-report count when the close was asked. A report that arrives while the close
+    /// waits keeps Settings open on the overview; one already seen does not.
+    delivery_generation: u64,
+    /// The forms' receipts armed for this close and not yet fired ([`SaveReceipt::wait_close`]). While any is out, the
+    /// operation store's own notification does not resume the close: that form's completion will.
+    armed: Rc<Cell<usize>>,
+    /// The first refusal met while waiting, which the resumed close shows instead of closing.
+    refused: Option<CloseRefusal>,
+}
+
+impl PendingClose {
+    /// Keep the first refusal met while waiting: it is the one the resumed close shows.
+    pub(super) fn refuse(&mut self, refused: Option<CloseRefusal>) {
+        if self.refused.is_none() {
+            self.refused = refused;
+        }
+    }
+}
+
+/// What a refusal met by a waiting close shows: its page, and, when a form or editor was refused, that form, so the
+/// form's own reveal runs (the Credentials overview's key form, say, in front of an open credential editor). The form
+/// is named by its entity id, not held: a receipt holding its own form would keep it alive.
+pub(super) struct CloseRefusal {
+    section: Section,
+    edit: Option<EntityId>,
+}
+
+impl CloseRefusal {
+    /// A refusal of a switch on `section`, which has no form of its own.
+    pub(super) fn page(section: Section) -> Self {
+        CloseRefusal {
+            section,
+            edit: None,
+        }
+    }
+
+    /// A refusal of `edit`'s save, Test, Clear or Delete.
+    fn edit(edit: &Edit) -> Self {
+        CloseRefusal {
+            section: edit.section(),
+            edit: Some(edit.id()),
+        }
+    }
+}
+
+/// One armed close receipt, counted in [`PendingClose::armed`] for as long as it lives: until its callback runs, or
+/// until the form holding it goes without running it (a custom agent editor a push removed, say), so a lost receipt
+/// cannot leave the count up and stop the operation store's notification from resuming the close.
+struct Armed(Rc<Cell<usize>>);
+
+impl Armed {
+    fn new(count: &Rc<Cell<usize>>) -> Self {
+        count.set(count.get() + 1);
+        Armed(Rc::clone(count))
+    }
+}
+
+impl Drop for Armed {
+    fn drop(&mut self) {
+        self.0.set(self.0.get().saturating_sub(1));
+    }
 }
 
 impl SettingsDialog {
-    /// Loaded views remain in this list while hidden. Include both Tensorlake key fields because they hold separate
-    /// drafts, although a successful write changes the same stored account.
-    fn edits(&self, cx: &App) -> Vec<Edit> {
+    /// Every loaded form and editor, clean or not, hidden or not. Include both Tensorlake key fields because they hold
+    /// separate drafts, although a successful write changes the same stored account.
+    fn loaded(&self, cx: &App) -> Vec<Edit> {
         let mut edits = Vec::new();
         edits.extend(self.file_types.iter().cloned().map(Edit::FileTypes));
         edits.extend(self.ntfy.iter().cloned().map(Edit::Alerts));
@@ -379,21 +502,18 @@ impl SettingsDialog {
             });
             Edit::CustomAgent(section, editor.clone())
         }));
+        edits
+    }
+
+    /// The loaded drafts that are unsaved or saving: what the close question and the dirty markers name.
+    fn edits(&self, cx: &App) -> Vec<Edit> {
+        let mut edits = self.loaded(cx);
         edits.retain(|edit| edit.state(cx) != EditState::Clean);
         edits
     }
 
     pub(super) fn section_edited(&self, section: &Section, cx: &App) -> bool {
         self.edits(cx).iter().any(|edit| &edit.section() == section)
-    }
-
-    /// A discard, a successful Clear, or a fresh edit makes this result irrelevant to the current draft.
-    pub(super) fn held_close_on_page(&self, cx: &App) -> bool {
-        self.close_save_held.as_ref().is_some_and(|held| {
-            self.edits(cx)
-                .iter()
-                .any(|edit| edit.section() == self.shown && held.permits(edit, cx))
-        })
     }
 
     /// An editor owns its actions, but its dirty marker follows the same draft as the section and close question.
@@ -423,11 +543,11 @@ impl SettingsDialog {
             .filter(|edit| edit.is_form() && edit.section() == self.shown)
             .map(|edit| edit.approval(cx))
             .collect();
-        self.start_batch(approved, false, window, cx);
+        self.start_loop(approved, false, window, cx);
     }
 
     /// The current page has only one Save even when it holds several fields, as Checkouts does. Its identity
-    /// survives the first field settling so keyboard focus stays on Save until the batch ends.
+    /// survives the first field settling so keyboard focus stays on Save until the loop ends.
     pub(super) fn page_answers(&self, cx: &Context<Self>) -> Option<(&'static str, Vec<Button>)> {
         let edits: Vec<_> = self
             .edits(cx)
@@ -462,7 +582,9 @@ impl SettingsDialog {
             )
             .accessible_name("Save")
             .tier(Tier::Primary)
-            .busy(self.batch.is_some() || saving || edits.iter().any(|edit| edit.holds_save(cx)))
+            .busy(
+                self.save_loop.is_some() || saving || edits.iter().any(|edit| edit.holds_save(cx)),
+            )
             .on_click(move |_, window, cx| {
                 let _ = dialog.update(cx, |dialog, cx| dialog.save_page(window, cx));
             }),
@@ -470,57 +592,137 @@ impl SettingsDialog {
         Some((name, answers))
     }
 
-    fn start_batch(
+    // ---- The save loop ----------------------------------------------------------------------------------------------
+
+    /// Send `approved` one at a time, each after the one before it is saved. A close Save first refuses two different
+    /// replacement Tensorlake keys, since it cannot pick one of them for the one account.
+    fn start_loop(
         &mut self,
         approved: Vec<ApprovedEdit>,
         close: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.batch.is_some() {
+        if self.save_loop.is_some() {
             return;
         }
-        self.close_save_held = None;
         self.key_conflict = false;
         if close && self.keys_disagree(cx) {
             self.reveal_key_conflict(window, cx);
             return;
         }
-
-        // Waiting for a write that already started needs no new authorization. Only the queued writes do.
-        let saving: Vec<_> = self
-            .edits(cx)
-            .into_iter()
-            .filter(|edit| {
-                edit.state(cx) == EditState::Saving
-                    && (close || approved.iter().any(|approval| approval.id == edit.id()))
-            })
-            .collect();
-        // Even a refused write that was already pending when the prompt opened needs a fresh Save.
-        let remaining = approved
-            .into_iter()
-            .filter(|approval| {
-                !approval.was_saving && !saving.iter().any(|edit| approval.id == edit.id())
-            })
-            .collect();
-        self.save_generation = self.save_generation.wrapping_add(1);
-        let generation = self.save_generation;
-        self.batch = Some(Batch {
-            generation,
+        self.save_loop = Some(SaveLoop {
+            remaining: approved.into(),
             close,
-            check_keys: close,
-            active: saving.clone(),
-            remaining,
-            paired_key: None,
-            after: AfterBatch::None,
+            has_delivery_warnings: false,
         });
-        for edit in saving {
-            self.dispatch_edit(&edit, generation, true, window, cx);
-        }
-        self.advance_batch(window, cx);
+        self.advance_loop(window, cx);
     }
 
-    /// Both forms write the same key. Refuse the close batch before any writes if the two drafts disagree.
+    /// Send the next approved draft that is still loaded, or finish the loop. A draft changed since its approval is
+    /// left in Settings for a fresh action (SPEC.md, "Settings"); a close Save shows its page. One that a Test or Clear
+    /// now holds stops the loop and shows its page, since its save could not start.
+    fn advance_loop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        while let Some(save_loop) = &mut self.save_loop {
+            let close = save_loop.close;
+            let Some(approval) = save_loop.remaining.pop_front() else {
+                self.finish_loop(window, cx);
+                break;
+            };
+            let Some(next) = self
+                .loaded(cx)
+                .into_iter()
+                .find(|edit| edit.id() == approval.id)
+            else {
+                continue;
+            };
+            if !approval.permits(&next, cx) {
+                if close {
+                    self.reveal_save_failure(next.section(), window, cx);
+                }
+                continue;
+            }
+            if next.holds_save(cx) {
+                self.save_loop = None;
+                self.reveal_edit_failure(&next, window, cx);
+                // The save could not be sent, which a waiting close treats as a refusal of that form.
+                self.close_settled(Some(CloseRefusal::edit(&next)), window, cx);
+                break;
+            }
+            self.dispatch_edit(next, window, cx);
+            break;
+        }
+        cx.notify();
+    }
+
+    /// Send `edit`'s save, or join the one it already has out (its editor's own Save, pressed while the loop ran).
+    fn dispatch_edit(&mut self, edit: Edit, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog = cx.weak_entity();
+        let handle = window.window_handle();
+        let reports = self.delivery_generation(cx);
+        let finished = edit.clone();
+        let already_saving = edit.state(cx) == EditState::Saving;
+        let started = edit.save(already_saving, window, cx, move |saved, cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                let _ = dialog.update(cx, |dialog, cx| {
+                    dialog.edit_finished(&finished, saved, reports, window, cx)
+                });
+            });
+        });
+        if !started {
+            self.edit_finished(&edit, false, reports, window, cx);
+        }
+    }
+
+    /// `edit`'s save, sent by the loop when the overview's delivery reports stood at `reports`, settled: go on after a
+    /// done save, and stop and show its page after a refused one.
+    fn edit_finished(
+        &mut self,
+        edit: &Edit,
+        saved: bool,
+        reports: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let missed_hosts =
+            matches!(edit, Edit::Credential(_)) && self.delivery_generation(cx) > reports;
+        let Some(save_loop) = &mut self.save_loop else {
+            return;
+        };
+        save_loop.has_delivery_warnings |= missed_hosts;
+        if saved {
+            self.advance_loop(window, cx);
+            return;
+        }
+        let close = save_loop.close;
+        self.save_loop = None;
+        self.reveal_edit_failure(edit, window, cx);
+        if close {
+            self.scroll_to_close_refusal(cx);
+        }
+        // Also when the form refused the save itself (a draft its own check rejects), which no receipt reports.
+        self.close_settled(Some(CloseRefusal::edit(edit)), window, cx);
+    }
+
+    /// Every approved draft was sent. A close Save closes Settings, unless a credential it saved missed hosts (shown on
+    /// the Credentials overview instead), a draft that changed meanwhile still needs its own action (SPEC.md: "New or
+    /// changed drafts stay in Settings for a fresh action"), or work started meanwhile (a switch's save, a Test) is
+    /// still out, whose outcome a close would drop unseen; Settings then stays open, as for a newer draft.
+    fn finish_loop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(save_loop) = self.save_loop.take() else {
+            return;
+        };
+        if save_loop.close {
+            if save_loop.has_delivery_warnings {
+                self.show_delivery_reports(window, cx);
+            } else if self.edits(cx).is_empty() && !self.close_busy(cx) {
+                self.finish_close(window, cx);
+            }
+        }
+        self.close_settled(None, window, cx);
+    }
+
+    /// Both forms write the same key. Refuse the close Save before any writes if the two drafts disagree.
     fn key_drafts<'a>(&self, cx: &'a App) -> Option<(&'a str, &'a str)> {
         let lake = self.tensorlake_section.as_ref()?.read(cx).key();
         let credentials = self.credentials.as_ref()?.read(cx).key();
@@ -539,158 +741,6 @@ impl SettingsDialog {
         self.key_conflict = true;
         self.show_credential_key(cx);
         self.reveal_save_failure(Section::Credentials, window, cx);
-    }
-
-    fn dispatch_edit(
-        &mut self,
-        edit: &Edit,
-        generation: u64,
-        already_saving: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let dialog = cx.weak_entity();
-        let handle = window.window_handle();
-        let id = edit.id();
-        let started = edit.save(already_saving, window, cx, move |saved, cx| {
-            let _ = handle.update(cx, |_, window, cx| {
-                let _ = dialog.update(cx, |dialog, cx| {
-                    dialog.edit_finished(generation, id, saved, window, cx)
-                });
-            });
-        });
-        if !started {
-            if edit.holds_save(cx)
-                && self.batch.as_ref().is_some_and(|batch| {
-                    batch.close || matches!(batch.after, AfterBatch::SaveAndClose(_))
-                })
-            {
-                self.close_save_held = Some(edit.approval(cx));
-            }
-            self.edit_finished(generation, id, false, window, cx);
-        }
-    }
-
-    /// Only the batch that dispatched this target can consume its receipt.
-    fn edit_finished(
-        &mut self,
-        generation: u64,
-        id: EntityId,
-        saved: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(batch) = self
-            .batch
-            .as_mut()
-            .filter(|batch| batch.generation == generation)
-        else {
-            return;
-        };
-        let Some(index) = batch.active.iter().position(|active| active.id() == id) else {
-            return;
-        };
-        let edit = batch.active.remove(index);
-        if saved {
-            self.advance_batch(window, cx);
-        } else {
-            let closing = batch.close
-                || matches!(batch.after, AfterBatch::SaveAndClose(_))
-                || matches!(batch.after, AfterBatch::Question(layer) if layers::is_open(layer, window, cx));
-            if let Some(Batch {
-                after: AfterBatch::Question(layer),
-                ..
-            }) = self.batch.take()
-            {
-                layers::close(layer, window, cx);
-            }
-            self.reveal_edit_failure(&edit, window, cx);
-            if closing {
-                self.scroll_to_close_refusal(cx);
-            }
-        }
-    }
-
-    fn advance_batch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        while let Some(batch) = self.batch.as_mut().filter(|batch| batch.active.is_empty()) {
-            let generation = batch.generation;
-            let Some(approval) = batch.remaining.pop_front() else {
-                if let Some(batch) = self.batch.take() {
-                    match batch.after {
-                        AfterBatch::SaveAndClose(approved) => {
-                            self.start_batch(approved, true, window, cx)
-                        }
-                        AfterBatch::Question(layer) => {
-                            self.refresh_close_question(layer, window, cx)
-                        }
-                        AfterBatch::None if batch.close && self.edits(cx).is_empty() => {
-                            self.finish_close(window, cx);
-                        }
-                        AfterBatch::None => {}
-                    }
-                }
-                break;
-            };
-            if let Some(next) = self
-                .edits(cx)
-                .into_iter()
-                .find(|edit| edit.id() == approval.id)
-            {
-                let permitted = approval.permits(&next, cx);
-                // A pair can become conflicting during an earlier write. Keep the Credentials explanation even
-                // when neither new draft can be sent under the old approval.
-                if let Edit::Key(_, view) = &next
-                    && self.batch.as_ref().is_some_and(|batch| batch.check_keys)
-                {
-                    let paired_key = self
-                        .batch
-                        .as_ref()
-                        .and_then(|batch| batch.paired_key.as_deref());
-                    if self.keys_disagree(cx)
-                        || paired_key.is_some_and(|approved| {
-                            view.read(cx)
-                                .typed_key()
-                                .is_some_and(|replacement| replacement != approved)
-                        })
-                    {
-                        if let Some(Batch {
-                            after: AfterBatch::Question(layer),
-                            ..
-                        }) = self.batch.take()
-                        {
-                            layers::close(layer, window, cx);
-                        }
-                        self.reveal_key_conflict(window, cx);
-                        break;
-                    }
-                    if permitted
-                        && let Some((key, _)) = self.key_drafts(cx)
-                        && let Some(batch) = &mut self.batch
-                        && batch.paired_key.is_none()
-                    {
-                        batch.paired_key = Some(key.to_owned());
-                    }
-                }
-                if !permitted {
-                    if self.batch.as_ref().is_some_and(|batch| batch.close) {
-                        self.reveal_save_failure(next.section(), window, cx);
-                    }
-                    continue;
-                }
-                if let Some(batch) = &mut self.batch {
-                    batch.active.push(next.clone());
-                }
-                self.dispatch_edit(
-                    &next,
-                    generation,
-                    next.state(cx) == EditState::Saving,
-                    window,
-                    cx,
-                );
-                break;
-            }
-        }
-        cx.notify();
     }
 
     fn show_credential_key(&mut self, cx: &mut Context<Self>) {
@@ -728,17 +778,34 @@ impl SettingsDialog {
         cx.notify();
     }
 
-    /// Notifications puts the ntfy refusal below its form and the sound controls. Scroll after selecting the
-    /// section and let the next layout measure the full page, including the new error.
+    /// Notifications puts the ntfy refusal, and a failed Send test's line, below its form and the sound controls.
+    /// Scroll after selecting the section and let the next layout measure the full page, including the new error.
     fn scroll_to_close_refusal(&mut self, cx: &App) {
         if self.shown == Section::Notifications
-            && self
-                .ntfy
-                .as_ref()
-                .is_some_and(|alerts| alerts.read(cx).save_refused())
+            && self.ntfy.as_ref().is_some_and(|alerts| {
+                let alerts = alerts.read(cx);
+                alerts.save_refused() || alerts.test_failed()
+            })
         {
             self.scroll_to_ntfy_refusal = true;
         }
+    }
+
+    /// The Credentials overview's count of delivery reports in this opening ([`credentials::Credentials`]).
+    fn delivery_generation(&self, cx: &App) -> u64 {
+        self.credentials
+            .as_ref()
+            .map_or(0, |credentials| credentials.read(cx).delivery_generation())
+    }
+
+    /// Stay open on the top of the Credentials overview, where a save's missed hosts are listed.
+    fn show_delivery_reports(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.clear(window, cx);
+        if self.shown != Section::Credentials {
+            self.show(Section::Credentials, window, cx);
+        }
+        self.page_scroll.set_offset(gpui::Point::default());
+        cx.notify();
     }
 
     /// A pending close owns its completed saves. A newer interactive child needs its own answer before Settings closes.
@@ -750,21 +817,46 @@ impl SettingsDialog {
         }
     }
 
-    /// All three close routes ask the same question about the loaded drafts, including the ones hidden by search
-    /// or another section. Showing a question during a pending save joins that save without sending it again.
+    // ---- Closing ----------------------------------------------------------------------------------------------------
+
+    /// Whether a close must wait before it asks or closes: a draft saving, a Test or Clear holding a form, a credential
+    /// or custom agent Delete out, the save loop running, or any save of the preference row (the switches outside
+    /// forms, and writers outside Settings). Recipe Build, Rebuild and Delete, Containers' and Tensorlake's leftover
+    /// work and Create SSH key do not hold it: they carry on, or tell their own outcome, without the dialog.
+    pub(super) fn close_busy(&self, cx: &App) -> bool {
+        self.save_loop.is_some()
+            || self.loaded(cx).iter().any(|edit| edit.holds_close(cx))
+            || session::current_operations(cx).is_some_and(|operations| {
+                operations
+                    .read(cx)
+                    .in_flight(&OpKey::preferences())
+                    .is_some()
+            })
+    }
+
+    /// All three close routes ask the same question about the loaded drafts, including the ones hidden by search or
+    /// another section. While work is out the close waits for it instead ([`PendingClose`]); a close Save already
+    /// running closes Settings itself when it finishes.
     pub(super) fn ask_to_close(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Dismissal {
-        self.close_save_held = None;
+        if self
+            .save_loop
+            .as_ref()
+            .is_some_and(|save_loop| save_loop.close)
+        {
+            return Dismissal::Stay;
+        }
+        if self.close_busy(cx) {
+            self.wait_to_close(window, cx);
+            return Dismissal::Stay;
+        }
+        self.close_waiting = None;
         let edits = self.edits(cx);
         if edits.is_empty() {
             return Dismissal::Close;
-        }
-        // A fresh question may change the close decision. The edits already authorized to save keep going.
-        if let Some(batch) = &mut self.batch {
-            batch.close = false;
         }
         let mut names = Vec::new();
         for edit in &edits {
@@ -775,12 +867,9 @@ impl SettingsDialog {
         if names.len() == 1 {
             self.reveal_save_failure(edits[0].section(), window, cx);
         }
-        let pending: Vec<_> = edits
-            .iter()
-            .filter(|edit| edit.state(cx) == EditState::Saving)
-            .collect();
         let approved: Vec<_> = edits.iter().map(|edit| edit.approval(cx)).collect();
-        let mut question = Question::new(
+        let discard = cx.weak_entity();
+        let question = Question::new(
             "Save changes before closing?",
             Answer::new(
                 "Save",
@@ -794,119 +883,151 @@ impl SettingsDialog {
             "Keep editing",
             HoverHelp::tooltip("Stay in Settings with this draft"),
             Tier::Neutral,
-        ));
-        if pending.is_empty() {
-            let discard = cx.weak_entity();
-            question = question.alternative(
-                Answer::new(
-                    "Discard",
-                    HoverHelp::tooltip("Close Settings without saving the drafts"),
-                    Tier::Ghost,
-                ),
-                move |approved, window, cx| {
-                    let _ = discard.update(cx, |dialog, cx| {
-                        // Closing drops every draft. A new or changed one needs its own answer.
-                        if dialog.edits(cx).iter().all(|edit| {
-                            edit.state(cx) == EditState::Dirty
-                                && approved.iter().any(|approval| approval.permits(edit, cx))
-                        }) {
-                            dialog.finish_close(window, cx);
-                        }
-                    });
-                },
-            );
-        }
+        ))
+        .alternative(
+            Answer::new(
+                "Discard",
+                HoverHelp::tooltip("Close Settings without saving the drafts"),
+                Tier::Ghost,
+            ),
+            move |approved, window, cx| {
+                let _ = discard.update(cx, |dialog, cx| {
+                    // Closing drops every draft. A new or changed one needs its own answer.
+                    if dialog.edits(cx).iter().all(|edit| {
+                        edit.state(cx) == EditState::Dirty
+                            && approved.iter().any(|approval| approval.permits(edit, cx))
+                    }) {
+                        dialog.finish_close(window, cx);
+                    }
+                });
+            },
+        );
         let save = cx.weak_entity();
         let mark = Mark::take(cx);
-        if let Some(layer) = prompt::ask(
+        prompt::ask(
             question,
             None,
             &mark,
             move |approved, window, cx| {
                 let _ = save.update(cx, |dialog, cx| {
-                    // An outstanding key save clears its field on success. Check the two drafts while
-                    // they are still both present, before letting that save carry on into a close batch.
-                    if dialog.batch.is_some() && dialog.keys_disagree(cx) {
-                        dialog.reveal_key_conflict(window, cx);
-                    } else if let Some(batch) = &mut dialog.batch {
-                        batch.after = AfterBatch::SaveAndClose(approved);
-                    } else {
-                        dialog.start_batch(approved, true, window, cx);
-                    }
+                    dialog.start_loop(approved, true, window, cx)
                 });
             },
             window,
             cx,
-        ) {
-            if let Some(batch) = &mut self.batch {
-                batch.after = AfterBatch::Question(layer);
-            } else {
-                for edit in pending {
-                    self.watch_close_question(edit, layer, window, cx);
-                }
-            }
-        }
+        );
         Dismissal::Stay
     }
 
-    /// Reopen the question with its current answers once the operations it originally named have settled.
-    fn refresh_close_question(
-        &mut self,
-        layer: LayerId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if layers::is_open(layer, window, cx) {
-            layers::close(layer, window, cx);
-            if self.ask_to_close(window, cx) == Dismissal::Close {
-                self.finish_close(window, cx);
+    /// Hold this close until the work out settles: remember the press (a repeated Close or Escape takes its place) and
+    /// arm the receipts of the forms whose work is out.
+    fn wait_to_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mark = Mark::take(cx);
+        match &mut self.close_waiting {
+            Some(pending) => pending.mark = mark,
+            None => {
+                self.close_waiting = Some(PendingClose {
+                    mark,
+                    delivery_generation: self.delivery_generation(cx),
+                    armed: Rc::default(),
+                    refused: None,
+                });
             }
+        }
+        self.arm_close(window, cx);
+    }
+
+    /// Arm a close receipt on every form whose work holds the close and has none armed yet. The Tensorlake section's
+    /// switch saves the preference row from a view of its own, so it gets one too.
+    fn arm_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(armed) = self
+            .close_waiting
+            .as_ref()
+            .map(|pending| Rc::clone(&pending.armed))
+        else {
+            return;
+        };
+        let handle = window.window_handle();
+        let dialog = cx.weak_entity();
+        let receipt = move |refusal: CloseRefusal| {
+            let (guard, dialog) = (Armed::new(&armed), dialog.clone());
+            move |refused: bool, cx: &mut App| {
+                drop(guard);
+                let _ = handle.update(cx, |_, window, cx| {
+                    let _ = dialog.update(cx, |dialog, cx| {
+                        dialog.close_settled(refused.then_some(refusal), window, cx)
+                    });
+                });
+            }
+        };
+        for edit in self.loaded(cx) {
+            if edit.holds_close(cx) && !edit.close_armed(cx) {
+                edit.wait_close(receipt(CloseRefusal::edit(&edit)), cx);
+            }
+        }
+        if let Some(view) = &self.tensorlake_section
+            && view.read(cx).holds_close()
+            && !view.read(cx).save_receipt.close_armed()
+        {
+            let then = receipt(CloseRefusal::page(Section::Tensorlake));
+            view.update(cx, |view, _| view.save_receipt.wait_close(then));
         }
     }
 
-    /// A pending save may settle before the person answers the question. Once they dismiss it, that outcome no longer
-    /// owns a close. An unanswered question closes the window's dialog only once all of its drafts have been saved.
-    fn watch_close_question(
-        &self,
-        edit: &Edit,
-        layer: LayerId,
+    /// Something a waiting close may depend on settled, with the page of its refusal when it was refused. Once nothing
+    /// holds the close, it goes on: it does nothing if the person moved on since asking, shows the first refused page,
+    /// shows the Credentials overview if a credential save reported missed hosts meanwhile, and otherwise asks its
+    /// question again (or closes, with nothing unsaved).
+    pub(super) fn close_settled(
+        &mut self,
+        refused: Option<CloseRefusal>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let handle = window.window_handle();
-        let dialog = cx.weak_entity();
-        let section = edit.section();
-        let credential_key = matches!(edit, Edit::Key(Place::Credentials, _));
-        let rejected = match edit {
-            Edit::Recipe(editor) => Some(editor.downgrade()),
-            _ => None,
+        let Some(pending) = &mut self.close_waiting else {
+            return;
         };
-        edit.save(true, window, cx, move |saved, cx| {
-            let _ = handle.update(cx, |_, window, cx| {
-                if !layers::is_open(layer, window, cx) {
-                    return;
-                }
-                let _ = dialog.update(cx, |dialog, cx| {
-                    if !saved {
-                        layers::close(layer, window, cx);
-                        if credential_key {
-                            dialog.show_credential_key(cx);
-                        }
-                        dialog.reveal_save_failure(section, window, cx);
-                        dialog.scroll_to_close_refusal(cx);
-                        if let Some(editor) = rejected.and_then(|editor| editor.upgrade()) {
-                            let save = editor.read(cx).save_focus();
-                            crate::focus::focus_in_layer(&save, &Mark::take(cx), window, cx);
-                        }
-                    } else if dialog
-                        .edits(cx)
-                        .iter()
-                        .all(|edit| edit.state(cx) != EditState::Saving)
-                    {
-                        dialog.refresh_close_question(layer, window, cx);
-                    }
-                });
-            });
-        });
+        pending.refuse(refused);
+        if pending.armed.get() > 0 {
+            return;
+        }
+        if self.close_busy(cx) {
+            self.arm_close(window, cx);
+            return;
+        }
+        let Some(pending) = self.close_waiting.take() else {
+            return;
+        };
+        if focus::has_moved_on(&pending.mark, cx) {
+            return;
+        }
+        if let Some(refusal) = pending.refused {
+            let refused = refusal
+                .edit
+                .and_then(|id| self.loaded(cx).into_iter().find(|edit| edit.id() == id));
+            match refused {
+                Some(edit) => self.reveal_edit_failure(&edit, window, cx),
+                None => self.reveal_save_failure(refusal.section, window, cx),
+            }
+            self.scroll_to_close_refusal(cx);
+        } else if self.delivery_generation(cx) > pending.delivery_generation {
+            self.show_delivery_reports(window, cx);
+        } else if self.ask_to_close(window, cx) == Dismissal::Close {
+            self.finish_close(window, cx);
+        }
+    }
+
+    /// The operation store changed. A close waiting on a preference save that no Settings form owns (a switch outside
+    /// Settings, another writer) has no completion of its own to resume it, so this does; while any armed receipt is
+    /// out it leaves the close to that form's completion, which runs after the form's own follow-up.
+    pub(super) fn operations_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .close_waiting
+            .as_ref()
+            .is_some_and(|pending| pending.armed.get() == 0)
+            && !self.close_busy(cx)
+        {
+            self.close_settled(None, window, cx);
+        }
     }
 }

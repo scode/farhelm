@@ -14,7 +14,9 @@ use serde_json::{Value, json};
 use super::Section;
 use super::recipe_editor_tests::{draft, one_command, open_editor_with, show};
 use super::recipe_tests::{answer_account, entry, idle};
-use super::tests::{available, drawn, fill, label_of, open_settings, section_button, sent};
+use super::tests::{
+    available, drawn, fill, label_of, open_settings, painted, section_button, sent,
+};
 use crate::operations::{HelmMarker, OpKey, Work};
 use crate::session;
 use crate::test_support::{any_open, bounds, center, click, focused_id, frame, keys, settle};
@@ -476,11 +478,46 @@ fn a_delete_while_the_recipes_build_is_out_says_why_and_sends_nothing(cx: &mut T
 
 // ---- Closing while work is out -------------------------------------------------------------------------------------
 
-/// A close while the save is out must neither drop the draft silently nor offer a Discard it cannot keep: the draft on
-/// screen is the one being saved. The old editor asked here too and finished the close once the save was done, even
-/// unanswered. Specified: with an update out, Escape asks with Keep editing and Save only and sends nothing more; the
-/// question's Save sends nothing more and Settings stays open while the save is out; the done answer closes Settings.
-/// Again with a second change: Escape asks, and the done answer closes Settings with the question unanswered.
+/// An unanswered inline Delete confirmation must not outlive a newer answer: once the close question's Save sends the
+/// recipe, a Delete still answerable in the footer could delete what the person just chose to keep (as a custom
+/// agent's Save takes its own Delete question away, `custom_agents.rs` `Editor::save`). Specified: with a change typed
+/// and the inline Delete asked, Escape from a field asks the close question; its Save sends the update, and the Delete
+/// confirmation is gone.
+#[gpui::test]
+fn a_close_save_takes_an_unanswered_delete_question_away(cx: &mut TestAppContext) {
+    let (mut helm, cx) = edit_rust_dev(cx);
+    fill(cx, "recipe-disk", "30");
+    click(cx, "recipe-delete");
+    assert!(
+        painted(cx).contains("Delete recipe rust-dev?"),
+        "the premise: the Delete question is up"
+    );
+    // Escape from an editable field is Settings' own close; the saved recipe's name is read-only and takes no focus.
+    click(cx, "recipe-disk");
+    keys(cx, "escape");
+    assert!(painted(cx).contains("Save changes before closing?"));
+    // Both questions are drawn and both confirming answers are `prompt-confirm`; the close question opens on its Save.
+    let focused = frame(cx)
+        .into_iter()
+        .find(|node| node.flags.focused && node.element_id.is_some())
+        .and_then(|node| node.label.map(|label| label.to_string()));
+    assert_eq!(
+        focused.as_deref(),
+        Some("Save"),
+        "the premise: focus on Save"
+    );
+    keys(cx, "enter");
+    let update = one_command(&mut helm);
+    assert_eq!(update.method, Method::Put, "the close Save sent the update");
+    assert!(
+        !painted(cx).contains("Delete recipe rust-dev?"),
+        "the unanswered Delete question is gone"
+    );
+}
+
+/// SPEC.md, "Settings": waiting for the helm's round trip before Settings closes is accepted, so a close asked while
+/// the recipe's save is out asks nothing about a draft already on its way, and waits for it. Specified: with an update
+/// out, Escape asks nothing, sends nothing more and leaves Settings open; the done answer closes Settings.
 #[gpui::test]
 fn a_close_while_the_save_is_out_waits_for_it(cx: &mut TestAppContext) {
     let (mut helm, cx) = edit_rust_dev(cx);
@@ -488,33 +525,12 @@ fn a_close_while_the_save_is_out_waits_for_it(cx: &mut TestAppContext) {
     click(cx, "recipe-save");
     let save = one_command(&mut helm);
     leave_by(cx, Leave::Escape);
-    assert_eq!(
-        question(cx),
-        Some((CLOSE.to_owned(), vec!["Keep editing".into(), "Save".into()])),
-        "no Discard while the save is out"
-    );
-    click(cx, "prompt-confirm");
+    assert_eq!(question(cx), None, "Escape waits for the save");
     assert_eq!(sent(&mut helm), [], "one save went out");
     assert!(any_open(cx), "Settings waits for the save");
     helm.reply(save.id, 200, Some(entry("rust-dev", idle(), Value::Null)));
     settle(cx);
-    assert!(!any_open(cx), "the done save finished the close");
-
-    open_settings(cx);
-    click(cx, section_button(Section::Recipes));
-    answer_account(&mut helm, cx, true);
-    open_editor_with(&mut helm, cx, "recipe-edit-rust-dev", json!([]));
-    fill(cx, "recipe-disk", "40");
-    click(cx, "recipe-save");
-    let save = one_command(&mut helm);
-    leave_by(cx, Leave::Escape);
-    assert_eq!(question(cx).map(|(title, _)| title).as_deref(), Some(CLOSE));
-    helm.reply(save.id, 200, Some(entry("rust-dev", idle(), Value::Null)));
-    settle(cx);
-    assert!(
-        !any_open(cx),
-        "the done save finished the close it was asking about"
-    );
+    assert!(!any_open(cx), "the done save let the close go on");
 }
 
 /// A close while a delete is out has nothing to ask: the recipe is going, and the delete goes on in the operation
@@ -533,59 +549,46 @@ fn a_close_while_the_delete_is_out_closes_at_once(cx: &mut TestAppContext) {
     assert!(!any_open(cx), "Settings closed without asking");
 }
 
-/// A newer question owns the decision, and Keep editing means stay: an earlier answer's leave must not override what
-/// the user answered since. Specified: Escape then the question's Save sends the update; while it is out, Escape asks
-/// again, and Keep editing answers it; the done save then leaves Settings open with the list shown and the editor gone.
+/// The close question's Save already closes Settings when its saves are done, so a second Escape while that Save runs
+/// must not ask again or close early over the save. Specified: Escape then the question's Save sends the update; while
+/// it is out, Escape asks nothing and Settings stays open; the done save closes Settings.
 #[gpui::test]
-fn keep_editing_after_an_earlier_save_answer_stays_in_settings(cx: &mut TestAppContext) {
+fn a_second_close_during_the_close_save_asks_nothing(cx: &mut TestAppContext) {
     let (mut helm, cx) = edit_rust_dev(cx);
     fill(cx, "recipe-disk", "30");
     leave_by(cx, Leave::Escape);
     click(cx, "prompt-confirm");
     let save = one_command(&mut helm);
     leave_by(cx, Leave::Escape);
-    assert_eq!(
-        question(cx).map(|(title, _)| title).as_deref(),
-        Some(CLOSE),
-        "asked again"
-    );
-    click(cx, "prompt-cancel");
+    assert_eq!(question(cx), None, "not asked again");
+    assert!(any_open(cx));
     helm.reply(save.id, 200, Some(entry("rust-dev", idle(), Value::Null)));
     settle(cx);
-    assert!(any_open(cx), "Keep editing kept Settings open");
-    assert!(
-        !drawn(cx, "recipe-editor") && drawn(cx, "recipes-list"),
-        "the done save returned to the list"
-    );
+    assert!(!any_open(cx), "the close Save finished the close");
 }
 
-/// A question asked while the save was out offers no Discard; once that save is refused nothing is out, and keeping
-/// such a question would leave the user only Save, which resends what the helm just refused. Specified: Escape while
-/// the save is out asks; a 409 takes the question away, shows the helm's words and the ordinary answers, and focus
-/// lands on Save.
+/// A close that waited on a save the helm then refuses must not close over the refusal or ask to resend what the helm
+/// just refused. Specified: Escape while the save is out asks nothing; a 409 keeps Settings open on the editor with the
+/// helm's words and its ordinary Save, and still asks nothing.
 #[gpui::test]
-fn a_refused_save_takes_an_open_question_away(cx: &mut TestAppContext) {
+fn a_refused_save_keeps_a_waiting_close_open_on_the_editor(cx: &mut TestAppContext) {
     let (mut helm, cx) = edit_rust_dev(cx);
     fill(cx, "recipe-disk", "30");
     click(cx, "recipe-save");
     let save = one_command(&mut helm);
     leave_by(cx, Leave::Escape);
-    assert_eq!(
-        question(cx).map(|(title, _)| title).as_deref(),
-        Some(CLOSE),
-        "the premise"
-    );
+    assert_eq!(question(cx), None, "the premise: the close waits");
     helm.reply(
         save.id,
         409,
         Some(json!("the recipe rust-dev is being deleted")),
     );
     settle(cx);
-    assert_eq!(question(cx), None, "the question went");
+    assert!(any_open(cx), "the refusal keeps Settings open");
+    assert_eq!(question(cx), None, "and asks nothing");
     assert_eq!(
         label_of(cx, "recipe-editor-error").as_deref(),
         Some("the recipe rust-dev is being deleted")
     );
     assert!(drawn(cx, "recipe-save"));
-    assert_eq!(focused_id(cx).as_deref(), Some("recipe-save"));
 }

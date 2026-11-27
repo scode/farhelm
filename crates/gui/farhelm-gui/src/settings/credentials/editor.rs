@@ -15,7 +15,6 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity, Window, div, px,
 };
 
-use super::super::Refused;
 use super::super::choices;
 use super::{
     Credentials, Group, delivery_failures, malformed, read_login, save_command, storage_warning,
@@ -35,9 +34,6 @@ use crate::theme;
 const EDITOR_GAP: f32 = 12.;
 /// The Codex login box's starting rows, the old `<textarea rows="8">`.
 const LOGIN_ROWS: usize = 8;
-/// The editor's name for [`Refused`]: Save and Delete are the controls whose press the key can refuse, and the line
-/// saying so is drawn under the id [`Refused::line`] makes of it, `credential-editor-busy`.
-const REFUSED: &str = "credential-editor";
 
 /// The agents an agent login can be for, in the old segments' order.
 const AGENTS: [(CredentialKind, farhelm_proto::LaunchHarness); 2] = [
@@ -100,8 +96,6 @@ pub(in crate::settings) struct Editor {
     error: Option<(HostText, String)>,
     /// Whether the editor's Delete is out.
     deleting: bool,
-    /// Whether the last Save or Delete sent nothing because work on this credential was already in flight.
-    refused: Refused,
     /// The open file dialog and the read of the file chosen in it, for a Codex login; Choose file… is busy meanwhile.
     /// Clear, an agent switch, Save and closing abandon the task. The paste box's edit revision fences the result, even
     /// if the user returned to the original text.
@@ -145,7 +139,6 @@ impl Editor {
             name,
             error: None,
             deleting: false,
-            refused: Refused::default(),
             choosing: None,
             _name_edits: name_edits,
         }
@@ -239,6 +232,11 @@ impl Editor {
     /// out.
     fn busy(&self) -> bool {
         self.secret.draft().is_saving() || self.deleting
+    }
+
+    /// Whether the editor's Delete is out, which holds a close ([`crate::settings::SettingsDialog::close_busy`]).
+    pub(in crate::settings) fn deleting(&self) -> bool {
+        self.deleting
     }
 
     /// The name the editor saves under: the saved one, or what was typed.
@@ -376,6 +374,11 @@ impl Editor {
         let parent = self.parent.clone();
         let started = operations.update(cx, |operations, cx| {
             operations.start(&key, command, cx, move |settled, cx| {
+                let refused = matches!(settled.outcome, Outcome::Refused(_));
+                // Before the editor goes: a close waiting on this Delete resumes after this completion.
+                let _ = editor.update(cx, |editor, cx| {
+                    editor.save_receipt.settled_other(refused, cx)
+                });
                 match settled.outcome.clone() {
                     Outcome::Done(_) => {
                         let _ = parent.update(cx, |parent, cx| {
@@ -399,9 +402,10 @@ impl Editor {
         self.started(started, cx);
     }
 
-    /// After a Save or Delete was asked: a started one drops the last error, a busy key says so ([`Refused`]).
+    /// After a Save or Delete was asked: a started one drops the last error. Nothing else works on the credential's
+    /// key while the editor is open (Save and Delete wait for each other, and a close waits for both), so the store
+    /// never refuses one as busy and there is no busy line to show.
     fn started(&mut self, started: Result<(), NotStarted>, cx: &mut Context<Self>) {
-        self.refused.record(REFUSED, &started);
         match started {
             Ok(()) => self.error = None,
             Err(not_started) => tracing::debug!(?not_started, "credential not saved"),
@@ -557,8 +561,7 @@ impl Editor {
             .child(save)
             .into_any_element();
         let error = this.error();
-        let busy_line = choices::busy_line(&this.refused, REFUSED, cx);
-        let outcome = (error.is_some() || busy_line.is_some() || busy).then(|| {
+        let outcome = (error.is_some() || busy).then(|| {
             let palette = theme::palette(cx);
             div()
                 .flex()
@@ -567,7 +570,6 @@ impl Editor {
                 .children(
                     error.map(|reason| choices::failure_outcome("credential-error", reason, cx)),
                 )
-                .children(busy_line)
                 .children(busy.then(|| {
                     choices::outcome_line(
                         "credential-saving",

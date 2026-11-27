@@ -177,6 +177,7 @@ impl SettingsDialog {
         let selected = self.shown.custom_agent_key().flatten();
         let mut selected_deleted = false;
         let mut updates = Vec::new();
+        let mut deleted_while_deleting = Vec::new();
         self.custom_agents.retain(|key, editor| {
             let Some(id) = key else { return true };
             let draft = editor.read(cx);
@@ -184,6 +185,9 @@ impl SettingsDialog {
                 // A pushed delete can arrive before a PUT's reply. Keep the editor and the receipt it owns
                 // while it has an outstanding or unsaved edit. An explicit Delete from this page discards both.
                 let keep = !draft.deleting && (draft.saving || draft.dirty(cx));
+                if draft.deleting {
+                    deleted_while_deleting.push(editor.clone());
+                }
                 selected_deleted |= selected.as_ref() == Some(id) && (!keep || !draft.removed);
                 if keep && !draft.removed {
                     updates.push((editor.clone(), None));
@@ -195,6 +199,13 @@ impl SettingsDialog {
             }
             true
         });
+        // The push came before the Delete's reply, and the editor goes now: a close waiting on that Delete must not
+        // wait for a completion that will find no editor.
+        for editor in deleted_while_deleting {
+            editor.update(cx, |editor, cx| {
+                editor.save_receipt.settled_other(false, cx)
+            });
+        }
         for (editor, saved) in updates {
             editor.update(cx, |editor, cx| {
                 if let Some(saved) = saved {
@@ -387,6 +398,11 @@ impl Editor {
         self.saving || self.deleting
     }
 
+    /// Whether the editor's Delete is out, which holds a close ([`super::SettingsDialog::close_busy`]).
+    pub(super) fn deleting(&self) -> bool {
+        self.deleting
+    }
+
     pub(super) fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.busy() {
             return false;
@@ -546,6 +562,11 @@ impl Editor {
         let sent = operations
             .update(cx, |operations, cx| {
                 operations.start(&key, command, cx, move |settled, cx| {
+                    let refused = matches!(settled.outcome, Outcome::Refused(_));
+                    // Before the editor can go: a close waiting on this Delete resumes after this completion.
+                    let _ = view.update(cx, |editor, cx| {
+                        editor.save_receipt.settled_other(refused, cx)
+                    });
                     if matches!(settled.outcome, Outcome::Done(_)) {
                         // Changes precedes the reply, but a frame may see both at once. Retire our own draft
                         // before it can look like an external deletion whose unsaved edits should be kept.

@@ -263,6 +263,9 @@ pub(super) struct Credentials {
     key_revealed: bool,
     /// The hosts the last done replacement did not reach, until the next editor closes (Back and Cancel included).
     undelivered: Vec<DeliveryFailure>,
+    /// How many times in this opening an editor closed with hosts it did not reach: a close of Settings compares it to
+    /// tell a fresh report, which keeps Settings open on this overview, from one already seen.
+    delivery_generation: u64,
     key: Entity<TensorlakeKey>,
     /// Each list's Add button, by list, where focus goes when an editor closes.
     add: [FocusHandle; 3],
@@ -282,12 +285,18 @@ impl Credentials {
             editor: None,
             key_revealed: false,
             undelivered: Vec::new(),
+            delivery_generation: 0,
             key,
             add: [(); 3].map(|_| cx.focus_handle().tab_stop(true)),
             window: window.window_handle(),
         };
         credentials.read(cx);
         credentials
+    }
+
+    /// The count of delivery reports in this opening (see the field).
+    pub(super) fn delivery_generation(&self) -> u64 {
+        self.delivery_generation
     }
 
     /// The open editor counts for closing even while the overview is showing a key error.
@@ -406,6 +415,9 @@ impl Credentials {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
+        if !undelivered.is_empty() {
+            self.delivery_generation += 1;
+        }
         self.undelivered = undelivered;
         self.read(cx);
         self.editor = None;

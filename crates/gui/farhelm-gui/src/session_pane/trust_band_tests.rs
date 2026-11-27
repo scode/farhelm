@@ -611,8 +611,8 @@ fn dont_show_again_stores_the_shared_dismissal(cx: &mut TestAppContext) {
 /// band shows only what the helm stores: the old band had to discard a Settings choice the helm then refused (the old
 /// `claude-trust.spec.ts`, "Claude trust band discards a newer Settings overlay after its origin closes"; a press of
 /// the switch while the band's save is out is the operation store's and Settings' own tests'). Specified: with the
-/// band's dismissal stored, Settings' hint switch saves "show", and after Settings closes, the helm refusing it leaves
-/// the band away with no failure line.
+/// band's dismissal stored, Settings' hint switch saves "show"; Close waits for that save (SPEC.md, "Settings"), and
+/// the helm refusing it keeps Settings open; after Settings closes, the band stays away with no failure line.
 #[gpui::test]
 fn the_band_follows_only_the_stored_dismissal(cx: &mut TestAppContext) {
     let mut trust = open(cx);
@@ -647,9 +647,18 @@ fn the_band_follows_only_the_stored_dismissal(cx: &mut TestAppContext) {
         json!({ "claude_trust_hint_dismissed": false })
     );
 
-    trust.close_settings();
+    click(trust.main.cx, "settings-footer-close");
+    assert!(
+        any_open(trust.main.cx),
+        "Close waits for the hint switch's save"
+    );
     assert!(!trust.shows(), "not before the helm stores it");
     trust.refuse(dismissals[0].0);
+    assert!(
+        any_open(trust.main.cx),
+        "the refusal keeps Settings open on the switch"
+    );
+    trust.close_settings();
     let read = trust.one_read();
     trust.trust_is(read, false);
     assert!(!trust.shows(), "the refused choice never shows");

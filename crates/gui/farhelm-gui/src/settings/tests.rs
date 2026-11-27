@@ -201,13 +201,17 @@ pub(super) fn open_settings(cx: &mut VisualTestContext) {
 }
 
 /// The visible part of the Settings page, between its pinned heading and footer.
-const DIALOG_BODY: &str = "settings-body";
+pub(super) const DIALOG_BODY: &str = "settings-body";
 /// All Settings forms put Save in the footer. The host settings and launcher checkout fields keep their own Save.
 const FOOTER_SAVE: &str = "settings-footer-save";
 
 /// Whether the element drawn under `selector` lies wholly inside, top to bottom, the element drawn under `region`: a
 /// control in a scrolling region shows whole only when this holds.
-fn shows_whole(cx: &mut VisualTestContext, selector: &'static str, region: &'static str) -> bool {
+pub(super) fn shows_whole(
+    cx: &mut VisualTestContext,
+    selector: &'static str,
+    region: &'static str,
+) -> bool {
     let (inner, outer) = (bounds(cx, selector), bounds(cx, region));
     inner.top() >= outer.top() && inner.bottom() <= outer.bottom()
 }
@@ -286,6 +290,8 @@ pub(super) fn heading(cx: &mut VisualTestContext) -> Option<String> {
 /// An unreadable catalog exposes the helm's reason on the first read and preserves the page on a failed refresh.
 /// Settings search finds the saved agent by its name, ID and command, and opens the editor without a read.
 /// When a push matches the in-flight save before its reply, Save keeps focus and another push cannot replace the edit.
+/// Escape while a Delete is out waits for it, even when the push removing the editor comes before the reply, and then
+/// closes Settings without asking about the deleted draft.
 #[gpui::test]
 fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppContext) {
     const DISPLAY_NAME: &str = "Example Code סוכן";
@@ -629,17 +635,24 @@ fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppCont
     click(cx, "custom-agent-delete");
     click(cx, "prompt-confirm");
     let (delete, _) = one_command(&mut helm, Method::Delete, "/api/custom-agents/example-code");
+    // A close while the Delete is out waits for it (SPEC.md, "Settings"), even when the push that removes the editor
+    // comes before the Delete's reply.
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape waits for the Delete");
+    assert!(!drawn(cx, "prompt"), "and asks nothing yet");
     helm.push(CollectionChanges {
         collection,
         meta: meta(&[]),
         upsert: vec![],
         remove: vec!["example-code".into()],
     });
+    settle(cx);
+    assert!(
+        !any_open(cx),
+        "the push that removed the deleting editor let the close go on before the reply"
+    );
     helm.reply(delete, 204, None);
     settle(cx);
-    assert_eq!(heading(cx).as_deref(), Some("Add custom agent"));
-    assert!(!drawn(cx, "settings-section-custom-example-code"));
-    keys(cx, "escape");
     assert!(!any_open(cx), "the deleted draft must not ask to be saved");
     assert!(
         sent(&mut helm).is_empty(),
@@ -1729,23 +1742,21 @@ fn switching_sections_keeps_a_pending_save_and_a_failure_line(cx: &mut TestAppCo
     );
 }
 
-/// SPEC_impl.md, "Work that finishes later": a save is the operation store's work, which outlives the view that
-/// started it, and the old app's Settings never cancelled a queued write on close. Closing the dialog must neither
-/// cancel the save nor leave the key busy for good. Specified: a switch's save in flight when Escape closes Settings is
-/// still on the preference row's key; the helm's push and reply settle it with no dialog left; Settings opened again
-/// shows the saved value.
+/// SPEC.md, "Settings": the helm is a presumed low-latency remote, and waiting for its round trip before Settings
+/// closes is accepted. A switch that saves at once has no draft for the close question to name, so without the wait a
+/// close would drop the switch's refusal unseen. Specified: Escape while a switch's save is out leaves Settings open,
+/// with the save still on the preference row's key; the helm's push and reply settle it, and Settings then closes on
+/// its own, with nothing unsaved and no question; Settings opened again shows the saved value.
 #[gpui::test]
-fn a_save_in_flight_goes_on_after_the_dialog_closes(cx: &mut TestAppContext) {
+fn escape_waits_for_a_switch_save_then_closes(cx: &mut TestAppContext) {
     let frames = Choice::ColorTerminalFrames.id();
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     open_settings(cx);
     click(cx, frames);
     let (id, _) = one_save(&mut helm);
     keys(cx, "escape");
-    assert!(
-        !any_open(cx),
-        "the premise: Settings closed with the save in flight"
-    );
+    assert!(any_open(cx), "Escape waits for the save");
+    assert!(!drawn(cx, "prompt"), "and asks nothing");
     assert_eq!(
         preference_work(cx),
         Some(Work::Save),
@@ -1763,6 +1774,7 @@ fn a_save_in_flight_goes_on_after_the_dialog_closes(cx: &mut TestAppContext) {
     helm.reply(id, 204, None);
     settle(cx);
     assert_eq!(preference_work(cx), None, "the reply settled it");
+    assert!(!any_open(cx), "and the waiting close went on");
     open_settings(cx);
     assert_eq!(switch_on(cx, frames), Some(true));
 }
@@ -3514,8 +3526,10 @@ fn a_stored_carriage_return_survives_an_edit(cx: &mut TestAppContext) {
     assert_eq!(sent.replacen(" # edited", "", 1), stored);
 }
 
-/// An explicit save outlives the close gesture but Settings stays open until it settles. Escape asks, with no
-/// Discard while the folder save is in flight. The done answer sends its read back and closes Settings.
+/// SPEC.md, "Settings": waiting for the helm's round trip before Settings closes is accepted, so a close does not ask
+/// about a save already out (which it could neither send again nor discard) and simply waits for it. Specified: Escape
+/// while the folder's save is out asks nothing and keeps Settings open; the done answer sends the field's read back and
+/// closes Settings.
 #[gpui::test]
 fn a_folder_save_in_flight_holds_settings_open_until_done(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -3524,14 +3538,8 @@ fn a_folder_save_in_flight_holds_settings_open_until_done(cx: &mut TestAppContex
     click(cx, FOOTER_SAVE);
     let (id, _) = one_put(&mut helm, Field::Folder.path());
     keys(cx, "escape");
-    assert_eq!(
-        label_of(cx, "prompt").as_deref(),
-        Some("Save changes before closing?")
-    );
-    assert!(
-        !drawn(cx, "prompt-alternative-0"),
-        "the write is already out"
-    );
+    assert!(!drawn(cx, "prompt"), "Escape waits for the save");
+    assert!(any_open(cx));
     assert_eq!(preference_work(cx), Some(Work::Save));
     helm.reply(id, 204, None);
     settle(cx);
@@ -3811,9 +3819,11 @@ fn an_unsaved_draft_survives_a_section_switch_and_goes_with_the_dialog(cx: &mut 
     assert_eq!(text(cx, Field::PostClone), "stored");
 }
 
-/// Checkouts' single footer Save must serialize the two writes on the shared key. Its first read-back is still
-/// sent as before, and the second field waits for the first acknowledgment even if the user asks to Close and then
-/// chooses Keep editing.
+/// Checkouts' single footer Save must serialize the two writes on the shared key. Its first read-back is still sent as
+/// before, and the second field waits for the first acknowledgment. A Close pressed meanwhile waits for the whole Save
+/// (SPEC.md, "Settings") rather than asking about drafts already on their way. Specified: Save sends the folder; Close
+/// asks nothing and sends nothing more; the folder's answer sends its read-back and the command; once both settle,
+/// the command's read-back goes out and Settings closes with nothing unsaved.
 #[gpui::test]
 fn one_checkout_save_writes_both_changed_fields_in_order(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -3825,15 +3835,7 @@ fn one_checkout_save_writes_both_changed_fields_in_order(cx: &mut TestAppContext
     let (folder, body) = one_put(&mut helm, Field::Folder.path());
     assert_eq!(body, json!({"root": "~/work"}));
     click(cx, "settings-footer-close");
-    assert_eq!(
-        label_of(cx, "prompt").as_deref(),
-        Some("Save changes before closing?")
-    );
-    assert!(
-        !drawn(cx, "prompt-alternative-0"),
-        "an acknowledged save is still pending"
-    );
-    click(cx, "prompt-cancel");
+    assert!(!drawn(cx, "prompt"), "Close waits for the page Save");
     assert!(any_open(cx));
     assert!(
         sent(&mut helm).is_empty(),
@@ -3858,6 +3860,7 @@ fn one_checkout_save_writes_both_changed_fields_in_order(cx: &mut TestAppContext
     let reads = sent_reads(&mut helm);
     assert_eq!(reads.len(), 1);
     assert_eq!(reads[0].1, Field::PostClone.path());
+    assert!(!any_open(cx), "the waiting close went on");
 }
 
 /// Discarding Clear saved token restores the input's ability to accept a replacement.
@@ -3928,8 +3931,12 @@ fn close_save_stops_at_the_first_failure_and_shows_that_page(cx: &mut TestAppCon
     assert_eq!(text(cx, Field::PostClone), "make setup");
 }
 
-/// A running page Save and a later close answer each authorize only the drafts they observed. After the folder
-/// settles, the second checkout edit and a new Notifications server must stay unsaved until a fresh action.
+/// SPEC.md, "Settings": "The close answers apply to the drafts listed when the question opened. A page Save also
+/// applies only to the drafts it started with. New or changed drafts stay in Settings for a fresh action." A save must
+/// never send a value the person did not approve. Specified: a Checkouts page Save sends the folder; the command edited
+/// again meanwhile is not sent when the folder is answered. Then Escape lists File types and Checkout settings, and
+/// Save sends only the file types; a new Notifications server and the command edited again while that save is out stay
+/// unsaved, nothing else is sent, Settings stays open, and the footer Save of Checkouts sends the newest command.
 #[gpui::test]
 fn close_save_leaves_unlisted_forms_and_later_versions_unsaved(cx: &mut TestAppContext) {
     let (mut helm, cx, _) = open_rail(cx, &Preferences::default());
@@ -3937,7 +3944,7 @@ fn close_save_leaves_unlisted_forms_and_later_versions_unsaved(cx: &mut TestAppC
     click(cx, section_button(Section::Notifications));
     let reads = sent_reads(&mut helm);
     let [(read, path)] = reads.as_slice() else {
-        panic!("expected one Notifications read before the held save");
+        panic!("expected one Notifications read");
     };
     assert_eq!(path, "/api/ntfy-alerts");
     helm.reply(
@@ -3952,49 +3959,221 @@ fn close_save_leaves_unlisted_forms_and_later_versions_unsaved(cx: &mut TestAppC
     click(cx, FOOTER_SAVE);
     let (folder, body) = one_put(&mut helm, Field::Folder.path());
     assert_eq!(body, json!({ "root": "~/approved" }));
-    assert_eq!(preference_work(cx), Some(Work::Save));
+    fill(cx, Field::PostClone.selector(), "make later");
+    helm.reply(folder, 204, None);
+    settle(cx);
+    let reads = sent_reads(&mut helm);
+    assert_eq!(
+        reads.len(),
+        1,
+        "only the folder's read-back: the changed command waits for a fresh action"
+    );
+    helm.reply(reads[0].0, 200, Some(json!({ "root": "~/approved" })));
+    settle(cx);
+
     click(cx, section_button(Section::Terminal));
     fill(cx, super::file_types::ID, "md, pdf");
     keys(cx, "escape");
     assert!(painted(cx).contains("Unsaved: File types, Checkout settings"));
     click(cx, "prompt-confirm");
+    let (save, body) = one_put(&mut helm, "/api/preferences");
+    assert_eq!(body, json!({ "open_extensions": "md, pdf" }));
 
     click(cx, section_button(Section::Notifications));
     fill(cx, "ntfy-server", "https://new.example");
     assert!(drawn(cx, "ntfy-token-origin-hint"));
     click(cx, section_button(Section::Checkouts));
-    fill(cx, Field::PostClone.selector(), "make later");
+    fill(cx, Field::PostClone.selector(), "make even later");
     assert_eq!(sent(&mut helm), []);
 
-    helm.reply(folder, 204, None);
+    helm.reply(save, 200, None);
     settle(cx);
-    let commands = sent(&mut helm);
-    let [read, save] = commands.as_slice() else {
-        panic!("expected the folder read-back and only the unchanged draft's save");
-    };
-    assert_eq!(
-        (read.method, read.path.as_str()),
-        (Method::Get, Field::Folder.path())
-    );
-    assert_eq!(
-        (save.method, save.path.as_str()),
-        (Method::Put, "/api/preferences")
-    );
-    assert_eq!(save.body, Some(json!({ "open_extensions": "md, pdf" })));
-    helm.reply(read.id, 200, Some(json!({ "root": "~/approved" })));
-    helm.reply(save.id, 200, None);
-    settle(cx);
-    assert_eq!(sent(&mut helm), []);
-    assert!(any_open(cx));
+    assert_eq!(sent(&mut helm), [], "the changed command was not sent");
+    assert!(any_open(cx), "the drafts left unsaved keep Settings open");
     click(cx, section_button(Section::Notifications));
     assert!(drawn(cx, "ntfy-token-origin-hint"));
     click(cx, section_button(Section::Checkouts));
-    assert_eq!(text(cx, Field::PostClone), "make later");
+    assert_eq!(text(cx, Field::PostClone), "make even later");
     click(cx, FOOTER_SAVE);
     assert_eq!(
         one_put(&mut helm, Field::PostClone.path()).1,
-        json!({ "command": "make later" })
+        json!({ "command": "make even later" })
     );
+}
+
+// ---- Closing while work is out -------------------------------------------------------------------------------------
+
+/// SPEC.md, "Settings": a close waits for the helm's answer, and a switch that saves at once has no draft for the close
+/// question to name, so a close that went on over its refusal would leave the switch snapped back with nobody told
+/// why. Specified: a frames-switch save out on Sessions, then Hosts shown and Escape: Settings stays open and asks
+/// nothing; the helm's refusal keeps it open, shows Sessions again with the switch's failure line, and still asks
+/// nothing.
+#[gpui::test]
+fn a_refused_switch_save_keeps_a_waiting_close_open_on_its_page(cx: &mut TestAppContext) {
+    let frames = Choice::ColorTerminalFrames;
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, frames.id());
+    let (id, _) = one_save(&mut helm);
+    click(cx, section_button(Section::Hosts));
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape waits for the save");
+    helm.reply(id, 503, Some(json!("fixture preference save refused")));
+    settle(cx);
+    assert!(any_open(cx), "the refusal keeps Settings open");
+    assert!(!drawn(cx, "prompt"), "and asks nothing");
+    assert_eq!(
+        heading(cx).as_deref(),
+        Some("Sessions"),
+        "on the switch's page"
+    );
+    assert!(drawn(cx, &frames.error_id()), "with its failure line");
+}
+
+/// A preference save that no Settings form owns (a hint switch outside Settings, an agent) has no completion of
+/// Settings' own to resume a waiting close; only the operation store's notification does, and without it the close
+/// would wait forever. Specified: with a save started on the preference row's key straight through the operation
+/// store, Escape keeps Settings open and asks nothing; that save's answer closes Settings.
+#[gpui::test]
+fn a_close_waits_for_a_preference_save_no_settings_form_owns(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    let started = cx.update(|_, cx| {
+        let operations = session::current_operations(cx).expect("the premise: a UI session");
+        let command = Choice::ColorTerminalFrames
+            .command(true)
+            .expect("the path builds");
+        operations.update(cx, |operations, cx| {
+            operations.start(&OpKey::preferences(), command, cx, |_, _| {})
+        })
+    });
+    assert!(started.is_ok(), "the premise: the outside save is out");
+    let (id, _) = one_save(&mut helm);
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape waits for the outside save");
+    assert!(!drawn(cx, "prompt"));
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert!(
+        !any_open(cx),
+        "the store's notification let the close go on"
+    );
+}
+
+/// A waiting close belongs to the press that asked for it: input after that press means the person went on with
+/// something else, and closing Settings under them when the save answers would take that away (SPEC.md, "Who may move
+/// focus", applied to closing). Specified: a frames-switch save out and Escape; then Hosts shown; the save's answer
+/// leaves Settings open on Hosts with nothing asked.
+#[gpui::test]
+fn input_after_a_waiting_close_cancels_it(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, Choice::ColorTerminalFrames.id());
+    let (id, _) = one_save(&mut helm);
+    keys(cx, "escape");
+    assert!(any_open(cx), "the premise: Escape waits");
+    click(cx, section_button(Section::Hosts));
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert!(any_open(cx), "the later input cancelled the close");
+    assert!(!drawn(cx, "prompt"));
+    assert_eq!(heading(cx).as_deref(), Some("Hosts"));
+}
+
+/// The tunnel switch's two saves go through their own paths (off saves at once, on through the warning's Allow), and
+/// each is one of the switches a close must wait for. Specified: with consent stored, turning tunnels off and
+/// pressing Escape keeps Settings open with nothing asked; the helm's push and answer close it. Then, in a new opening
+/// with no consent, Allow's save out and Escape keep Settings open; the helm's refusal keeps it open with the switch's
+/// failure line and nothing asked.
+#[gpui::test]
+fn a_close_waits_for_either_tunnel_save(cx: &mut TestAppContext) {
+    let (mut helm, cx) = show_terminal(cx, &consent_row(true));
+    click(cx, TUNNELS);
+    let (off, body) = one_save(&mut helm);
+    assert_eq!(body, json!({ "tunnel_consent": false }));
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape waits for the off save");
+    assert!(!drawn(cx, "prompt"));
+    push(&mut helm, &consent_row(false), cx);
+    helm.reply(off, 204, None);
+    settle(cx);
+    assert!(!any_open(cx), "the answered off save let the close go on");
+
+    open_settings(cx);
+    on_the_mac(cx);
+    click(cx, section_button(Section::Terminal));
+    click(cx, TUNNELS);
+    click(cx, "prompt-confirm");
+    let (allow, body) = one_save(&mut helm);
+    assert_eq!(body, json!({ "tunnel_consent": true }));
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape waits for Allow's save");
+    helm.reply(allow, 503, Some(json!("fixture consent refused")));
+    settle(cx);
+    assert!(any_open(cx), "the refusal keeps Settings open");
+    assert!(!drawn(cx, "prompt"), "and asks nothing");
+    assert!(
+        tunnel_failure(cx).is_some(),
+        "with the switch's failure line"
+    );
+}
+
+/// The hook setup switch saves through its own route, not the preference row, yet under the same key, so a close must
+/// wait for it as for any switch. Specified: Settings opened at Grok's hook setup with setup on; turning it off sends
+/// its `PUT`; Escape keeps Settings open with nothing asked; the helm's answer closes it.
+#[gpui::test]
+fn a_close_waits_for_the_hook_setup_switch(cx: &mut TestAppContext) {
+    let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
+    let agent = crate::hook_setup::HookAgent::Grok;
+    cx.update(|window, cx| {
+        super::open_at_hook_setup(agent, &gear, &Mark::take(cx), window, cx);
+    });
+    settle(cx);
+    let reads = sent_reads(&mut helm);
+    let [(read, _)] = reads.as_slice() else {
+        panic!("only the Grok setup read: {reads:?}")
+    };
+    helm.reply(*read, 200, Some(json!({ "enabled": true })));
+    settle(cx);
+    assert_eq!(switch_on(cx, agent.id()), Some(true), "the premise");
+    reach(cx, agent.id());
+    keys(cx, "space");
+    let (save, body) = one_put(&mut helm, "/api/agent-hook-setup/grok");
+    assert_eq!(body, json!({ "enabled": false }));
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape waits for the hook save");
+    assert!(!drawn(cx, "prompt"));
+    helm.reply(save, 204, None);
+    settle(cx);
+    assert!(!any_open(cx), "the answered save let the close go on");
+}
+
+/// Send test holds the ntfy form even when it has no draft, so the close question would have nothing to name and a
+/// close that went on would drop the test's outcome unseen. Specified: with the saved form clean, Send test out and
+/// Escape keep Settings open with nothing asked; the test's answer closes Settings.
+#[gpui::test]
+fn a_close_waits_for_a_test_on_a_clean_ntfy_form(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "alerts", "default", false),
+    );
+    assert!(
+        !drawn(cx, "settings-unsaved"),
+        "the premise: the form is clean"
+    );
+    reach(cx, "ntfy-send-test");
+    keys(cx, "space");
+    let requests = sent(&mut helm);
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].path, "/api/ntfy-alerts/test");
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape waits for the test");
+    assert!(!drawn(cx, "prompt"));
+    helm.reply(requests[0].id, 204, None);
+    settle(cx);
+    assert!(!any_open(cx), "the answered test let the close go on");
 }
 
 // ---- Notifications: ntfy alerts ------------------------------------------------------------------------------------
@@ -4510,8 +4689,9 @@ fn a_press_during_another_settings_save_says_why_it_sent_nothing(cx: &mut TestAp
 /// Why this matters: Checkouts' fields, its spare switch and the ntfy form save under the same preference row's key as
 /// every Settings choice, from views of their own, so each must say why its press sent nothing too. Specified: with
 /// Notifications and Checkouts read, the spare switch's save in flight, a typed post-clone command's Save and the ntfy
-/// form's Save send nothing and each draws the alert under its own control; a second click on the spare switch draws
-/// it under the switch; once the spare's save is answered, the ntfy Save sends its `PUT` and its line goes, while the
+/// form's Save send nothing and each draws the alert under its own control; a second click on the spare switch draws it
+/// under the switch; Escape meanwhile waits for the spare's save and asks nothing, and once that save is answered the
+/// close question opens (Keep editing stays); the ntfy Save then sends its `PUT` and its line goes, while the
 /// post-clone field's line stays until that field's own save starts.
 #[gpui::test]
 fn the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing(cx: &mut TestAppContext) {
@@ -4548,17 +4728,20 @@ fn the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing(cx: &mut Te
     assert_eq!(sent(&mut helm), [], "the key held the form back");
     assert_eq!(busy_line(cx, "ntfy"), busy_alert());
 
-    cx.simulate_resize(size(px(720.), px(560.)));
     click(cx, section_button(Section::Sessions));
     keys(cx, "escape");
-    click(cx, "prompt-confirm");
-    assert!(!drawn(cx, "prompt"));
+    assert!(!drawn(cx, "prompt"), "Escape waits for the spare's save");
     assert_eq!(sent(&mut helm), []);
-    assert!(shows_whole(cx, "ntfy-busy", DIALOG_BODY));
 
-    cx.simulate_resize(size(px(1600.), px(1000.)));
     helm.reply(id, 204, None);
     settle(cx);
+    assert_eq!(
+        label_of(cx, "prompt").as_deref(),
+        Some("Save changes before closing?"),
+        "the answered save lets the close ask"
+    );
+    click(cx, "prompt-cancel");
+    click(cx, section_button(Section::Notifications));
     let (id, _) = save_ntfy(&mut helm, cx);
     assert_eq!(busy_line(cx, "ntfy"), None, "its save started");
     helm.reply(id, 200, Some(ntfy("https://ntfy.sh", "", "default", false)));
@@ -4609,11 +4792,11 @@ fn the_tallest_sections_last_line_clears_the_footer_scrolled_to_the_end(cx: &mut
 /// overtake it, and showed one outcome at a time. Specified: right after a done save, Send test sends one `POST
 /// /api/ntfy-alerts/test` with no body, shows "Working…" and takes the saved line away; meanwhile Save and the switch
 /// send and change nothing; the helm's refusal shows in its own words with the alert role; an edit takes that line
-/// away; with an unsaved topic typed, an attempted Save and Close stays open with a retry explanation while the
-/// test is pending. A test refusal stays after showing Sessions and Notifications again, beside the
-/// unsaved topic; a test answered with no body shows "Test alert sent" with the status role, which also stays across
-/// that switch; closing Settings with it showing (Discard in the close question) and opening it again shows no line,
-/// and Save sends the stored topic, not the unsaved one.
+/// away; with an unsaved topic typed, Escape during the pending test asks nothing, and the test's refusal then keeps
+/// Settings open on its line instead of asking. A test refusal stays after showing Sessions and Notifications again,
+/// beside the unsaved topic; a test answered with no body shows "Test alert sent" with the status role, which also
+/// stays across that switch; closing Settings with it showing (Discard in the close question) and opening it again
+/// shows no line, and Save sends the stored topic, not the unsaved one.
 #[gpui::test]
 fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppContext) {
     let refusal = "the ntfy server could not be reached";
@@ -4676,7 +4859,7 @@ fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppC
     assert!(!drawn(cx, "ntfy-tested"), "an edit took the line away");
 
     let id = send_test(&mut helm, cx);
-    // Close cannot send this dirty form while Send test owns it. Explain the refused close before the test answers.
+    // Send test owns this dirty form, so its Save is busy, and Escape waits for the test before it asks anything.
     assert!(drawn(cx, "ntfy-working"));
     assert!(drawn(cx, "settings-unsaved"));
     assert_eq!(super::recipe_tests::pressable(cx, FOOTER_SAVE), Some(false));
@@ -4685,15 +4868,22 @@ fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppC
         sent(&mut helm).is_empty(),
         "the busy Save cannot send the draft"
     );
+    cx.simulate_resize(size(px(720.), px(560.)));
+    click(cx, section_button(Section::Sessions));
     keys(cx, "escape");
-    click(cx, "prompt-confirm");
-    assert_eq!(
-        label_of(cx, "settings-close-save-held").as_deref(),
-        Some(super::CLOSE_SAVE_HELD)
-    );
+    assert!(!drawn(cx, "prompt"), "Escape waits for the test");
     assert!(sent(&mut helm).is_empty(), "the test is the only request");
     helm.reply(id, 502, Some(json!(refusal)));
     settle(cx);
+    assert!(
+        !drawn(cx, "prompt") && drawn(cx, "ntfy-tested"),
+        "the failed test keeps Settings open on its line instead of asking"
+    );
+    assert!(
+        shows_whole(cx, "ntfy-tested", DIALOG_BODY),
+        "Notifications shown again and scrolled to the failed test's line"
+    );
+    cx.simulate_resize(size(px(1600.), px(1000.)));
     switch_sections(cx);
     assert_eq!(label_of(cx, "ntfy-tested").as_deref(), Some(refusal));
     let topic = topic_input(cx);

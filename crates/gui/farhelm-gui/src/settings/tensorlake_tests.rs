@@ -290,10 +290,11 @@ fn closing_with_two_different_key_drafts_never_chooses_one(cx: &mut TestAppConte
     assert_closing_with_two_different_key_drafts(cx, false);
 }
 
-/// A previously authorized Save may finish while Settings stays open. Its success clears the first field, so
-/// checking only after that reply would silently let Save and Close replace it with the other draft.
+/// A close asked while the first key's page Save is out waits for it (SPEC.md, "Settings") instead of approving
+/// drafts over it. Its success empties the first field, so the question then names only the other draft, which the
+/// person sees and answers afresh; nothing replaces the saved key without that answer.
 #[gpui::test]
-fn closing_with_conflicting_keys_does_not_replace_a_pending_key_save(cx: &mut TestAppContext) {
+fn closing_while_a_key_save_is_out_waits_and_asks_about_the_other_draft(cx: &mut TestAppContext) {
     assert_closing_with_two_different_key_drafts(cx, true);
 }
 
@@ -322,6 +323,25 @@ fn assert_closing_with_two_different_key_drafts(cx: &mut TestAppContext, saving_
         id
     });
     click(cx, "settings-close");
+    if let Some(id) = pending {
+        assert!(!drawn(cx, "prompt"), "Close waits for the first key's save");
+        helm.reply(id, 200, Some(account(true, false)));
+        settle(cx);
+        assert_eq!(preference_work(cx), None, "the first save settled");
+        assert!(
+            painted(cx).contains("Unsaved: Tensorlake API key in Credentials"),
+            "the question names only the draft still unsaved"
+        );
+        assert!(!painted(cx).contains("You entered two different Tensorlake keys."));
+        assert_eq!(typed_in_credentials(cx), "fictional-second-key");
+        assert!(
+            sent(&mut helm)
+                .iter()
+                .all(|request| request.method == Method::Get),
+            "the old save's success did not authorize a replacement key"
+        );
+        return;
+    }
     click(cx, "prompt-confirm");
     assert!(painted(cx).contains("You entered two different Tensorlake keys."));
     assert_eq!(typed_in_credentials(cx), "fictional-second-key");
@@ -330,19 +350,59 @@ fn assert_closing_with_two_different_key_drafts(cx: &mut TestAppContext, saving_
             .iter()
             .all(|request| request.method == Method::Get)
     );
-    if let Some(id) = pending {
-        helm.reply(id, 200, Some(account(true, false)));
-        settle(cx);
-        assert_eq!(preference_work(cx), None, "the first save settled");
-        assert!(painted(cx).contains("If that key is already saved, discard the draft."));
-        assert_eq!(typed_in_credentials(cx), "fictional-second-key");
-        assert!(
-            sent(&mut helm)
-                .iter()
-                .all(|request| request.method == Method::Get),
-            "the old save's success did not authorize a replacement key"
+}
+
+// ---- Closing while work is out -------------------------------------------------------------------------------------
+
+/// SPEC.md, "Settings": a close waits for the helm's answer. The create-without-asking switch saves at once from the
+/// Tensorlake section's own view, and the key form's Test holds the form even with no draft, so neither gives the
+/// close question anything to name; a close that went on would drop their outcome unseen. Specified: with no key saved,
+/// turning the switch on and pressing Escape keeps Settings open with nothing asked, and the answer closes it; in a new
+/// opening, Test on the clean key form and Escape keep Settings open, and the test's answer closes it.
+#[gpui::test]
+fn a_close_waits_for_the_switch_and_a_test_on_a_clean_key_form(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let read = show_tensorlake(&mut helm, cx);
+    helm.reply(read.id, 200, Some(account(false, false)));
+    settle(cx);
+    press(cx, ASK_ID);
+    let (save, body) = one_account_save(&mut helm);
+    assert_eq!(body, json!({ "create_without_asking": true }));
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape waits for the switch's save");
+    assert!(!drawn(cx, "prompt"));
+    helm.reply(save, 200, Some(account(false, true)));
+    settle(cx);
+    assert!(!any_open(cx), "the answered save let the close go on");
+
+    let read = show_tensorlake(&mut helm, cx);
+    helm.reply(read.id, 200, Some(account(true, true)));
+    settle(cx);
+    // A saved key also starts the leftover-sandbox read, answered first on the ordered lane.
+    for read in sent(&mut helm) {
+        assert_eq!(read.path, "/api/tensorlake/orphans");
+        helm.reply(
+            read.id,
+            200,
+            Some(super::tensorlake_sandbox_tests::leftover_list(&[], &[])),
         );
     }
+    settle(cx);
+    assert!(
+        !drawn(cx, "settings-unsaved"),
+        "the premise: the key form is clean"
+    );
+    reach(cx, "tensorlake-key-test");
+    keys(cx, "space");
+    let requests = sent(&mut helm);
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].path, "/api/tensorlake/test");
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape waits for the test");
+    assert!(!drawn(cx, "prompt"));
+    helm.reply(requests[0].id, 200, Some(json!({ "sandboxes": 0 })));
+    settle(cx);
+    assert!(!any_open(cx), "the answered test let the close go on");
 }
 
 // ---- Creating sandboxes --------------------------------------------------------------------------------------------

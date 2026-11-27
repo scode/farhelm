@@ -475,6 +475,11 @@ impl NtfyAlerts {
         self.testing
     }
 
+    /// Whether the last Send test failed, which a close waiting on it shows instead of closing.
+    pub(super) fn test_failed(&self) -> bool {
+        matches!(self.tested, Some(Err(_)))
+    }
+
     /// Reveal either an answered refusal or the existing message for a save that met a busy preference key.
     pub(super) fn save_refused(&self) -> bool {
         !self.testing
@@ -574,6 +579,8 @@ impl NtfyAlerts {
                     alerts.testing = false;
                     alerts.tested = Some(answer.map(|_| ()));
                     alerts.hold(cx);
+                    let failed = alerts.test_failed();
+                    alerts.save_receipt.settled_other(failed, cx);
                     cx.notify();
                 });
             });

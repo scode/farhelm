@@ -21,7 +21,7 @@ use crate::layers;
 use crate::local_time;
 use crate::operations::{OpKey, Work};
 use crate::session;
-use crate::test_support::{click, focused_id, keys, settle};
+use crate::test_support::{any_open, click, focused_id, keys, settle};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -206,6 +206,191 @@ fn a_completed_close_save_keeps_the_newer_tunnel_question(cx: &mut TestAppContex
     click(cx, "settings-close");
     assert!(!crate::test_support::any_open(cx));
     assert!(sent(&mut helm).is_empty());
+}
+
+// ---- Closing while work is out -------------------------------------------------------------------------------------
+
+/// The answer a replacement of `ci-token` gets when the helm saved it but could not deliver it to Example host.
+fn missed_example_host() -> Value {
+    json!({ "credential": entry("ci-token", "github_token", 2, &[]), "delivery_failures": [
+        { "host": "Example host", "reason": "could not install the agent settings" }] })
+}
+
+/// SPEC.md, "Settings": a close waits for the helm's answer, and a credential Delete has no draft for the close
+/// question to name, so a close that went on over it would drop a refusal unseen. Specified: with the Delete of `free`
+/// out, Escape keeps Settings open and asks nothing; the done answer closes the editor and Settings.
+#[gpui::test]
+fn a_close_waits_for_a_credential_delete(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_credentials(
+        &mut helm,
+        cx,
+        json!([entry("free", "endpoint_token", 1, &[])]),
+    );
+    press(cx, "credential-edit-free");
+    press(cx, "credential-delete");
+    let (delete, method, _, _) = one_command(&mut helm);
+    assert_eq!(method, Method::Delete, "the premise: the Delete is out");
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape waits for the Delete");
+    assert!(!drawn(cx, "prompt"));
+    helm.reply(delete, 200, Some(json!({})));
+    settle(cx);
+    assert!(!any_open(cx), "the done Delete let the close go on");
+}
+
+/// A replacement the helm saved but did not deliver everywhere closes its editor, and the overview lists the hosts it
+/// missed. A close that went on would hide that list the moment it appeared, so whether the save ran from the close
+/// question or from the editor's own Save with Close pressed meanwhile, Settings stays open on the overview. Specified:
+/// a replacement typed, Sessions shown, Close and Save send it; its answer with a missed host keeps Settings open on
+/// Credentials with the line and nothing asked. In a new opening, the editor's own Save, then Escape, and the same
+/// answer do the same.
+#[gpui::test]
+fn missed_hosts_reported_while_closing_keep_settings_on_the_overview(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let saved = entry("ci-token", "github_token", 1, &[]);
+    show_credentials(&mut helm, cx, json!([saved.clone()]));
+    press(cx, "credential-edit-ci-token");
+    fill(cx, "credential-secret", "fictional-replacement");
+    click_section(cx, Section::Sessions);
+    click(cx, "settings-close");
+    click(cx, "prompt-confirm");
+    // The question named one form, so it showed Credentials, which reads its catalog again.
+    let sent_now = sent(&mut helm);
+    let save = sent_now
+        .iter()
+        .find(|command| command.method == Method::Put)
+        .expect("the premise: the close Save sent the replacement")
+        .id;
+    for read in sent_now
+        .iter()
+        .filter(|command| command.method == Method::Get)
+    {
+        helm.reply(
+            read.id,
+            200,
+            Some(json!([entry("ci-token", "github_token", 1, &[])])),
+        );
+    }
+    helm.reply(save, 200, Some(missed_example_host()));
+    settle(cx);
+    assert!(any_open(cx), "the missed host keeps Settings open");
+    assert!(!drawn(cx, "prompt"));
+    assert_eq!(super::tests::heading(cx).as_deref(), Some("Credentials"));
+    assert!(drawn(cx, "credentials-undelivered-0"), "with the line");
+    // At this window size the whole overview fits, so this shows the line is in view but not that the scroll was reset:
+    // the closing editor moves focus to its list's Add button, whose scroll into view wins over the reset in a window
+    // too short for both.
+    assert!(
+        super::tests::shows_whole(cx, "credentials-undelivered-0", super::tests::DIALOG_BODY),
+        "the line is in view"
+    );
+    let (read, _, _, _) = one_command(&mut helm);
+    helm.reply(
+        read,
+        200,
+        Some(json!([entry("ci-token", "github_token", 2, &[])])),
+    );
+    settle(cx);
+    keys(cx, "escape");
+    assert!(
+        !any_open(cx),
+        "the report seen, nothing else holds the close"
+    );
+
+    show_credentials(&mut helm, cx, json!([saved]));
+    press(cx, "credential-edit-ci-token");
+    fill(cx, "credential-secret", "fictional-replacement");
+    press(cx, "credential-save");
+    let (save, _, _, _) = one_command(&mut helm);
+    keys(cx, "escape");
+    assert!(any_open(cx), "the premise: Escape waits for the save");
+    helm.reply(save, 200, Some(missed_example_host()));
+    settle(cx);
+    assert!(any_open(cx), "the missed host keeps Settings open");
+    assert!(!drawn(cx, "prompt"));
+    assert!(drawn(cx, "credentials-undelivered-0"), "with the line");
+}
+
+/// A close Save closes Settings once its drafts are saved, but work started while it ran (a switch's save, a Test) has
+/// an outcome nobody would see if Settings closed over it. Specified: a credential replacement typed, Close and Save
+/// send it; while it is out a frames-switch save starts on Sessions; the credential's done answer leaves Settings open
+/// with the switch's save still out and nothing asked.
+#[gpui::test]
+fn a_close_save_does_not_close_over_work_started_while_it_ran(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_credentials(
+        &mut helm,
+        cx,
+        json!([entry("ci-token", "github_token", 1, &[])]),
+    );
+    press(cx, "credential-edit-ci-token");
+    fill(cx, "credential-secret", "fictional-replacement");
+    click(cx, "settings-close");
+    click(cx, "prompt-confirm");
+    let save = sent(&mut helm)
+        .into_iter()
+        .find(|command| command.method == Method::Put)
+        .expect("the premise: the close Save sent the replacement");
+    click_section(cx, Section::Sessions);
+    click(cx, crate::settings::Choice::ColorTerminalFrames.id());
+    let switch = sent(&mut helm)
+        .into_iter()
+        .find(|command| command.path == "/api/preferences")
+        .expect("the premise: the switch's save is out");
+    helm.reply(
+        save.id,
+        200,
+        Some(json!({ "credential": entry("ci-token", "github_token", 2, &[]), "delivery_failures": [] })),
+    );
+    settle(cx);
+    assert!(any_open(cx), "the switch's save keeps Settings open");
+    assert!(!drawn(cx, "prompt"));
+    helm.reply(switch.id, 204, None);
+    settle(cx);
+    assert!(any_open(cx), "and nothing closes it later on its own");
+}
+
+/// A delivery report already on screen when Close is pressed has been seen, so it must not keep Settings open again;
+/// only a report that arrives while the close waits does. Specified: a replacement answered with a missed host, the
+/// line shown; then a frames-switch save out on Sessions and Escape; the switch's answer closes Settings.
+#[gpui::test]
+fn a_delivery_report_already_seen_does_not_hold_a_later_close(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_credentials(
+        &mut helm,
+        cx,
+        json!([entry("ci-token", "github_token", 1, &[])]),
+    );
+    press(cx, "credential-edit-ci-token");
+    fill(cx, "credential-secret", "fictional-replacement");
+    press(cx, "credential-save");
+    let (save, _, _, _) = one_command(&mut helm);
+    helm.reply(save, 200, Some(missed_example_host()));
+    settle(cx);
+    assert!(
+        drawn(cx, "credentials-undelivered-0"),
+        "the premise: the line shows"
+    );
+    let (read, _, _, _) = one_command(&mut helm);
+    helm.reply(
+        read,
+        200,
+        Some(json!([entry("ci-token", "github_token", 2, &[])])),
+    );
+    settle(cx);
+
+    click_section(cx, Section::Sessions);
+    click(cx, crate::settings::Choice::ColorTerminalFrames.id());
+    let (switch, _, _, _) = one_command(&mut helm);
+    keys(cx, "escape");
+    assert!(any_open(cx), "the premise: Escape waits for the switch");
+    helm.reply(switch, 204, None);
+    settle(cx);
+    assert!(
+        !any_open(cx),
+        "the report seen before Close does not hold it"
+    );
 }
 
 // ---- The overview --------------------------------------------------------------------------------------------------
@@ -1074,10 +1259,10 @@ fn a_cancelled_file_dialog_frees_choose_file(cx: &mut TestAppContext) {
 /// only the field it owns, and Test must use the saved key, never the field. Specified: with no key saved the field
 /// says "No key saved"; a typed key's Save sends `PUT /api/tensorlake` with only the key under the preference row's
 /// key, and the answer shows "API key saved", empties the field's draft and says a key is saved; Test sends `POST
-/// /api/tensorlake/test` with no body and shows the count. It holds the replacement's Save and Close and the dialog
-/// shows how to retry. Clear sends only the clear flag, shows "API key cleared"
-/// and "No key saved", and empties a key typed meanwhile, as the old form did; a refused Save keeps the typed key with
-/// the helm's words.
+/// /api/tensorlake/test` with no body and shows the count. A Close pressed during Test waits for it, then asks about
+/// the typed replacement (SPEC.md, "Settings": waiting for the helm's round trip is accepted). Clear sends only the
+/// clear flag, shows "API key cleared" and "No key saved", and empties a key typed meanwhile, as the old form did; a
+/// refused Save keeps the typed key with the helm's words.
 #[gpui::test]
 fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -1120,15 +1305,11 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
         (method, path.as_str(), body),
         (Method::Post, "/api/tensorlake/test", Value::Null)
     );
-    // The test uses the stored key. Close must preserve and explain why it could not save the replacement.
+    // The test uses the stored key, and holds the form: Close waits for it before asking about the replacement.
     assert!(drawn(cx, "tensorlake-key-working"));
     assert!(drawn(cx, "settings-unsaved"));
     click(cx, "settings-footer-close");
-    click(cx, "prompt-confirm");
-    assert_eq!(
-        label_of(cx, "settings-close-save-held").as_deref(),
-        Some(super::CLOSE_SAVE_HELD)
-    );
+    assert!(!drawn(cx, "prompt"), "Close waits for the Test");
     assert!(sent(&mut helm).is_empty(), "the test is the only request");
     helm.reply(id, 200, Some(json!({ "sandboxes": 2 })));
     settle(cx);
@@ -1136,15 +1317,17 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
         label_of(cx, "tensorlake-key-outcome").as_deref(),
         Some("The key works. It can see 2 sandboxes.")
     );
+    assert_eq!(
+        label_of(cx, "prompt").as_deref(),
+        Some("Save changes before closing?"),
+        "the answered Test lets the close ask about the typed key"
+    );
+    click(cx, "prompt-cancel");
 
     assert_eq!(
         key_typed(cx),
         "fictional-unsaved-key",
         "the premise: a key typed"
-    );
-    assert!(
-        drawn(cx, "settings-close-save-held"),
-        "the notice survives Test"
     );
     reach(cx, "tensorlake-key-clear");
     keys(cx, "space");
@@ -1158,13 +1341,8 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
     );
     assert!(painted(cx).contains("No key saved"));
     assert_eq!(key_typed(cx), "", "Clear emptied the typed key");
-    assert!(!drawn(cx, "settings-close-save-held"));
 
     fill(cx, "tensorlake-key", "fictional-bad-key");
-    assert!(
-        !drawn(cx, "settings-close-save-held"),
-        "a new draft has no old refusal"
-    );
     reach(cx, "settings-footer-save");
     keys(cx, "space");
     let (id, _, _, _) = one_command(&mut helm);

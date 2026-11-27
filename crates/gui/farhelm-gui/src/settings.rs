@@ -81,7 +81,7 @@ pub(crate) use custom_agents::{
 };
 mod editing;
 #[cfg(test)]
-pub(crate) use editing::{stage_held_close, stage_ntfy_refusal, stage_settled_key_conflict};
+pub(crate) use editing::{stage_ntfy_refusal, stage_settled_key_conflict};
 mod file_types;
 #[cfg(test)]
 mod file_types_tests;
@@ -194,8 +194,6 @@ const FOOTER_NOTE: &str = "Switches save at once; forms save with Save below.";
 
 /// Both close buttons and Escape go through the same draft check.
 const CLOSE_HELP: &str = "Close Settings. Unsaved changes ask first.";
-const CLOSE_SAVE_HELD: &str = "A test or another operation on this form blocked saving. After it finishes, select Close and choose Save.";
-
 const SOUNDS_ID: &str = "settings-sounds";
 const SOUNDS_LABEL: &str = "Sounds";
 const SOUNDS_HELP: &str = "The session open in an active window stays quiet.";
@@ -780,11 +778,15 @@ pub(crate) struct SettingsDialog {
     page_scroll: ScrollHandle,
     /// A close refusal scrolls only the Notifications page drawn next. Navigation can supersede it before layout.
     scroll_to_ntfy_refusal: bool,
-    /// Explain a blocked close beside its actions while the original draft still needs a save.
-    close_save_held: Option<editing::ApprovedEdit>,
-    /// The explicit saves still owned by the last footer or close action.
-    batch: Option<editing::Batch>,
-    save_generation: u64,
+    /// The explicit saves still owned by the last footer Save or close Save, sent one at a time.
+    save_loop: Option<editing::SaveLoop>,
+    /// A Close or Escape waiting for work to settle before it asks or closes (SPEC.md, "Settings").
+    close_waiting: Option<editing::PendingClose>,
+    /// The window the dialog is drawn in, for completions that arrive with no window at hand.
+    window: AnyWindowHandle,
+    /// Wakes a waiting close when a preference save that no Settings form owns settles
+    /// ([`SettingsDialog::operations_changed`]).
+    _operations: Option<Subscription>,
     /// A close Save cannot pick one of two different replacement keys for the same account.
     key_conflict: bool,
     /// The field lives with the dialog. Searching temporarily replaces the right pane and keeps its section state.
@@ -896,9 +898,14 @@ impl SettingsDialog {
             shown,
             page_scroll: ScrollHandle::new(),
             scroll_to_ntfy_refusal: false,
-            close_save_held: None,
-            batch: None,
-            save_generation: 0,
+            save_loop: None,
+            close_waiting: None,
+            window: window.window_handle(),
+            _operations: session::current_operations(cx).map(|operations| {
+                cx.observe_in(&operations, window, |dialog, _, window, cx| {
+                    dialog.operations_changed(window, cx)
+                })
+            }),
             key_conflict: false,
             search: Search::new(crate::actions::THIS_PLATFORM, window, cx),
             switches,
@@ -1234,6 +1241,7 @@ impl SettingsDialog {
     fn toggle_configured(
         &mut self,
         control: &'static str,
+        section: Section,
         state: impl Fn(&mut Self) -> &mut Configured + Copy + 'static,
         on: bool,
         command: impl FnOnce(bool) -> Result<Command, PathError>,
@@ -1249,10 +1257,11 @@ impl SettingsDialog {
                 &OpKey::preferences(),
                 |on| command(*on),
                 cx,
-                move |dialog, settled, _| {
+                move |dialog, settled, cx| {
                     if matches!(settled.outcome, Outcome::Done(_)) {
                         state(dialog).saved(on);
                     }
+                    dialog.switch_settled(section, &settled.outcome, cx);
                 },
             );
             self.refused.record(control, &started);
@@ -1266,6 +1275,34 @@ impl SettingsDialog {
         cx.notify();
     }
 
+    /// A switch that saves at once (one of `section`'s) settled with `outcome`: a close waiting on it resumes, after
+    /// this completion, showing `section` if the helm refused the save.
+    fn switch_settled(&mut self, section: Section, outcome: &Outcome, cx: &mut Context<Self>) {
+        let refused = matches!(outcome, Outcome::Refused(_));
+        self.close_settled_later(refused.then(|| editing::CloseRefusal::page(section)), cx);
+    }
+
+    /// Resume a waiting close ([`SettingsDialog::close_settled`]) once the current update and the effects it queued
+    /// are done, in the dialog's window: for completions that run with no window at hand. A refusal is recorded at
+    /// once, since the operation store's notification ([`SettingsDialog::operations_changed`]) can resume the close
+    /// before this deferred call runs, and must not close over it.
+    fn close_settled_later(
+        &mut self,
+        refused: Option<editing::CloseRefusal>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pending) = &mut self.close_waiting else {
+            return;
+        };
+        pending.refuse(refused);
+        let (handle, dialog) = (self.window, cx.weak_entity());
+        cx.defer(move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                let _ = dialog.update(cx, |dialog, cx| dialog.close_settled(None, window, cx));
+            });
+        });
+    }
+
     /// Edit the draft `field` reaches to `value`, the value the user chose, and save it as one field of the preference
     /// row with `command`: what every switch and radio choice here does. A press whose draft refuses the edit (its own
     /// save is in flight) or that the operation store refuses (another preference save is; see the module docs) sends
@@ -1273,6 +1310,7 @@ impl SettingsDialog {
     fn save_choice<T: Clone + PartialEq + std::fmt::Debug + 'static>(
         &mut self,
         control: &'static str,
+        section: Section,
         field: impl Fn(&mut Self) -> &mut Draft<T> + Copy + 'static,
         value: T,
         command: impl FnOnce(&T) -> Result<Command, PathError>,
@@ -1285,7 +1323,7 @@ impl SettingsDialog {
                 &OpKey::preferences(),
                 command,
                 cx,
-                |_, _, _| {},
+                move |dialog, settled, cx| dialog.switch_settled(section, &settled.outcome, cx),
             );
             self.refused.record(control, &started);
             if let Err(not_started) = started {
@@ -1313,6 +1351,7 @@ impl SettingsDialog {
         let index = Self::index(choice);
         self.save_choice(
             choice.id(),
+            choice.section(),
             move |dialog: &mut SettingsDialog| &mut dialog.switches[index].draft,
             on,
             |on| match running {
@@ -1329,6 +1368,7 @@ impl SettingsDialog {
     fn choose_appearance(&mut self, preference: Preference, cx: &mut Context<Self>) {
         self.save_choice(
             appearance::ID,
+            Section::Appearance,
             |dialog: &mut SettingsDialog| &mut dialog.appearance,
             preference,
             |preference| appearance::command(*preference),
@@ -1341,6 +1381,7 @@ impl SettingsDialog {
     fn choose_link_click(&mut self, choice: LinkClick, cx: &mut Context<Self>) {
         self.save_choice(
             terminal::ID,
+            Section::Terminal,
             |dialog: &mut SettingsDialog| &mut dialog.link_click,
             choice,
             |choice| terminal::command(*choice),
@@ -1384,10 +1425,11 @@ impl SettingsDialog {
             &OpKey::preferences(),
             |_| terminal::tunnels_off_command(),
             cx,
-            |dialog, settled, _| {
+            |dialog, settled, cx| {
                 if let Outcome::Refused(refusal) = &settled.outcome {
                     dialog.tunnels.failure = Some(refusal.words.clone());
                 }
+                dialog.switch_settled(Section::Terminal, &settled.outcome, cx);
             },
         );
         self.refused.record(terminal::TUNNEL_ID, &started);
@@ -1423,12 +1465,18 @@ impl SettingsDialog {
                 // stored consent, and the switch follows it.
                 let dialog = weak.clone();
                 crate::terminal::tunnels::ask_consent(&mark, window, cx, move |saved, cx| {
-                    if let Err(reason) = saved {
-                        let _ = dialog.update(cx, |dialog, cx| {
+                    let _ = dialog.update(cx, |dialog, cx| {
+                        let refused = saved.is_err();
+                        if let Err(reason) = saved {
                             dialog.tunnels.failure = Some(reason);
                             cx.notify();
-                        });
-                    }
+                        }
+                        // Allow's save is the fifth switch that saves at once; a close waiting on it resumes here.
+                        dialog.close_settled_later(
+                            refused.then(|| editing::CloseRefusal::page(Section::Terminal)),
+                            cx,
+                        );
+                    });
                 });
             },
             cx,
@@ -1579,6 +1627,7 @@ impl SettingsDialog {
                         let _ = weak.update(cx, |dialog, cx| {
                             dialog.toggle_configured(
                                 checkouts::SPARE_ID,
+                                Section::Checkouts,
                                 |dialog| &mut dialog.spare,
                                 on,
                                 checkouts::spare_command,
@@ -1619,6 +1668,7 @@ impl SettingsDialog {
                                     let index = agent.index();
                                     dialog.toggle_configured(
                                         agent.id(),
+                                        Section::Agent(harness),
                                         move |dialog| &mut dialog.trust[index].state,
                                         on,
                                         |on| agent.command(on),
@@ -1643,6 +1693,7 @@ impl SettingsDialog {
                             let _ = weak.update(cx, |dialog, cx| {
                                 dialog.toggle_configured(
                                     agent.id(),
+                                    Section::Agent(harness),
                                     move |dialog| &mut dialog.hooks[index].state,
                                     on,
                                     |on| hook_setup_command(agent, on),
@@ -1876,9 +1927,6 @@ impl Render for SettingsDialog {
         let frame = match editor_footer {
             Some((actions, Some(notices), _)) => frame.footer_actions(actions).notices(notices),
             Some((actions, None, _)) => frame.footer_actions(actions),
-            None if !searching && self.held_close_on_page(cx) => frame.notices(
-                choices::failure_line("settings-close-save-held".into(), CLOSE_SAVE_HELD, cx),
-            ),
             None => frame,
         };
         let frame = if divided {
