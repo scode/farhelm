@@ -55,9 +55,10 @@
 //!   fields. If a supervisor was added, its sessions connection can ask after the dialog closes.
 //!
 //! - **An agent's request.** An agent's `farhelm host add` waits on an approval card, whose action opens this dialog
-//!   ([`open_for_agent`]) prefilled with the destination and alias the agent asked for, and labelled with who asked;
-//!   opening is not approval (SPEC.md, "Agent-spawned sessions"). Add answers the request's Allow with the destination
-//!   then in the field, after the same checks as any Add, and the probe starts only once the helm accepted it (the
+//!   ([`open_for_agent`]) prefilled with the destination and alias the agent asked for, the Tailscale host checkbox
+//!   checked when the agent asked for it, and labelled with who asked; opening is not approval (SPEC.md,
+//!   "Agent-spawned sessions"). Add answers the request's Allow with the destination then in the field and the
+//!   checkbox as it is then, after the same checks as any Add, and the probe starts only once the helm accepted it (the
 //!   approvals module's [`AgentRequest`] sends the answer, under the request's own key). Cancel, the header's close and
 //!   Escape answer Deny through the dialog's dismiss hook, and the dialog closes once the helm took it; after an
 //!   accepted Allow they are ordinary cancellation and answer nothing. An agent's add always asks the setup
@@ -728,10 +729,11 @@ impl AddHostDialog {
                 seed.from_agent,
                 None,
             ),
+            // The agent's Tailscale request only pre-checks the box; the user can still change it before Add.
             Start::Agent(request) => (
                 request.destination.clone(),
                 request.alias.clone(),
-                false,
+                request.tailscale,
                 None,
                 true,
                 Some(request),
@@ -956,6 +958,8 @@ impl AddHostDialog {
         };
         let destination = self.destination.draft().value().clone();
         let alias = self.alias.draft().value().clone();
+        // Read once with the fields, so an agent's Allow carries the same Tailscale choice the probe then uses.
+        let tailscale = self.tailscale;
         if let Some(refused) = refusal(&destination, &alias, cx) {
             self.problem = Some(refused);
             cx.notify();
@@ -966,26 +970,28 @@ impl AddHostDialog {
         // an agent's request it stays the press's mark through the Allow: the setup confirmation opens through it.
         self.probe_mark = Mark::take(cx);
         match self.pending().cloned() {
-            Some(request) => self.allow(request, destination, alias, handle, cx),
-            None => self.probe(destination, alias, asks, handle, cx),
+            Some(request) => self.allow(request, destination, alias, tailscale, handle, cx),
+            None => self.probe(destination, alias, tailscale, asks, handle, cx),
         }
     }
 
-    /// Answer the agent's request Allow with `destination`, holding the fields read-only meanwhile so the values on
-    /// screen stay the ones approved; once the helm accepted it, the add is ordinary and probes what was approved,
-    /// after the launch check again (a launch may have started while the answer was out). A late answer or a refusal
-    /// shows in the error line and starts nothing (SPEC.md: "a late or refused answer starts no discovery probe").
+    /// Answer the agent's request Allow with `destination` and `tailscale`, holding the fields read-only meanwhile so
+    /// the values on screen stay the ones approved; once the helm accepted it, the add is ordinary and probes what was
+    /// approved, after the launch check again (a launch may have started while the answer was out). A late answer or a
+    /// refusal shows in the error line and starts nothing (SPEC.md: "a late or refused answer starts no discovery
+    /// probe").
     fn allow(
         &mut self,
         request: AgentRequest,
         destination: String,
         alias: String,
+        tailscale: bool,
         handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
         let dialog = cx.weak_entity();
         let approved = destination.clone();
-        let sent = request.allow(approved, cx, move |answered, cx| {
+        let sent = request.allow(approved, tailscale, cx, move |answered, cx| {
             let _ = dialog.update(cx, |dialog, cx| {
                 dialog.set_read_only(false, cx);
                 match answered {
@@ -993,7 +999,7 @@ impl AddHostDialog {
                         dialog.accepted = true;
                         match refusal(&destination, &alias, cx) {
                             Some(refused) => dialog.problem = Some(refused),
-                            None => dialog.probe(destination, alias, true, handle, cx),
+                            None => dialog.probe(destination, alias, tailscale, true, handle, cx),
                         }
                     }
                     // The request is gone, so the dialog has nothing left to approve: it closes, as the old one did
@@ -1022,16 +1028,18 @@ impl AddHostDialog {
         }
     }
 
-    /// Start the probe under the setup consent in effect when Add was pressed.
+    /// Start the probe under the setup consent and Tailscale choice in effect when Add was pressed. The choice is
+    /// passed in rather than read here so that, for an agent's add, the probe uses exactly what the Allow approved.
     fn probe(
         &mut self,
         destination: String,
         alias: String,
+        tailscale: bool,
         asks_before_setup: bool,
         handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
-        let command = match probe_command(&destination, &alias, self.tailscale, self.from_agent) {
+        let command = match probe_command(&destination, &alias, tailscale, self.from_agent) {
             Ok(command) => command,
             Err(error) => {
                 tracing::debug!(?error, "host probe not built");
@@ -1500,6 +1508,7 @@ impl Render for AddHostDialog {
             host_add::approved_fields(
                 self.destination.draft().value(),
                 self.alias.draft().value(),
+                self.tailscale,
                 cx,
             )
         });

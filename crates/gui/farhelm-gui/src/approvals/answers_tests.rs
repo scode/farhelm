@@ -9,7 +9,9 @@
 use std::time::Duration;
 
 use farhelm_helm_client::fake::FakeHelm;
-use farhelm_proto::approvals::{ApprovalAction, ApprovalAnswer, ApprovalSession, PendingApproval};
+use farhelm_proto::approvals::{
+    ApprovalAction, ApprovalAnswer, ApprovalSession, HostAddAnswer, PendingApproval,
+};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, KeyedEntry};
 use gpui::{AppContext as _, Entity, TestAppContext};
 use serde_json::{Value, json};
@@ -127,8 +129,8 @@ fn an_answer_is_a_post_to_its_request_with_the_answer_word() {
     assert_eq!(command.path().as_str(), "/api/approvals/a%20b%2Fc");
 }
 
-/// A host add's Allow carries the destination the add dialog holds then, in the shape the helm requires on that answer
-/// alone.
+/// A host add's Allow carries the destination and Tailscale choice the add dialog holds then, in the shape the helm
+/// requires on that answer alone.
 #[gpui::test]
 fn a_host_add_allow_carries_the_dialogs_destination(cx: &mut TestAppContext) {
     let (mut fake, arming) = connected(cx, &[stop("r")]);
@@ -136,7 +138,10 @@ fn a_host_add_allow_carries_the_dialogs_destination(cx: &mut TestAppContext) {
         answers::send(
             "r",
             ApprovalAnswer::Allow,
-            Some("ops@new.example".into()),
+            Some(HostAddAnswer {
+                destination: "ops@new.example".into(),
+                tailscale: false,
+            }),
             &arming,
             cx,
         )
@@ -150,7 +155,7 @@ fn a_host_add_allow_carries_the_dialogs_destination(cx: &mut TestAppContext) {
             .collect::<Vec<_>>(),
         [(
             "/api/approvals/r".to_owned(),
-            json!({ "answer": "allow", "host_add": { "destination": "ops@new.example" } })
+            json!({ "answer": "allow", "host_add": { "destination": "ops@new.example", "tailscale": false } })
         )]
     );
 }

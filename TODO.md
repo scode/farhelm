@@ -71,10 +71,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
   user when blocked through farhelm. Plan: `plans/queue/agent-blocked-notifications.md`.
 
-- **Let agents enable Tailscale when adding a host.** Make it possible for agents to support directly enabling tailscale
-  when adding a host. Also audit for any other gaps between GUI and agent capabilities when adding or removing hosts.
-  Plan: `plans/queue/agent-host-tailscale-parity.md`.
-
 - **Make forked and app-server Codex conversations resumable.** Two gaps keep Restart unavailable for Codex sessions.
   First, Farhelm refuses Codex's `fork` SessionStart source. Codex's "This conversation is open in another app" screen
   offers fork as the way out, so a session that resumed a conversation held elsewhere and forked it never gets Restart.

@@ -565,6 +565,10 @@ enum HostCmd {
         /// Optional name shown instead of the destination.
         #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
         alias: Option<String>,
+        /// Ask for the dialog's Tailscale host option; DEST must then be a node
+        /// name, DNS name or IP address, optionally login@.
+        #[arg(long)]
+        tailscale: bool,
     },
     /// Change a host's alias, icon or color; the card shows each old and new value.
     Edit {
@@ -2435,12 +2439,19 @@ fn run_template_write(command: &TemplateCmd) -> anyhow::Result<()> {
 /// display name the helm reports after the edit, since an alias change gives
 /// the host a new one; a removal's names it as the caller did. An add names
 /// the destination the user approved, which may differ from the argument,
-/// and warns that accepting the request does not establish installation.
+/// says when the user chose Tailscale (which may differ from `--tailscale`
+/// too), and warns that accepting the request does not establish
+/// installation.
 fn run_host_change(command: &HostCmd) -> anyhow::Result<()> {
     let verb = match command {
-        HostCmd::Add { destination, alias } => farhelm_proto::AgentVerb::HostAdd {
+        HostCmd::Add {
+            destination,
+            alias,
+            tailscale,
+        } => farhelm_proto::AgentVerb::HostAdd {
             destination: destination.clone(),
             alias: alias.clone(),
+            tailscale: *tailscale,
         },
         HostCmd::Edit {
             host,
@@ -2471,11 +2482,14 @@ fn run_host_change(command: &HostCmd) -> anyhow::Result<()> {
     };
     let (_asking, reply) = runtime()?.block_on(agent_request(&SessionEnv::from_env(), verb))?;
     match (reply, command) {
-        (AgentReply::HostAddAccepted { destination }, HostCmd::Add { .. }) => {
-            println!(
-                "accepted; Farhelm is adding {}. Accepted is not installed: adding may fail, need setup, or be cancelled. Check farhelm agent hosts and the host's state before relying on it.",
-                quoted(&destination)
-            );
+        (
+            AgentReply::HostAddAccepted {
+                destination,
+                tailscale,
+            },
+            HostCmd::Add { .. },
+        ) => {
+            println!("{}", host_add_accepted_line(&destination, tailscale));
         }
         (AgentReply::HostEdited { host }, HostCmd::Edit { .. }) => {
             println!("changed host {}", quoted(&host.name));
@@ -2487,6 +2501,21 @@ fn run_host_change(command: &HostCmd) -> anyhow::Result<()> {
         _ => anyhow::bail!("the helm answered a host change with something unexpected"),
     }
     Ok(())
+}
+
+/// The confirmation `farhelm agent host add` prints once the user approved.
+///
+/// It names what the user approved, not what the agent asked for: the user
+/// can edit the destination and toggle the Tailscale host option in the add
+/// dialog, so an agent that asked for Tailscale learns here whether the host
+/// is being added that way. A plain SSH add says nothing about Tailscale,
+/// which keeps the line unchanged for callers that never asked.
+fn host_add_accepted_line(destination: &str, tailscale: bool) -> String {
+    let route = if tailscale { " with Tailscale" } else { "" };
+    format!(
+        "accepted; Farhelm is adding {}{route}. Accepted is not installed: adding may fail, need setup, or be cancelled. Check farhelm agent hosts and the host's state before relying on it.",
+        quoted(destination)
+    )
 }
 
 /// Run one `farhelm agent` subcommand and print its answer.

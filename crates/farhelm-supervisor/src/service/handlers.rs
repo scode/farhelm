@@ -3827,8 +3827,15 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         // refusal and logged, as a creating verb's `--host` is, so it gets
         // the same bounds; so does a new alias, which the helm's audit and
         // the card carry. The alias's own rules (trimmed, at most 64
-        // characters) are the helm's, applied where it is stored.
-        AgentVerb::HostAdd { destination, alias } => {
+        // characters) are the helm's, applied where it is stored. Host add's
+        // Tailscale request is a bool with nothing to bound here; whether the
+        // destination suits Tailscale is the helm's check, because the
+        // parser for it lives there and this crate does not depend on it.
+        AgentVerb::HostAdd {
+            destination,
+            alias,
+            tailscale: _,
+        } => {
             farhelm_proto::approvals::validate_host_add_destination(destination)?;
             if let Some(alias) = alias
                 && (alias.len() > AGENT_HOST_NAME_CAP || alias.chars().any(char::is_control))

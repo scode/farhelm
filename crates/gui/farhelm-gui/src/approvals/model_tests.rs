@@ -1179,9 +1179,31 @@ fn a_host_edit_card_shows_an_alias_removal_and_omits_untouched_fields() {
 
 /// Host add, edit and remove always need the user's own Allow (the requesting host's command setting never covers
 /// them), say so on the card, and a remove repeats the GUI remove dialog's words; a host add's Allow opens the add
-/// dialog.
+/// dialog, and its card shows an agent's Tailscale request as "Tailscale host: Yes" after the alias, and nothing at
+/// all when none was made, so an ordinary SSH add reads exactly as before.
 #[test]
 fn host_cards_offer_allow_or_deny_only_and_say_why() {
+    let tailscale_add = Card::of(
+        &request(
+            "r",
+            "host",
+            ApprovalAction::HostAdd {
+                destination: "dev".into(),
+                alias: Some("new".into()),
+                tailscale: true,
+            },
+        ),
+        TunnelOffer::NotOffered,
+    );
+    assert_eq!(
+        tailscale_add.facts,
+        vec![
+            value("ssh destination", "dev"),
+            value("alias", "new"),
+            Fact::Words("tailscale host", "yes"),
+        ]
+    );
+    assert_eq!(tailscale_add.facts[2].label(), "Tailscale host");
     let add = Card::of(
         &request(
             "r",
@@ -1189,6 +1211,7 @@ fn host_cards_offer_allow_or_deny_only_and_say_why() {
             ApprovalAction::HostAdd {
                 destination: "ops@new.example".into(),
                 alias: Some("new".into()),
+                tailscale: false,
             },
         ),
         TunnelOffer::NotOffered,
@@ -1803,6 +1826,7 @@ fn every_kind_shows_exactly_the_old_cards_content() {
             ApprovalAction::HostAdd {
                 destination: "ops@new.example".into(),
                 alias: None,
+                tailscale: false,
             },
             "Add a host",
             vec![value("ssh destination", "ops@new.example")],

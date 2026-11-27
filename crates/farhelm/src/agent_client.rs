@@ -597,7 +597,7 @@ pub(crate) async fn relay_request(
                         mutating,
                     ));
                 }
-                if let AgentReply::HostAddAccepted { destination } = &reply
+                if let AgentReply::HostAddAccepted { destination, .. } = &reply
                     && farhelm_proto::approvals::validate_host_add_destination(destination).is_err()
                 {
                     return Err(lost_reply(

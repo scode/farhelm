@@ -200,7 +200,7 @@ fn agent_command_with_args(socket: &std::path::Path, args: &[&str]) -> Command {
 /// Spec: `farhelm agent hosts` sends exactly one `AgentRequest` — its own
 /// `req_id`, the injected session id, and the `Hosts` verb — and renders
 /// the reply as an aligned table whose `*` column marks this session's own
-/// host.
+/// host. A host's Tailscale flag adds no column and does not change `KIND`.
 ///
 /// Both halves matter and neither is checked anywhere else. The REQUEST
 /// shape is the contract the supervisor's restricted dispatch authorizes
@@ -238,13 +238,18 @@ fn hosts_asks_as_its_own_session_and_prints_the_marked_table() {
                             kind: "local".to_string(),
                             state: "connected".to_string(),
                             current: true,
+                            tailscale: false,
                         },
+                        // A Tailscale host renders like any other SSH host:
+                        // the table has no Tailscale column, and `KIND`
+                        // stays the host's kind; only `--json` carries it.
                         AgentHost {
                             id: "host-builder".to_string(),
                             name: "builder".to_string(),
                             kind: "ssh".to_string(),
                             state: "unreachable-reprobing".to_string(),
                             current: false,
+                            tailscale: true,
                         },
                     ],
                     complete: true,
@@ -274,10 +279,13 @@ fn hosts_asks_as_its_own_session_and_prints_the_marked_table() {
 }
 
 /// JSON discovery is a versioned envelope with explicit caller identity and
-/// the reply's completeness signal.
+/// the reply's completeness signal, and each host says whether it is a
+/// Tailscale host, under the same schema version as before that field.
 ///
 /// Parsing and comparing the whole value pins the public schema while
 /// avoiding a meaningless dependency on object-key serialization order.
+/// The field is additive, which is why `schema_version` stays at 8: the
+/// version moves only when a value an agent reads changes meaning or goes.
 #[farhelm_testtrace::test]
 fn hosts_json_has_the_exact_discovery_envelope() {
     let temp = farhelm_teststate::tempdir().unwrap();
@@ -295,13 +303,24 @@ fn hosts_json_has_the_exact_discovery_envelope() {
             outcome: AgentOutcome::Ok {
                 reply: AgentReply::Hosts {
                     caller_host_id: "11111111-1111-4111-8111-111111111111".to_string(),
-                    hosts: vec![AgentHost {
-                        id: "11111111-1111-4111-8111-111111111111".to_string(),
-                        name: "this machine".to_string(),
-                        kind: "local".to_string(),
-                        state: "connected".to_string(),
-                        current: true,
-                    }],
+                    hosts: vec![
+                        AgentHost {
+                            id: "11111111-1111-4111-8111-111111111111".to_string(),
+                            name: "this machine".to_string(),
+                            kind: "local".to_string(),
+                            state: "connected".to_string(),
+                            current: true,
+                            tailscale: false,
+                        },
+                        AgentHost {
+                            id: "22222222-2222-4222-8222-222222222222".to_string(),
+                            name: "dev".to_string(),
+                            kind: "ssh".to_string(),
+                            state: "connected".to_string(),
+                            current: false,
+                            tailscale: true,
+                        },
+                    ],
                     complete: false,
                 },
             },
@@ -326,7 +345,15 @@ fn hosts_json_has_the_exact_discovery_envelope() {
                     "name": "this machine",
                     "kind": "local",
                     "state": "connected",
-                    "current": true
+                    "current": true,
+                    "tailscale": false
+                }, {
+                    "id": "22222222-2222-4222-8222-222222222222",
+                    "name": "dev",
+                    "kind": "ssh",
+                    "state": "connected",
+                    "current": false,
+                    "tailscale": true
                 }],
                 "complete": false
             }
@@ -3157,6 +3184,81 @@ fn template_edit_and_delete_send_their_verbs() {
     );
 }
 
+/// Spec: `farhelm agent host add DEST --tailscale` sends one `HostAdd`
+/// carrying the Tailscale request, and plain `host add DEST` one without it.
+/// Each prints the approved destination, and the line says "with Tailscale"
+/// exactly when the helm reports that the user kept the option, whatever
+/// the agent asked for.
+///
+/// Why: the user can toggle Tailscale in the add dialog before approving,
+/// so the confirmation is the only place an agent learns how its host is
+/// actually being added. A line that echoed the flag instead would tell an
+/// agent its host uses Tailscale when the user had turned it off.
+#[farhelm_testtrace::test]
+fn host_add_sends_the_tailscale_request_and_reports_the_users_choice() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    for (requested, chosen, expected) in [
+        (
+            true,
+            true,
+            "accepted; Farhelm is adding \"dev\" with Tailscale. ",
+        ),
+        (true, false, "accepted; Farhelm is adding \"dev\". "),
+        (
+            false,
+            true,
+            "accepted; Farhelm is adding \"dev\" with Tailscale. ",
+        ),
+    ] {
+        let socket = temp
+            .path()
+            .join(format!("supervisor-add-{requested}-{chosen}.sock"));
+        let (done, thread) = mock_supervisor(&socket, move |request| {
+            let ControlMsg::AgentRequest {
+                req_id, request, ..
+            } = request
+            else {
+                panic!("farhelm agent must send an AgentRequest, got {request:?}");
+            };
+            assert_eq!(
+                request,
+                AgentVerb::HostAdd {
+                    destination: "dev".to_string(),
+                    alias: None,
+                    tailscale: requested,
+                }
+            );
+            Some(ControlMsg::AgentResponse {
+                req_id,
+                outcome: AgentOutcome::Ok {
+                    reply: AgentReply::HostAddAccepted {
+                        destination: "dev".to_string(),
+                        tailscale: chosen,
+                    },
+                },
+            })
+        });
+        let mut args = vec!["host", "add", "dev"];
+        if requested {
+            args.push("--tailscale");
+        }
+        let added = output_with_timeout(agent_command_with_args(&socket, &args));
+        finish_server(done, thread);
+        assert_eq!(
+            added.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&added.stderr)
+        );
+        let stdout = String::from_utf8(added.stdout).unwrap();
+        assert!(
+            stdout.starts_with(expected),
+            "requested {requested}, chosen {chosen}: {stdout:?}"
+        );
+        assert!(stdout.contains("Accepted is not installed"), "{stdout:?}");
+    }
+}
+
 /// Spec: `farhelm agent host edit HOST` sends one `HostEdit` carrying only
 /// the fields its flags give (`--no-alias` as an explicit clear), and
 /// `host remove HOST` one `HostRemove`; each prints one confirmation line,
@@ -3199,6 +3301,7 @@ fn host_edit_and_remove_send_their_verbs() {
                         kind: "ssh".to_string(),
                         state: "connected".to_string(),
                         current: false,
+                        tailscale: false,
                     },
                 },
             },

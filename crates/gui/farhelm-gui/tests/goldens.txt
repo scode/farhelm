@@ -62,8 +62,8 @@ linux/help-menu-announcements-hover--dark.png 918f1a29f4e46b81d38f7e7fd55b13068d
 linux/help-menu-announcements-hover--light.png 3a4fbbd7804808ff1c60267cf4d594d961e0fa1a
 linux/host-add-dialog--dark.png 80fbe2307e206831286b950324b89a70b6af3c73
 linux/host-add-dialog--light.png 19b7e63336990bf505484cc9b0cc4d7fc0522d9e
-linux/host-add-dialog-agent--dark.png 6a733496c829a2e7a5b1b31ccc412c9371952165
-linux/host-add-dialog-agent--light.png 8d003a7c197a8ff359e55460d01670174f6dbecc
+linux/host-add-dialog-agent--dark.png 4624e89001aab79e76688d76ea99c5d166db07c1
+linux/host-add-dialog-agent--light.png 850159ca305199e0deba9a67c9f57440759807bc
 linux/host-add-interrupted-probe--dark.png bcb2b48ec5c30d86dfdccfd957435c15fcaa33cc
 linux/host-add-interrupted-probe--light.png 1fef10fee77c585a77895e5675195a1326180a4b
 linux/host-add-mac-missing-date--dark.png cec1112a630a17a56b130cba8538db8bbc701412

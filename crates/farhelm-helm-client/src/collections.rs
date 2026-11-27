@@ -444,6 +444,7 @@ mod tests {
             action: farhelm_proto::approvals::ApprovalAction::HostAdd {
                 destination: label.into(),
                 alias: None,
+                tailscale: false,
             },
             own_host_session_action: false,
             expires_at_ms: 0,

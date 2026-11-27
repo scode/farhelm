@@ -9150,6 +9150,7 @@ mod tests {
                 kind: "local".to_string(),
                 state: "connected".to_string(),
                 current: true,
+                tailscale: false,
             }],
             complete: true,
         }))
@@ -9928,6 +9929,7 @@ mod tests {
                     kind: "ssh".to_string(),
                     state: "connected".to_string(),
                     current: false,
+                    tailscale: false,
                 })
                 .collect(),
             complete: true,

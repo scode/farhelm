@@ -3,10 +3,10 @@
 //!
 //! SPEC.md, "Agent-spawned sessions": an agent's `farhelm host add` "opens the ordinary add host dialog with the
 //! requested destination and alias" once the user acts on its card; "opening is not approval". Add answers Allow with
-//! the destination then in the dialog, and only an accepted Allow lets the ordinary discovery-first add go on; Cancel
-//! answers Deny; and the setup confirmation always shows for an agent's add, whatever "Set up new hosts without asking"
-//! says. Ported from the old app's `AgentAddBridge` (`approvals.rs`) and `AddHostForm`'s agent handling (`hosts.rs`) at
-//! the reference commit.
+//! the destination and Tailscale choice then in the dialog, and only an accepted Allow lets the ordinary
+//! discovery-first add go on; Cancel answers Deny; and the setup confirmation always shows for an agent's add, whatever
+//! "Set up new hosts without asking" says. Ported from the old app's `AgentAddBridge` (`approvals.rs`) and
+//! `AddHostForm`'s agent handling (`hosts.rs`) at the reference commit.
 //!
 //! The dialog itself is settings-and-hosts' ([`crate::hosts::add`]); this module is what that dialog holds for an
 //! agent's request: who asked, the answer under the request's own operation key, and the words for what came of it.
@@ -17,7 +17,7 @@
 //! looking. A late answer closes the dialog, as the old one closed once its request was gone; after a late Allow the
 //! cards' late-answer notice says that nothing was added.
 
-use farhelm_proto::approvals::{ApprovalAction, ApprovalAnswer, PendingApproval};
+use farhelm_proto::approvals::{ApprovalAction, ApprovalAnswer, HostAddAnswer, PendingApproval};
 use gpui::{
     AnyElement, App, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, Styled as _, div, px,
@@ -51,6 +51,9 @@ pub struct AgentRequest {
     pub destination: String,
     /// The alias the agent asked for (blank for none), which prefills the dialog's field.
     pub alias: String,
+    /// Whether the agent asked for the Tailscale host option, which pre-checks the dialog's checkbox. Only a starting
+    /// point: the user can toggle it before Add, and Add answers with the checkbox as it is then.
+    pub tailscale: bool,
     /// The answer bar's pause, shared with the cards: a click on its way when the waiting list changed answers nothing
     /// here either.
     pub arming: Entity<Arming>,
@@ -74,7 +77,12 @@ pub enum Answered {
 impl AgentRequest {
     /// The request `approval` is about to open the dialog for, or `None` when it is not a host add.
     pub fn of(approval: &PendingApproval, arming: Entity<Arming>) -> Option<Self> {
-        let ApprovalAction::HostAdd { destination, alias } = &approval.action else {
+        let ApprovalAction::HostAdd {
+            destination,
+            alias,
+            tailscale,
+        } = &approval.action
+        else {
             return None;
         };
         Some(AgentRequest {
@@ -82,6 +90,7 @@ impl AgentRequest {
             from: Requester::of(&approval.host_name, &approval.session),
             destination: destination.clone(),
             alias: alias.clone().unwrap_or_default(),
+            tailscale: *tailscale,
             arming,
         })
     }
@@ -101,15 +110,20 @@ impl AgentRequest {
         !self.arming.read(cx).armed()
     }
 
-    /// Answer Allow with `destination`, the one the dialog holds now (the helm adds what the user approved, not what
-    /// the agent first asked for), and call `then` with what came of it.
+    /// Answer Allow with `destination` and `tailscale`, the ones the dialog holds now (the helm adds what the user
+    /// approved, not what the agent first asked for, and tells the agent so), and call `then` with what came of it.
     pub fn allow(
         &self,
         destination: String,
+        tailscale: bool,
         cx: &mut App,
         then: impl FnOnce(Answered, &mut App) + 'static,
     ) -> Result<answers::Sent, NotStarted> {
-        self.answer(ApprovalAnswer::Allow, Some(destination), cx, then)
+        let approved = HostAddAnswer {
+            destination,
+            tailscale,
+        };
+        self.answer(ApprovalAnswer::Allow, Some(approved), cx, then)
     }
 
     /// Answer Deny, and call `then` with what came of it.
@@ -126,7 +140,7 @@ impl AgentRequest {
     fn answer(
         &self,
         answer: ApprovalAnswer,
-        host_add: Option<String>,
+        host_add: Option<HostAddAnswer>,
         cx: &mut App,
         then: impl FnOnce(Answered, &mut App) + 'static,
     ) -> Result<answers::Sent, NotStarted> {
@@ -161,15 +175,21 @@ impl AgentRequest {
     }
 }
 
-/// The dialog's lines spelling out what Add will approve ("Destination to add", "Alias to add"), following the fields
-/// as they are edited: the fields hold the raw text, which may hide invisible or direction-changing characters, and these
-/// lines show the escaped spelling of exactly what Allow will carry.
-pub fn approved_fields(destination: &str, alias: &str, cx: &App) -> AnyElement {
+/// The dialog's lines spelling out what Add will approve ("Destination to add", "Alias to add", "Tailscale host"),
+/// following the fields as they are edited: the fields hold the raw text, which may hide invisible or
+/// direction-changing characters, and these lines show the escaped spelling of exactly what Allow will carry. The
+/// Tailscale line always shows, Yes or No as the checkbox is now, because the agent may have asked for either and the
+/// user should see which one Add approves.
+pub fn approved_fields(destination: &str, alias: &str, tailscale: bool, cx: &App) -> AnyElement {
     facts(
         "add-host-agent-approved",
         [
             ("Destination to add", HostText::from_host(destination)),
             ("Alias to add", HostText::from_host(alias)),
+            (
+                "Tailscale host",
+                HostText::from_host(if tailscale { "Yes" } else { "No" }),
+            ),
         ],
         cx,
     )

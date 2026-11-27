@@ -297,12 +297,13 @@ except the host details view, which keeps the real destination visible; aliases 
 the local host can carry one too.
 
 An ordinary SSH entry can opt into **Tailscale host** in Add host or Host settings → Connection. The same choice is
-available as `tailscale: true` in `--ensure-hosts` and the host registration API. The helm resolves the node through
-Tailscale on its own machine. A destination can be a node name, a full Tailscale DNS name, or a Tailscale IP address,
-with an optional SSH login. The peer must advertise the host key its SSH server presents. A peer running only an
-ordinary SSH server may have no advertised key. With the option enabled, the helm checks the advertised keys, leaves the
-user's known-hosts files untouched, and reports an actionable error if Tailscale cannot verify the host. The user's SSH
-credentials and interactive sign-in still apply. Changing the setting reconnects the host and keeps its registry
+available as `tailscale: true` in `--ensure-hosts` and the host registration API, and an agent can ask for it with
+`farhelm agent host add --tailscale` (see [Agent-spawned sessions](#agent-spawned-sessions)). The helm resolves the node
+through Tailscale on its own machine. A destination can be a node name, a full Tailscale DNS name, or a Tailscale IP
+address, with an optional SSH login. The peer must advertise the host key its SSH server presents. A peer running only
+an ordinary SSH server may have no advertised key. With the option enabled, the helm checks the advertised keys, leaves
+the user's known-hosts files untouched, and reports an actionable error if Tailscale cannot verify the host. The user's
+SSH credentials and interactive sign-in still apply. Changing the setting reconnects the host and keeps its registry
 identity and sessions. It dismisses a sign-in question opened only for an automatic update; a question that an Update or
 Uninstall the user started is waiting on stays open, and the change answers busy if that question still holds the
 connection after a few seconds. If the host still owns Podman resources, its SSH route is protected from edits.
@@ -5071,16 +5072,24 @@ JSON. Discovery also has `--json` forms with a versioned envelope, exact names, 
 completeness fields. The templates listing includes a prefix's words when one is set. Prefixes belong to the launch argv
 and are also visible in process listings, so templates must not hold secrets in them.
 
-Agents can also add, change and remove hosts. `farhelm agent host add <destination> [--alias <name>]` asks to add an SSH
-host. The window shows a card whose action opens the ordinary add host dialog, prefilled with destination and alias and
-labelled with the asking host and session. The request never opens the dialog by itself, because the user did not start
-it (see [Keyboard focus](#keyboard-focus)). Opening is not approval. An existing draft or another modal is kept. Listing
-refreshes preserve edits. Add answers Allow with the destination then in the dialog, and Cancel, header close and Escape
-answer Deny through the ordinary approval route. Only an accepted Allow starts the ordinary discovery-first add flow,
-with the edited destination and alias, the same duplicate and alias refusals, and the same SSH second-factor help. A
-late or refused answer starts nothing. The command reports the actual approved destination as accepted as soon as the
-user answers, without waiting for discovery or setup. **Accepted is not installed:** adding may still fail, need setup,
-or be cancelled at the setup question. The agent checks `farhelm agent hosts` and the host's state before relying on it.
+Agents can also add, change and remove hosts. `farhelm agent host add <destination> [--alias <name>] [--tailscale]` asks
+to add an SSH host, with `--tailscale` asking for the **Tailscale host** option. A Tailscale request whose destination
+is not one Tailscale mode accepts (see [Topology](#topology)) is refused at once, before any card. The window shows a
+card whose action opens the ordinary add host dialog, prefilled with destination and alias, with **Tailscale host**
+checked when the agent asked for it, and labelled with the asking host and session. The card lists **Tailscale host:
+Yes** when the agent asked for it and nothing about Tailscale otherwise. The request never opens the dialog by itself,
+because the user did not start it (see [Keyboard focus](#keyboard-focus)). Opening is not approval. An existing draft or
+another modal is kept. Listing refreshes preserve edits. The dialog spells out what Add approves: the destination, the
+alias, and whether it is a Tailscale host, following the fields and the checkbox as the user changes them. Add answers
+Allow with the destination and Tailscale choice then in the dialog, and Cancel, header close and Escape answer Deny
+through the ordinary approval route. An Allow pairing Tailscale with a destination Tailscale mode does not accept is
+refused and the request keeps waiting. Only an accepted Allow starts the ordinary discovery-first add flow, with the
+edited destination, alias and Tailscale choice, the same duplicate and alias refusals, and the same SSH second-factor
+help. A late or refused answer starts nothing. The command reports the actual approved destination as accepted as soon
+as the user answers, without waiting for discovery or setup, and says when the user approved it as a Tailscale host,
+which may differ from what the agent asked. **Accepted is not installed:** adding may still fail, need setup, or be
+cancelled at the setup question. The agent checks `farhelm agent hosts` and the host's state before relying on it; the
+hosts listing's JSON form says whether each host is a Tailscale host.
 
 The user's confirmation-skipping settings spare confirmation clicks on actions the user started in the UI: they avoid
 accidental clicks, not grant permissions. An agent's request is inherently different. An agent add always shows the

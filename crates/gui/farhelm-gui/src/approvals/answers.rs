@@ -104,16 +104,14 @@ impl Arming {
 }
 
 /// The command for `answer` to the request `id`: `POST /api/approvals/{id}` with the answer, and for a host add's
-/// Allow the destination the add dialog holds then (the helm requires it there and refuses it anywhere else).
+/// Allow the destination and Tailscale choice the add dialog holds then (the helm requires them there and refuses them
+/// anywhere else).
 pub fn command(
     id: &str,
     answer: ApprovalAnswer,
-    host_add: Option<String>,
+    host_add: Option<HostAddAnswer>,
 ) -> Result<Command, PathError> {
-    let body = ApprovalAnswerRequest {
-        answer,
-        host_add: host_add.map(|destination| HostAddAnswer { destination }),
-    };
+    let body = ApprovalAnswerRequest { answer, host_add };
     Ok(Command::new(
         Work::Answer,
         Method::Post,
@@ -135,8 +133,8 @@ pub enum Sent {
 /// Send `answer` to the request `id` unless the answer bar is paused, and handle its outcome: the helm's 410 posts the
 /// late-answer notice, in its Always-allow form after an Always allow (whose host setting the helm stores before it
 /// looks for the request); any other refusal stays on the request's key for the card to show
-/// ([`crate::operations::Operations::failure`]). `host_add` is the destination a host add's Allow carries from the add
-/// dialog.
+/// ([`crate::operations::Operations::failure`]). `host_add` is the destination and Tailscale choice a host add's Allow
+/// carries from the add dialog.
 ///
 /// Checks the pause when the press arrives, not only when the buttons were drawn: a click already on its way when the
 /// list changed must not reach the next request. Refuses with [`NotStarted::Busy`] when an answer to this request is
@@ -144,7 +142,7 @@ pub enum Sent {
 pub fn send(
     id: &str,
     answer: ApprovalAnswer,
-    host_add: Option<String>,
+    host_add: Option<HostAddAnswer>,
     arming: &Entity<Arming>,
     cx: &mut App,
 ) -> Result<Sent, NotStarted> {
@@ -164,7 +162,7 @@ pub fn send(
 pub fn start(
     id: &str,
     answer: ApprovalAnswer,
-    host_add: Option<String>,
+    host_add: Option<HostAddAnswer>,
     arming: &Entity<Arming>,
     cx: &mut App,
     on_settled: impl FnOnce(&Settled, &mut App) + 'static,
@@ -182,7 +180,7 @@ pub fn start(
 pub fn start_unpaused(
     id: &str,
     answer: ApprovalAnswer,
-    host_add: Option<String>,
+    host_add: Option<HostAddAnswer>,
     cx: &mut App,
     on_settled: impl FnOnce(&Settled, &mut App) + 'static,
 ) -> Result<(), NotStarted> {

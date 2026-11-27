@@ -121,7 +121,8 @@ host changes, and these cards offer no **Always allow** choice.
 Agents cannot add [Tensorlake sandbox hosts](/docs/using/tensorlake-sandboxes/) or delete Tensorlake hosts. Add those
 from **Add host**, and use **Delete sandbox** in the host's menu yourself.
 
-- `farhelm agent host add build-box --alias build` asks to add an ssh destination, with an optional display alias.
+- `farhelm agent host add build-box --alias build` asks to add an ssh destination, with an optional display alias. With
+  `--tailscale` it asks for the [Tailscale host](/docs/get-started/add-a-remote-host/) option too.
 - `farhelm agent host edit build --icon flask --color teal` asks to change a host's appearance. It can also set an alias
   with `--alias` or clear it with `--no-alias`. Edits cover only the alias, icon and color; an agent cannot change a
   host's destination or permissions. The card shows each changed field's old and new value.
@@ -131,13 +132,13 @@ from **Add host**, and use **Delete sandbox** in the host's menu yourself.
 For edit and remove, use the host's name from `farhelm agent hosts`. Both offer **Allow** and **Deny**.
 
 An add request waits as a card and never opens anything over what you are doing. Choose **Open add dialog** on the card
-to open the ordinary **Add host** dialog, with the destination and alias filled in and the asking session and host
-shown. You can change either field before choosing **Add** to approve, or **Cancel** to decline. Approval starts the
-ordinary [add host flow](/docs/get-started/add-a-remote-host/) with the values you chose. If another Farhelm manages
-that host, the dialog says so and does not offer to take it over; to do that, add the host yourself from **Add host**.
-If Farhelm needs to be installed on the host, it still asks you to confirm setup, even with **Set up new hosts without
-asking** turned on. The settings that skip setup or removal questions apply to actions you start in the UI; they do not
-approve an agent's request.
+to open the ordinary **Add host** dialog, with the destination and alias filled in, **Tailscale host** checked if the
+agent asked for it, and the asking session and host shown. You can change any of these before choosing **Add** to
+approve, or **Cancel** to decline. Approval starts the ordinary [add host flow](/docs/get-started/add-a-remote-host/)
+with the values you chose. If another Farhelm manages that host, the dialog says so and does not offer to take it over;
+to do that, add the host yourself from **Add host**. If Farhelm needs to be installed on the host, it still asks you to
+confirm setup, even with **Set up new hosts without asking** turned on. The settings that skip setup or removal
+questions apply to actions you start in the UI; they do not approve an agent's request.
 
 The agent gets `accepted` when you approve and Farhelm starts adding the host. That does not mean Farhelm is installed
 or that the host is ready: adding can still fail, need setup, or be cancelled at the setup question. The agent must run
