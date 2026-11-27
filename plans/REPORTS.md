@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`triage-queue-discards`](reports/triage-queue-discards.report.md) landed 2026-11-26 in #5042: Execute 7 discarded triage outcomes by removing their feedback files and index entries and graduating them to the archive
 - [`triage-drift-and-brick-tooling`](reports/triage-drift-and-brick-tooling.report.md) landed 2026-11-26 in #5044, #5047, #5048: Execute 9 triage outcomes for live drift copy-back safety, runner harness validation, Cursor initial-prompt seeding, capture-timing ordering, Claude trust drift isolation, and brick-test cleanup
 - [`launcher-consent-and-custom-agent-fixes`](reports/launcher-consent-and-custom-agent-fixes.report.md) landed 2026-11-26 in #4999, #5003, #5029, #5037: Carry one-time YOLO consent through host wake, guard hook-setup continuation against late-arriving folders, distinguish unread custom agents from deleted ones, and show Custom approval flags on keyboard-highlighted recent setups
 - [`triage-trust-settings-and-ui-wording`](reports/triage-trust-settings-and-ui-wording.report.md) landed 2026-11-26 in #5043, #5046, #5049: Execute 7 triage outcomes for best-effort Custom auto-trust flags, unread Settings switch a11y, persistent-host trust help, disposable trust hints, Restart card trust copy, and trust test gaps
