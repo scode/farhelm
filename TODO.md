@@ -93,6 +93,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Shift-cmd-click a file to copy it to the clipboard.** Add a "click to copy into clipboard" for files on hover. So
   today we have click to download, cmd-click to open; add a shift-cmd-click to copy to clipboard.
 
+- **Shift-cmd-v to paste via file upload.** Shift-cmd-v to "paste via file upload" so text can be pasted but instead of
+  directly pasted, upload a file to a securely allocated temporary file and paste the path to it into the terminal.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
