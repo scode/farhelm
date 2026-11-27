@@ -89,6 +89,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Cmd+T to create a new terminal tab.** Cmd+T to create a new terminal tab.
 
+- **Cmd+W in a terminal tab closes only the tab.** Cmd+W when in a terminal tab should just close the tab, not the
+  entire session.
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
