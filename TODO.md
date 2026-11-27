@@ -83,6 +83,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan follow-ups
 
+- **Drift tests: isolate Codex's `--no-daemon` in the process-tree check.** The base drift case now checks that a shell
+  command Codex runs stays inside the session's process tree, but only for Farhelm's default launch, whose hook flags
+  already keep Codex off its shared background server as a side effect (SPEC_impl.md, "Codex without the shared
+  server"); so a Codex that ignored `--no-daemon` would still pass, and only the argument's presence is checked. A check
+  that rests on `--no-daemon` alone needs a Codex launch with hooks off and no other `-c` overrides (the trust and
+  effort choices are overrides too), which means answering Codex's own workspace trust dialog (the drift trust answerer
+  does not recognise it today), plus a negative control without `--no-daemon` against a shared server started in a
+  private `CODEX_HOME`, so the real one is never touched; that control must also confirm that a `!` shell-mode command
+  (which the probe uses) reaches the shared server when one is in use. Left out of `drift-base-isolation-and-turns`
+  under its complexity fallback.
+
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
   watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
   Checkout Trash can send up to 2N reads in quick succession. Revisit the choices to stop rechecking after a failed read
@@ -200,12 +211,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   is left that does not belong to "phase 3". Recorded by the maintainer on 2026-11-18 from the plan's review.
 
 ### Drift test feature coverage
-
-- **Drift tests: base launch, Codex process isolation, and Cursor/OpenCode interactive turns.** Verify that Codex's
-  `--no-daemon` keeps hooks and commands inside the session's process tree and still launches cleanly when hooks are
-  disabled, verify Cursor's default launch without a permission flag ("Agent's own setting"), and send a real prompt to
-  Cursor and OpenCode to confirm interactive turns work under Farhelm's terminal host (today both stop at the initial
-  TUI or trust screen). Plan: `plans/queue/drift-base-isolation-and-turns.md`.
 
 - **Drift tests: opt-in persistent hook installation for Grok and Antigravity.** Using isolated config directories so
   the real user home stays untouched, verify that the exact hook files Farhelm installs for Grok (`hooks/farhelm.json`)

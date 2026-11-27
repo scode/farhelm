@@ -584,38 +584,6 @@ async fn wait_for_disabled_reply(
     }
 }
 
-/// Read `/proc/<child>/<file>` of the owned CLI child, refusing the read if the host's pinned child (checked against
-/// its kernel start identity) changed while it ran, so the bytes always belong to the process the host tracks.
-fn read_child_proc(term: &Terminal<'_>, file: &str) -> anyhow::Result<Vec<u8>> {
-    let child = term
-        .host
-        .child_root()
-        .ok_or_else(|| anyhow::anyhow!("the owned CLI child is no longer live"))?;
-    let bytes = std::fs::read(format!("/proc/{}/{file}", child.pid))?;
-    anyhow::ensure!(
-        term.host.child_root() == Some(child),
-        "the CLI child changed during the process read"
-    );
-    Ok(bytes)
-}
-
-/// The host revalidates the child against its pinned kernel start identity. Check adjacent argument words and keep
-/// the actual command and environment private even when the check fails.
-fn check_child_words(term: &Terminal<'_>, file: &str, words: &[&str]) -> anyhow::Result<()> {
-    let bytes = read_child_proc(term, file)?;
-    let entries: Vec<_> = bytes.split(|byte| *byte == 0).collect();
-    anyhow::ensure!(
-        entries.windows(words.len()).any(|window| {
-            window
-                .iter()
-                .zip(words)
-                .all(|(actual, expected)| *actual == expected.as_bytes())
-        }),
-        "the owned CLI child did not receive the expected {file} words"
-    );
-    Ok(())
-}
-
 /// The owned CLI child's command line holds none of `words` as a whole argument. Like [`check_child_words`], the
 /// child is revalidated around the read and the command line stays out of the error.
 fn check_child_lacks_words(term: &Terminal<'_>, words: &[&str]) -> anyhow::Result<()> {
