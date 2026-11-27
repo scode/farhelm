@@ -68,6 +68,25 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
+- **Show "too large to copy contents" on file hover cards over the copy cap.** When a hovered terminal file path exceeds
+  the 10 MB Shift-Cmd-click copy cap, adjust the hover card hint to say "too large to copy contents" instead of omitting
+  the copy hint.
+
+- **Stop other free-text CLI options from swallowing following flags, and audit CLI parsing.** Give the remaining
+  free-text options (`--alias`, `--title`, `--host`, etc.) the same treatment as `--model` and `--effort` (#5129) so
+  omitted values do not swallow a following flag (for example, `farhelm agent host add dev --alias --tailscale`). During
+  planning, do a full sweep of Farhelm's command-line parsing and surface anything that departs from normal
+  best-practice Rust `clap` subcommands and default behavior to the maintainer so agent-introduced quirks can be
+  reviewed.
+
+- **Add a Tailscale column to plain `farhelm agent hosts` output.** Show each host's Tailscale setting in the non-JSON
+  table output of `farhelm agent hosts`, matching the `tailscale` field added to `farhelm agent hosts --json` (#5126).
+
+- **Delete dead fresh-checkout Replace code in the desktop app.** After #5142 made the helm Replace API refuse
+  destination folder changes and fresh managed checkouts, remove the now-unreachable desktop launcher wording and
+  Replace code for starting a fresh managed checkout inside an existing sandbox or container session (and clean up the
+  stale `replace-checkout-lifetime.md` changelog draft if still unreleased).
+
 ### Must run attended
 
 - **Finish Cursor launch-prompt verification.** Cursor Agent 2026.11.22-e9042b2 showed “Press any key to log in...” when
@@ -118,6 +137,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   without showing the accepted removal.
 
 ## Near term
+
+- **Tweak blocked-agent alerts.** Revisit blocked-agent notifications (#5118, #5125, #5135), including stopping
+  Notifications bell notices immediately when **Agent is blocked** is toggled off, along with other adjustments the
+  maintainer has in mind.
 
 - **Let an agent that adds a host start YOLO sessions on it.** We need to make it practical for an agent that adds a
   host to be granted permissions to then start YOLO sessions on it. Details TBD. Circumstances that prompted this: an
