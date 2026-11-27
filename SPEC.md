@@ -5160,7 +5160,7 @@ help. A late or refused answer starts nothing. The command reports the actual ap
 as the user answers, without waiting for discovery or setup, and says when the user approved it as a Tailscale host,
 which may differ from what the agent asked. **Accepted is not installed:** adding may still fail, need setup, or be
 cancelled at the setup question. The agent checks `farhelm agent hosts` and the host's state before relying on it; the
-hosts listing's JSON form says whether each host is a Tailscale host.
+hosts listing says whether each host is a Tailscale host, in its table's last column and in its JSON form.
 
 The user's confirmation-skipping settings spare confirmation clicks on actions the user started in the UI: they avoid
 accidental clicks, not grant permissions. An agent's request is inherently different. An agent add always shows the

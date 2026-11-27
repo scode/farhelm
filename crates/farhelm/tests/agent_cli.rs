@@ -200,7 +200,10 @@ fn agent_command_with_args(socket: &std::path::Path, args: &[&str]) -> Command {
 /// Spec: `farhelm agent hosts` sends exactly one `AgentRequest` — its own
 /// `req_id`, the injected session id, and the `Hosts` verb — and renders
 /// the reply as an aligned table whose `*` column marks this session's own
-/// host. A host's Tailscale flag adds no column and does not change `KIND`.
+/// host. The final `TAILSCALE` column says `yes` or `no` on every row, from
+/// the same flag `--json` carries, and a Tailscale host keeps `ssh` as its
+/// `KIND`: being a Tailscale host is a connection option of an SSH host,
+/// not a kind of its own.
 ///
 /// Both halves matter and neither is checked anywhere else. The REQUEST
 /// shape is the contract the supervisor's restricted dispatch authorizes
@@ -240,9 +243,9 @@ fn hosts_asks_as_its_own_session_and_prints_the_marked_table() {
                             current: true,
                             tailscale: false,
                         },
-                        // A Tailscale host renders like any other SSH host:
-                        // the table has no Tailscale column, and `KIND`
-                        // stays the host's kind; only `--json` carries it.
+                        // A Tailscale host beside an ordinary one, so the
+                        // expected table pins both the `yes` and the `no`
+                        // cell, and that `KIND` stays `ssh` for it.
                         AgentHost {
                             id: "host-builder".to_string(),
                             name: "builder".to_string(),
@@ -269,9 +272,9 @@ fn hosts_asks_as_its_own_session_and_prints_the_marked_table() {
         // multi-line string literal's backslash continuation eats exactly
         // that leading whitespace.
         [
-            "  ID           NAME         KIND  STATE",
-            "* host-local   this machine local connected",
-            "  host-builder builder      ssh   unreachable-reprobing",
+            "  ID           NAME         KIND  STATE                 TAILSCALE",
+            "* host-local   this machine local connected             no",
+            "  host-builder builder      ssh   unreachable-reprobing yes",
             "",
         ]
         .join("\n")

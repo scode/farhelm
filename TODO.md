@@ -75,10 +75,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   best-practice Rust `clap` subcommands and default behavior to the maintainer so agent-introduced quirks can be
   reviewed. Plan: `plans/queue/cli-flag-parsing-audit.md`.
 
-- **Add a Tailscale column to plain `farhelm agent hosts` output.** Show each host's Tailscale setting in the non-JSON
-  table output of `farhelm agent hosts`, matching the `tailscale` field added to `farhelm agent hosts --json` (#5126).
-  Plan: `plans/queue/agent-hosts-tailscale-column.md`.
-
 - **Cmd+T to create a new terminal tab.** Cmd+T to create a new terminal tab. Plan:
   `plans/queue/terminal-tab-shortcuts.md`.
 
