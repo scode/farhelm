@@ -60,3 +60,66 @@ bugs. It traced every way a Replace with draft or request could have carried a c
 that the helm itself refuses one, and that the live Replace with behavior is untouched. Its three findings were wording:
 a comment that implied the wrong condition, a comment that relied on an unstated rule about its callers, and the commit
 message's accuracy. All three were fixed, and the verification found nothing else.
+
+### Landing
+
+#### What landed with it
+
+Nothing outside the queue's own bookkeeping reached main between the executor's last rebase of this plan and its
+landing, and it was the only plan in this round. So no other change was landed or reviewed together with it.
+
+An independent reviewer and I read the change and found nothing to fix. The reviewer traced every way a launch could end
+up with a managed checkout on a host that belongs to an existing sandbox or container session. New, Clone, Replace with,
+Restart with, templates, search, recents and the restore of a waiting launch were all covered, and none can reach that
+case. The launcher hands the YOLO question the folder of the checkout a launch starts, and for a Replace with it now
+hands none. A Replace with request never carried a checkout folder, so that was already empty for it before.
+
+#### Fixes made while landing
+
+None.
+
+#### What the landing made untrue in the report
+
+Nothing. The report's checks ran only the launcher's and templates' tests and clippy for the desktop app's GUI crate.
+The landing added the GUI crate's whole test suite, the screenshot comparison and the desktop app's end-to-end smoke
+test, and they found nothing.
+
+#### Worth knowing
+
+- **Main fails `cargo clippy -- -D warnings`, and not because of this plan.** Since the change that made the helm poll
+  each host every 30 seconds (#5120), the helm's ntfy settings code keeps a save method that only tests call. Clippy
+  reports it as dead code, and with `-D warnings` the helm and everything built on it, the desktop app included, fail to
+  lint. Clippy with warnings not made fatal shows that method as the only warning in the workspace's default build and
+  in the desktop app. Every executor's clippy gate will hit this until it is fixed. Possible follow-up, recommended now:
+  keep the method for tests only, or have the tests call the method the helm uses.
+
+#### Checks
+
+Run once, on the plan's one PR rebased onto main as it stood when the landing started. Main had gained nothing outside
+the queue's bookkeeping since the executor's rebase, so this is the code that landed. The change removes code from the
+desktop app's launcher only. So the checks cover the desktop app's GUI crate, its screenshots and its end-to-end smoke
+test, plus clippy over everything. The SSH test worker was unreachable, so the smoke ran on a boat sandbox (an x86_64
+Ubuntu 24.04 VM), and the rest ran locally:
+
+- `cargo clippy --all-targets -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets` without and with
+  `--features agent` (the build with the desktop app's test-automation hooks), each with `-D warnings`: all three failed
+  on the same pre-existing dead-code warning in the helm's ntfy settings code. That warning has been on main since #5120
+  and is outside this plan (see "Worth knowing"). Run again without `-D warnings`, all three reported that warning and
+  no other. `cargo clippy -p farhelm-gui --all-targets -- -D warnings` (the GUI crate, which does not build on the
+  helm): clean.
+- The GUI crate's whole default test suite (`cargo nextest run -p farhelm-gui`), recorded run
+  bc87602d-b7f3-4804-8431-4249560a66ea: 3,589 passed, none failed, and it skipped its 4 opt-in tests, among them the
+  screenshot test the next item runs.
+- The full screenshot comparison (`scripts/check-gui-goldens.py`), recorded run 14684436-a078-42f4-86d8-2200cd6d6779:
+  passed.
+- On a boat, the desktop app's end-to-end smoke test (`scripts/gui-e2e-smoke.py`), recorded run
+  38640382-d621-4474-ac13-a762a04a8c3d: 48 of its 49 steps passed, and the paste step was skipped, as on every Linux
+  run. Its steps open the launcher, including in Replace with, and run a Replace from the session row that asks about
+  YOLO first. None of them sends a Replace with from the launcher, so the smoke does not reach the one line this plan
+  changed in a launch request; only the landing's two readings of the change (mine and the independent reviewer's) cover
+  it.
+- `cargo fmt --all -- --check`, `python3 releasing/check-changelog.py format` and `dprint check` on TODO.md and the
+  review-feedback index: passed.
+
+Reused: nothing. Skipped: the rest of the Rust workspace's tests, since nothing outside the launcher changed; the opt-in
+tests; and any run on a Mac, since none was available to the landing.
