@@ -1,5 +1,6 @@
-//! The original drift checks cover one ordinary launch per harness. The agents that report a conversation also
-//! have to resume it, recall a code word and accept a fresh hook report for the same identity.
+//! The original drift checks cover one ordinary launch per harness, each completing a real turn. The agents that
+//! report a conversation also have to resume it, recall a code word and accept a fresh hook report for the same
+//! identity; Cursor and OpenCode, which report none, stop after their one turn.
 
 use super::*;
 use farhelm_proto::LaunchPermission;
@@ -12,7 +13,8 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
         harness: kind,
         model: profile.model.map(str::to_owned),
         effort: profile.effort.map(Into::into),
-        // Exercise the two launch-only agents' actual permission flags without sending either a prompt.
+        // Exercise the two untracked agents' actual permission flags. YOLO also keeps their one turn from stopping
+        // at a tool approval.
         permissions: profile
             .hook_witness
             .is_none()
@@ -32,19 +34,16 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
     .await
 }
 
-/// A base case stops after confirming startup for a launch-only agent. All the others must prove conversation
-/// recall and fresh hook evidence on the new generation.
+/// Every base case answers a workspace trust question in its empty directory, if one appears, and completes a real
+/// turn under Farhelm's terminal host. An agent that reports a conversation must then prove recall and fresh hook
+/// evidence on the new generation; one that reports none (Cursor, OpenCode) ends after its turn's reply is on screen.
 async fn check_base_session(env: &DriftEnv<'_>, profile: &Harness, id: &str) -> DriftResult {
     let (sup, client, state) = (env.sup, env.client, env.state);
-    let trust = if profile.hook_witness.is_some() {
-        TrustPolicy::AutoAnswer
-    } else {
-        TrustPolicy::StopAtPrompt
-    };
+    let trust = TrustPolicy::AutoAnswer;
     let mut first = Terminal::attach(sup, client, id, false).await?;
     first.ready(profile, trust, false).await?;
     let Some(hook_witness) = profile.hook_witness else {
-        return Ok(());
+        return untracked_turn(&mut first).await;
     };
     let random = uuid::Uuid::new_v4().simple().to_string();
     let code_word = format!("FH{}", random[..8].to_ascii_uppercase());
@@ -53,8 +52,7 @@ async fn check_base_session(env: &DriftEnv<'_>, profile: &Harness, id: &str) -> 
     let prompt = format!(
         "Remember test label {code_word}. Reply with O and K joined into one word, and nothing else. No tools."
     );
-    first.type_text(&prompt, false).await?;
-    first.client.send_keys(first.channel, b"\r".to_vec()).await;
+    send_prompt(&mut first, &prompt, "OK", false).await?;
     let hook_log = state.join("hook-log").join(format!("{id}.log"));
     let captured = wait_for_turn(
         &mut first,
@@ -106,16 +104,23 @@ async fn check_base_session(env: &DriftEnv<'_>, profile: &Harness, id: &str) -> 
             HookWitness::Fresh | HookWitness::MatchingIdentity => hook_witness,
         },
     };
-    if expected.saw_reply(&second.host.screen_tail(SCREEN_BYTES)) {
-        return Err(anyhow::anyhow!("the recall witness was already present before Turn 2").into());
-    }
-    second.type_text(RECALL_PROMPT, true).await?;
-    second
-        .client
-        .send_keys(second.channel, b"\r".to_vec())
-        .await;
+    send_prompt(&mut second, RECALL_PROMPT, expected.reply, true).await?;
     wait_for_turn(&mut second, sup, id, &hook_log, &expected).await?;
     Ok(())
+}
+
+/// One short no-tools turn for an agent with no conversation report, proving that an interactive turn works under
+/// Farhelm's terminal host and not only that the CLI starts. The answer is split in the prompt ("FH" and a random
+/// nonce, joined only in the reply) so a wrapped prompt echo can never read as the answer, and the prompt is short:
+/// `Terminal::type_text` waits for the whole prompt on one screen line, and OpenCode's composer wraps well before the
+/// terminal's width. A login screen before the reply is still COULD NOT RUN, since no turn has succeeded yet.
+async fn untracked_turn(terminal: &mut Terminal<'_>) -> DriftResult {
+    let random = uuid::Uuid::new_v4().simple().to_string();
+    let nonce = &random[..8];
+    let reply = format!("FH{nonce}");
+    let prompt = format!("Reply FH then {nonce}, no space. No tools.");
+    send_prompt(terminal, &prompt, &reply, false).await?;
+    wait_for_reply(terminal, &reply, false).await
 }
 
 drift_cases! {

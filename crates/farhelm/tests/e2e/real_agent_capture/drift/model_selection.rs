@@ -113,7 +113,9 @@ async fn check_launch(
                     if let Some(reason) = startup_interruption(harness, &screen, model) {
                         return Err(DriftError::CouldNotRun(reason.to_owned()));
                     }
-                    if !trust_prompt(&screen) && screen_proves_model(harness, &screen, model) {
+                    if !trust_dialog_waiting(&screen, profile.composer)
+                        && screen_proves_model(harness, &screen, model)
+                    {
                         return Ok(());
                     }
                     pace().await;

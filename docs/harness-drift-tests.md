@@ -3,8 +3,8 @@
 Use this suite to check that the latest release of each agent CLI still accepts Farhelm's launch commands and that the
 agents with conversation tracking still report a conversation Farhelm can restart. Run it deliberately on Linux. The
 runner first upgrades each selected agent (see "Upgrading the agents first"). In the default category each tracked agent
-then sends two small prompts using your existing vendor login or provider credentials, and Cursor and OpenCode open
-their interactive CLI without submitting a prompt.
+then sends two small prompts using your existing vendor login or provider credentials, and Cursor and OpenCode, whose
+conversations Farhelm does not track, send one.
 
 ```sh
 python3 -B scripts/run-harness-drift.py --list
@@ -33,8 +33,10 @@ base case asks the agent to remember a random code word and waits for its reply 
 then stops the session, records how many hook reports were accepted, and uses Restart with the saved resume arguments.
 The resumed agent must recall the code word in a second reply. Farhelm must also accept a new hook report that leaves
 the original resume arguments intact. The Codex, Antigravity and Grok checks require a committed report for the resumed
-generation and its conversation ID. The launch-only base cases check that the interactive screen or workspace trust
-prompt opens. Every category has up to 720 seconds per harness, including startup, checks and cleanup.
+generation and its conversation ID. Cursor's and OpenCode's base cases launch with their YOLO flags, answer a workspace
+trust question if one appears, send one short prompt and wait for its reply on screen, which shows that an interactive
+turn works under Farhelm's terminal host. Every category has up to 720 seconds per harness, including startup, checks
+and cleanup.
 
 The `model_selection` category launches the current catalog models and checks which model the agent shows as active.
 Goose, Pi and OMP also start without provider or model flags and check that the agent shows an active model. Their
@@ -158,9 +160,11 @@ COULD NOT RUN and reports an UPGRADE FAILED line with the agent and the updater'
 
 - **PASSED** means all of that case's live checks ran and succeeded.
 - **COULD NOT RUN** means a prerequisite was missing, or a vendor prompt the test leaves for the vendor's user to answer
-  stood in the way, such as Codex's model retirement notice. The table gives the reason, such as a missing binary or a
-  login screen. A model selection case reports it when any of its models could not run, even when the others were
-  confirmed; the retained run names each model's outcome.
+  stood in the way, such as Codex's model retirement notice. A vendor account whose usage no longer covers the model
+  (Cursor's "not included in your weekly usage") before the case's first successful turn counts as a missing
+  prerequisite. The table gives the reason, such as a missing binary or a login screen. A model selection case reports
+  it when any of its models could not run, even when the others were confirmed; the retained run names each model's
+  outcome.
 - **UPGRADE FAILED** means the agent's updater (and its fallback installer, if it has one) failed. The case still ran,
   against the version shown.
 - **FAILED** means the CLI or test failed after starting. The retained run contains its output, source identity and
