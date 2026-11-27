@@ -1856,8 +1856,7 @@ host, it explains that the directory moves to the trash when its last session is
 same mark beside its directory. Sessions using another session's checkout, including its subdirectories, carry the mark
 too; requesting a checkout at launch does not establish current membership.
 
-On a session-owned sandbox or container the checkout tooltip explains permanent removal on Delete. The launcher says the
-same for a fresh checkout inside an existing session-owned environment.
+On a session-owned sandbox or container the checkout tooltip explains permanent removal on Delete.
 
 The launcher and template editor use the same segmented destination control: folder or managed checkout, with a folder
 glyph or branch glyph. Selecting managed checkout reveals a repository field and explains the directory's lifetime.

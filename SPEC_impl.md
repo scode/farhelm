@@ -3997,10 +3997,11 @@ Root identity is checked even before accepting an apparently missing source. Com
 overlapping active registry paths, including during startup recovery. A refused or failed archive step does not fail
 Delete (SPEC.md, Managed checkouts): the session and its checkout registry row are retired, the folder is left in place
 (after a failed move, possibly at its journaled archive destination, which the notice then names), and the reply carries
-a notice naming it. A Replace's reply carries its source Delete's notice as well, since a replacement in another folder
-can release the source's last reference. After process teardown and committed final retirement, Delete removes the
-private preparation lock and state files. This cleanup is best effort: a crash or unlink failure can leave private
-evidence, but cannot authorize another directory move.
+a notice naming it. A Replace's reply carries its source Delete's notice as well. Its replacement starts in the source's
+folder and normally keeps the checkout referenced, but the notice is the Delete's own answer and is shown wherever that
+Delete's result is. After process teardown and committed final retirement, Delete removes the private preparation lock
+and state files. This cleanup is best effort: a crash or unlink failure can leave private evidence, but cannot authorize
+another directory move.
 
 ### Archived-checkout trash
 
@@ -5471,8 +5472,9 @@ selection, independently of their previous ephemeral cwd.
 Schema 102 adds bounded helm-wide repository history. Migration seeds it from preserved ordinary and environment launch
 intent, using the stored timestamps across installations and the helm's admission time for a launch represented in both
 tables. New writes require a user-initiated checkout, follow successful create admission order, and survive host removal
-and adoption. A user checkout in an existing session-owned environment has its own bounded replay window so it can
-contribute a repository without aging the host's earlier setup or changing remembered settings.
+and adoption. Later creates in an existing session-owned environment (Replace, an agent's create) record no history, so
+they cannot age the environment's original setup. The `github_repository_replacement_admissions` table that once gave a
+user checkout there its own replay window is no longer used and awaits a migration that drops it.
 
 `LaunchHarness::omitted_permission` is the one per-harness fact for new request defaults. The helm fills omissions
 before validation and still refuses unsupported explicit choices. Every harness that offers Guarded defaults to it.
@@ -6003,13 +6005,16 @@ installation it is on, so it follows an open session the sidebar's filter hides
   uncertainty, the caller needs to see).
 - "Replace with" (SPEC.md's bullet of that name) reuses the same endpoint through `ReplaceReq`'s optional `with` field —
   a whole `CreateReq`, the same type an ordinary create's body decodes into — rather than a second route or a second
-  override type: present, its cwd/title/dimensions/mode selector are resolved exactly as an ordinary create's own body
-  is (including that body's own mutual-exclusivity refusals), and used in place of the source's live row; absent,
-  behavior is byte-for-byte unqualified replace. Replace never changes machine, with or without an override, so a
-  `with.host` naming anything but the source's own host (compared against the `claim` `route_session` resolved for the
-  source, not a fresh registry read) is refused with `Conflict` before either the create or the delete runs — the same
-  refusal shape `precondition::incarnation_holds` already gives an ordinary create, applied here to `with`'s own
-  `expected_incarnation` too. The desktop app sends no `intent_key` (its Replace with carries none, see
+  override type: present, its title/dimensions/mode selector are resolved exactly as an ordinary create's own body is
+  (including that body's own mutual-exclusivity refusals), and used in place of the source's live row; absent, behavior
+  is byte-for-byte unqualified replace. Replace never changes the session's destination, with or without an override. A
+  `with.github_checkout` is refused with `InvalidRequest` before routing, since a replacement never starts in a new
+  managed checkout. A `with.host` naming anything but the source's own host (compared against the `claim`
+  `route_session` resolved for the source, not a fresh registry read) is refused with `Conflict` before either the
+  create or the delete runs — the same refusal shape `precondition::incarnation_holds` already gives an ordinary create,
+  applied here to `with`'s own `expected_incarnation` too. A `with.cwd` that is not exactly the source's `cwd` in the
+  live row is refused with `Conflict` as well, compared as text without path normalization, since both desktop callers
+  send the listed `cwd` verbatim. The desktop app sends no `intent_key` (its Replace with carries none, see
   `crates/gui/farhelm-gui/src/session_list/replace.rs`). For a caller that does, the wire body's own two `intent_key`
   fields (the endpoint's own, and the one `with` carries because it is built from the identical create-body function)
   must agree, a caller sending two different keys for what claims to be one intended create being refused as a 400

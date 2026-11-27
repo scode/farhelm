@@ -5,10 +5,14 @@
 
 use std::collections::HashSet;
 
-use super::{Context, HostId, MAX_LAUNCH_HISTORY, history_order_is_newer};
+use super::{Context, MAX_LAUNCH_HISTORY};
 use farhelm_proto::{GithubRepo, parse_github_repo};
 use rusqlite::Transaction;
 
+// `github_repository_replacement_admissions` is no longer written or read. It held the separate replay
+// window for a user checkout started by Replace with inside an existing session-owned environment, and
+// Replace with no longer starts a checkout. It stays in the schema (and in the identity purge) because
+// removing it needs a migration; a later schema change can drop it.
 pub(super) const SCHEMA: &str = "CREATE TABLE github_repository_history (
     use_order INTEGER PRIMARY KEY,
     github_repo TEXT NOT NULL UNIQUE
@@ -96,60 +100,6 @@ pub(super) fn record(tx: &Transaction<'_>, repo: &str) -> anyhow::Result<()> {
     )
     .context("evicting old managed checkout repositories")?;
     Ok(())
-}
-
-/// A replacement in an existing disposable environment must not age its ordinary launcher history.
-/// Keep its bounded replay window here. The installation's creation sequence supplies the ordering for
-/// current peers. Observations without a sequence can be compared with each other by creation time.
-pub(super) fn record_replacement(
-    tx: &Transaction<'_>,
-    host: HostId,
-    identity: &str,
-    session: &farhelm_proto::SessionInfo,
-    sequence: Option<i64>,
-    repo: &str,
-) -> anyhow::Result<bool> {
-    use rusqlite::{OptionalExtension, params};
-
-    let ordering_kind = i64::from(sequence.is_some());
-    let ordering_value = sequence.unwrap_or(session.created_at);
-    let boundary: Option<(i64, i64, String)> = tx
-        .query_row(
-            "SELECT ordering_kind, ordering_value, session_id
-         FROM github_repository_replacement_admissions WHERE host_id = ?1 AND host_identity = ?2
-         ORDER BY ordering_kind DESC, ordering_value DESC, session_id ASC LIMIT 1 OFFSET ?3",
-            params![host, identity, MAX_LAUNCH_HISTORY - 1],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .optional()?;
-    if boundary.is_some_and(|(kind, value, session_id)| {
-        !history_order_is_newer(
-            (ordering_kind, ordering_value, &session.id),
-            (kind, value, &session_id),
-        )
-    }) {
-        return Ok(false);
-    }
-    let admitted = tx.execute(
-        "INSERT INTO github_repository_replacement_admissions
-            (host_id, host_identity, session_id, ordering_kind, ordering_value)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT (host_id, host_identity, session_id) DO NOTHING",
-        params![host, identity, session.id, ordering_kind, ordering_value],
-    )? != 0;
-    if !admitted {
-        return Ok(false);
-    }
-    tx.execute(
-        "DELETE FROM github_repository_replacement_admissions WHERE rowid IN (
-             SELECT rowid FROM github_repository_replacement_admissions
-             WHERE host_id = ?1 AND host_identity = ?2
-             ORDER BY ordering_kind DESC, ordering_value DESC, session_id ASC LIMIT -1 OFFSET ?3
-         )",
-        params![host, identity, MAX_LAUNCH_HISTORY],
-    )?;
-    record(tx, repo)?;
-    Ok(true)
 }
 
 /// Read the same newest-first order for every destination and revalidate identifiers before returning them.

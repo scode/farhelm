@@ -133,9 +133,6 @@ pub(crate) enum HistoryScope {
     /// An ordinary host still records accepted intent. Keeping repo provenance also keeps its transient
     /// checkout path out of folder suggestions.
     WithoutRepositorySuggestion,
-    /// A user checkout in an existing session-owned environment uses a separate replay window to keep
-    /// earlier setup and folder suggestions intact.
-    RepositoryOnly,
 }
 
 /// The facts one admitted create writes into each history table.
@@ -9706,12 +9703,6 @@ impl HelmStore {
                 .map(i64::try_from)
                 .transpose()
                 .context("creation sequence exceeds SQLite's signed integer range")?;
-            if scope == HistoryScope::RepositoryOnly {
-                let Some(repo) = github_repo.as_deref() else { return Ok(false); };
-                let changed = repository_history::record_replacement(&tx, host, &identity, &entry, sequence, repo)?;
-                tx.commit().context("committing repository history for a replacement")?;
-                return Ok(changed);
-            }
             let prior_fallback: bool = tx
                 .query_row(
                     "SELECT fallback_order FROM create_history_partitions
@@ -10801,64 +10792,6 @@ mod tests {
             global_repository_names(&reopened).await,
             ["org/one", "org/two"]
         );
-    }
-
-    /// A disposable host can keep its original structured setup even after enough fresh replacements to
-    /// fill a whole replay window. Replaying an evicted replacement must not make its repository recent.
-    #[farhelm_testtrace::test]
-    async fn replacement_checkout_history_has_its_own_admission_window() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "replacement.example", "identity-a").await;
-        let paths = HistoryPaths {
-            canonical_cwd: "/environment",
-            display_cwd: "/environment",
-        };
-        let mut initial = session("original", 51);
-        initial.creation_seq = Some(1);
-        let selection = environment_history_selection();
-        assert!(
-            store
-                .record_create_history_with_destination(
-                    host,
-                    "identity-a",
-                    &admitted_row(host, &initial),
-                    paths,
-                    None,
-                    Some(&selection),
-                )
-                .await
-                .unwrap()
-        );
-        let original = store.launch_history(host, "identity-a").await.unwrap();
-        assert_eq!(original.len(), 1);
-        let preferences = store.preferences().await.unwrap();
-        for (attempt, created_at) in (0..=MAX_LAUNCH_HISTORY).chain([0]).enumerate() {
-            let entry = session(&format!("replacement-{created_at}"), created_at);
-            let repo = farhelm_proto::parse_github_repo(&format!("org/repo-{created_at}")).unwrap();
-            let admitted = store
-                .record_create_history_with_environment_if_current(
-                    host,
-                    "identity-a",
-                    &admitted_row(host, &entry),
-                    paths,
-                    Some(&repo),
-                    Some(&selection),
-                    None,
-                    None,
-                    || Some(((), HistoryScope::RepositoryOnly)),
-                )
-                .await
-                .unwrap();
-            assert_eq!(admitted, attempt <= MAX_LAUNCH_HISTORY as usize);
-        }
-        assert_eq!(
-            store.launch_history(host, "identity-a").await.unwrap(),
-            original
-        );
-        assert_eq!(store.preferences().await.unwrap(), preferences);
-        let repos = global_repository_names(&store).await;
-        assert_eq!(repos[0], format!("org/repo-{MAX_LAUNCH_HISTORY}"));
-        assert!(!repos.iter().any(|repo| repo == "org/repo-0"));
     }
 
     /// Seed an upgrade from both source tables. A deleted sandbox's repo comes from its independent history.

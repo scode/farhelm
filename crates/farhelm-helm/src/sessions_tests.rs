@@ -552,68 +552,69 @@ async fn environment_checkout_harness(
     (h, host)
 }
 
-/// The same ownership policy covers ordinary hosts and session-owned hosts.
-/// Accepted agent checkouts keep their transient paths out of folder history
-/// and leave the user checkout as the sole shared repository suggestion.
+/// Accepted agent checkouts on a host added for continued use keep their
+/// transient paths out of folder history and leave the user checkout as the
+/// sole shared repository suggestion.
+///
+/// Why: helm-wide repository history takes new writes only from
+/// user-initiated checkouts (SPEC_impl.md, schema 102), so an agent's
+/// checkout must not become a suggestion the user never chose.
 #[farhelm_testtrace::test]
 async fn only_user_checkouts_teach_global_repository_history() {
     use super::{CreateAcceptance, CreateOrigin, host_client, record_created_history};
 
-    for session_owned in [false, true] {
-        let (h, host) = environment_checkout_harness(None, Vec::new(), session_owned).await;
-        h.manager.sync_registry().await.unwrap();
-        let identity = "fresh-recipe-install";
-        h.await_refreshed_as(host, identity, 0).await;
-        assert_eq!(
-            h.manager.status(host).unwrap().is_session_owned,
-            session_owned
-        );
-        let (claim, _) = host_client(&h.state, host).unwrap();
-        let user_repo = farhelm_proto::parse_github_repo("acme/user").unwrap();
-        let agent = CreateOrigin::Agent {
-            agent_wrapper_supplied: false,
-            wrapper_approved: false,
-        };
-        for (id, time, origin, repo) in [
-            ("user-checkout", 1, CreateOrigin::User, user_repo.clone()),
-            (
-                "agent-checkout",
-                2,
-                agent,
-                farhelm_proto::parse_github_repo("acme/agent").unwrap(),
-            ),
-        ] {
-            let session = rest_harness::session(id, time);
-            record_created_history(
-                &h.state,
-                &claim,
-                &session,
-                CreateAcceptance {
-                    environment_target: None,
-                    origin,
-                    github_repo: Some(repo),
-                    requested_cwd: String::new(),
-                    accept_result: None,
-                    explicit_selection: None,
-                    custom_registration: None,
-                },
-            )
-            .await
-            .unwrap();
-        }
-        assert_eq!(
-            h.store.global_github_repository_history().await.unwrap(),
-            [user_repo],
-            "session_owned={session_owned}",
-        );
-        assert!(
-            h.store
-                .folder_history(host, identity)
-                .await
-                .unwrap()
-                .is_empty()
-        );
+    let (h, host) = environment_checkout_harness(None, Vec::new(), false).await;
+    h.manager.sync_registry().await.unwrap();
+    let identity = "fresh-recipe-install";
+    h.await_refreshed_as(host, identity, 0).await;
+    assert!(
+        !h.manager.status(host).unwrap().is_session_owned,
+        "fixture premise: a host added for continued use"
+    );
+    let (claim, _) = host_client(&h.state, host).unwrap();
+    let user_repo = farhelm_proto::parse_github_repo("acme/user").unwrap();
+    let agent = CreateOrigin::Agent {
+        agent_wrapper_supplied: false,
+        wrapper_approved: false,
+    };
+    for (id, time, origin, repo) in [
+        ("user-checkout", 1, CreateOrigin::User, user_repo.clone()),
+        (
+            "agent-checkout",
+            2,
+            agent,
+            farhelm_proto::parse_github_repo("acme/agent").unwrap(),
+        ),
+    ] {
+        let session = rest_harness::session(id, time);
+        record_created_history(
+            &h.state,
+            &claim,
+            &session,
+            CreateAcceptance {
+                environment_target: None,
+                origin,
+                github_repo: Some(repo),
+                requested_cwd: String::new(),
+                accept_result: None,
+                explicit_selection: None,
+                custom_registration: None,
+            },
+        )
+        .await
+        .unwrap();
     }
+    assert_eq!(
+        h.store.global_github_repository_history().await.unwrap(),
+        [user_repo],
+    );
+    assert!(
+        h.store
+            .folder_history(host, identity)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// Read the next control frame a scripted environment peer receives.
@@ -801,28 +802,30 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
     assert_eq!(creates, 1);
 }
 
-/// The home fallback also applies when Replace with starts a fresh checkout
-/// on an existing session-owned host. The accepted preview and the create
-/// agree on the target's root before the original session is deleted. The new
-/// checkout teaches the global repository list without changing host suggestions.
-/// A checkout archived by that Delete wakes Trash even after the source is gone from the cache.
+/// Replace with in a session's own sandbox starts the replacement in the
+/// source's folder, and when the host reports that the source's Delete
+/// archived a checkout, Trash wakes even though the source has already left
+/// the cache by the time that reply arrives.
+///
+/// Why: Replace's delete half is the only thing that removes its source, so
+/// it alone can wake Trash for what that Delete archived; and a replacement
+/// in an existing session-owned environment must not spend a slot in the
+/// host's create window. What: the supervisor sees exactly one create, in the
+/// source's own folder with no checkout request, then one delete of the
+/// source; the archived reply wakes the fleet once and bumps the host's Trash
+/// epoch, and no create history is admitted for the replacement.
 #[farhelm_testtrace::test]
-async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
+async fn replace_with_on_a_session_owned_host_wakes_trash_for_an_archived_source() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 
     let (client, peer) = tokio::io::duplex(64 * 1024);
-    let (h, host) =
-        environment_checkout_harness(Some(client), vec![rest_harness::session("source", 1)], true)
-            .await;
-    assert!(
-        h.store
-            .resolve_checkout_config(None)
-            .await
-            .unwrap()
-            .root
-            .is_none()
+    let source = rest_harness::session("source", 1);
+    assert_eq!(
+        source.cwd, "/source",
+        "fixture premise: the source's folder"
     );
+    let (h, host) = environment_checkout_harness(Some(client), vec![source], true).await;
     let fleet = h.fleet.clone();
     let state = h.state.clone();
     let (done, mut finished) = tokio::sync::oneshot::channel();
@@ -834,41 +837,25 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
             .await
             .unwrap();
         let frame = next_control_frame(&mut reader).await;
-        let ControlMsg::GithubCheckoutPreview { req_id, request } = parse_control(&frame).unwrap()
-        else {
-            panic!("expected checkout preview");
-        };
-        assert_eq!(request.root.as_deref(), Some("~"));
-        let cwd = "/environment-home/bar-review";
-        writer
-            .write_control(&ControlMsg::GithubCheckoutPreviewed {
-                req_id,
-                preview: farhelm_proto::GithubPreviewResponse {
-                    canonical_root: "/environment-home".into(),
-                    basename: "bar-review".into(),
-                    cwd: cwd.into(),
-                    config_revision: request.config_revision.unwrap(),
-                    claim_context: farhelm_proto::ClaimContext {
-                        host: host.to_string(),
-                        incarnation: request.expected_incarnation.unwrap(),
-                    },
-                },
-            })
-            .await
-            .unwrap();
-        let frame = next_control_frame(&mut reader).await;
         let ControlMsg::CreateSession {
             req_id,
-            github_checkout: Some(checkout),
+            cwd,
+            github_checkout,
             ..
         } = parse_control(&frame).unwrap()
         else {
-            panic!("expected managed checkout create");
+            panic!("expected the replacement's create first, with no checkout preview");
         };
-        assert_eq!(checkout.root, "~");
-        assert_eq!(checkout.preview.cwd, cwd);
+        assert_eq!(
+            cwd, "/source",
+            "the replacement starts in the source's folder"
+        );
+        assert!(
+            github_checkout.is_none(),
+            "a replacement requests no checkout"
+        );
         let mut replacement = rest_harness::session("replacement", 2);
-        replacement.cwd = cwd.into();
+        replacement.cwd = cwd;
         fleet.edit(host, |script| script.sessions.push(replacement.clone()));
         writer
             .write_control(&ControlMsg::SessionCreated {
@@ -886,6 +873,9 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
             panic!("expected removal of the source after create");
         };
         assert_eq!(session_id, "source");
+        // Drop the source from both the host's list and the helm's cache
+        // before replying, so the Trash wake below cannot come from an
+        // ordinary cache change for the source.
         fleet.edit(host, |script| {
             script.sessions.retain(|session| session.id != "source")
         });
@@ -922,36 +912,21 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
     assert!(h.manager.status(host).unwrap().is_session_owned);
     assert!(
         h.store
-            .global_github_repository_history()
+            .has_cached_session(&store::SessionKey::new(host, "source"))
             .await
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        "fixture premise: the source is listed before the replace"
     );
-    let (status, preview) = post_text(
-        &h,
-        "/api/github-checkout-preview",
-        serde_json::json!({"host": host, "repo": "acme/bar", "title": "review"}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{preview}");
-    let preview: serde_json::Value = serde_json::from_str(&preview).unwrap();
+    assert_eq!(h.state.trash_requests.epoch(host), 0);
     let (status, result) = post_text(
         &h,
         &h.session_uri(host, "/api/sessions/source/replace"),
         serde_json::json!({
-            "with": {
-                "cwd": "", "command": {"command": "true", "yolo": false},
-                "github_checkout": {"repo": "acme/bar", "title": "review", "preview": preview},
-            },
+            "with": { "cwd": "/source", "command": {"command": "true", "yolo": false} },
         }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{result}");
-    assert_eq!(
-        h.store.global_github_repository_history().await.unwrap(),
-        [farhelm_proto::parse_github_repo("acme/bar").unwrap()],
-    );
-    // A command launch still consumes a slot under ordinary admission.
     let db = h.store.connection_for_test();
     let admitted = db
         .call("read replacement admission", move |conn| {
@@ -2478,7 +2453,7 @@ async fn delete_session_passes_the_supervisors_notice_to_the_caller() {
 #[farhelm_testtrace::test]
 async fn a_late_delete_keeps_its_checkout_notice_in_the_feed() {
     assert_late_checkout_notice("DELETE", "/api/sessions/sess-1", "").await;
-    let body = r#"{"with":{"cwd":"/different","command":{"command":"sh","yolo":false}}}"#;
+    let body = r#"{"with":{"cwd":"/sess-1","command":{"command":"sh","yolo":false}}}"#;
     assert_late_checkout_notice("POST", "/api/sessions/sess-1/replace", body).await;
 }
 
@@ -2506,7 +2481,7 @@ async fn assert_late_checkout_notice(method: &'static str, path: &str, body: &'s
             let ControlMsg::CreateSession { req_id, cwd, .. } = request else {
                 panic!("expected replacement create, got {request:?}");
             };
-            assert_eq!(cwd, "/different");
+            assert_eq!(cwd, "/sess-1");
             let mut session = rest_harness::session("replacement", 1_700_000_001);
             session.cwd = cwd;
             writer
@@ -4355,11 +4330,13 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
 /// carries it as `delete_notice` beside the new session's own fields, and a
 /// Delete with no notice adds no such field.
 ///
-/// Why: a Replace whose new session uses a different folder (an override or
-/// a fresh checkout) can release the source's last checkout reference, and
-/// a checkout that could not be archived must never be released silently
-/// (SPEC.md "Managed checkouts"). The reply stays a session object so a
-/// client that ignores the field is unaffected.
+/// Why: Replace's source removal is a Delete, and a checkout that could not
+/// be archived must never be released silently; its notice is shown wherever
+/// a Delete's result is (SPEC.md "Managed checkouts"). Replace keeps the
+/// source's folder, so this is not expected in normal use, but the helm
+/// passes on whatever the host's Delete reports rather than assuming it away.
+/// The reply stays a session object so a client that ignores the field is
+/// unaffected.
 #[farhelm_testtrace::test]
 async fn a_replace_reply_carries_the_source_deletes_notice() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -5654,25 +5631,35 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
 // Everything above this point pins UNQUALIFIED replace (`with` absent),
 // which the tests below leave completely alone. These pin the override
 // body: the create half launches `with`'s fields instead of the source's
-// own, while every failure shape, the same-host rule, and the delete half
-// stay exactly as `do_replace_session`'s doc describes for either form.
+// own, while every failure shape, the same-destination rule (host and
+// folder), and the delete half stay exactly as `do_replace_session`'s doc
+// describes for either form.
 
-/// The plainest "replace with": a raw override of cwd, invocation, and
-/// title. SPEC.md's replace-with bullet promises every field can be edited
-/// before launching, and this pins that the OVERRIDE — not the source's own
-/// cwd/title/invocation — is what reaches the supervisor, while the source
-/// is still removed exactly as an unqualified replace removes it.
+/// The plainest "replace with": a raw override of the command and title,
+/// with the body's cwd repeating the source's own folder exactly.
+///
+/// Why: SPEC.md's replace-with bullet lets the launch and title be edited
+/// while the folder stays the source's, and the desktop app sends that folder
+/// back verbatim; the helm's folder refusal must not catch that honest body.
+/// What: the OVERRIDE's command and title — not the source's own — reach the
+/// supervisor, the create runs in the source's folder, and the source is
+/// still removed exactly as an unqualified replace removes it.
 #[farhelm_testtrace::test]
-async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_removes_the_source() {
+async fn a_replace_with_override_keeps_the_source_folder_and_removes_the_source() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, Frame, SessionInfo};
 
+    let source = rest_harness::session("sess-1", 1_700_000_000);
+    assert_eq!(
+        source.cwd, "/sess-1",
+        "fixture premise: the source's folder"
+    );
+    assert_ne!(
+        source.invocation, "new-agent --flag",
+        "fixture premise: the override differs from the source's command"
+    );
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let (harness, local) = spliced_replace_harness(
-        client_side,
-        vec![rest_harness::session("sess-1", 1_700_000_000)],
-    )
-    .await;
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
     let fleet = harness.fleet.clone();
     let peer = tokio::spawn(async move {
         let (r, w) = tokio::io::split(peer_side);
@@ -5682,9 +5669,9 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
             .await
             .unwrap();
 
-        // The create half must carry the OVERRIDE's cwd, invocation, and
-        // title — never the source's own — with no idempotency key (the
-        // request body below sends none).
+        // The create half must carry the OVERRIDE's command and title —
+        // never the source's own — in the source's folder, with no
+        // idempotency key (the request body below sends none).
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
             prompt: None,
@@ -5700,7 +5687,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         else {
             panic!("expected CreateSession, got {request:?}");
         };
-        assert_eq!(cwd, "/replaced-with");
+        assert_eq!(cwd, "/sess-1");
         assert_eq!(
             launch,
             Some(farhelm_proto::SessionLaunch::plain_command(
@@ -5723,7 +5710,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
             last_activity_at: 1_700_000_500,
             last_work_started_at: 0,
             creation_seq: None,
-            cwd: "/replaced-with".into(),
+            cwd: "/sess-1".into(),
             canonical_cwd: None,
             invocation: "new-agent --flag".into(),
             launch: farhelm_proto::SessionLaunch::plain_command("new-agent --flag"),
@@ -5769,7 +5756,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({
             "with": {
-                "cwd": "/replaced-with",
+                "cwd": "/sess-1",
                 "command": {"command": "new-agent --flag", "yolo": false},
                 "title": "replaced-with-title",
             }
@@ -5779,7 +5766,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
     assert_eq!(session.id, harness.local_session_ref("sess-2"));
-    assert_eq!(session.cwd, "/replaced-with");
+    assert_eq!(session.cwd, "/sess-1");
     assert_eq!(session.invocation, "new-agent --flag");
     assert_eq!(session.title, "replaced-with-title");
 
@@ -5801,9 +5788,9 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
 /// this was pinned, the helm forwarded the conversation id but created the
 /// replacement with no prompt, so a folder replacement silently dropped the
 /// user's first message while the same request through a managed checkout kept
-/// it. What: the supervisor's `CreateSession` carries the body's exact
-/// multiline prompt for a prompt-capable agent launch, and the source is still
-/// deleted afterwards.
+/// it. What: the supervisor's `CreateSession`, in the source's own folder,
+/// carries the body's exact multiline prompt for a prompt-capable agent
+/// launch, and the source is still deleted afterwards.
 #[farhelm_testtrace::test]
 async fn a_replace_with_body_forwards_its_initial_prompt_to_the_create() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -5840,7 +5827,7 @@ async fn a_replace_with_body_forwards_its_initial_prompt_to_the_create() {
             Some(PROMPT),
             "the replacement must start with the prompt the Replace with body carried"
         );
-        assert_eq!(cwd, "/replaced-with");
+        assert_eq!(cwd, "/sess-1");
         let created = SessionInfo {
             persistent_hook_setup: Default::default(),
             terminal_missing: false,
@@ -5855,7 +5842,7 @@ async fn a_replace_with_body_forwards_its_initial_prompt_to_the_create() {
             last_activity_at: 1_700_000_500,
             last_work_started_at: 0,
             creation_seq: None,
-            cwd: "/replaced-with".into(),
+            cwd: "/sess-1".into(),
             canonical_cwd: None,
             invocation: "codex".into(),
             launch: farhelm_proto::SessionLaunch::plain_command("codex"),
@@ -5901,7 +5888,7 @@ async fn a_replace_with_body_forwards_its_initial_prompt_to_the_create() {
         &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({
             "with": {
-                "cwd": "/replaced-with",
+                "cwd": "/sess-1",
                 "launch": { "harness": "codex", "model": null, "effort": null, "permissions": null },
                 "title": "replaced-with-title",
                 "prompt": PROMPT,
@@ -5913,6 +5900,149 @@ async fn a_replace_with_body_forwards_its_initial_prompt_to_the_create() {
     let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
     assert_eq!(session.id, harness.local_session_ref("sess-2"));
 
+    peer.await.unwrap();
+}
+
+/// "Replace with" keeps the source's own folder: a body whose `cwd` is
+/// anything but the source's listed `cwd`, byte for byte, is a 409 before
+/// either the create or the delete runs.
+///
+/// Why: SPEC.md holds the folder fixed in Replace with (Clone is the way to a
+/// different folder), and the desktop launcher enforces that only on its own
+/// side; this pins the helm-side refusal that keeps every other caller to the
+/// same rule. A trailing slash is refused too, because the comparison is the
+/// exact text the desktop app sends back, not a path normalization. What:
+/// each mismatched body answers `Conflict` with the folder refusal and no
+/// stale-connection precondition marker (which would mean a different 409),
+/// the connected supervisor receives no request at all, and the listing
+/// still holds only the source.
+#[farhelm_testtrace::test]
+async fn a_replace_with_body_naming_another_folder_is_refused_before_anything_is_created() {
+    let source = rest_harness::session("sess-1", 1_700_000_000);
+    assert_eq!(
+        source.cwd, "/sess-1",
+        "fixture premise: the source's folder"
+    );
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    let (observe, peer) = silent_supervisor(peer_side);
+    harness.await_refreshed(local).await;
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.local_session_ref("sess-1")],
+        "fixture premise: the source is listed before the replace"
+    );
+
+    for cwd in ["/elsewhere", "/sess-1/"] {
+        let (status, headers, body) = post_text_headers(
+            &harness,
+            &harness.local_session_uri("/api/sessions/sess-1/replace"),
+            serde_json::json!({
+                "with": { "cwd": cwd, "command": {"command": "agent", "yolo": false} }
+            }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{cwd}: {body}");
+        assert!(
+            body.contains("keeps the source session's own folder"),
+            "{cwd}: the refusal must be the folder rule, not another conflict: {body}"
+        );
+        assert!(
+            !is_stale_precondition(&headers),
+            "{cwd}: a folder refusal is not a stale connection: {body}"
+        );
+    }
+
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.local_session_ref("sess-1")],
+        "nothing may be created or removed while replace with names another folder"
+    );
+    observe.send(()).expect("start post-request observation");
+    peer.await.unwrap();
+}
+
+/// "Replace with" never starts its replacement in a new managed checkout: a
+/// body carrying `github_checkout` is a 400 before routing, whatever else it
+/// says.
+///
+/// Why: SPEC.md's Replace with keeps the source's folder and the checkout it
+/// belongs to, so a request for a fresh checkout is not a replace at all, and
+/// silently ignoring the field would launch somewhere the caller did not ask
+/// for. What: the body answers `InvalidRequest` with the checkout refusal for
+/// a listed source and for an id no host lists (a refusal after routing would
+/// be that id's 404 instead); its `cwd` matches the source's, so no other
+/// rule can explain the refusal. The checkout refusal also wins over the
+/// body's other local refusals: naming both `command` and `launch`, or a
+/// `with.intent_key` that disagrees with the top-level key, still answers
+/// with the checkout message. The connected supervisor receives no request,
+/// and the source stays listed.
+#[farhelm_testtrace::test]
+async fn a_replace_with_body_naming_a_managed_checkout_is_refused_before_routing() {
+    let source = rest_harness::session("sess-1", 1_700_000_000);
+    assert_eq!(
+        source.cwd, "/sess-1",
+        "fixture premise: the source's folder"
+    );
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    let (observe, peer) = silent_supervisor(peer_side);
+    harness.await_refreshed(local).await;
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.local_session_ref("sess-1")],
+        "fixture premise: the source is listed before the replace"
+    );
+
+    let checkout_only = serde_json::json!({
+        "with": {
+            "cwd": "/sess-1",
+            "command": {"command": "agent", "yolo": false},
+            "github_checkout": {"repo": "acme/bar"},
+        }
+    });
+    // Each extra fault is refused on its own by an earlier-tested rule
+    // (`a_replace_with_body_shape_problem_is_refused_before_routing`,
+    // `a_replace_with_mismatched_intent_key_is_refused_as_a_bad_request`);
+    // here the checkout message must still be the answer.
+    let mut both_selectors = checkout_only.clone();
+    both_selectors["with"]["launch"] = serde_json::json!({ "harness": "codex" });
+    let mut mismatched_key = checkout_only.clone();
+    mismatched_key["intent_key"] = serde_json::json!("top-level-key");
+    mismatched_key["with"]["intent_key"] = serde_json::json!("a-different-key");
+    for (case, id, body) in [
+        ("listed source", "sess-1", &checkout_only),
+        ("unknown id", "does-not-exist", &checkout_only),
+        ("both selectors", "sess-1", &both_selectors),
+        ("mismatched key", "sess-1", &mismatched_key),
+    ] {
+        let (status, body) = post_text(
+            &harness,
+            &harness.local_session_uri(&format!("/api/sessions/{id}/replace")),
+            body.clone(),
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "{case}: {body}"
+        );
+        assert!(
+            body.contains("cannot start the replacement in a new managed checkout"),
+            "{case}: the refusal must be the checkout rule: {body}"
+        );
+    }
+
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.local_session_ref("sess-1")],
+        "nothing may be created or removed while replace with names a managed checkout"
+    );
+    observe.send(()).expect("start post-request observation");
     peer.await.unwrap();
 }
 
@@ -5987,12 +6117,12 @@ async fn a_replace_with_override_whose_create_fails_leaves_the_source_untouched(
         let ControlMsg::CreateSession { req_id, cwd, .. } = request else {
             panic!("expected CreateSession, got {request:?}");
         };
-        assert_eq!(cwd, "/does-not-exist");
+        assert_eq!(cwd, "/sess-1");
         writer
             .write_frame(&Frame::control(&ControlMsg::Error {
                 create_unaccepted: false,
                 req_id,
-                message: "working directory does not exist: /does-not-exist".into(),
+                message: "working directory does not exist: /sess-1".into(),
                 kind: ErrorKind::InvalidRequest,
             }))
             .await
@@ -6003,7 +6133,7 @@ async fn a_replace_with_override_whose_create_fails_leaves_the_source_untouched(
     let (status, body) = post_text(
         &harness,
         &harness.local_session_uri("/api/sessions/sess-1/replace"),
-        serde_json::json!({ "with": { "cwd": "/does-not-exist", "command": {"command": "agent", "yolo": false} } }),
+        serde_json::json!({ "with": { "cwd": "/sess-1", "command": {"command": "agent", "yolo": false} } }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
@@ -6052,7 +6182,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
         else {
             panic!("expected CreateSession, got {request:?}");
         };
-        assert_eq!(cwd, "/override-delete-fails");
+        assert_eq!(cwd, "/sess-1");
         assert_eq!(
             launch,
             Some(farhelm_proto::SessionLaunch::plain_command(
@@ -6073,7 +6203,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
             last_activity_at: 1_700_000_500,
             last_work_started_at: 0,
             creation_seq: None,
-            cwd: "/override-delete-fails".into(),
+            cwd: "/sess-1".into(),
             canonical_cwd: None,
             invocation: "override-agent".into(),
             launch: farhelm_proto::SessionLaunch::plain_command("override-agent"),
@@ -6122,7 +6252,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
         &harness,
         &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({
-            "with": { "cwd": "/override-delete-fails", "command": {"command": "override-agent", "yolo": false} }
+            "with": { "cwd": "/sess-1", "command": {"command": "override-agent", "yolo": false} }
         }),
     )
     .await;
@@ -7004,7 +7134,14 @@ async fn assert_workspace_trust_dispatch(
         let expected = crate::launches::compile(final_selection).unwrap();
         let expected_named =
             crate::launches::named_start(&expected, "named-target".into()).unwrap();
-        let destination = "/destination";
+        // Replace with keeps the source's folder, so only a create names a
+        // folder of its own; the trust policy under test is the
+        // destination's either way.
+        let destination = if matches!(surface, TrustComposeSurface::ReplaceWith) {
+            "/source"
+        } else {
+            "/destination"
+        };
         let mut source = rest_harness::session("source", 1);
         source.cwd = "/source".into();
         source.launch = crate::launches::compile(selection.clone()).unwrap();
@@ -7132,7 +7269,7 @@ async fn assert_workspace_trust_dispatch(
             "fixture requires a connected destination"
         );
         let create = serde_json::json!({
-            "host": host, "cwd": "/destination", "launch": selection, "conversation": "named-target"
+            "host": host, "cwd": destination, "launch": selection, "conversation": "named-target"
         });
         let source_ref = farhelm_proto::SessionRef::new(&live.entry_uuid, "source").unwrap();
         let (route, body) = match surface {
@@ -7191,7 +7328,7 @@ async fn restart_with_normalizes_workspace_trust_before_named_resume() {
     .await;
 }
 
-/// Replace with applies the current setting to the new directory. Source
+/// Replace with applies the current setting to the source folder it keeps. Source
 /// deletion still follows successful admission of the replacement.
 #[farhelm_testtrace::test]
 async fn replace_with_normalizes_workspace_trust_before_create_and_delete() {
@@ -11865,197 +12002,169 @@ async fn fresh_rest_reconciliation_precedes_mutable_resolution_and_binds_install
 /// Local resolution failures need a second, atomic supervisor decision. This
 /// covers late launch compilation as well as stale settings, and proves that
 /// unknown/transport/ordinary failure replies cannot acquire the durable-proof
-/// marker. A source-id winner is vetoed before history/default side effects.
+/// marker.
+///
+/// Why: a keyed request that failed locally may still have been accepted by a
+/// concurrent request after an unknown lookup, so only the supervisor's
+/// durable refusal may tell a client its key is free to discard.
 #[farhelm_testtrace::test]
-async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
+async fn fresh_local_refusals_require_durable_proof() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, ErrorKind};
 
-    for replacing in [false, true] {
-        for cause in ["settings", "launch"] {
-            for disposition in [
-                "refused",
-                "unknown",
-                "unavailable",
-                "stored-failure",
-                "source-veto",
-            ] {
-                if disposition == "source-veto" && !replacing {
-                    continue;
-                }
-                let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-                let (harness, local) =
-                    spliced_replace_harness(client_side, vec![rest_harness::session("sess-1", 12)])
-                        .await;
-                let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
-                let peer = tokio::spawn(async move {
-                    let (r, w) = tokio::io::split(peer_side);
-                    let mut reader = FrameReader::new(r);
-                    let mut writer = FrameWriter::new(w);
-                    handshake(&mut reader, &mut writer, "supervisor")
-                        .await
-                        .unwrap();
-                    let message =
-                        parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                    let ControlMsg::ReconcileGithubCheckout {
-                        req_id,
-                        intent_key,
-                        client_identity,
-                        refuse_unknown: false,
-                        ..
-                    } = message
-                    else {
-                        panic!("expected non-mutating lookup: {message:?}")
-                    };
-                    assert_eq!(intent_key, "failed-local-resolution");
-                    writer
-                        .write_control(&ControlMsg::GithubCheckoutReconciled {
-                            req_id,
-                            session: None,
-                            snapshot: None,
-                        })
-                        .await
-                        .unwrap();
-                    let message =
-                        parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                    let ControlMsg::ReconcileGithubCheckout {
-                        req_id,
-                        intent_key: refused_key,
-                        client_identity: refused_identity,
-                        refuse_unknown: true,
-                        ..
-                    } = message
-                    else {
-                        panic!("expected atomic refusal, never create: {message:?}")
-                    };
-                    assert_eq!(refused_key, intent_key);
-                    assert_eq!(
-                        refused_identity, client_identity,
-                        "selector consumption must not change the original identity"
-                    );
-                    let reply = match disposition {
-                        "refused" => ControlMsg::Error {
-                            create_unaccepted: false,
-                            req_id,
-                            kind: ErrorKind::CheckoutConflict,
-                            message: "stored durable refusal".into(),
-                        },
-                        "unknown" => ControlMsg::GithubCheckoutReconciled {
-                            req_id,
-                            session: None,
-                            snapshot: None,
-                        },
-                        "unavailable" => ControlMsg::Error {
-                            create_unaccepted: false,
-                            req_id,
-                            kind: ErrorKind::Unavailable,
-                            message: "refusal outcome unavailable".into(),
-                        },
-                        "stored-failure" => ControlMsg::Error {
-                            create_unaccepted: false,
-                            req_id,
-                            kind: ErrorKind::InvalidRequest,
-                            message: "original stored failure".into(),
-                        },
-                        "source-veto" => ControlMsg::GithubCheckoutReconciled {
-                            req_id,
-                            session: Some(rest_harness::session("sess-1", 12)),
-                            snapshot: None,
-                        },
-                        _ => unreachable!(),
-                    };
-                    writer.write_control(&reply).await.unwrap();
-                    tokio::select! {
-                        biased;
-                        frame = reader.read_frame() => panic!("refusal or source veto sent a mutation: {frame:?}"),
-                        result = &mut finished_rx => result.unwrap(),
-                    }
-                });
-                harness.await_refreshed(local).await;
-                harness
-                    .store
-                    .set_checkout_root(None, "/configured-root")
+    for cause in ["settings", "launch"] {
+        for disposition in ["refused", "unknown", "unavailable", "stored-failure"] {
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let (harness, local) = spliced_replace_harness(client_side, Vec::new()).await;
+            let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
                     .await
                     .unwrap();
-                let config = harness.store.resolve_checkout_config(None).await.unwrap();
-                let (claim, _) = super::create_target(&harness.state, None).unwrap();
-                assert!(
-                    harness
-                        .store
-                        .global_github_repository_history()
-                        .await
-                        .unwrap()
-                        .is_empty()
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::ReconcileGithubCheckout {
+                    req_id,
+                    intent_key,
+                    client_identity,
+                    refuse_unknown: false,
+                    ..
+                } = message
+                else {
+                    panic!("expected non-mutating lookup: {message:?}")
+                };
+                assert_eq!(intent_key, "failed-local-resolution");
+                writer
+                    .write_control(&ControlMsg::GithubCheckoutReconciled {
+                        req_id,
+                        session: None,
+                        snapshot: None,
+                    })
+                    .await
+                    .unwrap();
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::ReconcileGithubCheckout {
+                    req_id,
+                    intent_key: refused_key,
+                    client_identity: refused_identity,
+                    refuse_unknown: true,
+                    ..
+                } = message
+                else {
+                    panic!("expected atomic refusal, never create: {message:?}")
+                };
+                assert_eq!(refused_key, intent_key);
+                assert_eq!(
+                    refused_identity, client_identity,
+                    "selector consumption must not change the original identity"
                 );
-                let mut request = serde_json::json!({
-                    "cwd": "",
-                    "github_checkout": {"repo": "acme/bar", "preview": {
-                        "canonical_root": "/configured-root", "basename": "bar-1", "cwd": "/configured-root/bar-1",
-                        "config_revision": config.config_revision - i64::from(cause == "settings"),
-                        "host": claim.host.to_string(), "incarnation": claim.incarnation,
-                        "installation_identity": "local-identity"
-                    }}
+                let reply = match disposition {
+                    "refused" => ControlMsg::Error {
+                        create_unaccepted: false,
+                        req_id,
+                        kind: ErrorKind::CheckoutConflict,
+                        message: "stored durable refusal".into(),
+                    },
+                    "unknown" => ControlMsg::GithubCheckoutReconciled {
+                        req_id,
+                        session: None,
+                        snapshot: None,
+                    },
+                    "unavailable" => ControlMsg::Error {
+                        create_unaccepted: false,
+                        req_id,
+                        kind: ErrorKind::Unavailable,
+                        message: "refusal outcome unavailable".into(),
+                    },
+                    "stored-failure" => ControlMsg::Error {
+                        create_unaccepted: false,
+                        req_id,
+                        kind: ErrorKind::InvalidRequest,
+                        message: "original stored failure".into(),
+                    },
+                    _ => unreachable!(),
+                };
+                writer.write_control(&reply).await.unwrap();
+                tokio::select! {
+                    biased;
+                    frame = reader.read_frame() => panic!("refusal sent a mutation: {frame:?}"),
+                    result = &mut finished_rx => result.unwrap(),
+                }
+            });
+            harness.await_refreshed(local).await;
+            harness
+                .store
+                .set_checkout_root(None, "/configured-root")
+                .await
+                .unwrap();
+            let config = harness.store.resolve_checkout_config(None).await.unwrap();
+            let (claim, _) = super::create_target(&harness.state, None).unwrap();
+            assert!(
+                harness
+                    .store
+                    .global_github_repository_history()
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            let mut request = serde_json::json!({
+                "cwd": "",
+                "github_checkout": {"repo": "acme/bar", "preview": {
+                    "canonical_root": "/configured-root", "basename": "bar-1", "cwd": "/configured-root/bar-1",
+                    "config_revision": config.config_revision - i64::from(cause == "settings"),
+                    "host": claim.host.to_string(), "incarnation": claim.incarnation,
+                    "installation_identity": "local-identity"
+                }}
+            });
+            // A Grok launch naming a model is refused only when the
+            // selection compiles, which is the late local step this
+            // cause needs; the settings cause uses a valid raw command.
+            if cause == "launch" {
+                request["launch"] = serde_json::json!({
+                    "harness": "grok", "model": "grok-x", "effort": null, "permissions": null
                 });
-                // A Grok launch naming a model is refused only when the
-                // selection compiles, which is the late local step this
-                // cause needs; the settings cause uses a valid raw command.
-                if cause == "launch" {
-                    request["launch"] = serde_json::json!({
-                        "harness": "grok", "model": "grok-x", "effort": null, "permissions": null
-                    });
-                } else {
-                    request["command"] = serde_json::json!({"command": "claude", "yolo": false});
-                }
-                let (route, body): (&str, _) = if replacing {
-                    (
-                        &harness.local_session_uri("/api/sessions/sess-1/replace"),
-                        serde_json::json!({"intent_key": "failed-local-resolution", "with": request}),
-                    )
-                } else {
-                    request["intent_key"] = serde_json::json!("failed-local-resolution");
-                    ("/api/sessions", request)
-                };
-                let (status, headers, text) = post_text_headers(&harness, route, body).await;
-                let expected = match disposition {
-                    "refused" | "source-veto" => axum::http::StatusCode::CONFLICT,
-                    "unavailable" => axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                    "stored-failure" => axum::http::StatusCode::BAD_REQUEST,
-                    "unknown" if cause == "launch" => axum::http::StatusCode::BAD_REQUEST,
-                    _ => axum::http::StatusCode::CONFLICT,
-                };
-                assert_eq!(
-                    status, expected,
-                    "{replacing}/{cause}/{disposition}: {text}"
-                );
-                assert_eq!(
-                    headers.contains_key("x-farhelm-create-outcome"),
-                    disposition == "refused",
-                    "{text}"
-                );
-                if disposition == "stored-failure" {
-                    assert!(text.contains("original stored failure"), "{text}");
-                }
-                if disposition != "source-veto" {
-                    assert!(
-                        text.contains(if cause == "settings" {
-                            "checkout settings changed"
-                        } else {
-                            "Grok does not currently expose a verified model choice"
-                        }),
-                        "{text}"
-                    );
-                }
-                assert!(
-                    harness
-                        .store
-                        .global_github_repository_history()
-                        .await
-                        .unwrap()
-                        .is_empty()
-                );
-                finished_tx.send(()).unwrap();
-                peer.await.unwrap();
+            } else {
+                request["command"] = serde_json::json!({"command": "claude", "yolo": false});
             }
+            request["intent_key"] = serde_json::json!("failed-local-resolution");
+            let (status, headers, text) =
+                post_text_headers(&harness, "/api/sessions", request).await;
+            let expected = match disposition {
+                "refused" => axum::http::StatusCode::CONFLICT,
+                "unavailable" => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "stored-failure" => axum::http::StatusCode::BAD_REQUEST,
+                "unknown" if cause == "launch" => axum::http::StatusCode::BAD_REQUEST,
+                _ => axum::http::StatusCode::CONFLICT,
+            };
+            assert_eq!(status, expected, "{cause}/{disposition}: {text}");
+            assert_eq!(
+                headers.contains_key("x-farhelm-create-outcome"),
+                disposition == "refused",
+                "{text}"
+            );
+            if disposition == "stored-failure" {
+                assert!(text.contains("original stored failure"), "{text}");
+            }
+            assert!(
+                text.contains(if cause == "settings" {
+                    "checkout settings changed"
+                } else {
+                    "Grok does not currently expose a verified model choice"
+                }),
+                "{text}"
+            );
+            assert!(
+                harness
+                    .store
+                    .global_github_repository_history()
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            finished_tx.send(()).unwrap();
+            peer.await.unwrap();
         }
     }
 }
@@ -12063,357 +12172,18 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
 /// Two identical submissions can both observe an unknown key before one wins.
 /// The first reaches CreateSession under the original settings; a latch then
 /// changes configuration before the second resolves locally. Atomic refusal
-/// must return the accepted winner, including on replacement, without
-/// another create or a false non-acceptance marker. Codex's managed trust
+/// must return the accepted winner without another create or a false
+/// non-acceptance marker. Codex's managed trust
 /// setting also flips after dispatch; recovery must retain the approved
 /// launch rather than inheriting the retry's current setting.
 #[farhelm_testtrace::test]
 async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change() {
+    use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, ErrorKind};
-
-    for replacing in [false, true] {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let (harness, local) =
-            spliced_replace_harness(client_side, vec![rest_harness::session("sess-1", 12)]).await;
-        let (create_seen_tx, create_seen_rx) = tokio::sync::oneshot::channel();
-        let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ReconcileGithubCheckout {
-                req_id,
-                client_identity,
-                refuse_unknown: false,
-                ..
-            } = message
-            else {
-                panic!("first request must begin with lookup: {message:?}")
-            };
-            writer
-                .write_control(&ControlMsg::GithubCheckoutReconciled {
-                    req_id,
-                    session: None,
-                    snapshot: None,
-                })
-                .await
-                .unwrap();
-            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::CreateSession {
-                prompt: None,
-                named_start: None,
-                req_id: create_id,
-                github_checkout: Some(checkout),
-                launch: Some(launch),
-                ..
-            } = message
-            else {
-                panic!("first request must reach one fresh create: {message:?}")
-            };
-            assert_eq!(checkout.root, "/original-root");
-            assert_eq!(checkout.client_identity, client_identity);
-            let expected = crate::launches::compile(farhelm_proto::LaunchSelection {
-                custom_agent: None,
-                harness: farhelm_proto::LaunchHarness::Codex,
-                model: None,
-                effort: None,
-                permissions: Some(farhelm_proto::LaunchPermission::Guarded),
-                permission_flags: None,
-                wrapper_prefix: None,
-                container: None,
-                workspace_trust: Some(true),
-            })
-            .unwrap();
-            assert_eq!(
-                launch, expected,
-                "first dispatch must use Settings, not the client's false trust bit"
-            );
-            let mut winner = rest_harness::session("concurrent-winner", 13);
-            winner.cwd = checkout.preview.cwd;
-            winner.canonical_cwd = Some(winner.cwd.clone());
-            winner.invocation = launch.display_command();
-            winner.launch = launch;
-            create_seen_tx.send(()).unwrap();
-            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ReconcileGithubCheckout {
-                req_id,
-                client_identity: second_identity,
-                refuse_unknown: false,
-                ..
-            } = message
-            else {
-                panic!("second request must observe unknown before the winner commits: {message:?}")
-            };
-            assert_eq!(second_identity, client_identity);
-            writer
-                .write_control(&ControlMsg::GithubCheckoutReconciled {
-                    req_id,
-                    session: None,
-                    snapshot: None,
-                })
-                .await
-                .unwrap();
-            // Acceptance occurs after both unknown observations. The first
-            // response and second local-resolution failure may now interleave.
-            writer
-                .write_control(&ControlMsg::SessionCreated {
-                    req_id: create_id,
-                    session: winner.clone(),
-                })
-                .await
-                .unwrap();
-            let mut refusals = 0;
-            let mut deletes = 0;
-            for _ in 0..if replacing { 3 } else { 1 } {
-                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                match message {
-                    ControlMsg::ReconcileGithubCheckout {
-                        req_id,
-                        client_identity: refused_identity,
-                        refuse_unknown: true,
-                        ..
-                    } => {
-                        assert_eq!(refused_identity, client_identity);
-                        refusals += 1;
-                        writer
-                            .write_control(&ControlMsg::GithubCheckoutReconciled {
-                                req_id,
-                                session: Some(winner.clone()),
-                                snapshot: None,
-                            })
-                            .await
-                            .unwrap();
-                    }
-                    ControlMsg::DeleteSession {
-                        req_id, session_id, ..
-                    } if replacing => {
-                        assert_eq!(session_id, "sess-1");
-                        deletes += 1;
-                        writer
-                            .write_control(&ControlMsg::Error {
-                                create_unaccepted: false,
-                                req_id,
-                                kind: ErrorKind::Conflict,
-                                message: "retain source".into(),
-                            })
-                            .await
-                            .unwrap();
-                    }
-                    other => {
-                        panic!("only winner recovery and source deletion may follow: {other:?}")
-                    }
-                }
-            }
-            assert_eq!(refusals, 1);
-            assert_eq!(deletes, if replacing { 2 } else { 0 });
-            tokio::select! {
-                biased;
-                frame = reader.read_frame() => panic!("unexpected duplicate mutation: {frame:?}"),
-                result = &mut finished_rx => result.unwrap(),
-            }
-        });
-        harness.await_refreshed(local).await;
-        harness
-            .store
-            .set_checkout_root(None, "/original-root")
-            .await
-            .unwrap();
-        harness
-            .store
-            .set_agent_trust(farhelm_proto::LaunchHarness::Codex, true)
-            .await
-            .unwrap();
-        let config = harness.store.resolve_checkout_config(None).await.unwrap();
-        assert!(
-            config.codex_trust,
-            "the first composed launch must start with trust enabled"
-        );
-        let (claim, _) = super::create_target(&harness.state, None).unwrap();
-        let mut request = serde_json::json!({
-            "cwd": "", "launch": {"harness": "codex", "permissions": "guarded", "workspace_trust": false},
-            "github_checkout": {"repo": "acme/bar", "preview": {
-                "canonical_root": "/original-root", "basename": "bar-1", "cwd": "/original-root/bar-1",
-                "config_revision": config.config_revision, "host": claim.host.to_string(),
-                "incarnation": claim.incarnation, "installation_identity": "local-identity"
-            }}
-        });
-        let (route, body): (&str, _) = if replacing {
-            (
-                &harness.local_session_uri("/api/sessions/sess-1/replace"),
-                serde_json::json!({"intent_key": "concurrent-key", "with": request}),
-            )
-        } else {
-            request["intent_key"] = serde_json::json!("concurrent-key");
-            ("/api/sessions", request)
-        };
-        let first = post_text_headers(&harness, route, body.clone());
-        let second = async {
-            create_seen_rx
-                .await
-                .expect("first request must reach dispatch before settings change");
-            harness
-                .store
-                .set_agent_trust(farhelm_proto::LaunchHarness::Codex, false)
-                .await
-                .unwrap();
-            assert!(
-                !harness
-                    .store
-                    .resolve_checkout_config(None)
-                    .await
-                    .unwrap()
-                    .codex_trust
-            );
-            harness
-                .store
-                .set_checkout_root(None, "/changed-root")
-                .await
-                .unwrap();
-            assert!(
-                harness
-                    .store
-                    .resolve_checkout_config(None)
-                    .await
-                    .unwrap()
-                    .config_revision
-                    > config.config_revision
-            );
-            post_text_headers(&harness, route, body).await
-        };
-        let (first, second) = tokio::join!(first, second);
-        for (status, headers, text) in [&first, &second] {
-            assert_eq!(
-                *status,
-                if replacing {
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR
-                } else {
-                    axum::http::StatusCode::OK
-                },
-                "{text}"
-            );
-            assert!(
-                !headers.contains_key("x-farhelm-create-outcome"),
-                "an accepted winner is not a refusal"
-            );
-            assert!(text.contains("concurrent-winner"), "{text}");
-            if replacing {
-                assert!(text.contains("both sessions still exist"), "{text}");
-            } else {
-                let recovered: farhelm_proto::SessionInfo = serde_json::from_str(text).unwrap();
-                assert_eq!(
-                    recovered.launch.agent_selection().unwrap().workspace_trust,
-                    Some(true),
-                    "both replies must retain the accepted first launch after Settings changes"
-                );
-            }
-        }
-        assert_eq!(
-            harness
-                .store
-                .global_github_repository_history()
-                .await
-                .unwrap(),
-            vec![farhelm_proto::parse_github_repo("acme/bar").unwrap()]
-        );
-        finished_tx.send(()).unwrap();
-        peer.await.unwrap();
-    }
-}
-
-/// Fresh destination validation must reject a contradictory folder before any
-/// create or delete reaches the host. Both public entry points share this
-/// contract, independently of which agent selector the request uses.
-#[farhelm_testtrace::test]
-async fn fresh_create_and_replace_refuse_a_contradictory_cwd() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
-
-    for replacing in [false, true] {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let (harness, local) =
-            spliced_replace_harness(client_side, vec![rest_harness::session("sess-1", 12)]).await;
-        let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
-        let peer = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            tokio::select! {
-                biased;
-                frame = reader.read_frame() => panic!("contradictory destination contacted peer: {frame:?}"),
-                result = &mut finished_rx => result.unwrap(),
-            }
-        });
-        harness.await_refreshed(local).await;
-        harness
-            .store
-            .set_checkout_root(None, "/fresh-root")
-            .await
-            .unwrap();
-        let config = harness.store.resolve_checkout_config(None).await.unwrap();
-        let (claim, _) = super::create_target(&harness.state, None).unwrap();
-        for (selector, value) in [
-            (
-                "command",
-                serde_json::json!({"command": "agent", "yolo": false}),
-            ),
-            ("launch", serde_json::json!({"harness": "codex"})),
-        ] {
-            let mut request = serde_json::json!({
-                "cwd": "/unrelated-existing-directory",
-                "github_checkout": {"repo": "acme/bar", "preview": {
-                    "canonical_root": "/fresh-root", "basename": "bar-1", "cwd": "/fresh-root/bar-1",
-                    "config_revision": config.config_revision, "host": claim.host.to_string(),
-                    "incarnation": claim.incarnation, "installation_identity": "local-identity"
-                }}
-            });
-            request[selector] = value;
-            let (route, body): (&str, _) = if replacing {
-                (
-                    &harness.local_session_uri("/api/sessions/sess-1/replace"),
-                    serde_json::json!({"with": request}),
-                )
-            } else {
-                ("/api/sessions", request)
-            };
-            let (status, headers, text) = post_text_headers(&harness, route, body).await;
-            assert_eq!(
-                status,
-                axum::http::StatusCode::BAD_REQUEST,
-                "{selector}: {text}"
-            );
-            assert!(
-                text.contains("cwd must be empty or match the accepted preview"),
-                "{selector}: {text}"
-            );
-            assert_eq!(headers["x-farhelm-create-outcome"], "definitely-unaccepted");
-        }
-        finished_tx.send(()).unwrap();
-        peer.await.unwrap();
-    }
-}
-
-/// Fresh replacement forwards the accepted payload once, then reconciles the
-/// same request after configuration changes. A delete refusal retains both
-/// sessions. Source-id replays and unknown stale intents must send no delete
-/// or create and must not change history; a foreign installation gets no lookup.
-/// The peer remains live until an explicit completion signal, so unexpected
-/// mutation frames cannot be mistaken for a harmless closed connection.
-#[farhelm_testtrace::test]
-async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, ErrorKind};
 
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let (harness, local) =
-        spliced_replace_harness(client_side, vec![rest_harness::session("sess-1", 12)]).await;
-    let fleet = harness.fleet.clone();
+    let (harness, local) = spliced_replace_harness(client_side, Vec::new()).await;
+    let (create_seen_tx, create_seen_rx) = tokio::sync::oneshot::channel();
     let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
     let peer = tokio::spawn(async move {
         let (r, w) = tokio::io::split(peer_side);
@@ -12422,132 +12192,114 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
         handshake(&mut reader, &mut writer, "supervisor")
             .await
             .unwrap();
-        let mut original_identity = None;
-        let mut replacement = rest_harness::session("replacement", 13);
-        replacement.cwd = "/original-root/bar-fix".into();
-        replacement.canonical_cwd = Some(replacement.cwd.clone());
-        for (attempt, key) in ["original", "original", "source-replay", "unknown"]
-            .into_iter()
-            .enumerate()
-        {
-            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::ReconcileGithubCheckout {
+        let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::ReconcileGithubCheckout {
+            req_id,
+            client_identity,
+            refuse_unknown: false,
+            ..
+        } = message
+        else {
+            panic!("first request must begin with lookup: {message:?}")
+        };
+        writer
+            .write_control(&ControlMsg::GithubCheckoutReconciled {
                 req_id,
-                intent_key,
-                client_identity,
-                refuse_unknown,
-                ..
-            } = message
-            else {
-                panic!("expected reconciliation, got {message:?}");
-            };
-            assert_eq!(intent_key, key);
-            assert!(!refuse_unknown);
-            let identity: serde_json::Value = serde_json::from_str(&client_identity).unwrap();
-            assert_eq!(identity[0], "github_replace_request_v1");
-            assert_eq!(identity[1], "sess-1");
-            if let Some(original) = &original_identity {
-                assert_eq!(
-                    &client_identity, original,
-                    "retry must retain the original request"
-                );
-            } else {
-                original_identity = Some(client_identity.clone());
-            }
-            let session = match attempt {
-                1 => Some(replacement.clone()),
-                2 => Some(rest_harness::session("sess-1", 999)),
-                _ => None,
-            };
-            writer
-                .write_control(&ControlMsg::GithubCheckoutReconciled {
-                    req_id,
-                    session,
-                    snapshot: None,
-                })
-                .await
-                .unwrap();
-            if attempt == 3 {
-                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                let ControlMsg::ReconcileGithubCheckout {
-                    req_id,
-                    intent_key,
-                    client_identity: refused_identity,
-                    refuse_unknown: true,
-                    ..
-                } = message
-                else {
-                    panic!("expected durable refusal, got {message:?}")
-                };
-                assert_eq!(intent_key, key);
-                assert_eq!(refused_identity, client_identity);
-                writer
-                    .write_control(&ControlMsg::Error {
-                        create_unaccepted: false,
-                        req_id,
-                        kind: ErrorKind::CheckoutConflict,
-                        message: "fixture durable refusal".into(),
-                    })
-                    .await
-                    .unwrap();
-            }
-            if attempt == 0 {
-                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                let ControlMsg::CreateSession {
-                    prompt: None,
-                    named_start: None,
-                    req_id,
-                    cwd,
-                    title,
-                    github_checkout: Some(checkout),
-                    ..
-                } = message
-                else {
-                    panic!("expected fresh create, got {message:?}");
-                };
-                assert!(cwd.is_empty());
-                assert_eq!(title.as_deref(), Some("Fix"));
-                assert_eq!(checkout.root, "/original-root");
-                assert_eq!(checkout.preview.cwd, "/original-root/bar-fix");
-                assert_eq!(checkout.post_clone.as_deref(), Some("original-hook"));
-                assert_eq!(checkout.client_identity, client_identity);
-                fleet.edit(local, |script| script.sessions.push(replacement.clone()));
-                writer
-                    .write_control(&ControlMsg::SessionCreated {
-                        req_id,
-                        session: replacement.clone(),
-                    })
-                    .await
-                    .unwrap();
-            }
-            if attempt < 2 {
-                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                let ControlMsg::DeleteSession {
-                    req_id, session_id, ..
-                } = message
-                else {
-                    panic!("expected deletion of original, got {message:?}");
-                };
-                assert_eq!(session_id, "sess-1");
-                writer
-                    .write_control(&ControlMsg::Error {
-                        create_unaccepted: false,
-                        req_id,
-                        kind: ErrorKind::Conflict,
-                        message: "fixture retains source".into(),
-                    })
-                    .await
-                    .unwrap();
-            }
-        }
+                session: None,
+                snapshot: None,
+            })
+            .await
+            .unwrap();
+        let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            prompt: None,
+            named_start: None,
+            req_id: create_id,
+            github_checkout: Some(checkout),
+            launch: Some(launch),
+            ..
+        } = message
+        else {
+            panic!("first request must reach one fresh create: {message:?}")
+        };
+        assert_eq!(checkout.root, "/original-root");
+        assert_eq!(checkout.client_identity, client_identity);
+        let expected = crate::launches::compile(farhelm_proto::LaunchSelection {
+            custom_agent: None,
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: Some(farhelm_proto::LaunchPermission::Guarded),
+            permission_flags: None,
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: Some(true),
+        })
+        .unwrap();
+        assert_eq!(
+            launch, expected,
+            "first dispatch must use Settings, not the client's false trust bit"
+        );
+        let mut winner = rest_harness::session("concurrent-winner", 13);
+        winner.cwd = checkout.preview.cwd;
+        winner.canonical_cwd = Some(winner.cwd.clone());
+        winner.invocation = launch.display_command();
+        winner.launch = launch;
+        create_seen_tx.send(()).unwrap();
+        let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::ReconcileGithubCheckout {
+            req_id,
+            client_identity: second_identity,
+            refuse_unknown: false,
+            ..
+        } = message
+        else {
+            panic!("second request must observe unknown before the winner commits: {message:?}")
+        };
+        assert_eq!(second_identity, client_identity);
+        writer
+            .write_control(&ControlMsg::GithubCheckoutReconciled {
+                req_id,
+                session: None,
+                snapshot: None,
+            })
+            .await
+            .unwrap();
+        // Acceptance occurs after both unknown observations. The first
+        // response and second local-resolution failure may now interleave.
+        writer
+            .write_control(&ControlMsg::SessionCreated {
+                req_id: create_id,
+                session: winner.clone(),
+            })
+            .await
+            .unwrap();
+        let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::ReconcileGithubCheckout {
+            req_id,
+            client_identity: refused_identity,
+            refuse_unknown: true,
+            ..
+        } = message
+        else {
+            panic!("only winner recovery may follow: {message:?}")
+        };
+        assert_eq!(refused_identity, client_identity);
+        writer
+            .write_control(&ControlMsg::GithubCheckoutReconciled {
+                req_id,
+                session: Some(winner.clone()),
+                snapshot: None,
+            })
+            .await
+            .unwrap();
         tokio::select! {
             biased;
-            frame = reader.read_frame() => panic!("unexpected mutation after refusals: {frame:?}"),
+            frame = reader.read_frame() => panic!("unexpected duplicate mutation: {frame:?}"),
             result = &mut finished_rx => result.unwrap(),
         }
     });
     harness.await_refreshed(local).await;
-    let (claim, _) = super::create_target(&harness.state, None).unwrap();
     harness
         .store
         .set_checkout_root(None, "/original-root")
@@ -12555,60 +12307,74 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
         .unwrap();
     harness
         .store
-        .set_checkout_post_clone(None, "original-hook")
+        .set_agent_trust(farhelm_proto::LaunchHarness::Codex, true)
         .await
         .unwrap();
-    let revision = harness
-        .store
-        .resolve_checkout_config(None)
-        .await
-        .unwrap()
-        .config_revision;
-    let mut body = serde_json::json!({
-        "intent_key": "original",
-        "with": { "cwd": "/original-root/bar-fix", "command": {"command": "agent", "yolo": false}, "expected_incarnation": claim.incarnation,
-            "github_checkout": { "repo": "acme/bar", "title": "Fix", "preview": {
-                "canonical_root": "/original-root", "basename": "bar-fix", "cwd": "/original-root/bar-fix",
-                "config_revision": revision, "host": claim.host.to_string(), "incarnation": claim.incarnation,
-                "installation_identity": "local-identity"
-            }}
-        }
-    });
-    let route = &harness.local_session_uri("/api/sessions/sess-1/replace");
-    for attempt in 0..2 {
-        let (status, text) = post_text(&harness, route, body.clone()).await;
-        assert_eq!(
-            status,
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            "{text}"
-        );
-        assert!(text.contains("both sessions still exist"), "{text}");
-        assert!(
-            text.contains("replacement") && text.contains("sess-1"),
-            "{text}"
-        );
-        if attempt == 0 {
-            harness
-                .store
-                .set_checkout_root(None, "/changed-root")
-                .await
-                .unwrap();
-            harness
-                .store
-                .set_checkout_post_clone(None, "changed-hook")
-                .await
-                .unwrap();
-        }
-    }
-    let history = harness
-        .store
-        .folder_history(local, "local-identity")
-        .await
-        .unwrap();
+    let config = harness.store.resolve_checkout_config(None).await.unwrap();
     assert!(
-        history.is_empty(),
-        "fresh replacement paths are not folder intent"
+        config.codex_trust,
+        "the first composed launch must start with trust enabled"
     );
+    let (claim, _) = super::create_target(&harness.state, None).unwrap();
+    let mut request = serde_json::json!({
+        "cwd": "", "launch": {"harness": "codex", "permissions": "guarded", "workspace_trust": false},
+        "github_checkout": {"repo": "acme/bar", "preview": {
+            "canonical_root": "/original-root", "basename": "bar-1", "cwd": "/original-root/bar-1",
+            "config_revision": config.config_revision, "host": claim.host.to_string(),
+            "incarnation": claim.incarnation, "installation_identity": "local-identity"
+        }}
+    });
+    request["intent_key"] = serde_json::json!("concurrent-key");
+    let route = "/api/sessions";
+    let first = post_text_headers(&harness, route, request.clone());
+    let second = async {
+        create_seen_rx
+            .await
+            .expect("first request must reach dispatch before settings change");
+        harness
+            .store
+            .set_agent_trust(farhelm_proto::LaunchHarness::Codex, false)
+            .await
+            .unwrap();
+        assert!(
+            !harness
+                .store
+                .resolve_checkout_config(None)
+                .await
+                .unwrap()
+                .codex_trust
+        );
+        harness
+            .store
+            .set_checkout_root(None, "/changed-root")
+            .await
+            .unwrap();
+        assert!(
+            harness
+                .store
+                .resolve_checkout_config(None)
+                .await
+                .unwrap()
+                .config_revision
+                > config.config_revision
+        );
+        post_text_headers(&harness, route, request).await
+    };
+    let (first, second) = tokio::join!(first, second);
+    for (status, headers, text) in [&first, &second] {
+        assert_eq!(*status, axum::http::StatusCode::OK, "{text}");
+        assert!(
+            !headers.contains_key("x-farhelm-create-outcome"),
+            "an accepted winner is not a refusal"
+        );
+        assert!(text.contains("concurrent-winner"), "{text}");
+        let recovered: farhelm_proto::SessionInfo = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            recovered.launch.agent_selection().unwrap().workspace_trust,
+            Some(true),
+            "both replies must retain the accepted first launch after Settings changes"
+        );
+    }
     assert_eq!(
         harness
             .store
@@ -12617,32 +12383,77 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
             .unwrap(),
         vec![farhelm_proto::parse_github_repo("acme/bar").unwrap()]
     );
-    body["intent_key"] = serde_json::json!("source-replay");
-    let (status, headers, text) = post_text_headers(&harness, route, body.clone()).await;
-    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
-    assert!(
-        !headers.contains_key("x-farhelm-create-outcome"),
-        "a known-key source veto is not an unknown-key refusal"
-    );
-    assert!(text.contains("no replacement was made"), "{text}");
-    assert_eq!(
-        harness
-            .store
-            .folder_history(local, "local-identity")
+    finished_tx.send(()).unwrap();
+    peer.await.unwrap();
+}
+
+/// Fresh destination validation must reject a contradictory folder before any
+/// create reaches the host, independently of which agent selector the request
+/// uses.
+///
+/// Why: a managed checkout's folder is the one its accepted preview showed,
+/// and a REST caller may echo that path in `cwd` but cannot name a second
+/// destination; silently picking either one would launch somewhere the user
+/// did not confirm. What: a body naming an unrelated existing folder beside
+/// its checkout is a 400 with the contradiction named and the
+/// definitely-unaccepted marker, and the connected supervisor receives
+/// nothing.
+#[farhelm_testtrace::test]
+async fn fresh_create_refuses_a_contradictory_cwd() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(client_side, Vec::new()).await;
+    let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
             .await
-            .unwrap(),
-        history
-    );
-    body["intent_key"] = serde_json::json!("unknown");
-    let (status, headers, text) = post_text_headers(&harness, route, body.clone()).await;
-    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
-    assert_eq!(headers["x-farhelm-create-outcome"], "definitely-unaccepted");
-    assert!(text.contains("checkout settings changed"), "{text}");
-    body["with"]["github_checkout"]["preview"]["installation_identity"] =
-        serde_json::json!("foreign-installation");
-    let (status, text) = post_text(&harness, route, body).await;
-    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
-    assert!(text.contains("different host installation"), "{text}");
+            .unwrap();
+        tokio::select! {
+            biased;
+            frame = reader.read_frame() => panic!("contradictory destination contacted peer: {frame:?}"),
+            result = &mut finished_rx => result.unwrap(),
+        }
+    });
+    harness.await_refreshed(local).await;
+    harness
+        .store
+        .set_checkout_root(None, "/fresh-root")
+        .await
+        .unwrap();
+    let config = harness.store.resolve_checkout_config(None).await.unwrap();
+    let (claim, _) = super::create_target(&harness.state, None).unwrap();
+    for (selector, value) in [
+        (
+            "command",
+            serde_json::json!({"command": "agent", "yolo": false}),
+        ),
+        ("launch", serde_json::json!({"harness": "codex"})),
+    ] {
+        let mut request = serde_json::json!({
+            "cwd": "/unrelated-existing-directory",
+            "github_checkout": {"repo": "acme/bar", "preview": {
+                "canonical_root": "/fresh-root", "basename": "bar-1", "cwd": "/fresh-root/bar-1",
+                "config_revision": config.config_revision, "host": claim.host.to_string(),
+                "incarnation": claim.incarnation, "installation_identity": "local-identity"
+            }}
+        });
+        request[selector] = value;
+        let (status, headers, text) = post_text_headers(&harness, "/api/sessions", request).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "{selector}: {text}"
+        );
+        assert!(
+            text.contains("cwd must be empty or match the accepted preview"),
+            "{selector}: {text}"
+        );
+        assert_eq!(headers["x-farhelm-create-outcome"], "definitely-unaccepted");
+    }
     finished_tx.send(()).unwrap();
     peer.await.unwrap();
 }
@@ -13758,28 +13569,25 @@ async fn retired_container_create_refuses_before_target_routing() {
     }
 }
 
-/// Plain, edited and fresh-checkout Replace must inspect the source's stored
-/// launch. Fresh recovery must refuse before its reconciliation lookup, which
-/// can otherwise resume previously accepted creation work.
+/// Plain and edited Replace must inspect the source's stored launch before any
+/// create or delete reaches its host. The edited body repeats the source's own folder,
+/// so the retired-launch refusal is the only rule that can answer it.
 #[farhelm_testtrace::test]
 async fn retired_container_plain_and_custom_replace_dispatch_no_create_or_delete() {
-    for variant in 0..3 {
+    assert_eq!(
+        retired_container_source().cwd,
+        "/sess-1",
+        "fixture premise: the source's folder"
+    );
+    for body in [
+        serde_json::json!({}),
+        serde_json::json!({"with":{"cwd":"/sess-1","command":{"command":"echo replacement","yolo":false}}}),
+    ] {
         let (client, peer) = tokio::io::duplex(64 * 1024);
         let (harness, local) =
             spliced_replace_harness(client, vec![retired_container_source()]).await;
         let (observe, responder) = silent_supervisor(peer);
         harness.await_refreshed(local).await;
-        let (claim, _) = super::create_target(&harness.state, Some(local)).unwrap();
-        let body = match variant {
-            0 => serde_json::json!({}),
-            1 => {
-                serde_json::json!({"with":{"cwd":"/work","command":{"command":"echo replacement","yolo":false}}})
-            }
-            2 => {
-                serde_json::json!({"intent_key":"retired-fresh-replace","with":{"cwd":"","command":{"command":"replacement","yolo":false},"github_checkout":{"repo":"acme/project","preview":{"canonical_root":"/work","basename":"project-1","cwd":"/work/project-1","config_revision":1,"host":claim.host.to_string(),"incarnation":claim.incarnation,"installation_identity":"local-identity"}}}})
-            }
-            _ => unreachable!("three explicit replacement variants"),
-        };
         let (status, text) = post_text(
             &harness,
             &harness.local_session_uri("/api/sessions/sess-1/replace"),

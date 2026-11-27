@@ -68,14 +68,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Immediate
 
-- **Make the helm Replace API refuse destination changes to match the desktop launcher and `SPEC.md`.** From PR #5081
-  (`launcher-visible-consent`): the desktop app's **Replace with** dialog now keeps the session's original folder and
-  checkout fixed (using Clone instead when you want to move a session), and `SPEC.md` now describes Replace with as
-  keeping the destination. However, the helm's Replace API still accepts requests that name a different folder or a
-  fresh managed checkout (the `farhelm` CLI does not have a replace command today). Update the helm's Replace endpoint
-  to refuse requests that try to change the folder or switch to a managed checkout so the API, CLI (if any), desktop
-  launcher, and `SPEC.md` are consistent. Plan: `plans/queue/helm-replace-refuse-destination-change.md`.
-
 - **Align `SPEC.md` and code on which agent-requested Delete warnings go to the notices bell.** From PR #5088
   (`agent-delete-late-notice`): when an agent deletes a session via `farhelm agent delete` and cleanup produces a
   warning (for example, a managed checkout folder could not be archived safely, or stopping a container session's
