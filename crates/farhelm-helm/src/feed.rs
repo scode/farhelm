@@ -32,10 +32,10 @@ use tokio::sync::watch;
 ///   can tell a real change from a no-op, so every
 ///   publisher is responsible for calling [`Self::bump`] only when something
 ///   a client could observe actually differs. That rule is load-bearing
-///   rather than tidy: the session-cache refresh runs every few seconds per
-///   host and almost always writes an identical row set, so a
-///   bump-on-every-refresh feed would make the UI channel re-run every
-///   pushed collection's read on a three-second timer per host, for nothing.
+///   rather than tidy: the session-cache refresh runs on every hint and
+///   backstop poll per host and almost always writes an identical row set,
+///   so a bump-on-every-refresh feed would make the UI channel re-run every
+///   pushed collection's read on every one of them, for nothing.
 ///
 ///   The frequent publishers meet it by comparing, not by assuming a
 ///   mutation changed something: the cache writes compare stored rows

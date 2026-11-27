@@ -258,7 +258,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_94` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_95` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -269,7 +269,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 94;
+pub const PROTOCOL_VERSION: u32 = 95;
 
 /// The most characters an [`AgentVerb::Notify`] reason may have once the helm has cleaned it; the helm refuses a longer
 /// one rather than cut it. One short sentence is what the instruction asks for; the cap keeps a runaway reason out of
@@ -352,8 +352,12 @@ pub const LIST_SESSIONS_CAP: usize = 500;
 /// back-to-back refreshes at round-trip rate, and with it a hostile host
 /// costs the helm no more than a busy honest one.
 ///
-/// Well under the three-second poll the hint is meant to beat. Lowering it
-/// on one side only does nothing: the slower of the two ends sets the pace.
+/// Far under the helm's backstop poll, which since protocol 95 is thirty
+/// seconds and covers only a change no hint reports: a supervisor of that
+/// version keeps a hint it could not queue owed and retries it rather than
+/// dropping it, so hints are the path every change normally takes. Lowering
+/// this on one side only does nothing: the slower of the two ends sets the
+/// pace.
 pub const SESSIONS_CHANGED_MIN_GAP: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// The build version compiled into this binary, carried in the hello for
@@ -4323,16 +4327,18 @@ pub enum ControlMsg {
     /// derived as the reply is built (tabs, status, the restart offer), so
     /// pushing rows or deltas would need a detector and a snapshot for every
     /// such field, and a missed one would leave a client wrong with nothing
-    /// to correct it; a missed HINT only costs a poll interval.
+    /// to correct it.
     ///
-    /// Sent on every full-authority connection, whatever its hello's `role`
-    /// says (the role is not an authorization input), and ignored by a
-    /// connection that does not show sessions. The supervisor sends one only
+    /// Sent on every connection registered as a helm link, which since
+    /// protocol 73 means the owning helm's connections only, and ignored by
+    /// a connection that does not show sessions. The supervisor sends one only
     /// when a user-visible value actually changed, never merely because a
     /// listing was served, so hints and the refreshes they cause cannot feed
-    /// each other; it coalesces bursts into at most one hint per short gap,
-    /// and drops a hint rather than block when a connection's writer is
-    /// full. Polling stays the backstop for anything a hint misses.
+    /// each other; it coalesces bursts into at most one hint per short gap.
+    /// It never blocks on a connection's full writer queue, and since
+    /// protocol 95 it never drops the hint either: the connection owes it and
+    /// is retried shortly, which is what lets a helm poll only every thirty
+    /// seconds, as a backstop for a change no hint reports.
     ///
     /// Protocol 33.
     SessionsChanged,
@@ -6146,6 +6152,8 @@ mod tests {
     /// Version 93 adds the Notify verb and its Notified reply. Older relays cannot decode their tags.
     /// Version 94 adds launch-time extra instructions to CreateSession and RestartSession. An older supervisor would
     /// ignore them and start the agent without them.
+    /// Version 95 makes the supervisor keep a change hint it could not queue owed and retry it, so the helm polls
+    /// every thirty seconds instead of three. An older supervisor could drop a hint and leave a change unseen that long.
     /// Pinning the value here makes an accidental re-bump (or a forgotten
     /// one, if a later change needed it) a loud test failure rather than
     /// a silent drift discovered only by two builds refusing to talk to each other.
@@ -6156,8 +6164,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_94() {
-        assert_eq!(PROTOCOL_VERSION, 94);
+    fn protocol_version_is_pinned_at_95() {
+        assert_eq!(PROTOCOL_VERSION, 95);
     }
 
     /// Discovery is a read-only relay with a fixed reply tag and only the fields needed to choose

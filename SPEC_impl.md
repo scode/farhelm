@@ -3215,9 +3215,15 @@ then it waits out the rest of the gap, and the one refresh that follows answers 
 Supervisor messages are untrusted, so the helm enforces the gap itself rather than relying on the supervisor's spacing.
 Only a hint's own wake waits: the poll, a user's refresh and a nudge do not. A refresh a hint caused always raises a
 feed event, even when the cache compares equal: a tab opened and exited between two refreshes leaves the cache unchanged
-but a client's optimistic tab behind. The three-second poll stays as the backstop and keeps its changed-only rule. A
-hint stays pending until a refresh that STARTED after it completes; a refresh the helm discarded because one of its own
-seeded writes overtook it is retried as soon as the gap allows rather than left to the poll.
+but a client's optimistic tab behind. A backstop poll every thirty seconds stays, with its changed-only rule; since
+version 95, when hints stopped being dropped, it covers only a change no hint reports (a bug), and it was three seconds
+while a full queue could drop a hint. Three things that rode on the old cadence have their own schedule: a refresh that
+failed while a hint was waiting is retried after three seconds; a waiting session's ntfy alert gets a refresh at its
+three-second deadline ("Ntfy waiting alerts"); and turning waiting alerts on refreshes every host at once, so the
+waiting baseline is taken right away. A supervisor that stays connected but stops answering is caught by the refresh
+timeout only when a refresh runs, so on a quiet host that takes up to about a minute; the maintainer accepted that
+(2026-11-26). A hint stays pending until a refresh that STARTED after it completes; a refresh the helm discarded because
+one of its own seeded writes overtook it is retried as soon as the gap allows rather than left to the poll.
 
 The helm's client closes its transport when its final owning handle drops, even with an unanswered upcall. Answer tasks
 hold writer senders of their own, so closing the client's sender alone cannot make a quiet connection reach EOF. The
@@ -6329,17 +6335,23 @@ installation it is on, so it follows an open session the sidebar's filter hides
 The helm observes fresh accepted session listings inside each host connection's refresh loop. Its connection-local
 policy takes a small projection of session id, title and raw status, with an injected monotonic time; it never derives
 transitions from the restart-persistent session cache. The first successful list baselines waiting sessions. Subsequent
-waiting spells settle for 3 seconds on successful refresh observations and emit once. Each observation also takes
-whether waiting alerts go out now (master switch, waiting switch and a topic), read from a flag the helm store seeds
-when it opens and updates inside each ntfy save's database call, so the refresh path never awaits the database for it.
-While that flag is off the policy drops every spell and un-baselines, so nothing is consumed while alerts are off and
-the first observation after they come back on is a fresh baseline. Spell starts, baselines, settles, drops and sends are
-logged with session ids only, never titles. Unknown does not advance a spell, resolved non-waiting ends it, and removed
-sessions discard it. A discarded walk, failed cache write or withdrawn connection contributes no evidence. Equal
-suffixes on different entries belong to their separate connection-local policies. The raw projection precedes Unknown
-retention in the cache, including for identity-less hosts, so a cached Waiting value cannot fabricate new evidence.
-Publication and enqueue are checked under the connection's status read lock after the guarded publish, preventing a
-retarget during publication from alerting for the withdrawn connection.
+waiting spells settle for 3 seconds on successful refresh observations and emit once. A session that stays waiting sends
+no further change hint, so the host loop runs a refresh of its own when the earliest pending spell's 3 seconds are up,
+rather than leaving it to the thirty-second backstop poll; that refresh's observation is what sends the alert, and a
+deadline a refresh has already passed does not wake the loop again at once; if that refresh observed nothing (it failed
+or was discarded), the overdue deadline is retried three seconds later, as a failed refresh with a hint waiting is. Each
+observation also takes whether waiting alerts go out now (master switch, waiting switch and a topic), read from a flag
+the helm store seeds when it opens and updates inside each ntfy save's database call, so the refresh path never awaits
+the database for it. While that flag is off the policy drops every spell and un-baselines, so nothing is consumed while
+alerts are off, no deadline wakes a host, and the first observation after they come back on is a fresh baseline. A save
+that turns them on asks every serving host to refresh at once, so that baseline is taken right away rather than at the
+next poll: a session that starts waiting after the switch must not be taken into the baseline and miss its alert. Spell
+starts, baselines, settles, drops and sends are logged with session ids only, never titles. Unknown does not advance a
+spell, resolved non-waiting ends it, and removed sessions discard it. A discarded walk, failed cache write or withdrawn
+connection contributes no evidence. Equal suffixes on different entries belong to their separate connection-local
+policies. The raw projection precedes Unknown retention in the cache, including for identity-less hosts, so a cached
+Waiting value cannot fabricate new evidence. Publication and enqueue are checked under the connection's status read lock
+after the guarded publish, preventing a retarget during publication from alerting for the withdrawn connection.
 
 The manager owns one bounded 32-item queue and one sender task, also shared with AppState. Refresh uses try-send only.
 The sender reads the current dedicated settings and host display name; title and host characters that
@@ -7401,7 +7413,8 @@ answer, the actor dials anyway and adds the reason to a failed dial's text: a ne
 refused promptly by the gateway, while refusing to dial would cut off every running sandbox whenever the key is cleared
 or the API is down. The check is made per attempt and never while connected, so a connected host costs no API traffic
 and a suspended one one call per re-probe (45 seconds). A sandbox suspended under a live connection is noticed when the
-30-second refresh timeout tears the connection down.
+30-second refresh timeout tears the connection down; on a quiet host, where only the thirty-second backstop poll runs a
+refresh, that takes up to about a minute.
 
 The host list takes observation time and attribution from the actor's `suspended` snapshot. The saved completion time
 survives a helm restart. When the actor observes Running or connects to the supervisor after a failed status check, its

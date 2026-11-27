@@ -142,23 +142,50 @@ pub const CONNECT_BACKOFF: [Duration; 6] = [
 /// [`HostState::Duplicate`]).
 pub const REPROBE_INTERVAL: Duration = Duration::from_secs(45);
 
-/// How often a CONNECTED host's session list is drained into the cache.
+/// How often a CONNECTED host's session list is drained into the cache when
+/// nothing asked for it sooner: the BACKSTOP poll.
 ///
-/// Matched to the old Dioxus GUI's own `POLL_INTERVAL_MS` (three seconds),
-/// which was the freshness the single-host path delivered when this was
-/// written: that GUI polled the helm every three seconds and the helm
-/// answered with a live round trip. Multi-host aggregation moves that round trip off the
-/// request path and behind this cadence, so keeping the number identical
-/// is what stops the visible list from getting *staler* than it is now as
-/// a side effect of gaining hosts.
+/// A supervisor sends a content-free change hint
+/// (`ControlMsg::SessionsChanged`) when something a user can see changes, and
+/// `HostActor::serve` refreshes that host at once, at most once per
+/// `SESSIONS_CHANGED_MIN_GAP`. Since protocol 95 a hint the supervisor could
+/// not queue (its writer queue to this helm was full) is owed and retried
+/// rather than dropped, so in normal operation every change arrives as a
+/// hint and the poll only covers a change no hint source covers, which is a
+/// bug. Thirty seconds is the maintainer's choice for that role (2026-11-26):
+/// each poll re-reads and re-decodes the host's whole session list, which at
+/// fleet scale was a large share of an idle helm's CPU
+/// (`lore/2026-11-26-desktop-idle-cpu.md`).
 ///
-/// Since protocol 33 this is the BACKSTOP, not the only path: a supervisor
-/// sends a content-free change hint (`ControlMsg::SessionsChanged`) when
-/// something a user can see changes, and `HostActor::serve` refreshes that
-/// host at once, at most once per `SESSIONS_CHANGED_MIN_GAP`. The poll stays
-/// for anything a hint misses (a dropped hint, a change no hint source
-/// covers), which is why it keeps its cadence.
-pub const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
+/// It was three seconds, matched to the old Dioxus GUI's own poll, while a
+/// dropped hint was only caught by it. Three things that rode on that
+/// cadence keep their own schedule now: a waiting session's ntfy alert,
+/// whose confirming reading after its settling time gets a refresh of its
+/// own ([`crate::ntfy::Policy::next_deadline_after`]); a failed refresh that
+/// left a hint unanswered, retried after [`FAILED_HINT_RETRY`]; and the
+/// waiting baseline taken by the first listing after waiting alerts are
+/// switched on, taken at once by [`ConnectionManager::refresh_all_now`]. One
+/// accepted consequence: a connected supervisor that stops answering is caught by
+/// [`REFRESH_TIMEOUT`] only when a refresh runs, so on a quiet host that
+/// takes up to about a minute instead of about half of one.
+pub const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+
+/// How soon a refresh that FAILED while a hint was waiting for it is tried
+/// again, instead of at the next backstop poll.
+///
+/// The old three-second poll cadence, kept for exactly this case: a hint
+/// says the window may be stale, and a transient failure (a slow reply, a
+/// hiccup on the link) should not leave it stale for a whole
+/// [`REFRESH_INTERVAL`]. The same pace retries a refresh that failed at a
+/// waiting session's ntfy alert deadline. A host that keeps failing is retried
+/// no faster than this, or than fresh hints arrive, which is what keeps it
+/// from spinning. A host whose refreshes keep failing stays on this pace for
+/// as long as a hint or a waiting spell is pending (a failed refresh observes
+/// nothing, so it cannot end the spell, and the policy drops its spells
+/// only once a refresh has observed waiting alerts off); a host that reports
+/// a seal, for one, fails every refresh, so once it has hinted it
+/// stays here. That costs no more than the old poll.
+pub const FAILED_HINT_RETRY: Duration = Duration::from_secs(3);
 
 /// How long ONE connection attempt may take, including transport, hello,
 /// identity recording and the browser-link acknowledgement, before it fails.
@@ -188,9 +215,9 @@ pub const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(20);
 /// connection so the actor re-enters its normal loss handling, where a
 /// genuinely wedged peer at least surfaces as unreachable.
 ///
-/// Deliberately much larger than [`REFRESH_INTERVAL`] and larger than
-/// [`CONNECT_ATTEMPT_TIMEOUT`]: a refresh's one request costs the
-/// supervisor a whole-host capture sweep before it can answer (see
+/// Independent of [`REFRESH_INTERVAL`] (refreshes run one after another) and
+/// larger than [`CONNECT_ATTEMPT_TIMEOUT`]: a refresh's one request has the
+/// supervisor build its whole session list before it can answer (see
 /// [`drain_sessions`]). Thirty seconds is well past any plausible honest
 /// reply while still bounded by something a user would notice.
 pub const REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -309,7 +336,7 @@ struct RefreshStep {
     /// False for every refresh that failed, was skipped, or wrote a row set
     /// identical to what was already there, which in a settled fleet is
     /// nearly all of them: a bump per refresh would make the UI channel
-    /// re-run every pushed read every few seconds per host. The in-memory
+    /// re-run every pushed read on every refresh of every host. The in-memory
     /// (identity-less) path publishes through
     /// [`HostActor::publish_refresh`]'s value comparison instead — its
     /// "cache" IS the published status — so this stays false there.
@@ -765,7 +792,7 @@ pub struct HostSnapshot {
 /// through the peer at least partly: a supervisor's `Error.message` is
 /// wholly its own text, and a transport failure's chain can carry remote
 /// prose too. The wire's frame cap is measured in megabytes, and a
-/// connected host is refreshed every few seconds — so an unbounded copy of
+/// connected host is refreshed over and over — so an unbounded copy of
 /// the peer's message is both a log flood and a per-host retention leak
 /// that lasts as long as the state does.
 ///
@@ -821,10 +848,11 @@ pub fn peer_text_capped(text: &str, cap: usize) -> String {
 ///
 /// One request, one reply: the wire has no pages (`PROTOCOL_VERSION` 14),
 /// so a drain is a single `ListSessions` whose reply carries every
-/// session the host has up to `farhelm_proto::LIST_SESSIONS_CAP`. The
-/// supervisor's conversation-capture sweep rides that handler, so each
-/// refresh costs one whole-host sweep — the cost this cadence was sized
-/// against.
+/// session the host has up to `farhelm_proto::LIST_SESSIONS_CAP`, built
+/// whole on every request, and decoded and compared whole here; a host's
+/// refresh cost grows with its session count. (The supervisor's
+/// conversation capture no longer rides this handler: it runs on the
+/// supervisor's own ticker, and replies never run a capture sweep.)
 ///
 /// What is checked is what this side goes on to BUILD ON, and every
 /// refusal is an ordinary failed refresh that keeps the previous cache
@@ -3187,6 +3215,21 @@ impl ConnectionManager {
         };
         handle.refresh.send_modify(|wake| *wake += 1);
         true
+    }
+
+    /// [`Self::refresh_now`] for every host, for a change that every serving
+    /// host's next listing must see promptly.
+    ///
+    /// Its one use: turning ntfy waiting alerts on. The first listing after
+    /// that is each host's waiting baseline (`crate::ntfy::Policy`), so a
+    /// session that starts waiting before it is taken into the baseline and
+    /// never alerts for that wait. With the backstop poll at thirty seconds
+    /// that window would otherwise be up to half a minute.
+    pub(crate) fn refresh_all_now(&self) {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        for handle in map.actors.values() {
+            handle.refresh.send_modify(|wake| *wake += 1);
+        }
     }
 
     /// Whether `claim` still describes the connection the actor map holds
@@ -5635,8 +5678,9 @@ impl HostActor {
             // Marked seen here, so a hint arriving during this refresh shows
             // up as a change afterwards and gets a refresh of its own.
             let hints_at_start = *hints.borrow_and_update();
+            let refresh_started = tokio::time::Instant::now();
             if hints_at_start > answered {
-                last_hint_refresh = Some(tokio::time::Instant::now());
+                last_hint_refresh = Some(refresh_started);
             }
             let mut step = tokio::select! {
                 _ = next_nudge(nudge) => {
@@ -5678,6 +5722,7 @@ impl HostActor {
             }
             let end_connection = step.end_connection;
             let alert_observations = step.alert_observations;
+            let observed = alert_observations.is_some();
             let cache_changed = step.cache_changed;
             let discarded = step.discarded;
             // This refresh answers every hint it started after, if it
@@ -5688,9 +5733,8 @@ impl HostActor {
             // unchanged but a client's optimistic tab behind), and a client
             // re-reads only on an event. The poll's own changed-only rule is
             // untouched for refreshes no hint asked for.
-            let answers_hint = hints_at_start > answered
-                && !discarded
-                && matches!(step.health, RefreshHealth::Ok { .. });
+            let refresh_ok = matches!(step.health, RefreshHealth::Ok { .. });
+            let answers_hint = hints_at_start > answered && !discarded && refresh_ok;
             if answers_hint {
                 answered = hints_at_start;
             }
@@ -5755,13 +5799,40 @@ impl HostActor {
             // waiting for a further hint, when a hint is still unanswered and
             // either arrived during this refresh or this refresh was thrown
             // away by a seeded write. A FAILED refresh is left to the wait
-            // below, so a failing host cannot spin; the backstop poll (or the
-            // next hint) retries it on the host's ordinary schedule.
+            // below, so a failing host cannot spin: it is retried after
+            // `FAILED_HINT_RETRY` while a hint is still unanswered or a
+            // waiting session's alert is overdue (no faster, unless fresh
+            // hints keep arriving), otherwise at the backstop poll.
             let pending = *hints.borrow() > answered;
             let retry_hint = pending && (discarded || hints.has_changed().unwrap_or(false));
+            // A waiting session's ntfy alert is decided on a refresh at least
+            // its settling time into the spell, and a session that stays waiting
+            // sends no further hint, so the deadline gets a refresh of its
+            // own rather than waiting for the backstop poll. Only a deadline
+            // after this refresh's start wakes the loop directly: one this
+            // refresh already passed must not wake it again at once, or a
+            // failing host would spin. If this refresh observed nothing (it
+            // failed or was discarded), such an overdue deadline is retried
+            // at the failed-refresh pace instead of waiting for the poll.
+            let overdue_alert = !observed
+                && alert_policy
+                    .next_deadline()
+                    .is_some_and(|deadline| deadline <= refresh_started);
+            let poll = if (pending && !refresh_ok) || overdue_alert {
+                FAILED_HINT_RETRY.min(self.cadence.refresh)
+            } else {
+                self.cadence.refresh
+            };
+            let alert_deadline = alert_policy.next_deadline_after(refresh_started);
             tokio::select! {
                 _ = client.closed() => break,
-                _ = tokio::time::sleep(self.cadence.refresh) => {}
+                _ = tokio::time::sleep(poll) => {}
+                _ = async {
+                    match alert_deadline {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {}
                 // A refresh-only wake: loop straight back into another
                 // drain WITHOUT leaving this connection. The whole
                 // difference from the nudge arm below is that this one does
@@ -6157,7 +6228,7 @@ impl HostActor {
     /// something": a connected host republishes an identical
     /// `Connected { last_refresh: Ok { .. } }` every refresh tick, so a
     /// bump per publication would make the UI channel re-run every pushed
-    /// read every three seconds per host — strictly worse than the polling
+    /// read on every refresh of every host — strictly worse than the polling
     /// the feed replaces. What counts as a change is exactly what a client
     /// can see through the hosts read and the merged list: the state itself
     /// (including a refresh's health and its session count) and the
@@ -8231,9 +8302,8 @@ mod tests {
         /// Every `ListSessions` any peer has received, in arrival order.
         /// Which host each `ListSessions` arrived for, in arrival order.
         /// Recorded because one of the drain's contracts is entirely about
-        /// what is SENT: a refresh is exactly one request (the supervisor's
-        /// conversation-capture sweep rides its `ListSessions` handler, so
-        /// every extra request refreshes reported identities across the host — see
+        /// what is SENT: a refresh is exactly one request (each one has the
+        /// supervisor build its whole session list — see
         /// [`drain_sessions`]). The message carries nothing but its
         /// `req_id`, so the host is all there is to record, beside when the
         /// peer received it (for pacing tests).
@@ -10143,6 +10213,33 @@ mod tests {
         }
     }
 
+    /// Turn ntfy waiting alerts on in `store`, for a test of the host loop's
+    /// alert deadline: with them off the policy keeps no waiting spells, so
+    /// there is no deadline to refresh at. Call it in the fixture's setup,
+    /// before any host connects, so each host's first listing is the waiting
+    /// baseline. Nothing is sent: test builds give the alert sender no HTTP
+    /// client.
+    async fn enable_waiting_alerts(store: &HelmStore) {
+        let save = farhelm_proto::ntfy::SaveSettings {
+            notify_waiting: Some(true),
+            notify_blocked: Some(false),
+            custom_blocked_criteria: None,
+            enabled: true,
+            server_url: "https://ntfy.example".into(),
+            topic: "deadline-tests".into(),
+            priority: farhelm_proto::ntfy::Priority::Default,
+            token: None,
+        };
+        assert!(
+            store.save_ntfy_config(save).await.is_ok(),
+            "the premise: the alert settings save"
+        );
+        assert!(
+            store.waiting_alerts_enabled(),
+            "the premise: waiting alerts are on"
+        );
+    }
+
     /// Connect `fixture`'s one scripted remote host and wait for its first
     /// refresh AND for the local row to have settled into re-probing, then
     /// return the host and the feed's revision: from here, with
@@ -10188,6 +10285,273 @@ mod tests {
         .await
         .unwrap_or_else(|_| panic!("no feed event: {why}"))
         .expect("the feed outlives the fixture");
+    }
+
+    /// Wait until `fixture`'s transport has received more than `count` list
+    /// requests for `host`, or fail naming why. Polls the recorded requests;
+    /// under a paused clock the wait's timeout is virtual and the poll's
+    /// sleeps let the runtime auto-advance to the actor's next timer.
+    async fn wait_for_requests(fixture: &Fixture, host: HostId, count: usize, why: &str) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(7200);
+        while fixture.transport.requests(host).len() <= count {
+            assert!(tokio::time::Instant::now() < deadline, "no refresh: {why}");
+            // sleep-ok: a polling step over the transport's request record; under a paused clock it lets time advance to the actor's next wake.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// Spec: with waiting alerts on and the backstop poll out of reach, a
+    /// session that becomes waiting and stays waiting gets a refresh of its
+    /// own once its ntfy settling time is up, and not before.
+    ///
+    /// Why: the waiting alert is decided only on a refresh at least its
+    /// settling time into the spell, and a session that stays waiting sends no
+    /// further hint. With the poll at thirty seconds (protocol 95) the alert
+    /// would come up to thirty seconds late unless the deadline schedules a
+    /// refresh, which SPEC.md's "remains so for 3 seconds" rules out. The
+    /// poll is an hour away here, so only the deadline can explain the
+    /// refresh; the paused clock makes the timing exact.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_waiting_spell_gets_a_refresh_at_its_alert_deadline() {
+        let (hint, _) = broadcast::channel(8);
+        let hint_for_setup = hint.clone();
+        let fixture = fixture(quiet_cadence(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("waiting.example", None, None)
+                .await
+                .unwrap();
+            enable_waiting_alerts(&store).await;
+            transport.set_script(
+                host,
+                Script {
+                    sessions: vec![session("agent", 100)],
+                    hint_sender: Some(hint_for_setup),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let (host, _) = connected_hinting_host(&fixture).await;
+        let dials = fixture.transport.dials(host).len();
+
+        // The session starts waiting; its hint's refresh begins the spell.
+        let mut waiting = session("agent", 100);
+        waiting.status = SessionStatus::Waiting;
+        fixture.transport.set_script(
+            host,
+            Script {
+                sessions: vec![waiting],
+                hint_sender: Some(hint.clone()),
+                ..Script::default()
+            },
+        );
+        let requests = fixture.transport.requests(host).len();
+        hint.send(()).expect("the peer is subscribed");
+        wait_for_requests(&fixture, host, requests, "the waiting hint's refresh").await;
+        let spell_seen = tokio::time::Instant::now();
+        let requests = fixture.transport.requests(host).len();
+        // The premise that makes the deadline the only explanation: the
+        // waiting hint's refresh succeeded, so no failed-refresh retry (which
+        // is due after the same three seconds) is pending.
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.manager.wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { .. },
+                        ..
+                    }
+                )
+            }),
+        )
+        .await
+        .expect("the premise: the waiting hint's refresh succeeded")
+        .expect("actor is running");
+
+        wait_for_requests(&fixture, host, requests, "the alert deadline's refresh").await;
+        let waited = tokio::time::Instant::now() - spell_seen;
+        assert!(
+            waited >= crate::ntfy::SETTLE - Duration::from_millis(200),
+            "the deadline's refresh comes at the settling time, not before: {waited:?}"
+        );
+        assert!(
+            waited < Duration::from_secs(60),
+            "and well before the backstop poll: {waited:?}"
+        );
+        assert_eq!(
+            fixture.transport.dials(host).len(),
+            dials,
+            "no reconnect: the deadline's refresh ran on the same connection"
+        );
+    }
+
+    /// Spec: a refresh that FAILS while a hint is waiting for it is retried
+    /// after [`FAILED_HINT_RETRY`], without a further hint and with the
+    /// backstop poll out of reach.
+    ///
+    /// Why: with the poll at thirty seconds a transient failure would
+    /// otherwise leave the window stale that long, although the hint already
+    /// said it was out of date; retrying at the old poll's pace, and no
+    /// faster, keeps a failing host from spinning.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_failed_refresh_with_a_hint_pending_is_retried_soon() {
+        let (hint, _) = broadcast::channel(8);
+        let hint_for_setup = hint.clone();
+        let fixture = fixture(quiet_cadence(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("flaky.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    sessions: vec![session("agent", 100)],
+                    hint_sender: Some(hint_for_setup),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let (host, _) = connected_hinting_host(&fixture).await;
+        let dials = fixture.transport.dials(host).len();
+
+        fixture.transport.set_script(
+            host,
+            Script {
+                sessions: vec![session("agent", 100)],
+                hint_sender: Some(hint.clone()),
+                list_error: Some("transient".to_string()),
+                ..Script::default()
+            },
+        );
+        let requests = fixture.transport.requests(host).len();
+        hint.send(()).expect("the peer is subscribed");
+        wait_for_requests(&fixture, host, requests, "the hint's failing refresh").await;
+        let failed_at = tokio::time::Instant::now();
+        let requests = fixture.transport.requests(host).len();
+        // The premise: the refresh failed and the connection stayed up, so
+        // what follows is the failed-refresh retry, not a reconnect's refresh.
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.manager.wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Failed { .. },
+                        ..
+                    }
+                )
+            }),
+        )
+        .await
+        .expect("the premise: the hinted refresh failed while connected")
+        .expect("actor is running");
+
+        wait_for_requests(&fixture, host, requests, "the retry of the failed refresh").await;
+        let waited = tokio::time::Instant::now() - failed_at;
+        assert!(
+            waited >= FAILED_HINT_RETRY - Duration::from_millis(200),
+            "the retry waits out its pace: {waited:?}"
+        );
+        assert!(
+            waited < Duration::from_secs(60),
+            "and does not wait for the backstop poll: {waited:?}"
+        );
+        assert_eq!(
+            fixture.transport.dials(host).len(),
+            dials,
+            "no reconnect: the retry ran on the same connection"
+        );
+    }
+
+    /// Spec: a refresh at a waiting session's alert deadline that FAILS does
+    /// not wake the loop again at once (no back-to-back refreshes of a failing
+    /// host), and the overdue deadline is retried at [`FAILED_HINT_RETRY`]
+    /// rather than left to the backstop poll.
+    ///
+    /// Why: a deadline already in the past would wake the loop's
+    /// `sleep_until` immediately, so without the filter a failing host would
+    /// be refreshed at round-trip rate; without the retry, one failed refresh
+    /// would push the waiting alert from three seconds to the thirty-second poll.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_failed_alert_deadline_refresh_neither_spins_nor_waits_for_the_poll() {
+        let (hint, _) = broadcast::channel(8);
+        let hint_for_setup = hint.clone();
+        let fixture = fixture(quiet_cadence(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("deadline-fails.example", None, None)
+                .await
+                .unwrap();
+            enable_waiting_alerts(&store).await;
+            transport.set_script(
+                host,
+                Script {
+                    sessions: vec![session("agent", 100)],
+                    hint_sender: Some(hint_for_setup),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let (host, _) = connected_hinting_host(&fixture).await;
+        let dials = fixture.transport.dials(host).len();
+
+        let mut waiting = session("agent", 100);
+        waiting.status = SessionStatus::Waiting;
+        fixture.transport.set_script(
+            host,
+            Script {
+                sessions: vec![waiting.clone()],
+                hint_sender: Some(hint.clone()),
+                ..Script::default()
+            },
+        );
+        let requests = fixture.transport.requests(host).len();
+        hint.send(()).expect("the peer is subscribed");
+        wait_for_requests(&fixture, host, requests, "the waiting hint's refresh").await;
+        let spell_seen = tokio::time::Instant::now();
+
+        // Every later listing fails, the deadline's included.
+        fixture.transport.set_script(
+            host,
+            Script {
+                sessions: vec![waiting],
+                hint_sender: Some(hint.clone()),
+                list_error: Some("transient".to_string()),
+                ..Script::default()
+            },
+        );
+        let requests = fixture.transport.requests(host).len();
+        wait_for_requests(&fixture, host, requests, "the deadline's failing refresh").await;
+        let failed_at = tokio::time::Instant::now();
+        // The premise: nothing but the deadline refreshes a quiet host, so the
+        // failing refresh came at the settling time and not earlier.
+        let deadline_wait = failed_at - spell_seen;
+        assert!(
+            deadline_wait >= crate::ntfy::SETTLE - Duration::from_millis(200),
+            "the premise: the failing refresh is the deadline's: {deadline_wait:?}"
+        );
+        let requests = fixture.transport.requests(host).len();
+
+        // sleep-ok: a negative observation window on the paused clock; a spinning loop would refresh many times inside it.
+        tokio::time::sleep(FAILED_HINT_RETRY - Duration::from_millis(500)).await;
+        assert_eq!(
+            fixture.transport.requests(host).len(),
+            requests,
+            "a passed deadline must not wake the loop again at once"
+        );
+        wait_for_requests(&fixture, host, requests, "the overdue deadline's retry").await;
+        let waited = tokio::time::Instant::now() - failed_at;
+        assert!(
+            waited < Duration::from_secs(10),
+            "the overdue alert is retried at the failed-refresh pace, not the poll: {waited:?}"
+        );
+        assert_eq!(
+            fixture.transport.dials(host).len(),
+            dials,
+            "no reconnect: the deadline and its retry ran on the same connection"
+        );
     }
 
     /// Spec: a change hint makes the helm refresh the host at once, and the
@@ -12963,11 +13327,10 @@ mod tests {
     /// A refresh is exactly ONE `ListSessions`, however long the list.
     ///
     /// A contract about what goes OUT, which no state assertion can see,
-    /// and one that matters beyond tidiness: the supervisor's
-    /// conversation-capture sweep rides its `ListSessions` handler, so
-    /// every request refreshes reported identities across the host (see
-    /// [`drain_sessions`]). A drain that asked twice — to confirm a count,
-    /// say — would double that cost on every host on every refresh.
+    /// and one that matters beyond tidiness: every request has the
+    /// supervisor build its whole session list (see [`drain_sessions`]). A
+    /// drain that asked twice — to confirm a count, say — would double that
+    /// cost on every host on every refresh.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn a_refresh_is_one_list_request() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
@@ -13885,7 +14248,7 @@ mod tests {
     /// Preserve the diagnostic trail for a peer that returns the same hostile error on every refresh.
     ///
     /// The wire's frame cap is measured in megabytes and a connected host
-    /// refreshes every few seconds. This test checks both independent
+    /// refreshes over and over. This test checks both independent
     /// boundaries: retained and logged peer text stays safe to display, and
     /// every repeated failure remains available in the diagnostic trail.
     #[farhelm_testtrace::test(start_paused = true)]
