@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`golden-harness-and-new-container-scene`](reports/golden-harness-and-new-container-scene.report.md) landed 2026-11-26 in #5011, #5014: Report missing renders on the portable golden changes page and show the settled build status in the New container golden
 - [`welcome-empty-state`](reports/welcome-empty-state.report.md) landed 2026-11-26 in #5012, #5018: Replace the startup Welcome card with a welcome in the empty main area, shown whenever there are no sessions
 - [`agent-drift-and-screen-capture-tooling`](reports/agent-drift-and-screen-capture-tooling.report.md) landed 2026-11-26 in #5017, #5022: Stop agent updater process groups before drift cases, publish captured agent screens as recoverable pairs, and require a committed hook report after Restart in drift checks
 - [`triage-settings-nov24`](reports/triage-settings-nov24.report.md) landed 2026-11-26 in #4960, #4963, #4966, #4968, #4973, #4976, #4979, #4982, #4986, #4987, #4990, #4995, #5000, #5006, #5007, #5010, #5013, #5015, #5016, #5019, #5026: execute the 2026-11-24 triage outcomes for the Settings dialog, in grouped PRs
