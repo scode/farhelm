@@ -85,6 +85,7 @@ async fn prepare_grok(
             None,
             requested,
             None,
+            None,
         )
         .await
         .expect("hook setup cannot prevent the host from starting the launch");

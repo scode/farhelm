@@ -36,6 +36,7 @@ pub(super) fn persistent_hook_file(
     let command = super::hook_command(
         exe,
         super::AgentInstructions::Off,
+        None,
         farhelm_proto::ReportVendor::Grok,
     );
     let group = serde_json::json!([{

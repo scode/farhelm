@@ -459,6 +459,7 @@ impl Supervisor {
         initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
         initial_snapshot: Option<Vec<u8>>,
         setup_persistent_hooks: bool,
+        extra_instructions: Option<&str>,
     ) -> Result<SpawnedInHost, HostSpawnFailure> {
         // A corrupt file refuses before the launch spec is published.
         // Only the terminal child receives these values.
@@ -490,6 +491,7 @@ impl Supervisor {
                 initial_prompt,
                 setup_persistent_hooks,
                 credentials.codex_endpoint.as_ref(),
+                extra_instructions,
             )
             .await
             .map_err(HostSpawnFailure::Spec)?;

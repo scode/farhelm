@@ -232,6 +232,8 @@ fn create_launch(
 struct CreateRequest {
     setup_persistent_hooks: bool,
     prompt: Option<String>,
+    /// This start's extra instructions from the helm; see `ControlMsg::CreateSession::extra_instructions`.
+    extra_instructions: Option<String>,
     named_start: Option<farhelm_proto::NamedConversationStart>,
     parent: Option<String>,
     cwd: String,
@@ -281,6 +283,7 @@ async fn handle_create_session(
     let CreateRequest {
         setup_persistent_hooks,
         prompt,
+        extra_instructions,
         named_start,
         parent,
         cwd,
@@ -462,6 +465,7 @@ async fn handle_create_session(
                 CreateInputs {
                     setup_persistent_hooks,
                     prompt,
+                    extra_instructions,
                     named_start,
                     cwd: &cwd,
                     parent,
@@ -2112,6 +2116,8 @@ async fn handle_resize(
 /// fields explicit while preserving the protocol's partial-bundle refusal.
 struct RestartSessionRequest {
     setup_persistent_hooks: farhelm_proto::PersistentHookOptIns,
+    /// The relaunch's extra instructions from the helm; see `ControlMsg::RestartSession::extra_instructions`.
+    extra_instructions: Option<String>,
     named_start: Option<farhelm_proto::NamedConversationStart>,
     req_id: u64,
     session_id: String,
@@ -2253,6 +2259,7 @@ async fn handle_restart_session(
         }
         let RestartSessionRequest {
             setup_persistent_hooks,
+            extra_instructions,
             named_start,
             req_id,
             session_id,
@@ -2268,6 +2275,7 @@ async fn handle_restart_session(
                 expected_launch,
                 named_start,
                 setup_persistent_hooks,
+                extra_instructions,
             )
             .await;
         match result {
@@ -2722,6 +2730,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         ControlMsg::CreateSession {
             setup_persistent_hooks,
             prompt,
+            extra_instructions,
             named_start,
             req_id,
             parent,
@@ -2754,6 +2763,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             let request = CreateRequest {
                 setup_persistent_hooks,
                 prompt,
+                extra_instructions,
                 named_start,
                 parent,
                 cwd,
@@ -3067,6 +3077,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         }
         ControlMsg::RestartSession {
             setup_persistent_hooks,
+            extra_instructions,
             named_start,
             req_id,
             session_id,
@@ -3080,6 +3091,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 ctx.tasks,
                 RestartSessionRequest {
                     setup_persistent_hooks,
+                    extra_instructions,
                     named_start,
                     req_id,
                     session_id,
@@ -4287,6 +4299,7 @@ mod tests {
         let (mut tasks, mut rx) = dispatch_for_test(
             &sup,
             ControlMsg::RestartSession {
+                extra_instructions: None,
                 setup_persistent_hooks: Default::default(),
                 named_start: None,
                 req_id: 72,
@@ -4630,6 +4643,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -5024,6 +5038,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::RestartSession {
+                extra_instructions: None,
                 setup_persistent_hooks: Default::default(),
                 named_start: None,
                 req_id: 53,
@@ -5243,6 +5258,7 @@ mod tests {
     /// the combined cap that deliberately runs only after create admission.
     fn queued_create(cwd: &std::path::Path, key: &str, oversized: bool) -> ControlMsg {
         ControlMsg::CreateSession {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
@@ -7789,6 +7805,7 @@ mod tests {
         handle_restricted_control(
             &sup,
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -7922,6 +7939,7 @@ mod tests {
         handle_restricted_control(
             &sup,
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -8013,6 +8031,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -9281,6 +9300,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -9351,6 +9371,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::RestartSession {
+                extra_instructions: None,
                 setup_persistent_hooks: Default::default(),
                 named_start: None,
                 req_id: 5,
@@ -9484,6 +9505,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -9553,6 +9575,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -9618,6 +9641,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -9712,6 +9736,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -9778,6 +9803,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -9848,6 +9874,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -11334,6 +11361,7 @@ mod tests {
         let mut host = BusyHost::new().await;
 
         host.send(ControlMsg::RestartSession {
+            extra_instructions: None,
             setup_persistent_hooks: Default::default(),
             named_start: None,
             req_id: 2,
@@ -11542,6 +11570,7 @@ mod tests {
                 unreachable!("queued_create builds a create");
             };
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 req_id: 42,
                 prompt,
@@ -11670,6 +11699,7 @@ mod tests {
                 &ask(
                     &sup,
                     ControlMsg::RestartSession {
+                        extra_instructions: None,
                         setup_persistent_hooks: Default::default(),
                         req_id: 3,
                         named_start: None,
@@ -11686,6 +11716,7 @@ mod tests {
                 &ask(
                     &sup,
                     ControlMsg::RestartSession {
+                        extra_instructions: None,
                         setup_persistent_hooks: Default::default(),
                         req_id: 4,
                         named_start: None,
@@ -12204,6 +12235,7 @@ mod tests {
                 &ask(
                     &sup,
                     ControlMsg::RestartSession {
+                        extra_instructions: None,
                         setup_persistent_hooks: Default::default(),
                         req_id: 2,
                         named_start: None,

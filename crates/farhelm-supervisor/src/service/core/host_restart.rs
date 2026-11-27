@@ -231,6 +231,7 @@ impl Supervisor {
         tabs: Vec<TabInfo>,
         seed: Option<RestartSeed>,
         setup_persistent_hooks: bool,
+        extra_instructions: Option<&str>,
     ) -> Result<SessionInfo, RelaunchFailure> {
         let id = entry.info.id.clone();
         if let Err(crash) = self.host_restart_fault(HostRestartStage::GenerationClaimed) {
@@ -277,6 +278,7 @@ impl Supervisor {
                 None,
                 blob,
                 setup_persistent_hooks,
+                extra_instructions,
             )
             .await;
         let SpawnedInHost {
@@ -1455,6 +1457,7 @@ mod tests {
                 &entry,
                 &snapshot,
                 RelaunchPlan {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     clear_capture: false,
                     argv: vec!["sh".into(), "-c".into(), "exit 0".into()],

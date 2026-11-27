@@ -569,6 +569,7 @@ async fn raw_restart_with(
         .expect("handshake");
     writer
         .write_control(&ControlMsg::RestartSession {
+            extra_instructions: None,
             setup_persistent_hooks: Default::default(),
             named_start: None,
             req_id: 1,

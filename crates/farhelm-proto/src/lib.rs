@@ -258,7 +258,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_93` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_94` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -269,7 +269,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 93;
+pub const PROTOCOL_VERSION: u32 = 94;
 
 /// The most characters an [`AgentVerb::Notify`] reason may have once the helm has cleaned it; the helm refuses a longer
 /// one rather than cut it. One short sentence is what the instruction asks for; the cap keeps a runaway reason out of
@@ -1720,6 +1720,18 @@ impl AgentKind {
             | Self::Muse
             | Self::Custom
             | Self::Generic => false,
+        }
+    }
+
+    /// Whether Farhelm delivers launch-time instructions to this agent (the `farhelm agent instructions` pointer and,
+    /// with blocked alerts on, the blocked-agent instruction). The supervisor's test
+    /// `instruction_delivery_follows_the_start_expansion` pins this against what each integration's start expansion
+    /// actually carries, and Settings words the blocked switch's supported agents from it.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub const fn supports_instruction_injection(self) -> bool {
+        match self {
+            Self::Claude | Self::Codex | Self::Goose | Self::Pi | Self::Omp | Self::Muse => true,
+            Self::Grok | Self::Antigravity | Self::Custom | Self::Generic => false,
         }
     }
 
@@ -3426,6 +3438,13 @@ pub enum ControlMsg {
         /// Helm consent for the supervisor to set up the supported agent's configuration before this start.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         setup_persistent_hooks: bool,
+        /// Instructions the helm wants the agent given at this start, beside the `farhelm agent instructions` pointer
+        /// (today the blocked-agent instruction, while blocked alerts are on). This launch's only: never stored with
+        /// the session and never part of the idempotency fingerprint, so a later Restart gets the helm's current
+        /// choice. Delivered only to agents whose integration carries instructions, and not when
+        /// `FARHELM_AGENT_INSTRUCTIONS` turns them off.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        extra_instructions: Option<String>,
         /// Literal first message, appended only after the chosen start argv's
         /// Farhelm placeholders have been expanded. Never part of stored launch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3950,6 +3969,9 @@ pub enum ControlMsg {
         /// Use current consent for the session's resolved agent. A saved launch does not own the opt-in.
         #[serde(default, skip_serializing_if = "PersistentHookOptIns::is_empty")]
         setup_persistent_hooks: PersistentHookOptIns,
+        /// As [`ControlMsg::CreateSession`]'s `extra_instructions`, for the relaunch.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        extra_instructions: Option<String>,
         req_id: u64,
         /// Explicitly enter this conversation once, with Restart with only.
         /// Captured-identity proof gates apply only when this is absent.
@@ -5861,6 +5883,7 @@ mod tests {
             },
         };
         let with_payload = ControlMsg::CreateSession {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
@@ -6120,6 +6143,8 @@ mod tests {
     /// Version 92 adds the Tailscale request to agent host add. An older helm would ignore it and add the
     /// host as ordinary SSH.
     /// Version 93 adds the Notify verb and its Notified reply. Older relays cannot decode their tags.
+    /// Version 94 adds launch-time extra instructions to CreateSession and RestartSession. An older supervisor would
+    /// ignore them and start the agent without them.
     /// Pinning the value here makes an accidental re-bump (or a forgotten
     /// one, if a later change needed it) a loud test failure rather than
     /// a silent drift discovered only by two builds refusing to talk to each other.
@@ -6130,8 +6155,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_93() {
-        assert_eq!(PROTOCOL_VERSION, 93);
+    fn protocol_version_is_pinned_at_94() {
+        assert_eq!(PROTOCOL_VERSION, 94);
     }
 
     /// Discovery is a read-only relay with a fixed reply tag and only the fields needed to choose
@@ -6588,6 +6613,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_request_fingerprint_is_omitted_when_unset() {
         let create = |request_fingerprint: Option<String>| ControlMsg::CreateSession {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
@@ -8380,6 +8406,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_agent_launch_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
@@ -8462,6 +8489,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_command_launch_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
@@ -8522,6 +8550,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_inherited_spawn_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
@@ -8577,6 +8606,7 @@ mod tests {
             (None, false),
         ] {
             let msg = ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -8663,6 +8693,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn restart_session_roundtrips_through_frames() {
         let msg = ControlMsg::RestartSession {
+            extra_instructions: None,
             setup_persistent_hooks: PersistentHookOptIns {
                 grok: true,
                 antigravity: false,
@@ -8807,6 +8838,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn restart_session_json_shape_is_pinned() {
         let msg = ControlMsg::RestartSession {
+            extra_instructions: None,
             setup_persistent_hooks: Default::default(),
             named_start: None,
             req_id: 7,
@@ -8873,6 +8905,7 @@ mod tests {
         assert!(with.is_none());
 
         let msg = ControlMsg::RestartSession {
+            extra_instructions: None,
             setup_persistent_hooks: Default::default(),
             named_start: None,
             req_id: 2,
@@ -8990,6 +9023,7 @@ mod tests {
         assert_eq!(
             msg,
             ControlMsg::RestartSession {
+                extra_instructions: None,
                 setup_persistent_hooks: Default::default(),
                 named_start: None,
                 req_id: 9,

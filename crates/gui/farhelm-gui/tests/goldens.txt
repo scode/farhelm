@@ -420,8 +420,8 @@ linux/settings-notifications--dark.png 515b8dcf9e050e288387720c6f52e52a68863580
 linux/settings-notifications--light.png 792f9435602900ffb7c8a7473ff516edf190f147
 linux/settings-notifications-close-refused--dark.png d68d56eb450a2309cce0b6f2411dace4212bf8ba
 linux/settings-notifications-close-refused--light.png e11de59ad9fc3b321721aadb3072bafa1681aa18
-linux/settings-notifications-edited--dark.png b7790b0bd7f4e803a25701ceac9f0bdd261ecc90
-linux/settings-notifications-edited--light.png 5aa08f5d0edba0b2e9b01a83fda431d0b951ef1a
+linux/settings-notifications-edited--dark.png e23538cb4b34b302122c477bdb96d5e94280df62
+linux/settings-notifications-edited--light.png 3416e7eadf89bbc58ba983a82a8a93300b9207c0
 linux/settings-pi--dark.png cae851e758a9c55a05e8c3c9572447932060d551
 linux/settings-pi--light.png 8e4ededf21a717602801bb3314049d370ee946d3
 linux/settings-recipe-editor--dark.png 8ce268966c7f92304387803d8a0323b895001f5d
@@ -462,8 +462,8 @@ linux/settings-terminal-edited--dark.png a8a82e30939f289604fa23b0dd302c046e6b70e
 linux/settings-terminal-edited--light.png 18fe4fc9326d64ecfafd1f12ca547a0317396096
 linux/settings-tunnel-question-over-terminal--dark.png 04c6bf7b3dcdc7856f25ec3f52d0762d3cab1d10
 linux/settings-tunnel-question-over-terminal--light.png 0e74813e503e7b0cdd1683ad2a507b48a0dc3b40
-linux/settings-unsaved--dark.png 3b73c3534f3aea9327491eed77b223097cb6a168
-linux/settings-unsaved--light.png 42cfe37f7a4f29b46aceb734d5c6d2d6f7bd7d7b
+linux/settings-unsaved--dark.png 551664679fc31854dec6dd83fdb45a89aa152df6
+linux/settings-unsaved--light.png fb7d3fc93318a7c86573a0321f947ad505d910e2
 linux/solid-button-danger-held--dark.png 90ccd0f77da0946224c592547b42300ea1864c31
 linux/solid-button-danger-held--light.png 054d2c8e6efe21df9bc294995731314ca69a973c
 linux/solid-button-danger-hover--dark.png 35e9d6c249d2d14526cb2c7ae68de42ccf9cca04

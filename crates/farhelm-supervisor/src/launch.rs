@@ -71,6 +71,9 @@ pub const SUPERVISOR_SOCK_ENV_VAR: &str = "FARHELM_SUPERVISOR_SOCK";
 /// Current-launch controls consumed by Goose's persisted reporter.
 pub const GOOSE_REPORTER_ENABLED_ENV_VAR: &str = "FARHELM_GOOSE_REPORTER_ENABLED";
 pub const GOOSE_INSTRUCTIONS_ENV_VAR: &str = "FARHELM_GOOSE_INSTRUCTIONS";
+/// The launch's extra instructions for Goose's reporter to print after the pointer, set only beside
+/// [`GOOSE_INSTRUCTIONS_ENV_VAR`]`=1` (`HookPolicy::extra_instructions`).
+pub const GOOSE_EXTRA_INSTRUCTIONS_ENV_VAR: &str = "FARHELM_GOOSE_EXTRA_INSTRUCTIONS";
 pub const GOOSE_REPORTER_EXE_ENV_VAR: &str = "FARHELM_GOOSE_REPORTER_EXE";
 
 /// Absolute reporter executable supplied only to Pi launches Farhelm injected.
@@ -1488,6 +1491,7 @@ fn scrub_preparation_authority(command: &mut std::process::Command) {
         .env_remove(TAB_ID_ENV_VAR)
         .env_remove(GOOSE_REPORTER_ENABLED_ENV_VAR)
         .env_remove(GOOSE_INSTRUCTIONS_ENV_VAR)
+        .env_remove(GOOSE_EXTRA_INSTRUCTIONS_ENV_VAR)
         .env_remove(GOOSE_REPORTER_EXE_ENV_VAR)
         .env_remove(PI_REPORTER_EXE_ENV_VAR)
         // The OMP reporter's executable pointer: preparation children

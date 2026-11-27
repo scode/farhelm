@@ -630,9 +630,19 @@ fn hook_tail_args(
     }
 }
 
+/// The one `--append-system-prompt` value Pi and OMP get when the launch announces instructions: the pointer, then the
+/// launch's extra instructions after a blank line. One value because OMP keeps only the last such flag. Shared by the
+/// new launches' expansion and the legacy injections, so a session created before launch kinds gets the same text.
+pub(crate) fn appended_instructions(policy: &HookPolicy<'_>) -> String {
+    match policy.extra_instructions {
+        Some(extra) => format!("{INSTRUCTIONS_POINTER}\n\n{extra}"),
+        None => INSTRUCTIONS_POINTER.to_string(),
+    }
+}
+
 /// `{farhelm_args}` for the kinds that load Farhelm's reporter extension
 /// (Pi, OMP): the extension and, when announcing, the instructions pointer
-/// as arguments, and the executable the reporter calls in `exe_env_var`.
+/// (with any extra instructions, [`appended_instructions`]) as arguments, and the executable the reporter calls in `exe_env_var`.
 /// The same for start and resume, because these agents load extensions per
 /// process.
 pub(crate) fn reporter_extension_args(
@@ -654,7 +664,7 @@ pub(crate) fn reporter_extension_args(
     if policy.instructions.announces() {
         args.extend([
             "--append-system-prompt".to_string(),
-            INSTRUCTIONS_POINTER.to_string(),
+            appended_instructions(policy),
         ]);
     }
     FarhelmArgs {
@@ -690,6 +700,12 @@ pub struct HookPolicy<'a> {
     /// The supervisor socket from the launch spec, if it can be represented in vendor configuration.
     /// Muse needs its parent directory even when the agent scrubs the hook's environment.
     pub supervisor_socket: Option<&'a str>,
+    /// Instructions the helm sent with this launch, delivered after the instructions pointer, or `None`. Given only
+    /// where the pointer is ([`AgentInstructions::announces`]), so `FARHELM_AGENT_INSTRUCTIONS=off` withholds both, and
+    /// only at the start of a session's conversation, never by a turn-end hook. Each kind delivers them inline in its
+    /// own launch (a hook flag, an environment variable, or the system prompt it already appends), so nothing extra
+    /// is written to disk and a repeated or delayed start hook still prints them.
+    pub extra_instructions: Option<&'a str>,
 }
 
 /// The skip reason for a kind whose hooks `FARHELM_AGENT_HOOKS` turned off.
@@ -842,11 +858,15 @@ pub(crate) fn with_launch_environment(argv: Vec<String>, assignments: &[String])
 /// The shared base command for a vendor callback: Farhelm's own binary, shell-quoted, running `internal hook`.
 ///
 /// This owns the common flags and shell quoting. A vendor can append launch-local inputs, as Muse does for its
-/// destination, before serializing the complete command into its own configuration format.
+/// destination, before serializing the complete command into its own configuration format. `extra` is this launch's
+/// extra instructions ([`HookPolicy::extra_instructions`]), carried as `--extra-instructions` only beside
+/// `--announce`, so the hook prints them after the pointer; a turn-end hook passes neither. Carried on the command
+/// rather than in the environment because Muse scrubs its hooks' environment.
 #[warn(clippy::wildcard_enum_match_arm)]
 fn hook_command(
     hook_exe: &str,
     instructions: AgentInstructions,
+    extra: Option<&str>,
     vendor: farhelm_proto::ReportVendor,
 ) -> String {
     let vendor = match vendor {
@@ -873,6 +893,10 @@ fn hook_command(
     );
     if instructions.announces() {
         command.push_str(" --announce");
+        if let Some(extra) = extra {
+            command.push_str(" --extra-instructions ");
+            command.push_str(&farhelm_proto::text::shell_quote(extra));
+        }
     }
     command
 }
@@ -918,6 +942,7 @@ pub fn delivers_instructions(kind: AgentKind) -> bool {
                 codex_endpoint: None,
                 session_id: "session-1",
                 supervisor_socket: Some("/state/supervisor.sock"),
+                extra_instructions: None,
             },
         );
         if let HookLog::Skipped(reason) = &expansion.log {
@@ -1434,11 +1459,13 @@ impl AgentIntegration for ClaudeIntegration {
         let command = hook_command(
             hook_exe,
             policy.instructions,
+            policy.extra_instructions,
             farhelm_proto::ReportVendor::Claude,
         );
         let stop_command = hook_command(
             hook_exe,
             AgentInstructions::Off,
+            None,
             farhelm_proto::ReportVendor::Claude,
         );
         let settings = serde_json::json!({
@@ -1531,6 +1558,7 @@ impl AgentIntegration for CodexIntegration {
         let command = toml_basic_string(&hook_command(
             hook_exe,
             policy.instructions,
+            policy.extra_instructions,
             farhelm_proto::ReportVendor::Codex,
         ));
         // Only the selecting hook announces instructions. Stop runs every turn
@@ -1538,6 +1566,7 @@ impl AgentIntegration for CodexIntegration {
         let stop_command = toml_basic_string(&hook_command(
             hook_exe,
             AgentInstructions::Off,
+            None,
             farhelm_proto::ReportVendor::Codex,
         ));
         Ok(vec![
@@ -2985,21 +3014,65 @@ pub fn executable_basename(kind: AgentKind) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    /// Pin the launch capability independently of the drift suite's inventory so lost delivery also fails a test.
+    /// The helm's extra instructions (today the blocked-agent instruction) reach an agent only through the launch's
+    /// own start expansion, so each kind that delivers the pointer must also carry them exactly once (its turn-end
+    /// hook must not repeat them every turn), and a kind that delivers nothing, or a launch with instructions off,
+    /// must not carry them at all. Specified: for every kind, a start expansion with hooks on, instructions on and an
+    /// extra instruction holds that instruction exactly once across its arguments and environment when the kind
+    /// supports instruction injection and never otherwise, and never with instructions off.
+    #[test]
+    fn extra_instructions_ride_the_start_expansion_once_where_instructions_are_delivered() {
+        const MARK: &str = "extra-instruction-mark";
+        for &kind in AgentKind::ALL {
+            let Some(integration) = integration_for(kind) else {
+                assert!(!kind.supports_instruction_injection(), "{kind:?}");
+                continue;
+            };
+            let count = |instructions| {
+                let expansion = integration.farhelm_args(
+                    LaunchPhase::Start,
+                    &HookPolicy {
+                        hooks: &AgentHooks::All,
+                        instructions,
+                        exe: Some("/opt/farhelm"),
+                        vendor_extension: Some("/state/reporter.ts"),
+                        codex_endpoint: None,
+                        session_id: "session-1",
+                        supervisor_socket: Some("/state/supervisor.sock"),
+                        extra_instructions: Some(MARK),
+                    },
+                );
+                expansion
+                    .args
+                    .iter()
+                    .chain(expansion.env.iter().map(|(_, value)| value))
+                    .map(|text| text.matches(MARK).count())
+                    .sum::<usize>()
+            };
+            let expected = usize::from(kind.supports_instruction_injection());
+            assert_eq!(
+                count(AgentInstructions::On),
+                expected,
+                "{kind:?} with instructions on"
+            );
+            assert_eq!(
+                count(AgentInstructions::Off),
+                0,
+                "{kind:?} with instructions off"
+            );
+        }
+    }
+
+    /// Pin the launch capability independently of the drift suite's inventory so lost delivery also fails a test, and
+    /// pin `AgentKind::supports_instruction_injection`, which Settings words the blocked switch's supported agents
+    /// from, to what each integration's start expansion actually carries. Specified: for every kind, the start
+    /// expansion differs with instructions on and off exactly when `supports_instruction_injection` says so.
     #[test]
     fn instruction_delivery_follows_the_start_expansion() {
-        let current = [
-            AgentKind::Claude,
-            AgentKind::Codex,
-            AgentKind::Goose,
-            AgentKind::Muse,
-            AgentKind::Pi,
-            AgentKind::Omp,
-        ];
         for &kind in AgentKind::ALL {
             assert_eq!(
                 delivers_instructions(kind),
-                current.contains(&kind),
+                kind.supports_instruction_injection(),
                 "{kind:?}"
             );
         }
@@ -3051,6 +3124,7 @@ mod tests {
                     codex_endpoint: None,
                     session_id: "session-1",
                     supervisor_socket: Some("/state/supervisor.sock"),
+                    extra_instructions: None,
                 };
                 let expansion = CodexIntegration.farhelm_args(phase, &policy);
                 assert_eq!(expansion.args[0], "--no-daemon");
@@ -3094,6 +3168,7 @@ mod tests {
                         codex_endpoint: Some(&endpoint),
                         session_id: "session-1",
                         supervisor_socket: Some("/state/supervisor.sock"),
+                        extra_instructions: None,
                     },
                 );
                 assert_eq!(
@@ -3113,6 +3188,61 @@ mod tests {
                 );
                 assert!(provider.get("experimental_bearer_token").is_none());
             }
+        }
+    }
+
+    /// Sessions created before launch kinds go through each kind's legacy injection on Restart, and must get the
+    /// extra instructions wherever that path already gives the pointer; a Pi or OMP Restart once got the pointer
+    /// without them. Specified: for each kind's bare command, the legacy injection with hooks on, instructions on and
+    /// an extra instruction carries it exactly once in the argv for Claude, Codex, Muse, Goose, Pi and OMP and not for
+    /// Grok or Antigravity; with instructions off, never.
+    #[test]
+    fn extra_instructions_ride_the_legacy_injection_once_where_instructions_are_delivered() {
+        const MARK: &str = "extra-instruction-mark";
+        let hooks = AgentHooks::All;
+        for (kind, program) in [
+            (AgentKind::Claude, "claude"),
+            (AgentKind::Codex, "codex"),
+            (AgentKind::Muse, "muse"),
+            (AgentKind::Goose, "goose"),
+            (AgentKind::Pi, "pi"),
+            (AgentKind::Omp, "omp"),
+            (AgentKind::Grok, "grok"),
+            (AgentKind::Antigravity, "agy"),
+        ] {
+            let count = |instructions| {
+                let injection = integration_for(kind)
+                    .expect("integrated kind")
+                    .inject_hooks(
+                        vec![program.to_string()],
+                        &HookPolicy {
+                            hooks: &hooks,
+                            instructions,
+                            exe: Some("/opt/farhelm"),
+                            vendor_extension: Some("/state/extension.js"),
+                            codex_endpoint: None,
+                            session_id: "session-1",
+                            supervisor_socket: Some("/state/supervisor.sock"),
+                            extra_instructions: Some(MARK),
+                        },
+                    );
+                injection
+                    .argv
+                    .iter()
+                    .map(|word| word.matches(MARK).count())
+                    .sum::<usize>()
+            };
+            let expected = usize::from(kind.supports_instruction_injection());
+            assert_eq!(
+                count(AgentInstructions::On),
+                expected,
+                "{kind:?} with instructions on"
+            );
+            assert_eq!(
+                count(AgentInstructions::Off),
+                0,
+                "{kind:?} with instructions off"
+            );
         }
     }
 
@@ -3137,6 +3267,7 @@ mod tests {
             codex_endpoint: None,
             session_id: "session-1",
             supervisor_socket: Some("/state/supervisor.sock"),
+            extra_instructions: None,
         };
         let argv = |program: &str| vec![program.to_string()];
         let decide = |kind: AgentKind, program: &str| {
@@ -4436,6 +4567,7 @@ mod tests {
             codex_endpoint: None,
             session_id: "session-1",
             supervisor_socket: Some("/state/supervisor.sock"),
+            extra_instructions: None,
         };
         // The default (announcing) shape, which is what ships. The `off`
         // shape is checked at the end, against the same path.

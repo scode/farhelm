@@ -197,6 +197,7 @@ declare_execution_classes! {
         };
         AbortDownload => InlineControl => |c| ControlMsg::AbortDownload { channel: c.channel };
         CreateSession => OwnedMutation => |c| ControlMsg::CreateSession {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             req_id: c.req_id,
@@ -264,6 +265,7 @@ declare_execution_classes! {
             session_id: c.session_id.into(),
         };
         RestartSession => OwnedMutation => |c| ControlMsg::RestartSession {
+            extra_instructions: None,
             setup_persistent_hooks: Default::default(),
             req_id: c.req_id,
             named_start: None,

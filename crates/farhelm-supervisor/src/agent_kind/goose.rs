@@ -54,7 +54,7 @@ pub(crate) fn inject_hooks(mut argv: Vec<String>, policy: &HookPolicy<'_>) -> Ho
             REPORTER_EXTENSION.to_string(),
         ]);
     }
-    let controls = [
+    let mut controls = vec![
         format!(
             "{}={}",
             crate::launch::GOOSE_REPORTER_ENABLED_ENV_VAR,
@@ -67,6 +67,13 @@ pub(crate) fn inject_hooks(mut argv: Vec<String>, policy: &HookPolicy<'_>) -> Ho
         ),
         format!("{}={exe}", crate::launch::GOOSE_REPORTER_EXE_ENV_VAR),
     ];
+    // Always set, empty when there are none, so a value inherited from elsewhere
+    // never reaches a launch that has none, as the pointer switch is always set.
+    controls.push(format!(
+        "{}={}",
+        crate::launch::GOOSE_EXTRA_INSTRUCTIONS_ENV_VAR,
+        extra_instructions(enabled, policy).unwrap_or_default()
+    ));
     argv = with_launch_environment(argv, &controls);
     // A resume with hooks disabled was rewritten above but is not HOOKED,
     // and it logs nothing: nothing was skipped that the operator did not ask
@@ -108,25 +115,41 @@ pub(crate) fn farhelm_args(
     } else {
         Vec::new()
     };
+    let mut env = vec![
+        (
+            crate::launch::GOOSE_REPORTER_ENABLED_ENV_VAR.to_string(),
+            u8::from(enabled).to_string(),
+        ),
+        (
+            crate::launch::GOOSE_INSTRUCTIONS_ENV_VAR.to_string(),
+            u8::from(enabled && policy.instructions.announces()).to_string(),
+        ),
+        (
+            crate::launch::GOOSE_REPORTER_EXE_ENV_VAR.to_string(),
+            exe.to_string(),
+        ),
+    ];
+    // Always set, empty when there are none: see the legacy injection above.
+    env.push((
+        crate::launch::GOOSE_EXTRA_INSTRUCTIONS_ENV_VAR.to_string(),
+        extra_instructions(enabled, policy)
+            .unwrap_or_default()
+            .to_string(),
+    ));
     super::FarhelmArgs {
         args,
-        env: vec![
-            (
-                crate::launch::GOOSE_REPORTER_ENABLED_ENV_VAR.to_string(),
-                u8::from(enabled).to_string(),
-            ),
-            (
-                crate::launch::GOOSE_INSTRUCTIONS_ENV_VAR.to_string(),
-                u8::from(enabled && policy.instructions.announces()).to_string(),
-            ),
-            (
-                crate::launch::GOOSE_REPORTER_EXE_ENV_VAR.to_string(),
-                exe.to_string(),
-            ),
-        ],
+        env,
         hooked: enabled,
         log: super::HookLog::Silent,
     }
+}
+
+/// The extra instructions Goose's reporter prints after the pointer: this launch's, only where it prints the pointer
+/// at all (hooks on and instructions announced), as for every other kind.
+fn extra_instructions<'a>(enabled: bool, policy: &HookPolicy<'a>) -> Option<&'a str> {
+    policy
+        .extra_instructions
+        .filter(|_| enabled && policy.instructions.announces())
 }
 
 /// The `--with-extension` value that declares Farhelm's reporter: an MCP

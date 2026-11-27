@@ -1851,6 +1851,7 @@ mod tests {
         let parent = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     prompt: None,
                     named_start: None,
                     github_checkout: None,
@@ -2047,6 +2048,7 @@ mod tests {
         let parent = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     prompt: None,
                     named_start: None,
                     github_checkout: None,

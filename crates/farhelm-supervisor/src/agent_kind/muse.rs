@@ -40,12 +40,18 @@ impl AgentIntegration for MuseIntegration {
             farhelm_proto::text::shell_quote(policy.session_id),
             farhelm_proto::text::shell_quote(socket),
         );
-        // Shell quoting precedes JSON serialization. Only SessionStart carries the instruction pointer.
-        let with_destination = |instructions| {
-            hook_command(hook_exe, instructions, farhelm_proto::ReportVendor::Muse) + &destination
+        // Shell quoting precedes JSON serialization. Only SessionStart carries the instruction pointer and any extra
+        // instructions.
+        let with_destination = |instructions, extra| {
+            hook_command(
+                hook_exe,
+                instructions,
+                extra,
+                farhelm_proto::ReportVendor::Muse,
+            ) + &destination
         };
-        let command = with_destination(policy.instructions);
-        let stop = with_destination(AgentInstructions::Off);
+        let command = with_destination(policy.instructions, policy.extra_instructions);
+        let stop = with_destination(AgentInstructions::Off, None);
         let hooks = serde_json::json!({
             "SessionStart": [{"hooks": [{"type": "command", "command": command, "timeout": 60}]}],
             "Stop": [{"hooks": [{"type": "command", "command": stop, "timeout": 60}]}]
@@ -87,6 +93,7 @@ mod tests {
             codex_endpoint: None,
             session_id: "session-1",
             supervisor_socket: Some("/state path/with'quote\"and\\slash/supervisor.sock"),
+            extra_instructions: None,
         }
     }
 

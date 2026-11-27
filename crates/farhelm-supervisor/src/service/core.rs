@@ -2412,6 +2412,8 @@ struct LaunchRequest {
     /// Transient input applied after placeholder expansion, never persisted
     /// in the session's launch. Pending create retries retain it separately.
     prompt: Option<String>,
+    /// This launch's extra instructions ([`CreateInputs::extra_instructions`]), never persisted.
+    extra_instructions: Option<String>,
     /// Named creates use resume-phase hook policy without storing their selector.
     named: bool,
     /// Direct organizational parentage, persisted verbatim with the child.
@@ -2492,6 +2494,9 @@ struct LaunchRequest {
 pub(crate) struct CreateInputs<'a> {
     pub(crate) setup_persistent_hooks: bool,
     pub(crate) prompt: Option<String>,
+    /// The helm's instructions for this start (`ControlMsg::CreateSession::extra_instructions`). Neither stored nor
+    /// fingerprinted: a retry of an interrupted create takes the retry's own, the helm's current choice.
+    pub(crate) extra_instructions: Option<String>,
     /// One-time start only; the ordinary launch still supplies durable choices.
     pub(crate) named_start: Option<farhelm_proto::NamedConversationStart>,
     pub(crate) cwd: &'a str,
@@ -3035,6 +3040,7 @@ fn with_farhelm_args_using(
     codex_endpoint: Option<&crate::recipe_credentials::CodexEndpoint>,
     supervisor_socket: Option<&str>,
     session: &str,
+    extra_instructions: Option<&str>,
 ) -> FarhelmArgsExpansion {
     let policy = crate::agent_kind::HookPolicy {
         hooks,
@@ -3044,6 +3050,7 @@ fn with_farhelm_args_using(
         codex_endpoint,
         session_id: session,
         supervisor_socket,
+        extra_instructions,
     };
     let FarhelmArgsMode::Expand(phase) = mode else {
         let (argv, hooked, skipped) = legacy_hook_injection(argv, snapshot, &policy);
@@ -3151,6 +3158,7 @@ fn with_hook_argv_using(
         codex_endpoint: None,
         session_id: session,
         supervisor_socket: Some("/state/supervisor.sock"),
+        extra_instructions: None,
     };
     let (argv, hooked, _skipped) = legacy_hook_injection(argv, snapshot, &policy);
     (argv, hooked)
@@ -4139,6 +4147,8 @@ struct RestartWithBundle {
 struct RelaunchPlan {
     /// The helm's current opt-in, independent of the stored launch and the previous run's setup result.
     setup_persistent_hooks: bool,
+    /// The helm's extra instructions for this relaunch (`ControlMsg::RestartSession::extra_instructions`), never stored.
+    extra_instructions: Option<String>,
     /// Withdraw old capture only for a named start without subsequent reports.
     clear_capture: bool,
     argv: Vec<String>,
@@ -8816,6 +8826,10 @@ impl Supervisor {
             CreateInputs {
                 setup_persistent_hooks: false,
                 prompt,
+                // A reconcile resumes a fresh checkout's create from its stored
+                // fingerprint, and the helm's reconcile request carries no
+                // instructions; this one start goes without them.
+                extra_instructions: None,
                 named_start: None,
                 cwd: &requested_cwd,
                 parent,
@@ -9018,6 +9032,7 @@ impl Supervisor {
             CreateInputs {
                 setup_persistent_hooks: false,
                 prompt: None,
+                extra_instructions: None,
                 named_start: None,
                 cwd,
                 parent: None,
@@ -9093,6 +9108,7 @@ impl Supervisor {
         let CreateInputs {
             setup_persistent_hooks,
             prompt,
+            extra_instructions,
             named_start,
             cwd,
             parent,
@@ -9276,6 +9292,7 @@ impl Supervisor {
         Ok(LaunchRequest {
             setup_persistent_hooks,
             prompt,
+            extra_instructions,
             named: named_start.is_some(),
             parent,
             destination,
@@ -9937,6 +9954,8 @@ impl Supervisor {
             Ok(LaunchRequest {
                 setup_persistent_hooks: row.setup_persistent_hooks_on_create,
                 prompt: inputs.prompt,
+                // The retry's own, never the interrupted attempt's: nothing stored them.
+                extra_instructions: inputs.extra_instructions,
                 named: inputs.named_start.is_some(),
                 parent: row.parent,
                 // Fresh origins recover their original resolution; borrowers
@@ -10720,6 +10739,7 @@ impl Supervisor {
         let LaunchRequest {
             setup_persistent_hooks,
             prompt,
+            extra_instructions,
             named,
             parent,
             cwd,
@@ -11558,6 +11578,7 @@ impl Supervisor {
                 // a new host with the history it keeps.
                 None,
                 setup_persistent_hooks,
+                extra_instructions.as_deref(),
             )
             .await
         {
@@ -12306,6 +12327,7 @@ impl Supervisor {
             expected_launch,
             None,
             Default::default(),
+            None,
         )
         .await
     }
@@ -12314,6 +12336,7 @@ impl Supervisor {
     ///
     /// Only the captured-target proofs are bypassed. Launch compatibility,
     /// lifecycle ownership, stop consent and directory identity remain checked.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn restart_session_named(
         self: &Arc<Self>,
         session_id: &str,
@@ -12322,6 +12345,7 @@ impl Supervisor {
         expected_launch: Option<SessionLaunch>,
         named_start: Option<farhelm_proto::NamedConversationStart>,
         setup_persistent_hooks: farhelm_proto::PersistentHookOptIns,
+        extra_instructions: Option<String>,
     ) -> anyhow::Result<SessionInfo> {
         if let Some(launch) = &restart_with {
             validate_restart_with(launch)?;
@@ -12760,6 +12784,7 @@ impl Supervisor {
                 &snapshot,
                 RelaunchPlan {
                     setup_persistent_hooks: setup_persistent_hooks.allows(snapshot.kind),
+                    extra_instructions,
                     clear_capture,
                     argv,
                     launch_cwd,
@@ -12829,6 +12854,7 @@ impl Supervisor {
     ) -> anyhow::Result<SessionInfo> {
         let RelaunchPlan {
             setup_persistent_hooks,
+            extra_instructions,
             clear_capture,
             argv,
             launch_cwd,
@@ -12989,6 +13015,7 @@ impl Supervisor {
                 launch_cwd,
                 seed,
                 setup_persistent_hooks,
+                extra_instructions.as_deref(),
             )
             .await;
         match relaunched {
@@ -13231,6 +13258,7 @@ impl Supervisor {
         launch_cwd: String,
         seed: Option<host_restart::RestartSeed>,
         setup_persistent_hooks: bool,
+        extra_instructions: Option<&str>,
     ) -> Result<SessionInfo, RelaunchFailure> {
         // The tab strip as it is before any side effect: the reply reports
         // it, since a Restart leaves the tabs as they are.
@@ -13249,6 +13277,7 @@ impl Supervisor {
             tabs,
             seed,
             setup_persistent_hooks,
+            extra_instructions,
         )
         .await
     }
@@ -14518,6 +14547,7 @@ impl Supervisor {
         codex_endpoint: Option<&crate::recipe_credentials::CodexEndpoint>,
         supervisor_socket: &Path,
         session: &str,
+        extra_instructions: Option<&str>,
     ) -> FarhelmArgsExpansion {
         with_farhelm_args_using(
             argv,
@@ -14530,6 +14560,7 @@ impl Supervisor {
             codex_endpoint,
             supervisor_socket.to_str(),
             session,
+            extra_instructions,
         )
     }
 
@@ -14610,6 +14641,7 @@ impl Supervisor {
         initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
         setup_persistent_hooks: bool,
         codex_endpoint: Option<&crate::recipe_credentials::CodexEndpoint>,
+        extra_instructions: Option<&str>,
     ) -> anyhow::Result<PreparedLaunch> {
         // Start and Restart share this boundary, but a refusal must name the
         // field the user can correct, including when an old row reaches spawn.
@@ -14699,6 +14731,7 @@ impl Supervisor {
             codex_endpoint,
             &supervisor_sock,
             id,
+            extra_instructions,
         );
         // The message is literal user data, including whole arguments that
         // resemble {cwd} or {farhelm_args}. Append it only after both fills;
@@ -16779,6 +16812,7 @@ pub(crate) mod tests {
                     None,
                     false,
                     None,
+                    None,
                 )
                 .await
                 .expect("the fixture must reach spec publication");
@@ -16817,6 +16851,7 @@ pub(crate) mod tests {
                     None,
                     None,
                     false,
+                    None,
                     None,
                 )
                 .await;
@@ -16932,6 +16967,52 @@ pub(crate) mod tests {
         );
     }
 
+    /// Extra instructions are this launch's only: never stored, never fingerprinted, so a retry of an interrupted
+    /// create starts with the helm's current choice (the retry's own) instead of being refused as a changed request
+    /// because blocked alerts were switched in between. Specified: against a pending reservation for a create with a
+    /// prompt, retries carrying the same prompt with no, one, and another extra instruction are each accepted and
+    /// recover the retry's own extra instruction.
+    #[farhelm_testtrace::test]
+    async fn a_retry_takes_its_own_extra_instructions_and_is_not_refused_for_them() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let cwd = state.path().join("work");
+        std::fs::create_dir(&cwd).unwrap();
+        let cwd = cwd.to_str().unwrap();
+        let digest = "e".repeat(64);
+        let reservation = Reservation {
+            intent_key: "instructions-key".into(),
+            fingerprint: agent_create_fingerprint(&digest, Some("first message")),
+            session_id: "interrupted".into(),
+            dedup_scope: DedupScope::Permanent,
+            outcome: ReservationOutcome::Pending,
+        };
+        for extra in [None, Some("tell the user"), Some("something else")] {
+            let recovered = sup
+                .validate_retry(
+                    CreateInputs {
+                        extra_instructions: extra.map(str::to_owned),
+                        setup_persistent_hooks: false,
+                        prompt: Some("first message".into()),
+                        named_start: None,
+                        cwd,
+                        parent: None,
+                        github_checkout: None,
+                        launch: named_test_launch(),
+                        title: None,
+                        cols: 80,
+                        rows: 24,
+                    },
+                    &reservation,
+                )
+                .await
+                .unwrap_or_else(|error| panic!("{extra:?} refused: {error:#}"));
+            assert_eq!(recovered.extra_instructions.as_deref(), extra);
+        }
+    }
+
     /// A prompt is create-only data, including on pending recovery. A changed
     /// template must not substitute a different first message after a crash;
     /// completed replay and deleted-key identity still follow the original request.
@@ -16967,6 +17048,7 @@ pub(crate) mod tests {
         };
         assert!(sup.store.session("interrupted").await.unwrap().is_none());
         let inputs = |prompt: &str| CreateInputs {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: Some(prompt.into()),
             named_start: None,
@@ -17056,6 +17138,7 @@ pub(crate) mod tests {
                     None,
                     prompt.map(|text| (LaunchHarness::Claude, text)),
                     false,
+                    None,
                     None,
                 )
                 .await
@@ -17167,6 +17250,7 @@ pub(crate) mod tests {
             "fixture binds the original named request"
         );
         let inputs = CreateInputs {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: Some(named.clone()),
@@ -17794,6 +17878,7 @@ pub(crate) mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -20903,6 +20988,7 @@ pub(crate) mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -20958,6 +21044,7 @@ pub(crate) mod tests {
                     None,
                     named,
                     Default::default(),
+                    None,
                 )
                 .await
             }
@@ -21140,6 +21227,7 @@ pub(crate) mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -21217,6 +21305,7 @@ pub(crate) mod tests {
                 None,
                 Some(named.clone()),
                 Default::default(),
+                None,
             )
             .await
             .expect("named restart with a healthy reporter");
@@ -21285,6 +21374,7 @@ pub(crate) mod tests {
                 None,
                 Some(named.clone()),
                 Default::default(),
+                None,
             )
             .await
             .expect_err("the launch-spec collision must abort the named restart");
@@ -21327,6 +21417,7 @@ pub(crate) mod tests {
             None,
             Some(named),
             Default::default(),
+            None,
         )
         .await
         .expect("named restart succeeds after removing the obstruction");
@@ -25412,6 +25503,7 @@ exit 1
                 None,
                 None,
                 false,
+                None,
             ),
             async {
                 // Panics in here are caught, never left to unwind
@@ -27078,6 +27170,7 @@ exit 1
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -28005,6 +28098,7 @@ exit 1
         let created = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -28060,6 +28154,7 @@ exit 1
         let refused = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -28294,6 +28389,7 @@ exit 1
         let refusal = sup
             .create_session_admitted(
                 CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: Some(retry_prompt.into()),
                     named_start: None,
@@ -28408,6 +28504,7 @@ exit 1
             .expect("supervisor");
         let refusal = match sup
             .validate_create(CreateInputs {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -28475,6 +28572,7 @@ exit 1
         };
         assert!(sup.store.load_all().await.unwrap().is_empty());
         let inputs = CreateInputs {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
@@ -28518,6 +28616,7 @@ exit 1
             .expect("supervisor");
         let refusal = match sup
             .validate_create(CreateInputs {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -28568,6 +28667,7 @@ exit 1
             .expect("supervisor");
         let resolved = sup
             .validate_create(CreateInputs {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -28640,6 +28740,7 @@ exit 1
             let created = sup
                 .create_session(
                     CreateInputs {
+                        extra_instructions: None,
                         setup_persistent_hooks: false,
                         prompt: None,
                         named_start: None,
@@ -28744,6 +28845,7 @@ exit 1
         let mut tasks = tokio::task::JoinSet::new();
         let launch_dir = state.path().join("launch");
         let request = |req_id: u64, yolo: bool| ControlMsg::CreateSession {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
@@ -29125,6 +29227,7 @@ exit 1
         let other = "b".repeat(64);
         let request = |req_id: u64, command: &str, key: Option<&str>, digest: &str| {
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -29836,6 +29939,7 @@ exit 1
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -29890,6 +29994,7 @@ exit 1
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -29955,6 +30060,7 @@ exit 1
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -30036,6 +30142,7 @@ exit 1
         let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         let request = |req_id: u64, title: &str| ControlMsg::CreateSession {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
@@ -30778,6 +30885,7 @@ exit 1
         let created = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -31246,6 +31354,7 @@ exit 1
         let reply = sup
             .launch_reserved(
                 LaunchRequest {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named: false,
@@ -31529,6 +31638,7 @@ exit 1
             .expect("supervisor");
         let create = match sup
             .validate_create(CreateInputs {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -31841,6 +31951,7 @@ exit 1
                     codex_endpoint: None,
                     session_id: "session-1",
                     supervisor_socket: Some("/state/supervisor.sock"),
+                    extra_instructions: None,
                 },
             )
             .expect("the test supplies its hook destination")
@@ -31883,6 +31994,7 @@ exit 1
                 None,
                 Some("/state/supervisor.sock"),
                 "session-1",
+                None,
             )
             .3
         };
@@ -31996,6 +32108,7 @@ exit 1
                 None,
                 Some("/state/supervisor.sock"),
                 "session-1",
+                None,
             );
             (argv, env, hooked)
         };
@@ -32012,6 +32125,11 @@ exit 1
                 (
                     crate::launch::GOOSE_REPORTER_EXE_ENV_VAR.to_string(),
                     "/opt/farhelm".to_string(),
+                ),
+                // Always set, empty: these launches carry no extra instructions.
+                (
+                    crate::launch::GOOSE_EXTRA_INSTRUCTIONS_ENV_VAR.to_string(),
+                    String::new(),
                 ),
             ]
         };
@@ -32054,6 +32172,7 @@ exit 1
                 None,
                 Some("/state/supervisor.sock"),
                 "session-1",
+                None,
             );
             assert_eq!(expanded, around("codex", vec!["--no-daemon".to_string()]));
             assert_eq!(shell_arguments, ["--no-daemon"]);
@@ -32237,6 +32356,7 @@ exit 1
                 "FARHELM_GOOSE_REPORTER_ENABLED=1",
                 "FARHELM_GOOSE_INSTRUCTIONS=1",
                 "FARHELM_GOOSE_REPORTER_EXE=/opt/farhelm",
+                "FARHELM_GOOSE_EXTRA_INSTRUCTIONS=",
                 "GOOSE_MODE=auto",
                 "GOOSE_THINKING_EFFORT=off",
                 "goose",
@@ -32274,6 +32394,7 @@ exit 1
                 "FARHELM_GOOSE_REPORTER_ENABLED=0",
                 "FARHELM_GOOSE_INSTRUCTIONS=0",
                 "FARHELM_GOOSE_REPORTER_EXE=/opt/farhelm",
+                "FARHELM_GOOSE_EXTRA_INSTRUCTIONS=",
                 "goose",
                 "session",
                 "--resume",
@@ -32301,7 +32422,7 @@ exit 1
             "session-1",
         );
         assert!(hooked);
-        assert_eq!(injected[4..6], ["goose", "session"]);
+        assert_eq!(injected[5..7], ["goose", "session"]);
 
         let shaped = ["goose", "session", "--system", "--resume"]
             .map(str::to_string)
@@ -33501,6 +33622,7 @@ exit 1
         let info = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -33685,6 +33807,7 @@ exit 1
                 checkout.preview.cwd = preview.cwd.clone();
                 let launch = sup
                     .validate_create(CreateInputs {
+                        extra_instructions: None,
                         setup_persistent_hooks: false,
                         prompt: None,
                         named_start: None,
@@ -33748,6 +33871,7 @@ exit 1
             checkout.preview.cwd = preview.cwd.clone();
             let launch = sup
                 .validate_create(CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -34485,6 +34609,7 @@ exit 1
         };
         let sup = checkout_crash_supervisor(&state, CreateStage::AfterRecord).await;
         let inputs = || CreateInputs {
+            extra_instructions: None,
             setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
@@ -34893,6 +35018,7 @@ exit 1
     ) -> anyhow::Result<SessionInfo> {
         sup.create_session(
             CreateInputs {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -34929,6 +35055,7 @@ exit 1
     ) -> anyhow::Result<SessionInfo> {
         sup.create_session(
             CreateInputs {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
@@ -38309,6 +38436,7 @@ exit 1
                 &entry,
                 &snapshot,
                 RelaunchPlan {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     clear_capture: false,
                     argv: vec!["sh".into(), "-c".into(), "exit 0".into()],
@@ -38363,6 +38491,7 @@ exit 1
         let origin = sup
             .create_session(
                 CreateInputs {
+                    extra_instructions: None,
                     setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
@@ -38726,6 +38855,7 @@ exit 1
             let refusal = sup
                 .create_session(
                     CreateInputs {
+                        extra_instructions: None,
                         setup_persistent_hooks: false,
                         prompt: None,
                         named_start: None,

@@ -17,7 +17,7 @@
 //!   field: `DraftInput::save` sends and settles only its own field, so one whole-form save cannot be built from three
 //!   of them. That is a deliberate exception to the rule of one `DraftInput` per explicitly saved field, decided by the
 //!   migration's settings-and-hosts area on 2026-11-14, until a second whole-form save makes it worth lifting into
-//!   `drafts.rs`. The three text fields are bound to the draft here instead: an edit goes into the draft (refused, and
+//!   `drafts.rs`. The text fields are bound to the draft here instead: an edit goes into the draft (refused, and
 //!   the field put back, while the save is in flight), and the fields are read-only while it is. The token field is
 //!   also read-only while Clear saved token is on, as the old one was.
 //! - **The token is write-only.** The helm never returns it; the form shows whether one is saved (`token_set`) and
@@ -41,7 +41,7 @@
 //! The Sounds card above this form has four switches. Each writes its own preference immediately.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
-use farhelm_proto::ntfy::{Priority, SaveSettings, Settings};
+use farhelm_proto::ntfy::{DEFAULT_BLOCKED_CRITERIA, Priority, SaveSettings, Settings};
 use farhelm_proto::{LaunchHarness, WaitingAlertSupport};
 use gpui::{
     AnyWindowHandle, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -95,6 +95,8 @@ struct Form {
     enabled: bool,
     notify_waiting: bool,
     notify_blocked: bool,
+    /// What counts as blocked, as typed; empty means Farhelm's default ([`DEFAULT_BLOCKED_CRITERIA`]).
+    criteria: String,
     server_url: String,
     topic: String,
     priority: Priority,
@@ -109,6 +111,7 @@ impl Form {
             enabled: stored.enabled,
             notify_waiting: stored.notify_waiting,
             notify_blocked: stored.notify_blocked,
+            criteria: stored.custom_blocked_criteria.clone().unwrap_or_default(),
             server_url: stored.server_url.clone(),
             topic: stored.topic.clone(),
             priority: stored.priority,
@@ -133,6 +136,9 @@ impl Form {
             token,
             notify_waiting: Some(self.notify_waiting),
             notify_blocked: Some(self.notify_blocked),
+            // Always sent, so emptying the field is how Save goes back to the default: the helm reads text that
+            // normalizes to nothing as "use Farhelm's".
+            custom_blocked_criteria: Some(self.criteria.clone()),
         }
     }
 
@@ -219,6 +225,26 @@ fn and_list(names: &[&str]) -> String {
 pub(super) const BLOCKED_HELP: &str = "Sent when an agent runs farhelm agent notify. The Notifications bell lists \
      these whether or not this is on.";
 
+/// The criteria field's help: what it is for and what leaving it empty does.
+pub(super) const CRITERIA_HELP: &str = "Your own description of when an agent should tell you it is blocked; leave it \
+     empty to use Farhelm's, shown below";
+
+/// What the blocked switch asks of the agents Farhelm starts, worded from each built-in agent's
+/// `AgentKind::supports_instruction_injection` (pinned by the supervisor against what each launch actually carries), so
+/// the list cannot drift from the agents that really get the instruction.
+pub(super) fn blocked_agents() -> String {
+    let named: Vec<&'static str> = LaunchHarness::BUILT_INS
+        .iter()
+        .filter(|harness| harness.agent_kind().supports_instruction_injection())
+        .map(|harness| harness.display_name())
+        .collect();
+    format!(
+        "Farhelm asks {} to run it when they are blocked, in sessions started or restarted after you save. Other \
+         agents only do so if you tell them to.",
+        and_list(&named)
+    )
+}
+
 /// The line beside Send test when the saved settings would make a test mislead: one that arrives proves the server and
 /// topic, not that alerts are on. A maintainer's test passed while no real alert ever came (the plan
 /// `agent-blocked-notifications`), so the form now says what the saved settings do.
@@ -229,16 +255,20 @@ pub(super) const OFF_LINE: &str = "ntfy alerts are off, so none are sent. Send t
 /// [`UNSAVED_LINE`]'s counterpart for saved settings with the waiting switch off.
 pub(super) const WAITING_OFF_LINE: &str = "Waiting-for-answer alerts are off. Send test still sends one, but nothing is sent when a session waits.";
 
-/// The form's three text fields, each bound to its part of the [`Form`].
+/// The form's text fields, each bound to its part of the [`Form`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Field {
     Server,
     Topic,
     Token,
+    /// What counts as blocked, drawn under the blocked switch rather than with the connection fields.
+    Criteria,
 }
 
 impl Field {
-    pub(super) const ALL: [Field; 3] = [Field::Server, Field::Topic, Field::Token];
+    /// In drawing order, which Settings search lists its results in: the criteria field sits under the blocked
+    /// switch, above the connection fields.
+    pub(super) const ALL: [Field; 4] = [Field::Criteria, Field::Server, Field::Topic, Field::Token];
 
     /// The text input drawn for this field.
     pub(super) fn input(self, alerts: &NtfyAlerts) -> &TextInputState {
@@ -246,6 +276,7 @@ impl Field {
             Field::Server => &alerts.server,
             Field::Topic => &alerts.topic,
             Field::Token => &alerts.token,
+            Field::Criteria => &alerts.criteria,
         }
     }
 
@@ -263,6 +294,11 @@ impl Field {
                 "Topic to publish alerts to; subscribe to the same topic in your ntfy client",
             ),
             Self::Token => ("ntfy-token", "Access token (optional)", TOKEN_HELP),
+            Self::Criteria => (
+                "ntfy-blocked-criteria",
+                "What counts as blocked (optional)",
+                CRITERIA_HELP,
+            ),
         }
     }
 
@@ -273,6 +309,7 @@ impl Field {
             Field::Server => &mut form.server_url,
             Field::Topic => &mut form.topic,
             Field::Token => &mut form.token,
+            Field::Criteria => &mut form.criteria,
         }
     }
 }
@@ -335,6 +372,8 @@ pub(super) struct NtfyAlerts {
     server: TextInputState,
     topic: TextInputState,
     token: TextInputState,
+    /// What counts as blocked: a growing box, since criteria can run to a few sentences.
+    criteria: TextInputState,
     /// Whether the last save was done; its line shows until the next edit touches the form, or a test starts.
     saved: bool,
     /// Whether Send test is out; the form is locked meanwhile.
@@ -355,6 +394,7 @@ impl NtfyAlerts {
         let server = TextInputState::new(window, cx);
         let topic = TextInputState::new(window, cx);
         let token = TextInputState::new_masked(window, cx);
+        let criteria = TextInputState::new_growing(4, window, cx);
         let mut alerts = NtfyAlerts {
             save_receipt: super::editing::SaveReceipt::default(),
             enabled_focus: cx.focus_handle().tab_stop(true),
@@ -368,6 +408,7 @@ impl NtfyAlerts {
             server,
             topic,
             token,
+            criteria,
             saved: false,
             testing: false,
             tested: None,
@@ -430,7 +471,7 @@ impl NtfyAlerts {
         cx.notify();
     }
 
-    /// Set the three text fields to the draft's values. Setting a field raises no change event, so this is not an edit.
+    /// Set the text fields to the draft's values. Setting a field raises no change event, so this is not an edit.
     fn fill(&self, window: &mut Window, cx: &mut App) {
         let mut form = self.form.value().clone();
         for field in Field::ALL {
@@ -471,7 +512,7 @@ impl NtfyAlerts {
     fn hold(&self, cx: &mut App) {
         for field in Field::ALL {
             let held = match field {
-                Field::Server | Field::Topic => self.locked(),
+                Field::Server | Field::Topic | Field::Criteria => self.locked(),
                 Field::Token => self.locked() || self.form.value().clear,
             };
             field.input(self).set_read_only(held, cx);
@@ -711,15 +752,65 @@ impl NtfyAlerts {
         .height(px(choices::FIELD_HEIGHT));
         let input = match field {
             Field::Server => input.monospace(),
-            Field::Topic | Field::Token => input,
+            Field::Topic | Field::Token | Field::Criteria => input,
         };
         let form = self.form.value();
         let edited = self.stored.as_ref().is_some_and(|stored| match field {
             Field::Server => form.server_url != stored.server_url,
             Field::Topic => form.topic != stored.topic,
             Field::Token => !form.token.is_empty(),
+            // Compared as the helm will store it, so retyped spacing is not an edit.
+            Field::Criteria => farhelm_proto::ntfy::normalize_blocked_criteria(&form.criteria)
+                .map_or(true, |normalized| {
+                    normalized != stored.custom_blocked_criteria
+                }),
         });
         choices::field_with_caption(id, input, card::caption(label, edited, palette))
+    }
+
+    /// What counts as blocked, under the blocked switch: the field, then Farhelm's own wording read-only while the
+    /// field is empty, so the user sees what agents are told without the box being filled with a copy of it (the
+    /// stored choice stays "Farhelm's default", which follows later changes to that wording); or, once they have typed
+    /// their own, a Reset to default that empties the field.
+    fn criteria_row(&self, palette: &theme::Palette, cx: &Context<Self>) -> Div {
+        let row =
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(self.field(Field::Criteria, None, palette));
+        if self.form.value().criteria.trim().is_empty() {
+            return row.child(
+                card::help(
+                    "ntfy-default-criteria",
+                    format!("Farhelm's default: {DEFAULT_BLOCKED_CRITERIA}"),
+                    cx,
+                )
+                .min_w_0(),
+            );
+        }
+        let weak = cx.weak_entity();
+        row.child(
+            div().flex().child(
+                Button::new(
+                    "ntfy-criteria-reset",
+                    "Reset to default",
+                    HoverHelp::tooltip(
+                        "Empty the field so agents get Farhelm's own wording; Save applies it",
+                    ),
+                    Role::Button,
+                )
+                .tier(Tier::Neutral)
+                .disabled(self.locked())
+                .on_click(move |_, window, cx| {
+                    let _ = weak.update(cx, |alerts, cx| {
+                        if alerts.edit(|form| form.criteria.clear(), cx) {
+                            alerts.criteria.set_text(String::new(), window, cx);
+                        }
+                    });
+                }),
+            ),
+        )
     }
 
     /// A switch with its words, toggling through this form.
@@ -747,7 +838,11 @@ impl NtfyAlerts {
                 waiting_agents(),
                 cx,
             )),
-            Switch::Blocked => card::switch_copy(caption, BLOCKED_HELP, cx),
+            Switch::Blocked => card::switch_copy(caption, BLOCKED_HELP, cx).child(card::help(
+                "ntfy-blocked-agents",
+                blocked_agents(),
+                cx,
+            )),
         };
         div().child(
             Checkbox::new(id, label, HoverHelp::tooltip(help), Role::Switch)
@@ -1004,6 +1099,7 @@ impl Render for NtfyAlerts {
                         |form, on| form.notify_blocked = on,
                         cx,
                     ),
+                    self.criteria_row(palette, cx),
                     fields,
                     self.switch(
                         Switch::ClearToken,
@@ -1064,6 +1160,24 @@ mod tests {
             "Goose", "Pi", "Cursor", "Bash", "Zsh", "OMP", "Grok", "OpenCode",
         ] {
             assert!(!named.contains(&absent), "{absent} in {words}");
+        }
+    }
+
+    /// The blocked switch says which agents Farhelm asks to notify, from the same answer the supervisor's delivery is
+    /// pinned to. Specified: Claude Code, Codex, Muse Code, Goose, Pi and OMP are named; Cursor, Grok, Antigravity,
+    /// OpenCode and the shells are not.
+    #[test]
+    fn the_blocked_switch_names_the_agents_that_get_the_instruction() {
+        let words = blocked_agents();
+        for named in ["Claude Code", "Codex", "Muse Code", "Goose", "Pi", "OMP"] {
+            assert!(words.contains(named), "{named} missing from {words}");
+        }
+        let listed: Vec<&str> = words
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .collect();
+        for absent in ["Cursor", "Grok", "Antigravity", "OpenCode", "Bash", "Zsh"] {
+            assert!(!listed.contains(&absent), "{absent} in {words}");
         }
     }
 

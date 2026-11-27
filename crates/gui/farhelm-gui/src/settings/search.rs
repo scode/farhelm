@@ -415,6 +415,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                         ntfy::Field::Server => &[],
                         ntfy::Field::Topic => &[ntfy::TOPIC_HELP],
                         ntfy::Field::Token => &[ntfy::TOKEN_CHANGED_HELP, ntfy::TOKEN_CLEAR_HELP],
+                        ntfy::Field::Criteria => &[ntfy::BLOCKED_HELP],
                     };
                     entries.push(Entry::new(
                         section.clone(),

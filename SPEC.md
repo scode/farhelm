@@ -2864,38 +2864,41 @@ announcements** is on by default on macOS and Linux. Turning it off stops the he
 announcement feed. The switch is searchable and shared by windows on this helm. **ntfy alerts** has an off-by-default
 **Enable ntfy alerts** switch, under which an **Agent is waiting for an answer** switch (on by default, including for
 settings saved before it existed) chooses the waiting alert, and an off-by-default **Agent is blocked** switch chooses
-the alert an agent sends with `farhelm agent notify`. The form also has a server URL (default `https://ntfy.sh`), a
-topic, an optional access token, and a priority (Min, Low, Default, High, Urgent; default Default). The waiting switch
-says which agents it covers, worded from what Farhelm can read on each built-in agent's screen: questions and approvals
-for some, only the folder-trust question for others, none for the rest. These ntfy settings are explicitly saved helm
-configuration, shared by every client, outside the preference row. Save refusals appear inline. The stored token is
-never returned: the form shows whether one exists and allows replacing or clearing it. Changing to another server clears
-a saved token unless a new one is entered, and the form says so before saving. **Send test** uses the saved
-configuration, even while disabled, and reports success or failure inline. Because a test that arrives proves only the
-server and topic, a line beside it says when the form has unsaved changes (alerts and the test still use the saved
-settings), when the saved master switch is off, or when the saved waiting switch is off. The **Checkouts** section holds
-the explicitly saved **Default checkout folder** and, below it, a monospace multi-line post-clone command field and the
-default-on **Keep a checkout ready for faster launches** switch (see [Managed checkouts](#managed-checkouts)). The
-switch's help explains one extra checkout's disk space per repository and host, promptless login-shell preparation,
-earlier file times and Git hooks/filters, and discard on the next create or after 30 days unused; it links the full
-earlier-clone caveats. The folder's help explains expansion on each host, first-use folder creation, and that the
-default applies to hosts without their own folder, set in each host's settings. The command's help explains that it runs
-in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts only,
-and that command-line host overrides keep their command. When the updater is active, the desktop app's dialog also has
-an **App** section. It shows the running version and a **Check for updates** button above the switch for installing
-updates automatically (see [Installation and updates](#installation-and-updates)). Automatic updates are a setting of
-that app installation. On an installed stable Mac release, App also offers **Show what's new after updates**, on by
-default. The helm shares that choice and the last shown or skipped release with the window. The two host confirmation
-choices apply to every host and client of this helm; existing controls with a natural place in the main UI stay there.
-No client keeps its own copy: the helm pushes its preferences to the window when it connects and whenever they change,
-and the window writes one on change, so a window opens in the same order and on the same session after a reconnect as
-before it. Per-client persistence — a desktop state file, anything that lets two clients remember different answers — is
-not wanted for these shared preferences, including Announcements and upgrade highlights dismissals and the host rail's
-expansion. The sound switches are among these shared preferences: the maintainer decided on 2026-11-13 that they are
-helm preferences rather than per-device ones (see Status). A client that asks the helm for no particular order gets
-creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
-does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
-`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
+the alert an agent sends with `farhelm agent notify`, names the agents Farhelm asks to send it, and holds an optional
+**What counts as blocked** field, with Farhelm's own wording shown under it while it is empty and **Reset to default**
+once the user has typed their own (see the agent instructions below). The form also has a server URL (default
+`https://ntfy.sh`), a topic, an optional access token, and a priority (Min, Low, Default, High, Urgent; default
+Default). The waiting switch says which agents it covers, worded from what Farhelm can read on each built-in agent's
+screen: questions and approvals for some, only the folder-trust question for others, none for the rest. These ntfy
+settings are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals
+appear inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing
+it. Changing to another server clears a saved token unless a new one is entered, and the form says so before saving.
+**Send test** uses the saved configuration, even while disabled, and reports success or failure inline. Because a test
+that arrives proves only the server and topic, a line beside it says when the form has unsaved changes (alerts and the
+test still use the saved settings), when the saved master switch is off, or when the saved waiting switch is off. The
+**Checkouts** section holds the explicitly saved **Default checkout folder** and, below it, a monospace multi-line
+post-clone command field and the default-on **Keep a checkout ready for faster launches** switch (see
+[Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
+host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
+after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
+first-use folder creation, and that the default applies to hosts without their own folder, set in each host's settings.
+The command's help explains that it runs in each new checkout on its host, after cloning and before the agent starts,
+that changes affect future checkouts only, and that command-line host overrides keep their command. When the updater is
+active, the desktop app's dialog also has an **App** section. It shows the running version and a **Check for updates**
+button above the switch for installing updates automatically (see
+[Installation and updates](#installation-and-updates)). Automatic updates are a setting of that app installation. On an
+installed stable Mac release, App also offers **Show what's new after updates**, on by default. The helm shares that
+choice and the last shown or skipped release with the window. The two host confirmation choices apply to every host and
+client of this helm; existing controls with a natural place in the main UI stay there. No client keeps its own copy: the
+helm pushes its preferences to the window when it connects and whenever they change, and the window writes one on
+change, so a window opens in the same order and on the same session after a reconnect as before it. Per-client
+persistence — a desktop state file, anything that lets two clients remember different answers — is not wanted for these
+shared preferences, including Announcements and upgrade highlights dismissals and the host rail's expansion. The sound
+switches are among these shared preferences: the maintainer decided on 2026-11-13 that they are helm preferences rather
+than per-device ones (see Status). A client that asks the helm for no particular order gets creation time. No mandatory
+hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
+implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
+`farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -4587,15 +4590,29 @@ be documented. Another accepted limitation is a custom Codex command that cannot
 follow the support window under "Supported user environments" rather than getting compatibility code.
 
 The other exception is farhelm's own, and it is deliberate rather than tolerated: on a launch that gets the hook, the
-hook prints exactly one line for the AGENT to read — that `$farhelm <request>` in the user's message means "use the
-`farhelm agent` CLI", and that `farhelm agent instructions` explains the rest. Nothing reaches the user's terminal and
-nothing is written to disk. It is on by default, because an agent that has never heard of the CLI will not go looking
-for it, and `FARHELM_AGENT_INSTRUCTIONS=off` in the supervisor's environment removes it while leaving identity capture
-exactly as it was. A launch with no hook has no pointer either, for the plain reason that there is nothing to print it.
-The instructions themselves are printed only when that command is run, so a session where the user never mentions
-farhelm pays one line and nothing more. Farhelm's Grok and Antigravity hooks omit `--announce` because they also run
-outside Farhelm. Both integrations leave out the instructions pointer. Antigravity always receives an empty JSON object
-and a newline on stdout, including when reporting fails.
+hook prints exactly one line for the AGENT to read (and, while blocked alerts are on, the blocked-agent instruction
+after it; see below) — that `$farhelm <request>` in the user's message means "use the `farhelm agent` CLI", and that
+`farhelm agent instructions` explains the rest. Nothing reaches the user's terminal and nothing is written to disk. It
+is on by default, because an agent that has never heard of the CLI will not go looking for it, and
+`FARHELM_AGENT_INSTRUCTIONS=off` in the supervisor's environment removes it while leaving identity capture exactly as it
+was. A launch with no hook has no pointer either, for the plain reason that there is nothing to print it. The
+instructions themselves are printed only when that command is run, so a session where the user never mentions farhelm
+pays the pointer line (and, while blocked alerts are on, the blocked-agent instruction) and nothing more. Farhelm's Grok
+and Antigravity hooks omit `--announce` because they also run outside Farhelm. Both integrations leave out the
+instructions pointer. Antigravity always receives an empty JSON object and a newline on stdout, including when reporting
+fails.
+
+While ntfy alerts and their **Agent is blocked** switch are on, sessions started or restarted from then on also get the
+blocked-agent instruction after the pointer, wherever the pointer is delivered (Claude, Codex, Muse, Goose, Pi and OMP;
+the blocked switch names them, from the same list the supervisor's delivery is tested against): if the agent is going to
+stop without finishing what the user asked because it is blocked, it should not stop silently but run
+`farhelm agent notify` first. It is not a request to try harder. "What counts as blocked" follows, either Farhelm's own
+wording or, if the user wrote their own in Settings, theirs; the stored choice is "Farhelm's" or "mine", so a
+configuration that never chose follows later changes to Farhelm's wording. `FARHELM_AGENT_INSTRUCTIONS=off` withholds it
+with the pointer. Running sessions keep what they started with until their next Restart, and the instruction is never
+stored with a session. One start goes without it: a GitHub checkout create that Farhelm finishes after an interruption,
+from what it recorded before. Settings shows Farhelm's wording read-only under the empty criteria field, with Reset to
+default once the user has typed their own.
 
 Muse's `SessionStart` hook receives that pointer as developer context; its `Stop` hook omits the announcement. The
 observed Muse 1.4.14 hooks printed nothing on the terminal on success or failure, so no vendor-output exception is

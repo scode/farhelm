@@ -92,6 +92,11 @@ impl Config {
                 notify_blocked: save
                     .notify_blocked
                     .unwrap_or(previous.settings.notify_blocked),
+                custom_blocked_criteria: match save.custom_blocked_criteria {
+                    // An older client's save omits it and keeps the stored choice.
+                    None => previous.settings.custom_blocked_criteria,
+                    Some(text) => farhelm_proto::ntfy::normalize_blocked_criteria(&text)?,
+                },
             },
             token,
         })

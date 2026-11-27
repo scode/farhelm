@@ -1141,6 +1141,7 @@ async fn restricted_raw_data_is_refused() {
     ] {
         let raw_reply = peer
             .control(ControlMsg::CreateSession {
+                extra_instructions: None,
                 setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
