@@ -6545,10 +6545,14 @@ because builds bill. The Tensorlake build and preparation details below remain a
 
 Rebuild is a required provider operation that returns after admission or joining. It reads the current definition. A
 Podman Rebuild refuses as busy when a preparation-only job holds that recipe/place, so joining cannot claim a rebuild
-that never ran. Readiness is a synchronous projection over shared recipe state and the one build registry, with the same
-freshness rule for both providers and an exhaustive place decision. A Podman place job bumps the fleet feed when it is
-admitted, at each step, and once its registry entry is gone, so the pushed recipe places never show a finished job still
-building.
+that never ran. Every Podman preparation, launch or Rebuild, runs the fresh place check before it writes recipe state.
+Its first write is bound to the host entry's settings and the place claim that passed that check, not to a new lookup of
+the host. A failure is stored only in an existing recipe entry for the place. Otherwise the build registry keeps it in
+memory until the next job there or the recipe's Delete, and Settings shows it from there, so a refused check never
+creates an empty build record. Readiness is a synchronous projection over shared recipe state and the one build
+registry, with the same freshness rule for both providers and an exhaustive place decision. A Podman place job bumps the
+fleet feed when it is admitted, at each step, and once its registry entry is gone, so the pushed recipe places never
+show a finished job still building.
 
 Recipe deletion first takes the shared registry's deletion admission, excluding new builds, preparations and source
 selection for every provider. Each provider cleans all its recorded and live places under that guard. Cleanup waits for

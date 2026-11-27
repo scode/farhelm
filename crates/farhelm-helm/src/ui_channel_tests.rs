@@ -3287,6 +3287,74 @@ async fn an_open_channel_follows_the_stored_order_until_the_gui_names_one() {
     );
 }
 
+/// Why this matters: a container host that fails its Podman check usually has
+/// an unavailable reason, and Settings hides such a place's card for a recipe
+/// that other providers can also run unless the place has state worth
+/// showing. A refused first Rebuild now leaves its reason only in the build
+/// registry, not in a recipe entry, so without counting that failure the card
+/// carrying the reason would never appear.
+///
+/// Specification: with shared recipe `dev`'s card at the unchecked local
+/// place hidden, a failure the registry keeps for that place (as a refused
+/// admission leaves it, with no recipe entry) shows the card with that
+/// failure as its reason. Admitting the recipe's Delete clears it and hides
+/// the card again, and a job failing while that Delete runs (one the Delete
+/// cancelled, say) leaves nothing a recipe recreated under the name would
+/// show.
+#[farhelm_testtrace::test]
+async fn recipe_places_show_a_failure_kept_only_in_the_build_registry() {
+    use farhelm_proto::{Place, RecipePlaceView};
+
+    let (harness, _commands, local, _ws, _) = recipes_helm().await;
+    let card = |views: &[RecipePlaceView]| {
+        views
+            .iter()
+            .find(|view| view.recipe == "dev" && view.place == Place::PodmanHost(local))
+            .cloned()
+    };
+    let listed = || async {
+        serde_json::from_value::<Vec<RecipePlaceView>>(served(&harness, "/api/recipe-places").await)
+            .unwrap()
+    };
+    assert!(
+        card(&listed().await).is_none(),
+        "premise: the unchecked place's card starts hidden"
+    );
+
+    let builds = Arc::clone(harness.state.recipe_builds());
+    let reason = "Farhelm could not verify this container host's machine and account.";
+    builds.remember_podman_failure("dev", local, reason.into());
+    let (_, state) = harness
+        .store
+        .tensorlake_recipe_row("dev")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        !state.podman.contains_key(&local),
+        "premise: the failure has no recipe entry"
+    );
+    let shown = card(&listed().await).expect("the kept failure shows the place's card");
+    assert_eq!(shown.reason.as_deref(), Some(reason));
+    assert!(shown.unavailable_reason.is_some(), "{shown:?}");
+
+    let deletion = builds.begin_delete("dev").expect("Delete is admitted");
+    assert!(
+        card(&listed().await).is_none(),
+        "admitting Delete clears the kept failure"
+    );
+    builds.remember_podman_failure(
+        "dev",
+        local,
+        "container image work was cancelled for recipe deletion".into(),
+    );
+    drop(deletion);
+    assert!(
+        !builds.has_unrecorded_failure("dev", Place::PodmanHost(local)),
+        "a failure during Delete is not kept for a recipe recreated later"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Wire-type contracts
 // ---------------------------------------------------------------------------

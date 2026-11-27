@@ -1438,6 +1438,181 @@ async fn first_helper_write_refuses_removed_retargeted_or_replaced_probe_place()
     }
 }
 
+/// Why this matters: a Rebuild answers Accepted before its fresh Podman check
+/// runs, so a refused check can only reach the user through Settings. It used
+/// to do that by writing the failure into a new recipe entry for the place,
+/// leaving an empty build record behind for a place that never owned
+/// anything. Recipe Delete has to settle such records, and every later reader
+/// has to tell them apart from real ownership.
+///
+/// Specification: a first Rebuild at a place whose machine and account cannot
+/// be read is accepted, its job ends with the admission refusal, and that
+/// reason is the place's Settings reason (and keeps the card visible) while
+/// the recipe gains no entry for the place and no Podman command runs. Once
+/// the host reads correctly, the next Rebuild is admitted, clears the
+/// remembered failure, and its own failure after the first ownership write is
+/// stored in the entry that write created, as before.
+#[farhelm_testtrace::test(flavor = "current_thread")]
+async fn a_first_rebuild_refused_at_admission_shows_its_reason_without_a_recipe_entry() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = HelmStore::open(&directory.path().join("helm.db"))
+        .await
+        .unwrap();
+    let place = store
+        .add_ssh_host("place.example", None, None)
+        .await
+        .unwrap();
+    let (provider, commands) = fixture_on(store.clone(), place).await;
+    commands.model.lock().unwrap().place_identity = Some("not an identity\n");
+    let builds = provider.0.builds.clone();
+    let events = Arc::new(crate::feed::FleetEvents::new());
+
+    /// Run one Rebuild through the provider's entry point to its result.
+    async fn rebuild(
+        provider: &Podman,
+        builds: &crate::tensorlake::build::RecipeBuilds,
+        events: &Arc<crate::feed::FleetEvents>,
+        place: HostId,
+    ) -> String {
+        provider
+            .rebuild_recipe("dev", Place::PodmanHost(place), events.clone())
+            .await
+            .expect("Rebuild is accepted before its admission check runs");
+        // The current-thread runtime has not run the job yet, so it is
+        // still registered and its result cannot be missed.
+        let mut job = builds
+            .podman_job("dev", place)
+            .expect("the accepted Rebuild is a registered job");
+        loop {
+            if let Some(result) = job.borrow().result.clone() {
+                return result.expect_err("this Rebuild fails");
+            }
+            job.changed().await.expect("the job publishes its result");
+        }
+    }
+
+    let refusal = rebuild(&provider, &builds, &events, place).await;
+    assert!(
+        refusal.contains("could not verify this container host's machine and account"),
+        "{refusal}"
+    );
+    let (_, saved) = store.tensorlake_recipe_row("dev").await.unwrap().unwrap();
+    assert!(
+        !saved.podman.contains_key(&place),
+        "a refused admission must not create a recipe entry: {:?}",
+        saved.podman
+    );
+    assert!(
+        commands.model.lock().unwrap().commands.is_empty(),
+        "no Podman command runs before admission"
+    );
+    let view = builds.place_view(
+        "dev",
+        &saved,
+        Place::PodmanHost(place),
+        Some("this host needs a Podman check".into()),
+    );
+    assert_eq!(view.reason.as_deref(), Some(refusal.as_str()));
+    assert!(!view.ready && !view.building && !view.cleanup_pending);
+    assert!(builds.has_unrecorded_failure("dev", Place::PodmanHost(place)));
+
+    commands.model.lock().unwrap().place_identity = None;
+    let failure = rebuild(&provider, &builds, &events, place).await;
+    assert!(!builds.has_unrecorded_failure("dev", Place::PodmanHost(place)));
+    let (_, saved) = store.tensorlake_recipe_row("dev").await.unwrap().unwrap();
+    let entry = saved.podman.get(&place).expect(
+        "premise: the second Rebuild passed admission and its first ownership write created the entry",
+    );
+    assert_eq!(
+        entry.last_failure.as_deref(),
+        Some(failure.as_str()),
+        "a failure after the first ownership write is stored as before"
+    );
+    let view = builds.place_view("dev", &saved, Place::PodmanHost(place), None);
+    assert_eq!(view.reason.as_deref(), Some(failure.as_str()));
+}
+
+/// Why this matters: the check that admits a preparation confirms one
+/// registry entry's settings and place claim. Looking the host up again by
+/// its ID for the first ownership write can pick up different settings: a
+/// retarget made in between already passes its own new check, and recording
+/// the build helper under it would tie this preparation's resources to an
+/// endpoint nobody admitted for it.
+///
+/// Specification: with a preparation admitted, a retarget of its host before
+/// the build helper is reserved makes the software stage fail, even though a
+/// fresh lookup of the host now succeeds; no helper name, entry or Podman
+/// command results. (Nothing in production code pauses between admission and
+/// that write, so the test drives the stage that makes it with the admission
+/// the preparation would have passed.)
+#[farhelm_testtrace::test]
+async fn a_route_changed_after_admission_refuses_the_first_ownership_write() {
+    let (_directory, provider, commands, place) = fixture().await;
+    let (admitted_row, ready) = provider
+        .0
+        .places
+        .fresh(&provider.0.store, place)
+        .await
+        .unwrap();
+    let identity = ready.identity.unwrap();
+    provider
+        .0
+        .places
+        .retarget(&provider.0.store, place, "replacement.example")
+        .await
+        .unwrap();
+    let (current, _, _) = provider.place(place).await.unwrap();
+    assert_eq!(
+        current.destination.as_deref(),
+        Some("replacement.example"),
+        "premise: a lookup by ID now accepts the retargeted settings"
+    );
+    commands.model.lock().unwrap().commands.clear();
+
+    let (recipe, _) = provider
+        .0
+        .store
+        .tensorlake_recipe_row("dev")
+        .await
+        .unwrap()
+        .unwrap();
+    let (progress, _view) = tokio::sync::watch::channel(PodmanProgress::default());
+    let error = provider
+        .software(
+            "dev",
+            &recipe,
+            Admitted {
+                row: &admitted_row,
+                identity: &identity,
+            },
+            &progress,
+            &crate::feed::FleetEvents::new(),
+            &std::sync::atomic::AtomicBool::new(false),
+            true,
+        )
+        .await
+        .expect_err("the first ownership write is fenced to the admitted row");
+    assert!(
+        error
+            .to_string()
+            .contains("changed before its ownership could be recorded"),
+        "{error:#}"
+    );
+    let (_, saved) = provider
+        .0
+        .store
+        .tensorlake_recipe_row("dev")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!saved.podman.contains_key(&place), "{:?}", saved.podman);
+    let sent = commands.model.lock().unwrap().commands.clone();
+    assert!(
+        sent.is_empty(),
+        "nothing ran under the unadmitted settings: {sent:?}"
+    );
+}
+
 /// A rejected base pull has reached Podman under a durable reservation.
 /// Releasing the unsent helper keeps a known failure from blocking retries.
 #[farhelm_testtrace::test]

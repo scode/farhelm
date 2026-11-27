@@ -766,11 +766,17 @@ impl PodmanPlaces {
 
     /// Launch/preparation needs recent capabilities. Refresh one stale place
     /// and join its current task without waiting on any unrelated host.
+    ///
+    /// The row returned is the registry entry the admission was confirmed
+    /// against. A caller that records ownership afterwards fences that write
+    /// to this row (and the identity in the observation) rather than looking
+    /// the host up again: by then a retarget or an SSH mode change may have
+    /// replaced the settings that passed.
     pub(crate) async fn fresh(
         self: &Arc<Self>,
         store: &HelmStore,
         host: HostId,
-    ) -> anyhow::Result<ReadyPlace> {
+    ) -> anyhow::Result<(HostRow, ReadyPlace)> {
         if let Ok(ready) = self.confirm_cached_admission(store, host).await {
             return Ok(ready);
         }
@@ -796,16 +802,16 @@ impl PodmanPlaces {
         &self,
         store: &HelmStore,
         host: HostId,
-    ) -> anyhow::Result<ReadyPlace> {
+    ) -> anyhow::Result<(HostRow, ReadyPlace)> {
         let _published = self.claim_publication.lock().await;
         let row = current_row(store, host).await?;
         let ready = self.ready(&row)?;
         let identity = ready.identity.clone().map_err(anyhow::Error::msg)?;
         anyhow::ensure!(
-            store.owns_podman_place(row, identity).await?,
+            store.owns_podman_place(row.clone(), identity).await?,
             "{CLAIM_NEEDS_REFRESH}"
         );
-        Ok(ready)
+        Ok((row, ready))
     }
 
     /// A new session container inherits the place's environment at setup.

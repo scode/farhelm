@@ -1342,7 +1342,7 @@ impl EnvironmentProvider for Podman {
             && current.pending_create_at.is_none()
             && current.container_id.is_none()
         {
-            observed = self.0.places.fresh(&self.0.store, place.host).await?;
+            (_, observed) = self.0.places.fresh(&self.0.store, place.host).await?;
             place.identity = Some(
                 observed
                     .identity
