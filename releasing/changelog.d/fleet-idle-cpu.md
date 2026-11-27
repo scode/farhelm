@@ -11,3 +11,6 @@ time of sessions that keep working once a minute for all of them together, inste
 host full of busy agents no longer makes the app re-read everything about once a second. The visible cost: the "last
 active" age shown on a session that is still working can lag by up to about two minutes instead of one; a session that
 goes idle, starts waiting or ends shows its time at once. This needs the host updated, which an ordinary upgrade does.
+
+A host whose connection to the app is too busy to take a "something changed" notice right away now keeps it and sends
+it a moment later, instead of dropping it and leaving the change to the app's next periodic check.
