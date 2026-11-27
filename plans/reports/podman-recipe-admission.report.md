@@ -84,3 +84,65 @@ arriving while a recipe was being deleted could have survived the Delete and sho
 the same name; nothing tested that the Settings card for such a failure actually appears; the preparation helper's save
 was not bound to the checked settings (described above); and two test assertions were weaker than they looked. Round 2
 confirmed all four fixed and found nothing new.
+
+### Landing
+
+#### What landed with it
+
+This round landed this plan, then podman-proxy-free-images (host proxy settings kept out of captured recipe images).
+Both change the helm's container recipe builds, in the same files, so an independent reviewer and I read them together.
+They do not conflict in behavior; stacked, they left one variable this plan introduced unused, which the second plan's
+landing fixed (see its notes). Since this plan was built, main gained seven unrelated changes (#5079, #5087, #5088,
+#5090, #5091, #5092, #5093). Two of them touch the same part of the helm as this plan: reporting a launch's late wake
+failure right away (#5092), and showing a tagged resume's outcome in the hosts list (#5079). They change different code
+and nothing interacted. This plan adds no new way of reaching a container host without the proof that it is the expected
+machine, which landed earlier with podman-host-verification (#5084).
+
+The reviewer confirmed what the report says: a refused check creates no empty record and its reason still shows in
+Settings, cleaning up after a failed build cannot create a build record either, Delete clears the failure kept in
+memory, and nothing changed in how Farhelm recovers when it cannot tell whether Podman received a request to create a
+helper container. The real Podman scenario on the test worker passed with this plan's checks in place (see Checks).
+
+#### Fixes made while landing
+
+None for this plan. The unused variable mentioned above was fixed as part of landing podman-proxy-free-images.
+
+#### Worth knowing
+
+- The report's follow-up stands: rechecking the host before each image pull and each helper container was dropped by
+  your decision, and its TODO entry is gone, so that work needs a new entry if you want it.
+- When preparing images, the helm looks the host up twice where once would do. The reviewer noted it as a tidy-up; I did
+  not check whether a host change between the two lookups could matter. No TODO entry proposed.
+
+#### Checks
+
+Run once for the whole round, on podman-recipe-admission and podman-proxy-free-images stacked in that order on main as
+it stood when the landing started; what reached main after each plan was built is in each plan's notes. The test worker
+is an aarch64 Linux machine with rootless Podman and a systemd user manager:
+
+- On the test worker, `cargo clippy --all-targets -- -D warnings` failed on the stacked tree with an unused variable,
+  which the landing of podman-proxy-free-images fixed. After the fix, both it and
+  `cargo clippy -p farhelm --bins -- -D warnings` were clean.
+- On the test worker, `cargo nextest run -p farhelm-helm -p farhelm-supervisor`, recorded run
+  247588ce-13dc-4361-ae76-c7976490acd4: 3,616 passed, 12 skipped (tests marked ignored). That is every helm and
+  supervisor test on the stacked tree, which neither executor ran with both plans together. After the landing fix, the
+  helm's Podman provider tests again (`cargo nextest run -p farhelm-helm` filtered to the Podman provider, recipe
+  builds, recipe places and launch failures), recorded run cf3a17cc-3a34-4e82-9cbf-38b1876cddfa: 130 passed.
+- On the test worker, the end-to-end tests that use a stand-in for Podman and every one whose name mentions Podman,
+  recipes or containers, apart from the real scenario below (`cargo nextest run -p farhelm --test e2e` filtered to
+  them), recorded run edfb4e85-0d09-4d75-bce9-ad0b35147956: 9 passed. The worker's systemd user manager was not usable
+  for two of them this time, so they ran only their fallback path, and the variant where the container is stopped inside
+  its own systemd scope went untested. Both check the warning shown when stopping a container fails, on Stop and on tab
+  close, which neither plan changes.
+- On the test worker, the real Podman environment scenario
+  (`cargo nextest run -p farhelm --test e2e -E 'test(/^podman_environments::/)'`), recorded run
+  07049c94-e3e1-4467-8d5e-21ecab2af868: passed, and it did not skip. It builds a real recipe image with the production
+  Podman provider on a real host, so it ran the fresh Podman check that now starts every build, and captured an image
+  after the new step that strips the host's proxy settings from it. Neither executor ran it.
+- Locally, `cargo fmt --all -- --check` (again after the fix), the test-sleep check,
+  `python3 releasing/check-changelog.py format` and `dprint check` on the changed Markdown: passed, and `dprint check`
+  on SPEC.md again after the landing's wording fix there (in podman-proxy-free-images).
+
+Reused: nothing. Skipped: the rest of the end-to-end suite and the other crates' tests, since both plans change only the
+helm's container recipe builds; and the desktop app's tests, the screenshot comparison and the end-to-end smoke test,
+since nothing in the app changed.
