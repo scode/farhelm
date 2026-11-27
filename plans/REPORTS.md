@@ -9,3 +9,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`drift-base-isolation-and-turns`](reports/drift-base-isolation-and-turns.report.md) landed 2026-11-27 in #5167, #5168: Add Codex process-tree isolation and Cursor/OpenCode interactive turns to the base drift category
 - [`drift-permission-footer`](reports/drift-permission-footer.report.md) landed 2026-11-27 in #5169: Extend permission_modes drift checks with Guarded launches and tri-state permission-footer verification
 - [`terminal-tab-shortcuts`](reports/terminal-tab-shortcuts.report.md) landed 2026-11-27 in #5164, #5166: Add Cmd+T/Cmd+W terminal-tab shortcuts and always confirm Delete when shell tabs are open
+- [`drift-conversation-rotation`](reports/drift-conversation-rotation.report.md) landed 2026-11-27 in #5170, #5171: Add conversation_rotation drift category replacing standalone rotation tests and covering seven tracked harnesses

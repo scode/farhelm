@@ -174,3 +174,61 @@ did not write the code myself: same-model sub-agents implemented it and the fixe
   - an over-broad check was dropped;
   - the timeout messages are clearer;
   - a docs sentence was corrected. Three nits were fixed.
+
+### Landing
+
+#### What landed with it
+
+Since the executor last rebased this plan, main gained five changes. Two plans changed the drift tests:
+drift-base-isolation-and-turns (#5167, #5168) gave the base case real turns for Cursor and OpenCode, taught the shared
+trust-dialog answering to handle Cursor's boxed trust dialog, moved the prompt and reply helpers into the shared drift
+code, and added a Codex process-tree check. drift-permission-footer (#5169) added Guarded permission footer checks. The
+third, terminal-tab-shortcuts (#5164, #5166), added Cmd+T and Cmd+W for shell tabs in the desktop app. This was the only
+plan in the round, and its stack applied without conflict.
+
+An independent reviewer and I read the change against those. The new category answers trust dialogs the way the base
+case does, so it gets the Cursor dialog fix unchanged, and it reuses or redefines no other helper those plans moved or
+changed. The drift docs page reads as one text after all three drift plans' edits, and its turn counts per agent match
+the code. The new code builds no `farhelm` command line itself. The only `farhelm` commands its cases run are the
+agents' hooks and the terminal host the shared test setup starts; the report's live Codex run exercised that path after
+the command line's parsing changes (#5163, #5165), which were already in this plan's base. Each live check needs Restart
+to open the conversation the agent switched to, and the agent to recall a word only that conversation holds, so it
+cannot pass without the behavior. We found nothing to fix. The one optional cleanup: the new code repeats the shared
+prompt-sending helper's body twice instead of calling it.
+
+#### Fixes made while landing
+
+None.
+
+#### What the landing made untrue in the report
+
+Nothing. The three removed standalone tests were replaced, not moved, and nothing else referred to them, the two drift
+plans that landed meanwhile included. The coverage that went with them is mainly the Codex `/clear` checks the report
+describes, plus a few details of Codex's own labels and saved files that Farhelm does not act on.
+
+#### Checks
+
+Run once, on the plan's two PRs rebased onto main as it stood when the landing started, so with the other drift plans
+above. The plan changes only the opt-in real-agent tests, the drift runner's own tests, the drift docs and comments in
+the hook command. The real-agent cases spend vendor turns, so they were built and listed, not run, and their ordinary
+tests ran instead. Everything ran locally:
+
+- `cargo clippy --all-targets`, without `-D warnings`, because one warning already on main since #5120 (an unused method
+  in the helm's ntfy settings code, outside this plan) would fail that flag. That was the only warning.
+- The command line's unit tests, the hook command's among them (`cargo nextest run -p farhelm --bins`), recorded run
+  06dafe31-b596-43d4-95fb-d34aaad2599d: 155 passed, none failed.
+- The ordinary tests of the real-agent test code, without the opt-in cases
+  (`cargo nextest run -p farhelm --test e2e -E 'test(/real_agent_capture/)'`), recorded run
+  05582b10-386b-40b3-a67a-fc25eb55c16a: 64 passed, none failed (the report's 58 used a narrower filter, before the other
+  two drift plans landed), and no test reported that it skipped for a missing system service. Listing the opt-in
+  real-agent cases (`cargo nextest list -p farhelm --test e2e --run-ignored only -E 'test(/real_agent_capture/)'`) built
+  them and found 79, 78 of them drift cases.
+- The drift runner's own tests (`python3 -B scripts/test-run-harness-drift.py`), recorded run
+  7153660d-9102-4a3a-b291-ad36b04a75d8: 31 passed.
+- `cargo fmt --all -- --check`, the test-sleep check (`scripts/check-test-sleeps.py`),
+  `python3 scripts/check-agents-md.py` for the drift docs page, which the instruction files point to, and `dprint check`
+  on TODO.md and the drift docs page: passed.
+
+Reused: nothing. Not rerun: the plan's live runs against the real agents, described in its report; the landing ran none,
+since they spend vendor turns. Skipped: the rest of the Rust workspace's tests, since nothing else changed; the other
+opt-in tests; and any run on a Mac, since none was available to the landing.
