@@ -388,7 +388,8 @@ installer and installed-version evidence. Capture the completed native Restart
 to update offer. An installing-state screenshot is optional: do not require a
 transient progress image or fail when installation finishes before capture.'''
     if update_path == 'override':
-        discovery = '''Quit the old app normally through native CUA, then call launch_override.
+        discovery = '''Bind the old app and use brick_ui method quit with args [].
+Wait for versions to show that the old app exited, then call launch_override.
 Call update_logs and require the startup override announcement.\n''' + discovery
     click = '''Wait for the actual Restart to update offer. Use brick_ui method restart with
 coordinates from a fresh native image of that menu: args [[x,y]]. The harness
