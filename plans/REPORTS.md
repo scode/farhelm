@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`supervisor-tab-close-retry`](reports/supervisor-tab-close-retry.report.md) landed 2026-11-26 in #5087: Fix in-memory shell-tab close retry bugs and record Linux systemd/unscoped cleanup policy
 - [`agent-delete-late-notice`](reports/agent-delete-late-notice.report.md) landed 2026-11-26 in #5088: Always record agent-Delete leftover-checkout warnings in the notices bell
 - [`session-right-click-menu`](reports/session-right-click-menu.report.md) landed 2026-11-26 in #5090: Open session and bulk context menus on right-click
 - [`launcher-late-wake-failures`](reports/launcher-late-wake-failures.report.md) landed 2026-11-26 in #5079, #5092: Report request-tagged late wake failures for suspended sandboxes and stopped containers
