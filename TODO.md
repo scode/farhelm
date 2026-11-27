@@ -71,18 +71,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Inject instructions to notify the user when blocked.** Provide way to inject instructions for agents to notify the
   user when blocked through farhelm. Plan: `plans/queue/agent-blocked-notifications.md`.
 
-- **Update release brick-test instructions for the removed startup Welcome card.** PRs #5012 and #5018
-  (`welcome-empty-state`) replaced the startup Welcome modal card (dismissed with "Got it") with an inline Welcome view
-  in the empty main pane, so fresh installs of the next candidate no longer show a Welcome card or a "Got it" button.
-  `releasing/mac-vm-test/guest_workflow.py` (`managed_instructions` for `app-start` still says
-  `"dismiss welcome with got it"` unconditionally before the conditional append) and
-  `releasing/mac-vm-test/BRICK-TEST.md` ("On the first open after a fresh install, or after upgrading from a release
-  without it, dismiss the welcome card with **got it**") still tell the guest agent to dismiss the card unconditionally,
-  which can trip the next brick test. Remove the unconditional Welcome dismissal from candidate `app-start` and update
-  `BRICK-TEST.md` (keeping conditional handling only for older previous-release baselines such as `old-fixture` and
-  `checkpoint_contract.py` where the card still exists), and update the brick-test unit tests under
-  `releasing/mac-vm-test/` as needed. Plan: `plans/queue/brick-test-inline-welcome.md`.
-
 - **Verify and guard Claude drift trust copy-back against clearing real parent-directory trust.** PR #5047
   (`triage-drift-and-brick-tooling`) clears `hasTrustDialogAccepted` for the scratch workspace and all its ancestor
   directories in Claude's private drift mirror (`crates/farhelm/tests/e2e/real_agent_capture/drift/private_config.rs`)

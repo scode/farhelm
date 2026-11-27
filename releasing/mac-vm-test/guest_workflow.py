@@ -396,9 +396,19 @@ Any prerequisite refusal is permission-block/automation failure, never a pass.''
         # before waiting for Restart; P0 already completed that action earlier.
         if check_id == 'update-relaunch' and pass_id.startswith('upgrade-') and update_path in ('ordinary', 'override'):
             text = contracts['update-discovery'] + '\nThen complete the relaunch:\n' + text
-        if check_id in ('app-start', 'old-fixture', 'update-relaunch'):
+        # Only a previous release can open the startup Welcome card (dismissed
+        # with Got it) over the session UI. Candidates show Welcome inline in
+        # the empty main pane, with no Welcome card to dismiss, so their
+        # startup checkpoints must not send the tester looking for one. Older
+        # baselines predate the card and newer ones postdate it, hence "if it
+        # appears". The Send feedback guard stays on every startup checkpoint:
+        # the inline Welcome still offers Send feedback, and the live send
+        # belongs to P2 alone.
+        if check_id == 'old-fixture':
             text += ('\nIf the ordinary welcome card appears, dismiss it with got it before testing the session UI. '
                      'Do not select Send feedback now or begin P2 early.')
+        elif check_id in ('app-start', 'update-relaunch'):
+            text += '\nDo not select Send feedback now or begin P2 early.'
         return text
     return (f'Perform RECIPE.md checkpoint {check_id} for {pass_id}, and read its matching '
             'acceptance contract and the staged filled addendum.md. The context check_contracts '
@@ -458,14 +468,18 @@ or authentication changes. This preflight does not require drag or double-click 
         'artifact-verification': 'Call brick_action verify_candidate. Require its verified release receipt.',
         'fixture-clean': 'Call brick_action fixture_clean. Require both roles clean; never repair residue.',
         'install': 'Call brick_action install_candidate. Require successful installer and exact candidate CLI version.',
-        'app-start': '''Call brick_action launch. Bind the installed Farhelm app through native CUA,
-dismiss welcome with got it, and require candidate UI, usable session list and
-connected candidate local supervisor. Call versions after observing that state.
+        # Welcome follows the rule in instructions(): only old-fixture, the
+        # previous release's first open, may meet a startup Welcome card, and
+        # dismisses it only if present.
+        'app-start': '''Call brick_action launch. Bind the installed Farhelm app through native CUA
+and require candidate UI, usable session list and connected candidate local
+supervisor. Call versions after observing that state.
 No remote setup, conversations, templates or settings.''',
         'old-fixture': '''Call fixture_clean before installing anything; require both roles clean. Then call
 verify_previous and install_previous; its helper disables automatic updates
-before first launch. Call launch. Through native CUA dismiss welcome with got it,
-verify previous app/local supervisor and automatic updates off. Call versions.
+before first launch. Call launch. Through native CUA dismiss welcome with got it
+if present, verify previous app/local supervisor and automatic updates off.
+Call versions.
 For every fixture except p0-updater-upgrade, add context.ssh.alias through the
 ordinary Add host GUI, accept its ordinary setup confirmation and require remote
 connected at previous. Then call remote_version.''',

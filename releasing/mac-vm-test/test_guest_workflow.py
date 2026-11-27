@@ -89,6 +89,68 @@ Bonus upgrades still wait for the connected candidate supervisor.
         text = self.envelope('upgrade-v0.24.0', 'update-relaunch', 'manual', managed=True)['instructions']
         self.assertIn('wait for the connected candidate\nlocal supervisor', text)
 
+    # The startup checkpoints, split by which release the tester faces when
+    # the app opens. app-start is the candidate's first open after a fresh
+    # install (P0, the Mac P1 pair and the bonus fresh pass). update-relaunch
+    # is the candidate after Restart to update, on every update path the P0
+    # and bonus upgrade passes take. old-fixture is the previous release's
+    # first open on every upgrade pass.
+    CANDIDATE_STARTS = (('p0-fresh', 'app-start', None), ('p1-remote-mac', 'app-start', None),
+                        ('fresh', 'app-start', None), ('p0-installer-upgrade', 'update-relaunch', 'manual'),
+                        ('p0-updater-upgrade', 'update-relaunch', 'ordinary'),
+                        ('p0-updater-upgrade', 'update-relaunch', 'override'),
+                        ('upgrade-v0.24.0', 'update-relaunch', 'manual'),
+                        ('upgrade-v0.24.0', 'update-relaunch', 'ordinary'),
+                        ('upgrade-v0.24.0', 'update-relaunch', 'override'))
+    BASELINE_STARTS = (('p0-installer-upgrade', 'old-fixture', 'manual'),
+                       ('p0-updater-upgrade', 'old-fixture', 'ordinary'),
+                       ('upgrade-v0.24.0', 'old-fixture', 'manual'))
+
+    def test_only_a_previous_release_start_may_dismiss_a_welcome_card(self):
+        """Candidate starts never mention a Welcome card; a previous release's start dismisses one only if it appears.
+
+PRs #5012 and #5018 replaced the startup Welcome card, dismissed with Got it,
+with a Welcome view inline in the empty main pane, so a candidate has no card
+to dismiss and a tester told to dismiss one is sent after a control that is not
+there. A previous release used as the upgrade baseline may predate the card,
+show it, or postdate it, so its dismissal must stay conditional. Both envelopes
+are checked, since each carries its own copy of the startup text. These
+assertions cover the delivered instructions, not live product behavior.
+"""
+        for managed in (False, True):
+            for pass_id, check_id, update_path in self.CANDIDATE_STARTS:
+                with self.subTest(pass_id=pass_id, check=check_id, path=update_path, managed=managed):
+                    text = self.envelope(pass_id, check_id, update_path, managed=managed)['instructions'].lower()
+                    self.assertNotIn('welcome', text)
+                    self.assertNotIn('got it', text)
+            for pass_id, check_id, update_path in self.BASELINE_STARTS:
+                with self.subTest(pass_id=pass_id, check=check_id, path=update_path, managed=managed):
+                    text = ' '.join(
+                        self.envelope(pass_id, check_id, update_path, managed=managed)['instructions'].split()).lower()
+                    conditional = ('dismiss welcome with got it if present' if managed else
+                                   'if the ordinary welcome card appears, dismiss it with got it')
+                    self.assertEqual(text.count(conditional), 1)
+                    # Every remaining mention of the card must be that
+                    # conditional one; an unconditional dismissal beside it
+                    # would still fail on a baseline without the card.
+                    self.assertNotIn('got it', text.replace(conditional, ''))
+
+    def test_every_plain_startup_keeps_the_tester_off_send_feedback(self):
+        """The plain envelope's startup checkpoints all keep the tester from sending feedback before P2.
+
+The live feedback send is P2's own authorized checkpoint and cannot be
+recalled, while the candidate's inline Welcome view, like the older card,
+offers Send feedback. Removing the card dismissal from the candidate starts
+must not take this guard with it. Only the plain envelope carries this
+sentence: the managed one, which live runs use, limits feedback on old-fixture
+alone ("No session or feedback yet", pinned by OldSessionInstructionsTests),
+and has no such guard on the candidate starts.
+"""
+        for pass_id, check_id, update_path in self.CANDIDATE_STARTS + self.BASELINE_STARTS:
+            with self.subTest(pass_id=pass_id, check=check_id, path=update_path):
+                text = self.envelope(pass_id, check_id, update_path)['instructions']
+                self.assertEqual(text.count('Do not select Send feedback now or begin P2 early.'), 1)
+
     def test_remote_agent_prompt_is_entered_in_the_visible_terminal(self):
         """Keep the tester away from the launcher field that may be offscreen after remote Update."""
         text = self.envelope('p0-installer-upgrade', 'remote-supervisor-agent', 'manual', managed=True)['instructions']

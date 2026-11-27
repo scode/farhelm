@@ -393,7 +393,7 @@ Call update_logs and require the startup override announcement.\n''' + discovery
     click = '''Wait for the actual Restart to update offer. Use brick_ui method restart with
 coordinates from a fresh native image of that menu: args [[x,y]]. The harness
 owns the single native click and process handoff.
-Require the candidate returns usable and dismiss welcome with got it if present.
+Require the candidate returns usable.
 '''
     end = '''Never manually launch or use getApp to rescue a missing restart. Call versions
 after the candidate returns. Capture the final native acceptance state. The
